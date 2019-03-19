@@ -1,7 +1,8 @@
 from flask import Flask
 from flask_restful import Resource, Api
+from engine import app, db
 
-app = Flask(__name__)
+# app = Flask(__name__)
 api = Api(app)
 
 
@@ -64,5 +65,5 @@ api.add_resource(Index, '/vector/index')
 api.add_resource(VectorSearch, '/vector/search')
 
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# if __name__ == '__main__':
+#     app.run()
