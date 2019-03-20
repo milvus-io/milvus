@@ -25,3 +25,23 @@
     - `python` # enter python3 interaction environment
     - `from engine import db`
     - `db.create_all()`
+
+- table desc
+group_table
++-------------+--------------+------+-----+---------+----------------+
+| Field       | Type         | Null | Key | Default | Extra          |
++-------------+--------------+------+-----+---------+----------------+
+| id          | int(11)      | NO   | PRI | NULL    | auto_increment |
+| group_name  | varchar(100) | YES  |     | NULL    |                |
+| file_number | int(11)      | YES  |     | NULL    |                |
++-------------+--------------+------+-----+---------+----------------+
+
+file_table
++------------+--------------+------+-----+---------+----------------+
+| Field      | Type         | Null | Key | Default | Extra          |
++------------+--------------+------+-----+---------+----------------+
+| id         | int(11)      | NO   | PRI | NULL    | auto_increment |
+| group_name | varchar(100) | YES  |     | NULL    |                |
+| filename   | varchar(100) | YES  |     | NULL    |                |
+| row_number | int(11)      | YES  |     | NULL    |                |
++------------+--------------+------+-----+---------+----------------+

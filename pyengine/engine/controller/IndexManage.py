@@ -1,68 +1,72 @@
-from flask import Flask
+from flask import Flask, jsonify, request
 from flask_restful import Resource, Api
 from engine import app, db
+from engine.model.GroupTable import GroupTable
+from engine.controller.VectorEngine import VectorEngine
 
 # app = Flask(__name__)
 api = Api(app)
 
 
 from flask_restful import reqparse
+from flask_restful import request
 class Vector(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
-        self.__parser.add_argument('groupid', type=str)
-        self.__parser.add_argument('vec', type=str)
+        self.__parser.add_argument('vector', type=float, action='append', location=['json'])
 
-    def post(self):
-        # args = self.__parser.parse_args()
-        # vec = args['vec']
-        # groupid = args['groupid']
-        return "vector post"
+    def post(self, group_id):
+        args = self.__parser.parse_args()
+        vector = args['vector']
+        return VectorEngine.AddVector(group_id, vector)
 
 
 class VectorSearch(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
-        self.__parser.add_argument('groupid', type=str)
+        self.__parser.add_argument('vector', type=float, action='append', location=['json'])
 
-    def post(self):
+    def post(self, group_id):
+        args = self.__parser.parse_args()
+        print('vector: ', args['vector'])
+        # go to search every thing
         return "vectorSearch post"
 
 
 class Index(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
-        self.__parser.add_argument('groupid', type=str)
+        # self.__parser.add_argument('group_id', type=str)
 
-    def post(self):
-        return "index post"
+    def post(self, group_id):
+        return VectorEngine.CreateIndex(group_id)
 
 
 class Group(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
-        self.__parser.add_argument('groupid', type=str)
+        self.__parser.add_argument('group_id', type=str)
 
-    def post(self, groupid):
-        return "group post"
+    def post(self, group_id):
+        return VectorEngine.AddGroup(group_id)
 
-    def get(self, groupid):
-        return "group get"
+    def get(self, group_id):
+        return VectorEngine.GetGroup(group_id)
 
-    def delete(self, groupid):
-        return "group delete"
+    def delete(self, group_id):
+        return VectorEngine.DeleteGroup(group_id)
 
 
 class GroupList(Resource):
     def get(self):
-        return "grouplist get"
+        return VectorEngine.GetGroupList()
 
 
-api.add_resource(Vector, '/vector')
-api.add_resource(Group, '/vector/group/<groupid>')
+api.add_resource(Vector, '/vector/add/<group_id>')
+api.add_resource(Group, '/vector/group/<group_id>')
 api.add_resource(GroupList, '/vector/group')
-api.add_resource(Index, '/vector/index')
-api.add_resource(VectorSearch, '/vector/search')
+api.add_resource(Index, '/vector/index/<group_id>')
+api.add_resource(VectorSearch, '/vector/search/<group_id>')
 
 
 # if __name__ == '__main__':
