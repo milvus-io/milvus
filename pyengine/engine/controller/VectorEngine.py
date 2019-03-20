@@ -9,7 +9,7 @@ class VectorEngine(object):
     @staticmethod
     def AddGroup(group_id):
         group = GroupTable.query.filter(GroupTable.group_name==group_id).first()
-        if(group):
+        if group:
             return jsonify({'code': 1, 'group_name': group_id, 'file_number': group.file_number})
         else:
             new_group = GroupTable(group_id)
@@ -20,7 +20,7 @@ class VectorEngine(object):
     @staticmethod
     def GetGroup(group_id):
         group = GroupTable.query.filter(GroupTable.group_name==group_id).first()
-        if(group):
+        if group:
             return jsonify({'code': 0, 'group_name': group_id, 'file_number': group.file_number})
         else:
             return jsonify({'code': 1, 'group_name': group_id, 'file_number': 0}) # not found
@@ -53,9 +53,9 @@ class VectorEngine(object):
     @staticmethod
     def AddVector(group_id, vector):
         print(group_id, vector)
-        file = FileTable.query.filter(and_(FileTable.group_name == group_id, FileTable.type == 'raw').first()
-        if (file):
-            if(file.row_number >= ROW_LIMIT):
+        file = FileTable.query.filter(and_(FileTable.group_name == group_id, FileTable.type == 'raw')).first()
+        if file:
+            if file.row_number >= ROW_LIMIT:
                 # create index
                 index_filename = file.filename + "_index"
                 CreateIndex(group_id, index_filename)
