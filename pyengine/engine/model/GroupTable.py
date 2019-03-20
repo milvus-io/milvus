@@ -11,4 +11,4 @@ class GroupTable(db.Model):
         self.file_number = 0
 
     def __repr__(self):
-        return '<GroupTable $r>' % self.group_name
+        return '<GroupTable $s>' % self.group_name
