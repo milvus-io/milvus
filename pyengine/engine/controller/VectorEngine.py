@@ -1,8 +1,10 @@
 from engine.model.GroupTable import GroupTable
 from engine.model.FileTable import FileTable
+from engine.controller.RawFileHandler import RawFileHandler
+from engine.controller.GroupHandler import GroupHandler
 from flask import jsonify
 from engine import db
-import sys
+import sys, os
 
 class VectorEngine(object):
 
@@ -15,6 +17,7 @@ class VectorEngine(object):
             new_group = GroupTable(group_id)
             db.session.add(new_group)
             db.session.commit()
+            GroupHandler.CreateGroupDirectory(group_id)
             return jsonify({'code': 0, 'group_name': group_id, 'file_number': 0})
 
     @staticmethod
@@ -33,6 +36,7 @@ class VectorEngine(object):
             # old_group = GroupTable(group_id)
             db.session.delete(group)
             db.session.commit()
+            GroupHandler.DeleteGroupDirectory(group_id)
             return jsonify({'code': 0, 'group_name': group_id, 'file_number': group.file_number})
         else:
             return jsonify({'code': 0, 'group_name': group_id, 'file_number': 0})
@@ -61,8 +65,8 @@ class VectorEngine(object):
                 CreateIndex(group_id, index_filename)
 
                 # create another raw file
-                raw_filename = file.group_id + '_' + file.seq_no
-                InsertVectorIntoRawFile(raw_filename, vector)
+                raw_filename = file.seq_no
+                InsertVectorIntoRawFile(group_id, raw_filename, vector)
                 # insert a record into database
                 db.session.add(FileTable(group_id, raw_filename, 'raw', 1))
                 db.session.commit()
@@ -91,16 +95,20 @@ class VectorEngine(object):
         return jsonify({'code': 0})
     
     @staticmethod
-    def CreateIndex(group_id):
-        print(group_id)
-        return jsonify({'code': 0})
-
-    @staticmethod
     def CreateIndex(group_id, filename):
-        print(group_id, filename)
+        path = GroupHandler.GetGroupDirectory(group_id) + '/' + filename 
+        print(group_id, path)
         return jsonify({'code': 0})
 
     @staticmethod
-    def InsertVectorIntoRawFile(filename, vector):
+    def InsertVectorIntoRawFile(group_id, filename, vector):
         print(sys._getframe().f_code.co_name)
+        path = GroupHandler.GetGroupDirectory(group_id) + '/' + filename 
+
+        # if filename exist
+        # append
+        # if filename not exist
+        # create file
+        # append
         return filename
+
