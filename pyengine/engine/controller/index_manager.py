@@ -1,8 +1,8 @@
 from flask import Flask, jsonify, request
 from flask_restful import Resource, Api
 from engine import app, db
-from engine.model.GroupTable import GroupTable
-from engine.controller.VectorEngine import VectorEngine
+from engine.model.group_table import GroupTable
+from engine.controller.vector_engine import VectorEngine
 
 # app = Flask(__name__)
 api = Api(app)
@@ -25,12 +25,13 @@ class VectorSearch(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
         self.__parser.add_argument('vector', type=float, action='append', location=['json'])
+        self.__parser.add_argument('limit', type=int, action='append', location=['json'])
 
     def post(self, group_id):
         args = self.__parser.parse_args()
         print('vector: ', args['vector'])
         # go to search every thing
-        return "vectorSearch post"
+        return VectorEngine.SearchVector(group_id, args['vector'], args['limit'])
 
 
 class Index(Resource):
@@ -46,9 +47,12 @@ class Group(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
         self.__parser.add_argument('group_id', type=str)
+        self.__parser.add_argument('dimension', type=int, action='append', location=['json'])
 
     def post(self, group_id):
-        return VectorEngine.AddGroup(group_id)
+        args = self.__parser.parse_args()
+        dimension = args['dimension']
+        return VectorEngine.AddGroup(group_id, dimension)
 
     def get(self, group_id):
         return VectorEngine.GetGroup(group_id)

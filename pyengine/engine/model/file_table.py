@@ -9,6 +9,7 @@ class FileTable(db.Model):
     row_number = db.Column(db.Integer)
     seq_no = db.Column(db.Integer)
 
+
     def __init__(self, group_name, filename, type, row_number):
         self.group_name = group_name
         self.filename = filename
@@ -17,5 +18,7 @@ class FileTable(db.Model):
         self.type = type
         self.seq_no = 0
 
+
     def __repr__(self):
         return '<FileTable $r>' % self.tablename
+

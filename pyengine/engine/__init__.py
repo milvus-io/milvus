@@ -10,7 +10,7 @@ app.config.from_object('engine.settings')
 print ("Create database instance")
 db = SQLAlchemy(app)
 
-from engine.model.GroupTable import GroupTable
-from engine.model.FileTable import FileTable
+from engine.model.group_table import GroupTable
+from engine.model.file_table import FileTable
 
-from engine.controller import IndexManage
+from engine.controller import index_manager
