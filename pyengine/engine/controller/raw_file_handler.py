@@ -12,3 +12,7 @@ class RawFileHandler(object):
     @staticmethod
     def Append(filename, type, record):
         pass
+
+    @staticmethod
+    def GetRawFilename(group_id):
+        return group_id + '.raw'
