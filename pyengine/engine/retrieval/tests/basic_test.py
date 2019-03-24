@@ -53,46 +53,52 @@
 
 
 import numpy as np
+import pytest
 
-d = 64                           # dimension
-nb = 100000                      # database size
-nq = 10000                       # nb of queries
-np.random.seed(1234)             # make reproducible
-xb = np.random.random((nb, d)).astype('float32')
-xb[:, 0] += np.arange(nb) / 1000.
-xc = np.random.random((nb, d)).astype('float32')
-xc[:, 0] += np.arange(nb) / 1000.
-xq = np.random.random((nq, d)).astype('float32')
-xq[:, 0] += np.arange(nq) / 1000.
+@pytest.mark.skip(reason="Not for pytest")
+def basic_test():
+    d = 64                           # dimension
+    nb = 100000                      # database size
+    nq = 10000                       # nb of queries
+    np.random.seed(1234)             # make reproducible
+    xb = np.random.random((nb, d)).astype('float32')
+    xb[:, 0] += np.arange(nb) / 1000.
+    xc = np.random.random((nb, d)).astype('float32')
+    xc[:, 0] += np.arange(nb) / 1000.
+    xq = np.random.random((nq, d)).astype('float32')
+    xq[:, 0] += np.arange(nq) / 1000.
 
-import faiss                   # make faiss available
-index = faiss.IndexFlatL2(d)   # build the index
-print(index.is_trained)
-index.add(xb)                  # add vectors to the index
-print(index.ntotal)
-#faiss.write_index(index, "/tmp/faiss/tempfile_1")
+    import faiss                   # make faiss available
+    index = faiss.IndexFlatL2(d)   # build the index
+    print(index.is_trained)
+    index.add(xb)                  # add vectors to the index
+    print(index.ntotal)
+    #faiss.write_index(index, "/tmp/faiss/tempfile_1")
 
-writer = faiss.VectorIOWriter()
-faiss.write_index(index, writer)
-ar_data = faiss.vector_to_array(writer.data)
-import pickle
-pickle.dump(ar_data, open("/tmp/faiss/ser_1", "wb"))
+    writer = faiss.VectorIOWriter()
+    faiss.write_index(index, writer)
+    ar_data = faiss.vector_to_array(writer.data)
+    import pickle
+    pickle.dump(ar_data, open("/tmp/faiss/ser_1", "wb"))
 
-#index_3 = pickle.load("/tmp/faiss/ser_1")
+    #index_3 = pickle.load("/tmp/faiss/ser_1")
 
 
-# index_2 = faiss.IndexFlatL2(d)   # build the index
-# print(index_2.is_trained)
-# index_2.add(xc)                  # add vectors to the index
-# print(index_2.ntotal)
-# faiss.write_index(index, "/tmp/faiss/tempfile_2")
-#
-# index_3 = faiss.read_index
+    # index_2 = faiss.IndexFlatL2(d)   # build the index
+    # print(index_2.is_trained)
+    # index_2.add(xc)                  # add vectors to the index
+    # print(index_2.ntotal)
+    # faiss.write_index(index, "/tmp/faiss/tempfile_2")
+    #
+    # index_3 = faiss.read_index
 
-# k = 4                          # we want to see 4 nearest neighbors
-# D, I = index.search(xb[:5], k) # sanity check
-# print(I)
-# print(D)
-# D, I = index.search(xq, k)     # actual search
-# print(I[:5])                   # neighbors of the 5 first queries
-# print(I[-5:])                  # neighbors of the 5 last queries
+    # k = 4                          # we want to see 4 nearest neighbors
+    # D, I = index.search(xb[:5], k) # sanity check
+    # print(I)
+    # print(D)
+    # D, I = index.search(xq, k)     # actual search
+    # print(I[:5])                   # neighbors of the 5 first queries
+    # print(I[-5:])                  # neighbors of the 5 last queries
+
+if __name__ == '__main__':
+    basic_test()

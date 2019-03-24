@@ -18,7 +18,8 @@ class Vector(Resource):
     def post(self, group_id):
         args = self.__parser.parse_args()
         vector = args['vector']
-        return VectorEngine.AddVector(group_id, vector)
+        code = VectorEngine.AddVector(group_id, vector)
+        return jsonify({'code': code})
 
 
 class VectorSearch(Resource):
@@ -27,11 +28,12 @@ class VectorSearch(Resource):
         self.__parser.add_argument('vector', type=float, action='append', location=['json'])
         self.__parser.add_argument('limit', type=int, action='append', location=['json'])
 
-    def post(self, group_id):
+    def get(self, group_id):
         args = self.__parser.parse_args()
         print('vector: ', args['vector'])
         # go to search every thing
-        return VectorEngine.SearchVector(group_id, args['vector'], args['limit'])
+        code, vector_id = VectorEngine.SearchVector(group_id, args['vector'], args['limit'])
+        return jsonify({'code': code, 'vector_id': vector_id})
 
 
 class Index(Resource):
@@ -40,7 +42,8 @@ class Index(Resource):
         # self.__parser.add_argument('group_id', type=str)
 
     def post(self, group_id):
-        return VectorEngine.CreateIndex(group_id)
+        code = VectorEngine.CreateIndex(group_id)
+        return jsonify({'code': code})
 
 
 class Group(Resource):
@@ -52,18 +55,22 @@ class Group(Resource):
     def post(self, group_id):
         args = self.__parser.parse_args()
         dimension = args['dimension']
-        return VectorEngine.AddGroup(group_id, dimension)
+        code, group_id, file_number = VectorEngine.AddGroup(group_id, dimension)
+        return jsonify({'code': code, 'group': group_id, 'filenumber': file_number})
 
     def get(self, group_id):
-        return VectorEngine.GetGroup(group_id)
+        code, group_id, file_number = VectorEngine.GetGroup(group_id)
+        return jsonify({'code': code, 'group': group_id, 'filenumber': file_number})
 
     def delete(self, group_id):
-        return VectorEngine.DeleteGroup(group_id)
+        code, group_id, file_number = VectorEngine.DeleteGroup(group_id)
+        return jsonify({'code': code, 'group': group_id, 'filenumber': file_number})
 
 
 class GroupList(Resource):
     def get(self):
-        return VectorEngine.GetGroupList()
+        code, group_list = VectorEngine.GetGroupList()
+        return jsonify({'code': code, 'group_list': group_list})
 
 
 api.add_resource(Vector, '/vector/add/<group_id>')

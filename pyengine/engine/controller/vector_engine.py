@@ -12,13 +12,17 @@ import sys, os
 
 class VectorEngine(object):
     group_dict = None
+    SUCCESS_CODE = 0
+    FAULT_CODE = 1
+    GROUP_NOT_EXIST = 2
 
     @staticmethod
     def AddGroup(group_id, dimension):
         group = GroupTable.query.filter(GroupTable.group_name==group_id).first()
         if group:
             print('Already create the group: ', group_id)
-            return jsonify({'code': 1, 'group_name': group_id, 'file_number': group.file_number})
+            return VectorEngine.FAULT_CODE, group_id, group.file_number
+            # return jsonify({'code': 1, 'group_name': group_id, 'file_number': group.file_number})
         else:
             print('To create the group: ', group_id)
             new_group = GroupTable(group_id, dimension)
@@ -27,18 +31,16 @@ class VectorEngine(object):
             # add into database
             db.session.add(new_group)
             db.session.commit()
-            return jsonify({'code': 0, 'group_name': group_id, 'file_number': 0})
+            return VectorEngine.SUCCESS_CODE, group_id, 0
 
 
     @staticmethod
     def GetGroup(group_id):
         group = GroupTable.query.filter(GroupTable.group_name==group_id).first()
         if group:
-            print('Found the group: ', group_id)
-            return jsonify({'code': 0, 'group_name': group_id, 'file_number': group.file_number})
+            return VectorEngine.SUCCESS_CODE, group_id, group.file_number
         else:
-            print('Not found the group: ', group_id)
-            return jsonify({'code': 1, 'group_name': group_id, 'file_number': 0}) # not found
+            return VectorEngine.FAULT_CODE, group_id, 0
 
 
     @staticmethod
@@ -56,9 +58,9 @@ class VectorEngine(object):
                 db.session.delete(record)
             db.session.commit()
 
-            return jsonify({'code': 0, 'group_name': group_id, 'file_number': group.file_number})
+            return VectorEngine.SUCCESS_CODE, group_id, group.file_number
         else:
-            return jsonify({'code': 0, 'group_name': group_id, 'file_number': 0})
+            return VectorEngine.SUCCESS_CODE, group_id, 0
 
 
     @staticmethod
@@ -72,12 +74,16 @@ class VectorEngine(object):
             group_list.append(group_item)
 
         print(group_list)
-        return jsonify(results = group_list)
+        return VectorEngine.SUCCESS_CODE, group_list
 
 
     @staticmethod
     def AddVector(group_id, vector):
         print(group_id, vector)
+        code, _, _ = VectorEngine.GetGroup(group_id)
+        if code == VectorEngine.FAULT_CODE:
+            return VectorEngine.GROUP_NOT_EXIST
+
         file = FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').first()
         group = GroupTable.query.filter(GroupTable.group_name == group_id).first()
         if file:
@@ -118,37 +124,44 @@ class VectorEngine(object):
             db.session.add(FileTable(group_id, raw_filename, 'raw', 1))
             db.session.commit()
 
-        return jsonify({'code': 0})
+        return VectorEngine.SUCCESS_CODE
 
 
     @staticmethod
-    def SearchVector(group_id, vectors, limit):
+    def SearchVector(group_id, vector, limit):
+        # Check the group exist
+        code, _, _ = VectorEngine.GetGroup(group_id)
+        if code == VectorEngine.FAULT_CODE:
+            return VectorEngine.GROUP_NOT_EXIST
+
         # find all files
         files = FileTable.query.filter(FileTable.group_name == group_id).all()
-
         raw_keys = [ i.filename for i in files if i.type == 'raw' ]
         index_keys = [ i.filename for i in files if i.type == 'index' ]
-        index_map = dict
+        index_map = {}
         index_map['raw'] = raw_keys
         index_map['index'] = index_keys # {raw:[key1, key2], index:[key3, key4]}
 
-        scheduler_instance = Scheduler
-        result = scheduler_instance.Search(index_map, vectors, k=limit)
+        scheduler_instance = Scheduler()
+        result = scheduler_instance.Search(index_map, vector, limit)
 
-        # according to difference files get topk of each
-        # reduce the topk from them
-        # construct response and send back
-        return jsonify({'code': 0})
+        vector_id = 0
+
+        return VectorEngine.SUCCESS_CODE, vector_id
 
 
-    # TODO(linxj): Debug Interface. UnSopport now
-    # @staticmethod
-    # def CreateIndex(group_id):
-    #     # create index
-    #     file = FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').first()
-    #     path = GroupHandler.GetGroupDirectory(group_id) + '/' + file.filename
-    #     print('Going to create index for: ', path)
-    #     return jsonify({'code': 0})
+    @staticmethod
+    def CreateIndex(group_id):
+        # Check the group exist
+        code, _, _ = VectorEngine.GetGroup(group_id)
+        if code == VectorEngine.FAULT_CODE:
+            return VectorEngine.GROUP_NOT_EXIST
+
+        # create index
+        file = FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').first()
+        path = GroupHandler.GetGroupDirectory(group_id) + '/' + file.filename 
+        print('Going to create index for: ', path)
+        return VectorEngine.SUCCESS_CODE
 
 
     @staticmethod
@@ -158,21 +171,23 @@ class VectorEngine(object):
         if VectorEngine.group_dict is None:
             # print("VectorEngine.group_dict is None")
             VectorEngine.group_dict = dict()
+
+        if not (group_id in VectorEngine.group_dict):
             VectorEngine.group_dict[group_id] = []
 
         VectorEngine.group_dict[group_id].append(vector)
 
         print('InsertVectorIntoRawFile: ', VectorEngine.group_dict[group_id])
-
-        # if filename exist
-        # append
-        # if filename not exist
-        # create file
-        # append
         return filename
 
 
     @staticmethod
     def GetVectorListFromRawFile(group_id, filename="todo"):
         return VectorEngine.group_dict[group_id]
+
+    @staticmethod
+    def ClearRawFile(group_id):
+        print("VectorEngine.group_dict: ", VectorEngine.group_dict)
+        del VectorEngine.group_dict[group_id]
+        return VectorEngine.SUCCESS_CODE
 
