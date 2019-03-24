@@ -1,0 +1,84 @@
+from flask import Flask, jsonify, request
+from flask_restful import Resource, Api
+from engine import app, db
+from engine.model.group_table import GroupTable
+from engine.controller.vector_engine import VectorEngine
+
+# app = Flask(__name__)
+api = Api(app)
+
+
+from flask_restful import reqparse
+from flask_restful import request
+class Vector(Resource):
+    def __init__(self):
+        self.__parser = reqparse.RequestParser()
+        self.__parser.add_argument('vector', type=float, action='append', location=['json'])
+
+    def post(self, group_id):
+        args = self.__parser.parse_args()
+        vector = args['vector']
+        code = VectorEngine.AddVector(group_id, vector)
+        return jsonify({'code': code})
+
+
+class VectorSearch(Resource):
+    def __init__(self):
+        self.__parser = reqparse.RequestParser()
+        self.__parser.add_argument('vector', type=float, action='append', location=['json'])
+        self.__parser.add_argument('limit', type=int, action='append', location=['json'])
+
+    def get(self, group_id):
+        args = self.__parser.parse_args()
+        print('vector: ', args['vector'])
+        # go to search every thing
+        code, vector_id = VectorEngine.SearchVector(group_id, args['vector'], args['limit'])
+        return jsonify({'code': code, 'vector_id': vector_id})
+
+
+class Index(Resource):
+    def __init__(self):
+        self.__parser = reqparse.RequestParser()
+        # self.__parser.add_argument('group_id', type=str)
+
+    def post(self, group_id):
+        code = VectorEngine.CreateIndex(group_id)
+        return jsonify({'code': code})
+
+
+class Group(Resource):
+    def __init__(self):
+        self.__parser = reqparse.RequestParser()
+        self.__parser.add_argument('group_id', type=str)
+        self.__parser.add_argument('dimension', type=int, action='append', location=['json'])
+
+    def post(self, group_id):
+        args = self.__parser.parse_args()
+        dimension = args['dimension']
+        code, group_id, file_number = VectorEngine.AddGroup(group_id, dimension)
+        return jsonify({'code': code, 'group': group_id, 'filenumber': file_number})
+
+    def get(self, group_id):
+        code, group_id, file_number = VectorEngine.GetGroup(group_id)
+        return jsonify({'code': code, 'group': group_id, 'filenumber': file_number})
+
+    def delete(self, group_id):
+        code, group_id, file_number = VectorEngine.DeleteGroup(group_id)
+        return jsonify({'code': code, 'group': group_id, 'filenumber': file_number})
+
+
+class GroupList(Resource):
+    def get(self):
+        code, group_list = VectorEngine.GetGroupList()
+        return jsonify({'code': code, 'group_list': group_list})
+
+
+api.add_resource(Vector, '/vector/add/<group_id>')
+api.add_resource(Group, '/vector/group/<group_id>')
+api.add_resource(GroupList, '/vector/group')
+api.add_resource(Index, '/vector/index/<group_id>')
+api.add_resource(VectorSearch, '/vector/search/<group_id>')
+
+
+# if __name__ == '__main__':
+#     app.run()
