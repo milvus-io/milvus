@@ -98,7 +98,8 @@ class VectorEngine(object):
 
                 # create index
                 index_builder = build_index.FactoryIndex()
-                index = index_builder().build(d, raw_data)
+                index = index_builder().build(d, raw_data) # type: index
+                index = build_index.Index.serialize(index) # type: array
 
                 # TODO(jinhai): store index into Cache
                 index_filename = file.filename + '_index'
