@@ -6,6 +6,8 @@ from engine.controller.index_file_handler import IndexFileHandler
 from engine.settings import ROW_LIMIT
 from flask import jsonify
 from engine import db
+from engine.ingestion import build_index
+from engine.controller.scheduler import Scheduler
 import sys, os
 
 class VectorEngine(object):
@@ -83,6 +85,7 @@ class VectorEngine(object):
             return VectorEngine.GROUP_NOT_EXIST
 
         file = FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').first()
+        group = GroupTable.query.filter(GroupTable.group_name == group_id).first()
         if file:
             print('insert into exist file')
             # insert into raw file
@@ -90,14 +93,17 @@ class VectorEngine(object):
 
             # check if the file can be indexed
             if file.row_number + 1 >= ROW_LIMIT:
-                # read data from raw file
-                data = GetVectorsFromRawFile()
+                raw_data = GetVectorListFromRawFile(group_id)
+                d = group.dimension
 
                 # create index
-                index_filename = file.filename + '_index'
-                CreateIndex(group_id, index_filename, data)
+                index_builder = build_index.FactoryIndex()
+                index = index_builder().build(d, raw_data)
 
-                # update record into database
+                # TODO(jinhai): store index into Cache
+                index_filename = file.filename + '_index'
+
+                # TODO(jinhai): Update raw_file_name => index_file_name
                 FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1, 'type': 'index'})
                 pass
 
@@ -130,22 +136,15 @@ class VectorEngine(object):
 
         # find all files
         files = FileTable.query.filter(FileTable.group_name == group_id).all()
+        raw_keys = [ i.filename for i in files if i.type == 'raw' ]
+        index_keys = [ i.filename for i in files if i.type == 'index' ]
+        index_map = {}
+        index_map['raw'] = raw_keys
+        index_map['index'] = index_keys # {raw:[key1, key2], index:[key3, key4]}
 
-        for file in files:
-            if(file.type == 'raw'):
-                # create index
-                # add vector list
-                # train
-                # get topk
-                print('search in raw file: ', file.filename)
-            else:
-                # get topk
-                print('search in index file: ', file.filename)
-                data = IndexFileHandler.Read(file.filename, file.type)
+        scheduler_instance = Scheduler()
+        result = scheduler_instance.Search(index_map, vector, limit)
 
-        # according to difference files get topk of each
-        # reduce the topk from them
-        # construct response and send back
         vector_id = 0
 
         return VectorEngine.SUCCESS_CODE, vector_id
@@ -179,17 +178,11 @@ class VectorEngine(object):
         VectorEngine.group_dict[group_id].append(vector)
 
         print('InsertVectorIntoRawFile: ', VectorEngine.group_dict[group_id])
-
-        # if filename exist
-        # append
-        # if filename not exist
-        # create file
-        # append
         return filename
 
 
     @staticmethod
-    def GetVectorListFromRawFile(group_id, filename):
+    def GetVectorListFromRawFile(group_id, filename="todo"):
         return VectorEngine.group_dict[group_id]
 
     @staticmethod
