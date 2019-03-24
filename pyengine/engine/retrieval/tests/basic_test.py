@@ -77,8 +77,7 @@ faiss.write_index(index, writer)
 ar_data = faiss.vector_to_array(writer.data)
 import pickle
 pickle.dump(ar_data, open("/tmp/faiss/ser_1", "wb"))
-
-#index_3 = pickle.load("/tmp/faiss/ser_1")
+index_3 = pickle.load("/tmp/faiss/ser_1")
 
 
 # index_2 = faiss.IndexFlatL2(d)   # build the index

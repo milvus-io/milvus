@@ -35,7 +35,7 @@ class DefaultIndex(Index):
         # maybe need to specif parameters
         pass
 
-    def build(d, vectors, DEVICE=INDEX_DEVICES.CPU):
+    def build(self, d, vectors, DEVICE=INDEX_DEVICES.CPU):
         index = faiss.IndexFlatL2(d) # trained
         index.add(vectors)
         return index
