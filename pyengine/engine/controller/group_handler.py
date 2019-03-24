@@ -10,8 +10,7 @@ class GroupHandler(object):
         path=path.rstrip("\\")
         if not os.path.exists(path):
             os.makedirs(path)
-        print("CreateGroupDirectory, Path: ", path)
-
+        return path
 
     @staticmethod
     def DeleteGroupDirectory(group_id):
@@ -20,7 +19,7 @@ class GroupHandler(object):
         path=path.rstrip("\\")
         if os.path.exists(path):
             shutil.rmtree(path)
-        print("DeleteGroupDirectory, Path: ", path)
+        return path
 
     @staticmethod
     def GetGroupDirectory(group_id):

@@ -13,4 +13,4 @@ db = SQLAlchemy(app)
 from engine.model.group_table import GroupTable
 from engine.model.file_table import FileTable
 
-from engine.controller import index_manager
+from engine.controller import views
