@@ -7,7 +7,9 @@ import unittest
 
 class TestBuildIndex(unittest.TestCase):
     def test_factory_method(self):
-        pass
+        index_builder = FactoryIndex()
+        index = index_builder()
+        self.assertIsInstance(index, DefaultIndex)
 
     def test_default_index(self):
         d = 64
@@ -30,15 +32,38 @@ class TestBuildIndex(unittest.TestCase):
         d = 64
         nb = 10000
         nq = 100
-        _, xb, xq = get_dataset(d, nb, 500, nq)
+        nt = 500
+        xt, xb, xq = get_dataset(d, nb, nt, nq)
 
         index = faiss.IndexFlatL2(d)
         index.add(xb)
 
-        pass
+        assert index.ntotal == nb
+
+        Index.increase(index, xt)
+        assert index.ntotal == nb + nt
 
     def test_serialize(self):
-        pass
+        d = 64
+        nb = 10000
+        nq = 100
+        nt = 500
+        xt, xb, xq = get_dataset(d, nb, nt, nq)
+
+        index = faiss.IndexFlatL2(d)
+        index.add(xb)
+        Dref, Iref = index.search(xq, 5)
+
+        ar_data = Index.serialize(index)
+
+        reader = faiss.VectorIOReader()
+        faiss.copy_array_to_vector(ar_data, reader.data)
+        index2 = faiss.read_index(reader)
+
+        Dnew, Inew = index2.search(xq, 5)
+
+        assert np.all(Dnew == Dref) and np.all(Inew == Iref)
+
 
 
 def get_dataset(d, nb, nt, nq):
