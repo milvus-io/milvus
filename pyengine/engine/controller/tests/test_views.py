@@ -43,8 +43,8 @@ class TestViews:
     
     
     def test_vector(self, test_client):
-        dimension = {"dimension": 10}
-        resp = test_client.post('/vector/group/6', data=json.dumps(dimension))
+        dimension = {"dimension": 8}
+        resp = test_client.post('/vector/group/6', data=json.dumps(dimension), headers = TestViews.HEADERS)
         assert resp.status_code == 200
         assert self.loads(resp)['code'] == 0
         

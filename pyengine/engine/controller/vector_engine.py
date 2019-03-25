@@ -148,7 +148,9 @@ class VectorEngine(object):
         index_map['dimension'] = group.dimension
 
         scheduler_instance = Scheduler()
-        result = scheduler_instance.Search(index_map, vector, limit)
+        vectors = []
+        vectors.append(vector)
+        result = scheduler_instance.Search(index_map, vectors, limit)
 
         vector_id = 0
 

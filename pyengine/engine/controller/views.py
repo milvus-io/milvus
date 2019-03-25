@@ -26,7 +26,7 @@ class VectorSearch(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
         self.__parser.add_argument('vector', type=float, action='append', location=['json'])
-        self.__parser.add_argument('limit', type=int, action='append', location=['json'])
+        self.__parser.add_argument('limit', type=int, location=['json'])
 
     def get(self, group_id):
         args = self.__parser.parse_args()
@@ -51,7 +51,7 @@ class Group(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
         self.__parser.add_argument('group_id', type=str)
-        self.__parser.add_argument('dimension', type=int, action='append', location=['json'])
+        self.__parser.add_argument('dimension', type=int, location=['json'])
 
     def post(self, group_id):
         args = self.__parser.parse_args()

@@ -18,7 +18,6 @@ class Scheduler(metaclass=Singleton):
         assert k != 0
 
         query_vectors = serialize.to_array(vectors)
-
         return self.__scheduler(index_file_key, query_vectors, k)
 
 
@@ -33,11 +32,12 @@ class Scheduler(metaclass=Singleton):
             searcher = search_index.FaissSearch(index)
             result_list.append(searcher.search_by_vectors(vectors, k))
 
-        index_data_list = index_data_key['index']
-        for key in index_data_list:
-            index = GetIndexData(key)
-            searcher = search_index.FaissSearch(index)
-            result_list.append(searcher.search_by_vectors(vectors, k))
+        if 'index' in index_data_key:
+            index_data_list = index_data_key['index']
+            for key in index_data_list:
+                index = GetIndexData(key)
+                searcher = search_index.FaissSearch(index)
+                result_list.append(searcher.search_by_vectors(vectors, k))
 
         if len(result_list) == 1:
             return result_list[0].vectors
