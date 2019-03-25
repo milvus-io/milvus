@@ -8,6 +8,7 @@ from flask import jsonify
 from engine import db
 from engine.ingestion import build_index
 from engine.controller.scheduler import Scheduler
+from engine.ingestion import serialize
 import sys, os
 
 class VectorEngine(object):
@@ -98,14 +99,15 @@ class VectorEngine(object):
 
                 # create index
                 index_builder = build_index.FactoryIndex()
-                index = index_builder().build(d, raw_data) # type: index
-                index = build_index.Index.serialize(index) # type: array
+                index = index_builder().build(d, raw_data)
 
                 # TODO(jinhai): store index into Cache
                 index_filename = file.filename + '_index'
+                serialize.write_index(file_name=index_filename, index=index)
 
-                # TODO(jinhai): Update raw_file_name => index_file_name
-                FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1, 'type': 'index'})
+                FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1,
+                                                                                                                 'type': 'index',
+                                                                                                                 'filename': index_filename})
                 pass
 
             else:
@@ -135,13 +137,15 @@ class VectorEngine(object):
         if code == VectorEngine.FAULT_CODE:
             return VectorEngine.GROUP_NOT_EXIST
 
+        group = GroupTable.query.filter(GroupTable.group_name == group_id).first()
+
         # find all files
         files = FileTable.query.filter(FileTable.group_name == group_id).all()
-        raw_keys = [ i.filename for i in files if i.type == 'raw' ]
         index_keys = [ i.filename for i in files if i.type == 'index' ]
         index_map = {}
-        index_map['raw'] = raw_keys
-        index_map['index'] = index_keys # {raw:[key1, key2], index:[key3, key4]}
+        index_map['index'] = index_keys
+        index_map['raw'] = GetVectorListFromRawFile(group_id)
+        index_map['dimension'] = group.dimension
 
         scheduler_instance = Scheduler()
         result = scheduler_instance.Search(index_map, vector, limit)
