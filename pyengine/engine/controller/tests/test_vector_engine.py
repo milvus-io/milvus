@@ -3,6 +3,7 @@ from engine.settings import DATABASE_DIRECTORY
 from flask import jsonify
 import pytest
 import os
+import numpy as np
 import logging
 
 logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 class TestVectorEngine:
     def setup_class(self):
         self.__vector = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]
-        self.__limit = 3
+        self.__limit = 1
 
 
     def teardown_class(self):
@@ -39,11 +40,24 @@ class TestVectorEngine:
         # Check the group list
         code, group_list = VectorEngine.GetGroupList()
         assert code == VectorEngine.SUCCESS_CODE
+        print("group_list: ", group_list)
         assert group_list == [{'group_name': 'test_group', 'file_number': 0}]
 
         # Add Vector for not exist group
         code = VectorEngine.AddVector('not_exist_group', self.__vector)
         assert code == VectorEngine.GROUP_NOT_EXIST
+
+        # Add vector for exist group
+        code = VectorEngine.AddVector('test_group', self.__vector)
+        assert code == VectorEngine.SUCCESS_CODE
+
+        # Add vector for exist group
+        code = VectorEngine.AddVector('test_group', self.__vector)
+        assert code == VectorEngine.SUCCESS_CODE
+
+        # Add vector for exist group
+        code = VectorEngine.AddVector('test_group', self.__vector)
+        assert code == VectorEngine.SUCCESS_CODE
 
         # Add vector for exist group
         code = VectorEngine.AddVector('test_group', self.__vector)
@@ -89,10 +103,12 @@ class TestVectorEngine:
         expected_list = [self.__vector]
         vector_list = VectorEngine.GetVectorListFromRawFile('test_group', filename)
 
+
         print('expected_list: ', expected_list)
         print('vector_list: ', vector_list)
+        expected_list = np.asarray(expected_list).astype('float32')
 
-        assert vector_list == expected_list
+        assert np.all(vector_list == expected_list)
 
         code = VectorEngine.ClearRawFile('test_group')
         assert code == VectorEngine.SUCCESS_CODE

@@ -74,7 +74,6 @@ def basic_test():
     index.add(xb)                  # add vectors to the index
     print(index.ntotal)
     #faiss.write_index(index, "/tmp/faiss/tempfile_1")
-
     writer = faiss.VectorIOWriter()
     faiss.write_index(index, writer)
     ar_data = faiss.vector_to_array(writer.data)

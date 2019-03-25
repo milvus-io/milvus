@@ -7,8 +7,9 @@ class SearchResult():
         self.vectors = I
 
     def __add__(self, other):
-        self.distance += other.distance
-        self.vectors += other.vectors
+        distance = self.distance + other.distance
+        vectors = self.vectors + other.vectors
+        return SearchResult(distance, vectors)
 
 
 class FaissSearch():
@@ -31,6 +32,7 @@ class FaissSearch():
         D, I = self.__index.search(vector_list, k)
         return SearchResult(D, I)
 
-
+import heapq
 def top_k(input, k):
+    #sorted = heapq.nsmallest(k, input, key=input.key)
     pass

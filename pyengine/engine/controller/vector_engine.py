@@ -8,6 +8,7 @@ from flask import jsonify
 from engine import db
 from engine.ingestion import build_index
 from engine.controller.scheduler import Scheduler
+from engine.ingestion import serialize
 import sys, os
 
 class VectorEngine(object):
@@ -93,7 +94,7 @@ class VectorEngine(object):
 
             # check if the file can be indexed
             if file.row_number + 1 >= ROW_LIMIT:
-                raw_data = GetVectorListFromRawFile(group_id)
+                raw_data = VectorEngine.GetVectorListFromRawFile(group_id)
                 d = group.dimension
 
                 # create index
@@ -102,9 +103,11 @@ class VectorEngine(object):
 
                 # TODO(jinhai): store index into Cache
                 index_filename = file.filename + '_index'
+                serialize.write_index(file_name=index_filename, index=index)
 
-                # TODO(jinhai): Update raw_file_name => index_file_name
-                FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1, 'type': 'index'})
+                FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1,
+                                                                                                                 'type': 'index',
+                                                                                                                 'filename': index_filename})
                 pass
 
             else:
@@ -134,16 +137,20 @@ class VectorEngine(object):
         if code == VectorEngine.FAULT_CODE:
             return VectorEngine.GROUP_NOT_EXIST
 
+        group = GroupTable.query.filter(GroupTable.group_name == group_id).first()
+
         # find all files
         files = FileTable.query.filter(FileTable.group_name == group_id).all()
-        raw_keys = [ i.filename for i in files if i.type == 'raw' ]
         index_keys = [ i.filename for i in files if i.type == 'index' ]
         index_map = {}
-        index_map['raw'] = raw_keys
-        index_map['index'] = index_keys # {raw:[key1, key2], index:[key3, key4]}
+        index_map['index'] = index_keys
+        index_map['raw'] = VectorEngine.GetVectorListFromRawFile(group_id, "fakename") #TODO: pass by key, get from storage
+        index_map['dimension'] = group.dimension
 
         scheduler_instance = Scheduler()
-        result = scheduler_instance.Search(index_map, vector, limit)
+        vectors = []
+        vectors.append(vector)
+        result = scheduler_instance.Search(index_map, vectors, limit)
 
         vector_id = 0
 
@@ -183,7 +190,7 @@ class VectorEngine(object):
 
     @staticmethod
     def GetVectorListFromRawFile(group_id, filename="todo"):
-        return VectorEngine.group_dict[group_id]
+        return serialize.to_array(VectorEngine.group_dict[group_id])
 
     @staticmethod
     def ClearRawFile(group_id):

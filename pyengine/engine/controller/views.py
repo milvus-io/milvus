@@ -26,11 +26,12 @@ class VectorSearch(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
         self.__parser.add_argument('vector', type=float, action='append', location=['json'])
-        self.__parser.add_argument('limit', type=int, action='append', location=['json'])
+        self.__parser.add_argument('limit', type=int, location=['json'])
 
     def get(self, group_id):
         args = self.__parser.parse_args()
-        print('vector: ', args['vector'])
+        print('VectorSearch vector: ', args['vector'])
+        print('limit: ', args['limit'])
         # go to search every thing
         code, vector_id = VectorEngine.SearchVector(group_id, args['vector'], args['limit'])
         return jsonify({'code': code, 'vector_id': vector_id})
@@ -50,7 +51,7 @@ class Group(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
         self.__parser.add_argument('group_id', type=str)
-        self.__parser.add_argument('dimension', type=int, action='append', location=['json'])
+        self.__parser.add_argument('dimension', type=int, location=['json'])
 
     def post(self, group_id):
         args = self.__parser.parse_args()

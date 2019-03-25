@@ -6,4 +6,4 @@ SQLALCHEMY_TRACK_MODIFICATIONS = False
 SQLALCHEMY_DATABASE_URI = "mysql+pymysql://vecwise@127.0.0.1:3306/vecdata"
 
 ROW_LIMIT = 10000000
-DATABASE_DIRECTORY = '/home/jinhai/disk0/vecwise/db'
+DATABASE_DIRECTORY = '/tmp'

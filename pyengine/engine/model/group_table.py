@@ -12,7 +12,6 @@ class GroupTable(db.Model):
         self.group_name = group_name
         self.dimension = dimension
         self.file_number = 0
-        self.dimension = 0
 
 
     def __repr__(self):
