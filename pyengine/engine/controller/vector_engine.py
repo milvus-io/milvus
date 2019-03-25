@@ -144,7 +144,7 @@ class VectorEngine(object):
         index_keys = [ i.filename for i in files if i.type == 'index' ]
         index_map = {}
         index_map['index'] = index_keys
-        index_map['raw'] = VectorEngine.GetVectorListFromRawFile(group_id, "fakename")
+        index_map['raw'] = VectorEngine.GetVectorListFromRawFile(group_id, "fakename") #TODO: pass by key, get from storage
         index_map['dimension'] = group.dimension
 
         scheduler_instance = Scheduler()
@@ -188,8 +188,7 @@ class VectorEngine(object):
 
     @staticmethod
     def GetVectorListFromRawFile(group_id, filename="todo"):
-        return VectorEngine.group_dict[group_id]
-        # return serialize.to_array(VectorEngine.group_dict[group_id])
+        return serialize.to_array(VectorEngine.group_dict[group_id])
 
     @staticmethod
     def ClearRawFile(group_id):

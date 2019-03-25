@@ -3,6 +3,7 @@ from engine.settings import DATABASE_DIRECTORY
 from flask import jsonify
 import pytest
 import os
+import numpy as np
 import logging
 
 logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -104,10 +105,12 @@ class TestVectorEngine:
         expected_list = [self.__vector]
         vector_list = VectorEngine.GetVectorListFromRawFile('test_group', filename)
 
+
         print('expected_list: ', expected_list)
         print('vector_list: ', vector_list)
+        expected_list = np.asarray(expected_list).astype('float32')
 
-        assert vector_list == expected_list
+        assert np.all(vector_list == expected_list)
 
         code = VectorEngine.ClearRawFile('test_group')
         assert code == VectorEngine.SUCCESS_CODE
