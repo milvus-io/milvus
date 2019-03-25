@@ -28,9 +28,9 @@ class VectorSearch(Resource):
         self.__parser.add_argument('vector', type=float, action='append', location=['json'])
         self.__parser.add_argument('limit', type=int, action='append', location=['json'])
 
-    def get(self, group_id):
+    def post(self, group_id):
         args = self.__parser.parse_args()
-        print('vector: ', args['vector'])
+        print('VectorSearch vector: ', args['vector'])
         # go to search every thing
         code, vector_id = VectorEngine.SearchVector(group_id, args['vector'], args['limit'])
         return jsonify({'code': code, 'vector_id': vector_id})

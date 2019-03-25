@@ -15,7 +15,7 @@ def FactoryIndex(index_name="DefaultIndex"):
 
 
 class Index():
-    def build(d, vectors, DEVICE=INDEX_DEVICES.CPU):
+    def build(self, d, vectors, DEVICE=INDEX_DEVICES.CPU):
         pass
 
     @staticmethod

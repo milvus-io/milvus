@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 class TestVectorEngine:
     def setup_class(self):
         self.__vector = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]
-        self.__limit = 3
+        self.__vector_2 = [1.2, 2.2, 3.3, 4.5, 5.5, 6.6, 7.8, 8.8]
+        self.__query_vector = [[1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8],[1.2, 2.2, 3.3, 4.5, 5.5, 6.6, 7.8, 8.8]]
+        self.__limit = 1
 
 
     def teardown_class(self):
@@ -39,6 +41,7 @@ class TestVectorEngine:
         # Check the group list
         code, group_list = VectorEngine.GetGroupList()
         assert code == VectorEngine.SUCCESS_CODE
+        print("group_list: ", group_list)
         assert group_list == [{'group_name': 'test_group', 'file_number': 0}]
 
         # Add Vector for not exist group
@@ -46,11 +49,23 @@ class TestVectorEngine:
         assert code == VectorEngine.GROUP_NOT_EXIST
 
         # Add vector for exist group
-        code = VectorEngine.AddVector('test_group', self.__vector)
+        code = VectorEngine.AddVector('test_group', self.__vector_2)
+        assert code == VectorEngine.SUCCESS_CODE
+
+        # Add vector for exist group
+        code = VectorEngine.AddVector('test_group', self.__vector_2)
+        assert code == VectorEngine.SUCCESS_CODE
+
+        # Add vector for exist group
+        code = VectorEngine.AddVector('test_group', self.__vector_2)
+        assert code == VectorEngine.SUCCESS_CODE
+
+        # Add vector for exist group
+        code = VectorEngine.AddVector('test_group', self.__vector_2)
         assert code == VectorEngine.SUCCESS_CODE
 
         # Check search vector interface
-        code, vector_id = VectorEngine.SearchVector('test_group', self.__vector, self.__limit)
+        code, vector_id = VectorEngine.SearchVector('test_group', self.__query_vector, self.__limit)
         assert code == VectorEngine.SUCCESS_CODE
         assert vector_id == 0
 
