@@ -23,20 +23,25 @@ class TestScheduler(unittest.TestCase):
 
         index2 = faiss.read_index(file_name)
 
-        schuduler_instance = Scheduler()
+        scheduler_instance = Scheduler()
 
         # query args 1
         query_index = dict()
         query_index['index'] = [file_name]
-        vectors = schuduler_instance.Search(query_index, vectors=xq, k=5)
+        vectors = scheduler_instance.Search(query_index, vectors=xq, k=5)
         assert np.all(vectors == Iref)
 
         # query args 2
         query_index = dict()
         query_index['raw'] = xt
+        # Xiaojun TODO: 'raw_id' part
+        # query_index['raw_id'] = 
         query_index['dimension'] = d
         query_index['index'] = [file_name]
-        vectors = schuduler_instance.Search(query_index, vectors=xq, k=5)
+        
+        # Xiaojun TODO: once 'raw_id' part added, open below
+        # vectors = scheduler_instance.Search(query_index, vectors=xq, k=5)
+        
         # print("success")
 
 

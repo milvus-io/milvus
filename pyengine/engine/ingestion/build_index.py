@@ -15,7 +15,7 @@ def FactoryIndex(index_name="DefaultIndex"):
 
 
 class Index():
-    def build(self, d, vectors, DEVICE=INDEX_DEVICES.CPU):
+    def build(self, d, vectors, vector_ids, DEVICE=INDEX_DEVICES.CPU):
         pass
 
     @staticmethod
@@ -35,7 +35,7 @@ class DefaultIndex(Index):
         # maybe need to specif parameters
         pass
 
-    def build(self, d, vectors, DEVICE=INDEX_DEVICES.CPU):
+    def build(self, d, vectors, vector_ids, DEVICE=INDEX_DEVICES.CPU):
         index = faiss.IndexFlatL2(d) # trained
         index.add(vectors)
         return index
@@ -47,7 +47,7 @@ class LowMemoryIndex(Index):
         self.__bytes_per_vector = 8
         self.__bits_per_sub_vector = 8
 
-    def build(d, vectors, DEVICE=INDEX_DEVICES.CPU):
+    def build(d, vectors, vector_ids, DEVICE=INDEX_DEVICES.CPU):
         # quantizer = faiss.IndexFlatL2(d)
         # index = faiss.IndexIVFPQ(quantizer, d, self.nlist,
         #                          self.__bytes_per_vector, self.__bits_per_sub_vector)

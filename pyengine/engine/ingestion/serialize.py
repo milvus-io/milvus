@@ -9,3 +9,6 @@ def read_index(file_name):
 
 def to_array(vec):
     return np.asarray(vec).astype('float32')
+
+def to_str_array(vec):
+    return np.asarray(vec).astype('str')

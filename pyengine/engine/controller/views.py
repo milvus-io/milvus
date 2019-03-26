@@ -18,8 +18,8 @@ class Vector(Resource):
     def post(self, group_id):
         args = self.__parser.parse_args()
         vector = args['vector']
-        code = VectorEngine.AddVector(group_id, vector)
-        return jsonify({'code': code})
+        code, vector_id = VectorEngine.AddVector(group_id, vector)
+        return jsonify({'code': code, 'vector_id': vector_id})
 
 
 class VectorSearch(Resource):
