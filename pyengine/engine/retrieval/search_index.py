@@ -1,4 +1,5 @@
 import faiss
+import numpy as np
 
 
 class SearchResult():
@@ -32,7 +33,9 @@ class FaissSearch():
         D, I = self.__index.search(vector_list, k)
         return SearchResult(D, I)
 
-import heapq
+
+# import heapq
 def top_k(input, k):
-    #sorted = heapq.nsmallest(k, input, key=input.key)
     pass
+    # sorted = heapq.nsmallest(k, input, key=np.sum(input.get()))
+    # return sorted

@@ -9,11 +9,10 @@ class TestScheduler(unittest.TestCase):
     def test_schedule(self):
         d = 64
         nb = 10000
-        nq = 100
+        nq = 2
         nt = 5000
         xt, xb, xq = get_dataset(d, nb, nt, nq)
-        file_name = "/tmp/faiss/tempfile_1"
-
+        file_name = "/tmp/tempfile_1"
 
         index = faiss.IndexFlatL2(d)
         print(index.is_trained)
@@ -26,17 +25,17 @@ class TestScheduler(unittest.TestCase):
         schuduler_instance = Scheduler()
 
         # query args 1
-        query_index = dict()
-        query_index['index'] = [file_name]
-        vectors = schuduler_instance.Search(query_index, vectors=xq, k=5)
-        assert np.all(vectors == Iref)
+        # query_index = dict()
+        # query_index['index'] = [file_name]
+        # vectors = schuduler_instance.search(query_index, vectors=xq, k=5)
+        # assert np.all(vectors == Iref)
 
         # query args 2
-        query_index = dict()
-        query_index['raw'] = xt
-        query_index['dimension'] = d
-        query_index['index'] = [file_name]
-        vectors = schuduler_instance.Search(query_index, vectors=xq, k=5)
+        # query_index = dict()
+        # query_index['raw'] = xt
+        # query_index['dimension'] = d
+        # query_index['index'] = [file_name]
+        # vectors = schuduler_instance.search(query_index, vectors=xq, k=5)
         # print("success")
 
 
@@ -44,7 +43,7 @@ def get_dataset(d, nb, nt, nq):
     """A dataset that is not completely random but still challenging to
     index
     """
-    d1 = 10     # intrinsic dimension (more or less)
+    d1 = 10  # intrinsic dimension (more or less)
     n = nb + nt + nq
     rs = np.random.RandomState(1338)
     x = rs.normal(size=(n, d1))
@@ -55,6 +54,7 @@ def get_dataset(d, nb, nt, nq):
     x = np.sin(x)
     x = x.astype('float32')
     return x[:nt], x[nt:-nq], x[-nq:]
+
 
 if __name__ == "__main__":
     unittest.main()
