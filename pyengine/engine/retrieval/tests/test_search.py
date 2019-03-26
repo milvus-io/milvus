@@ -3,6 +3,7 @@ from ..search_index import *
 import unittest
 import numpy as np
 
+
 class TestSearchSingleThread(unittest.TestCase):
     def test_search_by_vectors(self):
         d = 64
@@ -31,7 +32,7 @@ def get_dataset(d, nb, nt, nq):
     """A dataset that is not completely random but still challenging to
     index
     """
-    d1 = 10     # intrinsic dimension (more or less)
+    d1 = 10  # intrinsic dimension (more or less)
     n = nb + nt + nq
     rs = np.random.RandomState(1338)
     x = rs.normal(size=(n, d1))
