@@ -65,12 +65,11 @@ class TestBuildIndex(unittest.TestCase):
         assert np.all(Dnew == Dref) and np.all(Inew == Iref)
 
 
-
 def get_dataset(d, nb, nt, nq):
     """A dataset that is not completely random but still challenging to
     index
     """
-    d1 = 10     # intrinsic dimension (more or less)
+    d1 = 10  # intrinsic dimension (more or less)
     n = nb + nt + nq
     rs = np.random.RandomState(1338)
     x = rs.normal(size=(n, d1))
@@ -81,7 +80,6 @@ def get_dataset(d, nb, nt, nq):
     x = np.sin(x)
     x = x.astype('float32')
     return x[:nt], x[nt:-nq], x[-nq:]
-
 
 
 if __name__ == "__main__":

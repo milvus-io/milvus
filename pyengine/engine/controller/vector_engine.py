@@ -156,7 +156,7 @@ class VectorEngine(object):
         scheduler_instance = Scheduler()
         vectors = []
         vectors.append(vector)
-        result = scheduler_instance.Search(index_map, vectors, limit)
+        result = scheduler_instance.search(index_map, vectors, limit)
 
         vector_id = [0]
 
