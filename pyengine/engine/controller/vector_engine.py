@@ -159,9 +159,8 @@ class VectorEngine(object):
         vectors.append(vector)
         result = scheduler_instance.search(index_map, vectors, limit)
 
-        vector_id = [0]
         vector_ids_str = []
-        for int_id in vector_id:
+        for int_id in result:
             vector_ids_str.append(group_id + '.' + str(int_id))
 
         return VectorEngine.SUCCESS_CODE, vector_ids_str
@@ -201,7 +200,7 @@ class VectorEngine(object):
         VectorEngine.group_vector_dict[group_id].append(vector)
         VectorEngine.group_vector_id_dict[group_id].append(vector_id)
 
-        print('InsertVectorIntoRawFile: ', VectorEngine.group_vector_dict[group_id], VectorEngine.group_vector_id_dict[group_id])
+        # print('InsertVectorIntoRawFile: ', VectorEngine.group_vector_dict[group_id], VectorEngine.group_vector_id_dict[group_id])
         print("cache size: ", len(VectorEngine.group_vector_dict[group_id]))
 
         return filename
@@ -209,8 +208,8 @@ class VectorEngine(object):
 
     @staticmethod
     def GetVectorListFromRawFile(group_id, filename="todo"):
-        print("GetVectorListFromRawFile, vectors: ", serialize.to_array(VectorEngine.group_vector_dict[group_id]))
-        print("GetVectorListFromRawFile, vector_ids: ", serialize.to_int_array(VectorEngine.group_vector_id_dict[group_id]))
+        # print("GetVectorListFromRawFile, vectors: ", serialize.to_array(VectorEngine.group_vector_dict[group_id]))
+        # print("GetVectorListFromRawFile, vector_ids: ", serialize.to_int_array(VectorEngine.group_vector_id_dict[group_id]))
         return serialize.to_array(VectorEngine.group_vector_dict[group_id]), serialize.to_int_array(VectorEngine.group_vector_id_dict[group_id])
 
     @staticmethod
