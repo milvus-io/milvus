@@ -71,7 +71,7 @@ class TestViews:
         resp = test_client.get('/vector/search/6', data=json.dumps(limit), headers = TestViews.HEADERS)
         assert resp.status_code == 200
         assert self.loads(resp)['code'] == 0
-        assert self.loads(resp)['vector_id'] == 0
+        assert self.loads(resp)['vector_id'] == [0]
 
         resp = test_client.delete('/vector/group/6', headers = TestViews.HEADERS)
         assert resp.status_code == 200

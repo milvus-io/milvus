@@ -71,7 +71,7 @@ class TestVectorEngine:
         # Check search vector interface
         code, vector_id = VectorEngine.SearchVector('test_group', self.__vector, self.__limit)
         assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == {0}
+        assert vector_id == [0]
 
         # Check create index interface
         code = VectorEngine.CreateIndex('test_group')

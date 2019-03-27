@@ -145,7 +145,6 @@ class VectorEngine(object):
             return VectorEngine.GROUP_NOT_EXIST, {}
 
         group = GroupTable.query.filter(GroupTable.group_name == group_id).first()
-
         # find all files
         files = FileTable.query.filter(FileTable.group_name == group_id).all()
         index_keys = [ i.filename for i in files if i.type == 'index' ]
@@ -159,7 +158,7 @@ class VectorEngine(object):
         vectors.append(vector)
         result = scheduler_instance.Search(index_map, vectors, limit)
 
-        vector_id = {0}
+        vector_id = [0]
 
         return VectorEngine.SUCCESS_CODE, vector_id
 
