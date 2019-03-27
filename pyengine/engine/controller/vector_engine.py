@@ -91,7 +91,7 @@ class VectorEngine(object):
         if file:
             print('insert into exist file')
             # create vector id
-            vector_id = group_id + '.' + (str)(file.seq_no + 1)
+            vector_id = file.seq_no + 1
             # insert into raw file
             VectorEngine.InsertVectorIntoRawFile(group_id, file.filename, vector, vector_id)
 
@@ -127,14 +127,15 @@ class VectorEngine(object):
             # first raw file
             raw_filename = group_id + '.raw'
             # create vector id
-            vector_id = group_id + '.' + (str)(0)
+            vector_id = 0
             # create and insert vector into raw file
             VectorEngine.InsertVectorIntoRawFile(group_id, raw_filename, vector, vector_id)
             # insert a record into database
             db.session.add(FileTable(group_id, raw_filename, 'raw', 1))
             db.session.commit()
 
-        return VectorEngine.SUCCESS_CODE, vector_id
+        vector_id_str = group_id + '.' + str(vector_id)
+        return VectorEngine.SUCCESS_CODE, vector_id_str
 
 
     @staticmethod
@@ -159,8 +160,11 @@ class VectorEngine(object):
         result = scheduler_instance.search(index_map, vectors, limit)
 
         vector_id = [0]
+        vector_ids_str = []
+        for int_id in vector_id:
+            vector_ids_str.append(group_id + '.' + str(int_id))
 
-        return VectorEngine.SUCCESS_CODE, vector_id
+        return VectorEngine.SUCCESS_CODE, vector_ids_str
 
 
     @staticmethod
@@ -203,7 +207,9 @@ class VectorEngine(object):
 
     @staticmethod
     def GetVectorListFromRawFile(group_id, filename="todo"):
-        return serialize.to_array(VectorEngine.group_vector_dict[group_id]), serialize.to_str_array(VectorEngine.group_vector_id_dict[group_id])
+        print("GetVectorListFromRawFile, vectors: ", serialize.to_array(VectorEngine.group_vector_dict[group_id]))
+        print("GetVectorListFromRawFile, vector_ids: ", serialize.to_int_array(VectorEngine.group_vector_id_dict[group_id]))
+        return serialize.to_array(VectorEngine.group_vector_dict[group_id]), serialize.to_int_array(VectorEngine.group_vector_id_dict[group_id])
 
     @staticmethod
     def ClearRawFile(group_id):

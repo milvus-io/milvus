@@ -14,5 +14,5 @@ def to_array(vec):
     return np.asarray(vec).astype('float32')
 
 
-def to_str_array(vec):
-    return np.asarray(vec).astype('str')
+def to_int_array(vec):
+    return np.asarray(vec).astype('int64')

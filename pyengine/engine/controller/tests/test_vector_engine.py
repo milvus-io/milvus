@@ -71,7 +71,7 @@ class TestVectorEngine:
         # Check search vector interface
         code, vector_id = VectorEngine.SearchVector('test_group', self.__vector, self.__limit)
         assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == [0]
+        assert vector_id == ['test_group.0']
 
         # Check create index interface
         code = VectorEngine.CreateIndex('test_group')
@@ -103,7 +103,7 @@ class TestVectorEngine:
         assert code == VectorEngine.SUCCESS_CODE
 
     def test_raw_file(self):
-        filename = VectorEngine.InsertVectorIntoRawFile('test_group', 'test_group.raw', self.__vector, 'test_group.0')
+        filename = VectorEngine.InsertVectorIntoRawFile('test_group', 'test_group.raw', self.__vector, 0)
         assert filename == 'test_group.raw'
 
         expected_list = [self.__vector]
