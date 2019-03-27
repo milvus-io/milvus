@@ -108,7 +108,8 @@ class VectorEngine(object):
                 FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1,
                                                                                                                  'type': 'index',
                                                                                                                  'filename': index_filename})
-                pass
+                db.session.commit()
+                VectorEngine.group_dict = None
 
             else:
                 # we still can insert into exist raw file, update database
@@ -152,9 +153,9 @@ class VectorEngine(object):
         vectors.append(vector)
         result = scheduler_instance.search(index_map, vectors, limit)
 
-        vector_id = 0
+        # vector_id = 0
 
-        return VectorEngine.SUCCESS_CODE, vector_id
+        return VectorEngine.SUCCESS_CODE, result
 
 
     @staticmethod
@@ -184,7 +185,8 @@ class VectorEngine(object):
 
         VectorEngine.group_dict[group_id].append(vector)
 
-        print('InsertVectorIntoRawFile: ', VectorEngine.group_dict[group_id])
+        # print('InsertVectorIntoRawFile: ', VectorEngine.group_dict[group_id])
+        print("cache size: ", len(VectorEngine.group_dict[group_id]))
         return filename
 
 

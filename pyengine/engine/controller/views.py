@@ -16,6 +16,7 @@ class Vector(Resource):
         self.__parser.add_argument('vector', type=float, action='append', location=['json'])
 
     def post(self, group_id):
+        print(request.json)
         args = self.__parser.parse_args()
         vector = args['vector']
         code = VectorEngine.AddVector(group_id, vector)
