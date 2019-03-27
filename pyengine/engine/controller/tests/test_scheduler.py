@@ -12,36 +12,41 @@ class TestScheduler(unittest.TestCase):
         nq = 2
         nt = 5000
         xt, xb, xq = get_dataset(d, nb, nt, nq)
+        ids_xb = np.arange(xb.shape[0])
+        ids_xt = np.arange(xt.shape[0])
         file_name = "/tmp/tempfile_1"
 
         index = faiss.IndexFlatL2(d)
-        print(index.is_trained)
-        index.add(xb)
-        faiss.write_index(index, file_name)
+        index2 = faiss.IndexIDMap(index)
+        index2.add_with_ids(xb, ids_xb)
         Dref, Iref = index.search(xq, 5)
-
-        index2 = faiss.read_index(file_name)
+        faiss.write_index(index, file_name)
 
         scheduler_instance = Scheduler()
 
-        # query args 1
+        # query 1
         query_index = dict()
         query_index['index'] = [file_name]
-        vectors = scheduler_instance.Search(query_index, vectors=xq, k=5)
+        vectors = scheduler_instance.search(query_index, vectors=xq, k=5)
         assert np.all(vectors == Iref)
 
-        # query args 2
-        query_index = dict()
-        query_index['raw'] = xt
-        # Xiaojun TODO: 'raw_id' part
-        # query_index['raw_id'] = 
+        # query 2
+        query_index.clear()
+        query_index['raw'] = xb
+        query_index['raw_id'] = ids_xb
         query_index['dimension'] = d
-        query_index['index'] = [file_name]
+        vectors = scheduler_instance.search(query_index, vectors=xq, k=5)
+        assert np.all(vectors == Iref)
 
-        # Xiaojun TODO: once 'raw_id' part added, open below
-        # vectors = scheduler_instance.Search(query_index, vectors=xq, k=5)
-
-        # print("success")
+        # query 3
+        # TODO(linxj): continue...
+        # query_index.clear()
+        # query_index['raw'] = xt
+        # query_index['raw_id'] = ids_xt
+        # query_index['dimension'] = d
+        # query_index['index'] = [file_name]
+        # vectors = scheduler_instance.search(query_index, vectors=xq, k=5)
+        # assert np.all(vectors == Iref)
 
 
 def get_dataset(d, nb, nt, nq):

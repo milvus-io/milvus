@@ -20,7 +20,7 @@ class Index():
 
     @staticmethod
     def increase(trained_index, vectors):
-        trained_index.add((vectors))
+        trained_index.add_with_ids(vectors. vector_ids)
 
     @staticmethod
     def serialize(index):
