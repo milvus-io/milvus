@@ -44,29 +44,34 @@ class TestVectorEngine:
         assert group_list == [{'group_name': 'test_group', 'file_number': 0}]
 
         # Add Vector for not exist group
-        code = VectorEngine.AddVector('not_exist_group', self.__vector)
+        code, vector_id = VectorEngine.AddVector('not_exist_group', self.__vector)
         assert code == VectorEngine.GROUP_NOT_EXIST
+        assert vector_id == 'invalid'
 
         # Add vector for exist group
-        code = VectorEngine.AddVector('test_group', self.__vector)
+        code, vector_id = VectorEngine.AddVector('test_group', self.__vector)
         assert code == VectorEngine.SUCCESS_CODE
+        assert vector_id == 'test_group.0'
 
         # Add vector for exist group
-        code = VectorEngine.AddVector('test_group', self.__vector)
+        code, vector_id = VectorEngine.AddVector('test_group', self.__vector)
         assert code == VectorEngine.SUCCESS_CODE
+        assert vector_id == 'test_group.1'
 
         # Add vector for exist group
-        code = VectorEngine.AddVector('test_group', self.__vector)
+        code, vector_id = VectorEngine.AddVector('test_group', self.__vector)
         assert code == VectorEngine.SUCCESS_CODE
+        assert vector_id == 'test_group.2'
 
         # Add vector for exist group
-        code = VectorEngine.AddVector('test_group', self.__vector)
+        code, vector_id = VectorEngine.AddVector('test_group', self.__vector)
         assert code == VectorEngine.SUCCESS_CODE
+        assert vector_id == 'test_group.3'
 
         # Check search vector interface
         code, vector_id = VectorEngine.SearchVector('test_group', self.__vector, self.__limit)
         assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == 0
+        assert vector_id == ['test_group.0']
 
         # Check create index interface
         code = VectorEngine.CreateIndex('test_group')
@@ -85,8 +90,9 @@ class TestVectorEngine:
         assert file_number == 0
 
         # Check SearchVector interface
-        code = VectorEngine.SearchVector('test_group', self.__vector, self.__limit)
+        code, vector_ids = VectorEngine.SearchVector('test_group', self.__vector, self.__limit)
         assert code == VectorEngine.GROUP_NOT_EXIST
+        assert vector_ids == {}
 
         # Create Index for not exist group id
         code = VectorEngine.CreateIndex('test_group')
@@ -97,17 +103,18 @@ class TestVectorEngine:
         assert code == VectorEngine.SUCCESS_CODE
 
     def test_raw_file(self):
-        filename = VectorEngine.InsertVectorIntoRawFile('test_group', 'test_group.raw', self.__vector)
+        filename = VectorEngine.InsertVectorIntoRawFile('test_group', 'test_group.raw', self.__vector, 0)
         assert filename == 'test_group.raw'
 
         expected_list = [self.__vector]
-        vector_list = VectorEngine.GetVectorListFromRawFile('test_group', filename)
+        vector_list, vector_id_list = VectorEngine.GetVectorListFromRawFile('test_group', filename)
 
 
         print('expected_list: ', expected_list)
         print('vector_list: ', vector_list)
-        expected_list = np.asarray(expected_list).astype('float32')
+        print('vector_id_list: ', vector_id_list)
 
+        expected_list = np.asarray(expected_list).astype('float32')
         assert np.all(vector_list == expected_list)
 
         code = VectorEngine.ClearRawFile('test_group')

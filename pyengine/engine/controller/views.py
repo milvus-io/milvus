@@ -3,6 +3,7 @@ from flask_restful import Resource, Api
 from engine import app, db
 from engine.model.group_table import GroupTable
 from engine.controller.vector_engine import VectorEngine
+import json
 
 # app = Flask(__name__)
 api = Api(app)
@@ -18,8 +19,8 @@ class Vector(Resource):
     def post(self, group_id):
         args = self.__parser.parse_args()
         vector = args['vector']
-        code = VectorEngine.AddVector(group_id, vector)
-        return jsonify({'code': code})
+        code, vector_id = VectorEngine.AddVector(group_id, vector)
+        return jsonify({'code': code, 'vector_id': vector_id})
 
 
 class VectorSearch(Resource):
@@ -34,7 +35,9 @@ class VectorSearch(Resource):
         print('limit: ', args['limit'])
         # go to search every thing
         code, vector_id = VectorEngine.SearchVector(group_id, args['vector'], args['limit'])
+        print('vector_id: ', vector_id)
         return jsonify({'code': code, 'vector_id': vector_id})
+        #return jsonify(})
 
 
 class Index(Resource):

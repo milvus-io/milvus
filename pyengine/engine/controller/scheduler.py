@@ -27,9 +27,10 @@ class Scheduler(metaclass=Singleton):
 
         if 'raw' in index_data_key:
             raw_vectors = index_data_key['raw']
+            raw_vector_ids = index_data_key['raw_id']
             d = index_data_key['dimension']
             index_builder = build_index.FactoryIndex()
-            index = index_builder().build(d, raw_vectors)
+            index = index_builder().build(d, raw_vectors, raw_vector_ids)
             searcher = search_index.FaissSearch(index)
             result_list.append(searcher.search_by_vectors(vectors, k))
 
@@ -43,7 +44,7 @@ class Scheduler(metaclass=Singleton):
         if len(result_list) == 1:
             return result_list[0].vectors
 
-        return result_list; # TODO(linxj): add topk
+        return result_list;  # TODO(linxj): add topk
 
         # d_list = np.array([])
         # v_list = np.array([])
