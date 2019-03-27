@@ -6,10 +6,10 @@ import numpy as np
 
 
 class TestScheduler(unittest.TestCase):
-    def test_schedule(self):
+    def test_single_query(self):
         d = 64
         nb = 10000
-        nq = 2
+        nq = 1
         nt = 5000
         xt, xb, xq = get_dataset(d, nb, nt, nq)
         ids_xb = np.arange(xb.shape[0])

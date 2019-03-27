@@ -42,7 +42,7 @@ class Scheduler(metaclass=Singleton):
                 result_list.append(searcher.search_by_vectors(vectors, k))
 
         if len(result_list) == 1:
-            return result_list[0].vectors
+            return result_list[0].vectors[0].tolist() # TODO(linxj): fix hard code
 
         return result_list;  # TODO(linxj): add topk
 
