@@ -36,9 +36,10 @@ class DefaultIndex(Index):
         pass
 
     def build(self, d, vectors, vector_ids, DEVICE=INDEXDEVICES.CPU):
-        index = faiss.IndexFlatL2(d)  # trained
-        index.add(vectors)
-        return index
+        index = faiss.IndexFlatL2(d)
+        index2 = faiss.IndexIDMap(index)
+        index2.add_with_ids(vectors, vector_ids)
+        return index2
 
 
 class LowMemoryIndex(Index):
