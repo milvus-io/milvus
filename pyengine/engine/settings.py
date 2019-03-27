@@ -1,9 +1,12 @@
-# _*_ coding: utf-8 _*_
+from environs import Env
 
-DEBUG = True
-SQLALCHEMY_TRACK_MODIFICATIONS = False
-# SECRET_KEY='A0Zr98j/3yX R~XHH!jmN]LWX/,?RT'
-SQLALCHEMY_DATABASE_URI = "mysql+pymysql://vecwise@127.0.0.1:3306/vecdata"
+env = Env()
+env.read_env()
 
-ROW_LIMIT = 10000000
-DATABASE_DIRECTORY = '/tmp'
+DEBUG = env.bool('DEBUG', default=False)
+SQLALCHEMY_TRACK_MODIFICATIONS = env.bool('DEBUG', default=False)
+SECRET_KEY = env.str('SECRET_KEY', 'test')
+SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
+
+ROW_LIMIT = env.int('ROW_LIMIT')
+DATABASE_DIRECTORY = env.str('DATABASE_DIRECTORY')

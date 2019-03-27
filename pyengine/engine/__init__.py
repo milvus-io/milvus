@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
+from engine import settings
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
-print ("Load paramters")
 app = Flask(__name__)
-app.config.from_object('engine.settings')
+app.config.from_object(settings)
 
 #创建数据库对象
 print ("Create database instance")
