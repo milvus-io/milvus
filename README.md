@@ -2,6 +2,8 @@
 
 ### Geting started
 
+- Create .env base on .env.example
+
 - Install Miniconda first
     - `conda create --name vec_engine python=3.6`
     - `conda activate vec_engine`
