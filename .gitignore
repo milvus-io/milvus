@@ -1,1 +1,5 @@
 .idea/
+.ycm_extra_conf.py
+__pycache__
+
+.env
