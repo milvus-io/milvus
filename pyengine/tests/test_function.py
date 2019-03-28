@@ -7,7 +7,6 @@ import json
 url = "http://127.0.0.1:5000"
 
 
-# TODO: LOG and Assert
 class TestEngineFunction():
     def test_1m_add(self):
         d = 4
@@ -38,6 +37,56 @@ class TestEngineFunction():
             data['limit'] = k
             # print(data)
             r = requests.get(vector_search_route, json=data)
+            print(r.json())
+
+    def test_restful_interface(self):
+        d = 4
+        nb = 100
+        nq = 1
+        k = 10
+        _, xb, xq = get_dataset(d, nb, 1, nq)
+
+        groupid_1 = "Group_1"
+        groupid_2 = "Group_2"
+
+        vector_add_route = url + "/vector/add/"
+        vector_search_route = url + "/vector/search/"
+        group_route = url + "/vector/group/"
+        group_list_route = url + "/vector/group"
+
+        # Add groupid
+        r = requests.post(group_route + groupid_1, json={"dimension": d})
+        print(r.json())
+        r = requests.post(group_route + groupid_2, json={"dimension": d})
+        print(r.json())
+
+        # Get groupid list
+        r = requests.get(group_list_route)
+        print(r.json())
+
+        # delete groupid
+        r = requests.delete(group_route + groupid_2)
+        print(r.json())
+
+        # get groupid
+        r = requests.get(group_route + groupid_1)
+        print(r.json())
+
+        # add vector
+        for i in xb:
+            data = dict()
+            data['vector'] = i.tolist()
+            # print(data)
+            r = requests.post(vector_add_route + groupid_1, json=data)
+            print(r.json())
+
+        # search dataset
+        data = dict()
+        for i in xq:
+            data['vector'] = i.tolist()
+            data['limit'] = k
+            # print(data)
+            r = requests.get(vector_search_route + groupid_1, json=data)
             print(r.json())
 
 
