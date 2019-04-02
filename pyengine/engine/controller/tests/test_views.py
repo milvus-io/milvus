@@ -48,17 +48,17 @@ class TestViews:
         assert resp.status_code == 200
         assert self.loads(resp)['code'] == 0
         
-        vector = {"vector": [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]}
+        vector = {"vector": [[1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]]}
         resp = test_client.post('/vector/add/6', data=json.dumps(vector), headers = TestViews.HEADERS)
         assert resp.status_code == 200
         assert self.loads(resp)['code'] == 0
 
-        vector = {"vector": [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]}
+        vector = {"vector": [[1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]]}
         resp = test_client.post('/vector/add/6', data=json.dumps(vector), headers = TestViews.HEADERS)
         assert resp.status_code == 200
         assert self.loads(resp)['code'] == 0
 
-        vector = {"vector": [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]}
+        vector = {"vector": [[1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8], [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8], [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]]}
         resp = test_client.post('/vector/add/6', data=json.dumps(vector), headers = TestViews.HEADERS)
         assert resp.status_code == 200
         assert self.loads(resp)['code'] == 0

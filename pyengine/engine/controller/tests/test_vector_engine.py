@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 class TestVectorEngine:
     def setup_class(self):
+        self.__vectors = [[1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]]
         self.__vector = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]
         self.__limit = 1
 
@@ -44,29 +45,29 @@ class TestVectorEngine:
         assert group_list == [{'group_name': 'test_group', 'file_number': 0}]
 
         # Add Vector for not exist group
-        code, vector_id = VectorEngine.AddVector('not_exist_group', self.__vector)
+        code, vector_id = VectorEngine.AddVector('not_exist_group', self.__vectors)
         assert code == VectorEngine.GROUP_NOT_EXIST
         assert vector_id == 'invalid'
 
         # Add vector for exist group
-        code, vector_id = VectorEngine.AddVector('test_group', self.__vector)
+        code, vector_id = VectorEngine.AddVector('test_group', self.__vectors)
         assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == 'test_group.0'
+        assert vector_id == ['test_group.0']
 
         # Add vector for exist group
-        code, vector_id = VectorEngine.AddVector('test_group', self.__vector)
+        code, vector_id = VectorEngine.AddVector('test_group', self.__vectors)
         assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == 'test_group.1'
+        assert vector_id == ['test_group.1']
 
         # Add vector for exist group
-        code, vector_id = VectorEngine.AddVector('test_group', self.__vector)
+        code, vector_id = VectorEngine.AddVector('test_group', self.__vectors)
         assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == 'test_group.2'
+        assert vector_id == ['test_group.2']
 
         # Add vector for exist group
-        code, vector_id = VectorEngine.AddVector('test_group', self.__vector)
+        code, vector_id = VectorEngine.AddVector('test_group', self.__vectors)
         assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == 'test_group.3'
+        assert vector_id == ['test_group.3']
 
         # Check search vector interface
         code, vector_id = VectorEngine.SearchVector('test_group', self.__vector, self.__limit)

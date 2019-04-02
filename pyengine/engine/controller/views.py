@@ -14,10 +14,9 @@ from flask_restful import request
 class Vector(Resource):
     def __init__(self):
         self.__parser = reqparse.RequestParser()
-        self.__parser.add_argument('vector', type=float, action='append', location=['json'])
+        self.__parser.add_argument('vector', type=list, action='append', location=['json'])
 
     def post(self, group_id):
-        print(request.json)
         args = self.__parser.parse_args()
         vector = args['vector']
         code, vector_id = VectorEngine.AddVector(group_id, vector)
