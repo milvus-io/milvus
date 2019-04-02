@@ -10,3 +10,16 @@ SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
 
 ROW_LIMIT = env.int('ROW_LIMIT')
 DATABASE_DIRECTORY = env.str('DATABASE_DIRECTORY')
+
+FLASK_PROFILER_CONFIG = {
+    "enabled": DEBUG,
+    "storage": {
+        "engine": "sqlalchemy",
+        "db_url": env.str("PROFILER_STORAGE_DB_URL")
+    },
+    "basicAuth": {
+        "enabled": True,
+        "username": env.str("PROFILER_BASIC_AUTH_USERNAME", "admin"),
+        "password": env.str("PROFILER_BASIC_AUTH_PASSWORD", "admin"),
+    }
+}

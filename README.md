@@ -10,7 +10,7 @@
     - `conda install faiss-gpu cuda90 -c pytorch # For CUDA9.0`
     - `conda install flask`
     - `pip install flask-restful flask_sqlalchemy flask_script`
-    - `pip install pymysql environs`
+    - `pip install pymysql environs flask-profiler`
 
 ### Create Database
 
