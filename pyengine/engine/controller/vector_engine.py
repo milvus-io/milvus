@@ -80,62 +80,65 @@ class VectorEngine(object):
 
 
     @staticmethod
-    def AddVector(group_id, vector):
-        print(group_id, vector)
+    def AddVector(group_id, vectors):
+        print(group_id, vectors)
         code, _, _ = VectorEngine.GetGroup(group_id)
         if code == VectorEngine.FAULT_CODE:
             return VectorEngine.GROUP_NOT_EXIST, 'invalid'
 
-        file = FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').first()
-        group = GroupTable.query.filter(GroupTable.group_name == group_id).first()
-        if file:
-            print('insert into exist file')
-            # create vector id
-            vector_id = file.seq_no + 1
-            # insert into raw file
-            VectorEngine.InsertVectorIntoRawFile(group_id, file.filename, vector, vector_id)
+        vector_str_list = []
+        for vector in vectors:
+            file = FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').first()
+            group = GroupTable.query.filter(GroupTable.group_name == group_id).first()
 
-            # check if the file can be indexed
-            if file.row_number + 1 >= ROW_LIMIT:
-                raw_vector_array, raw_vector_id_array = VectorEngine.GetVectorListFromRawFile(group_id)
-                d = group.dimension
+            if file:
+                print('insert into exist file')
+                # create vector id
+                vector_id = file.seq_no + 1
+                # insert into raw file
+                VectorEngine.InsertVectorIntoRawFile(group_id, file.filename, vector, vector_id)
 
-                # create index
-                index_builder = build_index.FactoryIndex()
-                index = index_builder().build(d, raw_vector_array, raw_vector_id_array)
+                # check if the file can be indexed
+                if file.row_number + 1 >= ROW_LIMIT:
+                    raw_vector_array, raw_vector_id_array = VectorEngine.GetVectorListFromRawFile(group_id)
+                    d = group.dimension
 
-                # TODO(jinhai): store index into Cache
-                index_filename = file.filename + '_index'
-                serialize.write_index(file_name=index_filename, index=index)
+                    # create index
+                    index_builder = build_index.FactoryIndex()
+                    index = index_builder().build(d, raw_vector_array, raw_vector_id_array)
 
-                FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1,
-                                                                                                                 'type': 'index',
-                                                                                                                 'filename': index_filename,
-                                                                                                                 'seq_no': file.seq_no + 1})
-                db.session.commit()
-                VectorEngine.group_dict = None
+                    # TODO(jinhai): store index into Cache
+                    index_filename = file.filename + '_index'
+                    serialize.write_index(file_name=index_filename, index=index)
+
+                    FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1,
+                                                                                                                    'type': 'index',
+                                                                                                                    'filename': index_filename,
+                                                                                                                    'seq_no': file.seq_no + 1})
+                    db.session.commit()
+                    VectorEngine.group_dict = None
+                else:
+                    # we still can insert into exist raw file, update database
+                    FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1, 
+                                                                                                                    'seq_no': file.seq_no + 1})
+                    db.session.commit()
+                    print('Update db for raw file insertion')
+
             else:
-                # we still can insert into exist raw file, update database
-                FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1, 
-                                                                                                                 'seq_no': file.seq_no + 1})
+                print('add a new raw file')
+                # first raw file
+                raw_filename = group_id + '.raw'
+                # create vector id
+                vector_id = 0
+                # create and insert vector into raw file
+                VectorEngine.InsertVectorIntoRawFile(group_id, raw_filename, vector, vector_id)
+                # insert a record into database
+                db.session.add(FileTable(group_id, raw_filename, 'raw', 1))
                 db.session.commit()
-                print('Update db for raw file insertion')
-                pass
 
-        else:
-            print('add a new raw file')
-            # first raw file
-            raw_filename = group_id + '.raw'
-            # create vector id
-            vector_id = 0
-            # create and insert vector into raw file
-            VectorEngine.InsertVectorIntoRawFile(group_id, raw_filename, vector, vector_id)
-            # insert a record into database
-            db.session.add(FileTable(group_id, raw_filename, 'raw', 1))
-            db.session.commit()
+            vector_str_list.append(group_id + '.' + str(vector_id))
 
-        vector_id_str = group_id + '.' + str(vector_id)
-        return VectorEngine.SUCCESS_CODE, vector_id_str
+        return VectorEngine.SUCCESS_CODE, vector_str_list
 
 
     @staticmethod
