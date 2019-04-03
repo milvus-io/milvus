@@ -1,50 +1,34 @@
-# Vecwise Engine
+# Vecwise Engine Dev Guide
 
-### Geting started
+## Install via Conda
+1.  Install Miniconda first
+    - `bash vecwise_engine/install/miniconda.sh`
 
-- Create .env base on .env.example
+2.  Create environment
 
-- Install Miniconda first
-    - `conda create --name vec_engine python=3.6`
-    - `conda activate vec_engine`
-    - `conda install faiss-gpu cuda90 -c pytorch # For CUDA9.0`
-    - `conda install flask`
-    - `pip install flask-restful flask_sqlalchemy flask_script`
-    - `pip install pymysql environs flask-profiler`
+    - `conda env create -f vecwise_engine/environment.yaml`
 
-### Create Database
+3.  Test your installation
 
-- Install MySQL
+## Install via Docker
+
+1.  Install nvidia-docker
+
+2.  `docker build -t cuda9.0/VecEngine .`
+
+3.  `docker run -it cuda9.0/VecEngine bash`
+
+
+## Create Database
+1. Install MySQL
     - `sudo apt-get update`
     - `sudo apt-get install mariadb-server`
 
-- Create user and database:
+2. Create user and database:
     - `create user vecwise;`
     - `create database vecdata;`
     - `grant all privileges on vecdata.* to 'vecwise'@'%';`
     - `flush privileges;`
 
-- Create table:
-    - `python` # enter python3 interaction environment
-    - `from engine import db`
-    - `db.create_all()`
-
-- table desc
-group_table
-+-------------+--------------+------+-----+---------+----------------+
-| Field       | Type         | Null | Key | Default | Extra          |
-+-------------+--------------+------+-----+---------+----------------+
-| id          | int(11)      | NO   | PRI | NULL    | auto_increment |
-| group_name  | varchar(100) | YES  |     | NULL    |                |
-| file_number | int(11)      | YES  |     | NULL    |                |
-+-------------+--------------+------+-----+---------+----------------+
-
-file_table
-+------------+--------------+------+-----+---------+----------------+
-| Field      | Type         | Null | Key | Default | Extra          |
-+------------+--------------+------+-----+---------+----------------+
-| id         | int(11)      | NO   | PRI | NULL    | auto_increment |
-| group_name | varchar(100) | YES  |     | NULL    |                |
-| filename   | varchar(100) | YES  |     | NULL    |                |
-| row_number | int(11)      | YES  |     | NULL    |                |
-+------------+--------------+------+-----+---------+----------------+
+3. Create table:
+    - `cd vecwise_engine/pyengine && python manager.py create_all`

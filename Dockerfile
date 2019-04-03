@@ -1,9 +1,15 @@
-From continuumio/miniconda
-RUN conda update -y conda
-RUN conda create --name vec_engine python=3.6
-RUN echo "source activate vec_engine" > ~/.bashrc
-ENV PATH /opt/conda/envs/env/bin:$PATH
-#RUN conda install -y faiss-gpu cuda90 -c pytorch
-#RUN pip install flask flask-restful flask_sqlalchemy flask_script pymysql environs
-WORKDIR /root/front-source
-EXPOSE 5000
+FROM nvidia/cuda:9.0-devel-ubuntu16.04
+
+ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
+
+WORKDIR /app
+
+COPY environment.yaml install/miniconda.sh /app/
+
+RUN ./miniconda.sh -p $HOME/miniconda -b -f \
+    && echo ". /root/miniconda/etc/profile.d/conda.sh" >> /root/.bashrc \
+    && /root/miniconda/bin/conda env create -f environment.yaml \
+    && echo "conda activate vec_engine" >> /root/.bashrc \
+    && rm /app/*
+
+COPY . /app
