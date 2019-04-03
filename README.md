@@ -5,7 +5,6 @@
     - `bash vecwise_engine/install/miniconda.sh`
 
 2.  Create environment
-
     - `conda env create -f vecwise_engine/environment.yaml`
 
 3.  Test your installation
