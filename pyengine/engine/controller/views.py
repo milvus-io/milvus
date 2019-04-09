@@ -59,16 +59,16 @@ class Group(Resource):
     def post(self, group_id):
         args = self.__parser.parse_args()
         dimension = args['dimension']
-        code, group_id, file_number = VectorEngine.AddGroup(group_id, dimension)
-        return jsonify({'code': code, 'group': group_id, 'filenumber': file_number})
+        code, group_id = VectorEngine.AddGroup(group_id, dimension)
+        return jsonify({'code': code, 'group': group_id, 'filenumber': 0})
 
     def get(self, group_id):
         code, group_id, file_number = VectorEngine.GetGroup(group_id)
-        return jsonify({'code': code, 'group': group_id, 'filenumber': file_number})
+        return jsonify({'code': code, 'group': group_id, 'filenumber': 0})
 
     def delete(self, group_id):
         code, group_id, file_number = VectorEngine.DeleteGroup(group_id)
-        return jsonify({'code': code, 'group': group_id, 'filenumber': file_number})
+        return jsonify({'code': code, 'group': group_id, 'filenumber': 0})
 
 
 class GroupList(Resource):

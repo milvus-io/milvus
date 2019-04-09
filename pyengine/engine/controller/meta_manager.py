@@ -10,14 +10,15 @@ class MetaManager(object):
     def AddGroup(self, group_name, dimension):
         group = GroupTable.query.filter(GroupTable.group_name==group_id).first()
         if group:
-            return ErrorCode.ALREADY_EXIST, group_name, group_filenumber
+            return ErrorCode.ALREADY_EXIST, group_name
         else:
             new_group = GroupTable(group_name, dimension)
             GroupHandler.CreateGroupDirectory(group_id)
 
             # add into database
             db.session.add(new_group)
-            return ErrorCode.SUCCESS_CODE, group_name, 0
+            self.Sync()
+            return ErrorCode.SUCCESS_CODE, group_name
 
     @staticmethod
     def GetGroup(group_name):

@@ -27,10 +27,9 @@ class TestVectorEngine:
         assert file_number == 0
 
         # Add a group
-        code, group_id, file_number = VectorEngine.AddGroup('test_group', 8)
+        code, group_id = VectorEngine.AddGroup('test_group', 8)
         assert code == VectorEngine.SUCCESS_CODE
         assert group_id == 'test_group'
-        assert file_number == 0
 
         # Check the group existing
         code, group_id, file_number = VectorEngine.GetGroup('test_group')
