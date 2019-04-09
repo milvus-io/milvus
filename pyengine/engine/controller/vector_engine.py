@@ -29,6 +29,7 @@ class VectorEngine(object):
         else:
             StorageManager.AddGroup(group_name)
             MetaManager.AddGroup(group_name, dimension)
+            MetaManager.Sync()
             return ErrorCode.SUCCESS_CODE, group_name
 
 
@@ -43,13 +44,8 @@ class VectorEngine(object):
         if(group):
             MetaManager.DeleteGroup(group)
             StorageManager.DeleteGroup(group_name)
-
-            records = FileTable.query.filter(FileTable.group_name == group_name).all()
-            for record in records:
-                print("record.group_name: ", record.group_name)
-                db.session.delete(record)
-            db.session.commit()
-
+            MetaManager.DeleteGroupFiles(group_name)
+            MetaManager.Sync()
             return VectorEngine.SUCCESS_CODE, group_name
         else:
             return VectorEngine.SUCCESS_CODE, group_name
@@ -57,40 +53,39 @@ class VectorEngine(object):
 
     @staticmethod
     def GetGroupList():
-        group = GroupTable.query.all()
+        groups = MetaManager.GetAllGroup()
         group_list = []
-        for group_tuple in group:
+        for group_tuple in groups:
             group_item = {}
             group_item['group_name'] = group_tuple.group_name
-            group_item['file_number'] = group_tuple.file_number
+            group_item['file_number'] = 0
             group_list.append(group_item)
 
-        print(group_list)
         return VectorEngine.SUCCESS_CODE, group_list
 
 
     @staticmethod
-    def AddVector(group_id, vectors):
-        print(group_id, vectors)
-        code, _, = VectorEngine.GetGroup(group_id)
-        if code == VectorEngine.FAULT_CODE:
+    def AddVector(group_name, vectors):
+        print(group_name, vectors)
+        error, _ = MetaManager.GetGroup(group_name)
+        if error == VectorEngine.FAULT_CODE:
             return VectorEngine.GROUP_NOT_EXIST, 'invalid'
 
         vector_str_list = []
         for vector in vectors:
-            file = FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').first()
-            group = GroupTable.query.filter(GroupTable.group_name == group_id).first()
+            file = FileTable.query.filter(FileTable.group_name == group_name).filter(FileTable.type == 'raw').first()
+            group = GroupTable.query.filter(GroupTable.group_name == group_name).first()
 
             if file:
                 print('insert into exist file')
                 # create vector id
                 vector_id = file.seq_no + 1
                 # insert into raw file
-                VectorEngine.InsertVectorIntoRawFile(group_id, file.filename, vector, vector_id)
+                VectorEngine.InsertVectorIntoRawFile(group_name, file.filename, vector, vector_id)
 
                 # check if the file can be indexed
                 if file.row_number + 1 >= ROW_LIMIT:
-                    raw_vector_array, raw_vector_id_array = VectorEngine.GetVectorListFromRawFile(group_id)
+                    raw_vector_array, raw_vector_id_array = VectorEngine.GetVectorListFromRawFile(group_name)
                     d = group.dimension
 
                     # create index
@@ -101,7 +96,7 @@ class VectorEngine(object):
                     index_filename = file.filename + '_index'
                     serialize.write_index(file_name=index_filename, index=index)
 
-                    FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1,
+                    FileTable.query.filter(FileTable.group_name == group_name).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1,
                                                                                                                     'type': 'index',
                                                                                                                     'filename': index_filename,
                                                                                                                     'seq_no': file.seq_no + 1})
@@ -109,7 +104,7 @@ class VectorEngine(object):
                     VectorEngine.group_dict = None
                 else:
                     # we still can insert into exist raw file, update database
-                    FileTable.query.filter(FileTable.group_name == group_id).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1, 
+                    FileTable.query.filter(FileTable.group_name == group_name).filter(FileTable.type == 'raw').update({'row_number':file.row_number + 1, 
                                                                                                                     'seq_no': file.seq_no + 1})
                     db.session.commit()
                     print('Update db for raw file insertion')
@@ -117,16 +112,16 @@ class VectorEngine(object):
             else:
                 print('add a new raw file')
                 # first raw file
-                raw_filename = group_id + '.raw'
+                raw_filename = group_name + '.raw'
                 # create vector id
                 vector_id = 0
                 # create and insert vector into raw file
-                VectorEngine.InsertVectorIntoRawFile(group_id, raw_filename, vector, vector_id)
+                VectorEngine.InsertVectorIntoRawFile(group_name, raw_filename, vector, vector_id)
                 # insert a record into database
-                db.session.add(FileTable(group_id, raw_filename, 'raw', 1))
+                db.session.add(FileTable(group_name, raw_filename, 'raw', 1))
                 db.session.commit()
 
-            vector_str_list.append(group_id + '.' + str(vector_id))
+            vector_str_list.append(group_name + '.' + str(vector_id))
 
         return VectorEngine.SUCCESS_CODE, vector_str_list
 

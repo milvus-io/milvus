@@ -1,5 +1,6 @@
 from engine.controller.vector_engine import VectorEngine
 from engine.settings import DATABASE_DIRECTORY
+from engine.controller.error_code import ErrorCode
 from flask import jsonify
 import pytest
 import os
@@ -22,23 +23,22 @@ class TestVectorEngine:
     def test_group(self):
         # Make sure there is no group
         code, group_id = VectorEngine.DeleteGroup('test_group')
-        assert code == VectorEngine.SUCCESS_CODE
+        assert code == ErrorCode.SUCCESS_CODE
         assert group_id == 'test_group'
 
         # Add a group
         code, group_id = VectorEngine.AddGroup('test_group', 8)
-        assert code == VectorEngine.SUCCESS_CODE
+        assert code == ErrorCode.SUCCESS_CODE
         assert group_id == 'test_group'
 
         # Check the group existing
         code, group_id = VectorEngine.GetGroup('test_group')
-        assert code == VectorEngine.SUCCESS_CODE
+        assert code == ErrorCode.SUCCESS_CODE
         assert group_id == 'test_group'
 
         # Check the group list
         code, group_list = VectorEngine.GetGroupList()
-        assert code == VectorEngine.SUCCESS_CODE
-        print("group_list: ", group_list)
+        assert code == ErrorCode.SUCCESS_CODE
         assert group_list == [{'group_name': 'test_group', 'file_number': 0}]
 
         # Add Vector for not exist group
@@ -48,21 +48,21 @@ class TestVectorEngine:
 
         # Add vector for exist group
         code, vector_id = VectorEngine.AddVector('test_group', self.__vectors)
-        assert code == VectorEngine.SUCCESS_CODE
+        assert code == ErrorCode.SUCCESS_CODE
         assert vector_id == ['test_group.0', 'test_group.1', 'test_group.2', 'test_group.3', 'test_group.4', 'test_group.5', 'test_group.6', 'test_group.7', 'test_group.8', 'test_group.9']
 
         # Check search vector interface
         code, vector_id = VectorEngine.SearchVector('test_group', self.__vector, self.__limit)
-        assert code == VectorEngine.SUCCESS_CODE
+        assert code == ErrorCode.SUCCESS_CODE
         assert vector_id == ['test_group.0']
 
         # Check create index interface
         code = VectorEngine.CreateIndex('test_group')
-        assert code == VectorEngine.SUCCESS_CODE
+        assert code == ErrorCode.SUCCESS_CODE
 
         # Remove the group
         code, group_id = VectorEngine.DeleteGroup('test_group')
-        assert code == VectorEngine.SUCCESS_CODE
+        assert code == ErrorCode.SUCCESS_CODE
         assert group_id == 'test_group'
 
         # Check the group is disppeared
@@ -81,7 +81,7 @@ class TestVectorEngine:
 
         # Clear raw file
         code = VectorEngine.ClearRawFile('test_group')
-        assert code == VectorEngine.SUCCESS_CODE
+        assert code == ErrorCode.SUCCESS_CODE
 
     def test_raw_file(self):
         filename = VectorEngine.InsertVectorIntoRawFile('test_group', 'test_group.raw', self.__vector, 0)
@@ -99,7 +99,7 @@ class TestVectorEngine:
         assert np.all(vector_list == expected_list)
 
         code = VectorEngine.ClearRawFile('test_group')
-        assert code == VectorEngine.SUCCESS_CODE
+        assert code == ErrorCode.SUCCESS_CODE
 
 
 
