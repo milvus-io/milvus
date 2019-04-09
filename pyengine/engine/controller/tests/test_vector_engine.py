@@ -21,10 +21,9 @@ class TestVectorEngine:
 
     def test_group(self):
         # Make sure there is no group
-        code, group_id, file_number = VectorEngine.DeleteGroup('test_group')
+        code, group_id = VectorEngine.DeleteGroup('test_group')
         assert code == VectorEngine.SUCCESS_CODE
         assert group_id == 'test_group'
-        assert file_number == 0
 
         # Add a group
         code, group_id = VectorEngine.AddGroup('test_group', 8)
@@ -32,10 +31,9 @@ class TestVectorEngine:
         assert group_id == 'test_group'
 
         # Check the group existing
-        code, group_id, file_number = VectorEngine.GetGroup('test_group')
+        code, group_id = VectorEngine.GetGroup('test_group')
         assert code == VectorEngine.SUCCESS_CODE
         assert group_id == 'test_group'
-        assert file_number == 0
 
         # Check the group list
         code, group_list = VectorEngine.GetGroupList()
@@ -63,16 +61,14 @@ class TestVectorEngine:
         assert code == VectorEngine.SUCCESS_CODE
 
         # Remove the group
-        code, group_id, file_number = VectorEngine.DeleteGroup('test_group')
+        code, group_id = VectorEngine.DeleteGroup('test_group')
         assert code == VectorEngine.SUCCESS_CODE
         assert group_id == 'test_group'
-        assert file_number == 0
 
         # Check the group is disppeared
-        code, group_id, file_number = VectorEngine.GetGroup('test_group')
+        code, group_id = VectorEngine.GetGroup('test_group')
         assert code == VectorEngine.FAULT_CODE
         assert group_id == 'test_group'
-        assert file_number == 0
 
         # Check SearchVector interface
         code, vector_ids = VectorEngine.SearchVector('test_group', self.__vector, self.__limit)

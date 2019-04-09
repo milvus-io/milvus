@@ -27,8 +27,14 @@ class MetaManager(object):
         else:
             return ErrorCode.FAULT_CODE, None
 
-    # def DeleteGroup(group_id):
-    #     group = GroupTable.query.filter(GroupTable.group_name==group_id).first()
-    #     if(group):
-    #         db.session.delete(group)
-    #     else:
+    @staticmethod
+    def DeleteGroup(group):
+        db.session.delete(group)
+
+    @staticmethod
+    def DeleteGroupFiles(group_name):
+        records = FileTable.query.filter(FileTable.group_name == group_name).all()
+        for record in records:
+            print("record.group_name: ", record.group_name)
+            db.session.delete(record)
+    

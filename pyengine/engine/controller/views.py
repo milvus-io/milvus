@@ -63,11 +63,11 @@ class Group(Resource):
         return jsonify({'code': code, 'group': group_id, 'filenumber': 0})
 
     def get(self, group_id):
-        code, group_id, file_number = VectorEngine.GetGroup(group_id)
+        code, group_id = VectorEngine.GetGroup(group_id)
         return jsonify({'code': code, 'group': group_id, 'filenumber': 0})
 
     def delete(self, group_id):
-        code, group_id, file_number = VectorEngine.DeleteGroup(group_id)
+        code, group_id = VectorEngine.DeleteGroup(group_id)
         return jsonify({'code': code, 'group': group_id, 'filenumber': 0})
 
 

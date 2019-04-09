@@ -24,41 +24,35 @@ class VectorEngine(object):
     @staticmethod
     def AddGroup(group_name, dimension):
         error, group = MetaManager.GetGroup(group_name)
-        if(error == ErrorCode.SUCCESS_CODE):
+        if error == ErrorCode.SUCCESS_CODE:
             return ErrorCode.FAULT_CODE, group_name
         else:
             StorageManager.AddGroup(group_name)
             MetaManager.AddGroup(group_name, dimension)
-            return VectorEngine.SUCCESS_CODE, group_name
+            return ErrorCode.SUCCESS_CODE, group_name
 
 
     @staticmethod
-    def GetGroup(group_id):
-        group = GroupTable.query.filter(GroupTable.group_name==group_id).first()
-        if group:
-            return VectorEngine.SUCCESS_CODE, group_id, group.file_number
-        else:
-            return VectorEngine.FAULT_CODE, group_id, 0
-
+    def GetGroup(group_name):
+        error, _ = MetaManager.GetGroup(group_name)
+        return error, group_name
 
     @staticmethod
-    def DeleteGroup(group_id):
-        group = GroupTable.query.filter(GroupTable.group_name==group_id).first()
+    def DeleteGroup(group_name):
+        group = GroupTable.query.filter(GroupTable.group_name==group_name).first()
         if(group):
-            # old_group = GroupTable(group_id)
-            db.session.delete(group)
-            db.session.commit()
-            GroupHandler.DeleteGroupDirectory(group_id)
+            MetaManager.DeleteGroup(group)
+            StorageManager.DeleteGroup(group_name)
 
-            records = FileTable.query.filter(FileTable.group_name == group_id).all()
+            records = FileTable.query.filter(FileTable.group_name == group_name).all()
             for record in records:
                 print("record.group_name: ", record.group_name)
                 db.session.delete(record)
             db.session.commit()
 
-            return VectorEngine.SUCCESS_CODE, group_id, group.file_number
+            return VectorEngine.SUCCESS_CODE, group_name
         else:
-            return VectorEngine.SUCCESS_CODE, group_id, 0
+            return VectorEngine.SUCCESS_CODE, group_name
 
 
     @staticmethod
@@ -78,7 +72,7 @@ class VectorEngine(object):
     @staticmethod
     def AddVector(group_id, vectors):
         print(group_id, vectors)
-        code, _, _ = VectorEngine.GetGroup(group_id)
+        code, _, = VectorEngine.GetGroup(group_id)
         if code == VectorEngine.FAULT_CODE:
             return VectorEngine.GROUP_NOT_EXIST, 'invalid'
 
@@ -140,7 +134,7 @@ class VectorEngine(object):
     @staticmethod
     def SearchVector(group_id, vector, limit):
         # Check the group exist
-        code, _, _ = VectorEngine.GetGroup(group_id)
+        code, _ = VectorEngine.GetGroup(group_id)
         if code == VectorEngine.FAULT_CODE:
             return VectorEngine.GROUP_NOT_EXIST, {}
 
@@ -168,7 +162,7 @@ class VectorEngine(object):
     @staticmethod
     def CreateIndex(group_id):
         # Check the group exist
-        code, _, _ = VectorEngine.GetGroup(group_id)
+        code, _ = VectorEngine.GetGroup(group_id)
         if code == VectorEngine.FAULT_CODE:
             return VectorEngine.GROUP_NOT_EXIST
 
