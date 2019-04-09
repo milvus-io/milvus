@@ -14,6 +14,14 @@ class StorageManager(object):
     def GetGroupDirectory(group_name):
         return DATABASE_DIRECTORY + '/' + group_name
 
+    @staticmethod
+    def DeleteGroup(group_id):
+        path = StorageManager.GetGroupDirectory(group_id)
+        path = path.strip()
+        path=path.rstrip("\\")
+        if os.path.exists(path):
+            shutil.rmtree(path)
+
     def Read():
         pass
 
