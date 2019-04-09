@@ -11,6 +11,7 @@ from engine.controller.scheduler import Scheduler
 from engine.ingestion import serialize
 from engine.controller.meta_manager import MetaManager
 from engine.controller.error_code import ErrorCode
+from engine.controller.storage_manager import StorageManager
 import sys, os
 
 class VectorEngine(object):
@@ -24,15 +25,15 @@ class VectorEngine(object):
     def AddGroup(group_name, dimension):
         error, group = MetaManager.GetGroup(group_name)
         if(error == ErrorCode.SUCCESS_CODE):
-            return ErrorCode.FAULT_CODE, group_name, group.file_number
+            return ErrorCode.FAULT_CODE, group_name
         else:
+            StorageManager.CreateGroup(group_name)
             new_group = GroupTable(group_name, dimension)
-            GroupHandler.CreateGroupDirectory(group_name)
 
             # add into database
             db.session.add(new_group)
             db.session.commit()
-            return VectorEngine.SUCCESS_CODE, group_name, 0
+            return VectorEngine.SUCCESS_CODE, group_name
 
 
     @staticmethod
