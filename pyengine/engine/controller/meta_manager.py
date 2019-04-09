@@ -15,7 +15,6 @@ class MetaManager(object):
 
         # add into database
         db.session.add(new_group)
-        db.session.commit()
 
         return ErrorCode.SUCCESS_CODE, group_name
 
@@ -28,6 +27,11 @@ class MetaManager(object):
             return ErrorCode.FAULT_CODE, None
 
     @staticmethod
+    def GetAllGroup():
+        groups = GroupTable.query.all()
+        return groups
+
+    @staticmethod
     def DeleteGroup(group):
         db.session.delete(group)
 
@@ -35,6 +39,6 @@ class MetaManager(object):
     def DeleteGroupFiles(group_name):
         records = FileTable.query.filter(FileTable.group_name == group_name).all()
         for record in records:
-            print("record.group_name: ", record.group_name)
+            # print("record.group_name: ", record.group_name)
             db.session.delete(record)
     
