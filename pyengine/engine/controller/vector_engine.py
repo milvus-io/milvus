@@ -27,12 +27,8 @@ class VectorEngine(object):
         if(error == ErrorCode.SUCCESS_CODE):
             return ErrorCode.FAULT_CODE, group_name
         else:
-            StorageManager.CreateGroup(group_name)
-            new_group = GroupTable(group_name, dimension)
-
-            # add into database
-            db.session.add(new_group)
-            db.session.commit()
+            StorageManager.AddGroup(group_name)
+            MetaManager.AddGroup(group_name, dimension)
             return VectorEngine.SUCCESS_CODE, group_name
 
 

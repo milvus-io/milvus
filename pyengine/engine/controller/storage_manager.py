@@ -3,7 +3,7 @@ from engine.settings import DATABASE_DIRECTORY
 
 class StorageManager(object):
     @staticmethod
-    def CreateGroup(group_name):
+    def AddGroup(group_name):
         path = StorageManager.GetGroupDirectory(group_name)
         path = path.strip()
         path=path.rstrip("\\")
