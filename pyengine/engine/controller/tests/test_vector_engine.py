@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class TestVectorEngine:
     def setup_class(self):
-        self.__vectors = [[1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]]
+        self.__vectors = [[1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8] for _ in range(10) ]
         self.__vector = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8]
         self.__limit = 1
 
@@ -52,22 +52,7 @@ class TestVectorEngine:
         # Add vector for exist group
         code, vector_id = VectorEngine.AddVector('test_group', self.__vectors)
         assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == ['test_group.0']
-
-        # Add vector for exist group
-        code, vector_id = VectorEngine.AddVector('test_group', self.__vectors)
-        assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == ['test_group.1']
-
-        # Add vector for exist group
-        code, vector_id = VectorEngine.AddVector('test_group', self.__vectors)
-        assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == ['test_group.2']
-
-        # Add vector for exist group
-        code, vector_id = VectorEngine.AddVector('test_group', self.__vectors)
-        assert code == VectorEngine.SUCCESS_CODE
-        assert vector_id == ['test_group.3']
+        assert vector_id == ['test_group.0', 'test_group.1', 'test_group.2', 'test_group.3', 'test_group.4', 'test_group.5', 'test_group.6', 'test_group.7', 'test_group.8', 'test_group.9']
 
         # Check search vector interface
         code, vector_id = VectorEngine.SearchVector('test_group', self.__vector, self.__limit)

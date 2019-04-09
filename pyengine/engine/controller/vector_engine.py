@@ -9,6 +9,8 @@ from engine import db
 from engine.ingestion import build_index
 from engine.controller.scheduler import Scheduler
 from engine.ingestion import serialize
+from engine.controller.meta_manager import MetaManager
+from engine.controller.error_code import ErrorCode
 import sys, os
 
 class VectorEngine(object):
@@ -19,21 +21,18 @@ class VectorEngine(object):
     GROUP_NOT_EXIST = 2
 
     @staticmethod
-    def AddGroup(group_id, dimension):
-        group = GroupTable.query.filter(GroupTable.group_name==group_id).first()
-        if group:
-            print('Already create the group: ', group_id)
-            return VectorEngine.FAULT_CODE, group_id, group.file_number
-            # return jsonify({'code': 1, 'group_name': group_id, 'file_number': group.file_number})
+    def AddGroup(group_name, dimension):
+        error, group = MetaManager.GetGroup(group_name)
+        if(error == ErrorCode.SUCCESS_CODE):
+            return ErrorCode.FAULT_CODE, group_name, group.file_number
         else:
-            print('To create the group: ', group_id)
-            new_group = GroupTable(group_id, dimension)
-            GroupHandler.CreateGroupDirectory(group_id)
+            new_group = GroupTable(group_name, dimension)
+            GroupHandler.CreateGroupDirectory(group_name)
 
             # add into database
             db.session.add(new_group)
             db.session.commit()
-            return VectorEngine.SUCCESS_CODE, group_id, 0
+            return VectorEngine.SUCCESS_CODE, group_name, 0
 
 
     @staticmethod
