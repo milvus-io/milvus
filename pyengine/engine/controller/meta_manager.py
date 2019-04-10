@@ -41,4 +41,20 @@ class MetaManager(object):
         for record in records:
             # print("record.group_name: ", record.group_name)
             db.session.delete(record)
+
+    @staticmethod
+    def UpdateGroup(group_name, data):
+        GroupTable.query.filter(GroupTable.group_name==group_name).update(data)
+
     
+    @staticmethod
+    def GetAllRawFiles(group_name):
+        FileTable.query.filter(FileTable.group_name == group_name and FileTable.type == 'raw')
+    
+    @staticmethod
+    def CreateRawFile(group_name, filename):
+        db.session.add(FileTable(group_name, filename, 'raw', 0))
+
+    @staticmethod
+    def UpdateFile(filename, data):
+        FileTable.query.filter(FileTable.filename == filename).update(data)

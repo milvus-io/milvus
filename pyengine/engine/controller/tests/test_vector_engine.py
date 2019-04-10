@@ -49,6 +49,7 @@ class TestVectorEngine:
         # Add vector for exist group
         code, vector_id = VectorEngine.AddVector('test_group', self.__vectors)
         assert code == ErrorCode.SUCCESS_CODE
+        print(vector_id)
         assert vector_id == ['test_group.0', 'test_group.1', 'test_group.2', 'test_group.3', 'test_group.4', 'test_group.5', 'test_group.6', 'test_group.7', 'test_group.8', 'test_group.9']
 
         # Check search vector interface

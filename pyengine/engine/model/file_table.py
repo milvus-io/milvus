@@ -7,7 +7,7 @@ class FileTable(db.Model):
     filename = db.Column(db.String(100))
     type = db.Column(db.String(100))
     row_number = db.Column(db.Integer)
-    seq_no = db.Column(db.Integer)
+    date = db.Column(db.Date)
 
 
     def __init__(self, group_name, filename, type, row_number):
@@ -16,7 +16,6 @@ class FileTable(db.Model):
         self.type = type
         self.row_number = row_number
         self.type = type
-        self.seq_no = 0
 
 
     def __repr__(self):
