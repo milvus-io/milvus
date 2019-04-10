@@ -68,8 +68,19 @@ class VectorEngine(object):
         pass
 
     @staticmethod
-    def AddVectorToExistFile(group_name):
-        pass
+    def BuildVectorIndex(group_name, raw_filename, dimension):
+        # Build index
+        raw_vector_array, raw_vector_id_array = VectorEngine.GetVectorListFromRawFile(group_name)
+
+        # create index
+        index_builder = build_index.FactoryIndex()
+        index = index_builder().build(dimension, raw_vector_array, raw_vector_id_array)
+
+        # TODO(jinhai): store index into Cache
+        index_filename = raw_filename + '_index'
+        serialize.write_index(file_name=index_filename, index=index)
+
+        UpdateFile(raw_filename, {'row_number': ROW_LIMIT, 'type': 'index', 'filename': index_filename})
 
     @staticmethod
     def AddVector(group_name, vectors):
@@ -90,8 +101,10 @@ class VectorEngine(object):
                     current_raw_file = file
                     current_raw_row_number = file.row_number
                     print(raw_filename)
+                elif file.type == 'raw':
+                    BuildVectorIndex(group_name, file.filename, group.dimension)
                 else:
-                    print("---- To Build Index")
+                    pass
         else:
             pass
 
@@ -114,35 +127,21 @@ class VectorEngine(object):
                 ++ table_row_number
                 vector_str_list.append(group_name + '.' + str(vector_id))
 
-            # Build index
-            raw_vector_array, raw_vector_id_array = VectorEngine.GetVectorListFromRawFile(group_name)
-            d = group.dimension
-
-            # create index
-            index_builder = build_index.FactoryIndex()
-            index = index_builder().build(d, raw_vector_array, raw_vector_id_array)
-
-            # TODO(jinhai): store index into Cache
-            index_filename = file.filename + '_index'
-            serialize.write_index(file_name=index_filename, index=index)
-
-            UpdateFile(file.filename, {'row_number': ROW_LIMIT, 'type': 'index', 'filename': index_filename})
+            BuildVectorIndex(group_name, raw_filename, group.dimension)
 
             # create new raw file name
             raw_filename = str(group.file_number + 1)
             table_row_number = 0
+            current_raw_file = None
 
-            # update file table
-            MetaManager.CreateRawFile(group_name, raw_filename)
-
-        # Append vectors to raw file
+        # If no raw file
         if current_raw_file == None:
             # update file table
             MetaManager.CreateRawFile(group_name, raw_filename)
 
-        # 1. update db
+        # 1. update db on file number and row number
         new_group_file_number = group.file_number + 1
-        new_group_row_number = int(group.row_number) + incoming_row_number
+        new_group_row_number = int(group.row_number) + incoming_row_number - start_row_index
         MetaManager.UpdateGroup(group_name, {'file_number': new_group_file_number, 'row_number': new_group_row_number})
 
         # 2. store vector into raw files
