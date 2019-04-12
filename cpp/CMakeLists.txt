@@ -1,0 +1,66 @@
+#-------------------------------------------------------------------------------
+# Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+# Unauthorized copying of this file, via any medium is strictly prohibited.
+# Proprietary and confidential.
+#-------------------------------------------------------------------------------
+
+cmake_minimum_required(VERSION 3.12)
+
+project(vecwise_engine)
+
+set(CMAKE_CXX_STANDARD 14)
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
+    message("building vecwise_engine on x86 architecture")
+    set(VECWISE_BUILD_ARCH x86_64)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(ppc)")
+    message("building vecwise_engine on ppc architecture")
+    set(VECWISE_BUILD_ARCH ppc64le)
+else()
+    message("unknown processor type")
+    message("CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
+    set(VECWISE_BUILD_ARCH unknown)
+endif()
+
+if(DEFINED UNIX)
+    message("building vecwise on Unix")
+    set(VECWISE_BUILD_SYSTEM macos)
+elseif(DEFINED APPLE)
+    message("building vecwise on MacOS")
+    set(VECWISE_BUILD_SYSTEM unix)
+else()
+    message("unknown OS")
+    set(VECWISE_BUILD_SYSTEM unknown)
+endif ()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC")
+else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC")
+endif()
+
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/" ${CMAKE_MODULE_PATH})
+
+set(VECWISE_ENGINE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
+set(VECWISE_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
+
+add_compile_definitions(PROFILER=${PROFILER})
+
+include_directories(${VECWISE_ENGINE_INCLUDE})
+include_directories(${VECWISE_ENGINE_SRC})
+
+add_subdirectory(src)
+
+if (BUILD_UNIT_TEST)
+    include(CTest)
+    include(ConfigureGoogleTest)
+
+    if(GTEST_FOUND)
+        message(STATUS "Google C++ Testing Framework (Google Test) found in ${GTEST_ROOT}")
+        include_directories(${GTEST_INCLUDE_DIR})
+        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
+    else()
+        message(AUTHOR_WARNING "Google C++ Testing Framework (Google Test) not found: automated tests are disabled.")
+    endif(GTEST_FOUND)
+
+endif(BUILD_UNIT_TEST)
