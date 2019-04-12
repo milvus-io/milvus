@@ -6,6 +6,6 @@
 #include <gtest/gtest.h>
 
 
-TEST(LOG_TESTS, INIT_TEST) {
-    ASSERT_EQ(true);
+TEST(LogTest, INIT_TEST) {
+    ASSERT_STREQ("A", "A");
 }
