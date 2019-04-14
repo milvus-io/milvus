@@ -1,0 +1,84 @@
+language: cpp
+
+env:
+  global:
+    - OMP_NUM_THREADS=4
+
+matrix:
+  include:
+    - os: linux
+      compiler: gcc
+      addons:
+        apt:
+          packages:
+            - libblas-dev
+            - liblapack-dev
+            - python-numpy
+            - python-dev
+#            - swig3.0
+      env:
+        - PYTHON_CFLAGS="-I/usr/include/python2.7"
+    - os: linux
+      compiler: gcc
+      addons:
+        apt:
+          packages:
+            - libatlas-base-dev
+            - liblapack-dev
+            - python-numpy
+            - python-dev
+#            - swig3.0
+      env:
+        - PYTHON_CFLAGS="-I/usr/include/python2.7"
+    - os: linux
+      compiler: gcc
+      addons:
+        apt:
+          packages:
+            - libopenblas-dev
+            - liblapack-dev
+            - python-numpy
+            - python-dev
+#            - swig3.0
+      env:
+        - PYTHON_CFLAGS="-I/usr/include/python2.7"
+    - os: linux
+      compiler: clang
+      addons:
+        apt:
+          packages:
+            - libopenblas-dev
+            - liblapack-dev
+            - python-numpy
+            - python-dev
+#            - swig3.0
+      env:
+        - PYTHON_CFLAGS="-I/usr/include/python2.7"
+        # NOTE: Hack, c.f. https://github.com/travis-ci/travis-ci/issues/8613
+        - LD_LIBRARY_PATH="/usr/local/clang/lib"
+    - os: osx
+      env:
+        - MATRIX_EVAL="brew update && brew install gcc@6 numpy swig; brew link --overwrite gcc@6; export CC=gcc-6 CXX=g++-6"
+    - os: osx
+      env:
+        - MATRIX_EVAL="brew update && brew install llvm numpy swig; brew link --overwrite llvm; export CC=/usr/local/opt/llvm/bin/clang CXX=/usr/local/opt/llvm/bin/clang++"
+        - LDFLAGS="-L/usr/local/opt/llvm/lib"
+        - CPPFLAGS="-I/usr/local/opt/llvm/include"
+  allow_failures:
+    - os: osx
+      env:
+        - MATRIX_EVAL="brew update && brew install gcc@6 numpy swig; brew link --overwrite gcc@6; export CC=gcc-6 CXX=g++-6"
+
+before_install:
+  - eval "$MATRIX_EVAL"
+
+install:
+  - ./.travis/install.sh
+  - aclocal
+  - autoconf
+  - ./configure --without-cuda
+  - make
+  - make -C python
+
+script:
+  - make test

@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 link_directories(
         "${CMAKE_BINARY_DIR}/lib"
-        "${VECWISE_THIRD_PARTY}/lib"
+        "${VECWISE_THIRD_PARTY_BUILD}/lib"
 )
 
 set(unittest_srcs

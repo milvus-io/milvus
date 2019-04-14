@@ -43,13 +43,17 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/" ${CMAKE_MODUL
 
 set(VECWISE_ENGINE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
 set(VECWISE_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
-set(VECWISE_THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party/build)
+set(VECWISE_THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+set(VECWISE_THIRD_PARTY_BUILD ${CMAKE_CURRENT_SOURCE_DIR}/third_party/build)
 
 add_compile_definitions(PROFILER=${PROFILER})
 
 include_directories(${VECWISE_ENGINE_INCLUDE})
 include_directories(${VECWISE_ENGINE_SRC})
-include_directories(${VECWISE_THIRD_PARTY}/include)
+include_directories(${VECWISE_THIRD_PARTY_BUILD}/include)
+
+execute_process(COMMAND bash build.sh
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 add_subdirectory(src)
 
