@@ -33,7 +33,9 @@ typedef std::vector<GroupFileSchema> GroupFilesSchema;
 
 class Meta {
 public:
-    virtual Status add_group(const std::string& group_id_, GroupSchema& group_info_) = 0;
+    virtual Status add_group(const GroupOptions& options_,
+            const std::string& group_id_,
+            GroupSchema& group_info_) = 0;
     virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) = 0;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
 
@@ -45,8 +47,7 @@ public:
     virtual Status get_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
                                   GroupFileSchema& group_file_info_) = 0;
-    virtual Status mark_group_file_as_index(const std::string& group_id_,
-                                            const std::string& file_id_) = 0;
+    virtual Status update_group_file(const GroupFileSchema& group_file_) = 0;
 
     virtual Status get_group_files(const std::string& group_id_,
                                    GroupFilesSchema& group_files_info_) = 0;
