@@ -1,0 +1,58 @@
+
+Easylogging++ v9.00 RELEASE NOTES
+---------------------------------
+
+==========================
+=  DEPRECATED COMPONENTS =
+==========================
+
+ - Support for C++98 and C++03 is dropped in favour of performance improvements
+ - Dropped QA Level
+ - Dropped support for checking whitespaces within level/configuration name from configuration file
+ - Replaced escape character from 'E' to '%' 
+ - Renamed namespaces (easyloggingpp => el, internal => base, utilities => utils)
+ - Renamed internal classes (StringUtils => Str, OSUtils => OS, DateUtils => DateTime)
+ - Avoid direct copy/assignment for classes, i.e, Configurations c2 = c is incorrect; Configurations c2; c2 = c; is correct
+ - Changed comment style for configuration from // to ##
+ - Some Loggers static functions have been moved to new el::Helpers e.g, setApplicationArguments
+ - Renamed RollOutSize -> MaxLogFileSize (MAX_LOG_FILE_SIZE for configuration file)
+ - Renamed Level::All -> Level::Global
+ 
+===========================
+=       NEW FEATURES      =
+===========================
+
+ - Added support for milliseconds width for VC++
+ - Crash handling
+ - Stacktrace printing
+ - Customizable date/time format (issue #48)
+ - Support for Qt/QByteArray logging
+ - Introduced vmodule support to specify verbose logging levels by modules
+ - Introduced el::LoggingFlag
+ - Introduced global configurations (Configuring all loggers and registering new loggers right from configuration file)
+ - Changed licence to MIT to support any type of project
+ - Dedicated website (easylogging.org)
+ - Dedicated support email (support@easy..) 
+ - Support for Visual C++ 2013 (Tested with preview)
+
+============================
+=      DROPPED SUPPORT     =
+============================
+
+ - Dropped support for Android NDK (Code not deleted as it is on to-do list to fix it for future version)
+
+============================
+=       BUG FIXES          = 
+============================
+
+ - Issue with creating 1000+ loggers (issue #66)
+ - Issue with occasional logging offset
+ - Fixed clang++ extra warnings
+
+==========================
+=         NOTES          =
+==========================
+
+ - If you have any confusions refer to reference manual (github readme)
+ - If you still have confusions please feel free to email 
+ - There is very less backward compatibility because of major design improvements - since now library is on better track future versions will be made backward compatible (with minimum v9.00 compatible).

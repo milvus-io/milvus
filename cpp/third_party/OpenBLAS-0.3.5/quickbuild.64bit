@@ -1,0 +1,3 @@
+#!/bin/bash
+
+make BINARY=64

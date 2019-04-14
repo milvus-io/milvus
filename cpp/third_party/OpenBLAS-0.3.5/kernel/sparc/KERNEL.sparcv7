@@ -1,0 +1,59 @@
+SGEMMKERNEL    =  gemm_kernel_2x8.S
+SGEMMINCOPY    =  gemm_ncopy_2.S
+SGEMMITCOPY    =  gemm_tcopy_2.S
+SGEMMONCOPY    =  gemm_ncopy_8.S
+SGEMMOTCOPY    =  ../generic/gemm_tcopy_8.c
+SGEMMINCOPYOBJ =  sgemm_incopy.$(SUFFIX)
+SGEMMITCOPYOBJ =  sgemm_itcopy.$(SUFFIX)
+SGEMMONCOPYOBJ =  sgemm_oncopy.$(SUFFIX)
+SGEMMOTCOPYOBJ =  sgemm_otcopy.$(SUFFIX)
+
+DGEMMKERNEL    =  gemm_kernel_2x8.S
+DGEMMINCOPY    =  gemm_ncopy_2.S
+DGEMMITCOPY    =  gemm_tcopy_2.S
+DGEMMONCOPY    =  gemm_ncopy_8.S
+DGEMMOTCOPY    =  ../generic/gemm_tcopy_8.c
+DGEMMINCOPYOBJ =  dgemm_incopy.$(SUFFIX)
+DGEMMITCOPYOBJ =  dgemm_itcopy.$(SUFFIX)
+DGEMMONCOPYOBJ =  dgemm_oncopy.$(SUFFIX)
+DGEMMOTCOPYOBJ =  dgemm_otcopy.$(SUFFIX)
+
+CGEMMKERNEL    =  zgemm_kernel_1x4.S
+CGEMMINCOPY    =  ../generic/zgemm_ncopy_1.c
+CGEMMITCOPY    =  ../generic/zgemm_tcopy_1.c
+CGEMMONCOPY    =  ../generic/zgemm_ncopy_4.c
+CGEMMOTCOPY    =  ../generic/zgemm_tcopy_4.c
+CGEMMINCOPYOBJ =  cgemm_incopy.$(SUFFIX)
+CGEMMITCOPYOBJ =  cgemm_itcopy.$(SUFFIX)
+CGEMMONCOPYOBJ =  cgemm_oncopy.$(SUFFIX)
+CGEMMOTCOPYOBJ =  cgemm_otcopy.$(SUFFIX)
+
+ZGEMMKERNEL    =  zgemm_kernel_1x4.S
+ZGEMMINCOPY    =  ../generic/zgemm_ncopy_1.c
+ZGEMMITCOPY    =  ../generic/zgemm_tcopy_1.c
+ZGEMMONCOPY    =  ../generic/zgemm_ncopy_4.c
+ZGEMMOTCOPY    =  ../generic/zgemm_tcopy_4.c
+ZGEMMINCOPYOBJ =  zgemm_incopy.$(SUFFIX)
+ZGEMMITCOPYOBJ =  zgemm_itcopy.$(SUFFIX)
+ZGEMMONCOPYOBJ =  zgemm_oncopy.$(SUFFIX)
+ZGEMMOTCOPYOBJ =  zgemm_otcopy.$(SUFFIX)
+
+STRSMKERNEL_LN	=  trsm_kernel_LN_2x8.S
+STRSMKERNEL_LT	=  trsm_kernel_LT_2x8.S
+STRSMKERNEL_RN	=  trsm_kernel_LT_2x8.S
+STRSMKERNEL_RT	=  trsm_kernel_RT_2x8.S
+
+DTRSMKERNEL_LN	=  trsm_kernel_LN_2x8.S
+DTRSMKERNEL_LT	=  trsm_kernel_LT_2x8.S
+DTRSMKERNEL_RN	=  trsm_kernel_LT_2x8.S
+DTRSMKERNEL_RT	=  trsm_kernel_RT_2x8.S
+
+CTRSMKERNEL_LN	= ztrsm_kernel_LT_1x4.S
+CTRSMKERNEL_LT	= ztrsm_kernel_LT_1x4.S
+CTRSMKERNEL_RN	= ztrsm_kernel_LT_1x4.S
+CTRSMKERNEL_RT	= ztrsm_kernel_RT_1x4.S
+
+ZTRSMKERNEL_LN	= ztrsm_kernel_LT_1x4.S
+ZTRSMKERNEL_LT	= ztrsm_kernel_LT_1x4.S
+ZTRSMKERNEL_RN	= ztrsm_kernel_LT_1x4.S
+ZTRSMKERNEL_RT	= ztrsm_kernel_RT_1x4.S

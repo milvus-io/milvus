@@ -1,0 +1,256 @@
+SAMAXKERNEL  = ../mips/amax.c
+DAMAXKERNEL  = ../mips/amax.c
+CAMAXKERNEL  = ../mips/zamax.c
+ZAMAXKERNEL  = ../mips/zamax.c
+
+SAMINKERNEL  = ../mips/amin.c
+DAMINKERNEL  = ../mips/amin.c
+CAMINKERNEL  = ../mips/zamin.c
+ZAMINKERNEL  = ../mips/zamin.c
+
+SMAXKERNEL   = ../mips/max.c
+DMAXKERNEL   = ../mips/max.c
+
+SMINKERNEL   = ../mips/min.c
+DMINKERNEL   = ../mips/min.c
+
+ISAMAXKERNEL = ../mips/iamax.c
+IDAMAXKERNEL = ../mips/iamax.c
+ICAMAXKERNEL = ../mips/izamax.c
+IZAMAXKERNEL = ../mips/izamax.c
+
+ISAMINKERNEL = ../mips/iamin.c
+IDAMINKERNEL = ../mips/iamin.c
+ICAMINKERNEL = ../mips/izamin.c
+IZAMINKERNEL = ../mips/izamin.c
+
+ISMAXKERNEL  = ../mips/imax.c
+IDMAXKERNEL  = ../mips/imax.c
+
+ISMINKERNEL  = ../mips/imin.c
+IDMINKERNEL  = ../mips/imin.c
+
+ifdef HAVE_MSA
+SASUMKERNEL  = ../mips/sasum_msa.c
+DASUMKERNEL  = ../mips/dasum_msa.c
+CASUMKERNEL  = ../mips/casum_msa.c
+ZASUMKERNEL  = ../mips/zasum_msa.c
+else
+SASUMKERNEL  = ../mips/asum.c
+DASUMKERNEL  = ../mips/asum.c
+CASUMKERNEL  = ../mips/zasum.c
+ZASUMKERNEL  = ../mips/zasum.c
+endif
+
+ifdef HAVE_MSA
+SAXPYKERNEL  = ../mips/saxpy_msa.c
+DAXPYKERNEL  = ../mips/daxpy_msa.c
+CAXPYKERNEL  = ../mips/caxpy_msa.c
+ZAXPYKERNEL  = ../mips/zaxpy_msa.c
+else
+SAXPYKERNEL  = ../mips/axpy.c
+DAXPYKERNEL  = ../mips/axpy.c
+CAXPYKERNEL  = ../mips/zaxpy.c
+ZAXPYKERNEL  = ../mips/zaxpy.c
+endif
+
+ifdef HAVE_MSA
+SCOPYKERNEL  = ../mips/scopy_msa.c
+DCOPYKERNEL  = ../mips/dcopy_msa.c
+CCOPYKERNEL  = ../mips/ccopy_msa.c
+ZCOPYKERNEL  = ../mips/zcopy_msa.c
+else
+SCOPYKERNEL  = ../mips/copy.c
+DCOPYKERNEL  = ../mips/copy.c
+CCOPYKERNEL  = ../mips/zcopy.c
+ZCOPYKERNEL  = ../mips/zcopy.c
+endif
+
+ifdef HAVE_MSA
+SDOTKERNEL   = ../mips/sdot_msa.c
+DDOTKERNEL   = ../mips/ddot_msa.c
+CDOTKERNEL   = ../mips/cdot_msa.c
+ZDOTKERNEL   = ../mips/zdot_msa.c
+else
+SDOTKERNEL   = ../mips/dot.c
+DDOTKERNEL   = ../mips/dot.c
+CDOTKERNEL   = ../mips/zdot.c
+ZDOTKERNEL   = ../mips/zdot.c
+endif
+
+SNRM2KERNEL  = ../mips/nrm2.c
+DNRM2KERNEL  = ../mips/nrm2.c
+CNRM2KERNEL  = ../mips/znrm2.c
+ZNRM2KERNEL  = ../mips/znrm2.c
+
+ifdef HAVE_MSA
+SROTKERNEL   = ../mips/srot_msa.c
+DROTKERNEL   = ../mips/drot_msa.c
+CROTKERNEL   = ../mips/crot_msa.c
+ZROTKERNEL   = ../mips/zrot_msa.c
+else
+SROTKERNEL   = ../mips/rot.c
+DROTKERNEL   = ../mips/rot.c
+CROTKERNEL   = ../mips/zrot.c
+ZROTKERNEL   = ../mips/zrot.c
+endif
+
+ifdef HAVE_MSA
+SSCALKERNEL  = ../mips/sscal_msa.c
+DSCALKERNEL  = ../mips/dscal_msa.c
+CSCALKERNEL  = ../mips/cscal_msa.c
+ZSCALKERNEL  = ../mips/zscal_msa.c
+else
+SSCALKERNEL  = ../mips/scal.c
+DSCALKERNEL  = ../mips/scal.c
+CSCALKERNEL  = ../mips/zscal.c
+ZSCALKERNEL  = ../mips/zscal.c
+endif
+
+ifdef HAVE_MSA
+SSWAPKERNEL  = ../mips/sswap_msa.c
+DSWAPKERNEL  = ../mips/dswap_msa.c
+CSWAPKERNEL  = ../mips/cswap_msa.c
+ZSWAPKERNEL  = ../mips/zswap_msa.c
+else
+SSWAPKERNEL  = ../mips/swap.c
+DSWAPKERNEL  = ../mips/swap.c
+CSWAPKERNEL  = ../mips/zswap.c
+ZSWAPKERNEL  = ../mips/zswap.c
+endif
+
+ifdef HAVE_MSA
+SGEMVNKERNEL = ../mips/sgemv_n_msa.c
+DGEMVNKERNEL = ../mips/dgemv_n_msa.c
+CGEMVNKERNEL = ../mips/cgemv_n_msa.c
+ZGEMVNKERNEL = ../mips/zgemv_n_msa.c
+else
+SGEMVNKERNEL = ../mips/gemv_n.c
+DGEMVNKERNEL = ../mips/gemv_n.c
+CGEMVNKERNEL = ../mips/zgemv_n.c
+ZGEMVNKERNEL = ../mips/zgemv_n.c
+endif
+
+ifdef HAVE_MSA
+SGEMVTKERNEL = ../mips/sgemv_t_msa.c
+DGEMVTKERNEL = ../mips/dgemv_t_msa.c
+CGEMVTKERNEL = ../mips/cgemv_t_msa.c
+ZGEMVTKERNEL = ../mips/zgemv_t_msa.c
+else
+SGEMVTKERNEL = ../mips/gemv_t.c
+DGEMVTKERNEL = ../mips/gemv_t.c
+CGEMVTKERNEL = ../mips/zgemv_t.c
+ZGEMVTKERNEL = ../mips/zgemv_t.c
+endif
+
+ifdef HAVE_MSA
+SGEMMKERNEL    = ../mips/sgemm_kernel_8x8_msa.c
+SGEMMONCOPY    = ../mips/sgemm_ncopy_8_msa.c
+SGEMMOTCOPY    = ../mips/sgemm_tcopy_8_msa.c
+SGEMMONCOPYOBJ = sgemm_oncopy.o
+SGEMMOTCOPYOBJ = sgemm_otcopy.o
+else
+SGEMMKERNEL    = ../generic/gemmkernel_2x2.c
+SGEMMONCOPY    = ../generic/gemm_ncopy_2.c
+SGEMMOTCOPY    = ../generic/gemm_tcopy_2.c
+SGEMMONCOPYOBJ = sgemm_oncopy.o
+SGEMMOTCOPYOBJ = sgemm_otcopy.o
+endif
+
+ifdef HAVE_MSA
+DGEMMKERNEL    = ../mips/dgemm_kernel_8x4_msa.c
+DGEMMINCOPY    = ../mips/dgemm_ncopy_8_msa.c
+DGEMMITCOPY    = ../mips/dgemm_tcopy_8_msa.c
+DGEMMONCOPY    = ../mips/dgemm_ncopy_4_msa.c
+DGEMMOTCOPY    = ../mips/dgemm_tcopy_4_msa.c
+DGEMMINCOPYOBJ = dgemm_incopy.o
+DGEMMITCOPYOBJ = dgemm_itcopy.o
+DGEMMONCOPYOBJ = dgemm_oncopy.o
+DGEMMOTCOPYOBJ = dgemm_otcopy.o
+else
+DGEMMKERNEL    = ../generic/gemmkernel_2x2.c
+DGEMMONCOPY    = ../generic/gemm_ncopy_2.c
+DGEMMOTCOPY    = ../generic/gemm_tcopy_2.c
+DGEMMONCOPYOBJ = dgemm_oncopy.o
+DGEMMOTCOPYOBJ = dgemm_otcopy.o
+endif
+
+ifdef HAVE_MSA
+CGEMMKERNEL    = ../mips/cgemm_kernel_8x4_msa.c
+CGEMMINCOPY    = ../mips/cgemm_ncopy_8_msa.c
+CGEMMITCOPY    = ../mips/cgemm_tcopy_8_msa.c
+CGEMMONCOPY    = ../mips/cgemm_ncopy_4_msa.c
+CGEMMOTCOPY    = ../mips/cgemm_tcopy_4_msa.c
+CGEMMINCOPYOBJ = cgemm_incopy.o
+CGEMMITCOPYOBJ = cgemm_itcopy.o
+CGEMMONCOPYOBJ = cgemm_oncopy.o
+CGEMMOTCOPYOBJ = cgemm_otcopy.o
+else
+CGEMMKERNEL    = ../generic/zgemmkernel_2x2.c
+CGEMMONCOPY    = ../generic/zgemm_ncopy_2.c
+CGEMMOTCOPY    = ../generic/zgemm_tcopy_2.c
+CGEMMONCOPYOBJ = cgemm_oncopy.o
+CGEMMOTCOPYOBJ = cgemm_otcopy.o
+endif
+
+ifdef HAVE_MSA
+ZGEMMKERNEL    = ../mips/zgemm_kernel_4x4_msa.c
+ZGEMMONCOPY    = ../mips/zgemm_ncopy_4_msa.c
+ZGEMMOTCOPY    = ../mips/zgemm_tcopy_4_msa.c
+ZGEMMONCOPYOBJ = zgemm_oncopy.o
+ZGEMMOTCOPYOBJ = zgemm_otcopy.o
+else
+ZGEMMKERNEL    = ../generic/zgemmkernel_2x2.c
+ZGEMMONCOPY    = ../generic/zgemm_ncopy_2.c
+ZGEMMOTCOPY    = ../generic/zgemm_tcopy_2.c
+ZGEMMONCOPYOBJ = zgemm_oncopy.o
+ZGEMMOTCOPYOBJ = zgemm_otcopy.o
+endif
+
+ifdef HAVE_MSA
+STRSMKERNEL_LN = ../mips/strsm_kernel_LN_8x8_msa.c
+STRSMKERNEL_LT = ../mips/strsm_kernel_LT_8x8_msa.c
+STRSMKERNEL_RN = ../mips/strsm_kernel_RN_8x8_msa.c
+STRSMKERNEL_RT = ../mips/strsm_kernel_RT_8x8_msa.c
+else
+STRSMKERNEL_LN = ../generic/trsm_kernel_LN.c
+STRSMKERNEL_LT = ../generic/trsm_kernel_LT.c
+STRSMKERNEL_RN = ../generic/trsm_kernel_RN.c
+STRSMKERNEL_RT = ../generic/trsm_kernel_RT.c
+endif
+
+ifdef HAVE_MSA
+DTRSMKERNEL_LN = ../mips/dtrsm_kernel_LN_8x4_msa.c
+DTRSMKERNEL_LT = ../mips/dtrsm_kernel_LT_8x4_msa.c
+DTRSMKERNEL_RN = ../mips/dtrsm_kernel_RN_8x4_msa.c
+DTRSMKERNEL_RT = ../mips/dtrsm_kernel_RT_8x4_msa.c
+else
+DTRSMKERNEL_LN = ../generic/trsm_kernel_LN.c
+DTRSMKERNEL_LT = ../generic/trsm_kernel_LT.c
+DTRSMKERNEL_RN = ../generic/trsm_kernel_RN.c
+DTRSMKERNEL_RT = ../generic/trsm_kernel_RT.c
+endif
+
+ifdef HAVE_MSA
+CTRSMKERNEL_LN = ../generic/trsm_kernel_LN.c
+CTRSMKERNEL_LT = ../generic/trsm_kernel_LT.c
+CTRSMKERNEL_RN = ../generic/trsm_kernel_RN.c
+CTRSMKERNEL_RT = ../generic/trsm_kernel_RT.c
+else
+CTRSMKERNEL_LN = ../generic/trsm_kernel_LN.c
+CTRSMKERNEL_LT = ../generic/trsm_kernel_LT.c
+CTRSMKERNEL_RN = ../generic/trsm_kernel_RN.c
+CTRSMKERNEL_RT = ../generic/trsm_kernel_RT.c
+endif
+
+ifdef HAVE_MSA
+ZTRSMKERNEL_LN = ../generic/trsm_kernel_LN.c
+ZTRSMKERNEL_LT = ../generic/trsm_kernel_LT.c
+ZTRSMKERNEL_RN = ../generic/trsm_kernel_RN.c
+ZTRSMKERNEL_RT = ../generic/trsm_kernel_RT.c
+else
+ZTRSMKERNEL_LN = ../generic/trsm_kernel_LN.c
+ZTRSMKERNEL_LT = ../generic/trsm_kernel_LT.c
+ZTRSMKERNEL_RN = ../generic/trsm_kernel_RN.c
+ZTRSMKERNEL_RT = ../generic/trsm_kernel_RT.c
+endif

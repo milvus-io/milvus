@@ -1,0 +1,9 @@
+GQR:  Data file for testing Generalized QR and RQ routines
+3                             Number of values of M, P and N
+0 3 10                        Values of M
+0 5 20                        Values of P
+0 3 30                        Values of N
+20.0                          Threshold value of test ratio
+T                             Put T to test the error exits
+1                             Code to interpret the seed
+GQR  8                        List types on next line if 0 < NTYPES < 8

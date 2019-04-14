@@ -1,0 +1,59 @@
+SGEMMKERNEL    =  gemm_kernel_power6.S
+SGEMMINCOPY    =
+SGEMMITCOPY    =
+SGEMMONCOPY    =  gemm_ncopy_4.S
+SGEMMOTCOPY    =  gemm_tcopy_4.S
+SGEMMINCOPYOBJ =
+SGEMMITCOPYOBJ =
+SGEMMONCOPYOBJ =  sgemm_oncopy$(TSUFFIX).$(SUFFIX)
+SGEMMOTCOPYOBJ =  sgemm_otcopy$(TSUFFIX).$(SUFFIX)
+DGEMMKERNEL    =  gemm_kernel_power6.S
+DGEMMINCOPY    =
+DGEMMITCOPY    =
+DGEMMONCOPY    =  gemm_ncopy_4.S
+DGEMMOTCOPY    =  gemm_tcopy_4.S
+DGEMMINCOPYOBJ =
+DGEMMITCOPYOBJ =
+DGEMMONCOPYOBJ =  dgemm_oncopy$(TSUFFIX).$(SUFFIX)
+DGEMMOTCOPYOBJ =  dgemm_otcopy$(TSUFFIX).$(SUFFIX)
+CGEMMKERNEL    =  zgemm_kernel_power6.S
+CGEMMINCOPY    =  ../generic/zgemm_ncopy_2.c
+CGEMMITCOPY    =  ../generic/zgemm_tcopy_2.c
+CGEMMONCOPY    =  ../generic/zgemm_ncopy_4.c
+CGEMMOTCOPY    =  ../generic/zgemm_tcopy_4.c
+CGEMMINCOPYOBJ =  cgemm_incopy$(TSUFFIX).$(SUFFIX)
+CGEMMITCOPYOBJ =  cgemm_itcopy$(TSUFFIX).$(SUFFIX)
+CGEMMONCOPYOBJ =  cgemm_oncopy$(TSUFFIX).$(SUFFIX)
+CGEMMOTCOPYOBJ =  cgemm_otcopy$(TSUFFIX).$(SUFFIX)
+ZGEMMKERNEL    =  zgemm_kernel_power6.S
+ZGEMMINCOPY    =  ../generic/zgemm_ncopy_2.c
+ZGEMMITCOPY    =  ../generic/zgemm_tcopy_2.c
+ZGEMMONCOPY    =  ../generic/zgemm_ncopy_4.c
+ZGEMMOTCOPY    =  ../generic/zgemm_tcopy_4.c
+ZGEMMINCOPYOBJ =  zgemm_incopy$(TSUFFIX).$(SUFFIX)
+ZGEMMITCOPYOBJ =  zgemm_itcopy$(TSUFFIX).$(SUFFIX)
+ZGEMMONCOPYOBJ =  zgemm_oncopy$(TSUFFIX).$(SUFFIX)
+ZGEMMOTCOPYOBJ =  zgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+STRSMKERNEL_LN	=  trsm_kernel_power6_LN.S
+STRSMKERNEL_LT	=  trsm_kernel_power6_LT.S
+STRSMKERNEL_RN	=  trsm_kernel_power6_LT.S
+STRSMKERNEL_RT	=  trsm_kernel_power6_RT.S
+
+DTRSMKERNEL_LN	=  trsm_kernel_power6_LN.S
+DTRSMKERNEL_LT	=  trsm_kernel_power6_LT.S
+DTRSMKERNEL_RN	=  trsm_kernel_power6_LT.S
+DTRSMKERNEL_RT	=  trsm_kernel_power6_RT.S
+
+CTRSMKERNEL_LN	=  ztrsm_kernel_power6_LN.S
+CTRSMKERNEL_LT	=  ztrsm_kernel_power6_LT.S
+CTRSMKERNEL_RN	=  ztrsm_kernel_power6_LT.S
+CTRSMKERNEL_RT	=  ztrsm_kernel_power6_RT.S
+
+ZTRSMKERNEL_LN	=  ztrsm_kernel_power6_LN.S
+ZTRSMKERNEL_LT	=  ztrsm_kernel_power6_LT.S
+ZTRSMKERNEL_RN	=  ztrsm_kernel_power6_LT.S
+ZTRSMKERNEL_RT	=  ztrsm_kernel_power6_RT.S
+
+CROTKERNEL = ../arm/zrot.c
+ZROTKERNEL = ../arm/zrot.c

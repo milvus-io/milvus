@@ -1,0 +1,3 @@
+include $(KERNELDIR)/KERNEL.CORTEXA57
+
+

@@ -1,0 +1,117 @@
+# CCOMMON_OPT	+= -DFASTCPU
+
+ifeq ($(OSNAME), SunOS)
+ifdef BINARY64
+ifeq ($(F_COMPILER), SUN)
+FCOMMON_OPT += -m64
+endif
+endif
+endif
+
+ifeq ($(CORE), SKYLAKEX)
+ifndef DYNAMIC_ARCH
+ifndef NO_AVX512
+CCOMMON_OPT += -march=skylake-avx512
+FCOMMON_OPT += -march=skylake-avx512
+ifeq ($(OSNAME), CYGWIN_NT)
+CCOMMON_OPT += -fno-asynchronous-unwind-tables
+endif
+ifeq ($(OSNAME), WINNT)
+ifeq ($(C_COMPILER), GCC)
+CCOMMON_OPT += -fno-asynchronous-unwind-tables
+endif
+endif
+endif
+endif
+endif
+
+ifeq ($(CORE), HASWELL)
+ifndef DYNAMIC_ARCH
+ifndef NO_AVX2
+CCOMMON_OPT += -mavx2
+FCOMMON_OPT += -mavx2
+endif
+endif
+endif
+
+
+
+ifeq ($(OSNAME), Interix)
+ARFLAGS		= -m x64
+endif
+
+ifeq ($(OSNAME), Darwin)
+ifndef SMP
+LIBMKL		= -L$(MKLPATH)/em64t -Wl,-rpath,$(MKLPATH)/em64t -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lguide -lpthread -lm
+else
+LIBMKL		= -L$(MKLPATH)/em64t -Wl,-rpath,$(MKLPATH)/em64t -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -lguide -lpthread -lm
+endif
+else
+ifndef SMP
+LIBMKL		= -L$(MKLPATH)/em64t -Wl,-rpath,$(MKLPATH)/em64t -Wl,--start-group -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -Wl,--end-group -lguide -lpthread -lm
+else
+LIBMKL		= -L$(MKLPATH)/em64t -Wl,-rpath,$(MKLPATH)/em64t -Wl,--start-group -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -Wl,--end-group -lguide -lpthread -lm
+endif
+endif
+
+
+ifndef SMP
+LIBATLAS	= -L$(ATLASPATH)64 -llapack -lcblas -lf77blas -latlas -lm
+else
+LIBATLAS	= -L$(ATLASPATH)64 -llapack -lptcblas -lptf77blas -latlas -lpthread -lm
+endif
+
+LIBFLAME	= -L$(FLAMEPATH) -llapack2flame -lflame $(TOPDIR)/$(LIBNAME) -lgfortran -lpthread -lm
+
+
+ifeq ($(F_COMPILER), g77)
+LIBACML		= -L$(ACMLPATH)/gnu64/lib -Wl,-rpath,$(ACMLPATH)/gnu64/lib -lacml -lacml_mv -lg2c -lm
+endif
+
+ifeq ($(F_COMPILER), GFORTRAN)
+ifndef SMP
+LIBACML		= -L$(ACMLPATH)/gfortran64/lib -Wl,-rpath,$(ACMLPATH)/gfortran64/lib -lacml -lacml_mv -lgfortran -lm
+else
+LIBACML		= -L$(ACMLPATH)/gfortran64_mp/lib -Wl,-rpath,$(ACMLPATH)/gfortran64_mp/lib -lacml_mp -lacml_mv -lgfortran -lgomp -lm
+endif
+endif
+
+ifeq ($(F_COMPILER), INTEL)
+ifndef SMP
+LIBACML		= -L$(ACMLPATH)/ifort64/lib -Wl,-rpath,$(ACMLPATH)/ifort64/lib -lacml -lacml_mv -lifcoremt_pic -lirc -lm -lpthread -ldl
+else
+LIBACML		= -L$(ACMLPATH)/ifort64_mp/lib -Wl,-rpath,$(ACMLPATH)/ifort64_mp/lib -lacml_mp -lacml_mv -lifcoremt_pic -liomp5 -lirc -lm -lpthread -ldl
+endif
+endif
+
+ifeq ($(F_COMPILER), OPEN64)
+ifndef SMP
+LIBACML		= -L$(ACMLPATH)/open64/lib -Wl,-rpath,$(ACMLPATH)/open64/lib -lacml -lacml_mv -lm
+else
+LIBACML		= -L$(ACMLPATH)/open64_mp/lib -Wl,-rpath,$(ACMLPATH)/open64_mp/lib -lacml_mp -lacml_mv -lm -lpthread
+endif
+endif
+
+ifeq ($(F_COMPILER), pgf77)
+ifndef SMP
+LIBACML		= -L$(ACMLPATH)/pgi64/lib    -Wl,-rpath,$(ACMLPATH)/pgi64/lib    -lacml -lacml_mv -L$(PGIPATH) -Wl,-rpath,$(PGIPATH) -lpgftnrtl -lnspgc -lpgmp -lpgc
+else
+LIBACML		= -L$(ACMLPATH)/pgi64_mp/lib -Wl,-rpath,$(ACMLPATH)/pgi64_mp/lib -lacml -lacml_mv -L$(PGIPATH) -Wl,-rpath,$(PGIPATH) -lpgftnrtl -lnspgc -lpgmp -lpgc
+endif
+endif
+
+ifeq ($(F_COMPILER), PATHSCALE)
+ifndef SMP
+LIBACML		= -L$(ACMLPATH)/pathscale64/lib -Wl,-rpath,$(ACMLPATH)/pathscale64/lib -lacml -lacml_mv -Wl,-rpath,$(PATHSCALEPATH) -L$(PATHSCALEPATH) -lpathfortran -lm
+else
+LIBACML		= -L$(ACMLPATH)/pathscale64_mp/lib -Wl,-rpath,$(ACMLPATH)/pathscale64_mp/lib -lacml_mp -lacml_mv -Wl,-rpath,$(PATHSCALEPATH) -L$(PATHSCALEPATH) -lopenmp -lpathfortran -lm
+endif
+endif
+
+ifeq ($(F_COMPILER), f90)
+LIBACML		= -L$(ACMLPATH)/sun64/lib -Wl,-R,$(ACMLPATH)/sun64/lib -L$(SUNPATH)/lib/amd64 -Wl,-R,$(SUNPATH)/lib/amd64 -lacml -lacml_mv -lfsu
+endif
+
+LIBSUNPERF	= -L$(SUNPATH)/lib/amd64 -L$(SUNPATH)/rtlibs/amd64 -Wl,-R,$(SUNPATH)/lib/amd64  -Wl,-R,$(SUNPATH)/rtlibs/amd64 -lsunperf -lfui -lfsu -lmtsk
+
+LIBVECLIB	= /System/Library/Frameworks/vecLib.framework/Versions/Current/vecLib

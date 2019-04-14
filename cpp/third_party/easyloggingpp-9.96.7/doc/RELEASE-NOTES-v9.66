@@ -1,0 +1,25 @@
+Easylogging++ v9.66 RELEASE NOTES
+---------------------------------
+
+Release type: Minor
+API changes: No
+
+========================
+=      BUG FIXES       =
+========================
+
+ - Verbose fix when using `Logger::verbose`
+
+==========================
+=      IMPROVEMENTS      =
+==========================
+
+ - Changed `func` and `file` to `FUNCTION` and `FILE` respectively
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/blob/v9.66/README.md for manual for this release
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

@@ -1,0 +1,20 @@
+Easylogging++ v9.69 RELEASE NOTES
+---------------------------------
+
+Release type: Minor
+API changes: Yes
+
+===========================
+=      IMPROVEMENTS       =
+===========================
+
+ - Multiple log dispatch call backs by extending `el::LogDispatchCallback`
+ - Ability to log from `el::LogDispatchCallback` with no problems with recursive calls
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/blob/v9.69/README.md for manual for this release
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

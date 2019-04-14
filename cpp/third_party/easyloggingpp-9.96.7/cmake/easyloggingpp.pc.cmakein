@@ -1,0 +1,6 @@
+Name: easyloggingpp
+Description: Feature-rich single header C++ logging library
+Version: @ELPP_VERSION_STRING@
+prefix=@CMAKE_INSTALL_PREFIX@
+includedir=@ELPP_INCLUDE_INSTALL_DIR@
+Cflags: -I${includedir}

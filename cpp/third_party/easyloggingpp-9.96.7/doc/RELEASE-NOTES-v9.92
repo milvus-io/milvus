@@ -1,0 +1,15 @@
+Easylogging++ v9.92 RELEASE NOTES
+---------------------------------
+
+Release type: Minor
+API changes: No
+Breaking Change: No
+
+==========================
+=         NOTES          =
+==========================
+
+ - Updated github repo
+ - See https://github.com/muflihun/easyloggingpp/blob/v9.92/README.md for manual for this release
+ - See https://github.com/muflihun/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/muflihun/easyloggingpp/issues?page=1&state=closed

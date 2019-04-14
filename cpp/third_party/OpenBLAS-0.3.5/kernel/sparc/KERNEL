@@ -1,0 +1,69 @@
+ifndef SAMINKERNEL
+SAMINKERNEL = amax.S
+endif
+
+ifndef DAMINKERNEL
+DAMINKERNEL = amax.S
+endif
+
+ifndef CAMINKERNEL
+CAMINKERNEL = zamax.S
+endif
+
+ifndef ZAMINKERNEL
+ZAMINKERNEL = zamax.S
+endif
+
+ifndef SMINKERNEL
+SMINKERNEL = max.S
+endif
+
+ifndef DMINKERNEL
+DMINKERNEL = max.S
+endif
+
+ifndef ISAMINKERNEL
+ISAMINKERNEL = iamax.S
+endif
+
+ifndef IDAMINKERNEL
+IDAMINKERNEL = iamax.S
+endif
+
+ifndef ICAMINKERNEL
+ICAMINKERNEL = izamax.S
+endif
+
+ifndef IZAMINKERNEL
+IZAMINKERNEL = izamax.S
+endif
+
+ifndef ISMINKERNEL
+ISMINKERNEL = iamax.S
+endif
+
+ifndef IDMINKERNEL
+IDMINKERNEL = iamax.S
+endif
+
+ifndef SNRM2KERNEL
+SNRM2KERNEL = snrm2.S
+endif
+
+ifndef DNRM2KERNEL
+DNRM2KERNEL = dnrm2.S
+endif
+
+ifndef CNRM2KERNEL
+CNRM2KERNEL = cnrm2.S
+endif
+
+ifndef ZNRM2KERNEL
+ZNRM2KERNEL = znrm2.S
+endif
+
+SGEMM_BETA = ../generic/gemm_beta.c
+DGEMM_BETA = ../generic/gemm_beta.c
+CGEMM_BETA = ../generic/zgemm_beta.c
+ZGEMM_BETA = ../generic/zgemm_beta.c
+

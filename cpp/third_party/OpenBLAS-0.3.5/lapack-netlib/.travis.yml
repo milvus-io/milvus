@@ -1,0 +1,62 @@
+language: cpp
+
+addons:
+  apt:
+    sources:
+      - george-edison55-precise-backports # cmake
+    packages:
+      - cmake
+      - cmake-data
+      - gfortran
+
+os:
+  - linux
+  - osx
+
+env:
+  - CMAKE_BUILD_TYPE=Release
+  - CMAKE_BUILD_TYPE=Coverage
+
+install:
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]];
+    then
+      for pkg in gcc cmake; do
+        if brew list -1 | grep -q "^${pkg}\$"; then
+          brew outdated $pkg || brew upgrade $pkg;
+        else
+          brew install $pkg;
+        fi
+      done
+    fi
+
+script:
+  - export PR=https://api.github.com/repos/$TRAVIS_REPO_SLUG/pulls/$TRAVIS_PULL_REQUEST
+  - export BRANCH=$(if [ "$TRAVIS_PULL_REQUEST" == "false" ]; then echo $TRAVIS_BRANCH; else echo `curl -s $PR | jq -r .head.ref`; fi)
+  - echo "TRAVIS_BRANCH=$TRAVIS_BRANCH, PR=$PR, BRANCH=$BRANCH"
+  - export SRC_DIR=$(pwd)
+  - export BLD_DIR=${SRC_DIR}/lapack-travis-bld
+  - export INST_DIR=${SRC_DIR}/../lapack-travis-install
+  - mkdir -p ${BLD_DIR}
+  - cd ${BLD_DIR}
+# See issue #17 on github dashboard.  Once resolved, use -DCBLAS=ON
+#  - cmake -DCMAKE_INSTALL_PREFIX=${INST_DIR} -DLAPACKE=ON ${SRC_DIR}
+  - cmake -DBUILDNAME:STRING="travis-${TRAVIS_OS_NAME}-${BRANCH}"
+    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+    -DCMAKE_INSTALL_PREFIX=${INST_DIR}
+    -DCBLAS:BOOL=ON
+    -DLAPACKE:BOOL=ON
+    -DBUILD_TESTING=ON
+    -DLAPACKE_WITH_TMG:BOOL=ON
+    ${SRC_DIR}
+  - ctest -D ExperimentalStart
+  - ctest -D ExperimentalConfigure
+  - ctest -D ExperimentalBuild -j2
+  - ctest -D ExperimentalTest --schedule-random -j2 --output-on-failure --timeout 100
+  - ctest -D ExperimentalSubmit
+  - make install -j2
+  - if [[ "$CMAKE_BUILD_TYPE" == "Coverage" ]];
+    then
+    echo "Coverage";
+    make coverage;
+    bash <(curl -s https://codecov.io/bash) -X gcov;
+    fi

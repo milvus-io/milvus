@@ -1,0 +1,18 @@
+Easylogging++ v9.62 RELEASE NOTES
+---------------------------------
+
+Release type: Minor
+API changes: No
+
+==========================
+=      BUG FIXES         =
+==========================
+
+ - Fix to `Logger::verbose` checking whether verbosity is on or not
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

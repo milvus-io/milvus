@@ -1,0 +1,191 @@
+ifndef SAMINKERNEL
+SAMINKERNEL = amax.S
+endif
+
+ifndef DAMINKERNEL
+DAMINKERNEL = amax.S
+endif
+
+ifndef QAMINKERNEL
+QAMINKERNEL = amax.S
+endif
+
+ifndef CAMINKERNEL
+CAMINKERNEL = zamax.S
+endif
+
+ifndef ZAMINKERNEL
+ZAMINKERNEL = zamax.S
+endif
+
+ifndef XAMINKERNEL
+XAMINKERNEL = zamax.S
+endif
+
+ifndef SMAXKERNEL
+SMAXKERNEL = amax.S
+endif
+
+ifndef DMAXKERNEL
+DMAXKERNEL = amax.S
+endif
+
+ifndef QMAXKERNEL
+QMAXKERNEL = amax.S
+endif
+
+ifndef SMINKERNEL
+SMINKERNEL = amax.S
+endif
+
+ifndef DMINKERNEL
+DMINKERNEL = amax.S
+endif
+
+ifndef QMINKERNEL
+QMINKERNEL = amax.S
+endif
+
+ifndef ISAMINKERNEL
+ISAMINKERNEL = iamax.S
+endif
+
+ifndef IDAMINKERNEL
+IDAMINKERNEL = iamax.S
+endif
+
+ifndef IQAMINKERNEL
+IQAMINKERNEL = iamax.S
+endif
+
+ifndef ICAMINKERNEL
+ICAMINKERNEL = izamax.S
+endif
+
+ifndef IZAMINKERNEL
+IZAMINKERNEL = izamax.S
+endif
+
+ifndef IXAMINKERNEL
+IXAMINKERNEL = izamax.S
+endif
+
+ifndef ISMINKERNEL
+ISMINKERNEL = iamax.S
+endif
+
+ifndef IDMINKERNEL
+IDMINKERNEL = iamax.S
+endif
+
+ifndef IQMINKERNEL
+IQMINKERNEL = iamax.S
+endif
+
+ifndef QDOTKERNEL
+QDOTKERNEL = qdot.S
+endif
+
+ifndef XDOTKERNEL
+XDOTKERNEL = xdot.S
+endif
+
+ifndef QAXPYKERNEL
+QAXPYKERNEL = qaxpy.S
+endif
+
+ifndef XAXPYKERNEL
+XAXPYKERNEL = xaxpy.S
+endif
+
+#Use C kernel for sgemv and dgemv
+ifndef SGEMVNKERNEL
+SGEMVNKERNEL = ../arm/gemv_n.c
+endif
+
+ifndef SGEMVTKERNEL
+SGEMVTKERNEL = ../arm/gemv_t.c
+endif
+
+ifndef DGEMVNKERNEL
+DGEMVNKERNEL = ../arm/gemv_n.c
+endif
+
+ifndef DGEMVTKERNEL
+DGEMVTKERNEL = ../arm/gemv_t.c
+endif
+
+ifndef QGEMVNKERNEL
+QGEMVNKERNEL = qgemv_n.S
+endif
+
+ifndef QGEMVTKERNEL
+QGEMVTKERNEL = qgemv_t.S
+endif
+
+ifndef XGEMVNKERNEL
+XGEMVNKERNEL = xgemv_n.S
+endif
+
+ifndef XGEMVTKERNEL
+XGEMVTKERNEL = xgemv_t.S
+endif
+
+QGEMMKERNEL    =  qgemm_kernel_2x2.S
+QGEMMINCOPY    =
+QGEMMITCOPY    =
+QGEMMONCOPY    =  ../generic/gemm_ncopy_2.c
+QGEMMOTCOPY    =  ../generic/gemm_tcopy_2.c
+QGEMMINCOPYOBJ =
+QGEMMITCOPYOBJ =
+QGEMMONCOPYOBJ =  qgemm_oncopy$(TSUFFIX).$(SUFFIX)
+QGEMMOTCOPYOBJ =  qgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+XGEMMKERNEL    =  xgemm_kernel_1x1.S
+XGEMMINCOPY    =
+XGEMMITCOPY    =
+XGEMMONCOPY    =  ../generic/zgemm_ncopy_1.c
+XGEMMOTCOPY    =  ../generic/zgemm_tcopy_1.c
+XGEMMINCOPYOBJ =
+XGEMMITCOPYOBJ =
+XGEMMONCOPYOBJ =  xgemm_oncopy$(TSUFFIX).$(SUFFIX)
+XGEMMOTCOPYOBJ =  xgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+QTRSMKERNEL_LN  =  qtrsm_kernel_LN_2x2.S
+QTRSMKERNEL_LT  =  qtrsm_kernel_LT_2x2.S
+QTRSMKERNEL_RN  =  qtrsm_kernel_LT_2x2.S
+QTRSMKERNEL_RT  =  qtrsm_kernel_RT_2x2.S
+
+XTRSMKERNEL_LN  =  xtrsm_kernel_LT_1x1.S
+XTRSMKERNEL_LT  =  xtrsm_kernel_LT_1x1.S
+XTRSMKERNEL_RN  =  xtrsm_kernel_LT_1x1.S
+XTRSMKERNEL_RT  =  xtrsm_kernel_LT_1x1.S
+
+XGEMM3MKERNEL    =  xgemm3m_kernel_2x2.S
+
+
+# bug in zdot assembler kernel
+ifndef ZDOTKERNEL
+ZDOTKERNEL   = ../arm/zdot.c
+endif
+
+DSDOTKERNEL   = ../generic/dot.c
+
+# Bug in znrm2 assembler kernel
+ifndef ZNRM2KERNEL
+ZNRM2KERNEL  = ../arm/znrm2.c
+endif
+
+# Bug in zgemv_t  assembler kernel
+ifndef ZGEMVTKERNEL
+ZGEMVTKERNEL = ../arm/zgemv_t.c
+endif
+
+SGEMM_BETA = ../generic/gemm_beta.c
+DGEMM_BETA = ../generic/gemm_beta.c
+CGEMM_BETA = ../generic/zgemm_beta.c
+ZGEMM_BETA = ../generic/zgemm_beta.c
+
+QGEMM_BETA = ../generic/gemm_beta.c
+XGEMM_BETA = ../generic/zgemm_beta.c
+

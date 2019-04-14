@@ -1,0 +1,19 @@
+ifeq ($(CORE), $(filter $(CORE),ARMV7 CORTEXA9 CORTEXA15))
+ifeq ($(OSNAME), Android)
+CCOMMON_OPT += -mfpu=neon  -march=armv7-a
+FCOMMON_OPT += -mfpu=neon  -march=armv7-a
+else
+CCOMMON_OPT += -mfpu=vfpv3 -march=armv7-a
+FCOMMON_OPT += -mfpu=vfpv3 -march=armv7-a
+endif
+endif
+
+ifeq ($(CORE), ARMV6)
+CCOMMON_OPT += -mfpu=vfp -march=armv6
+FCOMMON_OPT += -mfpu=vfp -march=armv6
+endif
+
+ifeq ($(CORE), ARMV5)
+CCOMMON_OPT += -march=armv5
+FCOMMON_OPT += -march=armv5
+endif

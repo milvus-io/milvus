@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SplitterWidget</class>
+ <widget class="QWidget" name="SplitterWidget">
+  <property name="windowModality">
+   <enum>Qt::NonModal</enum>
+  </property>
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>523</width>
+    <height>378</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <widget class="QPushButton" name="buttonChooseFiles">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>20</y>
+     <width>115</width>
+     <height>27</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Choose File(s)</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="labelFile">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>220</y>
+     <width>441</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string/>
+   </property>
+   <property name="wordWrap">
+    <bool>true</bool>
+   </property>
+  </widget>
+  <widget class="QTreeView" name="listFiles">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>50</y>
+     <width>431</width>
+     <height>171</height>
+    </rect>
+   </property>
+   <property name="styleSheet">
+    <string notr="true"/>
+   </property>
+   <property name="editTriggers">
+    <set>QAbstractItemView::AllEditTriggers</set>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="buttonStartSplit">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>85</width>
+     <height>27</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Start Split</string>
+   </property>
+  </widget>
+  <zorder>listFiles</zorder>
+  <zorder>buttonChooseFiles</zorder>
+  <zorder>labelFile</zorder>
+  <zorder>buttonStartSplit</zorder>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

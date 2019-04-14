@@ -1,0 +1,56 @@
+Easylogging++ v9.64 RELEASE NOTES
+---------------------------------
+
+Release type: Major
+API changes: Yes
+
+==========================
+=      BUG FIXES         =
+==========================
+
+ - Fixes for some STL containers for unicode
+ - Sample fixes for unicode 
+ - Made `log()` private because some stuffs do not work properly (e.g, `_ELPP_{level}_LOGS` macros)
+ - Fix line number to zero when using `log()` and friend functions
+ - Fix log enabled/disabled for `_ELPP_INFO_LOG` and friends for `log()` and friends
+ - Made `Loggers::getLogger`, `Loggers::hasLogger` and `Loggers::unregisterLogger` thread-safe
+
+==========================
+=      NEW FEATURES      =
+==========================
+
+ - Ability to enable / disable hierarchical logging using `LoggingFlag::HierarchicalLogging` and `Loggers::setLoggingLevel` (issue #167)
+ - Ability to disable performance tracking dispatch by using flag `LoggingFlag::DisablePerformanceTrackingDispatch' (issue #164)
+ - Ability to check datatype for PostPerformanceTrackingData (using `PostPerformanceTrackingData::dataType()`)
+ - Added `LoggingFlag::MultiLoggerSupport` and removed `_ELPP_MULTI_LOGGER_SUPPORT` macro (issue #166)
+ - Added `LoggingFlag::PerformanceTrackingCallback` and removed need to define `_ELPP_HANDLE_POST_PERFORMANCE_TRACKING` macro (issue #166)
+ - Replaced macro `_ELPP_HANDLE_POST_LOG_DISPATCH` with `LoggingFlag::EnableLogDispatchCallback` (issue #166)
+
+==========================
+=       REFACTORING      =
+==========================
+
+ - Changed `_ELPP_DISABLE_LOGGING_FLAGS_FROM_ARG` to `_ELPP_LOGGING_FLAGS_FROM_ARG` and inverted the logic (issue #163)
+ - Renamed `Trackable` class to `PerformanceTracker` (issue #163)
+ - A lot of internal refactoring for performance and size (issue #163)
+ - Added internal error when too many arguments provided in `log()` and friends
+ - Moved `addFlag(LoggingFlag)`, `removeFlag(LoggingFlag)` and `hasFlag(LoggingFlag)` to `el::Loggers` (issue #163)
+ - Renamed following macros: (issue #163)
+     - `_ELPP_STOP_ON_FIRST_ASSERTION` to `_ELPP_DEBUG_ASSERT_FAILURE`
+     - `_ELPP_ENABLE_ERRORS` to `_ELPP_DEBUG_ERRORS`
+     - `_ELPP_ENABLE_INFO` to `_ELPP_DEBUG_INFO`
+ - Removed `_ELPP_STRICT_SIZE_CHECK` macro and left it on user to add flag `LoggingFlag::StrictLogFileSizeCheck` (issue #166)
+ - Removed `_ELPP_PERFORMANCE_DISABLE_COMPARE_CHECKPOINTS` macro and left it on user to add flag `LoggingFlag::DisablePerformanceTrackingCheckpointComparison` (issue #166)
+ - Changed handlers name: (issue #165)
+     - `PreRollOutHandler` to `PreRollOutCallback`
+     - `PostLogDispatchHandler` to `LogDispatchCallback`
+     - `PostPerformanceTrackingHandler` to `PerformanceTrackingCallback`
+ - Moved `el::api::*` to `el::*`
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/blob/v9.64/README.md for manual for this release
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

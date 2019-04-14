@@ -1,0 +1,29 @@
+Easylogging++ v9.94 RELEASE NOTES
+---------------------------------
+
+Release type: Minor
+API changes: No
+Breaking Change: No
+
+==========================
+=         FIXES          =
+==========================
+
+ - Fixed performance tracking time unit and calculations
+
+==========================
+=        FEATURES        =
+==========================
+
+ - Restored `ELPP_DEFAULT_LOGGER` and `ELPP_DEFAULT_PERFORMANCE_LOGGER`
+ - Helpers::getThreadName for reading current thread's name
+ - Custom format specifier now has to return `std::string` instead
+ - Merged `thread_name` with `thread` if thread name is available it's used otherwise ID is displayed
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/muflihun/easyloggingpp/blob/9.93/README.md for manual for this release
+ - See https://github.com/muflihun/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/muflihun/easyloggingpp/issues?page=1&state=closed

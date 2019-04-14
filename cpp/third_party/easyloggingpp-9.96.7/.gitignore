@@ -1,0 +1,9 @@
+build/*
+build-*
+*.pro.user
+.DS_Store
+release.info
+bin/*
+logs/*
+experiments/*
+CMakeLists.txt.user*

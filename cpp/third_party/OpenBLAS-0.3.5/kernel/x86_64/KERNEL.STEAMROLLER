@@ -1,0 +1,95 @@
+DSCALKERNEL = dscal.c
+CSCALKERNEL = cscal.c
+ZSCALKERNEL = zscal.c
+
+SAXPYKERNEL = saxpy.c
+DAXPYKERNEL = daxpy.c
+CAXPYKERNEL = caxpy.c
+ZAXPYKERNEL = zaxpy.c
+
+SDOTKERNEL     = sdot.c
+DSDOTKERNEL    = sdot.c
+DDOTKERNEL     = ddot.c
+CDOTKERNEL     = cdot.c
+ZDOTKERNEL     = zdot.c
+
+
+DSYMV_U_KERNEL = dsymv_U.c
+DSYMV_L_KERNEL = dsymv_L.c
+SSYMV_U_KERNEL = ssymv_U.c
+SSYMV_L_KERNEL = ssymv_L.c
+
+SGEMVNKERNEL = sgemv_n_4.c
+SGEMVTKERNEL = sgemv_t_4.c
+
+DGEMVNKERNEL = dgemv_n_4.c
+DGEMVTKERNEL = dgemv_t_4.c
+
+ZGEMVNKERNEL = zgemv_n_4.c
+ZGEMVTKERNEL = zgemv_t_4.c
+
+DCOPYKERNEL  = dcopy_bulldozer.S
+
+
+SGEMMKERNEL    =  sgemm_kernel_16x2_piledriver.S
+SGEMMINCOPY    =  ../generic/gemm_ncopy_16.c
+SGEMMITCOPY    =  ../generic/gemm_tcopy_16.c
+SGEMMONCOPY    =  gemm_ncopy_2_bulldozer.S
+SGEMMOTCOPY    =  gemm_tcopy_2_bulldozer.S
+SGEMMINCOPYOBJ =  sgemm_incopy$(TSUFFIX).$(SUFFIX)
+SGEMMITCOPYOBJ =  sgemm_itcopy$(TSUFFIX).$(SUFFIX)
+SGEMMONCOPYOBJ =  sgemm_oncopy$(TSUFFIX).$(SUFFIX)
+SGEMMOTCOPYOBJ =  sgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+DGEMMKERNEL    =  dgemm_kernel_8x2_piledriver.S
+DGEMMINCOPY    =  ../generic/gemm_ncopy_8.c
+DGEMMITCOPY    =  ../generic/gemm_tcopy_8.c
+DGEMMONCOPY    =  gemm_ncopy_2_bulldozer.S
+DGEMMOTCOPY    =  gemm_tcopy_2_bulldozer.S
+DGEMMINCOPYOBJ =  dgemm_incopy$(TSUFFIX).$(SUFFIX)
+DGEMMITCOPYOBJ =  dgemm_itcopy$(TSUFFIX).$(SUFFIX)
+DGEMMONCOPYOBJ =  dgemm_oncopy$(TSUFFIX).$(SUFFIX)
+DGEMMOTCOPYOBJ =  dgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+CGEMMKERNEL    =  cgemm_kernel_4x2_piledriver.S
+CGEMMINCOPY    =  ../generic/zgemm_ncopy_4.c
+CGEMMITCOPY    =  ../generic/zgemm_tcopy_4.c
+CGEMMONCOPY    =  ../generic/zgemm_ncopy_2.c
+CGEMMOTCOPY    =  ../generic/zgemm_tcopy_2.c
+CGEMMINCOPYOBJ =  cgemm_incopy$(TSUFFIX).$(SUFFIX)
+CGEMMITCOPYOBJ =  cgemm_itcopy$(TSUFFIX).$(SUFFIX)
+CGEMMONCOPYOBJ =  cgemm_oncopy$(TSUFFIX).$(SUFFIX)
+CGEMMOTCOPYOBJ =  cgemm_otcopy$(TSUFFIX).$(SUFFIX)
+ZGEMMKERNEL    =  zgemm_kernel_2x2_piledriver.S
+ZGEMMINCOPY    =
+ZGEMMITCOPY    =
+ZGEMMONCOPY    =  ../generic/zgemm_ncopy_2.c
+ZGEMMOTCOPY    =  ../generic/zgemm_tcopy_2.c
+ZGEMMINCOPYOBJ =
+ZGEMMITCOPYOBJ =
+ZGEMMONCOPYOBJ =  zgemm_oncopy$(TSUFFIX).$(SUFFIX)
+ZGEMMOTCOPYOBJ =  zgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+CGEMM3MKERNEL    =  zgemm3m_kernel_8x4_barcelona.S
+ZGEMM3MKERNEL    =  zgemm3m_kernel_4x4_barcelona.S
+
+STRSMKERNEL_LN  = strsm_kernel_LN_bulldozer.c
+STRSMKERNEL_LT  = strsm_kernel_LT_bulldozer.c
+STRSMKERNEL_RN  = strsm_kernel_RN_bulldozer.c
+STRSMKERNEL_RT  = strsm_kernel_RT_bulldozer.c
+
+DTRSMKERNEL_LN  = dtrsm_kernel_LN_bulldozer.c
+DTRSMKERNEL_LT  = dtrsm_kernel_LT_8x2_bulldozer.S
+DTRSMKERNEL_RN  = dtrsm_kernel_RN_8x2_bulldozer.S
+DTRSMKERNEL_RT  = dtrsm_kernel_RT_bulldozer.c
+
+CTRSMKERNEL_LN  = ctrsm_kernel_LN_bulldozer.c
+CTRSMKERNEL_LT  = ctrsm_kernel_LT_bulldozer.c
+CTRSMKERNEL_RN  = ctrsm_kernel_RN_bulldozer.c
+CTRSMKERNEL_RT  = ctrsm_kernel_RT_bulldozer.c
+
+ZTRSMKERNEL_LN  = ztrsm_kernel_LN_bulldozer.c
+ZTRSMKERNEL_LT  = ztrsm_kernel_LT_bulldozer.c
+ZTRSMKERNEL_RN  = ztrsm_kernel_RN_bulldozer.c
+ZTRSMKERNEL_RT  = ztrsm_kernel_RT_bulldozer.c
+

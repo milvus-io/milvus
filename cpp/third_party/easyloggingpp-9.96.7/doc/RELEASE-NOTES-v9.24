@@ -1,0 +1,23 @@
+Easylogging++ v9.24 RELEASE NOTES
+---------------------------------
+
+==========================
+=         FIXES          =
+==========================
+
+ - `strerror` CRT warning fix for VC++ when using PLOG() or any equivalent (issue# 123)
+ - Fixed `CVERBOSE_EVERY_N` resolution from `VLOG_IF` to custom logger verbose log
+
+==========================
+=       NEW FEATURES     =
+==========================
+
+ - New helper `reconfigureLogger(const std::string&, const ConfigurationType&, const std::string&)`
+ - Support for syslog (issue #120)
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

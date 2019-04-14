@@ -1,0 +1,22 @@
+Easylogging++ v9.75 RELEASE NOTES
+---------------------------------
+
+Release type: Minor
+API changes: No
+
+==========================
+=      BUG FIXES         =
+==========================
+
+ - Makes Mutex non-copyable (issue #191)
+ - Fixes issue with `DefaultPerformanceTrackingCallback` (issue #190)
+ - Fix build for VS2013 under high warnings [warning level 4] (issue #194)
+ - Fixes a lot of reference to temporary warnings
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/blob/v9.75/README.md for manual for this release
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

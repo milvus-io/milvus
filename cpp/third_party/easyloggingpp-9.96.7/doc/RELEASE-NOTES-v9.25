@@ -1,0 +1,39 @@
+Easylogging++ v9.25 RELEASE NOTES
+---------------------------------
+
+==========================
+=          FIXES         =
+==========================
+
+ - Month (numeric) is not correct in %datetime (issue #125)
+ - Massive improvement for each log entry (issue #124)
+ - Fix to log format like `%%logger %logger %%logger %msg`
+
+==========================
+=      NEW FEATURES      =
+==========================
+
+ - Default log file using command line args (issue #122)
+ - Introduced `LoggingFlag::ImmediateFlush` for performance imporvement (issue #127)
+ - Introduced `ConfigurationType::LogFlushThreshold` to manually specify log flush threshold (issue #126)
+ - Introduced `Logger::flush` family and `Loggers::flushAll` family of function to manually flush log files (issue #128)
+ - Introduced command line arg to enable/disable logging flag using `--logging-flags` param (issue #129)
+ - Abort warning on fatal log
+ - Renamed `TIMED_BLOCK` to `TIMED_SCOPE` and introduced new `TIMED_BLOCK` that can be used like `TIMED_BLOCK(obj, "blk") { ... }`
+ - Now aborts application on crashes etc (as opposed to `exit(status)`) and contains `status` and `reason` params to make it easy to debug using IDE like VS
+ - Introduced mor params in `el::Helpers::crashAbort` to specify the location and be helpful while debugging
+
+==========================
+=       DEPRECATED       =
+==========================
+
+ - Replaced format specifier `%log` with `%msg` (issue #131)
+ - Replaced `_ELPP_STRICT_SIZE_CHECK` macro with `LoggingFlag::StrictLogFileSizeCheck` (issue #130)
+
+==========================
+=         NOTES          =
+==========================
+
+ - As soon as you upgrade, you will want to replace existing `TIMED_BLOCK` with `TIMED_SCOPE` to prevent any undefined behaviour
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

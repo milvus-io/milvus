@@ -1,0 +1,9 @@
+LSE:  Data file for testing Constrained Linear Least Squares routines
+6                          Number of values of M, P, and N
+6  0  5  8  10 30          Values of M
+0  5  5  5  8  20          Values of P
+5  5  6  8  12 40          Values of N,  note P<= N <= P+M
+20.0                       Threshold value of test ratio
+T                          Put T to test the error exits
+1                          Code to interpret the seed
+LSE  8                     List types on next line if 0 < NTYPES < 8

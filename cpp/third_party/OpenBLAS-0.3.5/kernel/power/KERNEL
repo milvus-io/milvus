@@ -1,0 +1,52 @@
+ifndef STRSMKERNEL_LN
+STRSMKERNEL_LN	= ../generic/trsm_kernel_LN.c
+endif
+
+ifndef STRSMKERNEL_LT
+STRSMKERNEL_LT	= ../generic/trsm_kernel_LT.c
+endif
+
+ifndef STRSMKERNEL_RN
+STRSMKERNEL_RN	= ../generic/trsm_kernel_RN.c
+endif
+
+ifndef STRSMKERNEL_RT
+STRSMKERNEL_RT	= ../generic/trsm_kernel_RT.c
+endif
+
+ifndef CTRSMKERNEL_LN
+CTRSMKERNEL_LN	= ../generic/trsm_kernel_LN.c
+endif
+
+ifndef CTRSMKERNEL_LT
+CTRSMKERNEL_LT	= ../generic/trsm_kernel_LT.c
+endif
+
+ifndef CTRSMKERNEL_RN
+CTRSMKERNEL_RN	= ../generic/trsm_kernel_RN.c
+endif
+
+ifndef CTRSMKERNEL_RT
+CTRSMKERNEL_RT	= ../generic/trsm_kernel_RT.c
+endif
+
+ifndef SGEMM_BETA
+SGEMM_BETA = gemm_beta.S
+endif
+
+ifndef DGEMM_BETA
+DGEMM_BETA = gemm_beta.S
+endif
+
+ifndef CGEMM_BETA
+CGEMM_BETA = zgemm_beta.S
+endif
+
+ifndef ZGEMM_BETA
+ZGEMM_BETA = zgemm_beta.S
+endif
+
+ifndef DSDOTKERNEL
+DSDOTKERNEL = ../generic/dot.c
+endif
+

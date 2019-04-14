@@ -1,0 +1,10 @@
+lib/libmyLib.so
+lib/easylogging++.o
+lib/mylib.o
+lib/myLib.a
+myLib.a
+libmyLib.so
+logs/*
+myapp
+myapp.dSYM/*
+

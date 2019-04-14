@@ -1,0 +1,15 @@
+Easylogging++ v9.52 RELEASE NOTES
+---------------------------------
+
+=======================
+=     BUG FIXES       =
+=======================
+
+ - Bug fix from ver. 9.51 with unicode support - introduced `_ELPP_FILENAME_TIMESTAMP`
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

@@ -1,0 +1,21 @@
+Easylogging++ v9.32 RELEASE NOTES
+---------------------------------
+
+=========================
+=      NEW FEATURES     =
+=========================
+
+ - Unicode support (enabled when `_ELPP_UNICODE` is defined)
+
+=========================
+=        API CHANGES    =
+=========================
+
+ - It is recommended to use `el::base::types::ostream_t` in `el::Loggable` to make it happier with unicode
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

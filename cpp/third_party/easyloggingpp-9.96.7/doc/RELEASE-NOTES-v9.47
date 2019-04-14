@@ -1,0 +1,22 @@
+Easylogging++ v9.47 RELEASE NOTES
+---------------------------------
+
+==============================
+=        BUG FIXES           =
+==============================
+
+ - July month abbreviation fix
+ - Default date/time fix for 'PM' times
+
+========================
+=       CHANGES        =
+========================
+
+ - `Logger not registered` message now uses debug level instead of error
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

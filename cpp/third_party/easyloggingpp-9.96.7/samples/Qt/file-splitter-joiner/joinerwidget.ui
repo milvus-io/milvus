@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>JoinerWidget</class>
+ <widget class="QWidget" name="JoinerWidget">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>523</width>
+    <height>378</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <widget class="QLabel" name="label">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>10</y>
+     <width>401</width>
+     <height>17</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>You may join parts into a single file. Please add parts here:</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="buttonAddParts">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>50</y>
+     <width>101</width>
+     <height>27</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Add Part(s)</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="buttonStart">
+   <property name="geometry">
+    <rect>
+     <x>380</x>
+     <y>50</y>
+     <width>101</width>
+     <height>27</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Start Join</string>
+   </property>
+  </widget>
+  <widget class="QTreeWidget" name="treeFiles">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>80</y>
+     <width>471</width>
+     <height>271</height>
+    </rect>
+   </property>
+   <column>
+    <property name="text">
+     <string notr="true">1</string>
+    </property>
+   </column>
+  </widget>
+  <widget class="QPushButton" name="buttonUp">
+   <property name="geometry">
+    <rect>
+     <x>488</x>
+     <y>190</y>
+     <width>31</width>
+     <height>27</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>⇧</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="buttonDown">
+   <property name="geometry">
+    <rect>
+     <x>488</x>
+     <y>220</y>
+     <width>31</width>
+     <height>27</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>⇩</string>
+   </property>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

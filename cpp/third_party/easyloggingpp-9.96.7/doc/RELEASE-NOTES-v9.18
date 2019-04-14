@@ -1,0 +1,27 @@
+
+Easylogging++ v9.18 RELEASE NOTES
+---------------------------------
+
+==========================
+=           FIXES        =
+==========================
+
+ - Completely dithced away QA logging even macros unusable
+ - Fixed some of verbose logging macro expansions
+
+==========================
+=       NEW FEATURES     =
+==========================
+
+ - Only allow aplha-numeric (+ some symbols) for logger names (issue #105)
+ - Case insensitive app args (issue #106)
+ - Helper to reconfigure specific level for all loggers (issue #107)
+ - DCHECK macros for debug mode checks (issue #108)
+ - Added `bool Loggers::hasLogger(const std::string&)`
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

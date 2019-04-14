@@ -1,0 +1,71 @@
+# This is triggered by Makefile.system and runs before any of the code is built.
+
+export BINARY
+export USE_OPENMP
+
+ifdef TARGET_CORE
+TARGET_MAKE = Makefile_kernel.conf
+TARGET_CONF = config_kernel.h
+else
+TARGET_MAKE = Makefile.conf
+TARGET_CONF = config.h
+endif
+
+# CPUIDEMU = ../../cpuid/table.o
+
+ifdef CPUIDEMU
+EXFLAGS = -DCPUIDEMU -DVENDOR=99
+endif
+
+ifeq ($(TARGET), 1004K)
+TARGET_FLAGS = -mips32r2
+endif
+
+ifeq ($(TARGET), P5600)
+TARGET_FLAGS = -mips32r5
+endif
+
+ifeq ($(TARGET), I6400)
+TARGET_FLAGS = -mips64r6
+endif
+
+ifeq ($(TARGET), P6600)
+TARGET_FLAGS = -mips64r6
+endif
+
+ifeq ($(TARGET), I6500)
+TARGET_FLAGS = -mips64r6
+endif
+
+all: getarch_2nd
+	./getarch_2nd  0 >> $(TARGET_MAKE)
+	./getarch_2nd  1 >> $(TARGET_CONF)
+
+config.h : c_check f_check getarch
+	perl ./c_check $(TARGET_MAKE) $(TARGET_CONF) $(CC) $(TARGET_FLAGS)
+ifneq ($(ONLY_CBLAS), 1)
+	perl ./f_check $(TARGET_MAKE) $(TARGET_CONF) $(FC) $(TARGET_FLAGS)
+else
+#When we only build CBLAS, we set NOFORTRAN=2
+	echo "NOFORTRAN=2" >> $(TARGET_MAKE)
+	echo "NO_FBLAS=1" >> $(TARGET_MAKE)
+	echo "F_COMPILER=GFORTRAN"  >> $(TARGET_MAKE)
+	echo "BU=_"  >> $(TARGET_MAKE)
+	echo "#define BUNDERSCORE _" >> $(TARGET_CONF)
+	echo "#define NEEDBUNDERSCORE 1" >> $(TARGET_CONF)
+endif
+	./getarch 0 >> $(TARGET_MAKE)
+	./getarch 1 >> $(TARGET_CONF)
+
+
+getarch : getarch.c cpuid.S dummy $(CPUIDEMU)
+	$(HOSTCC) $(CFLAGS) $(EXFLAGS) -o $(@F) getarch.c cpuid.S $(CPUIDEMU)
+
+getarch_2nd : getarch_2nd.c config.h dummy
+ifndef TARGET_CORE
+	$(HOSTCC) -I. $(CFLAGS) -o $(@F) getarch_2nd.c
+else
+	$(HOSTCC) -I. $(CFLAGS) -DBUILD_KERNEL -o $(@F) getarch_2nd.c
+endif
+
+dummy:

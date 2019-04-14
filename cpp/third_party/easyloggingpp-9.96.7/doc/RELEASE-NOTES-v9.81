@@ -1,0 +1,37 @@
+Easylogging++ v9.81 RELEASE NOTES
+---------------------------------
+
+Release type: Minor
+API changes: No
+
+==========================
+=      BUILD FIX         =
+==========================
+
+ - Fix with `-Wundef` compiler flag (issue #221)
+ - Fix with `-Wswitch-default` compiler flag (issue #221)
+ - Warning fix for some unused variables
+ - syslog constant is no longer defined unless `ELPP_SYSLOG` is defined
+ - use unistd.h -> usleep for async if `std::this_thread::sleep_for` not available by defining `ELPP_NO_SLEEP_FOR` (Only async logging)
+ - Fixes `std::move` obsolete warning for clang++ 3.7 (issue #315)
+ - Crash on exit for some platforms when CTRL+C pressed (issue #261)
+ - Warning fix with clang3.7 (issue #335)
+
+==========================
+=      NEW FEATURES      =
+==========================
+
+ - `ELPP_CUSTOM_COUT` to define custom standard output (e.g, `std::cerr`) (issue #201)`
+ - More terminal colors (for INFO, DEBUG and TRACE logs)
+ - CHECK_NOTNULL for smart pointers (issue #334)
+ - ELPP_FRESH_LOG_FILE to always start new log file (issue #384)
+
+==========================
+=         NOTES          =
+==========================
+
+ - CHECK_NOTNULL does not return pointer anymore instead a simple check
+ - New sample for log rotation added
+ - See https://github.com/easylogging/easyloggingpp/blob/v9.81/README.md for manual for this release
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

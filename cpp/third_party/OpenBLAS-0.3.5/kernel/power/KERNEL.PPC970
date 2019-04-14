@@ -1,0 +1,56 @@
+SGEMMKERNEL    =  gemm_kernel_altivec.S
+SGEMMINCOPY    =  ../generic/gemm_ncopy_16.c
+SGEMMITCOPY    =  ../generic/gemm_tcopy_16.c
+SGEMMONCOPY    =  ../generic/gemm_ncopy_4.c
+SGEMMOTCOPY    =  ../generic/gemm_tcopy_4.c
+SGEMMINCOPYOBJ =  sgemm_incopy$(TSUFFIX).$(SUFFIX)
+SGEMMITCOPYOBJ =  sgemm_itcopy$(TSUFFIX).$(SUFFIX)
+SGEMMONCOPYOBJ =  sgemm_oncopy$(TSUFFIX).$(SUFFIX)
+SGEMMOTCOPYOBJ =  sgemm_otcopy$(TSUFFIX).$(SUFFIX)
+DGEMMKERNEL    =  gemm_kernel.S
+DGEMMINCOPY    =
+DGEMMITCOPY    =
+DGEMMONCOPY    =  gemm_ncopy_4.S
+DGEMMOTCOPY    =  gemm_tcopy_4.S
+DGEMMINCOPYOBJ =
+DGEMMITCOPYOBJ =
+DGEMMONCOPYOBJ =  dgemm_oncopy$(TSUFFIX).$(SUFFIX)
+DGEMMOTCOPYOBJ =  dgemm_otcopy$(TSUFFIX).$(SUFFIX)
+CGEMMKERNEL    =  zgemm_kernel_altivec.S
+CGEMMINCOPY    =  ../generic/zgemm_ncopy_8.c
+CGEMMITCOPY    =  ../generic/zgemm_tcopy_8.c
+CGEMMONCOPY    =  ../generic/zgemm_ncopy_2.c
+CGEMMOTCOPY    =  ../generic/zgemm_tcopy_2.c
+CGEMMINCOPYOBJ =  cgemm_incopy$(TSUFFIX).$(SUFFIX)
+CGEMMITCOPYOBJ =  cgemm_itcopy$(TSUFFIX).$(SUFFIX)
+CGEMMONCOPYOBJ =  cgemm_oncopy$(TSUFFIX).$(SUFFIX)
+CGEMMOTCOPYOBJ =  cgemm_otcopy$(TSUFFIX).$(SUFFIX)
+ZGEMMKERNEL    =  zgemm_kernel.S
+ZGEMMINCOPY    =
+ZGEMMITCOPY    =
+ZGEMMONCOPY    =  ../generic/zgemm_ncopy_2.c
+ZGEMMOTCOPY    =  ../generic/zgemm_tcopy_2.c
+ZGEMMINCOPYOBJ =
+ZGEMMITCOPYOBJ =
+ZGEMMONCOPYOBJ =  zgemm_oncopy$(TSUFFIX).$(SUFFIX)
+ZGEMMOTCOPYOBJ =  zgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+#STRSMKERNEL_LN	=  trsm_kernel_LN.S
+#STRSMKERNEL_LT	=  trsm_kernel_LT.S
+#STRSMKERNEL_RN	=  trsm_kernel_LT.S
+#STRSMKERNEL_RT	=  trsm_kernel_RT.S
+
+DTRSMKERNEL_LN	=  trsm_kernel_LN.S
+DTRSMKERNEL_LT	=  trsm_kernel_LT.S
+DTRSMKERNEL_RN	=  trsm_kernel_LT.S
+DTRSMKERNEL_RT	=  trsm_kernel_RT.S
+
+#CTRSMKERNEL_LN	=  ztrsm_kernel_LN.S
+#CTRSMKERNEL_LT	=  ztrsm_kernel_LT.S
+#CTRSMKERNEL_RN	=  ztrsm_kernel_LT.S
+#CTRSMKERNEL_RT	=  ztrsm_kernel_RT.S
+
+ZTRSMKERNEL_LN	=  ztrsm_kernel_LN.S
+ZTRSMKERNEL_LT	=  ztrsm_kernel_LT.S
+ZTRSMKERNEL_RN	=  ztrsm_kernel_LT.S
+ZTRSMKERNEL_RT	=  ztrsm_kernel_RT.S

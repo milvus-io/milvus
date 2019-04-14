@@ -1,0 +1,24 @@
+Easylogging++ v9.56 RELEASE NOTES
+---------------------------------
+
+=========================
+=       BUG FIXES       =
+=========================
+
+ - Issue with writing unicode characters to file (issue #151)
+ - Issue with syslog along with unicode support (issue #152)
+
+=========================
+=     NEW FEATURES      =
+=========================
+
+ - Ability to export symbols for DLL (issue #150)
+ - Ability to share logging repository (issue #153)
+ - Ability to force using standard C++ thread using `_ELPP_FORCE_USE_STD_THREAD`
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

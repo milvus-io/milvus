@@ -1,0 +1,159 @@
+SGEMM_BETA = ../generic/gemm_beta.c
+DGEMM_BETA = ../generic/gemm_beta.c
+CGEMM_BETA = ../generic/zgemm_beta.c
+ZGEMM_BETA = ../generic/zgemm_beta.c
+
+STRMMKERNEL	= ../generic/trmmkernel_2x2.c
+DTRMMKERNEL	= ../generic/trmmkernel_2x2.c
+CTRMMKERNEL	= ../generic/ztrmmkernel_2x2.c
+ZTRMMKERNEL	= ../generic/ztrmmkernel_2x2.c
+
+SGEMMKERNEL    =  ../generic/gemmkernel_2x2.c
+SGEMMONCOPY    =  ../generic/gemm_ncopy_2.c
+SGEMMOTCOPY    =  ../generic/gemm_tcopy_2.c
+SGEMMONCOPYOBJ =  sgemm_oncopy.o
+SGEMMOTCOPYOBJ =  sgemm_otcopy.o
+
+DGEMMKERNEL    =  ../generic/gemmkernel_2x2.c
+DGEMMONCOPY    = ../generic/gemm_ncopy_2.c
+DGEMMOTCOPY    = ../generic/gemm_tcopy_2.c
+DGEMMONCOPYOBJ = dgemm_oncopy.o
+DGEMMOTCOPYOBJ = dgemm_otcopy.o
+
+CGEMMKERNEL    = ../generic/zgemmkernel_2x2.c
+CGEMMONCOPY    = ../generic/zgemm_ncopy_2.c
+CGEMMOTCOPY    = ../generic/zgemm_tcopy_2.c
+CGEMMONCOPYOBJ =  cgemm_oncopy.o
+CGEMMOTCOPYOBJ =  cgemm_otcopy.o
+
+ZGEMMKERNEL    = ../generic/zgemmkernel_2x2.c
+ZGEMMONCOPY    = ../generic/zgemm_ncopy_2.c
+ZGEMMOTCOPY    = ../generic/zgemm_tcopy_2.c
+ZGEMMONCOPYOBJ =  zgemm_oncopy.o
+ZGEMMOTCOPYOBJ =  zgemm_otcopy.o
+
+STRSMKERNEL_LN	=  ../generic/trsm_kernel_LN.c
+STRSMKERNEL_LT	=  ../generic/trsm_kernel_LT.c
+STRSMKERNEL_RN	=  ../generic/trsm_kernel_RN.c
+STRSMKERNEL_RT	=  ../generic/trsm_kernel_RT.c
+
+DTRSMKERNEL_LN	= ../generic/trsm_kernel_LN.c
+DTRSMKERNEL_LT	= ../generic/trsm_kernel_LT.c
+DTRSMKERNEL_RN	= ../generic/trsm_kernel_RN.c
+DTRSMKERNEL_RT	= ../generic/trsm_kernel_RT.c
+
+CTRSMKERNEL_LN	= ../generic/trsm_kernel_LN.c
+CTRSMKERNEL_LT	= ../generic/trsm_kernel_LT.c
+CTRSMKERNEL_RN	= ../generic/trsm_kernel_RN.c
+CTRSMKERNEL_RT	= ../generic/trsm_kernel_RT.c
+
+ZTRSMKERNEL_LN	= ../generic/trsm_kernel_LN.c
+ZTRSMKERNEL_LT	= ../generic/trsm_kernel_LT.c
+ZTRSMKERNEL_RN	= ../generic/trsm_kernel_RN.c
+ZTRSMKERNEL_RT	= ../generic/trsm_kernel_RT.c
+
+#Todo: CGEMM3MKERNEL should be 4x4 blocksizes.
+CGEMM3MKERNEL    =  zgemm3m_kernel_8x4_sse3.S
+ZGEMM3MKERNEL    =  zgemm3m_kernel_4x4_sse3.S
+
+#Pure C for other kernels
+SAMAXKERNEL  = ../arm/amax.c
+DAMAXKERNEL  = ../arm/amax.c
+CAMAXKERNEL  = ../arm/zamax.c
+ZAMAXKERNEL  = ../arm/zamax.c
+
+SAMINKERNEL  = ../arm/amin.c
+DAMINKERNEL  = ../arm/amin.c
+CAMINKERNEL  = ../arm/zamin.c
+ZAMINKERNEL  = ../arm/zamin.c
+
+SMAXKERNEL   = ../arm/max.c
+DMAXKERNEL   = ../arm/max.c
+
+SMINKERNEL   = ../arm/min.c
+DMINKERNEL   = ../arm/min.c
+
+ISAMAXKERNEL = ../arm/iamax.c
+IDAMAXKERNEL = ../arm/iamax.c
+ICAMAXKERNEL = ../arm/izamax.c
+IZAMAXKERNEL = ../arm/izamax.c
+
+ISAMINKERNEL = ../arm/iamin.c
+IDAMINKERNEL = ../arm/iamin.c
+ICAMINKERNEL = ../arm/izamin.c
+IZAMINKERNEL = ../arm/izamin.c
+
+ISMAXKERNEL  = ../arm/imax.c
+IDMAXKERNEL  = ../arm/imax.c
+
+ISMINKERNEL  = ../arm/imin.c
+IDMINKERNEL  = ../arm/imin.c
+
+SASUMKERNEL  = ../arm/asum.c
+DASUMKERNEL  = ../arm/asum.c
+CASUMKERNEL  = ../arm/zasum.c
+ZASUMKERNEL  = ../arm/zasum.c
+
+SAXPYKERNEL  = ../arm/axpy.c
+DAXPYKERNEL  = ../arm/axpy.c
+CAXPYKERNEL  = ../arm/zaxpy.c
+ZAXPYKERNEL  = ../arm/zaxpy.c
+
+SCOPYKERNEL  = ../arm/copy.c
+DCOPYKERNEL  = ../arm/copy.c
+CCOPYKERNEL  = ../arm/zcopy.c
+ZCOPYKERNEL  = ../arm/zcopy.c
+
+SDOTKERNEL   = ../arm/dot.c
+DDOTKERNEL   = ../arm/dot.c
+CDOTKERNEL   = ../arm/zdot.c
+ZDOTKERNEL   = ../arm/zdot.c
+
+SNRM2KERNEL  = ../arm/nrm2.c
+DNRM2KERNEL  = ../arm/nrm2.c
+CNRM2KERNEL  = ../arm/znrm2.c
+ZNRM2KERNEL  = ../arm/znrm2.c
+
+SROTKERNEL   = ../arm/rot.c
+DROTKERNEL   = ../arm/rot.c
+CROTKERNEL   = ../arm/zrot.c
+ZROTKERNEL   = ../arm/zrot.c
+
+SSCALKERNEL  = ../arm/scal.c
+DSCALKERNEL  = ../arm/scal.c
+CSCALKERNEL  = ../arm/zscal.c
+ZSCALKERNEL  = ../arm/zscal.c
+
+SSWAPKERNEL  = ../arm/swap.c
+DSWAPKERNEL  = ../arm/swap.c
+CSWAPKERNEL  = ../arm/zswap.c
+ZSWAPKERNEL  = ../arm/zswap.c
+
+SGEMVNKERNEL = ../arm/gemv_n.c
+DGEMVNKERNEL = ../arm/gemv_n.c
+CGEMVNKERNEL = ../arm/zgemv_n.c
+ZGEMVNKERNEL = ../arm/zgemv_n.c
+
+SGEMVTKERNEL = ../arm/gemv_t.c
+DGEMVTKERNEL = ../arm/gemv_t.c
+CGEMVTKERNEL = ../arm/zgemv_t.c
+ZGEMVTKERNEL = ../arm/zgemv_t.c
+
+SSYMV_U_KERNEL =  ../generic/symv_k.c
+SSYMV_L_KERNEL =  ../generic/symv_k.c
+DSYMV_U_KERNEL =  ../generic/symv_k.c
+DSYMV_L_KERNEL =  ../generic/symv_k.c
+QSYMV_U_KERNEL =  ../generic/symv_k.c
+QSYMV_L_KERNEL =  ../generic/symv_k.c
+CSYMV_U_KERNEL =  ../generic/zsymv_k.c
+CSYMV_L_KERNEL =  ../generic/zsymv_k.c
+ZSYMV_U_KERNEL =  ../generic/zsymv_k.c
+ZSYMV_L_KERNEL =  ../generic/zsymv_k.c
+XSYMV_U_KERNEL =  ../generic/zsymv_k.c
+XSYMV_L_KERNEL =  ../generic/zsymv_k.c
+
+ZHEMV_U_KERNEL =  ../generic/zhemv_k.c
+ZHEMV_L_KERNEL =  ../generic/zhemv_k.c
+
+CGEMM3MKERNEL    = ../generic/zgemm3mkernel_dump.c
+ZGEMM3MKERNEL    = ../generic/zgemm3mkernel_dump.c

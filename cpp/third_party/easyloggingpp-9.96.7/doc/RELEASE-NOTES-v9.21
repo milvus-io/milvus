@@ -1,0 +1,29 @@
+Easylogging++ v9.21 RELEASE NOTES
+---------------------------------
+
+==========================
+=       REFACTORING      =
+==========================
+
+ - Removed some unnecessary code
+ - Removed licence full detail, instead added link to it
+ - Removed unnecessary methods from VersionInfo static class, just left `version()` and `releaseDate()`
+
+==========================
+=       BUG FIXES        =
+==========================
+
+ - Configuring same logger twice loses some information (issue #116)
+
+==========================
+=     NEW FEATRUES       =
+==========================
+
+ - Added base configurations pointer to `parseFromText` same as `parseFromFile`
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

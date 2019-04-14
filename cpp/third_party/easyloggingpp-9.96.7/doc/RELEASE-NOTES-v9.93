@@ -1,0 +1,28 @@
+Easylogging++ v9.93 RELEASE NOTES
+---------------------------------
+
+Release type: Minor
+API changes: No
+Breaking Change: No
+
+==========================
+=         FIXES          =
+==========================
+
+ - Multithread storage lock fix
+ - Dead lock fixes (#417) Thanks to @aparajita for tip
+
+==========================
+=        FEATURES        =
+==========================
+
+ - Set thread names using new helper `Helpers::setThreadName` and print using new format specifier `%thread_name`
+ - A lot of sample clean up and fixed
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/muflihun/easyloggingpp/blob/9.93/README.md for manual for this release
+ - See https://github.com/muflihun/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/muflihun/easyloggingpp/issues?page=1&state=closed

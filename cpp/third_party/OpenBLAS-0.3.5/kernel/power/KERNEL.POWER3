@@ -1,0 +1,2 @@
+include $(KERNELDIR)/KERNEL.POWER5
+

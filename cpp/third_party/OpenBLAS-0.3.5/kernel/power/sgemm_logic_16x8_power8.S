@@ -1,0 +1,2333 @@
+/***************************************************************************
+Copyright (c) 2013-2016, The OpenBLAS Project
+All rights reserved.
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+1. Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in
+the documentation and/or other materials provided with the
+distribution.
+3. Neither the name of the OpenBLAS project nor the names of
+its contributors may be used to endorse or promote products
+derived from this software without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE OPENBLAS PROJECT OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*****************************************************************************/
+
+/**************************************************************************************
+* 2016/04/21 Werner Saar (wernsaar@googlemail.com)
+* 	 BLASTEST 		: OK
+* 	 CTEST			: OK
+* 	 TEST			: OK
+*	 LAPACK-TEST		: OK
+**************************************************************************************/
+
+	srawi.		J,	N,	3
+	ble		SGEMM_L8_END
+
+SGEMM_L8_BEGIN:
+
+	mr		BO,	B
+	mr		BBO,	BBUFFER
+	srawi.		T1,	K,	2
+	ble		SGEMM_L8_COPYB1
+
+
+SGEMM_L8_COPYB4:
+
+	dcbt		BO,	PRE
+	dcbtst		BBO,	PRE
+	COPYB_4x8
+	addic.		T1,	T1,	-1
+	ble		SGEMM_L8_COPYB1
+
+	dcbtst		BBO,	PRE
+	COPYB_4x8
+	addic.		T1,	T1,	-1
+	ble		SGEMM_L8_COPYB1
+
+	dcbtst		BBO,	PRE
+	COPYB_4x8
+	addic.		T1,	T1,	-1
+	ble		SGEMM_L8_COPYB1
+
+	dcbtst		BBO,	PRE
+	COPYB_4x8
+	addic.		T1,	T1,	-1
+
+	bgt		SGEMM_L8_COPYB4
+
+SGEMM_L8_COPYB1:
+
+	andi.		T1,	K,	3
+	ble		SGEMM_L8_COPYB_END	
+
+SGEMM_L8_COPYB1_LOOP:
+
+
+	COPYB_1x8
+	addic.		T1,	T1,	-1
+
+	bgt		SGEMM_L8_COPYB1_LOOP
+
+SGEMM_L8_COPYB_END:
+
+	mr		CO,	C
+	mr		AO,	A
+	slwi		T1,	LDC	,	3
+	add		C,	C,	T1
+	srawi.		I,	M,	4
+	ble		SGEMM_L8x16_END
+
+SGEMM_L8x16_BEGIN:
+
+
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L8x16_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L8x16_SUB4
+
+SGEMM_L8x16_LOOP_START:
+
+	dcbt		AO,	PRE
+	dcbt		BO,	PRE
+	LOAD8x16_1
+	dcbt		BO,	PRE
+	KERNEL8x16_I1
+	dcbt		AO,	PRE
+	dcbt		BO,	PRE
+	KERNEL8x16_2
+	dcbt		BO,	PRE
+	KERNEL8x16_1
+	dcbt		AO,	PRE
+	dcbt		BO,	PRE
+	KERNEL8x16_2
+
+	dcbt		BO,	PRE
+	KERNEL8x16_1
+	dcbt		AO,	PRE
+	dcbt		BO,	PRE
+	KERNEL8x16_2
+	dcbt		BO,	PRE
+	KERNEL8x16_1
+	dcbt		AO,	PRE
+	dcbt		BO,	PRE
+	KERNEL8x16_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L8x16_LOOP_END
+
+	.align 5
+
+SGEMM_L8x16_LOOP:
+
+	dcbt		BO,	PRE
+	KERNEL8x16_1
+	dcbt		AO,	PRE
+	dcbt		BO,	PRE
+	KERNEL8x16_2
+	dcbt		BO,	PRE
+	KERNEL8x16_1
+	dcbt		AO,	PRE
+	dcbt		BO,	PRE
+	KERNEL8x16_2
+
+	dcbt		BO,	PRE
+	KERNEL8x16_1
+	dcbt		AO,	PRE
+	dcbt		BO,	PRE
+	KERNEL8x16_2
+	dcbt		BO,	PRE
+	KERNEL8x16_1
+	dcbt		AO,	PRE
+	dcbt		BO,	PRE
+	KERNEL8x16_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L8x16_LOOP
+
+SGEMM_L8x16_LOOP_END:
+
+	dcbt		BO,	PRE
+	KERNEL8x16_1
+	dcbt		AO,	PRE
+	dcbt		BO,	PRE
+	KERNEL8x16_2
+	dcbt		BO,	PRE
+	KERNEL8x16_1
+	dcbt		AO,	PRE
+	KERNEL8x16_2
+
+	KERNEL8x16_1
+	dcbt		AO,	PRE
+	KERNEL8x16_2
+	KERNEL8x16_1
+	KERNEL8x16_E2
+
+	b		SGEMM_L8x16_SUB1
+
+SGEMM_L8x16_SUB4:
+
+	dcbt		AO,	PRE
+	KERNEL8x16_SUBI1
+	KERNEL8x16_SUB1
+	dcbt		AO,	PRE
+	KERNEL8x16_SUB1
+	KERNEL8x16_SUB1
+
+	KERNEL8x16_SUB1
+	KERNEL8x16_SUB1
+	KERNEL8x16_SUB1
+	KERNEL8x16_SUB1
+
+	b		SGEMM_L8x16_SUB1
+
+SGEMM_L8x16_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL8x16_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L8x16_SAVE
+	b		SGEMM_L8x16_SUB2
+
+SGEMM_L8x16_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L8x16_SAVE
+
+SGEMM_L8x16_SUB2:
+
+	KERNEL8x16_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L8x16_SUB2
+
+SGEMM_L8x16_SAVE:
+
+	SAVE8x16
+
+	addic.		I,	I,	-1
+	bgt		SGEMM_L8x16_BEGIN
+
+SGEMM_L8x16_END:
+
+SGEMM_L8x8_BEGIN:
+
+	andi.		T2,	M,	15
+	ble		SGEMM_L8x1_END
+
+	andi.		T1,	M,	8
+	ble		SGEMM_L8x8_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L8x8_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L8x8_SUB4
+
+SGEMM_L8x8_LOOP_START:
+
+	LOAD8x8_1
+	KERNEL8x8_I1
+	KERNEL8x8_2
+	KERNEL8x8_1
+	KERNEL8x8_2
+
+	KERNEL8x8_1
+	KERNEL8x8_2
+	KERNEL8x8_1
+	KERNEL8x8_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L8x8_LOOP_END
+
+	.align 5
+
+SGEMM_L8x8_LOOP:
+
+	KERNEL8x8_1
+	KERNEL8x8_2
+	KERNEL8x8_1
+	KERNEL8x8_2
+
+	KERNEL8x8_1
+	KERNEL8x8_2
+	KERNEL8x8_1
+	KERNEL8x8_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L8x8_LOOP
+
+SGEMM_L8x8_LOOP_END:
+
+	KERNEL8x8_1
+	KERNEL8x8_2
+	KERNEL8x8_1
+	KERNEL8x8_2
+
+	KERNEL8x8_1
+	KERNEL8x8_2
+	KERNEL8x8_1
+	KERNEL8x8_E2
+
+	b		SGEMM_L8x8_SUB1
+
+SGEMM_L8x8_SUB4:
+
+	KERNEL8x8_SUBI1
+	KERNEL8x8_SUB1
+	KERNEL8x8_SUB1
+	KERNEL8x8_SUB1
+
+	KERNEL8x8_SUB1
+	KERNEL8x8_SUB1
+	KERNEL8x8_SUB1
+	KERNEL8x8_SUB1
+
+	b		SGEMM_L8x8_SUB1
+
+SGEMM_L8x8_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL8x8_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L8x8_SAVE
+	b		SGEMM_L8x8_SUB2
+
+SGEMM_L8x8_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L8x8_SAVE
+
+SGEMM_L8x8_SUB2:
+
+	KERNEL8x8_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L8x8_SUB2
+
+SGEMM_L8x8_SAVE:
+
+	SAVE8x8
+
+SGEMM_L8x8_END:
+
+SGEMM_L8x4_BEGIN:
+
+
+	andi.		T1,	M,	4
+	ble		SGEMM_L8x4_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L8x4_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L8x4_SUB4
+
+SGEMM_L8x4_LOOP_START:
+
+	LOAD8x4_1
+	KERNEL8x4_I1
+	KERNEL8x4_2
+	KERNEL8x4_1
+	KERNEL8x4_2
+
+	KERNEL8x4_1
+	KERNEL8x4_2
+	KERNEL8x4_1
+	KERNEL8x4_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L8x4_LOOP_END
+
+	.align 5
+
+SGEMM_L8x4_LOOP:
+
+	KERNEL8x4_1
+	KERNEL8x4_2
+	KERNEL8x4_1
+	KERNEL8x4_2
+
+	KERNEL8x4_1
+	KERNEL8x4_2
+	KERNEL8x4_1
+	KERNEL8x4_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L8x4_LOOP
+
+SGEMM_L8x4_LOOP_END:
+
+	KERNEL8x4_1
+	KERNEL8x4_2
+	KERNEL8x4_1
+	KERNEL8x4_2
+
+	KERNEL8x4_1
+	KERNEL8x4_2
+	KERNEL8x4_1
+	KERNEL8x4_E2
+
+	b		SGEMM_L8x4_SUB1
+
+SGEMM_L8x4_SUB4:
+
+	KERNEL8x4_SUBI1
+	KERNEL8x4_SUB1
+	KERNEL8x4_SUB1
+	KERNEL8x4_SUB1
+
+	KERNEL8x4_SUB1
+	KERNEL8x4_SUB1
+	KERNEL8x4_SUB1
+	KERNEL8x4_SUB1
+
+	b		SGEMM_L8x4_SUB1
+
+SGEMM_L8x4_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL8x4_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L8x4_SAVE
+	b		SGEMM_L8x4_SUB2
+
+SGEMM_L8x4_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L8x4_SAVE
+
+SGEMM_L8x4_SUB2:
+
+	KERNEL8x4_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L8x4_SUB2
+
+SGEMM_L8x4_SAVE:
+
+	SAVE8x4
+
+SGEMM_L8x4_END:
+
+SGEMM_L8x2_BEGIN:
+
+
+	andi.		T1,	M,	2
+	ble		SGEMM_L8x2_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L8x2_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L8x2_SUB4
+
+SGEMM_L8x2_LOOP_START:
+
+	LOAD8x2_1
+	KERNEL8x2_I1
+	KERNEL8x2_2
+	KERNEL8x2_1
+	KERNEL8x2_2
+
+	KERNEL8x2_1
+	KERNEL8x2_2
+	KERNEL8x2_1
+	KERNEL8x2_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L8x2_LOOP_END
+
+	.align 5
+
+SGEMM_L8x2_LOOP:
+
+	KERNEL8x2_1
+	KERNEL8x2_2
+	KERNEL8x2_1
+	KERNEL8x2_2
+
+	KERNEL8x2_1
+	KERNEL8x2_2
+	KERNEL8x2_1
+	KERNEL8x2_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L8x2_LOOP
+
+SGEMM_L8x2_LOOP_END:
+
+	KERNEL8x2_1
+	KERNEL8x2_2
+	KERNEL8x2_1
+	KERNEL8x2_2
+
+	KERNEL8x2_1
+	KERNEL8x2_2
+	KERNEL8x2_1
+	KERNEL8x2_E2
+
+	b		SGEMM_L8x2_SUB1
+
+SGEMM_L8x2_SUB4:
+
+	KERNEL8x2_SUBI1
+	KERNEL8x2_SUB1
+	KERNEL8x2_SUB1
+	KERNEL8x2_SUB1
+
+	KERNEL8x2_SUB1
+	KERNEL8x2_SUB1
+	KERNEL8x2_SUB1
+	KERNEL8x2_SUB1
+
+	b		SGEMM_L8x2_SUB1
+
+SGEMM_L8x2_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL8x2_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L8x2_SAVE
+	b		SGEMM_L8x2_SUB2
+
+SGEMM_L8x2_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L8x2_SAVE
+
+SGEMM_L8x2_SUB2:
+
+	KERNEL8x2_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L8x2_SUB2
+
+SGEMM_L8x2_SAVE:
+
+	SAVE8x2
+
+SGEMM_L8x2_END:
+
+SGEMM_L8x1_BEGIN:
+
+
+	andi.		T1,	M,	1
+	ble		SGEMM_L8x1_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L8x1_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L8x1_SUB4
+
+SGEMM_L8x1_LOOP_START:
+
+	LOAD8x1_1
+	KERNEL8x1_I1
+	KERNEL8x1_2
+	KERNEL8x1_1
+	KERNEL8x1_2
+
+	KERNEL8x1_1
+	KERNEL8x1_2
+	KERNEL8x1_1
+	KERNEL8x1_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L8x1_LOOP_END
+
+	.align 5
+
+SGEMM_L8x1_LOOP:
+
+	KERNEL8x1_1
+	KERNEL8x1_2
+	KERNEL8x1_1
+	KERNEL8x1_2
+
+	KERNEL8x1_1
+	KERNEL8x1_2
+	KERNEL8x1_1
+	KERNEL8x1_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L8x1_LOOP
+
+SGEMM_L8x1_LOOP_END:
+
+	KERNEL8x1_1
+	KERNEL8x1_2
+	KERNEL8x1_1
+	KERNEL8x1_2
+
+	KERNEL8x1_1
+	KERNEL8x1_2
+	KERNEL8x1_1
+	KERNEL8x1_E2
+
+	b		SGEMM_L8x1_SUB1
+
+SGEMM_L8x1_SUB4:
+
+	KERNEL8x1_SUBI1
+	KERNEL8x1_SUB1
+	KERNEL8x1_SUB1
+	KERNEL8x1_SUB1
+
+	KERNEL8x1_SUB1
+	KERNEL8x1_SUB1
+	KERNEL8x1_SUB1
+	KERNEL8x1_SUB1
+
+	b		SGEMM_L8x1_SUB1
+
+SGEMM_L8x1_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL8x1_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L8x1_SAVE
+	b		SGEMM_L8x1_SUB2
+
+SGEMM_L8x1_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L8x1_SAVE
+
+SGEMM_L8x1_SUB2:
+
+	KERNEL8x1_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L8x1_SUB2
+
+SGEMM_L8x1_SAVE:
+
+	SAVE8x1
+
+SGEMM_L8x1_END:
+
+	slwi		T1,	K,	5
+	add		B,	B,	T1
+
+	addic.		J,	J,	-1
+	bgt		SGEMM_L8_BEGIN
+
+	andi.		T2,	N,	7
+	ble		L999
+
+SGEMM_L8_END:
+
+	b		SGEMM_L4_BEGIN
+
+L999_H1:
+
+	b		L999
+
+SGEMM_L4_BEGIN:
+
+	mr		BO,	B
+	mr		BBO,	BBUFFER
+	slwi		T1,	K,	2
+
+SGEMM_L4_COPYB:
+	dcbtst		BBO,	PRE
+
+	lxvw4x		vs3,	o0,	BO
+	lxvw4x		vs11,	o16,	BO
+	xxspltw		vs4,	vs3,	0
+	xxspltw		vs5,	vs3,	1
+	xxspltw		vs6,	vs3,	2
+	xxspltw		vs7,	vs3,	3
+	xxspltw		vs12,	vs11,	0
+	xxspltw		vs13,	vs11,	1
+	xxspltw		vs14,	vs11,	2
+	xxspltw		vs15,	vs11,	3
+	stxvw4x		vs4,	o0,	BBO
+	stxvw4x		vs5,	o16,	BBO
+	stxvw4x		vs6,	o32,	BBO
+	stxvw4x		vs7,	o48,	BBO
+	addi		BO,	BO,	32
+	addi		BBO,	BBO,	64
+	stxvw4x		vs12,	o0,	BBO
+	stxvw4x		vs13,	o16,	BBO
+	stxvw4x		vs14,	o32,	BBO
+	stxvw4x		vs15,	o48,	BBO
+	addic.		T1,	T1,	-8
+	addi		BBO,	BBO,	64
+
+	bge		SGEMM_L4_COPYB
+
+	andi.		T1,	N,	4
+	ble		SGEMM_L4_END
+	mr		CO,	C
+	mr		AO,	A
+	slwi		T1,	LDC	,	2
+	add		C,	C,	T1
+	srawi.		I,	M,	4
+	ble		SGEMM_L4x16_END
+
+SGEMM_L4x16_BEGIN:
+
+
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L4x16_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L4x16_SUB4
+
+SGEMM_L4x16_LOOP_START:
+
+	dcbt		AO,	PRE
+	LOAD4x16_1
+	KERNEL4x16_I1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+	KERNEL4x16_1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+
+	KERNEL4x16_1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+	KERNEL4x16_1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L4x16_LOOP_END
+
+	.align 5
+
+SGEMM_L4x16_LOOP:
+
+	KERNEL4x16_1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+	KERNEL4x16_1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+
+	KERNEL4x16_1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+	KERNEL4x16_1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L4x16_LOOP
+
+SGEMM_L4x16_LOOP_END:
+
+	KERNEL4x16_1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+	KERNEL4x16_1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+
+	KERNEL4x16_1
+	dcbt		AO,	PRE
+	KERNEL4x16_2
+	KERNEL4x16_1
+	KERNEL4x16_E2
+
+	b		SGEMM_L4x16_SUB1
+
+SGEMM_L4x16_SUB4:
+
+	dcbt		AO,	PRE
+	KERNEL4x16_SUBI1
+	KERNEL4x16_SUB1
+	dcbt		AO,	PRE
+	KERNEL4x16_SUB1
+	KERNEL4x16_SUB1
+
+	KERNEL4x16_SUB1
+	KERNEL4x16_SUB1
+	KERNEL4x16_SUB1
+	KERNEL4x16_SUB1
+
+	b		SGEMM_L4x16_SUB1
+
+SGEMM_L4x16_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL4x16_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L4x16_SAVE
+	b		SGEMM_L4x16_SUB2
+
+SGEMM_L4x16_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L4x16_SAVE
+
+SGEMM_L4x16_SUB2:
+
+	KERNEL4x16_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L4x16_SUB2
+
+SGEMM_L4x16_SAVE:
+
+	SAVE4x16
+
+	addic.		I,	I,	-1
+	bgt		SGEMM_L4x16_BEGIN
+
+SGEMM_L4x16_END:
+
+SGEMM_L4x8_BEGIN:
+
+	andi.		T2,	M,	15
+	ble		SGEMM_L4x1_END
+
+	andi.		T1,	M,	8
+	ble		SGEMM_L4x8_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L4x8_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L4x8_SUB4
+
+SGEMM_L4x8_LOOP_START:
+
+	LOAD4x8_1
+	KERNEL4x8_I1
+	KERNEL4x8_2
+	KERNEL4x8_1
+	KERNEL4x8_2
+
+	KERNEL4x8_1
+	KERNEL4x8_2
+	KERNEL4x8_1
+	KERNEL4x8_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L4x8_LOOP_END
+
+	.align 5
+
+SGEMM_L4x8_LOOP:
+
+	KERNEL4x8_1
+	KERNEL4x8_2
+	KERNEL4x8_1
+	KERNEL4x8_2
+
+	KERNEL4x8_1
+	KERNEL4x8_2
+	KERNEL4x8_1
+	KERNEL4x8_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L4x8_LOOP
+
+SGEMM_L4x8_LOOP_END:
+
+	KERNEL4x8_1
+	KERNEL4x8_2
+	KERNEL4x8_1
+	KERNEL4x8_2
+
+	KERNEL4x8_1
+	KERNEL4x8_2
+	KERNEL4x8_1
+	KERNEL4x8_E2
+
+	b		SGEMM_L4x8_SUB1
+
+SGEMM_L4x8_SUB4:
+
+	KERNEL4x8_SUBI1
+	KERNEL4x8_SUB1
+	KERNEL4x8_SUB1
+	KERNEL4x8_SUB1
+
+	KERNEL4x8_SUB1
+	KERNEL4x8_SUB1
+	KERNEL4x8_SUB1
+	KERNEL4x8_SUB1
+
+	b		SGEMM_L4x8_SUB1
+
+SGEMM_L4x8_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL4x8_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L4x8_SAVE
+	b		SGEMM_L4x8_SUB2
+
+SGEMM_L4x8_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L4x8_SAVE
+
+SGEMM_L4x8_SUB2:
+
+	KERNEL4x8_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L4x8_SUB2
+
+SGEMM_L4x8_SAVE:
+
+	SAVE4x8
+
+SGEMM_L4x8_END:
+
+SGEMM_L4x4_BEGIN:
+
+
+	andi.		T1,	M,	4
+	ble		SGEMM_L4x4_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L4x4_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L4x4_SUB4
+
+SGEMM_L4x4_LOOP_START:
+
+	LOAD4x4_1
+	KERNEL4x4_I1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	KERNEL4x4_2
+
+	KERNEL4x4_1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	KERNEL4x4_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L4x4_LOOP_END
+
+	.align 5
+
+SGEMM_L4x4_LOOP:
+
+	KERNEL4x4_1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	KERNEL4x4_2
+
+	KERNEL4x4_1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	KERNEL4x4_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L4x4_LOOP
+
+SGEMM_L4x4_LOOP_END:
+
+	KERNEL4x4_1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	KERNEL4x4_2
+
+	KERNEL4x4_1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	KERNEL4x4_E2
+
+	b		SGEMM_L4x4_SUB1
+
+SGEMM_L4x4_SUB4:
+
+	KERNEL4x4_SUBI1
+	KERNEL4x4_SUB1
+	KERNEL4x4_SUB1
+	KERNEL4x4_SUB1
+
+	KERNEL4x4_SUB1
+	KERNEL4x4_SUB1
+	KERNEL4x4_SUB1
+	KERNEL4x4_SUB1
+
+	b		SGEMM_L4x4_SUB1
+
+SGEMM_L4x4_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL4x4_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L4x4_SAVE
+	b		SGEMM_L4x4_SUB2
+
+SGEMM_L4x4_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L4x4_SAVE
+
+SGEMM_L4x4_SUB2:
+
+	KERNEL4x4_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L4x4_SUB2
+
+SGEMM_L4x4_SAVE:
+
+	SAVE4x4
+
+SGEMM_L4x4_END:
+
+SGEMM_L4x2_BEGIN:
+
+
+	andi.		T1,	M,	2
+	ble		SGEMM_L4x2_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L4x2_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L4x2_SUB4
+
+SGEMM_L4x2_LOOP_START:
+
+	LOAD4x2_1
+	KERNEL4x2_I1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_2
+
+	KERNEL4x2_1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L4x2_LOOP_END
+
+	.align 5
+
+SGEMM_L4x2_LOOP:
+
+	KERNEL4x2_1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_2
+
+	KERNEL4x2_1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L4x2_LOOP
+
+SGEMM_L4x2_LOOP_END:
+
+	KERNEL4x2_1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_2
+
+	KERNEL4x2_1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_E2
+
+	b		SGEMM_L4x2_SUB1
+
+SGEMM_L4x2_SUB4:
+
+	KERNEL4x2_SUBI1
+	KERNEL4x2_SUB1
+	KERNEL4x2_SUB1
+	KERNEL4x2_SUB1
+
+	KERNEL4x2_SUB1
+	KERNEL4x2_SUB1
+	KERNEL4x2_SUB1
+	KERNEL4x2_SUB1
+
+	b		SGEMM_L4x2_SUB1
+
+SGEMM_L4x2_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL4x2_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L4x2_SAVE
+	b		SGEMM_L4x2_SUB2
+
+SGEMM_L4x2_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L4x2_SAVE
+
+SGEMM_L4x2_SUB2:
+
+	KERNEL4x2_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L4x2_SUB2
+
+SGEMM_L4x2_SAVE:
+
+	SAVE4x2
+
+SGEMM_L4x2_END:
+
+SGEMM_L4x1_BEGIN:
+
+
+	andi.		T1,	M,	1
+	ble		SGEMM_L4x1_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L4x1_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L4x1_SUB4
+
+SGEMM_L4x1_LOOP_START:
+
+	LOAD4x1_1
+	KERNEL4x1_I1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_2
+
+	KERNEL4x1_1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L4x1_LOOP_END
+
+	.align 5
+
+SGEMM_L4x1_LOOP:
+
+	KERNEL4x1_1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_2
+
+	KERNEL4x1_1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L4x1_LOOP
+
+SGEMM_L4x1_LOOP_END:
+
+	KERNEL4x1_1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_2
+
+	KERNEL4x1_1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_E2
+
+	b		SGEMM_L4x1_SUB1
+
+SGEMM_L4x1_SUB4:
+
+	KERNEL4x1_SUBI1
+	KERNEL4x1_SUB1
+	KERNEL4x1_SUB1
+	KERNEL4x1_SUB1
+
+	KERNEL4x1_SUB1
+	KERNEL4x1_SUB1
+	KERNEL4x1_SUB1
+	KERNEL4x1_SUB1
+
+	b		SGEMM_L4x1_SUB1
+
+SGEMM_L4x1_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL4x1_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L4x1_SAVE
+	b		SGEMM_L4x1_SUB2
+
+SGEMM_L4x1_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L4x1_SAVE
+
+SGEMM_L4x1_SUB2:
+
+	KERNEL4x1_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L4x1_SUB2
+
+SGEMM_L4x1_SAVE:
+
+	SAVE4x1
+
+SGEMM_L4x1_END:
+
+	slwi		T1,	K,	4
+	add		B,	B,	T1
+
+SGEMM_L4_END:
+SGEMM_L2_BEGIN:
+
+	mr		BO,	B
+	mr		BBO,	BBUFFER
+	slwi		T1,	K,	1
+
+SGEMM_L2_COPYB:
+	dcbtst		BBO,	PRE
+
+	lxvw4x		vs3,	o0,	BO
+	lxvw4x		vs11,	o16,	BO
+	xxspltw		vs4,	vs3,	0
+	xxspltw		vs5,	vs3,	1
+	xxspltw		vs6,	vs3,	2
+	xxspltw		vs7,	vs3,	3
+	xxspltw		vs12,	vs11,	0
+	xxspltw		vs13,	vs11,	1
+	xxspltw		vs14,	vs11,	2
+	xxspltw		vs15,	vs11,	3
+	stxvw4x		vs4,	o0,	BBO
+	stxvw4x		vs5,	o16,	BBO
+	stxvw4x		vs6,	o32,	BBO
+	stxvw4x		vs7,	o48,	BBO
+	addi		BO,	BO,	32
+	addi		BBO,	BBO,	64
+	stxvw4x		vs12,	o0,	BBO
+	stxvw4x		vs13,	o16,	BBO
+	stxvw4x		vs14,	o32,	BBO
+	stxvw4x		vs15,	o48,	BBO
+	addic.		T1,	T1,	-8
+	addi		BBO,	BBO,	64
+
+	bge		SGEMM_L2_COPYB
+
+	andi.		T1,	N,	2
+	ble		SGEMM_L2_END
+	mr		CO,	C
+	mr		AO,	A
+	slwi		T1,	LDC	,	1
+	add		C,	C,	T1
+	srawi.		I,	M,	4
+	ble		SGEMM_L2x16_END
+
+SGEMM_L2x16_BEGIN:
+
+
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L2x16_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L2x16_SUB4
+
+SGEMM_L2x16_LOOP_START:
+
+	dcbt		AO,	PRE
+	LOAD2x16_1
+	KERNEL2x16_I1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L2x16_LOOP_END
+
+	.align 5
+
+SGEMM_L2x16_LOOP:
+
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L2x16_LOOP
+
+SGEMM_L2x16_LOOP_END:
+
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	KERNEL2x16_1
+	KERNEL2x16_E2
+
+	b		SGEMM_L2x16_SUB1
+
+SGEMM_L2x16_SUB4:
+
+	dcbt		AO,	PRE
+	KERNEL2x16_SUBI1
+	KERNEL2x16_SUB1
+	dcbt		AO,	PRE
+	KERNEL2x16_SUB1
+	KERNEL2x16_SUB1
+
+	KERNEL2x16_SUB1
+	KERNEL2x16_SUB1
+	KERNEL2x16_SUB1
+	KERNEL2x16_SUB1
+
+	b		SGEMM_L2x16_SUB1
+
+SGEMM_L2x16_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL2x16_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L2x16_SAVE
+	b		SGEMM_L2x16_SUB2
+
+SGEMM_L2x16_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L2x16_SAVE
+
+SGEMM_L2x16_SUB2:
+
+	KERNEL2x16_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L2x16_SUB2
+
+SGEMM_L2x16_SAVE:
+
+	SAVE2x16
+
+	addic.		I,	I,	-1
+	bgt		SGEMM_L2x16_BEGIN
+
+SGEMM_L2x16_END:
+
+SGEMM_L2x8_BEGIN:
+
+	andi.		T2,	M,	15
+	ble		SGEMM_L2x1_END
+
+	andi.		T1,	M,	8
+	ble		SGEMM_L2x8_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L2x8_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L2x8_SUB4
+
+SGEMM_L2x8_LOOP_START:
+
+	LOAD2x8_1
+	KERNEL2x8_I1
+	KERNEL2x8_2
+	KERNEL2x8_1
+	KERNEL2x8_2
+
+	KERNEL2x8_1
+	KERNEL2x8_2
+	KERNEL2x8_1
+	KERNEL2x8_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L2x8_LOOP_END
+
+	.align 5
+
+SGEMM_L2x8_LOOP:
+
+	KERNEL2x8_1
+	KERNEL2x8_2
+	KERNEL2x8_1
+	KERNEL2x8_2
+
+	KERNEL2x8_1
+	KERNEL2x8_2
+	KERNEL2x8_1
+	KERNEL2x8_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L2x8_LOOP
+
+SGEMM_L2x8_LOOP_END:
+
+	KERNEL2x8_1
+	KERNEL2x8_2
+	KERNEL2x8_1
+	KERNEL2x8_2
+
+	KERNEL2x8_1
+	KERNEL2x8_2
+	KERNEL2x8_1
+	KERNEL2x8_E2
+
+	b		SGEMM_L2x8_SUB1
+
+SGEMM_L2x8_SUB4:
+
+	KERNEL2x8_SUBI1
+	KERNEL2x8_SUB1
+	KERNEL2x8_SUB1
+	KERNEL2x8_SUB1
+
+	KERNEL2x8_SUB1
+	KERNEL2x8_SUB1
+	KERNEL2x8_SUB1
+	KERNEL2x8_SUB1
+
+	b		SGEMM_L2x8_SUB1
+
+SGEMM_L2x8_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL2x8_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L2x8_SAVE
+	b		SGEMM_L2x8_SUB2
+
+SGEMM_L2x8_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L2x8_SAVE
+
+SGEMM_L2x8_SUB2:
+
+	KERNEL2x8_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L2x8_SUB2
+
+SGEMM_L2x8_SAVE:
+
+	SAVE2x8
+
+SGEMM_L2x8_END:
+
+SGEMM_L2x4_BEGIN:
+
+
+	andi.		T1,	M,	4
+	ble		SGEMM_L2x4_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L2x4_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L2x4_SUB4
+
+SGEMM_L2x4_LOOP_START:
+
+	LOAD2x4_1
+	KERNEL2x4_I1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_2
+
+	KERNEL2x4_1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L2x4_LOOP_END
+
+	.align 5
+
+SGEMM_L2x4_LOOP:
+
+	KERNEL2x4_1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_2
+
+	KERNEL2x4_1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L2x4_LOOP
+
+SGEMM_L2x4_LOOP_END:
+
+	KERNEL2x4_1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_2
+
+	KERNEL2x4_1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_E2
+
+	b		SGEMM_L2x4_SUB1
+
+SGEMM_L2x4_SUB4:
+
+	KERNEL2x4_SUBI1
+	KERNEL2x4_SUB1
+	KERNEL2x4_SUB1
+	KERNEL2x4_SUB1
+
+	KERNEL2x4_SUB1
+	KERNEL2x4_SUB1
+	KERNEL2x4_SUB1
+	KERNEL2x4_SUB1
+
+	b		SGEMM_L2x4_SUB1
+
+SGEMM_L2x4_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL2x4_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L2x4_SAVE
+	b		SGEMM_L2x4_SUB2
+
+SGEMM_L2x4_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L2x4_SAVE
+
+SGEMM_L2x4_SUB2:
+
+	KERNEL2x4_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L2x4_SUB2
+
+SGEMM_L2x4_SAVE:
+
+	SAVE2x4
+
+SGEMM_L2x4_END:
+
+SGEMM_L2x2_BEGIN:
+
+
+	andi.		T1,	M,	2
+	ble		SGEMM_L2x2_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L2x2_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L2x2_SUB4
+
+SGEMM_L2x2_LOOP_START:
+
+	LOAD2x2_1
+	KERNEL2x2_I1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_2
+
+	KERNEL2x2_1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L2x2_LOOP_END
+
+	.align 5
+
+SGEMM_L2x2_LOOP:
+
+	KERNEL2x2_1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_2
+
+	KERNEL2x2_1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L2x2_LOOP
+
+SGEMM_L2x2_LOOP_END:
+
+	KERNEL2x2_1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_2
+
+	KERNEL2x2_1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_E2
+
+	b		SGEMM_L2x2_SUB1
+
+SGEMM_L2x2_SUB4:
+
+	KERNEL2x2_SUBI1
+	KERNEL2x2_SUB1
+	KERNEL2x2_SUB1
+	KERNEL2x2_SUB1
+
+	KERNEL2x2_SUB1
+	KERNEL2x2_SUB1
+	KERNEL2x2_SUB1
+	KERNEL2x2_SUB1
+
+	b		SGEMM_L2x2_SUB1
+
+SGEMM_L2x2_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL2x2_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L2x2_SAVE
+	b		SGEMM_L2x2_SUB2
+
+SGEMM_L2x2_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L2x2_SAVE
+
+SGEMM_L2x2_SUB2:
+
+	KERNEL2x2_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L2x2_SUB2
+
+SGEMM_L2x2_SAVE:
+
+	SAVE2x2
+
+SGEMM_L2x2_END:
+
+SGEMM_L2x1_BEGIN:
+
+
+	andi.		T1,	M,	1
+	ble		SGEMM_L2x1_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L2x1_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L2x1_SUB4
+
+SGEMM_L2x1_LOOP_START:
+
+	LOAD2x1_1
+	KERNEL2x1_I1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_2
+
+	KERNEL2x1_1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L2x1_LOOP_END
+
+	.align 5
+
+SGEMM_L2x1_LOOP:
+
+	KERNEL2x1_1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_2
+
+	KERNEL2x1_1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L2x1_LOOP
+
+SGEMM_L2x1_LOOP_END:
+
+	KERNEL2x1_1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_2
+
+	KERNEL2x1_1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_E2
+
+	b		SGEMM_L2x1_SUB1
+
+SGEMM_L2x1_SUB4:
+
+	KERNEL2x1_SUBI1
+	KERNEL2x1_SUB1
+	KERNEL2x1_SUB1
+	KERNEL2x1_SUB1
+
+	KERNEL2x1_SUB1
+	KERNEL2x1_SUB1
+	KERNEL2x1_SUB1
+	KERNEL2x1_SUB1
+
+	b		SGEMM_L2x1_SUB1
+
+SGEMM_L2x1_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL2x1_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L2x1_SAVE
+	b		SGEMM_L2x1_SUB2
+
+SGEMM_L2x1_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L2x1_SAVE
+
+SGEMM_L2x1_SUB2:
+
+	KERNEL2x1_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L2x1_SUB2
+
+SGEMM_L2x1_SAVE:
+
+	SAVE2x1
+
+SGEMM_L2x1_END:
+
+	slwi		T1,	K,	3
+	add		B,	B,	T1
+
+SGEMM_L2_END:
+SGEMM_L1_BEGIN:
+
+	mr		BO,	B
+	mr		BBO,	BBUFFER
+	slwi		T1,	K,	0
+
+SGEMM_L1_COPYB:
+	dcbtst		BBO,	PRE
+
+	lxvw4x		vs3,	o0,	BO
+	lxvw4x		vs11,	o16,	BO
+	xxspltw		vs4,	vs3,	0
+	xxspltw		vs5,	vs3,	1
+	xxspltw		vs6,	vs3,	2
+	xxspltw		vs7,	vs3,	3
+	xxspltw		vs12,	vs11,	0
+	xxspltw		vs13,	vs11,	1
+	xxspltw		vs14,	vs11,	2
+	xxspltw		vs15,	vs11,	3
+	stxvw4x		vs4,	o0,	BBO
+	stxvw4x		vs5,	o16,	BBO
+	stxvw4x		vs6,	o32,	BBO
+	stxvw4x		vs7,	o48,	BBO
+	addi		BO,	BO,	32
+	addi		BBO,	BBO,	64
+	stxvw4x		vs12,	o0,	BBO
+	stxvw4x		vs13,	o16,	BBO
+	stxvw4x		vs14,	o32,	BBO
+	stxvw4x		vs15,	o48,	BBO
+	addic.		T1,	T1,	-8
+	addi		BBO,	BBO,	64
+
+	bge		SGEMM_L1_COPYB
+
+	andi.		T1,	N,	1
+	ble		SGEMM_L1_END
+	mr		CO,	C
+	mr		AO,	A
+	srawi.		I,	M,	4
+	ble		SGEMM_L1x16_END
+
+SGEMM_L1x16_BEGIN:
+
+
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L1x16_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L1x16_SUB4
+
+SGEMM_L1x16_LOOP_START:
+
+	dcbt		AO,	PRE
+	LOAD1x16_1
+	KERNEL1x16_I1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L1x16_LOOP_END
+
+	.align 5
+
+SGEMM_L1x16_LOOP:
+
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L1x16_LOOP
+
+SGEMM_L1x16_LOOP_END:
+
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	KERNEL1x16_1
+	KERNEL1x16_E2
+
+	b		SGEMM_L1x16_SUB1
+
+SGEMM_L1x16_SUB4:
+
+	dcbt		AO,	PRE
+	KERNEL1x16_SUBI1
+	KERNEL1x16_SUB1
+	dcbt		AO,	PRE
+	KERNEL1x16_SUB1
+	KERNEL1x16_SUB1
+
+	KERNEL1x16_SUB1
+	KERNEL1x16_SUB1
+	KERNEL1x16_SUB1
+	KERNEL1x16_SUB1
+
+	b		SGEMM_L1x16_SUB1
+
+SGEMM_L1x16_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL1x16_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L1x16_SAVE
+	b		SGEMM_L1x16_SUB2
+
+SGEMM_L1x16_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L1x16_SAVE
+
+SGEMM_L1x16_SUB2:
+
+	KERNEL1x16_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L1x16_SUB2
+
+SGEMM_L1x16_SAVE:
+
+	SAVE1x16
+
+	addic.		I,	I,	-1
+	bgt		SGEMM_L1x16_BEGIN
+
+SGEMM_L1x16_END:
+
+SGEMM_L1x8_BEGIN:
+
+	andi.		T2,	M,	15
+	ble		SGEMM_L1x1_END
+
+	andi.		T1,	M,	8
+	ble		SGEMM_L1x8_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L1x8_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L1x8_SUB4
+
+SGEMM_L1x8_LOOP_START:
+
+	LOAD1x8_1
+	KERNEL1x8_I1
+	KERNEL1x8_2
+	KERNEL1x8_1
+	KERNEL1x8_2
+
+	KERNEL1x8_1
+	KERNEL1x8_2
+	KERNEL1x8_1
+	KERNEL1x8_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L1x8_LOOP_END
+
+	.align 5
+
+SGEMM_L1x8_LOOP:
+
+	KERNEL1x8_1
+	KERNEL1x8_2
+	KERNEL1x8_1
+	KERNEL1x8_2
+
+	KERNEL1x8_1
+	KERNEL1x8_2
+	KERNEL1x8_1
+	KERNEL1x8_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L1x8_LOOP
+
+SGEMM_L1x8_LOOP_END:
+
+	KERNEL1x8_1
+	KERNEL1x8_2
+	KERNEL1x8_1
+	KERNEL1x8_2
+
+	KERNEL1x8_1
+	KERNEL1x8_2
+	KERNEL1x8_1
+	KERNEL1x8_E2
+
+	b		SGEMM_L1x8_SUB1
+
+SGEMM_L1x8_SUB4:
+
+	KERNEL1x8_SUBI1
+	KERNEL1x8_SUB1
+	KERNEL1x8_SUB1
+	KERNEL1x8_SUB1
+
+	KERNEL1x8_SUB1
+	KERNEL1x8_SUB1
+	KERNEL1x8_SUB1
+	KERNEL1x8_SUB1
+
+	b		SGEMM_L1x8_SUB1
+
+SGEMM_L1x8_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL1x8_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L1x8_SAVE
+	b		SGEMM_L1x8_SUB2
+
+SGEMM_L1x8_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L1x8_SAVE
+
+SGEMM_L1x8_SUB2:
+
+	KERNEL1x8_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L1x8_SUB2
+
+SGEMM_L1x8_SAVE:
+
+	SAVE1x8
+
+SGEMM_L1x8_END:
+
+SGEMM_L1x4_BEGIN:
+
+
+	andi.		T1,	M,	4
+	ble		SGEMM_L1x4_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L1x4_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L1x4_SUB4
+
+SGEMM_L1x4_LOOP_START:
+
+	LOAD1x4_1
+	KERNEL1x4_I1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_2
+
+	KERNEL1x4_1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L1x4_LOOP_END
+
+	.align 5
+
+SGEMM_L1x4_LOOP:
+
+	KERNEL1x4_1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_2
+
+	KERNEL1x4_1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L1x4_LOOP
+
+SGEMM_L1x4_LOOP_END:
+
+	KERNEL1x4_1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_2
+
+	KERNEL1x4_1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_E2
+
+	b		SGEMM_L1x4_SUB1
+
+SGEMM_L1x4_SUB4:
+
+	KERNEL1x4_SUBI1
+	KERNEL1x4_SUB1
+	KERNEL1x4_SUB1
+	KERNEL1x4_SUB1
+
+	KERNEL1x4_SUB1
+	KERNEL1x4_SUB1
+	KERNEL1x4_SUB1
+	KERNEL1x4_SUB1
+
+	b		SGEMM_L1x4_SUB1
+
+SGEMM_L1x4_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL1x4_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L1x4_SAVE
+	b		SGEMM_L1x4_SUB2
+
+SGEMM_L1x4_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L1x4_SAVE
+
+SGEMM_L1x4_SUB2:
+
+	KERNEL1x4_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L1x4_SUB2
+
+SGEMM_L1x4_SAVE:
+
+	SAVE1x4
+
+SGEMM_L1x4_END:
+
+SGEMM_L1x2_BEGIN:
+
+
+	andi.		T1,	M,	2
+	ble		SGEMM_L1x2_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L1x2_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L1x2_SUB4
+
+SGEMM_L1x2_LOOP_START:
+
+	LOAD1x2_1
+	KERNEL1x2_I1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_2
+
+	KERNEL1x2_1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L1x2_LOOP_END
+
+	.align 5
+
+SGEMM_L1x2_LOOP:
+
+	KERNEL1x2_1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_2
+
+	KERNEL1x2_1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L1x2_LOOP
+
+SGEMM_L1x2_LOOP_END:
+
+	KERNEL1x2_1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_2
+
+	KERNEL1x2_1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_E2
+
+	b		SGEMM_L1x2_SUB1
+
+SGEMM_L1x2_SUB4:
+
+	KERNEL1x2_SUBI1
+	KERNEL1x2_SUB1
+	KERNEL1x2_SUB1
+	KERNEL1x2_SUB1
+
+	KERNEL1x2_SUB1
+	KERNEL1x2_SUB1
+	KERNEL1x2_SUB1
+	KERNEL1x2_SUB1
+
+	b		SGEMM_L1x2_SUB1
+
+SGEMM_L1x2_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL1x2_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L1x2_SAVE
+	b		SGEMM_L1x2_SUB2
+
+SGEMM_L1x2_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L1x2_SAVE
+
+SGEMM_L1x2_SUB2:
+
+	KERNEL1x2_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L1x2_SUB2
+
+SGEMM_L1x2_SAVE:
+
+	SAVE1x2
+
+SGEMM_L1x2_END:
+
+SGEMM_L1x1_BEGIN:
+
+
+	andi.		T1,	M,	1
+	ble		SGEMM_L1x1_END
+	mr		BO,	BBUFFER
+	srawi.		L,	K,	3
+	ble		SGEMM_L1x1_SUB0
+	cmpwi		cr0,	L,	1
+	ble		SGEMM_L1x1_SUB4
+
+SGEMM_L1x1_LOOP_START:
+
+	LOAD1x1_1
+	KERNEL1x1_I1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_2
+
+	KERNEL1x1_1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_2
+
+	addic.		L,	L,	-2
+	ble		SGEMM_L1x1_LOOP_END
+
+	.align 5
+
+SGEMM_L1x1_LOOP:
+
+	KERNEL1x1_1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_2
+
+	KERNEL1x1_1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_2
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L1x1_LOOP
+
+SGEMM_L1x1_LOOP_END:
+
+	KERNEL1x1_1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_2
+
+	KERNEL1x1_1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_E2
+
+	b		SGEMM_L1x1_SUB1
+
+SGEMM_L1x1_SUB4:
+
+	KERNEL1x1_SUBI1
+	KERNEL1x1_SUB1
+	KERNEL1x1_SUB1
+	KERNEL1x1_SUB1
+
+	KERNEL1x1_SUB1
+	KERNEL1x1_SUB1
+	KERNEL1x1_SUB1
+	KERNEL1x1_SUB1
+
+	b		SGEMM_L1x1_SUB1
+
+SGEMM_L1x1_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL1x1_SUBI1
+
+	addic.		L,	L,	-1
+	ble		SGEMM_L1x1_SAVE
+	b		SGEMM_L1x1_SUB2
+
+SGEMM_L1x1_SUB1:
+
+	andi.		L,	K,	7
+	ble		SGEMM_L1x1_SAVE
+
+SGEMM_L1x1_SUB2:
+
+	KERNEL1x1_SUB1
+
+	addic.		L,	L,	-1
+	bgt		SGEMM_L1x1_SUB2
+
+SGEMM_L1x1_SAVE:
+
+	SAVE1x1
+
+SGEMM_L1x1_END:
+
+SGEMM_L1_END:

@@ -1,0 +1,3 @@
+#!/bin/bash
+
+make -j 2 BINARY=32

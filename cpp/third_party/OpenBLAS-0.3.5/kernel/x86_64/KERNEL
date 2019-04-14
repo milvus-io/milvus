@@ -1,0 +1,468 @@
+ifndef SAMAXKERNEL
+SAMAXKERNEL = amax_sse.S
+endif
+
+ifndef DAMAXKERNEL
+DAMAXKERNEL = amax_sse2.S
+endif
+
+ifndef QAMAXKERNEL
+QAMAXKERNEL = amax.S
+endif
+
+ifndef CAMAXKERNEL
+CAMAXKERNEL = zamax_sse.S
+endif
+
+ifndef ZAMAXKERNEL
+ZAMAXKERNEL = zamax_sse2.S
+endif
+
+ifndef XAMAXKERNEL
+XAMAXKERNEL = zamax.S
+endif
+
+ifndef SASUMKERNEL
+SASUMKERNEL =  asum_sse.S
+endif
+
+ifndef DASUMKERNEL
+DASUMKERNEL =  asum_sse2.S
+endif
+
+ifndef CASUMKERNEL
+CASUMKERNEL = zasum_sse.S
+endif
+
+ifndef ZASUMKERNEL
+ZASUMKERNEL = zasum_sse2.S
+endif
+
+ifndef QASUMKERNEL
+QASUMKERNEL =  asum.S
+endif
+
+ifndef XASUMKERNEL
+XASUMKERNEL = zasum.S
+endif
+
+ifndef SAMINKERNEL
+SAMINKERNEL = amax_sse.S
+endif
+
+ifndef DAMINKERNEL
+DAMINKERNEL = amax_sse2.S
+endif
+
+ifndef QAMINKERNEL
+QAMINKERNEL = amax.S
+endif
+
+ifndef CAMINKERNEL
+CAMINKERNEL = zamax_sse.S
+endif
+
+ifndef ZAMINKERNEL
+ZAMINKERNEL = zamax_sse2.S
+endif
+
+ifndef XAMINKERNEL
+XAMINKERNEL = zamax.S
+endif
+
+ifndef SAXPYKERNEL
+SAXPYKERNEL =  axpy_sse.S
+endif
+
+ifndef DAXPYKERNEL
+DAXPYKERNEL =  axpy_sse2.S
+endif
+
+ifndef CAXPYKERNEL
+CAXPYKERNEL = zaxpy_sse.S
+endif
+
+ifndef ZAXPYKERNEL
+ZAXPYKERNEL = zaxpy_sse2.S
+endif
+
+ifndef QAXPYKERNEL
+QAXPYKERNEL =  axpy.S
+endif
+
+ifndef XAXPYKERNEL
+XAXPYKERNEL = zaxpy.S
+endif
+
+ifndef SCOPYKERNEL
+SCOPYKERNEL =  copy_sse.S
+endif
+
+ifndef DCOPYKERNEL
+DCOPYKERNEL =  copy_sse2.S
+endif
+
+ifndef CCOPYKERNEL
+CCOPYKERNEL = zcopy_sse.S
+endif
+
+ifndef ZCOPYKERNEL
+ZCOPYKERNEL = zcopy_sse2.S
+endif
+
+ifndef QCOPYKERNEL
+QCOPYKERNEL =  copy.S
+endif
+
+ifndef XCOPYKERNEL
+XCOPYKERNEL = zcopy.S
+endif
+
+ifndef SDOTKERNEL
+SDOTKERNEL = ../generic/dot.c
+endif
+
+ifndef DSDOTKERNEL
+DSDOTKERNEL = ../generic/dot.c
+endif
+
+ifndef DDOTKERNEL
+DDOTKERNEL =  dot_sse2.S
+endif
+
+ifndef CDOTKERNEL
+CDOTKERNEL = zdot_sse.S
+endif
+
+ifndef ZDOTKERNEL
+ZDOTKERNEL = zdot_sse2.S
+endif
+
+ifndef QDOTKERNEL
+QDOTKERNEL =  dot.S
+endif
+
+ifndef XDOTKERNEL
+XDOTKERNEL = zdot.S
+endif
+
+ifndef ISAMAXKERNEL
+ISAMAXKERNEL = iamax_sse.S
+endif
+
+ifndef IDAMAXKERNEL
+IDAMAXKERNEL = iamax_sse2.S
+endif
+
+ifndef IQAMAXKERNEL
+IQAMAXKERNEL = iamax.S
+endif
+
+ifndef ICAMAXKERNEL
+ICAMAXKERNEL = izamax_sse.S
+endif
+
+ifndef IZAMAXKERNEL
+IZAMAXKERNEL = izamax_sse2.S
+endif
+
+ifndef IXAMAXKERNEL
+IXAMAXKERNEL = izamax.S
+endif
+
+ifndef ISAMINKERNEL
+ISAMINKERNEL = iamax_sse.S
+endif
+
+ifndef IDAMINKERNEL
+IDAMINKERNEL = iamax_sse2.S
+endif
+
+ifndef IQAMINKERNEL
+IQAMINKERNEL = iamax.S
+endif
+
+ifndef ICAMINKERNEL
+ICAMINKERNEL = izamax_sse.S
+endif
+
+ifndef IZAMINKERNEL
+IZAMINKERNEL = izamax_sse2.S
+endif
+
+ifndef IXAMINKERNEL
+IXAMINKERNEL = izamax.S
+endif
+
+ifndef ISMAXKERNEL
+ISMAXKERNEL = iamax_sse.S
+endif
+
+ifndef IDMAXKERNEL
+IDMAXKERNEL = iamax_sse2.S
+endif
+
+ifndef IQMAXKERNEL
+IQMAXKERNEL = iamax.S
+endif
+
+ifndef ISMINKERNEL
+ISMINKERNEL = iamax_sse.S
+endif
+
+ifndef IDMINKERNEL
+IDMINKERNEL = iamax_sse2.S
+endif
+
+ifndef IQMINKERNEL
+IQMINKERNEL = iamax.S
+endif
+
+ifndef SMAXKERNEL
+SMAXKERNEL = amax_sse.S
+endif
+
+ifndef DMAXKERNEL
+DMAXKERNEL = amax_sse2.S
+endif
+
+ifndef QMAXKERNEL
+QMAXKERNEL = amax.S
+endif
+
+ifndef SMINKERNEL
+SMINKERNEL = amax_sse.S
+endif
+
+ifndef DMINKERNEL
+DMINKERNEL = amax_sse2.S
+endif
+
+ifndef QMINKERNEL
+QMINKERNEL = amax.S
+endif
+
+ifndef SNRM2KERNEL
+SNRM2KERNEL = nrm2_sse.S
+endif
+
+ifndef DNRM2KERNEL
+DNRM2KERNEL = nrm2.S
+endif
+
+ifndef QNRM2KERNEL
+QNRM2KERNEL = nrm2.S
+endif
+
+ifndef CNRM2KERNEL
+CNRM2KERNEL = znrm2_sse.S
+endif
+
+ifndef ZNRM2KERNEL
+ZNRM2KERNEL = znrm2.S
+endif
+
+ifndef XNRM2KERNEL
+XNRM2KERNEL = znrm2.S
+endif
+
+ifndef SROTKERNEL
+SROTKERNEL = rot_sse.S
+endif
+
+ifndef DROTKERNEL
+DROTKERNEL = rot_sse2.S
+endif
+
+ifndef QROTKERNEL
+QROTKERNEL = rot.S
+endif
+
+ifndef CROTKERNEL
+CROTKERNEL = zrot_sse.S
+endif
+
+ifndef ZROTKERNEL
+ZROTKERNEL = zrot_sse2.S
+endif
+
+ifndef XROTKERNEL
+XROTKERNEL = zrot.S
+endif
+
+ifndef SSCALKERNEL
+SSCALKERNEL =  scal_sse.S
+endif
+
+ifndef DSCALKERNEL
+DSCALKERNEL =  scal_sse2.S
+endif
+
+ifndef CSCALKERNEL
+CSCALKERNEL = zscal_sse.S
+endif
+
+ifndef ZSCALKERNEL
+ZSCALKERNEL = zscal_sse2.S
+endif
+
+ifndef ASCALKERNEL
+QSCALKERNEL =  scal.S
+endif
+
+ifndef XSCALKERNEL
+XSCALKERNEL = zscal.S
+endif
+
+ifndef SSWAPKERNEL
+SSWAPKERNEL =  swap_sse.S
+endif
+
+ifndef DSWAPKERNEL
+DSWAPKERNEL =  swap_sse2.S
+endif
+
+ifndef CSWAPKERNEL
+CSWAPKERNEL = zswap_sse.S
+endif
+
+ifndef ZSWAPKERNEL
+ZSWAPKERNEL = zswap_sse2.S
+endif
+
+ifndef QSWAPKERNEL
+QSWAPKERNEL =   swap.S
+endif
+
+ifndef XSWAPKERNEL
+XSWAPKERNEL =  zswap.S
+endif
+
+ifndef SSYMV_U_KERNEL
+SSYMV_U_KERNEL =  symv_U_sse.S
+endif
+
+ifndef SSYMV_L_KERNEL
+SSYMV_L_KERNEL =  symv_L_sse.S
+endif
+
+ifndef DSYMV_U_KERNEL
+DSYMV_U_KERNEL =  symv_U_sse2.S
+endif
+
+ifndef DSYMV_L_KERNEL
+DSYMV_L_KERNEL =  symv_L_sse2.S
+endif
+
+ifndef ZSYMV_U_KERNEL
+ZSYMV_U_KERNEL =  zsymv_U_sse2.S
+endif
+
+ifndef ZSYMV_L_KERNEL
+ZSYMV_L_KERNEL =  zsymv_L_sse2.S
+endif
+
+ifndef ZHEMV_U_KERNEL
+ZHEMV_U_KERNEL =  zsymv_U_sse2.S
+endif
+
+ifndef ZHEMV_L_KERNEL
+ZHEMV_L_KERNEL =  zsymv_L_sse2.S
+endif
+
+GEMVDEP = ../l2param.h
+
+ifndef SGEMVNKERNEL
+SGEMVNKERNEL = sgemv_n.c
+endif
+
+ifndef SGEMVTKERNEL
+SGEMVTKERNEL = sgemv_t.c
+endif
+
+ifndef DGEMVNKERNEL
+DGEMVNKERNEL = dgemv_n.S
+endif
+
+ifndef DGEMVTKERNEL
+DGEMVTKERNEL = dgemv_t.S
+endif
+
+ifndef CGEMVNKERNEL
+CGEMVNKERNEL = cgemv_n_4.c
+endif
+
+ifndef CGEMVTKERNEL
+CGEMVTKERNEL = cgemv_t_4.c
+endif
+
+ifndef ZGEMVNKERNEL
+ZGEMVNKERNEL = zgemv_n_4.c
+endif
+
+ifndef ZGEMVTKERNEL
+ZGEMVTKERNEL = zgemv_t_4.c
+endif
+
+ifndef QGEMVNKERNEL
+QGEMVNKERNEL = qgemv_n.S
+endif
+
+ifndef QGEMVTKERNEL
+QGEMVTKERNEL = qgemv_t.S
+endif
+
+ifndef XGEMVNKERNEL
+XGEMVNKERNEL = xgemv_n.S
+endif
+
+ifndef XGEMVTKERNEL
+XGEMVTKERNEL = xgemv_t.S
+endif
+
+QGEMMKERNEL    =  qgemm_kernel_2x2.S
+QGEMMINCOPY    =
+QGEMMITCOPY    =
+QGEMMONCOPY    =  ../generic/gemm_ncopy_2.c
+QGEMMOTCOPY    =  ../generic/gemm_tcopy_2.c
+QGEMMINCOPYOBJ =
+QGEMMITCOPYOBJ =
+QGEMMONCOPYOBJ =  qgemm_oncopy$(TSUFFIX).$(SUFFIX)
+QGEMMOTCOPYOBJ =  qgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+XGEMMKERNEL    =  xgemm_kernel_1x1.S
+XGEMMINCOPY    =
+XGEMMITCOPY    =
+XGEMMONCOPY    =  ../generic/zgemm_ncopy_1.c
+XGEMMOTCOPY    =  ../generic/zgemm_tcopy_1.c
+XGEMMINCOPYOBJ =
+XGEMMITCOPYOBJ =
+XGEMMONCOPYOBJ =  xgemm_oncopy$(TSUFFIX).$(SUFFIX)
+XGEMMOTCOPYOBJ =  xgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+ifndef SGEMM_BETA
+SGEMM_BETA = gemm_beta.S
+endif
+ifndef DGEMM_BETA
+DGEMM_BETA = gemm_beta.S
+endif
+ifndef CGEMM_BETA
+CGEMM_BETA = zgemm_beta.S
+endif
+ifndef ZGEMM_BETA
+ZGEMM_BETA = zgemm_beta.S
+endif
+QGEMM_BETA = ../generic/gemm_beta.c
+XGEMM_BETA = ../generic/zgemm_beta.c
+
+QTRSMKERNEL_LN	=  qtrsm_kernel_LN_2x2.S
+QTRSMKERNEL_LT	=  qtrsm_kernel_LT_2x2.S
+QTRSMKERNEL_RN	=  qtrsm_kernel_LT_2x2.S
+QTRSMKERNEL_RT	=  qtrsm_kernel_RT_2x2.S
+
+XTRSMKERNEL_LN	=  xtrsm_kernel_LT_1x1.S
+XTRSMKERNEL_LT	=  xtrsm_kernel_LT_1x1.S
+XTRSMKERNEL_RN	=  xtrsm_kernel_LT_1x1.S
+XTRSMKERNEL_RT	=  xtrsm_kernel_LT_1x1.S
+
+XGEMM3MKERNEL    =  xgemm3m_kernel_2x2.S

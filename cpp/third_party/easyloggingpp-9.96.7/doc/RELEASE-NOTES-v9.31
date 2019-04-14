@@ -1,0 +1,15 @@
+Easylogging++ v9.31 RELEASE NOTES
+---------------------------------
+
+=========================
+=        FIXES          =
+=========================
+
+ - Fixes for Intel C++ after updated to g++ 4.8
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

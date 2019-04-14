@@ -1,0 +1,96 @@
+language: cpp
+matrix:
+  include:
+#  - os: linux
+#    dist: trusty
+#    compiler: clang
+#    before_install:
+#    - sudo add-apt-repository ppa:kubuntu-ppa/backports -y
+#    - sudo apt-get -qq update
+#    - sudo apt-get install -y libgtest-dev valgrind cmake
+#    - sudo apt-get install --only-upgrade cmake
+#    - sudo wget https://github.com/google/googletest/archive/release-1.7.0.tar.gz
+#    - sudo tar xf release-1.7.0.tar.gz
+#    - cd googletest-release-1.7.0
+#    - sudo cmake -DBUILD_SHARED_LIBS=ON .
+#    - sudo make
+#    - sudo cp -a include/gtest /usr/include
+#    - sudo cp -a libgtest_main.so libgtest.so /usr/lib/
+#    - g++ -v
+
+  - os: linux
+    dist: trusty
+    compiler: gcc
+    env:
+      - COMPILER=g++-4.8
+    addons:
+      apt:
+        sources: ['ubuntu-toolchain-r-test']
+        packages: [g++-4.8, valgrind]
+  - os: linux
+    dist: trusty
+    compiler: gcc
+    env:
+      - COMPILER=g++-4.9
+    addons:
+      apt:
+        sources: ['ubuntu-toolchain-r-test']
+        packages: [g++-4.9, valgrind]
+  - os: linux
+    dist: trusty
+    compiler: gcc
+    env:
+      - COMPILER=g++-5
+    addons:
+      apt:
+        sources: ['ubuntu-toolchain-r-test']
+        packages: [g++-5, valgrind]
+  - os: linux
+    dist: trusty
+    compiler: gcc
+    env:
+      - COMPILER=g++-6
+    addons:
+      apt:
+        sources: ['ubuntu-toolchain-r-test']
+        packages: [g++-6, valgrind]
+  - os: linux
+    dist: trusty
+    compiler: gcc
+    env:
+      - COMPILER=g++-7
+    addons:
+      apt:
+        sources: ['ubuntu-toolchain-r-test']
+        packages: [g++-7, valgrind]
+
+before_install:
+ - sudo apt-get -qq update
+ - sudo apt-get install -y libgtest-dev valgrind cmake
+ - sudo wget https://github.com/google/googletest/archive/release-1.7.0.tar.gz
+ - sudo tar xf release-1.7.0.tar.gz
+ - cd googletest-release-1.7.0
+ - sudo cmake -DBUILD_SHARED_LIBS=ON .
+ - sudo make
+ - sudo cp -a include/gtest /usr/include
+ - sudo cp -a libgtest_main.so libgtest.so /usr/lib/
+ - which valgrind
+ - cd "${TRAVIS_BUILD_DIR}"
+before_script:
+ - cd test/
+ - cmake -Dtest=ON ../
+ - make
+ - ls -l
+script: "./easyloggingpp-unit-tests -v && cd ../samples/STL && pwd && sh ./.travis_build.sh && valgrind ./bin/very-basic.cpp.bin"
+branches:
+  only:
+    - master
+    - develop
+notifications:
+  recipients:
+    - mkhan3189@gmail.com
+  email:
+    on_success: never
+    on_failure: change
+rvm:
+  - 9.00

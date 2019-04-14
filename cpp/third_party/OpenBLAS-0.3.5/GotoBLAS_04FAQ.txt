@@ -1,0 +1,13 @@
+
+Quick guide to build library for Windows 64bit.
+
+1. What you need
+
+ a. Windows Server 2003 or later
+ b. Cygwin environment(make, gcc, g77, perl, sed, wget)
+ c. MinGW64 compiler
+ d. Microsoft Visual Studio (lib.exe and mspdb80.dll are required to create dll)
+
+2. Do ./quickbuild.win64
+
+Good luck

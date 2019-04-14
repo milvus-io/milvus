@@ -1,0 +1,15 @@
+Easylogging++ v9.46 RELEASE NOTES
+---------------------------------
+
+==============================
+=        BUG FIXES           =
+==============================
+
+ - CHECK_EQ and CHECK_STRCASEEQ macro fixes (issue #142)
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

@@ -1,0 +1,168 @@
+TOPDIR	= .
+export GOTOBLAS_MAKEFILE = 1
+-include $(TOPDIR)/Makefile.conf_last
+include ./Makefile.system
+
+PREFIX ?= /opt/OpenBLAS
+
+OPENBLAS_INCLUDE_DIR := $(PREFIX)/include
+OPENBLAS_LIBRARY_DIR := $(PREFIX)/lib
+OPENBLAS_BINARY_DIR := $(PREFIX)/bin
+OPENBLAS_BUILD_DIR := $(CURDIR)
+OPENBLAS_CMAKE_DIR := $(OPENBLAS_LIBRARY_DIR)/cmake/openblas
+OPENBLAS_CMAKE_CONFIG := OpenBLASConfig.cmake
+OPENBLAS_CMAKE_CONFIG_VERSION := OpenBLASConfigVersion.cmake
+OPENBLAS_PKGCONFIG_DIR := $(OPENBLAS_LIBRARY_DIR)/pkgconfig
+
+.PHONY : install
+.NOTPARALLEL : install
+
+lib.grd :
+	$(error OpenBLAS: Please run "make" firstly)
+
+install : 	lib.grd
+	@-mkdir -p "$(DESTDIR)$(PREFIX)"
+	@-mkdir -p "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)"
+	@-mkdir -p "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)"
+	@-mkdir -p "$(DESTDIR)$(OPENBLAS_BINARY_DIR)"
+	@-mkdir -p "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)"
+	@-mkdir -p "$(DESTDIR)$(OPENBLAS_PKGCONFIG_DIR)"
+	@echo Generating openblas_config.h in $(DESTDIR)$(OPENBLAS_INCLUDE_DIR)
+#for inc
+	@echo \#ifndef OPENBLAS_CONFIG_H > "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/openblas_config.h"
+	@echo \#define OPENBLAS_CONFIG_H >> "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/openblas_config.h"
+	@$(AWK) 'NF {print $$1, "OPENBLAS_"$$2, $$3}' config_last.h >> "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/openblas_config.h"
+	@echo \#define OPENBLAS_VERSION \" OpenBLAS $(VERSION) \" >> "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/openblas_config.h"
+	@cat openblas_config_template.h >> "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/openblas_config.h"
+	@echo \#endif  \/\* OPENBLAS_CONFIG_H \*\/ >> "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/openblas_config.h"
+
+	@echo Generating f77blas.h in $(DESTDIR)$(OPENBLAS_INCLUDE_DIR)
+	@echo \#ifndef OPENBLAS_F77BLAS_H > "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/f77blas.h"
+	@echo \#define OPENBLAS_F77BLAS_H >> "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/f77blas.h"
+	@echo \#include \"openblas_config.h\" >> "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/f77blas.h"
+	@cat common_interface.h >> "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/f77blas.h"
+	@echo \#endif >> "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/f77blas.h"
+
+ifndef NO_CBLAS
+	@echo Generating cblas.h in $(DESTDIR)$(OPENBLAS_INCLUDE_DIR)
+	@sed 's/common/openblas_config/g' cblas.h > "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/cblas.h"
+endif
+
+ifneq ($(OSNAME), AIX)
+ifndef NO_LAPACKE
+	@echo Copying LAPACKE header files to $(DESTDIR)$(OPENBLAS_INCLUDE_DIR)
+	@-install -pm644 $(NETLIB_LAPACK_DIR)/LAPACKE/include/lapacke.h "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/lapacke.h"
+	@-install -pm644 $(NETLIB_LAPACK_DIR)/LAPACKE/include/lapacke_config.h "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/lapacke_config.h"
+	@-install -pm644 $(NETLIB_LAPACK_DIR)/LAPACKE/include/lapacke_mangling_with_flags.h.in "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/lapacke_mangling.h"
+	@-install -pm644 $(NETLIB_LAPACK_DIR)/LAPACKE/include/lapacke_utils.h "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/lapacke_utils.h"
+endif
+
+#for install static library
+ifndef NO_STATIC
+	@echo Copying the static library to $(DESTDIR)$(OPENBLAS_LIBRARY_DIR)
+	@install -pm644 $(LIBNAME) "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)"
+	@cd "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)" ; \
+	ln -fs $(LIBNAME) $(LIBPREFIX).$(LIBSUFFIX)
+endif
+#for install shared library
+ifndef NO_SHARED
+	@echo Copying the shared library to $(DESTDIR)$(OPENBLAS_LIBRARY_DIR)
+ifeq ($(OSNAME), $(filter $(OSNAME),Linux SunOS Android Haiku))
+	@install -pm755 $(LIBSONAME) "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)"
+	@cd "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)" ; \
+	ln -fs $(LIBSONAME) $(LIBPREFIX).so ; \
+	ln -fs $(LIBSONAME) $(LIBPREFIX).so.$(MAJOR_VERSION)
+endif
+
+ifeq ($(OSNAME), $(filter $(OSNAME),FreeBSD OpenBSD NetBSD DragonFly))
+	@cp $(LIBSONAME) "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)"
+	@cd "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)" ; \
+	ln -fs $(LIBSONAME) $(LIBPREFIX).so
+endif
+ifeq ($(OSNAME), Darwin)
+	@-cp $(LIBDYNNAME) "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)"
+	@-install_name_tool -id "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)/$(LIBDYNNAME)" "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)/$(LIBDYNNAME)"
+	@cd "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)" ; \
+	ln -fs $(LIBDYNNAME) $(LIBPREFIX).dylib
+endif
+ifeq ($(OSNAME), WINNT)
+	@-cp $(LIBDLLNAME) "$(DESTDIR)$(OPENBLAS_BINARY_DIR)"
+	@-cp $(IMPLIBNAME) "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)"
+endif
+ifeq ($(OSNAME), CYGWIN_NT)
+	@-cp $(LIBDLLNAME) "$(DESTDIR)$(OPENBLAS_BINARY_DIR)"
+	@-cp $(IMPLIBNAME) "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)"
+endif
+endif
+
+else
+#install on AIX has different options syntax
+ifndef NO_LAPACKE
+	@echo Copying LAPACKE header files to $(DESTDIR)$(OPENBLAS_INCLUDE_DIR)
+	@-installbsd -c -m 644 $(NETLIB_LAPACK_DIR)/LAPACKE/include/lapacke.h "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/lapacke.h"
+	@-installbsd -c -m 644 $(NETLIB_LAPACK_DIR)/LAPACKE/include/lapacke_config.h "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/lapacke_config.h"
+	@-installbsd -c -m 644 $(NETLIB_LAPACK_DIR)/LAPACKE/include/lapacke_mangling_with_flags.h.in "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/lapacke_mangling.h"
+	@-installbsd -c -m 644 $(NETLIB_LAPACK_DIR)/LAPACKE/include/lapacke_utils.h "$(DESTDIR)$(OPENBLAS_INCLUDE_DIR)/lapacke_utils.h"
+endif
+
+#for install static library
+ifndef NO_STATIC
+	@echo Copying the static library to $(DESTDIR)$(OPENBLAS_LIBRARY_DIR)
+	@installbsd -c -m 644 $(LIBNAME) "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)"
+	@cd "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)" ; \
+	ln -fs $(LIBNAME) $(LIBPREFIX).$(LIBSUFFIX)
+endif
+#for install shared library
+ifndef NO_SHARED
+	@echo Copying the shared library to $(DESTDIR)$(OPENBLAS_LIBRARY_DIR)
+	@installbsd -c -m 755 $(LIBSONAME) "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)"
+	@cd "$(DESTDIR)$(OPENBLAS_LIBRARY_DIR)" ; \
+	ln -fs $(LIBSONAME) $(LIBPREFIX).so ; \
+	ln -fs $(LIBSONAME) $(LIBPREFIX).so.$(MAJOR_VERSION)
+endif
+
+endif
+
+#Generating openblas.pc
+	@echo Generating openblas.pc in "$(DESTDIR)$(OPENBLAS_PKGCONFIG_DIR)"
+	@echo 'libdir='$(OPENBLAS_LIBRARY_DIR) > "$(DESTDIR)$(OPENBLAS_PKGCONFIG_DIR)/openblas.pc"
+	@echo 'includedir='$(OPENBLAS_INCLUDE_DIR) >> "$(DESTDIR)$(OPENBLAS_PKGCONFIG_DIR)/openblas.pc"
+	@echo 'openblas_config= USE_64BITINT='$(USE_64BITINT) 'DYNAMIC_ARCH='$(DYNAMIC_ARCH) 'DYNAMIC_OLDER='$(DYNAMIC_OLDER) 'NO_CBLAS='$(NO_CBLAS) 'NO_LAPACK='$(NO_LAPACK) 'NO_LAPACKE='$(NO_LAPACKE) 'NO_AFFINITY='$(NO_AFFINITY) 'USE_OPENMP='$(USE_OPENMP) $(CORE) 'MAX_THREADS='$(NUM_THREADS)>> "$(DESTDIR)$(OPENBLAS_PKGCONFIG_DIR)/openblas.pc"
+	@echo 'version='$(VERSION) >> "$(DESTDIR)$(OPENBLAS_PKGCONFIG_DIR)/openblas.pc"
+	@echo 'extralib='$(EXTRALIB) >> "$(DESTDIR)$(OPENBLAS_PKGCONFIG_DIR)/openblas.pc"
+	@cat openblas.pc.in >> "$(DESTDIR)$(OPENBLAS_PKGCONFIG_DIR)/openblas.pc"
+
+
+#Generating OpenBLASConfig.cmake
+	@echo Generating $(OPENBLAS_CMAKE_CONFIG) in $(DESTDIR)$(OPENBLAS_CMAKE_DIR)
+	@echo "SET(OpenBLAS_VERSION \"${VERSION}\")" > "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG)"
+	@echo "SET(OpenBLAS_INCLUDE_DIRS ${OPENBLAS_INCLUDE_DIR})" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG)"
+
+ifndef NO_SHARED
+#ifeq logical or
+ifeq ($(OSNAME), $(filter $(OSNAME),Linux FreeBSD NetBSD OpenBSD DragonFly))
+	@echo "SET(OpenBLAS_LIBRARIES ${OPENBLAS_LIBRARY_DIR}/$(LIBPREFIX).so)" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG)"
+endif
+ifeq ($(OSNAME), $(filter $(OSNAME),WINNT CYGWIN_NT))
+	@echo "SET(OpenBLAS_LIBRARIES ${OPENBLAS_BINARY_DIR}/$(LIBDLLNAME))" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG)"
+endif
+ifeq ($(OSNAME), Darwin)
+	@echo "SET(OpenBLAS_LIBRARIES ${OPENBLAS_LIBRARY_DIR}/$(LIBPREFIX).dylib)" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG)"
+endif
+else
+#only static
+	@echo "SET(OpenBLAS_LIBRARIES ${OPENBLAS_LIBRARY_DIR}/$(LIBPREFIX).$(LIBSUFFIX))" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG)"
+endif
+#Generating OpenBLASConfigVersion.cmake
+	@echo Generating $(OPENBLAS_CMAKE_CONFIG_VERSION) in $(DESTDIR)$(OPENBLAS_CMAKE_DIR)
+	@echo "set (PACKAGE_VERSION \"${VERSION}\")" > "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG_VERSION)"
+	@echo "if (PACKAGE_VERSION VERSION_LESS PACKAGE_FIND_VERSION)" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG_VERSION)"
+	@echo "  set (PACKAGE_VERSION_COMPATIBLE FALSE)" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG_VERSION)"
+	@echo "else ()" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG_VERSION)"
+	@echo "  set (PACKAGE_VERSION_COMPATIBLE TRUE)" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG_VERSION)"
+	@echo "  if (PACKAGE_FIND_VERSION STREQUAL PACKAGE_VERSION)" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG_VERSION)"
+	@echo "    set (PACKAGE_VERSION_EXACT TRUE)" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG_VERSION)"
+	@echo "  endif ()" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG_VERSION)"
+	@echo "endif ()" >> "$(DESTDIR)$(OPENBLAS_CMAKE_DIR)/$(OPENBLAS_CMAKE_CONFIG_VERSION)"
+	@echo Install OK!
+

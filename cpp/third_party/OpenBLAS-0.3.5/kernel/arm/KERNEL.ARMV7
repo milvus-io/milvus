@@ -1,0 +1,30 @@
+include $(KERNELDIR)/KERNEL.ARMV6
+
+SNRM2KERNEL  = nrm2_vfpv3.S
+DNRM2KERNEL  = nrm2_vfpv3.S
+CNRM2KERNEL  = nrm2_vfpv3.S
+ZNRM2KERNEL  = nrm2_vfpv3.S
+
+SGEMVNKERNEL = gemv_n_vfpv3.S
+DGEMVNKERNEL = gemv_n_vfpv3.S
+
+SGEMMKERNEL    =  sgemm_kernel_4x4_vfpv3.S
+SGEMMONCOPY    =  sgemm_ncopy_4_vfp.S
+SGEMMOTCOPY    =  sgemm_tcopy_4_vfp.S
+SGEMMONCOPYOBJ =  sgemm_oncopy.o
+SGEMMOTCOPYOBJ =  sgemm_otcopy.o
+
+DGEMMKERNEL    =  dgemm_kernel_4x4_vfpv3.S
+DGEMMONCOPY    =  dgemm_ncopy_4_vfp.S
+DGEMMOTCOPY    =  dgemm_tcopy_4_vfp.S
+DGEMMONCOPYOBJ = dgemm_oncopy.o
+DGEMMOTCOPYOBJ = dgemm_otcopy.o
+
+CGEMMKERNEL    = cgemm_kernel_2x2_vfpv3.S
+ZGEMMKERNEL    = zgemm_kernel_2x2_vfpv3.S
+
+STRMMKERNEL  =  strmm_kernel_4x4_vfpv3.S
+DTRMMKERNEL  =  dtrmm_kernel_4x4_vfpv3.S
+CTRMMKERNEL  =  ctrmm_kernel_2x2_vfpv3.S
+ZTRMMKERNEL  =  ztrmm_kernel_2x2_vfpv3.S
+

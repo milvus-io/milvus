@@ -1,0 +1,21 @@
+Easylogging++ v9.30 RELEASE NOTES
+---------------------------------
+
+=========================
+=        FIXES          =
+=========================
+
+ - Fixes to clang++ 3.4+
+
+=========================
+=      REFACTORING      =
+=========================
+
+ - Removed unused variable m_postStream
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

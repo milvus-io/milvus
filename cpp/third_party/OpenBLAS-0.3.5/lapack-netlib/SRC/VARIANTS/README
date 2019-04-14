@@ -1,0 +1,84 @@
+		   ===============
+		   = README File =
+		   ===============
+
+This README File is for the LAPACK driver variants.
+It is composed of 5 sections:
+	- Description: contents a quick description of each of the variants. For a more detailed description please refer to LAWN XXX.
+	- Build
+	- Testing
+	- Linking your program
+	- Support
+
+Author: Peng DU and Julie LANGOU, May 2008
+
+===============
+= DESCRIPTION =
+===============
+
+This directory contains several variants of LAPACK routines in single/double/complex/double complex precision:
+	- [sdcz]getrf with LU Crout Level 3 BLAS version algorithm [2]- Directory: SRC/VARIANTS/lu/CR
+	- [sdcz]getrf with LU Left Looking Level 3 BLAS version algorithm [2]- Directory: SRC/VARIANTS/lu/LL
+	- [sdcz]getrf with Sivan Toledo's recursive LU algorithm [1] - Directory: SRC/VARIANTS/lu/REC
+	- [sdcz]geqrf with QR Left Looking Level 3 BLAS version algorithm [2]- Directory: SRC/VARIANTS/qr/LL
+	- [sdcz]potrf with Cholesky Right Looking Level 3 BLAS version algorithm [2]- Directory: SRC/VARIANTS/cholesky/RL
+	- [sdcz]potrf with Cholesky Top Level 3 BLAS version algorithm [2]- Directory: SRC/VARIANTS/cholesky/TOP
+
+References:For a more detailed description please refer to
+	- [1] Toledo, S. 1997. Locality of Reference in LU Decomposition with Partial Pivoting. SIAM J. Matrix Anal. Appl. 18, 4 (Oct. 1997),
+          1065-1081. http://dx.doi.org/10.1137/S0895479896297744
+	- [2]LAWN XXX
+
+=========
+= BUILD =
+=========
+
+These variants are compiled by default in the build process but they are not tested by default.
+The build process creates one new library per variants in the four arithmetics (single real/double real/single complex/double complex).
+The libraries are in the SRC/VARIANTS directory.
+
+Corresponding libraries created in SRC/VARIANTS:
+	- LU Crout : lucr.a
+	- LU Left Looking : lull.a
+	- LU Sivan Toledo's recursive : lurec.a
+	- QR Left Looking : qrll.a
+	- Cholesky Right Looking : cholrl.a
+	- Cholesky Top : choltop.a
+
+
+===========
+= TESTING =
+===========
+
+To test these variants you can type 'make variants-testing'
+This will rerun the linear methods testings once per variants and append the short name of the variants to the output files.
+You should then see the following files in the TESTING directory:
+[scdz]test_cholrl.out
+[scdz]test_choltop.out
+[scdz]test_lucr.out
+[scdz]test_lull.out
+[scdz]test_lurec.out
+[scdz]test_qrll.out
+
+========================
+= LINKING YOUR PROGRAM =
+========================
+
+You just need to add the variants methods library in your linking sequence before your lapack libary.
+Here is a quick example for LU
+
+Default using LU Right Looking version:
+ $(FORTRAN) -c myprog.f
+ $(FORTRAN) -o myexe myprog.o $(LAPACKLIB) $(BLASLIB)
+
+Using LU Left Looking version:
+ $(FORTRAN) -c myprog.f
+ $(FORTRAN) -o myexe myprog.o $(PATH TO LAPACK/SRC/VARIANTS)/lull.a $(LAPACKLIB) $(BLASLIB)
+
+===========
+= SUPPORT =
+===========
+
+You can use either LAPACK forum or the LAPACK mailing list to get support.
+LAPACK forum : http://icl.cs.utk.edu/lapack-forum
+LAPACK mailing list : lapack@cs.utk.edu

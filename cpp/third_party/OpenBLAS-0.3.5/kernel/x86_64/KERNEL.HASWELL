@@ -1,0 +1,102 @@
+DSCALKERNEL = dscal.c
+CSCALKERNEL = cscal.c
+ZSCALKERNEL = zscal.c
+
+SGEMVNKERNEL = sgemv_n_4.c
+SGEMVTKERNEL = sgemv_t_4.c
+
+DGEMVNKERNEL = dgemv_n_4.c
+DGEMVTKERNEL = dgemv_t_4.c
+
+ZGEMVNKERNEL = zgemv_n_4.c
+ZGEMVTKERNEL = zgemv_t_4.c
+
+CGEMVNKERNEL = cgemv_n_4.c
+CGEMVTKERNEL = cgemv_t_4.c
+
+SSYMV_L_KERNEL = ssymv_L.c
+SSYMV_U_KERNEL = ssymv_U.c
+DSYMV_L_KERNEL = dsymv_L.c
+DSYMV_U_KERNEL = dsymv_U.c
+
+SDOTKERNEL = sdot.c
+DDOTKERNEL = ddot.c
+CDOTKERNEL = cdot.c
+ZDOTKERNEL = zdot.c
+
+DSDOTKERNEL = sdot.c
+
+SAXPYKERNEL = saxpy.c
+DAXPYKERNEL = daxpy.c
+CAXPYKERNEL = caxpy.c
+ZAXPYKERNEL = zaxpy.c
+
+STRMMKERNEL    =  sgemm_kernel_16x4_haswell.S
+SGEMMKERNEL    =  sgemm_kernel_16x4_haswell.S
+SGEMM_BETA     =  sgemm_beta_skylakex.c
+SGEMMINCOPY    =  ../generic/gemm_ncopy_16.c
+SGEMMITCOPY    =  ../generic/gemm_tcopy_16.c
+SGEMMONCOPY    =  sgemm_ncopy_4_skylakex.c
+SGEMMOTCOPY    =  ../generic/gemm_tcopy_4.c
+SGEMMINCOPYOBJ =  sgemm_incopy$(TSUFFIX).$(SUFFIX)
+SGEMMITCOPYOBJ =  sgemm_itcopy$(TSUFFIX).$(SUFFIX)
+SGEMMONCOPYOBJ =  sgemm_oncopy$(TSUFFIX).$(SUFFIX)
+SGEMMOTCOPYOBJ =  sgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+DTRMMKERNEL    =  dtrmm_kernel_4x8_haswell.c
+DGEMMKERNEL    =  dgemm_kernel_4x8_haswell.S
+DGEMM_BETA     =  dgemm_beta_skylakex.c
+DGEMMINCOPY    =  ../generic/gemm_ncopy_4.c
+DGEMMITCOPY    =  ../generic/gemm_tcopy_4.c
+DGEMMONCOPY    =  dgemm_ncopy_8_skylakex.c
+DGEMMOTCOPY    =  ../generic/gemm_tcopy_8.c
+DGEMMINCOPYOBJ =  dgemm_incopy$(TSUFFIX).$(SUFFIX)
+DGEMMITCOPYOBJ =  dgemm_itcopy$(TSUFFIX).$(SUFFIX)
+DGEMMONCOPYOBJ =  dgemm_oncopy$(TSUFFIX).$(SUFFIX)
+DGEMMOTCOPYOBJ =  dgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+CTRMMKERNEL    =  cgemm_kernel_8x2_haswell.S
+CGEMMKERNEL    =  cgemm_kernel_8x2_haswell.S
+CGEMMINCOPY    =  ../generic/zgemm_ncopy_8.c
+CGEMMITCOPY    =  ../generic/zgemm_tcopy_8.c
+CGEMMONCOPY    =  ../generic/zgemm_ncopy_2.c
+CGEMMOTCOPY    =  ../generic/zgemm_tcopy_2.c
+CGEMMINCOPYOBJ =  cgemm_incopy$(TSUFFIX).$(SUFFIX)
+CGEMMITCOPYOBJ =  cgemm_itcopy$(TSUFFIX).$(SUFFIX)
+CGEMMONCOPYOBJ =  cgemm_oncopy$(TSUFFIX).$(SUFFIX)
+CGEMMOTCOPYOBJ =  cgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+ZTRMMKERNEL    =  zgemm_kernel_4x2_haswell.S
+ZGEMMKERNEL    =  zgemm_kernel_4x2_haswell.S
+ZGEMMINCOPY    =  ../generic/zgemm_ncopy_4.c
+ZGEMMITCOPY    =  ../generic/zgemm_tcopy_4.c
+ZGEMMONCOPY    =  ../generic/zgemm_ncopy_2.c
+ZGEMMOTCOPY    =  ../generic/zgemm_tcopy_2.c
+ZGEMMINCOPYOBJ =  zgemm_incopy$(TSUFFIX).$(SUFFIX)
+ZGEMMITCOPYOBJ =  zgemm_itcopy$(TSUFFIX).$(SUFFIX)
+ZGEMMONCOPYOBJ =  zgemm_oncopy$(TSUFFIX).$(SUFFIX)
+ZGEMMOTCOPYOBJ =  zgemm_otcopy$(TSUFFIX).$(SUFFIX)
+
+STRSMKERNEL_LN	=  ../generic/trsm_kernel_LN.c
+STRSMKERNEL_LT	=  ../generic/trsm_kernel_LT.c
+STRSMKERNEL_RN	=  ../generic/trsm_kernel_RN.c
+STRSMKERNEL_RT	=  ../generic/trsm_kernel_RT.c
+
+DTRSMKERNEL_LN	= ../generic/trsm_kernel_LN.c
+DTRSMKERNEL_LT	= ../generic/trsm_kernel_LT.c
+DTRSMKERNEL_RN	= dtrsm_kernel_RN_haswell.c
+DTRSMKERNEL_RT	= ../generic/trsm_kernel_RT.c
+
+CTRSMKERNEL_LN	= ../generic/trsm_kernel_LN.c
+CTRSMKERNEL_LT	= ../generic/trsm_kernel_LT.c
+CTRSMKERNEL_RN	= ../generic/trsm_kernel_RN.c
+CTRSMKERNEL_RT	= ../generic/trsm_kernel_RT.c
+
+ZTRSMKERNEL_LN	= ../generic/trsm_kernel_LN.c
+ZTRSMKERNEL_LT	= ../generic/trsm_kernel_LT.c
+ZTRSMKERNEL_RN	= ../generic/trsm_kernel_RN.c
+ZTRSMKERNEL_RT	= ../generic/trsm_kernel_RT.c
+
+CGEMM3MKERNEL    =  zgemm3m_kernel_4x8_nehalem.S
+ZGEMM3MKERNEL    =  zgemm3m_kernel_2x8_nehalem.S
+

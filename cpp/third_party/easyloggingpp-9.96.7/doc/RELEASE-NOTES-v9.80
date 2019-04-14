@@ -1,0 +1,15 @@
+Easylogging++ v9.80 RELEASE NOTES
+---------------------------------
+
+Release type: Minor
+API changes: No
+
+==========================
+=         NOTES          =
+==========================
+
+ - Licence update
+ - Email update
+ - See https://github.com/easylogging/easyloggingpp/blob/v9.80/README.md for manual for this release
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

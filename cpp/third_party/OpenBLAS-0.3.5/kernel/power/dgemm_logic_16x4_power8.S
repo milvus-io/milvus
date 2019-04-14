@@ -1,0 +1,1851 @@
+/***************************************************************************
+Copyright (c) 2013-2016, The OpenBLAS Project
+All rights reserved.
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+1. Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in
+the documentation and/or other materials provided with the
+distribution.
+3. Neither the name of the OpenBLAS project nor the names of
+its contributors may be used to endorse or promote products
+derived from this software without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE OPENBLAS PROJECT OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*****************************************************************************/
+
+/**************************************************************************************
+* 2016/03/05 Werner Saar (wernsaar@googlemail.com)
+* 	 BLASTEST 		: OK
+* 	 CTEST			: OK
+* 	 TEST			: OK
+*	 LAPACK-TEST		: OK
+**************************************************************************************/
+
+#define MY_ALIGN .align 3
+
+	srawi.		J,	N,	2
+	ble		LDGEMM_L4_END
+
+LDGEMM_L4_BEGIN:
+
+	li		T1,	128
+	li		T2,	256
+	mr		AO,	A
+
+	mr		CO,	C
+	slwi		T3,	LDC	,	2
+	add		C,	C,	T3
+
+	dcbt		A,	T1
+	dcbt		A,	T2
+
+	srawi.		I,	M,	4
+	ble		LDGEMM_L4x16_END
+
+	MY_ALIGN
+LDGEMM_L4x16_BEGIN_FIRST:
+
+	li		L,	-128
+
+	mr		T1,	CO
+	add		T2,	T1,	LDC
+	add		T3,	T2,	LDC
+	add		T4,	T3,	LDC
+
+	and		T1,	T1,	L
+	and		T2,	T2,	L
+	and		T3,	T3,	L
+	and		T4,	T4,	L
+
+	dcbt		T1,	r0
+	dcbt		T2,	r0
+	dcbt		T3,	r0
+	dcbt		T4,	r0
+
+	mr		BO,	B
+	srawi.		L,	K,	2
+
+	addi		T1, T1, 128
+	addi		T2, T2, 128
+	addi		T3, T3, 128
+	addi		T4, T4, 128
+
+	dcbt		T1,	r0
+	dcbt		T2,	r0
+	dcbt		T3,	r0
+	dcbt		T4,	r0
+	
+	ble		LDGEMM_L4x16_SUB0_FIRST
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L4x16_SUB4_FIRST
+
+	MY_ALIGN
+LDGEMM_L4x16_LOOP_START_FIRST:
+
+	li	T2,	512
+	li	o40,	40
+	li	o56,	56
+
+	dcbt	AO,	PRE
+	dcbt	BO,	T2
+	LOAD4x16_1
+	dcbt	AO,	PRE
+	KERNEL4x16_I1
+	dcbt	AO,	PRE
+	addic.		L,	L,	-2
+	KERNEL4x16_L2
+
+	dcbt	AO,	PRE
+	KERNEL4x16_L1
+	dcbt	AO,	PRE
+	dcbt	BO,	T2
+	KERNEL4x16_L2
+
+	ble		LDGEMM_L4x16_LOOP_END_FIRST
+	mtctr		L
+
+	MY_ALIGN
+
+LDGEMM_L4x16_LOOP_FIRST:
+
+	dcbt	AO,	PRE
+	KERNEL4x16_L1
+	dcbt	AO,	PRE
+	KERNEL4x16_L2
+
+	dcbt	AO,	PRE
+	KERNEL4x16_L1
+	dcbt	AO,	PRE
+	dcbt	BO,	T2
+	KERNEL4x16_L2
+
+	bdnz		LDGEMM_L4x16_LOOP_FIRST
+
+	MY_ALIGN
+
+LDGEMM_L4x16_LOOP_END_FIRST:
+
+	KERNEL4x16_L1
+	KERNEL4x16_L2
+
+	KERNEL4x16_1
+	KERNEL4x16_E2
+
+	b		LDGEMM_L4x16_SUB1_FIRST
+
+LDGEMM_L4x16_SUB4_FIRST:
+
+	KERNEL4x16_SUBI1
+	KERNEL4x16_SUB1
+	KERNEL4x16_SUB1
+	KERNEL4x16_SUB1
+
+	b		LDGEMM_L4x16_SUB1_FIRST
+
+LDGEMM_L4x16_SUB0_FIRST:
+
+	andi.		L,	K,	3
+
+	KERNEL4x16_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L4x16_SAVE_FIRST
+	b		LDGEMM_L4x16_SUB2_FIRST
+
+LDGEMM_L4x16_SUB1_FIRST:
+
+	andi.		L,	K,	3
+	ble		LDGEMM_L4x16_SAVE_FIRST
+
+LDGEMM_L4x16_SUB2_FIRST:
+
+	KERNEL4x16_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L4x16_SUB2_FIRST
+
+	MY_ALIGN
+LDGEMM_L4x16_SAVE_FIRST:
+
+	SAVE4x16
+
+	addic.		I,	I,	-1
+	ble		LDGEMM_L4x16_END
+
+LDGEMM_L4x16_END_FIRST:
+
+	MY_ALIGN
+
+LDGEMM_L4x16_BEGIN:
+
+	li		L,	-128
+
+	mr		T1,	CO
+	add		T2,	T1,	LDC
+	add		T3,	T2,	LDC
+	add		T4,	T3,	LDC
+
+	and		T1,	T1,	L
+	and		T2,	T2,	L
+	and		T3,	T3,	L
+	and		T4,	T4,	L
+
+	dcbt		T1,	r0
+	dcbt		T2,	r0
+	dcbt		T3,	r0
+	dcbt		T4,	r0
+
+	mr		BO,	B
+	srawi.		L,	K,	1
+
+	addi		T1, T1, 128
+	addi		T2, T2, 128
+	addi		T3, T3, 128
+	addi		T4, T4, 128
+
+	dcbt		T1,	r0
+	dcbt		T2,	r0
+	dcbt		T3,	r0
+	dcbt		T4,	r0
+	
+	ble-		LDGEMM_L4x16_SUB0
+	cmpwi		cr0,	L,	1
+	ble-		LDGEMM_L4x16_SUB4
+
+	MY_ALIGN
+
+LDGEMM_L4x16_LOOP_START:
+
+	li	o40,	40
+	li	o56,	56
+
+	dcbt	AO,	PRE
+	LOAD4x16_1
+	dcbt	AO,	PRE
+	KERNEL4x16_I1
+	dcbt	AO,	PRE
+	addic.		L,	L,	-2
+	KERNEL4x16_L2
+
+	ble-		LDGEMM_L4x16_LOOP_END
+	mtctr		L
+
+	MY_ALIGN
+
+LDGEMM_L4x16_LOOP:
+
+	dcbt	AO,	PRE
+	KERNEL4x16_L1
+	dcbt	AO,	PRE
+	KERNEL4x16_L2
+
+	bdnz+		LDGEMM_L4x16_LOOP
+
+
+	MY_ALIGN
+
+LDGEMM_L4x16_LOOP_END:
+
+	KERNEL4x16_1
+	KERNEL4x16_E2
+
+	b		LDGEMM_L4x16_SUB1
+
+	MY_ALIGN
+
+LDGEMM_L4x16_SUB4:
+
+	KERNEL4x16_SUBI1
+	KERNEL4x16_SUB1
+
+	b		LDGEMM_L4x16_SUB1
+
+	MY_ALIGN
+
+LDGEMM_L4x16_SUB0:
+
+	andi.		L,	K,	1
+
+	KERNEL4x16_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L4x16_SAVE
+	b		LDGEMM_L4x16_SUB2
+
+	MY_ALIGN
+
+LDGEMM_L4x16_SUB1:
+
+	andi.		L,	K,	1
+	ble		LDGEMM_L4x16_SAVE
+
+	MY_ALIGN
+
+LDGEMM_L4x16_SUB2:
+
+	KERNEL4x16_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L4x16_SUB2
+
+	MY_ALIGN
+
+LDGEMM_L4x16_SAVE:
+
+	SAVE4x16
+
+	addic.		I,	I,	-1
+	bgt+		LDGEMM_L4x16_BEGIN
+
+LDGEMM_L4x16_END:
+
+LDGEMM_L4x8_BEGIN:
+
+	andi.		T2,	M,	15
+	ble		LDGEMM_L4x1_END
+
+	andi.		T1,	M,	8
+	ble		LDGEMM_L4x8_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L4x8_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L4x8_SUB4
+
+LDGEMM_L4x8_LOOP_START:
+
+	dcbt	AO,	PRE
+	LOAD4x8_1
+	KERNEL4x8_I1
+	dcbt	AO,	PRE
+	KERNEL4x8_2
+	KERNEL4x8_1
+	dcbt	AO,	PRE
+	KERNEL4x8_2
+
+	KERNEL4x8_1
+	dcbt	AO,	PRE
+	KERNEL4x8_2
+	KERNEL4x8_1
+	dcbt	AO,	PRE
+	KERNEL4x8_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L4x8_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L4x8_LOOP:
+
+	KERNEL4x8_1
+	dcbt	AO,	PRE
+	KERNEL4x8_2
+	KERNEL4x8_1
+	dcbt	AO,	PRE
+	KERNEL4x8_2
+
+	KERNEL4x8_1
+	dcbt	AO,	PRE
+	KERNEL4x8_2
+	KERNEL4x8_1
+	dcbt	AO,	PRE
+	KERNEL4x8_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L4x8_LOOP
+
+LDGEMM_L4x8_LOOP_END:
+
+	KERNEL4x8_1
+	KERNEL4x8_2
+	KERNEL4x8_1
+	KERNEL4x8_2
+
+	KERNEL4x8_1
+	KERNEL4x8_2
+	KERNEL4x8_1
+	KERNEL4x8_E2
+
+	b		LDGEMM_L4x8_SUB1
+
+LDGEMM_L4x8_SUB4:
+
+	KERNEL4x8_SUBI1
+	KERNEL4x8_SUB1
+	KERNEL4x8_SUB1
+	KERNEL4x8_SUB1
+
+	KERNEL4x8_SUB1
+	KERNEL4x8_SUB1
+	KERNEL4x8_SUB1
+	KERNEL4x8_SUB1
+
+	b		LDGEMM_L4x8_SUB1
+
+LDGEMM_L4x8_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL4x8_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L4x8_SAVE
+	b		LDGEMM_L4x8_SUB2
+
+LDGEMM_L4x8_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L4x8_SAVE
+
+LDGEMM_L4x8_SUB2:
+
+	KERNEL4x8_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L4x8_SUB2
+
+LDGEMM_L4x8_SAVE:
+
+	SAVE4x8
+
+LDGEMM_L4x8_END:
+
+LDGEMM_L4x4_BEGIN:
+
+
+	andi.		T1,	M,	4
+	ble		LDGEMM_L4x4_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L4x4_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L4x4_SUB4
+
+LDGEMM_L4x4_LOOP_START:
+
+	dcbt	AO,	PRE
+	LOAD4x4_1
+	KERNEL4x4_I1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	dcbt	AO,	PRE
+	KERNEL4x4_2
+
+	KERNEL4x4_1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	dcbt	AO,	PRE
+	KERNEL4x4_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L4x4_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L4x4_LOOP:
+
+	KERNEL4x4_1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	dcbt	AO,	PRE
+	KERNEL4x4_2
+
+	KERNEL4x4_1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	dcbt	AO,	PRE
+	KERNEL4x4_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L4x4_LOOP
+
+LDGEMM_L4x4_LOOP_END:
+
+	KERNEL4x4_1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	KERNEL4x4_2
+
+	KERNEL4x4_1
+	KERNEL4x4_2
+	KERNEL4x4_1
+	KERNEL4x4_E2
+
+	b		LDGEMM_L4x4_SUB1
+
+LDGEMM_L4x4_SUB4:
+
+	KERNEL4x4_SUBI1
+	KERNEL4x4_SUB1
+	KERNEL4x4_SUB1
+	KERNEL4x4_SUB1
+
+	KERNEL4x4_SUB1
+	KERNEL4x4_SUB1
+	KERNEL4x4_SUB1
+	KERNEL4x4_SUB1
+
+	b		LDGEMM_L4x4_SUB1
+
+LDGEMM_L4x4_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL4x4_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L4x4_SAVE
+	b		LDGEMM_L4x4_SUB2
+
+LDGEMM_L4x4_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L4x4_SAVE
+
+LDGEMM_L4x4_SUB2:
+
+	KERNEL4x4_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L4x4_SUB2
+
+LDGEMM_L4x4_SAVE:
+
+	SAVE4x4
+
+LDGEMM_L4x4_END:
+
+LDGEMM_L4x2_BEGIN:
+
+
+	andi.		T1,	M,	2
+	ble		LDGEMM_L4x2_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L4x2_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L4x2_SUB4
+
+LDGEMM_L4x2_LOOP_START:
+
+	LOAD4x2_1
+	KERNEL4x2_I1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_2
+
+	KERNEL4x2_1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L4x2_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L4x2_LOOP:
+
+	KERNEL4x2_1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_2
+
+	KERNEL4x2_1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L4x2_LOOP
+
+LDGEMM_L4x2_LOOP_END:
+
+	KERNEL4x2_1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_2
+
+	KERNEL4x2_1
+	KERNEL4x2_2
+	KERNEL4x2_1
+	KERNEL4x2_E2
+
+	b		LDGEMM_L4x2_SUB1
+
+LDGEMM_L4x2_SUB4:
+
+	KERNEL4x2_SUBI1
+	KERNEL4x2_SUB1
+	KERNEL4x2_SUB1
+	KERNEL4x2_SUB1
+
+	KERNEL4x2_SUB1
+	KERNEL4x2_SUB1
+	KERNEL4x2_SUB1
+	KERNEL4x2_SUB1
+
+	b		LDGEMM_L4x2_SUB1
+
+LDGEMM_L4x2_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL4x2_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L4x2_SAVE
+	b		LDGEMM_L4x2_SUB2
+
+LDGEMM_L4x2_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L4x2_SAVE
+
+LDGEMM_L4x2_SUB2:
+
+	KERNEL4x2_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L4x2_SUB2
+
+LDGEMM_L4x2_SAVE:
+
+	SAVE4x2
+
+LDGEMM_L4x2_END:
+
+LDGEMM_L4x1_BEGIN:
+
+
+	andi.		T1,	M,	1
+	ble		LDGEMM_L4x1_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L4x1_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L4x1_SUB4
+
+LDGEMM_L4x1_LOOP_START:
+
+	LOAD4x1_1
+	KERNEL4x1_I1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_2
+
+	KERNEL4x1_1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L4x1_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L4x1_LOOP:
+
+	KERNEL4x1_1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_2
+
+	KERNEL4x1_1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L4x1_LOOP
+
+LDGEMM_L4x1_LOOP_END:
+
+	KERNEL4x1_1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_2
+
+	KERNEL4x1_1
+	KERNEL4x1_2
+	KERNEL4x1_1
+	KERNEL4x1_E2
+
+	b		LDGEMM_L4x1_SUB1
+
+LDGEMM_L4x1_SUB4:
+
+	KERNEL4x1_SUBI1
+	KERNEL4x1_SUB1
+	KERNEL4x1_SUB1
+	KERNEL4x1_SUB1
+
+	KERNEL4x1_SUB1
+	KERNEL4x1_SUB1
+	KERNEL4x1_SUB1
+	KERNEL4x1_SUB1
+
+	b		LDGEMM_L4x1_SUB1
+
+LDGEMM_L4x1_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL4x1_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L4x1_SAVE
+	b		LDGEMM_L4x1_SUB2
+
+LDGEMM_L4x1_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L4x1_SAVE
+
+LDGEMM_L4x1_SUB2:
+
+	KERNEL4x1_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L4x1_SUB2
+
+LDGEMM_L4x1_SAVE:
+
+	SAVE4x1
+
+LDGEMM_L4x1_END:
+
+	slwi		T1,	K,	5
+	add		B,	B,	T1
+
+	addic.		J,	J,	-1
+	bgt		LDGEMM_L4_BEGIN
+
+	andi.		T2,	N,	3
+	ble		.L999
+
+LDGEMM_L4_END:
+
+	b		LDGEMM_L2_BEGIN
+
+.L999_H1:
+
+	b		.L999
+
+LDGEMM_L2_BEGIN:
+
+	andi.		T1,	N,	2
+	ble		LDGEMM_L2_END
+	mr		CO,	C
+	mr		AO,	A
+	slwi		T1,	LDC	,	1
+	add		C,	C,	T1
+	srawi.		I,	M,	4
+	ble		LDGEMM_L2x16_END
+
+LDGEMM_L2x16_BEGIN:
+
+
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L2x16_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L2x16_SUB4
+
+LDGEMM_L2x16_LOOP_START:
+
+	dcbt		AO,	PRE
+	LOAD2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_I1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L2x16_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L2x16_LOOP:
+
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L2x16_LOOP
+
+LDGEMM_L2x16_LOOP_END:
+
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	dcbt		AO,	PRE
+	KERNEL2x16_2
+	dcbt		AO,	PRE
+	KERNEL2x16_1
+	KERNEL2x16_E2
+
+	b		LDGEMM_L2x16_SUB1
+
+LDGEMM_L2x16_SUB4:
+
+	dcbt		AO,	PRE
+	KERNEL2x16_SUBI1
+	dcbt		AO,	PRE
+	KERNEL2x16_SUB1
+	dcbt		AO,	PRE
+	KERNEL2x16_SUB1
+	dcbt		AO,	PRE
+	KERNEL2x16_SUB1
+
+	KERNEL2x16_SUB1
+	KERNEL2x16_SUB1
+	KERNEL2x16_SUB1
+	KERNEL2x16_SUB1
+
+	b		LDGEMM_L2x16_SUB1
+
+LDGEMM_L2x16_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL2x16_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L2x16_SAVE
+	b		LDGEMM_L2x16_SUB2
+
+LDGEMM_L2x16_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L2x16_SAVE
+
+LDGEMM_L2x16_SUB2:
+
+	KERNEL2x16_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L2x16_SUB2
+
+LDGEMM_L2x16_SAVE:
+
+	SAVE2x16
+
+	addic.		I,	I,	-1
+	bgt		LDGEMM_L2x16_BEGIN
+
+LDGEMM_L2x16_END:
+
+LDGEMM_L2x8_BEGIN:
+
+	andi.		T2,	M,	15
+	ble		LDGEMM_L2x1_END
+
+	andi.		T1,	M,	8
+	ble		LDGEMM_L2x8_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L2x8_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L2x8_SUB4
+
+LDGEMM_L2x8_LOOP_START:
+
+	dcbt	AO,	PRE
+	LOAD2x8_1
+	KERNEL2x8_I1
+	dcbt	AO,	PRE
+	KERNEL2x8_2
+	KERNEL2x8_1
+	dcbt	AO,	PRE
+	KERNEL2x8_2
+
+	KERNEL2x8_1
+	dcbt	AO,	PRE
+	KERNEL2x8_2
+	KERNEL2x8_1
+	dcbt	AO,	PRE
+	KERNEL2x8_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L2x8_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L2x8_LOOP:
+
+	KERNEL2x8_1
+	dcbt	AO,	PRE
+	KERNEL2x8_2
+	KERNEL2x8_1
+	dcbt	AO,	PRE
+	KERNEL2x8_2
+
+	KERNEL2x8_1
+	dcbt	AO,	PRE
+	KERNEL2x8_2
+	KERNEL2x8_1
+	dcbt	AO,	PRE
+	KERNEL2x8_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L2x8_LOOP
+
+LDGEMM_L2x8_LOOP_END:
+
+	KERNEL2x8_1
+	KERNEL2x8_2
+	KERNEL2x8_1
+	KERNEL2x8_2
+
+	KERNEL2x8_1
+	KERNEL2x8_2
+	KERNEL2x8_1
+	KERNEL2x8_E2
+
+	b		LDGEMM_L2x8_SUB1
+
+LDGEMM_L2x8_SUB4:
+
+	KERNEL2x8_SUBI1
+	KERNEL2x8_SUB1
+	KERNEL2x8_SUB1
+	KERNEL2x8_SUB1
+
+	KERNEL2x8_SUB1
+	KERNEL2x8_SUB1
+	KERNEL2x8_SUB1
+	KERNEL2x8_SUB1
+
+	b		LDGEMM_L2x8_SUB1
+
+LDGEMM_L2x8_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL2x8_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L2x8_SAVE
+	b		LDGEMM_L2x8_SUB2
+
+LDGEMM_L2x8_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L2x8_SAVE
+
+LDGEMM_L2x8_SUB2:
+
+	KERNEL2x8_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L2x8_SUB2
+
+LDGEMM_L2x8_SAVE:
+
+	SAVE2x8
+
+LDGEMM_L2x8_END:
+
+LDGEMM_L2x4_BEGIN:
+
+
+	andi.		T1,	M,	4
+	ble		LDGEMM_L2x4_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L2x4_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L2x4_SUB4
+
+LDGEMM_L2x4_LOOP_START:
+
+	LOAD2x4_1
+	KERNEL2x4_I1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_2
+
+	KERNEL2x4_1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L2x4_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L2x4_LOOP:
+
+	KERNEL2x4_1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_2
+
+	KERNEL2x4_1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L2x4_LOOP
+
+LDGEMM_L2x4_LOOP_END:
+
+	KERNEL2x4_1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_2
+
+	KERNEL2x4_1
+	KERNEL2x4_2
+	KERNEL2x4_1
+	KERNEL2x4_E2
+
+	b		LDGEMM_L2x4_SUB1
+
+LDGEMM_L2x4_SUB4:
+
+	KERNEL2x4_SUBI1
+	KERNEL2x4_SUB1
+	KERNEL2x4_SUB1
+	KERNEL2x4_SUB1
+
+	KERNEL2x4_SUB1
+	KERNEL2x4_SUB1
+	KERNEL2x4_SUB1
+	KERNEL2x4_SUB1
+
+	b		LDGEMM_L2x4_SUB1
+
+LDGEMM_L2x4_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL2x4_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L2x4_SAVE
+	b		LDGEMM_L2x4_SUB2
+
+LDGEMM_L2x4_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L2x4_SAVE
+
+LDGEMM_L2x4_SUB2:
+
+	KERNEL2x4_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L2x4_SUB2
+
+LDGEMM_L2x4_SAVE:
+
+	SAVE2x4
+
+LDGEMM_L2x4_END:
+
+LDGEMM_L2x2_BEGIN:
+
+
+	andi.		T1,	M,	2
+	ble		LDGEMM_L2x2_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L2x2_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L2x2_SUB4
+
+LDGEMM_L2x2_LOOP_START:
+
+	LOAD2x2_1
+	KERNEL2x2_I1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_2
+
+	KERNEL2x2_1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L2x2_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L2x2_LOOP:
+
+	KERNEL2x2_1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_2
+
+	KERNEL2x2_1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L2x2_LOOP
+
+LDGEMM_L2x2_LOOP_END:
+
+	KERNEL2x2_1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_2
+
+	KERNEL2x2_1
+	KERNEL2x2_2
+	KERNEL2x2_1
+	KERNEL2x2_E2
+
+	b		LDGEMM_L2x2_SUB1
+
+LDGEMM_L2x2_SUB4:
+
+	KERNEL2x2_SUBI1
+	KERNEL2x2_SUB1
+	KERNEL2x2_SUB1
+	KERNEL2x2_SUB1
+
+	KERNEL2x2_SUB1
+	KERNEL2x2_SUB1
+	KERNEL2x2_SUB1
+	KERNEL2x2_SUB1
+
+	b		LDGEMM_L2x2_SUB1
+
+LDGEMM_L2x2_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL2x2_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L2x2_SAVE
+	b		LDGEMM_L2x2_SUB2
+
+LDGEMM_L2x2_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L2x2_SAVE
+
+LDGEMM_L2x2_SUB2:
+
+	KERNEL2x2_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L2x2_SUB2
+
+LDGEMM_L2x2_SAVE:
+
+	SAVE2x2
+
+LDGEMM_L2x2_END:
+
+LDGEMM_L2x1_BEGIN:
+
+
+	andi.		T1,	M,	1
+	ble		LDGEMM_L2x1_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L2x1_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L2x1_SUB4
+
+LDGEMM_L2x1_LOOP_START:
+
+	LOAD2x1_1
+	KERNEL2x1_I1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_2
+
+	KERNEL2x1_1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L2x1_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L2x1_LOOP:
+
+	KERNEL2x1_1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_2
+
+	KERNEL2x1_1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L2x1_LOOP
+
+LDGEMM_L2x1_LOOP_END:
+
+	KERNEL2x1_1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_2
+
+	KERNEL2x1_1
+	KERNEL2x1_2
+	KERNEL2x1_1
+	KERNEL2x1_E2
+
+	b		LDGEMM_L2x1_SUB1
+
+LDGEMM_L2x1_SUB4:
+
+	KERNEL2x1_SUBI1
+	KERNEL2x1_SUB1
+	KERNEL2x1_SUB1
+	KERNEL2x1_SUB1
+
+	KERNEL2x1_SUB1
+	KERNEL2x1_SUB1
+	KERNEL2x1_SUB1
+	KERNEL2x1_SUB1
+
+	b		LDGEMM_L2x1_SUB1
+
+LDGEMM_L2x1_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL2x1_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L2x1_SAVE
+	b		LDGEMM_L2x1_SUB2
+
+LDGEMM_L2x1_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L2x1_SAVE
+
+LDGEMM_L2x1_SUB2:
+
+	KERNEL2x1_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L2x1_SUB2
+
+LDGEMM_L2x1_SAVE:
+
+	SAVE2x1
+
+LDGEMM_L2x1_END:
+
+	slwi		T1,	K,	4
+	add		B,	B,	T1
+
+LDGEMM_L2_END:
+LDGEMM_L1_BEGIN:
+
+	andi.		T1,	N,	1
+	ble		LDGEMM_L1_END
+	mr		CO,	C
+	mr		AO,	A
+	srawi.		I,	M,	4
+	ble		LDGEMM_L1x16_END
+
+LDGEMM_L1x16_BEGIN:
+
+
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L1x16_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L1x16_SUB4
+
+LDGEMM_L1x16_LOOP_START:
+
+	dcbt		AO,	PRE
+	LOAD1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_I1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L1x16_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L1x16_LOOP:
+
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L1x16_LOOP
+
+LDGEMM_L1x16_LOOP_END:
+
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	dcbt		AO,	PRE
+	KERNEL1x16_2
+	dcbt		AO,	PRE
+	KERNEL1x16_1
+	KERNEL1x16_E2
+
+	b		LDGEMM_L1x16_SUB1
+
+LDGEMM_L1x16_SUB4:
+
+	dcbt		AO,	PRE
+	KERNEL1x16_SUBI1
+	dcbt		AO,	PRE
+	KERNEL1x16_SUB1
+	dcbt		AO,	PRE
+	KERNEL1x16_SUB1
+	dcbt		AO,	PRE
+	KERNEL1x16_SUB1
+
+	KERNEL1x16_SUB1
+	KERNEL1x16_SUB1
+	KERNEL1x16_SUB1
+	KERNEL1x16_SUB1
+
+	b		LDGEMM_L1x16_SUB1
+
+LDGEMM_L1x16_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL1x16_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L1x16_SAVE
+	b		LDGEMM_L1x16_SUB2
+
+LDGEMM_L1x16_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L1x16_SAVE
+
+LDGEMM_L1x16_SUB2:
+
+	KERNEL1x16_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L1x16_SUB2
+
+LDGEMM_L1x16_SAVE:
+
+	SAVE1x16
+
+	addic.		I,	I,	-1
+	bgt		LDGEMM_L1x16_BEGIN
+
+LDGEMM_L1x16_END:
+
+LDGEMM_L1x8_BEGIN:
+
+	andi.		T2,	M,	15
+	ble		LDGEMM_L1x1_END
+
+	andi.		T1,	M,	8
+	ble		LDGEMM_L1x8_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L1x8_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L1x8_SUB4
+
+LDGEMM_L1x8_LOOP_START:
+
+	dcbt	AO,	PRE
+	LOAD1x8_1
+	KERNEL1x8_I1
+	dcbt	AO,	PRE
+	KERNEL1x8_2
+	KERNEL1x8_1
+	dcbt	AO,	PRE
+	KERNEL1x8_2
+
+	KERNEL1x8_1
+	dcbt	AO,	PRE
+	KERNEL1x8_2
+	KERNEL1x8_1
+	dcbt	AO,	PRE
+	KERNEL1x8_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L1x8_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L1x8_LOOP:
+
+	KERNEL1x8_1
+	dcbt	AO,	PRE
+	KERNEL1x8_2
+	KERNEL1x8_1
+	dcbt	AO,	PRE
+	KERNEL1x8_2
+
+	KERNEL1x8_1
+	dcbt	AO,	PRE
+	KERNEL1x8_2
+	KERNEL1x8_1
+	dcbt	AO,	PRE
+	KERNEL1x8_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L1x8_LOOP
+
+LDGEMM_L1x8_LOOP_END:
+
+	KERNEL1x8_1
+	KERNEL1x8_2
+	KERNEL1x8_1
+	KERNEL1x8_2
+
+	KERNEL1x8_1
+	KERNEL1x8_2
+	KERNEL1x8_1
+	KERNEL1x8_E2
+
+	b		LDGEMM_L1x8_SUB1
+
+LDGEMM_L1x8_SUB4:
+
+	KERNEL1x8_SUBI1
+	KERNEL1x8_SUB1
+	KERNEL1x8_SUB1
+	KERNEL1x8_SUB1
+
+	KERNEL1x8_SUB1
+	KERNEL1x8_SUB1
+	KERNEL1x8_SUB1
+	KERNEL1x8_SUB1
+
+	b		LDGEMM_L1x8_SUB1
+
+LDGEMM_L1x8_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL1x8_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L1x8_SAVE
+	b		LDGEMM_L1x8_SUB2
+
+LDGEMM_L1x8_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L1x8_SAVE
+
+LDGEMM_L1x8_SUB2:
+
+	KERNEL1x8_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L1x8_SUB2
+
+LDGEMM_L1x8_SAVE:
+
+	SAVE1x8
+
+LDGEMM_L1x8_END:
+
+LDGEMM_L1x4_BEGIN:
+
+
+	andi.		T1,	M,	4
+	ble		LDGEMM_L1x4_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L1x4_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L1x4_SUB4
+
+LDGEMM_L1x4_LOOP_START:
+
+	LOAD1x4_1
+	KERNEL1x4_I1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_2
+
+	KERNEL1x4_1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L1x4_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L1x4_LOOP:
+
+	KERNEL1x4_1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_2
+
+	KERNEL1x4_1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L1x4_LOOP
+
+LDGEMM_L1x4_LOOP_END:
+
+	KERNEL1x4_1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_2
+
+	KERNEL1x4_1
+	KERNEL1x4_2
+	KERNEL1x4_1
+	KERNEL1x4_E2
+
+	b		LDGEMM_L1x4_SUB1
+
+LDGEMM_L1x4_SUB4:
+
+	KERNEL1x4_SUBI1
+	KERNEL1x4_SUB1
+	KERNEL1x4_SUB1
+	KERNEL1x4_SUB1
+
+	KERNEL1x4_SUB1
+	KERNEL1x4_SUB1
+	KERNEL1x4_SUB1
+	KERNEL1x4_SUB1
+
+	b		LDGEMM_L1x4_SUB1
+
+LDGEMM_L1x4_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL1x4_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L1x4_SAVE
+	b		LDGEMM_L1x4_SUB2
+
+LDGEMM_L1x4_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L1x4_SAVE
+
+LDGEMM_L1x4_SUB2:
+
+	KERNEL1x4_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L1x4_SUB2
+
+LDGEMM_L1x4_SAVE:
+
+	SAVE1x4
+
+LDGEMM_L1x4_END:
+
+LDGEMM_L1x2_BEGIN:
+
+
+	andi.		T1,	M,	2
+	ble		LDGEMM_L1x2_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L1x2_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L1x2_SUB4
+
+LDGEMM_L1x2_LOOP_START:
+
+	LOAD1x2_1
+	KERNEL1x2_I1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_2
+
+	KERNEL1x2_1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L1x2_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L1x2_LOOP:
+
+	KERNEL1x2_1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_2
+
+	KERNEL1x2_1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L1x2_LOOP
+
+LDGEMM_L1x2_LOOP_END:
+
+	KERNEL1x2_1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_2
+
+	KERNEL1x2_1
+	KERNEL1x2_2
+	KERNEL1x2_1
+	KERNEL1x2_E2
+
+	b		LDGEMM_L1x2_SUB1
+
+LDGEMM_L1x2_SUB4:
+
+	KERNEL1x2_SUBI1
+	KERNEL1x2_SUB1
+	KERNEL1x2_SUB1
+	KERNEL1x2_SUB1
+
+	KERNEL1x2_SUB1
+	KERNEL1x2_SUB1
+	KERNEL1x2_SUB1
+	KERNEL1x2_SUB1
+
+	b		LDGEMM_L1x2_SUB1
+
+LDGEMM_L1x2_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL1x2_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L1x2_SAVE
+	b		LDGEMM_L1x2_SUB2
+
+LDGEMM_L1x2_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L1x2_SAVE
+
+LDGEMM_L1x2_SUB2:
+
+	KERNEL1x2_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L1x2_SUB2
+
+LDGEMM_L1x2_SAVE:
+
+	SAVE1x2
+
+LDGEMM_L1x2_END:
+
+LDGEMM_L1x1_BEGIN:
+
+
+	andi.		T1,	M,	1
+	ble		LDGEMM_L1x1_END
+	mr		BO,	B
+	srawi.		L,	K,	3
+	ble		LDGEMM_L1x1_SUB0
+	cmpwi		cr0,	L,	1
+	ble		LDGEMM_L1x1_SUB4
+
+LDGEMM_L1x1_LOOP_START:
+
+	LOAD1x1_1
+	KERNEL1x1_I1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_2
+
+	KERNEL1x1_1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_2
+
+	addic.		L,	L,	-2
+	ble		LDGEMM_L1x1_LOOP_END
+
+	MY_ALIGN
+
+LDGEMM_L1x1_LOOP:
+
+	KERNEL1x1_1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_2
+
+	KERNEL1x1_1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_2
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L1x1_LOOP
+
+LDGEMM_L1x1_LOOP_END:
+
+	KERNEL1x1_1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_2
+
+	KERNEL1x1_1
+	KERNEL1x1_2
+	KERNEL1x1_1
+	KERNEL1x1_E2
+
+	b		LDGEMM_L1x1_SUB1
+
+LDGEMM_L1x1_SUB4:
+
+	KERNEL1x1_SUBI1
+	KERNEL1x1_SUB1
+	KERNEL1x1_SUB1
+	KERNEL1x1_SUB1
+
+	KERNEL1x1_SUB1
+	KERNEL1x1_SUB1
+	KERNEL1x1_SUB1
+	KERNEL1x1_SUB1
+
+	b		LDGEMM_L1x1_SUB1
+
+LDGEMM_L1x1_SUB0:
+
+	andi.		L,	K,	7
+
+	KERNEL1x1_SUBI1
+
+	addic.		L,	L,	-1
+	ble		LDGEMM_L1x1_SAVE
+	b		LDGEMM_L1x1_SUB2
+
+LDGEMM_L1x1_SUB1:
+
+	andi.		L,	K,	7
+	ble		LDGEMM_L1x1_SAVE
+
+LDGEMM_L1x1_SUB2:
+
+	KERNEL1x1_SUB1
+
+	addic.		L,	L,	-1
+	bgt		LDGEMM_L1x1_SUB2
+
+LDGEMM_L1x1_SAVE:
+
+	SAVE1x1
+
+LDGEMM_L1x1_END:
+
+LDGEMM_L1_END:

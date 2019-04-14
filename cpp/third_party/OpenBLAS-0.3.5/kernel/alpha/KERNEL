@@ -1,0 +1,124 @@
+ifndef SAMINKERNEL
+SAMINKERNEL = amax.S
+endif
+
+ifndef DAMINKERNEL
+DAMINKERNEL = amax.S
+endif
+
+ifndef CAMINKERNEL
+CAMINKERNEL = zamax.S
+endif
+
+ifndef ZAMINKERNEL
+ZAMINKERNEL = zamax.S
+endif
+
+ifndef SMINKERNEL
+SMINKERNEL = max.S
+endif
+
+ifndef DMINKERNEL
+DMINKERNEL = max.S
+endif
+
+ifndef ISAMINKERNEL
+ISAMINKERNEL = iamax.S
+endif
+
+ifndef IDAMINKERNEL
+IDAMINKERNEL = iamax.S
+endif
+
+ifndef ICAMINKERNEL
+ICAMINKERNEL = izamax.S
+endif
+
+ifndef IZAMINKERNEL
+IZAMINKERNEL = izamax.S
+endif
+
+ifndef ISMINKERNEL
+ISMINKERNEL = iamax.S
+endif
+
+ifndef IDMINKERNEL
+IDMINKERNEL = iamax.S
+endif
+
+ifndef CCOPYKERNEL
+CCOPYKERNEL = copy.S
+endif
+
+ifndef ZCOPYKERNEL
+ZCOPYKERNEL = copy.S
+endif
+
+ifndef SNRM2KERNEL
+SNRM2KERNEL = snrm2.S
+endif
+
+ifndef DNRM2KERNEL
+DNRM2KERNEL = dnrm2.S
+endif
+
+ifndef CNRM2KERNEL
+CNRM2KERNEL = cnrm2.S
+endif
+
+ifndef ZNRM2KERNEL
+ZNRM2KERNEL = znrm2.S
+endif
+
+SGEMMKERNEL    = gemm_kernel_4x4.S
+SGEMM_BETA     = gemm_beta.S
+SGEMMONCOPY    = ../generic/gemm_ncopy_4.c
+SGEMMOTCOPY    = ../generic/gemm_tcopy_4.c
+SGEMMONCOPYOBJ = sgemm_oncopy.$(SUFFIX)
+SGEMMOTCOPYOBJ = sgemm_otcopy.$(SUFFIX)
+
+DGEMMKERNEL    = gemm_kernel_4x4.S
+DGEMM_BETA     = gemm_beta.S
+DGEMMONCOPY    = ../generic/gemm_ncopy_4.c
+DGEMMOTCOPY    = ../generic/gemm_tcopy_4.c
+DGEMMONCOPYOBJ = dgemm_oncopy.$(SUFFIX)
+DGEMMOTCOPYOBJ = dgemm_otcopy.$(SUFFIX)
+
+CGEMMKERNEL    = zgemm_kernel_2x2.S
+CGEMM_BETA     = zgemm_beta.S
+CGEMMONCOPY    = ../generic/zgemm_ncopy_2.c
+CGEMMOTCOPY    = ../generic/zgemm_tcopy_2.c
+CGEMMONCOPYOBJ = cgemm_oncopy.$(SUFFIX)
+CGEMMOTCOPYOBJ = cgemm_otcopy.$(SUFFIX)
+
+ZGEMMKERNEL    = zgemm_kernel_2x2.S
+ZGEMM_BETA     = zgemm_beta.S
+ZGEMMONCOPY    = ../generic/zgemm_ncopy_2.c
+ZGEMMOTCOPY    = ../generic/zgemm_tcopy_2.c
+ZGEMMONCOPYOBJ = zgemm_oncopy.$(SUFFIX)
+ZGEMMOTCOPYOBJ = zgemm_otcopy.$(SUFFIX)
+
+SGEMM_BETA = gemm_beta.S
+DGEMM_BETA = gemm_beta.S
+CGEMM_BETA = zgemm_beta.S
+ZGEMM_BETA = zgemm_beta.S
+
+STRSMKERNEL_LN	=  trsm_kernel_4x4_LN.S
+STRSMKERNEL_LT	=  trsm_kernel_4x4_LT.S
+STRSMKERNEL_RN	=  trsm_kernel_4x4_LT.S
+STRSMKERNEL_RT	=  trsm_kernel_4x4_RT.S
+
+DTRSMKERNEL_LN	=  trsm_kernel_4x4_LN.S
+DTRSMKERNEL_LT	=  trsm_kernel_4x4_LT.S
+DTRSMKERNEL_RN	=  trsm_kernel_4x4_LT.S
+DTRSMKERNEL_RT	=  trsm_kernel_4x4_RT.S
+
+CTRSMKERNEL_LN	=  ztrsm_kernel_2x2_LN.S
+CTRSMKERNEL_LT	=  ztrsm_kernel_2x2_LT.S
+CTRSMKERNEL_RN	=  ztrsm_kernel_2x2_LT.S
+CTRSMKERNEL_RT	=  ztrsm_kernel_2x2_RT.S
+
+ZTRSMKERNEL_LN	=  ztrsm_kernel_2x2_LN.S
+ZTRSMKERNEL_LT	=  ztrsm_kernel_2x2_LT.S
+ZTRSMKERNEL_RN	=  ztrsm_kernel_2x2_LT.S
+ZTRSMKERNEL_RT	=  ztrsm_kernel_2x2_RT.S

@@ -1,0 +1,34 @@
+Easylogging++ v9.90 RELEASE NOTES
+---------------------------------
+
+Release type: Major
+API changes: Yes
+Breaking Change: Yes
+
+This is a major release. We have separated header file in to `easylogging++.h` and `easylogging++.cc`. Source file (`easylogging++.cc`) encompass source to speed up compile time. Thanks to @aparajita.
+
+==========================
+=         FIXES          =
+==========================
+
+ - Fix to custom datetime format in Unicode mode
+
+==========================
+=      NEW FEATURES      =
+==========================
+
+ - The `FormatSpecifierValueResolver` function passed to the `CustomFormatSpecifier` constructor
+   now receives `const LogMessage&` as an argument. This allows you to access message-specific context
+   (such as the verbose level) within your custom formatting function. For an example, see
+   samples/STL/custom-format-spec.cpp.
+ - Separated header and source file (`easylogging++.h` and `easylogging++.cc`) (issue #445)
+ - New `ELPP_DEFAULT_LOGGING_FLAGS` macro for setting initial logging flags
+ - C++11 detection is improved, and Clang uses `std::thread` by default if it is available
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/blob/v9.90/README.md for manual for this release
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

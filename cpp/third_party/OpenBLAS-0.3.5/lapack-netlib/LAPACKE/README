@@ -1,0 +1,208 @@
+-------------------------------------------------------------------------------
+                             C Interface to LAPACK
+                                   README
+-------------------------------------------------------------------------------
+Introduction
+-------------------------------------------------------------------------------
+
+This library is a part of reference implementation for the C interface to
+LAPACK project according to the specifications described at the forum for
+the Intel(R) Math Kernel Library (Intel(R) MKL):
+http://software.intel.com/en-us/forums/showthread.php?t=61234
+
+This implementation provides a native C interface to LAPACK routines available
+at www.netlib.org/lapack to facilitate usage of LAPACK functionality
+for C programmers.
+This implementation introduces:
+- row-major and column-major matrix layout controlled by the first function
+  parameter;
+- an implementation with working arrays (middle-level interface) as well as
+  without working arrays (high-level interface);
+- input scalars passed by value;
+- error code as a return value instead of the INFO parameter.
+
+This implementation supports both the ILP64 and LP64 programming models,
+and different complex type styles: structure, C99.
+
+This implementation includes interfaces for the LAPACK-3.2.1 Driver and
+Computational routines only.
+
+-------------------------------------------------------------------------------
+Product Directories
+-------------------------------------------------------------------------------
+
+The installation directory of this package has the following structure:
+
+src                - C interface source files
+utils              - C interface auxiliary files
+include            - header files for C interface
+
+-------------------------------------------------------------------------------
+Installation
+-------------------------------------------------------------------------------
+
+The reference code for the C interface to LAPACK is built similarly to the
+Basic Linear Algebra Subprograms (BLAS) and LAPACK. The build system produces
+a static binary lapacke.a.
+
+You need to provide a make.inc file in the top directory that defines the
+compiler, compiler flags, names for binaries to be created/linked to. You may
+choose the appropriate LP64/ILP64 model, convenient complex type style,
+LAPACKE name pattern, and/or redefine system malloc/free in make.inc. Several
+examples of make.inc are provided.
+
+After setting up the make.inc, you can build C interface to LAPACK by typing
+
+make lapacke
+
+-------------------------------------------------------------------------------
+Handling Complex Types
+-------------------------------------------------------------------------------
+
+The interface uses complex types lapack_complex_float/lapack_complex_double.
+You have several options to define them:
+
+1) C99 complex types (default):
+
+#define lapack_complex_float    float _Complex
+#define lapack_complex_double   double _Complex
+
+2) C structure option (set by enabling in the configuration file):
+-DHAVE_LAPACK_CONFIG_H  -DLAPACK_COMPLEX_STRUCTURE
+
+typedef struct { float real, imag; } _lapack_complex_float;
+typedef struct { double real, imag; } _lapack_complex_double;
+#define lapack_complex_float  _lapack_complex_float
+#define lapack_complex_double _lapack_complex_double
+
+3) C++ complex types (set by enabling in the configuration file):
+-DHAVE_LAPACK_CONFIG_H -DLAPACK_COMPLEX_CPP
+
+#define lapack_complex_float std::complex<float>
+#define lapack_complex_double std::complex<double>
+
+You have to compile the interface with C++ compiler with C++ types.
+
+4) Custom complex types:
+-DLAPACK_COMPLEX_CUSTOM
+
+To use custom complex types, you need to:
+- Define lapack_complex_float/lapack_complex_double types on your own.
+- Optionally define lapack_make_complex_float/lapack_make_complex_double_real
+  functions if you want to build the testing suite supplied. Use these
+  functions for the testing system. Their purpose is to make a complex value of
+  a real part re, imaginary part im. The prototypes are as follows:
+
+   lapack_complex_float lapack_make_complex_float( float re, float im );
+   lapack_complex_double lapack_make_complex_double( double re, double im );
+
+-------------------------------------------------------------------------------
+Choosing ILP64 Data Model
+-------------------------------------------------------------------------------
+To choose ILP64 data model (set by enabling in the configuration file), use the
+following options:
+
+-DHAVE_LAPACK_CONFIG_H  -DLAPACK_ILP64
+
+-------------------------------------------------------------------------------
+Using Predicate Functions
+-------------------------------------------------------------------------------
+
+The functions
+
+lapacke_?gees/lapacke_?gees_work
+lapacke_?geesx/lapacke_?geesx_work
+lapacke_?geev/lapacke_?geev_work
+lapacke_?geevx/lapacke_?geevx_work
+
+require the pointer to a predicate function as an argument of a predefined type
+such as:
+
+typedef lapack_logical (*LAPACK_S_SELECT2) ( const float*, const float* );
+
+The purpose and format of these predicate functions are described in the LAPACK
+documentation. This interface passes the pointer to the corresponding LAPACK
+routine as it is.
+
+Be cautious with return values of the logical type if you link against LAPACK
+compiled with Fortran compiler. Whereas all non-zero values are treated as TRUE
+generally, some Fortran compilers may rely on a certain TRUE value, so you will
+have to use the same TRUE value in the predicate function to be consistent with
+LAPACK implementation.
+
+-------------------------------------------------------------------------------
+Implementation Details
+-------------------------------------------------------------------------------
+
+The current C interface implementation consists of wrappers to LAPACK routines.
+The row-major matrices are transposed on entry to and on exit from the LAPACK
+routine, if needed. Top-level interfaces additionally allocate/deallocate
+working space on entry to and on exit from the LAPACK routine.
+
+Because of possible additional transpositions, a routine called with
+this interface may require more memory space and run slower than the
+corresponding LAPACK routine.
+
+-------------------------------------------------------------------------------
+Disclaimer and Legal Information
+-------------------------------------------------------------------------------
+
+INFORMATION IN THIS DOCUMENT IS PROVIDED IN CONNECTION WITH INTEL(R)
+PRODUCTS. NO LICENSE, EXPRESS OR IMPLIED, BY ESTOPPEL OR OTHERWISE, TO
+ANY INTELLECTUAL PROPERTY RIGHTS IS GRANTED BY THIS DOCUMENT.  EXCEPT
+AS PROVIDED IN INTEL'S TERMS AND CONDITIONS OF SALE FOR SUCH PRODUCTS,
+INTEL ASSUMES NO LIABILITY WHATSOEVER, AND INTEL DISCLAIMS ANY EXPRESS
+OR IMPLIED WARRANTY, RELATING TO SALE AND/OR USE OF INTEL PRODUCTS
+INCLUDING LIABILITY OR WARRANTIES RELATING TO FITNESS FOR A PARTICULAR
+PURPOSE, MERCHANTABILITY, OR INFRINGEMENT OF ANY PATENT, COPYRIGHT OR
+OTHER INTELLECTUAL PROPERTY RIGHT.  UNLESS OTHERWISE AGREED IN WRITING
+BY INTEL, THE INTEL PRODUCTS ARE NOT DESIGNED NOR INTENDED FOR ANY
+APPLICATION IN WHICH THE FAILURE OF THE INTEL PRODUCT COULD CREATE A
+SITUATION WHERE PERSONAL INJURY OR DEATH MAY OCCUR.
+
+Intel may make changes to specifications and product descriptions at
+any time, without notice. Designers must not rely on the absence or
+characteristics of any features or instructions marked "reserved" or
+"undefined." Intel reserves these for future definition and shall have
+no responsibility whatsoever for conflicts or incompatibilities
+arising from future changes to them. The information here is subject
+to change without notice. Do not finalize a design with this
+information.
+
+The products described in this document may contain design defects or
+errors known as errata which may cause the product to deviate from
+published specifications. Current characterized errata are available
+on request.
+
+Contact your local Intel sales office or your distributor to obtain
+the latest specifications and before placing your product order.
+Copies of documents which have an order number and are referenced in
+this document, or other Intel literature, may be obtained by calling
+1-800-548-4725, or go to http://www.intel.com/design/literature.htm
+
+Intel processor numbers are not a measure of performance. Processor
+numbers differentiate features within each processor family, not
+across different processor families. See
+http://www.intel.com/products/processor_number for details.
+
+This document contains information on products in the design phase of
+development.
+
+BunnyPeople, Celeron, Celeron Inside, Centrino, Centrino Atom,
+Centrino Atom Inside, Centrino Inside, Centrino logo, Core Inside,
+FlashFile, i960, InstantIP, Intel, Intel logo, Intel386, Intel486,
+IntelDX2, IntelDX4, IntelSX2, Intel Atom, Intel Atom Inside, Intel
+Core, Intel Inside, Intel Inside logo, Intel. Leap ahead., Intel. Leap
+ahead.  logo, Intel NetBurst, Intel NetMerge, Intel NetStructure,
+Intel SingleDriver, Intel SpeedStep, Intel StrataFlash, Intel Viiv,
+Intel vPro, XScale, IPLink, Itanium, Itanium Inside, MCS, MMX, Oplus,
+OverDrive, Intel PDCharm, Pentium, Pentium Inside, skoool, Sound Mark,
+The Journey Inside, VTune, Xeon, and Xeon Inside are trademarks of
+Intel Corporation in the U.S. and other countries.
+
+
+* Other names and brands may be claimed as the property of others.
+
+Copyright (C) 2011, Intel Corporation. All rights reserved.
+
+

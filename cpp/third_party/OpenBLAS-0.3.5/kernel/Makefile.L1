@@ -1,0 +1,813 @@
+### AMAX ###
+
+ifndef SAMAXKERNEL
+SAMAXKERNEL = amax.S
+endif
+
+ifndef DAMAXKERNEL
+DAMAXKERNEL = amax.S
+endif
+
+ifndef QAMAXKERNEL
+QAMAXKERNEL = amax.S
+endif
+
+ifndef CAMAXKERNEL
+CAMAXKERNEL = zamax.S
+endif
+
+ifndef ZAMAXKERNEL
+ZAMAXKERNEL = zamax.S
+endif
+
+ifndef XAMAXKERNEL
+XAMAXKERNEL = zamax.S
+endif
+
+### AMIN ###
+
+ifndef SAMINKERNEL
+SAMINKERNEL = amin.S
+endif
+
+ifndef DAMINKERNEL
+DAMINKERNEL = amin.S
+endif
+
+ifndef QAMINKERNEL
+QAMINKERNEL = amin.S
+endif
+
+ifndef CAMINKERNEL
+CAMINKERNEL = zamin.S
+endif
+
+ifndef ZAMINKERNEL
+ZAMINKERNEL = zamin.S
+endif
+
+ifndef XAMINKERNEL
+XAMINKERNEL = zamin.S
+endif
+
+### MAX ###
+
+ifndef SMAXKERNEL
+SMAXKERNEL = max.S
+endif
+
+ifndef DMAXKERNEL
+DMAXKERNEL = max.S
+endif
+
+ifndef QMAXKERNEL
+QMAXKERNEL = max.S
+endif
+
+### MIN ###
+
+ifndef SMINKERNEL
+SMINKERNEL = min.S
+endif
+
+ifndef DMINKERNEL
+DMINKERNEL = min.S
+endif
+
+ifndef QMINKERNEL
+QMINKERNEL = min.S
+endif
+
+### IAMAX ###
+
+ifndef ISAMAXKERNEL
+ISAMAXKERNEL = iamax.S
+endif
+
+ifndef IDAMAXKERNEL
+IDAMAXKERNEL = iamax.S
+endif
+
+ifndef IQAMAXKERNEL
+IQAMAXKERNEL = iamax.S
+endif
+
+ifndef ICAMAXKERNEL
+ICAMAXKERNEL = izamax.S
+endif
+
+ifndef IZAMAXKERNEL
+IZAMAXKERNEL = izamax.S
+endif
+
+ifndef IXAMAXKERNEL
+IXAMAXKERNEL = izamax.S
+endif
+
+### IAMIN ###
+
+ifndef ISAMINKERNEL
+ISAMINKERNEL = iamin.S
+endif
+
+ifndef IDAMINKERNEL
+IDAMINKERNEL = iamin.S
+endif
+
+ifndef IQAMINKERNEL
+IQAMINKERNEL = iamin.S
+endif
+
+ifndef ICAMINKERNEL
+ICAMINKERNEL = izamin.S
+endif
+
+ifndef IZAMINKERNEL
+IZAMINKERNEL = izamin.S
+endif
+
+ifndef IXAMINKERNEL
+IXAMINKERNEL = izamin.S
+endif
+
+### IMAX ###
+
+ifndef ISMAXKERNEL
+ISMAXKERNEL = iamax.S
+endif
+
+ifndef IDMAXKERNEL
+IDMAXKERNEL = iamax.S
+endif
+
+ifndef IQMAXKERNEL
+IQMAXKERNEL = iamax.S
+endif
+
+### IMIN ###
+
+ifndef ISMINKERNEL
+ISMINKERNEL = iamin.S
+endif
+
+ifndef IDMINKERNEL
+IDMINKERNEL = iamin.S
+endif
+
+ifndef IQMINKERNEL
+IQMINKERNEL = iamin.S
+endif
+
+### ASUM ###
+
+ifndef SASUMKERNEL
+SASUMKERNEL =  asum.S
+endif
+
+ifndef DASUMKERNEL
+DASUMKERNEL =  asum.S
+endif
+
+ifndef CASUMKERNEL
+CASUMKERNEL = zasum.S
+endif
+
+ifndef ZASUMKERNEL
+ZASUMKERNEL = zasum.S
+endif
+
+ifndef QASUMKERNEL
+QASUMKERNEL =  asum.S
+endif
+
+ifndef XASUMKERNEL
+XASUMKERNEL = zasum.S
+endif
+
+### AXPY ###
+
+ifndef SAXPYKERNEL
+SAXPYKERNEL =  axpy.S
+endif
+
+ifndef DAXPYKERNEL
+DAXPYKERNEL =  axpy.S
+endif
+
+ifndef CAXPYKERNEL
+CAXPYKERNEL = zaxpy.S
+endif
+
+ifndef ZAXPYKERNEL
+ZAXPYKERNEL = zaxpy.S
+endif
+
+ifndef QAXPYKERNEL
+QAXPYKERNEL =  axpy.S
+endif
+
+ifndef XAXPYKERNEL
+XAXPYKERNEL = zaxpy.S
+endif
+
+### COPY ###
+
+ifndef SCOPYKERNEL
+SCOPYKERNEL =  copy.S
+endif
+
+ifndef DCOPYKERNEL
+DCOPYKERNEL =  copy.S
+endif
+
+ifndef CCOPYKERNEL
+CCOPYKERNEL = zcopy.S
+endif
+
+ifndef ZCOPYKERNEL
+ZCOPYKERNEL = zcopy.S
+endif
+
+ifndef QCOPYKERNEL
+QCOPYKERNEL =  copy.S
+endif
+
+ifndef XCOPYKERNEL
+XCOPYKERNEL = zcopy.S
+endif
+
+### DOT ###
+
+ifndef SDOTKERNEL
+SDOTKERNEL =  dot.S
+endif
+
+ifndef DDOTKERNEL
+DDOTKERNEL =  dot.S
+endif
+
+ifndef CDOTKERNEL
+CDOTKERNEL = zdot.S
+endif
+
+ifndef ZDOTKERNEL
+ZDOTKERNEL = zdot.S
+endif
+
+ifndef QDOTKERNEL
+QDOTKERNEL =  dot.S
+endif
+
+ifndef XDOTKERNEL
+XDOTKERNEL = zdot.S
+endif
+
+### NRM2 ###
+
+ifndef SNRM2KERNEL
+SNRM2KERNEL = nrm2.S
+endif
+
+ifndef DNRM2KERNEL
+DNRM2KERNEL = nrm2.S
+endif
+
+ifndef QNRM2KERNEL
+QNRM2KERNEL = nrm2.S
+endif
+
+ifndef CNRM2KERNEL
+CNRM2KERNEL = znrm2.S
+endif
+
+ifndef ZNRM2KERNEL
+ZNRM2KERNEL = znrm2.S
+endif
+
+ifndef XNRM2KERNEL
+XNRM2KERNEL = znrm2.S
+endif
+
+### ROT ###
+
+ifndef SROTKERNEL
+SROTKERNEL = rot.S
+endif
+
+ifndef DROTKERNEL
+DROTKERNEL = rot.S
+endif
+
+ifndef QROTKERNEL
+QROTKERNEL = rot.S
+endif
+
+ifndef CROTKERNEL
+CROTKERNEL = zrot.S
+endif
+
+ifndef ZROTKERNEL
+ZROTKERNEL = zrot.S
+endif
+
+ifndef XROTKERNEL
+XROTKERNEL = zrot.S
+endif
+
+### SCAL ###
+
+ifndef SSCALKERNEL
+SSCALKERNEL =  scal.S
+endif
+
+ifndef DSCALKERNEL
+DSCALKERNEL =  scal.S
+endif
+
+ifndef CSCALKERNEL
+CSCALKERNEL = zscal.S
+endif
+
+ifndef ZSCALKERNEL
+ZSCALKERNEL = zscal.S
+endif
+
+ifndef QSCALKERNEL
+QSCALKERNEL =  scal.S
+endif
+
+ifndef XSCALKERNEL
+XSCALKERNEL = zscal.S
+endif
+
+### SWAP ###
+
+ifndef SSWAPKERNEL
+SSWAPKERNEL =  swap.S
+endif
+
+ifndef DSWAPKERNEL
+DSWAPKERNEL =  swap.S
+endif
+
+ifndef CSWAPKERNEL
+CSWAPKERNEL = zswap.S
+endif
+
+ifndef ZSWAPKERNEL
+ZSWAPKERNEL = zswap.S
+endif
+
+ifndef QSWAPKERNEL
+QSWAPKERNEL =   swap.S
+endif
+
+ifndef XSWAPKERNEL
+XSWAPKERNEL =  zswap.S
+endif
+
+### GEMV ###
+
+ifndef SGEMVNKERNEL
+SGEMVNKERNEL = gemv_n.S
+endif
+
+ifndef SGEMVTKERNEL
+SGEMVTKERNEL = gemv_t.S
+endif
+
+ifndef DGEMVNKERNEL
+DGEMVNKERNEL = gemv_n.S
+endif
+
+ifndef DGEMVTKERNEL
+DGEMVTKERNEL = gemv_t.S
+endif
+
+ifndef CGEMVNKERNEL
+CGEMVNKERNEL = zgemv_n.S
+endif
+
+ifndef CGEMVTKERNEL
+CGEMVTKERNEL = zgemv_t.S
+endif
+
+ifndef ZGEMVNKERNEL
+ZGEMVNKERNEL = zgemv_n.S
+endif
+
+ifndef ZGEMVTKERNEL
+ZGEMVTKERNEL = zgemv_t.S
+endif
+
+ifndef QGEMVNKERNEL
+QGEMVNKERNEL = gemv_n.S
+endif
+
+ifndef QGEMVTKERNEL
+QGEMVTKERNEL = gemv_t.S
+endif
+
+ifndef XGEMVNKERNEL
+XGEMVNKERNEL = zgemv_n.S
+endif
+
+ifndef XGEMVTKERNEL
+XGEMVTKERNEL = zgemv_t.S
+endif
+
+ifndef SCABS_KERNEL
+SCABS_KERNEL	= cabs.S
+endif
+
+ifndef DCABS_KERNEL
+DCABS_KERNEL	= cabs.S
+endif
+
+ifndef QCABS_KERNEL
+QCABS_KERNEL	= cabs.S
+endif
+
+ifndef LSAME_KERNEL
+LSAME_KERNEL	= lsame.S
+endif
+
+### AXPBY ###
+
+ifndef SAXPBYKERNEL
+SAXPBYKERNEL = ../arm/axpby.c
+endif
+
+ifndef DAXPBYKERNEL
+DAXPBYKERNEL = ../arm/axpby.c
+endif
+
+ifndef CAXPBYKERNEL
+CAXPBYKERNEL = ../arm/zaxpby.c
+endif
+
+ifndef ZAXPBYKERNEL
+ZAXPBYKERNEL = ../arm/zaxpby.c
+endif
+
+SBLASOBJS	+= \
+	 samax_k$(TSUFFIX).$(SUFFIX)  samin_k$(TSUFFIX).$(SUFFIX)  smax_k$(TSUFFIX).$(SUFFIX)  smin_k$(TSUFFIX).$(SUFFIX) \
+	isamax_k$(TSUFFIX).$(SUFFIX) isamin_k$(TSUFFIX).$(SUFFIX) ismax_k$(TSUFFIX).$(SUFFIX) ismin_k$(TSUFFIX).$(SUFFIX) \
+	sasum_k$(TSUFFIX).$(SUFFIX) saxpy_k$(TSUFFIX).$(SUFFIX) scopy_k$(TSUFFIX).$(SUFFIX) \
+	sdot_k$(TSUFFIX).$(SUFFIX) sdsdot_k$(TSUFFIX).$(SUFFIX) dsdot_k$(TSUFFIX).$(SUFFIX) \
+	snrm2_k$(TSUFFIX).$(SUFFIX) srot_k$(TSUFFIX).$(SUFFIX) sscal_k$(TSUFFIX).$(SUFFIX) sswap_k$(TSUFFIX).$(SUFFIX) \
+	saxpby_k$(TSUFFIX).$(SUFFIX)
+
+DBLASOBJS	+= \
+	 damax_k$(TSUFFIX).$(SUFFIX)  damin_k$(TSUFFIX).$(SUFFIX)  dmax_k$(TSUFFIX).$(SUFFIX)  dmin_k$(TSUFFIX).$(SUFFIX) \
+	idamax_k$(TSUFFIX).$(SUFFIX) idamin_k$(TSUFFIX).$(SUFFIX) idmax_k$(TSUFFIX).$(SUFFIX) idmin_k$(TSUFFIX).$(SUFFIX) \
+	dasum_k$(TSUFFIX).$(SUFFIX) daxpy_k$(TSUFFIX).$(SUFFIX) dcopy_k$(TSUFFIX).$(SUFFIX) ddot_k$(TSUFFIX).$(SUFFIX) \
+	dnrm2_k$(TSUFFIX).$(SUFFIX) drot_k$(TSUFFIX).$(SUFFIX) dscal_k$(TSUFFIX).$(SUFFIX) dswap_k$(TSUFFIX).$(SUFFIX) \
+	daxpby_k$(TSUFFIX).$(SUFFIX)
+
+QBLASOBJS	+= \
+	 qamax_k$(TSUFFIX).$(SUFFIX)  qamin_k$(TSUFFIX).$(SUFFIX)  qmax_k$(TSUFFIX).$(SUFFIX)  qmin_k$(TSUFFIX).$(SUFFIX) \
+	iqamax_k$(TSUFFIX).$(SUFFIX) iqamin_k$(TSUFFIX).$(SUFFIX) iqmax_k$(TSUFFIX).$(SUFFIX) iqmin_k$(TSUFFIX).$(SUFFIX) \
+	qasum_k$(TSUFFIX).$(SUFFIX) qaxpy_k$(TSUFFIX).$(SUFFIX) qcopy_k$(TSUFFIX).$(SUFFIX) qdot_k$(TSUFFIX).$(SUFFIX) \
+	qnrm2_k$(TSUFFIX).$(SUFFIX) qrot_k$(TSUFFIX).$(SUFFIX) qscal_k$(TSUFFIX).$(SUFFIX) qswap_k$(TSUFFIX).$(SUFFIX)
+
+CBLASOBJS	+= \
+	camax_k$(TSUFFIX).$(SUFFIX)  camin_k$(TSUFFIX).$(SUFFIX) icamax_k$(TSUFFIX).$(SUFFIX) icamin_k$(TSUFFIX).$(SUFFIX) \
+	casum_k$(TSUFFIX).$(SUFFIX) caxpy_k$(TSUFFIX).$(SUFFIX) caxpyc_k$(TSUFFIX).$(SUFFIX) ccopy_k$(TSUFFIX).$(SUFFIX) \
+	cdotc_k$(TSUFFIX).$(SUFFIX) cdotu_k$(TSUFFIX).$(SUFFIX) cnrm2_k$(TSUFFIX).$(SUFFIX) csrot_k$(TSUFFIX).$(SUFFIX) \
+	cscal_k$(TSUFFIX).$(SUFFIX) cswap_k$(TSUFFIX).$(SUFFIX) caxpby_k$(TSUFFIX).$(SUFFIX)
+
+ZBLASOBJS	+= \
+	 zamax_k$(TSUFFIX).$(SUFFIX)  zamin_k$(TSUFFIX).$(SUFFIX) izamax_k$(TSUFFIX).$(SUFFIX) izamin_k$(TSUFFIX).$(SUFFIX) \
+	zasum_k$(TSUFFIX).$(SUFFIX) zaxpy_k$(TSUFFIX).$(SUFFIX) zaxpyc_k$(TSUFFIX).$(SUFFIX) zcopy_k$(TSUFFIX).$(SUFFIX) \
+	zdotc_k$(TSUFFIX).$(SUFFIX) zdotu_k$(TSUFFIX).$(SUFFIX) znrm2_k$(TSUFFIX).$(SUFFIX) zdrot_k$(TSUFFIX).$(SUFFIX) \
+	zscal_k$(TSUFFIX).$(SUFFIX) zswap_k$(TSUFFIX).$(SUFFIX) zaxpby_k$(TSUFFIX).$(SUFFIX)
+
+XBLASOBJS	+= \
+	 xamax_k$(TSUFFIX).$(SUFFIX)  xamin_k$(TSUFFIX).$(SUFFIX) ixamax_k$(TSUFFIX).$(SUFFIX) ixamin_k$(TSUFFIX).$(SUFFIX) \
+	xasum_k$(TSUFFIX).$(SUFFIX) xaxpy_k$(TSUFFIX).$(SUFFIX) xaxpyc_k$(TSUFFIX).$(SUFFIX) xcopy_k$(TSUFFIX).$(SUFFIX) \
+	xdotc_k$(TSUFFIX).$(SUFFIX) xdotu_k$(TSUFFIX).$(SUFFIX) xnrm2_k$(TSUFFIX).$(SUFFIX) xqrot_k$(TSUFFIX).$(SUFFIX) \
+	xscal_k$(TSUFFIX).$(SUFFIX) xswap_k$(TSUFFIX).$(SUFFIX)
+
+### AMAX ###
+
+
+
+
+$(KDIR)samax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)samax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(SAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE  -DUSE_ABS -UUSE_MIN $< -o $@
+
+$(KDIR)damax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)damax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(DAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE  -DUSE_ABS -UUSE_MIN $< -o $@
+
+$(KDIR)qamax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)qamax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(QAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE -DUSE_ABS -UUSE_MIN $< -o $@
+
+$(KDIR)camax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)camax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(CAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UDOUBLE  -DUSE_ABS -UUSE_MIN $< -o $@
+
+$(KDIR)zamax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)zamax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ZAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DDOUBLE  -DUSE_ABS -UUSE_MIN $< -o $@
+
+$(KDIR)xamax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)xamax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(XAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DXDOUBLE -DUSE_ABS -UUSE_MIN $< -o $@
+
+### AMIN ###
+
+$(KDIR)samin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)samin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(SAMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -DUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)damin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)damin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(DAMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE -DUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)qamin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)qamin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(QAMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE -DUSE_ABS -DUSE_MIN $< -o $@
+
+$(KDIR)camin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)camin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(CAMINKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UDOUBLE -DUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)zamin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)zamin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ZAMINKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DDOUBLE -DUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)xamin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)xamin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(XAMINKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DXDOUBLE -DUSE_ABS -DUSE_MIN $< -o $@
+
+### MAX ###
+
+$(KDIR)smax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)smax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(SMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -UUSE_ABS  -UUSE_MIN $< -o $@
+
+$(KDIR)dmax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)dmax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(DMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE -UUSE_ABS  -UUSE_MIN $< -o $@
+
+$(KDIR)qmax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)qmax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(QMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE -UUSE_ABS -UUSE_MIN $< -o $@
+
+### MIN ###
+
+$(KDIR)smin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)smin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(SMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -UUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)dmin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)dmin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(DMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE -UUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)qmin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)qmin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(QMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE -UUSE_ABS -DUSE_MIN $< -o $@
+
+
+### IAMAX ###
+
+$(KDIR)isamax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)isamax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ISAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -DUSE_ABS  -UUSE_MIN $< -o $@
+
+$(KDIR)idamax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)idamax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IDAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE -DUSE_ABS  -UUSE_MIN $< -o $@
+
+$(KDIR)iqamax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)iqamax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IQAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE -DUSE_ABS -UUSE_MIN $< -o $@
+
+$(KDIR)icamax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)icamax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ICAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UDOUBLE -DUSE_ABS  -UUSE_MIN $< -o $@
+
+$(KDIR)izamax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)izamax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IZAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DDOUBLE -DUSE_ABS  -UUSE_MIN $< -o $@
+
+$(KDIR)ixamax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)ixamax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IXAMAXKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DXDOUBLE -DUSE_ABS -UUSE_MIN $< -o $@
+
+### IAMIN ###
+
+$(KDIR)isamin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)isamin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ISAMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -DUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)idamin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)idamin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IDAMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE -DUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)iqamin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)iqamin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IQAMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE -DUSE_ABS -DUSE_MIN $< -o $@
+
+$(KDIR)icamin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)icamin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ICAMINKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UDOUBLE -DUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)izamin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)izamin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IZAMINKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DDOUBLE -DUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)ixamin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)ixamin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IXAMINKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DXDOUBLE -DUSE_ABS -DUSE_MIN $< -o $@
+
+### IMAX ###
+
+$(KDIR)ismax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)ismax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ISMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -UUSE_ABS  -UUSE_MIN $< -o $@
+
+$(KDIR)idmax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)idmax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IDMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE -UUSE_ABS  -UUSE_MIN $< -o $@
+
+$(KDIR)iqmax_k$(TSUFFIX).$(SUFFIX)  $(KDIR)iqmax_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IQMAXKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE -UUSE_ABS -UUSE_MIN $< -o $@
+
+### IMIN ###
+
+$(KDIR)ismin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)ismin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ISMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -UUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)idmin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)idmin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IDMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE -UUSE_ABS  -DUSE_MIN $< -o $@
+
+$(KDIR)iqmin_k$(TSUFFIX).$(SUFFIX)  $(KDIR)iqmin_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(IQMINKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE -UUSE_ABS -DUSE_MIN $< -o $@
+
+
+$(KDIR)sasum_k$(TSUFFIX).$(SUFFIX)   $(KDIR)sasum_k$(TPSUFFIX).$(PSUFFIX)   : $(KERNELDIR)/$(SASUMKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE $< -o $@
+
+$(KDIR)dasum_k$(TSUFFIX).$(SUFFIX)   $(KDIR)dasum_k$(TPSUFFIX).$(PSUFFIX)   : $(KERNELDIR)/$(DASUMKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE $< -o $@
+
+$(KDIR)qasum_k$(TSUFFIX).$(SUFFIX)   $(KDIR)qasum_k$(TPSUFFIX).$(PSUFFIX)   : $(KERNELDIR)/$(QASUMKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE $< -o $@
+
+$(KDIR)casum_k$(TSUFFIX).$(SUFFIX)  $(KDIR)casum_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(CASUMKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UDOUBLE $< -o $@
+
+$(KDIR)zasum_k$(TSUFFIX).$(SUFFIX)  $(KDIR)zasum_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ZASUMKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DDOUBLE $< -o $@
+
+$(KDIR)xasum_k$(TSUFFIX).$(SUFFIX)  $(KDIR)xasum_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(XASUMKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DXDOUBLE $< -o $@
+
+$(KDIR)saxpy_k$(TSUFFIX).$(SUFFIX)  $(KDIR)saxpy_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(SAXPYKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE $< -o $@
+
+$(KDIR)daxpy_k$(TSUFFIX).$(SUFFIX)  $(KDIR)daxpy_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(DAXPYKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE $< -o $@
+
+$(KDIR)qaxpy_k$(TSUFFIX).$(SUFFIX)  $(KDIR)qaxpy_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(QAXPYKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE $< -o $@
+
+$(KDIR)caxpy_k$(TSUFFIX).$(SUFFIX)  $(KDIR)caxpy_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(CAXPYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DCOMPLEX -UCONJ -UDOUBLE $< -o $@
+
+$(KDIR)zaxpy_k$(TSUFFIX).$(SUFFIX)  $(KDIR)zaxpy_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ZAXPYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UCONJ -DDOUBLE $< -o $@
+
+$(KDIR)xaxpy_k$(TSUFFIX).$(SUFFIX)  $(KDIR)xaxpy_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(XAXPYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UCONJ -DXDOUBLE $< -o $@
+
+$(KDIR)caxpyc_k$(TSUFFIX).$(SUFFIX)  $(KDIR)caxpyc_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(CAXPYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DCONJ -UDOUBLE $< -o $@
+
+$(KDIR)zaxpyc_k$(TSUFFIX).$(SUFFIX)  $(KDIR)zaxpyc_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ZAXPYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DCONJ -DDOUBLE $< -o $@
+
+$(KDIR)xaxpyc_k$(TSUFFIX).$(SUFFIX)  $(KDIR)xaxpyc_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(XAXPYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DCONJ -DXDOUBLE $< -o $@
+
+$(KDIR)scopy_k$(TSUFFIX).$(SUFFIX) $(KDIR)scopy_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(SCOPYKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -DC_INTERFACE $< -o $@
+
+$(KDIR)dcopy_k$(TSUFFIX).$(SUFFIX) $(KDIR)dcopy_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(DCOPYKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE -DC_INTERFACE $< -o $@
+
+$(KDIR)qcopy_k$(TSUFFIX).$(SUFFIX) $(KDIR)qcopy_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(QCOPYKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE -DC_INTERFACE $< -o $@
+
+$(KDIR)ccopy_k$(TSUFFIX).$(SUFFIX) $(KDIR)ccopy_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(CCOPYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UDOUBLE -DC_INTERFACE $< -o $@
+
+$(KDIR)zcopy_k$(TSUFFIX).$(SUFFIX) $(KDIR)zcopy_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(ZCOPYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DDOUBLE -DC_INTERFACE $< -o $@
+
+$(KDIR)xcopy_k$(TSUFFIX).$(SUFFIX) $(KDIR)xcopy_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(XCOPYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DXDOUBLE -DC_INTERFACE $< -o $@
+
+$(KDIR)ddot_k$(TSUFFIX).$(SUFFIX) $(KDIR)ddot_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(DDOTKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE $< -o $@
+
+$(KDIR)qdot_k$(TSUFFIX).$(SUFFIX) $(KDIR)qdot_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(QDOTKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE $< -o $@
+
+$(KDIR)sdot_k$(TSUFFIX).$(SUFFIX) $(KDIR)sdot_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(SDOTKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE $< -o $@
+
+ifdef DSDOTKERNEL
+
+$(KDIR)dsdot_k$(TSUFFIX).$(SUFFIX) $(KDIR)dsdot_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(DSDOTKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -DDSDOT $< -o $@
+
+$(KDIR)sdsdot_k$(TSUFFIX).$(SUFFIX) $(KDIR)sdsdot_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(DSDOTKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -DDSDOT $< -o $@
+
+else
+
+$(KDIR)dsdot_k$(TSUFFIX).$(SUFFIX) $(KDIR)dsdot_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(SDOTKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -DDSDOT $< -o $@
+
+$(KDIR)sdsdot_k$(TSUFFIX).$(SUFFIX) $(KDIR)sdsdot_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(SDOTKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE -DDSDOT $< -o $@
+
+endif
+
+$(KDIR)zdotu_k$(TSUFFIX).$(SUFFIX) $(KDIR)zdotu_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(ZDOTKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DDOUBLE -UCONJ $< -o $@
+
+$(KDIR)zdotc_k$(TSUFFIX).$(SUFFIX) $(KDIR)zdotc_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(ZDOTKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DDOUBLE -DCONJ $< -o $@
+
+$(KDIR)xdotu_k$(TSUFFIX).$(SUFFIX) $(KDIR)xdotu_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(XDOTKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DXDOUBLE -UCONJ $< -o $@
+
+$(KDIR)xdotc_k$(TSUFFIX).$(SUFFIX) $(KDIR)xdotc_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(XDOTKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DXDOUBLE -DCONJ $< -o $@
+
+$(KDIR)cdotu_k$(TSUFFIX).$(SUFFIX) $(KDIR)cdotu_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(CDOTKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UDOUBLE -UCONJ $< -o $@
+
+$(KDIR)cdotc_k$(TSUFFIX).$(SUFFIX) $(KDIR)cdotc_k$(TPSUFFIX).$(PSUFFIX) : $(KERNELDIR)/$(CDOTKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UDOUBLE -DCONJ $< -o $@
+
+$(KDIR)snrm2_k$(TSUFFIX).$(SUFFIX)  $(KDIR)snrm2_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(SNRM2KERNEL)
+	$(CC) $(CFLAGS) -UCOMPLEX -c -UDOUBLE $< -o $@
+
+$(KDIR)dnrm2_k$(TSUFFIX).$(SUFFIX)  $(KDIR)dnrm2_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(DNRM2KERNEL)
+	$(CC) $(CFLAGS) -UCOMPLEX -c -DDOUBLE $< -o $@
+
+$(KDIR)qnrm2_k$(TSUFFIX).$(SUFFIX)  $(KDIR)qnrm2_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(QNRM2KERNEL)
+	$(CC) $(CFLAGS) -UCOMPLEX -c -DXDOUBLE $< -o $@
+
+$(KDIR)cnrm2_k$(TSUFFIX).$(SUFFIX)  $(KDIR)cnrm2_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(CNRM2KERNEL)
+	$(CC) $(CFLAGS) -DCOMPLEX -c -UDOUBLE $< -o $@
+
+$(KDIR)znrm2_k$(TSUFFIX).$(SUFFIX)  $(KDIR)znrm2_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ZNRM2KERNEL)
+	$(CC) $(CFLAGS) -DCOMPLEX -c -DDOUBLE $< -o $@
+
+$(KDIR)xnrm2_k$(TSUFFIX).$(SUFFIX)  $(KDIR)xnrm2_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(XNRM2KERNEL)
+	$(CC) $(CFLAGS) -DCOMPLEX -c -DXDOUBLE $< -o $@
+
+$(KDIR)srot_k$(TSUFFIX).$(SUFFIX)  $(KDIR)srot_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(SROTKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UCOMPLEX -UDOUBLE  $< -o $@
+
+$(KDIR)drot_k$(TSUFFIX).$(SUFFIX)  $(KDIR)drot_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(DROTKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UCOMPLEX -DDOUBLE  $< -o $@
+
+$(KDIR)qrot_k$(TSUFFIX).$(SUFFIX)  $(KDIR)qrot_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(QROTKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UCOMPLEX -DXDOUBLE $< -o $@
+
+$(KDIR)csrot_k$(TSUFFIX).$(SUFFIX)  $(KDIR)csrot_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(CROTKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DCOMPLEX -UDOUBLE  $< -o $@
+
+$(KDIR)zdrot_k$(TSUFFIX).$(SUFFIX)  $(KDIR)zdrot_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ZROTKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DCOMPLEX -DDOUBLE  $< -o $@
+
+$(KDIR)xqrot_k$(TSUFFIX).$(SUFFIX)  $(KDIR)xqrot_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(XROTKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DCOMPLEX -DXDOUBLE $< -o $@
+
+$(KDIR)sscal_k$(TSUFFIX).$(SUFFIX)  $(KDIR)sscal_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(SSCALKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE $< -o $@
+
+$(KDIR)dscal_k$(TSUFFIX).$(SUFFIX)  $(KDIR)dscal_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(DSCALKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE $< -o $@
+
+$(KDIR)qscal_k$(TSUFFIX).$(SUFFIX)  $(KDIR)qscal_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(QSCALKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE $< -o $@
+
+$(KDIR)cscal_k$(TSUFFIX).$(SUFFIX)  $(KDIR)cscal_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(CSCALKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UDOUBLE $< -o $@
+
+$(KDIR)zscal_k$(TSUFFIX).$(SUFFIX)  $(KDIR)zscal_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ZSCALKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DDOUBLE $< -o $@
+
+$(KDIR)xscal_k$(TSUFFIX).$(SUFFIX)  $(KDIR)xscal_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(XSCALKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DXDOUBLE $< -o $@
+
+$(KDIR)sswap_k$(TSUFFIX).$(SUFFIX)  $(KDIR)sswap_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(SSWAPKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE $< -o $@
+
+$(KDIR)dswap_k$(TSUFFIX).$(SUFFIX)  $(KDIR)dswap_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(DSWAPKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE $< -o $@
+
+$(KDIR)qswap_k$(TSUFFIX).$(SUFFIX)  $(KDIR)qswap_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(QSWAPKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DXDOUBLE $< -o $@
+
+$(KDIR)cswap_k$(TSUFFIX).$(SUFFIX)  $(KDIR)cswap_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(CSWAPKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UDOUBLE $< -o $@
+
+$(KDIR)zswap_k$(TSUFFIX).$(SUFFIX)  $(KDIR)zswap_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ZSWAPKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DDOUBLE $< -o $@
+
+$(KDIR)xswap_k$(TSUFFIX).$(SUFFIX)  $(KDIR)xswap_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(XSWAPKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -DXDOUBLE $< -o $@
+
+$(KDIR)saxpby_k$(TSUFFIX).$(SUFFIX)  $(KDIR)saxpby_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(SAXPBYKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -UDOUBLE $< -o $@
+
+$(KDIR)daxpby_k$(TSUFFIX).$(SUFFIX)  $(KDIR)daxpby_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(DAXPBYKERNEL)
+	$(CC) -c $(CFLAGS) -UCOMPLEX -DDOUBLE $< -o $@
+
+$(KDIR)caxpby_k$(TSUFFIX).$(SUFFIX)  $(KDIR)caxpby_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(CAXPBYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UCONJ -UDOUBLE $< -o $@
+
+$(KDIR)zaxpby_k$(TSUFFIX).$(SUFFIX)  $(KDIR)zaxpby_k$(TPSUFFIX).$(PSUFFIX)  : $(KERNELDIR)/$(ZAXPBYKERNEL)
+	$(CC) -c $(CFLAGS) -DCOMPLEX -UCONJ -DDOUBLE $< -o $@
+
+

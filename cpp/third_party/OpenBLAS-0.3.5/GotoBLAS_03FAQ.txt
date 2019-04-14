@@ -1,0 +1,128 @@
+	GotoBLAS2 FAQ
+
+1. General
+
+1.1  Q Can I find useful paper about GotoBLAS2?
+
+     A You may check following URL.
+
+     http://www.cs.utexas.edu/users/flame/Publications/index.htm
+
+    11. Kazushige Goto and Robert A. van de Geijn, " Anatomy of
+	High-Performance Matrix Multiplication," ACM Transactions on
+	Mathematical Software, accepted.
+
+    15. Kazushige Goto and Robert van de Geijn, "High-Performance
+        Implementation of the Level-3 BLAS." ACM Transactions on
+        Mathematical Software, submitted.
+
+
+1.2  Q Does GotoBLAS2 work with Hyperthread (SMT)?
+
+     A Yes, it will work. GotoBLAS2 detects Hyperthread and
+       avoid scheduling on the same core.
+
+
+1.3  Q When I type "make", following error occured. What's wrong?
+
+	$shell> make
+	"./Makefile.rule", line 58: Missing dependency operator
+	"./Makefile.rule", line 61: Need an operator
+	...
+
+     A This error occurs because you didn't use GNU make. Some binary
+       packages install GNU make as "gmake" and it's worth to try.
+
+
+1.4  Q Function "xxx" is slow. Why?
+
+     A Generally GotoBLAS2 has many well optimized functions, but it's
+       far and far from perfect. Especially Level 1/2 function
+       performance depends on how you call BLAS. You should understand
+       what happends between your function and GotoBLAS2 by using profile
+       enabled version or hardware performance counter. Again, please
+       don't regard GotoBLAS2 as a black box.
+
+
+1.5  Q I have a commercial C compiler and want to compile GotoBLAS2 with
+       it. Is it possible?
+
+     A All function that affects performance is written in assembler
+       and C code is just used for wrapper of assembler functions or
+       complicated functions. Also I use many inline assembler functions,
+       unfortunately most of commercial compiler can't handle inline
+       assembler. Therefore you should use gcc.
+
+
+1.6  Q I use OpenMP compiler. How can I use GotoBLAS2 with it?
+
+     A Please understand that OpenMP is a compromised method to use
+       thread. If you want to use OpenMP based code with GotoBLAS2, you
+       should enable "USE_OPENMP=1" in Makefile.rule.
+
+
+1.7  Q Could you tell me how to use profiled library?
+
+     A You need to build and link your application with -pg
+       option. After executing your application, "gmon.out" is
+       generated in your current directory.
+
+       $shell> gprof <your application name> gmon.out
+
+       Each sample counts as 0.01 seconds.
+	 %   cumulative   self              self     total
+	time   seconds   seconds    calls  Ks/call  Ks/call  name
+	89.86    975.02   975.02    79317     0.00     0.00  .dgemm_kernel
+	 4.19   1020.47    45.45       40     0.00     0.00  .dlaswp00N
+	 2.28   1045.16    24.69     2539     0.00     0.00  .dtrsm_kernel_LT
+	 1.19   1058.03    12.87    79317     0.00     0.00  .dgemm_otcopy
+	 1.05   1069.40    11.37     4999     0.00     0.00  .dgemm_oncopy
+       ....
+
+       I think profiled BLAS library is really useful for your
+       research. Please find bottleneck of your application and
+       improve it.
+
+1.8  Q Is number of thread limited?
+
+     A Basically, there is no limitation about number of threads. You
+       can specify number of threads as many as you want, but larger
+       number of threads will consume extra resource. I recommend you to
+       specify minimum number of threads.
+
+1.9  Q I have segfaults when I compile with USE_OPENMP=1. What's wrong?
+
+     A This may be related to a bug in the Linux kernel 2.6.32. Try applying
+     the patch segaults.patch using
+
+     patch < segfaults.patch
+
+     and see if the crashes persist. Note that this patch will lead to many
+     compiler warnings.
+
+2. Architecture Specific issue or Implementation
+
+2.1 Q GotoBLAS2 seems to support any combination with OS and
+      architecture. Is it possible?
+
+    A Combination is limited by current OS and architecture. For
+      examble, the combination OSX with SPARC is impossible. But it
+      will be possible with slight modification if these combination
+      appears in front of us.
+
+
+2.2 Q I have POWER architecture systems. Do I need extra work?
+
+    A Although POWER architecture defined special instruction
+      like CPUID to detect correct architecture, it's privileged
+      and can't be accessed by user process. So you have to set
+      the architecture that you have manually in getarch.c.
+
+
+2.3 Q I can't create DLL on Cygwin (Error 53). What's wrong?
+
+    A You have to make sure if lib.exe and mspdb80.dll are in Microsoft
+      Studio PATH. The easiest way is to use 'which' command.
+
+    $shell> which lib.exe
+    /cygdrive/c/Program Files/Microsoft Visual Studio/VC98/bin/lib.exe

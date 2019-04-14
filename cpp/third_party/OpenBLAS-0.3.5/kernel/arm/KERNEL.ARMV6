@@ -1,0 +1,115 @@
+include $(KERNELDIR)/KERNEL.ARMV5
+
+SAMAXKERNEL  = iamax_vfp.S
+DAMAXKERNEL  = iamax_vfp.S
+CAMAXKERNEL  = iamax_vfp.S
+ZAMAXKERNEL  = iamax_vfp.S
+
+SAMINKERNEL  = iamax_vfp.S
+DAMINKERNEL  = iamax_vfp.S
+CAMINKERNEL  = iamax_vfp.S
+ZAMINKERNEL  = iamax_vfp.S
+
+SMAXKERNEL   = iamax_vfp.S
+DMAXKERNEL   = iamax_vfp.S
+
+SMINKERNEL   = iamax_vfp.S
+DMINKERNEL   = iamax_vfp.S
+
+ISAMAXKERNEL = iamax_vfp.S
+IDAMAXKERNEL = iamax_vfp.S
+ICAMAXKERNEL = iamax_vfp.S
+IZAMAXKERNEL = iamax_vfp.S
+
+ISAMINKERNEL = iamax_vfp.S
+IDAMINKERNEL = iamax_vfp.S
+ICAMINKERNEL = iamax_vfp.S
+IZAMINKERNEL = iamax_vfp.S
+
+ISMAXKERNEL  = iamax_vfp.S
+IDMAXKERNEL  = iamax_vfp.S
+
+ISMINKERNEL  = iamax_vfp.S
+IDMINKERNEL  = iamax_vfp.S
+
+SASUMKERNEL  = asum_vfp.S
+DASUMKERNEL  = asum_vfp.S
+CASUMKERNEL  = asum_vfp.S
+ZASUMKERNEL  = asum_vfp.S
+
+SAXPYKERNEL  = axpy_vfp.S
+DAXPYKERNEL  = axpy_vfp.S
+CAXPYKERNEL  = axpy_vfp.S
+ZAXPYKERNEL  = axpy_vfp.S
+
+SROTKERNEL   = rot_vfp.S
+DROTKERNEL   = rot_vfp.S
+CROTKERNEL   = rot_vfp.S
+ZROTKERNEL   = rot_vfp.S
+
+SDOTKERNEL   = sdot_vfp.S
+DDOTKERNEL   = ddot_vfp.S
+CDOTKERNEL   = cdot_vfp.S
+ZDOTKERNEL   = zdot_vfp.S
+
+SNRM2KERNEL  = nrm2_vfp.S
+DNRM2KERNEL  = nrm2_vfp.S
+CNRM2KERNEL  = nrm2_vfp.S
+ZNRM2KERNEL  = nrm2_vfp.S
+
+SSWAPKERNEL  = swap_vfp.S
+DSWAPKERNEL  = swap_vfp.S
+CSWAPKERNEL  = swap_vfp.S
+ZSWAPKERNEL  = swap_vfp.S
+
+SGEMVNKERNEL = gemv_n_vfp.S
+DGEMVNKERNEL = gemv_n_vfp.S
+CGEMVNKERNEL = cgemv_n_vfp.S
+ZGEMVNKERNEL = zgemv_n_vfp.S
+
+SGEMVTKERNEL = gemv_t_vfp.S
+DGEMVTKERNEL = gemv_t_vfp.S
+CGEMVTKERNEL = cgemv_t_vfp.S
+ZGEMVTKERNEL = zgemv_t_vfp.S
+
+SGEMMKERNEL    = sgemm_kernel_4x2_vfp.S
+ifneq ($(SGEMM_UNROLL_M), $(SGEMM_UNROLL_N))
+SGEMMINCOPY    = sgemm_ncopy_4_vfp.S
+SGEMMITCOPY    = sgemm_tcopy_4_vfp.S
+SGEMMINCOPYOBJ = sgemm_incopy.o
+SGEMMITCOPYOBJ = sgemm_itcopy.o
+endif
+SGEMMONCOPY    = sgemm_ncopy_2_vfp.S
+SGEMMOTCOPY    = ../generic/gemm_tcopy_2.c
+SGEMMONCOPYOBJ = sgemm_oncopy.o
+SGEMMOTCOPYOBJ = sgemm_otcopy.o
+
+DGEMMKERNEL    = dgemm_kernel_4x2_vfp.S
+ifneq ($(DGEMM_UNROLL_M), $(DGEMM_UNROLL_N))
+DGEMMINCOPY    = dgemm_ncopy_4_vfp.S
+DGEMMITCOPY    = dgemm_tcopy_4_vfp.S
+DGEMMINCOPYOBJ = dgemm_incopy.o
+DGEMMITCOPYOBJ = dgemm_itcopy.o
+endif
+DGEMMONCOPY    = dgemm_ncopy_2_vfp.S
+DGEMMOTCOPY    = ../generic/gemm_tcopy_2.c
+DGEMMONCOPYOBJ = dgemm_oncopy.o
+DGEMMOTCOPYOBJ = dgemm_otcopy.o
+
+CGEMMKERNEL    = cgemm_kernel_2x2_vfp.S
+CGEMMONCOPY    = cgemm_ncopy_2_vfp.S
+CGEMMOTCOPY    = cgemm_tcopy_2_vfp.S
+CGEMMONCOPYOBJ = cgemm_oncopy.o
+CGEMMOTCOPYOBJ = cgemm_otcopy.o
+
+ZGEMMKERNEL    = zgemm_kernel_2x2_vfp.S
+ZGEMMONCOPY    = zgemm_ncopy_2_vfp.S
+ZGEMMOTCOPY    = zgemm_tcopy_2_vfp.S
+ZGEMMONCOPYOBJ = zgemm_oncopy.o
+ZGEMMOTCOPYOBJ = zgemm_otcopy.o
+
+STRMMKERNEL    = strmm_kernel_4x2_vfp.S
+DTRMMKERNEL    = dtrmm_kernel_4x2_vfp.S
+CTRMMKERNEL    = ctrmm_kernel_2x2_vfp.S
+ZTRMMKERNEL    = ztrmm_kernel_2x2_vfp.S
+

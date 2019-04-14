@@ -1,0 +1,29 @@
+Easylogging++ v9.86 RELEASE NOTES
+---------------------------------
+
+Release type: Major
+API changes: No
+Breaking Change: Yes
+
+==========================
+=      NEW FEATURES      =
+==========================
+
+ - Stack trace and crash report now requires `ELPP_FEATURE_CRASH_LOG` macro (#409)
+ - Performance tracking now requires `ELPP_PERFORMANCE_TRACKING` macro defined (#409)
+ - do(something) || LOG(DEBUG) idiom (#426)
+
+==========================
+=         FIXES          =
+==========================
+
+ - Do not create default file when using `ELPP_NO_LOG_TO_FILE` (completely fixed)
+ 
+==========================
+=         NOTES          =
+==========================
+
+ - Licence now included in releases
+ - See https://github.com/easylogging/easyloggingpp/blob/v9.86/README.md for manual for this release
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed

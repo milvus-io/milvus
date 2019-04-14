@@ -1,0 +1,57 @@
+CPP	= $(CC) -E
+RANLIB  = ranlib
+
+ifeq ($(LIBSUBARCH), EV4)
+LIBNAME		= $(LIBPREFIX)_ev4.a
+LIBNAME_P	= $(LIBPREFIX)_ev4_p.a
+endif
+
+ifeq ($(LIBSUBARCH), EV5)
+LIBNAME		= $(LIBPREFIX)_ev5.a
+LIBNAME_P	= $(LIBPREFIX)_ev5_p.a
+endif
+
+ifeq ($(LIBSUBARCH), EV6)
+LIBNAME		= $(LIBPREFIX)_ev6.a
+LIBNAME_P	= $(LIBPREFIX)_ev6_p.a
+endif
+
+ifneq ($(COMPILER), NATIVE)
+# GCC User
+ifeq ($(LIBSUBARCH), EV4)
+OPTION += -DEV4 -mcpu=ev4
+endif
+ifeq ($(LIBSUBARCH), EV5)
+OPTION += -DEV5 -mcpu=ev5
+endif
+ifeq ($(LIBSUBARCH), EV6)
+OPTION += -DEV6 -mcpu=ev6
+endif
+else
+# Compaq Compiler User
+ifeq ($(LIBSUBARCH), EV4)
+OPTION += -DEV4 -tune ev4 -arch ev4
+endif
+ifeq ($(LIBSUBARCH), EV5)
+OPTION += -DEV5 -tune ev5 -arch ev5
+endif
+ifeq ($(LIBSUBARCH), EV6)
+OPTION += -DEV6 -tune ev6 -arch ev6
+endif
+endif
+
+ifeq ($(F_COMPILER), GFORTRAN)
+FCOMMON_OPT	+= -mieee
+endif
+
+ifeq ($(F_COMPILER), G77)
+FCOMMON_OPT	+= -mieee
+endif
+
+ifndef SMP
+LIBCXML		= -lcxml  -lots -lm
+LIBATLAS	= -L/usr/lib/atlas3.7.8 -lf77blas -latlas -lm
+else
+LIBCXML		= -lcxmlp -lots -lm
+LIBATLAS	= -L/usr/lib/atlas3.7.8p -llapack -lptcblas -lptf77blas -latlas -lpthread -lm
+endif

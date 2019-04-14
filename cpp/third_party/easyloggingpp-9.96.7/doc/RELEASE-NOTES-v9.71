@@ -1,0 +1,19 @@
+Easylogging++ v9.71 RELEASE NOTES
+---------------------------------
+
+Release type: Minor
+API changes: No
+
+========================
+=      BUG FIXES       =
+========================
+
+ - Fix to `PERFORMANCE_CHECKPOINT`
+
+==========================
+=         NOTES          =
+==========================
+
+ - See https://github.com/easylogging/easyloggingpp/blob/v9.71/README.md for manual for this release
+ - See https://github.com/easylogging/easyloggingpp/tree/master/doc for other release notes
+ - Closed issues: https://github.com/easylogging/easyloggingpp/issues?page=1&state=closed
