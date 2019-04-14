@@ -16,4 +16,5 @@ set(unittest_libs
         gmock_main
         pthread)
 
+add_subdirectory(cache)
 add_subdirectory(log)
