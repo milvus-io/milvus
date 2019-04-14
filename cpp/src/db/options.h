@@ -3,7 +3,9 @@
 
 #include <string>
 
-namespace vecengine {
+namespace zilliz {
+namespace vecwise {
+namespace engine {
 
 struct Options {
     uint16_t  memory_sync_interval = 10;
@@ -28,6 +30,8 @@ struct DBMetaOptions : public MetaOptions {
 }; // DBMetaOptions
 
 
-} // namespace vecengine
+} // namespace engine
+} // namespace vecwise
+} // namespace zilliz
 
 #endif // VECENGINE_OPTIONS_H_
