@@ -3,7 +3,9 @@
 
 #include <mutex>
 #include <condition_variable>
+#include <memory>
 #include "db.h"
+#include "memvectors.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -39,6 +41,8 @@ private:
     std::condition_variable _bg_work_finish_signal;
     bool _bg_compaction_scheduled;
     Status _bg_error;
+
+    MemManager _memMgr;
 
 }; // DBImpl
 

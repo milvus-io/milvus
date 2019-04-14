@@ -3,6 +3,8 @@
 
 #include <string>
 #include "options.h"
+#include "db_meta.h"
+#include "status.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -14,8 +16,23 @@ class DB {
 public:
     static DB* Open(const Options& options_, const std::string& name_);
 
-    virtual std::string add_group(GroupOptions options_,
-            const std::string& group_id_) = 0;
+    virtual Status add_group(GroupOptions options_,
+            const std::string& group_id_,
+            GroupSchema& group_info_) = 0;
+    virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) = 0;
+    virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
+
+    virtual Status add_group_file(const std::string& group_id_,
+                                  GroupFileSchema& group_file_info_) = 0;
+    virtual Status has_group_file(const std::string& group_id_,
+                                  const std::string& file_id_,
+                                  bool& has_or_not_) = 0;
+    virtual Status get_group_file(const std::string& group_id_,
+                                  const std::string& file_id_,
+                                  GroupFileSchema& group_file_info_) = 0;
+
+    virtual Status get_group_files(const std::string& group_id_,
+                                   GroupFilesSchema& group_files_info_) = 0;
 
     DB() = default;
     DB(const DB&) = delete;
