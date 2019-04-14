@@ -32,7 +32,7 @@ TEST(CacheTest, CACHE_TEST) {
     cache_mgr.InsertItem(key, MAKE_100MB_DATA);
     cache::DataObjPtr data = cache_mgr.GetItem(key);
     ASSERT_TRUE(data != nullptr);
-    ASSERT_TRUE(cache_mgr.IsExists(key));
+    ASSERT_TRUE(cache_mgr.ItemExists(key));
     ASSERT_EQ(data->size(), 100*1024*1024);
 
     cache_mgr.EraseItem(key);
