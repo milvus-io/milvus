@@ -52,6 +52,9 @@ include_directories(${VECWISE_ENGINE_INCLUDE})
 include_directories(${VECWISE_ENGINE_SRC})
 include_directories(${VECWISE_THIRD_PARTY_BUILD}/include)
 
+link_directories(${CMAKE_CURRRENT_BINARY_DIR})
+link_directories(./third_party/build/lib)
+
 execute_process(COMMAND bash build.sh
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
@@ -60,3 +63,5 @@ add_subdirectory(src)
 if (BUILD_UNIT_TEST)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
 endif(BUILD_UNIT_TEST)
+
+add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
