@@ -3,6 +3,7 @@
 #include <index_io.h>
 
 #include "memvectors.h"
+#include "db_meta.h"
 
 
 namespace vecengine {
@@ -15,10 +16,9 @@ MemVectors::MemVectors(size_t dimension_, const std::string& file_location_) :
     _pIdMapIndex = new faiss::IndexIDMap(_pInnerIndex) {
 }
 
-IDNumbers&& MemVectors::add(size_t n, const float* vectors) {
-    IDNumbers&& ids = _pIdGenerator->getNextIDNumbers(n);
-    _pIdMapIndex->add_with_ids(n, vectors, pIds, &ids[0]);
-    return ids;
+void MemVectors::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
+    vector_ids_ = _pIdGenerator->getNextIDNumbers(n_);
+    _pIdMapIndex->add_with_ids(n_, vectors_, &vector_ids_[0]);
 }
 
 size_t MemVectors::total() const {
@@ -57,27 +57,33 @@ MemVectors* MemManager::get_mem_by_group(const std::string& group_id_) {
     if memIt != _memMap.end() {
         return &(memIt->second);
     }
-    // PXU TODO:
-    // 1. Read Group meta info
-    // 2. Initalize MemVectors base meta info
-    return nullptr;
-    /* GroupMetaInfo info; */
-    /* bool succ = env->getGroupMeta(group_id, &info); */
-    /* if (!succ) { */
-    /*     return nullptr; */
-    /* } */
-    /* _memMap[group_id] = MemVectors(info.dimension, info.next_file_location); */
-    /* return &(_memMap[group_id]); */
+
+    GroupSchema group_info;
+    Status status = _pMeta->get_group(group_id_, group_info);
+    if (!status.ok()) {
+        return nullptr;
+    }
+    _memMap[group_id] = MemVectors(group_info.dimension, group_info.next_file_location);
+    return &(_memMap[group_id]);
 }
 
-IDNumbers&& MemManager::add_vectors_no_lock(const std::string& group_id_,
+Status MemManager::add_vectors(const std::string& group_id_,
+        size_t n_,
+        const float* vectors_,
+        IDNumbers& vector_ids_) {
+    // PXU TODO
+    return add_vectors_no_lock(group_id_, n_, vectors_, vector_ids_);
+}
+
+Status MemManager::add_vectors_no_lock(const std::string& group_id_,
         size_t n,
-        const float* vectors) {
-    auto mem = get_group_mem(group_id_);
+        const float* vectors,
+        IDNumbers& vector_ids_) {
+    auto mem = get_mem_by_group(group_id_);
     if (mem == nullptr) {
-        return IDNumbers();
+        return Status::NotFound("Group " + group_id_ " not found!");
     }
-    return mem->add(n, vectors);
+    return mem->add(n, vectors, vector_ids_);
 }
 
 
