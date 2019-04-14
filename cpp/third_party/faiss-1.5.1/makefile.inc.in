@@ -1,0 +1,44 @@
+# Copyright (c) 2015-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the BSD+Patents license found in the
+# LICENSE file in the root directory of this source tree.
+
+CXX          = @CXX@
+CXXCPP       = @CXXCPP@
+CPPFLAGS     = -DFINTEGER=int @CPPFLAGS@ @OPENMP_CXXFLAGS@ @NVCC_CPPFLAGS@
+CXXFLAGS     = -fPIC @ARCH_CXXFLAGS@ -Wno-sign-compare @CXXFLAGS@
+CPUFLAGS     = @ARCH_CPUFLAGS@
+LDFLAGS      = @OPENMP_CXXFLAGS@ @LDFLAGS@ @NVCC_LDFLAGS@
+LIBS         = @BLAS_LIBS@ @LAPACK_LIBS@ @LIBS@ @NVCC_LIBS@
+PYTHONCFLAGS = @PYTHON_CFLAGS@ -I@NUMPY_INCLUDE@
+
+NVCC         = @NVCC@
+CUDA_ROOT    = @CUDA_PREFIX@
+CUDA_ARCH    = @CUDA_ARCH@
+NVCCFLAGS    = -I $(CUDA_ROOT)/targets/x86_64-linux/include/ \
+-Xcompiler -fPIC \
+-Xcudafe --diag_suppress=unrecognized_attribute \
+$(CUDA_ARCH) \
+-lineinfo \
+-ccbin $(CXX) -DFAISS_USE_FLOAT16
+
+OS = $(shell uname -s)
+
+SHAREDEXT   = so
+SHAREDFLAGS = -shared
+
+ifeq ($(OS),Darwin)
+	SHAREDEXT   = dylib
+	SHAREDFLAGS = -dynamiclib -undefined dynamic_lookup
+endif
+
+MKDIR_P      = @MKDIR_P@
+PYTHON       = @PYTHON@
+SWIG         = @SWIG@
+AR          ?= ar 
+
+prefix      ?= @prefix@
+exec_prefix ?= @exec_prefix@
+libdir       = @libdir@
+includedir   = @includedir@
