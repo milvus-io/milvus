@@ -2,14 +2,11 @@
 #define UTILS_ID_GENERATORS_H_
 
 #include <vector>
+#include "types.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
-
-#define uint64_t IDNumber;
-#define IDNumber* IDNumberPtr;
-#define std::vector<IDNumber> IDNumbers;
 
 class IDGenerator {
 public:

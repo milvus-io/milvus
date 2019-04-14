@@ -4,6 +4,7 @@
 #include <map>
 #include <string>
 #include "id_generators.h"
+#include "status.h"
 
 class faiss::IndexIDMap;
 class faiss::Index;
@@ -37,19 +38,24 @@ private:
 }; // MemVectors
 
 
+class Meta;
+
 class MemManager {
 public:
-    MemManager() = default;
+    MemManager(const std::shared_ptr<Meta>& meta_) : _pMeta(meta_) {}
 
     MemVectors* get_mem_by_group(const std::string& group_id_);
 
+    Status add_vectors(const std::string& group_id_,
+            size_t n_, const float* vectors_, IDNumbers& vector_ids_);
+
 private:
-    IDNumbers&& add_vectors_no_lock(const std::string& group_id_,
-            size_t n,
-            const float* vectors);
+    Status add_vectors_no_lock(const std::string& group_id_,
+            size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
     typedef std::map<std::string, MemVectors> MemMap;
     MemMap _memMap;
+    std::shared_ptr<Meta> _pMeta;
 }; // MemManager
 
 
