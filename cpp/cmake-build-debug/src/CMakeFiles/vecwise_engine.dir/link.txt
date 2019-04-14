@@ -1,1 +1,0 @@
-/usr/bin/c++ -fPIC  -O0 -g -fPIC -g  -shared -Wl,-soname,libvecwise_engine.so -o libvecwise_engine.so CMakeFiles/vecwise_engine.dir/main.cpp.o CMakeFiles/vecwise_engine.dir/cache/Cache.cpp.o CMakeFiles/vecwise_engine.dir/cache/CacheMgr.cpp.o  -L/home/yhmo/work/git/vecwise/vecwise_engine/cpp/./third_party/build/lib 
