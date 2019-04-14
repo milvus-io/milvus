@@ -3,7 +3,9 @@
 
 #include <vector>
 
-namespace vecengine {
+namespace zilliz {
+namespace vecwise {
+namespace engine {
 
 #define uint64_t IDNumber;
 #define IDNumber* IDNumberPtr;
@@ -30,6 +32,8 @@ private:
 }; // SimpleIDGenerator
 
 
-} // namespace vecengine
+} // namespace engine
+} // namespace vecwise
+} // namespace zilliz
 
 #endif // UTILS_ID_GENERATORS_H_
