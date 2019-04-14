@@ -3,18 +3,17 @@
 # Unauthorized copying of this file, via any medium is strictly prohibited.
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
-link_directories(
-        "${CMAKE_BINARY_DIR}/lib"
-        "${VECWISE_THIRD_PARTY}/lib"
-)
+include_directories(../../src)
 
-set(unittest_srcs
-        ${CMAKE_CURRENT_SOURCE_DIR}/vecwise_test.cpp)
+set(cache_srcs
+        ../../src/cache/Cache.cpp
+        ../../src/cache/CacheMgr.cpp)
 
-set(unittest_libs
-        gtest_main
-        gmock_main
-        pthread)
+set(cache_test_src
+        ${unittest_srcs}
+        ${cache_srcs}
+        cache_tests.cpp)
 
-add_subdirectory(cache)
-add_subdirectory(log)
+add_executable(cache_tests ${cache_test_src})
+
+target_link_libraries(cache_tests ${unittest_libs})
