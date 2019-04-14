@@ -9,3 +9,11 @@
 TEST(LogTest, INIT_TEST) {
     ASSERT_STREQ("A", "A");
 }
+
+TEST(LogTest, RUN_TEST) {
+    ASSERT_STREQ("B", "B");
+}
+
+TEST(LogTest, FINISH_TEST) {
+    ASSERT_STREQ("C", "C");
+}
