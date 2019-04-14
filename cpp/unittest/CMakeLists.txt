@@ -9,7 +9,7 @@ link_directories(
 )
 
 set(unittest_srcs
-        ${CMAKE_CURRENT_SOURCE_DIR}/vecwise_test.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/vecwise_test.cpp ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc)
 
 set(unittest_libs
         gtest_main

@@ -13,4 +13,5 @@ CMAKE_CMD="cmake -DLAPACK_BINARY_DIR=${INSTALL_PREFIX} -DCMAKE_INSTALL_LIBDIR=${
 
 ${CMAKE_CMD}
 
-cmake --build -j . --target install
+#cmake --build -j . --target install
+make -j && make install

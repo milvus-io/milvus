@@ -4,16 +4,17 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
+#include "easylogging++.h"
 
+class LogTest: public testing::Test {
+protected:
+    void SetUp() override {
+        el::Configurations conf("../../../conf/vecwise_engine_log.conf");
+        el::Loggers::reconfigureAllLoggers(conf);
+    }
+};
 
-TEST(LogTest, INIT_TEST) {
-    ASSERT_STREQ("A", "A");
-}
-
-TEST(LogTest, RUN_TEST) {
-    ASSERT_STREQ("B", "B");
-}
-
-TEST(LogTest, FINISH_TEST) {
-    ASSERT_STREQ("C", "C");
+TEST_F(LogTest, TEST) {
+    EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::NewLineForContainer));
+    EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::LogDetailedCrashReason));
 }

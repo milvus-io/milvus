@@ -5,6 +5,9 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <easylogging++.h>
+
+INITIALIZE_EASYLOGGINGPP
 
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
