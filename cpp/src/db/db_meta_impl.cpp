@@ -52,6 +52,7 @@ Status DBMetaImpl::get_group_file(const std::string& group_id_,
 }
 
 Status DBMetaImpl::get_group_files(const std::string& group_id_,
+                               const int date_delta_,
                                GroupFilesSchema& group_files_info_) {
     // PXU TODO
     return Status.OK();
