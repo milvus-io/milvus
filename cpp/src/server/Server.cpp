@@ -47,7 +47,7 @@ Server::Daemonize() {
         return;
     }
 
-    CommonUtil::PrintInfo("Megawise server run in daemonize mode");
+    CommonUtil::PrintInfo("Vecwise server run in daemonize mode");
 
 //    std::string log_path(GetLogDirFullPath());
 //    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
@@ -156,10 +156,10 @@ Server::Start() {
 
             StartService();
 
-            CommonUtil::PrintInfo("Megawise server is running...");
+            CommonUtil::PrintInfo("Vecwise server is running...");
 
         } catch(std::exception& ex){
-            std::string info = "Megawise server encounter exception: " + std::string(ex.what());
+            std::string info = "Vecwise server encounter exception: " + std::string(ex.what());
             CommonUtil::PrintError(info);
 
             CommonUtil::PrintInfo("Is another server instance running?");
@@ -173,7 +173,7 @@ Server::Start() {
 
 void
 Server::Stop() {
-    CommonUtil::PrintInfo("Megawise server will be closed");
+    CommonUtil::PrintInfo("Vecwise server will be closed");
 
     // Unlock and close lockfile
     if (pid_fd != -1) {
@@ -200,7 +200,7 @@ Server::Stop() {
     StopService();
 
 
-    CommonUtil::PrintInfo("Megawise server closed");
+    CommonUtil::PrintInfo("Vecwise server closed");
 }
 
 
