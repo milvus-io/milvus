@@ -4,7 +4,7 @@
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
 
-AUX_SOURCE_DIRECTORY(./cache cache_files)
+aux_source_directory(./cache cache_files)
 
 set(vecwise_engine_src
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
