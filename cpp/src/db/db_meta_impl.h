@@ -29,6 +29,7 @@ public:
     virtual Status update_group_file(const GroupFileSchema& group_file_) override;
 
     virtual Status get_group_files(const std::string& group_id_,
+                                   const int date_delta_,
                                    GroupFilesSchema& group_files_info_) override;
 
 private:

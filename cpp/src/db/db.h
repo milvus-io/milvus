@@ -21,17 +21,8 @@ public:
             GroupSchema& group_info_) = 0;
     virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) = 0;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
-
-    virtual Status add_group_file(const std::string& group_id_,
-                                  GroupFileSchema& group_file_info_) = 0;
-    virtual Status has_group_file(const std::string& group_id_,
-                                  const std::string& file_id_,
-                                  bool& has_or_not_) = 0;
-    virtual Status get_group_file(const std::string& group_id_,
-                                  const std::string& file_id_,
-                                  GroupFileSchema& group_file_info_) = 0;
-
     virtual Status get_group_files(const std::string& group_id_,
+                                   const int date_delta_,
                                    GroupFilesSchema& group_files_info_) = 0;
 
     DB() = default;

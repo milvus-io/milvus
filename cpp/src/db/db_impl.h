@@ -19,7 +19,13 @@ public:
 
     virtual Status add_group(GroupOptions options_,
             const std::string& group_id_,
-            std::string& gid_) override;
+            GroupSchema& group_info_) override;
+    virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) override;
+    virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
+
+    virtual Status get_group_files(const std::string& group_id_,
+                                   const int date_delta_,
+                                   GroupFilesSchema& group_files_info_) override;
 
     void try_schedule_compaction();
 
@@ -43,6 +49,7 @@ private:
     Status _bg_error;
 
     MemManager _memMgr;
+    std::shared_ptr<Meta> _pMeta;
 
 }; // DBImpl
 
