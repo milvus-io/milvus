@@ -6,6 +6,7 @@
 #include <memory>
 #include "db.h"
 #include "memvectors.h"
+#include "types.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -27,10 +28,14 @@ public:
                                    const int date_delta_,
                                    GroupFilesSchema& group_files_info_) override;
 
-    void try_schedule_compaction();
+    virtual Status add_vectors(const std::string& group_id_,
+            size_t n, const float* vectors, IDNumbers& vector_ids_) override;
 
     virtual ~DBImpl();
+
 private:
+
+    void try_schedule_compaction();
 
     static void BGWork(void* db);
     void background_call();
@@ -45,8 +50,8 @@ private:
     bool _bg_compaction_scheduled;
     Status _bg_error;
 
-    MemManager _memMgr;
     std::shared_ptr<Meta> _pMeta;
+    std::shared_ptr<MemManager> _pMemMgr;
 
 }; // DBImpl
 

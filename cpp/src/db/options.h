@@ -9,6 +9,7 @@ namespace vecwise {
 namespace engine {
 
 class MetaOptions;
+class Env;
 
 struct Options {
     uint16_t  memory_sync_interval = 10;

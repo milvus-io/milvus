@@ -17,14 +17,20 @@ public:
     Status& operator=(const Status& rhs_) noexcept;
 
     static Status OK() { return Status(); }
+    static Status NotFound(const std::string& msg_, const std::string& msg2_="") {
+        return Status(kNotFound, msg_, msg2_);
+    }
 
     bool ok() const { return _state == nullptr; }
+
+    bool IsNotFound() const { return code() == kNotFound; }
 
 private:
     const char* _state;
 
     enum Code {
         kOK = 0,
+        kNotFound,
     };
 
     Code code() const {

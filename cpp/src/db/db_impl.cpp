@@ -9,7 +9,8 @@ DBImpl::DBImpl(const Options& options_, const std::string& name_)
       _options(options_),
       _bg_work_finish_signal(_mutex),
       _bg_compaction_scheduled(false),
-      _pMeta(new DBMetaImpl(*(_options.pMetaOptions))) {
+      _pMeta(new DBMetaImpl(*(_options.pMetaOptions))),
+      _pMemMgr(new MemManager(_pMeta)) {
 }
 
 Status DBImpl::add_group(const GroupOptions& options_,
@@ -34,6 +35,11 @@ Status DBImpl::get_group_files(const std::string& group_id_,
                                GroupFilesSchema& group_files_info_) {
     return _pMeta->get_group_files(group_id_, date_delta_, group_file_info_);
 
+}
+
+Status DBImpl::add_vectors(const std::string& group_id_,
+        size_t n, const float* vectors, IDNumbers& vector_ids_) {
+    return _pMemMgr->add_vectors(group_id_, n, vectors, vector_ids_);
 }
 
 void DBImpl::try_schedule_compaction() {

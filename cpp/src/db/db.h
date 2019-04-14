@@ -25,6 +25,9 @@ public:
                                    const int date_delta_,
                                    GroupFilesSchema& group_files_info_) = 0;
 
+    virtual Status add_vectors(const std::string& group_id_,
+            size_t n, const float* vectors) = 0;
+
     DB() = default;
     DB(const DB&) = delete;
     DB& operator=(const DB&) = delete;
