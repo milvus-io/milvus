@@ -36,9 +36,6 @@ private:
     void background_call();
     void background_compaction();
 
-    Status meta_add_group(const std::string& group_id_);
-    Status meta_add_group_file(const std::string& group_id_);
-
     const _dbname;
     Env* const _env;
     const Options _options;
