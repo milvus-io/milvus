@@ -65,14 +65,48 @@ CMAKE_SOURCE_DIR = /home/yhmo/work/git/vecwise/vecwise_engine/cpp
 CMAKE_BINARY_DIR = /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug
 
 #=============================================================================
+# Target rules for target CMakeFiles/Clean-All.dir
+
+# All Build rule for target.
+CMakeFiles/Clean-All.dir/all:
+	$(MAKE) -f CMakeFiles/Clean-All.dir/build.make CMakeFiles/Clean-All.dir/depend
+	$(MAKE) -f CMakeFiles/Clean-All.dir/build.make CMakeFiles/Clean-All.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles --progress-num= "Built target Clean-All"
+.PHONY : CMakeFiles/Clean-All.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/Clean-All.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles 0
+	$(MAKE) -f CMakeFiles/Makefile2 CMakeFiles/Clean-All.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles 0
+.PHONY : CMakeFiles/Clean-All.dir/rule
+
+# Convenience name for target.
+Clean-All: CMakeFiles/Clean-All.dir/rule
+
+.PHONY : Clean-All
+
+# clean rule for target.
+CMakeFiles/Clean-All.dir/clean:
+	$(MAKE) -f CMakeFiles/Clean-All.dir/build.make CMakeFiles/Clean-All.dir/clean
+.PHONY : CMakeFiles/Clean-All.dir/clean
+
+# clean rule for target.
+clean: CMakeFiles/Clean-All.dir/clean
+
+.PHONY : clean
+
+#=============================================================================
 # Directory level rules for directory src
 
 # Convenience name for "all" pass in the directory.
+src/all: src/CMakeFiles/vecwise_engine_server.dir/all
 src/all: src/CMakeFiles/vecwise_engine.dir/all
 
 .PHONY : src/all
 
 # Convenience name for "clean" pass in the directory.
+src/clean: src/CMakeFiles/vecwise_engine_server.dir/clean
 src/clean: src/CMakeFiles/vecwise_engine.dir/clean
 
 .PHONY : src/clean
@@ -81,6 +115,43 @@ src/clean: src/CMakeFiles/vecwise_engine.dir/clean
 src/preinstall:
 
 .PHONY : src/preinstall
+
+#=============================================================================
+# Target rules for target src/CMakeFiles/vecwise_engine_server.dir
+
+# All Build rule for target.
+src/CMakeFiles/vecwise_engine_server.dir/all: src/CMakeFiles/vecwise_engine.dir/all
+	$(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/depend
+	$(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles --progress-num=13,14,15,16,17,18,19,20,21 "Built target vecwise_engine_server"
+.PHONY : src/CMakeFiles/vecwise_engine_server.dir/all
+
+# Include target in all.
+all: src/CMakeFiles/vecwise_engine_server.dir/all
+
+.PHONY : all
+
+# Build rule for subdir invocation for target.
+src/CMakeFiles/vecwise_engine_server.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles 13
+	$(MAKE) -f CMakeFiles/Makefile2 src/CMakeFiles/vecwise_engine_server.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles 0
+.PHONY : src/CMakeFiles/vecwise_engine_server.dir/rule
+
+# Convenience name for target.
+vecwise_engine_server: src/CMakeFiles/vecwise_engine_server.dir/rule
+
+.PHONY : vecwise_engine_server
+
+# clean rule for target.
+src/CMakeFiles/vecwise_engine_server.dir/clean:
+	$(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/clean
+.PHONY : src/CMakeFiles/vecwise_engine_server.dir/clean
+
+# clean rule for target.
+clean: src/CMakeFiles/vecwise_engine_server.dir/clean
+
+.PHONY : clean
 
 #=============================================================================
 # Target rules for target src/CMakeFiles/vecwise_engine.dir

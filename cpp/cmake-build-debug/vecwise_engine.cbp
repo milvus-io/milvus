@@ -37,6 +37,70 @@
 					<DistClean command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
 				</MakeCommands>
 			</Target>
+			<Target title="Clean-All">
+				<Option working_dir="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/Makefile&quot;  VERBOSE=1 Clean-All"/>
+					<CompileFile command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="vecwise_engine_server">
+				<Option output="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/vecwise_engine_server" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src"/>
+				<Option object_output="./"/>
+				<Option type="1"/>
+				<Option compiler="gcc"/>
+				<Compiler>
+					<Add option="-DPROFILER="/>
+					<Add directory="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/include"/>
+					<Add directory="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src"/>
+					<Add directory="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/third_party/build/include"/>
+					<Add directory="/usr/include/c++/5"/>
+					<Add directory="/usr/include/x86_64-linux-gnu/c++/5"/>
+					<Add directory="/usr/include/c++/5/backward"/>
+					<Add directory="/usr/lib/gcc/x86_64-linux-gnu/5/include"/>
+					<Add directory="/usr/local/include"/>
+					<Add directory="/usr/lib/gcc/x86_64-linux-gnu/5/include-fixed"/>
+					<Add directory="/usr/include/x86_64-linux-gnu"/>
+					<Add directory="/usr/include"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/Makefile&quot;  VERBOSE=1 vecwise_engine_server"/>
+					<CompileFile command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="vecwise_engine_server/fast">
+				<Option output="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/vecwise_engine_server" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src"/>
+				<Option object_output="./"/>
+				<Option type="1"/>
+				<Option compiler="gcc"/>
+				<Compiler>
+					<Add option="-DPROFILER="/>
+					<Add directory="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/include"/>
+					<Add directory="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src"/>
+					<Add directory="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/third_party/build/include"/>
+					<Add directory="/usr/include/c++/5"/>
+					<Add directory="/usr/include/x86_64-linux-gnu/c++/5"/>
+					<Add directory="/usr/include/c++/5/backward"/>
+					<Add directory="/usr/lib/gcc/x86_64-linux-gnu/5/include"/>
+					<Add directory="/usr/local/include"/>
+					<Add directory="/usr/lib/gcc/x86_64-linux-gnu/5/include-fixed"/>
+					<Add directory="/usr/include/x86_64-linux-gnu"/>
+					<Add directory="/usr/include"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/Makefile&quot;  VERBOSE=1 vecwise_engine_server/fast"/>
+					<CompileFile command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -j8 -f &quot;/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
 			<Target title="vecwise_engine">
 				<Option output="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src/libvecwise_engine.so" prefix_auto="0" extension_auto="0"/>
 				<Option working_dir="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/src"/>
@@ -218,11 +282,56 @@
 			<Option target="vecwise_engine"/>
 			<Option target="cache_tests"/>
 		</Unit>
-		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/cache/DataObj.h">
-			<Option target="vecwise_engine"/>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/config/ConfigNode.cpp">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/config/ConfigNode.h">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/config/IConfigMgr.cpp">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/config/IConfigMgr.h">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/config/YamlConfigMgr.cpp">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/config/YamlConfigMgr.h">
+			<Option target="vecwise_engine_server"/>
 		</Unit>
 		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/main.cpp">
 			<Option target="vecwise_engine"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/server/Server.cpp">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/server/Server.h">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/server/ServerConfig.cpp">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/server/ServerConfig.h">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/utils/CommonUtil.cpp">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/utils/CommonUtil.h">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/utils/SignalUtil.cpp">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/utils/SignalUtil.h">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/utils/TimeRecorder.cpp">
+			<Option target="vecwise_engine_server"/>
+		</Unit>
+		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/utils/TimeRecorder.h">
+			<Option target="vecwise_engine_server"/>
 		</Unit>
 		<Unit filename="/home/yhmo/work/git/vecwise/vecwise_engine/cpp/unittest/cache/cache_tests.cpp">
 			<Option target="cache_tests"/>

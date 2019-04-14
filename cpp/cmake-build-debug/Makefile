@@ -111,6 +111,32 @@ depend:
 .PHONY : depend
 
 #=============================================================================
+# Target rules for targets named Clean-All
+
+# Build rule for target.
+Clean-All: cmake_check_build_system
+	$(MAKE) -f CMakeFiles/Makefile2 Clean-All
+.PHONY : Clean-All
+
+# fast build rule for target.
+Clean-All/fast:
+	$(MAKE) -f CMakeFiles/Clean-All.dir/build.make CMakeFiles/Clean-All.dir/build
+.PHONY : Clean-All/fast
+
+#=============================================================================
+# Target rules for targets named vecwise_engine_server
+
+# Build rule for target.
+vecwise_engine_server: cmake_check_build_system
+	$(MAKE) -f CMakeFiles/Makefile2 vecwise_engine_server
+.PHONY : vecwise_engine_server
+
+# fast build rule for target.
+vecwise_engine_server/fast:
+	$(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/build
+.PHONY : vecwise_engine_server/fast
+
+#=============================================================================
 # Target rules for targets named vecwise_engine
 
 # Build rule for target.
@@ -157,6 +183,8 @@ help:
 	@echo "... depend"
 	@echo "... rebuild_cache"
 	@echo "... edit_cache"
+	@echo "... Clean-All"
+	@echo "... vecwise_engine_server"
 	@echo "... vecwise_engine"
 	@echo "... cache_tests"
 	@echo "... log_tests"
