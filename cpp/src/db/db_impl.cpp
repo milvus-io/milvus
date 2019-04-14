@@ -8,14 +8,31 @@ DBImpl::DBImpl(const Options& options_, const std::string& name_)
       _env(options_.env),
       _options(options_),
       _bg_work_finish_signal(_mutex),
-      _bg_compaction_scheduled(false) {
+      _bg_compaction_scheduled(false),
+      _pMeta(new DBMetaImpl(*(_options.pMetaOptions))) {
 }
 
 Status DBImpl::add_group(const GroupOptions& options_,
         const std::string& group_id_,
-        std::string& gid_) {
+        GroupSchema& group_info_) {
     assert((!options_.has_id) ||
             (options_.has_id && ("" != group_id_)));
+
+    return _pMeta->add_group(options_, group_id, group_info_);
+}
+
+Status DBImpl::get_group(const std::string& group_id_, GroupSchema& group_info_) {
+    return _pMeta->get_group(group_id_, group_info_);
+}
+
+Status DBImpl::has_group(const std::string& group_id_, bool& has_or_not_) {
+    return _pMeta->has_group(group_id_, has_or_not_);
+}
+
+Status DBImpl::get_group_files(const std::string& group_id_,
+                               const int date_delta_,
+                               GroupFilesSchema& group_files_info_) {
+    return _pMeta->get_group_files(group_id_, date_delta_, group_file_info_);
 
 }
 
