@@ -5,10 +5,27 @@
 #-------------------------------------------------------------------------------
 
 aux_source_directory(./cache cache_files)
+aux_source_directory(./config config_files)
+aux_source_directory(./server server_files)
+aux_source_directory(./utils utils_files)
 
 set(vecwise_engine_src
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
         ${cache_files}
-        cache/DataObj.h)
+        )
 
 add_library(vecwise_engine SHARED ${vecwise_engine_src})
+
+add_executable(vecwise_engine_server
+        ${config_files}
+        ${server_files}
+        ${utils_files}
+        )
+
+set(dependency_libs
+        vecwise_engine
+        yaml-cpp
+        boost_system
+        boost_filesystem
+        )
+target_link_libraries(vecwise_engine_server ${dependency_libs})
