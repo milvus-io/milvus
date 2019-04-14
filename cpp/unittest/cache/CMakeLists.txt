@@ -5,9 +5,7 @@
 #-------------------------------------------------------------------------------
 include_directories(../../src)
 
-set(cache_srcs
-        ../../src/cache/Cache.cpp
-        ../../src/cache/CacheMgr.cpp)
+aux_source_directory(../../src/cache cache_srcs)
 
 set(cache_test_src
         ${unittest_srcs}
