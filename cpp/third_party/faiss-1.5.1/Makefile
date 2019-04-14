@@ -19,11 +19,9 @@ GPU_SRC     = $(GPU_CPPSRC) $(GPU_CUSRC)
 GPU_CPPOBJ  = $(GPU_CPPSRC:.cpp=.o)
 GPU_CUOBJ   = $(GPU_CUSRC:.cu=.o)
 GPU_OBJ     = $(GPU_CPPOBJ) $(GPU_CUOBJ)
-GPU_INSTALLDIRS = $(DESTDIR)$(includedir)/faiss/gpu/{impl,utils}
 
 ifneq ($(strip $(NVCC)),)
 	OBJ         += $(GPU_OBJ)
-	INSTALLDIRS += $(GPU_INSTALLDIRS)
 	HEADERS     += $(GPU_HEADERS)
 endif
 
@@ -46,7 +44,7 @@ libfaiss.$(SHAREDEXT): $(OBJ)
 	$(NVCC) $(NVCCFLAGS) -g -O3 -c $< -o $@
 
 clean:
-	rm -f libfaiss.{a,$(SHAREDEXT)}
+	rm -f libfaiss.a libfaiss.$(SHAREDEXT)
 	rm -f $(OBJ)
 
 
@@ -54,14 +52,15 @@ clean:
 # Installing
 
 install: libfaiss.a libfaiss.$(SHAREDEXT) installdirs
-	cp libfaiss.{a,$(SHAREDEXT)} $(DESTDIR)$(libdir)
+	cp libfaiss.a libfaiss.$(SHAREDEXT) $(DESTDIR)$(libdir)
 	tar cf - $(HEADERS) | tar xf - -C $(DESTDIR)$(includedir)/faiss/
 
 installdirs:
 	$(MKDIR_P) $(INSTALLDIRS)
 
 uninstall:
-	rm -f $(DESTDIR)$(libdir)/libfaiss.{a,$(SHAREDEXT)}
+	rm -f $(DESTDIR)$(libdir)/libfaiss.a \
+	      $(DESTDIR)$(libdir)/libfaiss.$(SHAREDEXT)
 	rm -rf $(DESTDIR)$(includedir)/faiss
 
 
