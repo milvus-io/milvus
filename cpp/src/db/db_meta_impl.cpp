@@ -14,7 +14,9 @@ Status DBMetaImpl::initialize() {
     return Status.OK();
 }
 
-Status DBMetaImpl::add_group(const std::string& group_id_, GroupSchema& group_info_) {
+Status DBMetaImpl::add_group(const GroupOptions& options_,
+            const std::string& group_id_,
+            GroupSchema& group_info_) {
     //PXU TODO
     return Status.OK();
 }
@@ -55,8 +57,7 @@ Status DBMetaImpl::get_group_files(const std::string& group_id_,
     return Status.OK();
 }
 
-Status DBMetaImpl::mark_group_file_as_index(const std::string& group_id_,
-                                        const std::string& file_id_) {
+Status DBMetaImpl::update_group_file(const GroupFileSchema& group_file_) {
     //PXU TODO
     return Status.OK();
 }
