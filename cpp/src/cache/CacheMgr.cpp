@@ -15,15 +15,15 @@ CacheMgr::CacheMgr() {
     cache_ = std::make_shared<Cache>(16, 1UL<<32);
 }
 
-size_t CacheMgr::ItemCount() const {
+uint64_t CacheMgr::ItemCount() const {
     if(cache_ == nullptr) {
         return 0;
     }
 
-    return cache_->size();
+    return (uint64_t)(cache_->size());
 }
 
-bool CacheMgr::IsExists(const std::string& key) {
+bool CacheMgr::ItemExists(const std::string& key) {
     if(cache_ == nullptr) {
         return false;
     }

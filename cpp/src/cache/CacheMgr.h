@@ -19,9 +19,9 @@ public:
         return mgr;
     }
 
-    size_t ItemCount() const;
+    uint64_t ItemCount() const;
 
-    bool IsExists(const std::string& key);
+    bool ItemExists(const std::string& key);
 
     DataObjPtr GetItem(const std::string& key);
 

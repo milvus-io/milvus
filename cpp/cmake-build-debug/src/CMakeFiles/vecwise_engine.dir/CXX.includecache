@@ -6,12 +6,6 @@
 
 #IncludeRegexTransform: 
 
-/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/cache/Cache.cpp
-Cache.h
-/home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/cache/Cache.h
-set
--
-
 /home/yhmo/work/git/vecwise/vecwise_engine/cpp/src/cache/Cache.h
 string
 -
