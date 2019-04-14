@@ -4,3 +4,5 @@ __pycache__
 
 .env
 build
+cmake-build-debug
+cmake_build
