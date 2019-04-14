@@ -14,7 +14,7 @@ set(vecwise_engine_src
         ${cache_files}
         )
 
-add_library(vecwise_engine SHARED ${vecwise_engine_src})
+add_library(vecwise_engine STATIC ${vecwise_engine_src})
 
 add_executable(vecwise_engine_server
         ${config_files}
