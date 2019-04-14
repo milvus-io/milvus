@@ -5,7 +5,9 @@
 #include <condition_variable>
 #include "db.h"
 
-namespace vecengine {
+namespace zilliz {
+namespace vecwise {
+namespace engine {
 
 class Env;
 
@@ -40,6 +42,10 @@ private:
 
 }; // DBImpl
 
-} // namespace vecengine
+} // namespace engine
+} // namespace vecwise
+} // namespace zilliz
+
+#endif // VECENGINE_DB_META_IMPL_H_
 
 #endif // VECENGINE_DB_IMPL_H_

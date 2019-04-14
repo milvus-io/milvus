@@ -9,7 +9,9 @@ class faiss::IndexIDMap;
 class faiss::Index;
 
 
-namespace vecengine {
+namespace zilliz {
+namespace vecwise {
+namespace engine {
 
 class MemVectors {
 public:
@@ -51,6 +53,8 @@ private:
 }; // MemManager
 
 
-} // namespace vecengine
+} // namespace engine
+} // namespace vecwise
+} // namespace zilliz
 
 #endif
