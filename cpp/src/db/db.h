@@ -4,7 +4,9 @@
 #include <string>
 #include "options.h"
 
-namespace vecengine {
+namespace zilliz {
+namespace vecwise {
+namespace engine {
 
 class Env;
 
@@ -22,6 +24,8 @@ public:
     virtual ~DB();
 }; // DB
 
-} // namespace vecengine
+} // namespace engine
+} // namespace vecwise
+} // namespace zilliz
 
 #endif // VECENGINE_DB_H_

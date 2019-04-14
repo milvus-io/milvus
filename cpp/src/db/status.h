@@ -1,7 +1,9 @@
 #ifndef VECENGINE_STATUS_H_
 #define VECENGINE_STATUS_H_
 
-namespace vecengine {
+namespace zilliz {
+namespace vecwise {
+namespace engine {
 
 class Status {
 public:
@@ -50,6 +52,8 @@ inline Status& Status::operator=(Status&& rhs_) noexcept {
     return *this;
 }
 
-} // namespace vecengine
+} // namespace engine
+} // namespace vecwise
+} // namespace zilliz
 
 #endif // VECENGINE_STATUS_H_
