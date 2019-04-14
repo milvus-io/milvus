@@ -6,6 +6,7 @@ cd -
 
 CUDA_PATH="--with-cuda=/usr/local/cuda"
 CUDA_CONFIG=--with-cuda-arch="-gencode=arch=compute_61,code=sm_61"
+LDFLAGS=-L${INSTALL_PREFIX}/lib
 
 mkdir -p INSTALL_PREFIX
 ./configure --prefix=${INSTALL_PREFIX} ${CUDA_PATH} ${CUDA_CONFIG}
