@@ -111,6 +111,21 @@ depend:
 .PHONY : depend
 
 # Convenience name for target.
+src/CMakeFiles/vecwise_engine_server.dir/rule:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f CMakeFiles/Makefile2 src/CMakeFiles/vecwise_engine_server.dir/rule
+.PHONY : src/CMakeFiles/vecwise_engine_server.dir/rule
+
+# Convenience name for target.
+vecwise_engine_server: src/CMakeFiles/vecwise_engine_server.dir/rule
+
+.PHONY : vecwise_engine_server
+
+# fast build rule for target.
+vecwise_engine_server/fast:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/build
+.PHONY : vecwise_engine_server/fast
+
+# Convenience name for target.
 src/CMakeFiles/vecwise_engine.dir/rule:
 	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f CMakeFiles/Makefile2 src/CMakeFiles/vecwise_engine.dir/rule
 .PHONY : src/CMakeFiles/vecwise_engine.dir/rule
@@ -179,6 +194,87 @@ cache/CacheMgr.cpp.s:
 	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine.dir/build.make src/CMakeFiles/vecwise_engine.dir/cache/CacheMgr.cpp.s
 .PHONY : cache/CacheMgr.cpp.s
 
+config/ConfigNode.o: config/ConfigNode.cpp.o
+
+.PHONY : config/ConfigNode.o
+
+# target to build an object file
+config/ConfigNode.cpp.o:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/config/ConfigNode.cpp.o
+.PHONY : config/ConfigNode.cpp.o
+
+config/ConfigNode.i: config/ConfigNode.cpp.i
+
+.PHONY : config/ConfigNode.i
+
+# target to preprocess a source file
+config/ConfigNode.cpp.i:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/config/ConfigNode.cpp.i
+.PHONY : config/ConfigNode.cpp.i
+
+config/ConfigNode.s: config/ConfigNode.cpp.s
+
+.PHONY : config/ConfigNode.s
+
+# target to generate assembly for a file
+config/ConfigNode.cpp.s:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/config/ConfigNode.cpp.s
+.PHONY : config/ConfigNode.cpp.s
+
+config/IConfigMgr.o: config/IConfigMgr.cpp.o
+
+.PHONY : config/IConfigMgr.o
+
+# target to build an object file
+config/IConfigMgr.cpp.o:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/config/IConfigMgr.cpp.o
+.PHONY : config/IConfigMgr.cpp.o
+
+config/IConfigMgr.i: config/IConfigMgr.cpp.i
+
+.PHONY : config/IConfigMgr.i
+
+# target to preprocess a source file
+config/IConfigMgr.cpp.i:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/config/IConfigMgr.cpp.i
+.PHONY : config/IConfigMgr.cpp.i
+
+config/IConfigMgr.s: config/IConfigMgr.cpp.s
+
+.PHONY : config/IConfigMgr.s
+
+# target to generate assembly for a file
+config/IConfigMgr.cpp.s:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/config/IConfigMgr.cpp.s
+.PHONY : config/IConfigMgr.cpp.s
+
+config/YamlConfigMgr.o: config/YamlConfigMgr.cpp.o
+
+.PHONY : config/YamlConfigMgr.o
+
+# target to build an object file
+config/YamlConfigMgr.cpp.o:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/config/YamlConfigMgr.cpp.o
+.PHONY : config/YamlConfigMgr.cpp.o
+
+config/YamlConfigMgr.i: config/YamlConfigMgr.cpp.i
+
+.PHONY : config/YamlConfigMgr.i
+
+# target to preprocess a source file
+config/YamlConfigMgr.cpp.i:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/config/YamlConfigMgr.cpp.i
+.PHONY : config/YamlConfigMgr.cpp.i
+
+config/YamlConfigMgr.s: config/YamlConfigMgr.cpp.s
+
+.PHONY : config/YamlConfigMgr.s
+
+# target to generate assembly for a file
+config/YamlConfigMgr.cpp.s:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/config/YamlConfigMgr.cpp.s
+.PHONY : config/YamlConfigMgr.cpp.s
+
 main.o: main.cpp.o
 
 .PHONY : main.o
@@ -206,6 +302,141 @@ main.cpp.s:
 	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine.dir/build.make src/CMakeFiles/vecwise_engine.dir/main.cpp.s
 .PHONY : main.cpp.s
 
+server/Server.o: server/Server.cpp.o
+
+.PHONY : server/Server.o
+
+# target to build an object file
+server/Server.cpp.o:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/server/Server.cpp.o
+.PHONY : server/Server.cpp.o
+
+server/Server.i: server/Server.cpp.i
+
+.PHONY : server/Server.i
+
+# target to preprocess a source file
+server/Server.cpp.i:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/server/Server.cpp.i
+.PHONY : server/Server.cpp.i
+
+server/Server.s: server/Server.cpp.s
+
+.PHONY : server/Server.s
+
+# target to generate assembly for a file
+server/Server.cpp.s:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/server/Server.cpp.s
+.PHONY : server/Server.cpp.s
+
+server/ServerConfig.o: server/ServerConfig.cpp.o
+
+.PHONY : server/ServerConfig.o
+
+# target to build an object file
+server/ServerConfig.cpp.o:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/server/ServerConfig.cpp.o
+.PHONY : server/ServerConfig.cpp.o
+
+server/ServerConfig.i: server/ServerConfig.cpp.i
+
+.PHONY : server/ServerConfig.i
+
+# target to preprocess a source file
+server/ServerConfig.cpp.i:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/server/ServerConfig.cpp.i
+.PHONY : server/ServerConfig.cpp.i
+
+server/ServerConfig.s: server/ServerConfig.cpp.s
+
+.PHONY : server/ServerConfig.s
+
+# target to generate assembly for a file
+server/ServerConfig.cpp.s:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/server/ServerConfig.cpp.s
+.PHONY : server/ServerConfig.cpp.s
+
+utils/CommonUtil.o: utils/CommonUtil.cpp.o
+
+.PHONY : utils/CommonUtil.o
+
+# target to build an object file
+utils/CommonUtil.cpp.o:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/utils/CommonUtil.cpp.o
+.PHONY : utils/CommonUtil.cpp.o
+
+utils/CommonUtil.i: utils/CommonUtil.cpp.i
+
+.PHONY : utils/CommonUtil.i
+
+# target to preprocess a source file
+utils/CommonUtil.cpp.i:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/utils/CommonUtil.cpp.i
+.PHONY : utils/CommonUtil.cpp.i
+
+utils/CommonUtil.s: utils/CommonUtil.cpp.s
+
+.PHONY : utils/CommonUtil.s
+
+# target to generate assembly for a file
+utils/CommonUtil.cpp.s:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/utils/CommonUtil.cpp.s
+.PHONY : utils/CommonUtil.cpp.s
+
+utils/SignalUtil.o: utils/SignalUtil.cpp.o
+
+.PHONY : utils/SignalUtil.o
+
+# target to build an object file
+utils/SignalUtil.cpp.o:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/utils/SignalUtil.cpp.o
+.PHONY : utils/SignalUtil.cpp.o
+
+utils/SignalUtil.i: utils/SignalUtil.cpp.i
+
+.PHONY : utils/SignalUtil.i
+
+# target to preprocess a source file
+utils/SignalUtil.cpp.i:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/utils/SignalUtil.cpp.i
+.PHONY : utils/SignalUtil.cpp.i
+
+utils/SignalUtil.s: utils/SignalUtil.cpp.s
+
+.PHONY : utils/SignalUtil.s
+
+# target to generate assembly for a file
+utils/SignalUtil.cpp.s:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/utils/SignalUtil.cpp.s
+.PHONY : utils/SignalUtil.cpp.s
+
+utils/TimeRecorder.o: utils/TimeRecorder.cpp.o
+
+.PHONY : utils/TimeRecorder.o
+
+# target to build an object file
+utils/TimeRecorder.cpp.o:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/utils/TimeRecorder.cpp.o
+.PHONY : utils/TimeRecorder.cpp.o
+
+utils/TimeRecorder.i: utils/TimeRecorder.cpp.i
+
+.PHONY : utils/TimeRecorder.i
+
+# target to preprocess a source file
+utils/TimeRecorder.cpp.i:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/utils/TimeRecorder.cpp.i
+.PHONY : utils/TimeRecorder.cpp.i
+
+utils/TimeRecorder.s: utils/TimeRecorder.cpp.s
+
+.PHONY : utils/TimeRecorder.s
+
+# target to generate assembly for a file
+utils/TimeRecorder.cpp.s:
+	cd /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug && $(MAKE) -f src/CMakeFiles/vecwise_engine_server.dir/build.make src/CMakeFiles/vecwise_engine_server.dir/utils/TimeRecorder.cpp.s
+.PHONY : utils/TimeRecorder.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -213,6 +444,7 @@ help:
 	@echo "... clean"
 	@echo "... depend"
 	@echo "... rebuild_cache"
+	@echo "... vecwise_engine_server"
 	@echo "... edit_cache"
 	@echo "... vecwise_engine"
 	@echo "... cache/Cache.o"
@@ -221,9 +453,33 @@ help:
 	@echo "... cache/CacheMgr.o"
 	@echo "... cache/CacheMgr.i"
 	@echo "... cache/CacheMgr.s"
+	@echo "... config/ConfigNode.o"
+	@echo "... config/ConfigNode.i"
+	@echo "... config/ConfigNode.s"
+	@echo "... config/IConfigMgr.o"
+	@echo "... config/IConfigMgr.i"
+	@echo "... config/IConfigMgr.s"
+	@echo "... config/YamlConfigMgr.o"
+	@echo "... config/YamlConfigMgr.i"
+	@echo "... config/YamlConfigMgr.s"
 	@echo "... main.o"
 	@echo "... main.i"
 	@echo "... main.s"
+	@echo "... server/Server.o"
+	@echo "... server/Server.i"
+	@echo "... server/Server.s"
+	@echo "... server/ServerConfig.o"
+	@echo "... server/ServerConfig.i"
+	@echo "... server/ServerConfig.s"
+	@echo "... utils/CommonUtil.o"
+	@echo "... utils/CommonUtil.i"
+	@echo "... utils/CommonUtil.s"
+	@echo "... utils/SignalUtil.o"
+	@echo "... utils/SignalUtil.i"
+	@echo "... utils/SignalUtil.s"
+	@echo "... utils/TimeRecorder.o"
+	@echo "... utils/TimeRecorder.i"
+	@echo "... utils/TimeRecorder.s"
 .PHONY : help
 
 
