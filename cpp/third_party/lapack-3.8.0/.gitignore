@@ -1,0 +1,37 @@
+# ignore objects and archives, anywhere in the tree.
+*.[oa]
+
+# test in INSTALL
+INSTALL/test*
+
+# local make.inc
+make.inc
+
+# BLAS testing
+BLAS/TESTING/*.out
+BLAS/TESTING/x*
+
+# CBLAS
+CBLAS/include/cblas_mangling.h
+
+# CBLAS testing
+CBLAS/testing/*.out
+CBLAS/testing/x*
+
+# CBLAS examples
+CBLAS/examples/cblas_ex1
+CBLAS/examples/cblas_ex2
+
+# LAPACK testing
+TESTING/LIN/xlintst*
+TESTING/EIG/xeigtst*
+TESTING/*.out
+TESTING/*.txt
+TESTING/x*
+
+# LAPACKE example
+LAPACKE/example/xexample*
+
+# SED
+SRC/*-e
+LAPACKE/src/*-e

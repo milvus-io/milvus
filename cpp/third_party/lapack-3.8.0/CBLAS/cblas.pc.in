@@ -1,0 +1,10 @@
+libdir=@CMAKE_INSTALL_FULL_LIBDIR@
+includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+
+Name: CBLAS
+Description: C Standard Interface to BLAS Basic Linear Algebra Subprograms
+Version: @LAPACK_VERSION@
+URL: http://www.netlib.org/blas/#_cblas
+Libs: -L${libdir} -lcblas
+Cflags: -I${includedir}
+Requires.private: blas

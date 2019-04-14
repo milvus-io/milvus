@@ -1,0 +1,10 @@
+# Load lapack targets from the build tree if necessary.
+set(_LAPACK_TARGET "@_lapack_config_build_guard_target@")
+if(_LAPACK_TARGET AND NOT TARGET "${_LAPACK_TARGET}")
+  include("@LAPACK_BINARY_DIR@/lapack-targets.cmake")
+endif()
+unset(_LAPACK_TARGET)
+
+# Report the blas and lapack raw or imported libraries.
+set(LAPACK_blas_LIBRARIES "@BLAS_LIBRARIES@")
+set(LAPACK_lapack_LIBRARIES "@LAPACK_LIBRARIES@")

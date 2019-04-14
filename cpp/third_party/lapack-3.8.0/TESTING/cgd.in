@@ -1,0 +1,182 @@
+CGV               Data for the Complex Nonsymmetric Eigenvalue Driver
+6                 Number of matrix dimensions
+2 6 8 10 12 20    Matrix dimensions
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+CGV 26            Test all 26 matrix types
+CGS               Data for the Complex Nonsymmetric Schur Form Driver
+5                 Number of matrix dimensions
+2 6 10 12 20 30   Matrix dimensions
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+CGS 26            Test all 26 matrix types
+CGX               Data for the Complex Nonsymmetric Schur Form Expert Driver
+2                 Largest matrix dimension (0 <= NSIZE <= 5)
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+CXV               Data for the Complex Nonsymmetric Eigenvalue Expert Driver
+6                 Number of matrix dimensions
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+CGX               Data for the Complex Nonsymmetric Schur Form Expert Driver
+0                 Number of matrix dimensions
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+  4
+  2
+( 2.0000E+00, 6.0000E+00)
+( 2.0000E+00, 5.0000E+00)
+( 3.0000E+00,-1.0000E+01)
+( 4.0000E+00, 7.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 9.0000E+00, 2.0000E+00)
+( 1.6000E+01,-2.4000E+01)
+( 7.0000E+00,-7.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 8.0000E+00,-3.0000E+00)
+( 9.0000E+00,-8.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 1.0000E+01,-1.6000E+01)
+(-9.0000E+00, 1.0000E+00)
+(-1.0000E+00,-8.0000E+00)
+(-1.0000E+00, 1.0000E+01)
+( 2.0000E+00,-6.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+(-1.0000E+00, 4.0000E+00)
+( 1.0000E+00, 1.6000E+01)
+(-6.0000E+00, 4.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 1.0000E+00,-1.4000E+01)
+(-1.0000E+00, 6.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 8.0000E+00, 4.0000E+00)
+  7.6883E-02  2.1007E-01      Condition #'s for cluster selected from lower 2x2
+  4
+  2
+( 1.0000E+00, 8.0000E+00)
+( 2.0000E+00, 4.0000E+00)
+( 3.0000E+00,-1.3000E+01)
+( 4.0000E+00, 4.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 5.0000E+00, 7.0000E+00)
+( 6.0000E+00,-2.4000E+01)
+( 7.0000E+00,-3.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 8.0000E+00, 3.0000E+00)
+( 9.0000E+00,-5.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 1.0000E+01, 1.6000E+01)
+(-1.0000E+00, 9.0000E+00)
+(-1.0000E+00,-1.0000E+00)
+(-1.0000E+00, 1.0000E+00)
+(-1.0000E+00,-6.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+(-1.0000E+00, 4.0000E+00)
+(-1.0000E+00, 1.6000E+01)
+(-1.0000E+00,-2.4000E+01)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 1.0000E+00,-1.1000E+01)
+(-1.0000E+00, 6.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 1.0000E+00, 4.0000E+00)
+  4.2067E-01  4.9338E+00      Condition #'s for cluster selected from lower 2x2
+0
+CXV               Data for the Complex Nonsymmetric Eigenvalue Expert Driver
+0                 Number of matrix dimensions
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+  4
+( 2.0000E+00, 6.0000E+00)
+( 2.0000E+00, 5.0000E+00)
+( 3.0000E+00,-1.0000E+01)
+( 4.0000E+00, 7.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 9.0000E+00, 2.0000E+00)
+( 1.6000E+01,-2.4000E+01)
+( 7.0000E+00,-7.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 8.0000E+00,-3.0000E+00)
+( 9.0000E+00,-8.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 1.0000E+01,-1.6000E+01)
+(-9.0000E+00, 1.0000E+00)
+(-1.0000E+00,-8.0000E+00)
+(-1.0000E+00, 1.0000E+01)
+( 2.0000E+00,-6.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+(-1.0000E+00, 4.0000E+00)
+( 1.0000E+00, 1.6000E+01)
+(-6.0000E+00, 4.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 1.0000E+00,-1.4000E+01)
+(-1.0000E+00, 6.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 8.0000E+00, 4.0000E+00)
+  5.2612E+00  8.0058E-01  1.4032E+00  4.0073E+00  condition #'s for eigenvalues
+  1.1787E+00  3.3139E+00  1.1835E+00  2.0777E+00  condition #'s for eigenvectors
+  4
+( 1.0000E+00, 8.0000E+00)
+( 2.0000E+00, 4.0000E+00)
+( 3.0000E+00,-1.3000E+01)
+( 4.0000E+00, 4.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 5.0000E+00, 7.0000E+00)
+( 6.0000E+00,-2.4000E+01)
+( 7.0000E+00,-3.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 8.0000E+00, 3.0000E+00)
+( 9.0000E+00,-5.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 1.0000E+01, 1.6000E+01)
+(-1.0000E+00, 9.0000E+00)
+(-1.0000E+00,-1.0000E+00)
+(-1.0000E+00, 1.0000E+00)
+(-1.0000E+00,-6.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+(-1.0000E+00, 4.0000E+00)
+(-1.0000E+00, 1.6000E+01)
+(-1.0000E+00,-2.4000E+01)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 1.0000E+00,-1.1000E+01)
+(-1.0000E+00, 6.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 0.0000E+00, 0.0000E+00)
+( 1.0000E+00, 4.0000E+00)
+  4.9068E+00  1.6813E+00  3.4636E+00  5.2436E+00  condition #'s for eigenvalues
+  1.0386E+00  1.4728E+00  2.0029E+00  9.8365E-01  condition #'s for eigenvectors
+0

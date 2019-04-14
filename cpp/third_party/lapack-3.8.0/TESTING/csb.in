@@ -1,0 +1,9 @@
+CHB:  Data file for testing Hermitian Eigenvalue Problem routines
+2                                 Number of values of N
+5 20                              Values of N (dimension)
+5                                 Number of values of K
+0 1 2 5 16                        Values of K (band width)
+20.0                              Threshold value
+T                                 Put T to test the error exits
+1                                 Code to interpret the seed
+CHB 15

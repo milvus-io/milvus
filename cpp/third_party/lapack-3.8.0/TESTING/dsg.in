@@ -1,0 +1,13 @@
+DSG:  Data file for testing Generalized Symmetric Eigenvalue Problem routines
+7                                 Number of values of N
+0 1 2 3 5 10 16                   Values of N (dimension)
+3                                 Number of values of NB
+1 3 20                            Values of NB (blocksize)
+2 2  2                            Values of NBMIN (minimum blocksize)
+1 1  1                            Values of NX (crossover point)
+20.0                              Threshold value
+T                                 Put T to test the LAPACK routines
+T                                 Put T to test the driver routines
+T                                 Put T to test the error exits
+1                                 Code to interpret the seed
+DSG 21

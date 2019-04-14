@@ -1,0 +1,86 @@
+SGS               Data for the Real Nonsymmetric Schur Form Driver
+5                 Number of matrix dimensions
+2 6 10 12 20 30   Matrix dimensions
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+SGS 26            Test all 26 matrix types
+SGV               Data for the Real Nonsymmetric Eigenvalue Problem Driver
+6                 Number of matrix dimensions
+2 6 8 10 15 20    Matrix dimensions
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold value
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+SGV 26            Test all 26 matrix types
+SGX               Data for the Real Nonsymmetric Schur Form Expert Driver
+2                 Largest matrix dimension (0 <= NSIZE <= 5)
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+SGX               Data for the Real Nonsymmetric Schur Form Expert Driver
+0                 Largest matrix dimension (0 <= NSIZE <= 5)
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+   4
+   2
+   8.0000E+00   4.0000E+00  -1.3000E+01   4.0000E+00   Input matrix A
+   0.0000E+00   7.0000E+00  -2.4000E+01  -3.0000E+00
+   0.0000E+00   0.0000E+00   3.0000E+00  -5.0000E+00
+   0.0000E+00   0.0000E+00   0.0000E+00   1.6000E+01
+   9.0000E+00  -1.0000E+00   1.0000E+00  -6.0000E+00   Input matrix B
+   0.0000E+00   4.0000E+00   1.6000E+01  -2.4000E+01
+   0.0000E+00   0.0000E+00  -1.1000E+01   6.0000E+00
+   0.0000E+00   0.0000E+00   0.0000E+00   4.0000E+00
+   2.5901E-01   1.7592E+00     Condition #'s for cluster selected from lower 2x2
+   4
+   2
+   1.0000E+00   2.0000E+00   3.0000E+00   4.0000E+00   Input matrix A
+   0.0000E+00   5.0000E+00   6.0000E+00   7.0000E+00
+   0.0000E+00   0.0000E+00   8.0000E+00   9.0000E+00
+   0.0000E+00   0.0000E+00   0.0000E+00   1.0000E+01
+  -1.0000E+00  -1.0000E+00  -1.0000E+00  -1.0000E+00   Input matrix B
+   0.0000E+00  -1.0000E+00  -1.0000E+00  -1.0000E+00
+   0.0000E+00   0.0000E+00   1.0000E+00  -1.0000E+00
+   0.0000E+00   0.0000E+00   0.0000E+00   1.0000E+00
+   9.8173E-01   6.3649E-01     Condition #'s for cluster selected from lower 2x2
+0
+SXV               Data for the Real Nonsymmetric Eigenvalue Expert Driver
+5                 Largest matrix dimension
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+SXV               Data for the Real Nonsymmetric Eigenvalue Expert Driver
+0                 Largest matrix dimension
+1 1 1 2 1         Parameters NB, NBMIN, NXOVER, NS, NBCOL
+10                Threshold for test ratios
+.TRUE.            Put T to test the error exits
+0                 Code to interpret the seed
+   4
+   8.0000E+00   4.0000E+00  -1.3000E+01   4.0000E+00   Input matrix A
+   0.0000E+00   7.0000E+00  -2.4000E+01  -3.0000E+00
+   0.0000E+00   0.0000E+00   3.0000E+00  -5.0000E+00
+   0.0000E+00   0.0000E+00   0.0000E+00   1.6000E+01
+   9.0000E+00  -1.0000E+00   1.0000E+00  -6.0000E+00   Input matrix B
+   0.0000E+00   4.0000E+00   1.6000E+01  -2.4000E+01
+   0.0000E+00   0.0000E+00  -1.1000E+01   6.0000E+00
+   0.0000E+00   0.0000E+00   0.0000E+00   4.0000E+00
+   3.1476E+00   2.5286E+00   4.2241E+00   3.4160E+00   eigenvalue condition #'s
+   6.7340E-01   1.1380E+00   3.5424E+00   9.5917E-01   eigenvector condition #'s
+   4
+   1.0000E+00   2.0000E+00   3.0000E+00   4.0000E+00   Input matrix A
+   0.0000E+00   5.0000E+00   6.0000E+00   7.0000E+00
+   0.0000E+00   0.0000E+00   8.0000E+00   9.0000E+00
+   0.0000E+00   0.0000E+00   0.0000E+00   1.0000E+01
+  -1.0000E+00  -1.0000E+00  -1.0000E+00  -1.0000E+00   Input matrix B
+   0.0000E+00  -1.0000E+00  -1.0000E+00  -1.0000E+00
+   0.0000E+00   0.0000E+00   1.0000E+00  -1.0000E+00
+   0.0000E+00   0.0000E+00   0.0000E+00   1.0000E+00
+   1.3639E+00   4.0417E+00   6.4089E-01   6.8030E-01   eigenvalue condition #'s
+   7.6064E-01   8.4964E-01   1.1222E-01   1.1499E-01   eigenvector condition #'s
+0
