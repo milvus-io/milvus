@@ -1,11 +1,49 @@
-#inlcude "env.h"
+#include "env.h"
 
-namespace vecengine {
+namespace zilliz {
+namespace vecwise {
+namespace engine {
 
-DBConfig::DBConfig()
-    : _mem_sync_interval(10),
-      _file_merge_trigger_number(20),
-      _index_file_build_trigger_size(100000) {
+Env::Env()
+    : _bg_work_cv(&_bg_work_mutex),
+      _bg_work_started(false) {
 }
 
-} // namespace vecengine
+void Env::schedule(void (*function_)(void* arg_), void* arg_) {
+    std::lock_guard<std::mutex> lock;
+
+    if (!_bg_work_started) {
+        _bg_work_started = true;
+        std::thread bg_thread(Env::BackgroundThreadEntryPoint, this);
+        bg_thread.detach();
+    }
+
+    if (_bg_work_queue.empty()) {
+        _bg_work_cv.notify_one();
+    }
+
+    _bg_work_queue.emplace(function_, arg_);
+}
+
+void Env::backgroud_thread_main() {
+    while (true) {
+        std::lock_guard<std::mutex> lock;
+        while (_bg_work_queue.empty()) {
+            _bg_work_cv.wait();
+        }
+
+        assert(!_bg_work_queue.empty());
+        auto bg_function = _bg_work_queue.front()._function;
+        void* bg_arg = _bg_work_queue.front()._arg;
+        _bg_work_queue.pop();
+
+        lock.unlock();
+        bg_function(bg_arg);
+    }
+}
+
+Env::~Env() {}
+
+} // namespace engine
+} // namespace vecwise
+} // namespace zilliz

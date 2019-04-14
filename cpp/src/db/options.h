@@ -6,7 +6,9 @@
 namespace vecengine {
 
 struct Options {
-
+    uint16_t  memory_sync_interval = 10;
+    uint16_t  raw_file_merge_trigger_number = 100;
+    size_t  raw_to_index_trigger_size = 100000;
 }; // Options
 
 
