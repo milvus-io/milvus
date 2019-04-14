@@ -21,7 +21,8 @@ struct MetaOptions {
 
 
 struct DBMetaOptions : public MetaOptions {
-    std::string db_uri;
+    std::string backend_uri;
+    std::string dbname;
 }; // DBMetaOptions
 
 

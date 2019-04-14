@@ -33,23 +33,23 @@ typedef std::vector<GroupFileSchema> GroupFilesSchema;
 
 class Meta {
 public:
-    virtual Status add_group(const std::string& group_id_, GroupSchema& group_info) = 0;
-    virtual Status get_group(const std::string& group_id_, GroupSchema& group_info) = 0;
-    virtual Status has_group(const std::string& group_id_, bool& has_or_not) = 0;
+    virtual Status add_group(const std::string& group_id_, GroupSchema& group_info_) = 0;
+    virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) = 0;
+    virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
 
-    virtual Status add_group_file(const std::string& group_id,
-                                  GroupFileSchema& group_file_info) = 0;
-    virtual Status has_group_file(const std::string& group_id,
-                                  const std::string& file_id,
-                                  bool& has_or_not) = 0;
-    virtual Status get_group_file(const std::string& group_id,
-                                  const std::string& file_id,
-                                  GroupFileSchema& group_file_info) = 0;
-    virtual Status mark_group_file_as_index(const std::string& group_id,
-                                            const std::string& file_id) = 0;
+    virtual Status add_group_file(const std::string& group_id_,
+                                  GroupFileSchema& group_file_info_) = 0;
+    virtual Status has_group_file(const std::string& group_id_,
+                                  const std::string& file_id_,
+                                  bool& has_or_not_) = 0;
+    virtual Status get_group_file(const std::string& group_id_,
+                                  const std::string& file_id_,
+                                  GroupFileSchema& group_file_info_) = 0;
+    virtual Status mark_group_file_as_index(const std::string& group_id_,
+                                            const std::string& file_id_) = 0;
 
-    virtual Status get_group_files(const std::string& group_id,
-                                   GroupFilesSchema& group_files_info) = 0;
+    virtual Status get_group_files(const std::string& group_id_,
+                                   GroupFilesSchema& group_files_info_) = 0;
 
 }; // MetaData
 
