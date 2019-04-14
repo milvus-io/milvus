@@ -1,0 +1,617 @@
+The system is: Linux - 4.10.0-28-generic - x86_64
+Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+Compiler: /usr/bin/cc 
+Build flags: 
+Id flags:  
+
+The output was:
+0
+
+
+Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+
+The C compiler identification is GNU, found in "/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/3.13.2/CompilerIdC/a.out"
+
+Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+Compiler: /usr/bin/c++ 
+Build flags: 
+Id flags:  
+
+The output was:
+0
+
+
+Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+
+The CXX compiler identification is GNU, found in "/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/3.13.2/CompilerIdCXX/a.out"
+
+Determining if the C compiler works passed with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_c2c35/fast"
+/usr/bin/make -f CMakeFiles/cmTC_c2c35.dir/build.make CMakeFiles/cmTC_c2c35.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_c2c35.dir/testCCompiler.c.o
+/usr/bin/cc    -o CMakeFiles/cmTC_c2c35.dir/testCCompiler.c.o   -c /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp/testCCompiler.c
+Linking C executable cmTC_c2c35
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_c2c35.dir/link.txt --verbose=1
+/usr/bin/cc      CMakeFiles/cmTC_c2c35.dir/testCCompiler.c.o  -o cmTC_c2c35 
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+Detecting C compiler ABI info compiled with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_d0db3/fast"
+/usr/bin/make -f CMakeFiles/cmTC_d0db3.dir/build.make CMakeFiles/cmTC_d0db3.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_d0db3.dir/CMakeCCompilerABI.c.o
+/usr/bin/cc    -o CMakeFiles/cmTC_d0db3.dir/CMakeCCompilerABI.c.o   -c /usr/local/share/cmake-3.13/Modules/CMakeCCompilerABI.c
+Linking C executable cmTC_d0db3
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d0db3.dir/link.txt --verbose=1
+/usr/bin/cc     -v CMakeFiles/cmTC_d0db3.dir/CMakeCCompilerABI.c.o  -o cmTC_d0db3 
+Using built-in specs.
+COLLECT_GCC=/usr/bin/cc
+COLLECT_LTO_WRAPPER=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper
+Target: x86_64-linux-gnu
+Configured with: ../src/configure -v --with-pkgversion='Ubuntu 5.4.0-6ubuntu1~16.04.10' --with-bugurl=file:///usr/share/doc/gcc-5/README.Bugs --enable-languages=c,ada,c++,java,go,d,fortran,objc,obj-c++ --prefix=/usr --program-suffix=-5 --enable-shared --enable-linker-build-id --libexecdir=/usr/lib --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --with-sysroot=/ --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-gnu-unique-object --disable-vtable-verify --enable-libmpx --enable-plugin --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk --enable-gtk-cairo --with-java-home=/usr/lib/jvm/java-1.5.0-gcj-5-amd64/jre --enable-java-home --with-jvm-root-dir=/usr/lib/jvm/java-1.5.0-gcj-5-amd64 --with-jvm-jar-dir=/usr/lib/jvm-exports/java-1.5.0-gcj-5-amd64 --with-arch-directory=amd64 --with-ecj-jar=/usr/share/java/eclipse-ecj.jar --enable-objc-gc --enable-multiarch --disable-werror --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu
+Thread model: posix
+gcc version 5.4.0 20160609 (Ubuntu 5.4.0-6ubuntu1~16.04.10) 
+COMPILER_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/
+LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../:/lib/:/usr/lib/
+COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_d0db3' '-mtune=generic' '-march=x86-64'
+ /usr/lib/gcc/x86_64-linux-gnu/5/collect2 -plugin /usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so -plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper -plugin-opt=-fresolution=/tmp/ccbtNWlP.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --sysroot=/ --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -z relro -o cmTC_d0db3 /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o -L/usr/lib/gcc/x86_64-linux-gnu/5 -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/5/../../.. CMakeFiles/cmTC_d0db3.dir/CMakeCCompilerABI.c.o -lgcc --as-needed -lgcc_s --no-as-needed -lc -lgcc --as-needed -lgcc_s --no-as-needed /usr/lib/gcc/x86_64-linux-gnu/5/crtend.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+Parsed C implicit link information from above output:
+  link line regex: [^( *|.*[/\])(ld|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\]+-)?ld|collect2)[^/\]*( |$)]
+  ignore line: [Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp]
+  ignore line: []
+  ignore line: [Run Build Command:"/usr/bin/make" "cmTC_d0db3/fast"]
+  ignore line: [/usr/bin/make -f CMakeFiles/cmTC_d0db3.dir/build.make CMakeFiles/cmTC_d0db3.dir/build]
+  ignore line: [make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp']
+  ignore line: [Building C object CMakeFiles/cmTC_d0db3.dir/CMakeCCompilerABI.c.o]
+  ignore line: [/usr/bin/cc    -o CMakeFiles/cmTC_d0db3.dir/CMakeCCompilerABI.c.o   -c /usr/local/share/cmake-3.13/Modules/CMakeCCompilerABI.c]
+  ignore line: [Linking C executable cmTC_d0db3]
+  ignore line: [/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d0db3.dir/link.txt --verbose=1]
+  ignore line: [/usr/bin/cc     -v CMakeFiles/cmTC_d0db3.dir/CMakeCCompilerABI.c.o  -o cmTC_d0db3 ]
+  ignore line: [Using built-in specs.]
+  ignore line: [COLLECT_GCC=/usr/bin/cc]
+  ignore line: [COLLECT_LTO_WRAPPER=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper]
+  ignore line: [Target: x86_64-linux-gnu]
+  ignore line: [Configured with: ../src/configure -v --with-pkgversion='Ubuntu 5.4.0-6ubuntu1~16.04.10' --with-bugurl=file:///usr/share/doc/gcc-5/README.Bugs --enable-languages=c,ada,c++,java,go,d,fortran,objc,obj-c++ --prefix=/usr --program-suffix=-5 --enable-shared --enable-linker-build-id --libexecdir=/usr/lib --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --with-sysroot=/ --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-gnu-unique-object --disable-vtable-verify --enable-libmpx --enable-plugin --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk --enable-gtk-cairo --with-java-home=/usr/lib/jvm/java-1.5.0-gcj-5-amd64/jre --enable-java-home --with-jvm-root-dir=/usr/lib/jvm/java-1.5.0-gcj-5-amd64 --with-jvm-jar-dir=/usr/lib/jvm-exports/java-1.5.0-gcj-5-amd64 --with-arch-directory=amd64 --with-ecj-jar=/usr/share/java/eclipse-ecj.jar --enable-objc-gc --enable-multiarch --disable-werror --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu]
+  ignore line: [Thread model: posix]
+  ignore line: [gcc version 5.4.0 20160609 (Ubuntu 5.4.0-6ubuntu1~16.04.10) ]
+  ignore line: [COMPILER_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/]
+  ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../:/lib/:/usr/lib/]
+  ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_d0db3' '-mtune=generic' '-march=x86-64']
+  link line: [ /usr/lib/gcc/x86_64-linux-gnu/5/collect2 -plugin /usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so -plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper -plugin-opt=-fresolution=/tmp/ccbtNWlP.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --sysroot=/ --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -z relro -o cmTC_d0db3 /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o -L/usr/lib/gcc/x86_64-linux-gnu/5 -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/5/../../.. CMakeFiles/cmTC_d0db3.dir/CMakeCCompilerABI.c.o -lgcc --as-needed -lgcc_s --no-as-needed -lc -lgcc --as-needed -lgcc_s --no-as-needed /usr/lib/gcc/x86_64-linux-gnu/5/crtend.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o]
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/collect2] ==> ignore
+    arg [-plugin] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so] ==> ignore
+    arg [-plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper] ==> ignore
+    arg [-plugin-opt=-fresolution=/tmp/ccbtNWlP.res] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+    arg [-plugin-opt=-pass-through=-lc] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+    arg [--sysroot=/] ==> ignore
+    arg [--build-id] ==> ignore
+    arg [--eh-frame-hdr] ==> ignore
+    arg [-m] ==> ignore
+    arg [elf_x86_64] ==> ignore
+    arg [--hash-style=gnu] ==> ignore
+    arg [--as-needed] ==> ignore
+    arg [-dynamic-linker] ==> ignore
+    arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+    arg [-zrelro] ==> ignore
+    arg [-o] ==> ignore
+    arg [cmTC_d0db3] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o] ==> ignore
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib]
+    arg [-L/lib/x86_64-linux-gnu] ==> dir [/lib/x86_64-linux-gnu]
+    arg [-L/lib/../lib] ==> dir [/lib/../lib]
+    arg [-L/usr/lib/x86_64-linux-gnu] ==> dir [/usr/lib/x86_64-linux-gnu]
+    arg [-L/usr/lib/../lib] ==> dir [/usr/lib/../lib]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../..] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../..]
+    arg [CMakeFiles/cmTC_d0db3.dir/CMakeCCompilerABI.c.o] ==> ignore
+    arg [-lgcc] ==> lib [gcc]
+    arg [--as-needed] ==> ignore
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [--no-as-needed] ==> ignore
+    arg [-lc] ==> lib [c]
+    arg [-lgcc] ==> lib [gcc]
+    arg [--as-needed] ==> ignore
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [--no-as-needed] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/crtend.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o] ==> ignore
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5] ==> [/usr/lib/gcc/x86_64-linux-gnu/5]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib] ==> [/usr/lib]
+  collapse library dir [/lib/x86_64-linux-gnu] ==> [/lib/x86_64-linux-gnu]
+  collapse library dir [/lib/../lib] ==> [/lib]
+  collapse library dir [/usr/lib/x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/usr/lib/../lib] ==> [/usr/lib]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../..] ==> [/usr/lib]
+  implicit libs: [gcc;gcc_s;c;gcc;gcc_s]
+  implicit dirs: [/usr/lib/gcc/x86_64-linux-gnu/5;/usr/lib/x86_64-linux-gnu;/usr/lib;/lib/x86_64-linux-gnu;/lib]
+  implicit fwks: []
+
+
+
+
+Detecting C [-std=c11] compiler features compiled with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_5233d/fast"
+/usr/bin/make -f CMakeFiles/cmTC_5233d.dir/build.make CMakeFiles/cmTC_5233d.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_5233d.dir/feature_tests.c.o
+/usr/bin/cc   -std=c11 -o CMakeFiles/cmTC_5233d.dir/feature_tests.c.o   -c /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/feature_tests.c
+Linking C executable cmTC_5233d
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_5233d.dir/link.txt --verbose=1
+/usr/bin/cc      CMakeFiles/cmTC_5233d.dir/feature_tests.c.o  -o cmTC_5233d 
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+    Feature record: C_FEATURE:1c_function_prototypes
+    Feature record: C_FEATURE:1c_restrict
+    Feature record: C_FEATURE:1c_static_assert
+    Feature record: C_FEATURE:1c_variadic_macros
+
+
+Detecting C [-std=c99] compiler features compiled with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_d8fd5/fast"
+/usr/bin/make -f CMakeFiles/cmTC_d8fd5.dir/build.make CMakeFiles/cmTC_d8fd5.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_d8fd5.dir/feature_tests.c.o
+/usr/bin/cc   -std=c99 -o CMakeFiles/cmTC_d8fd5.dir/feature_tests.c.o   -c /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/feature_tests.c
+Linking C executable cmTC_d8fd5
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d8fd5.dir/link.txt --verbose=1
+/usr/bin/cc      CMakeFiles/cmTC_d8fd5.dir/feature_tests.c.o  -o cmTC_d8fd5 
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+    Feature record: C_FEATURE:1c_function_prototypes
+    Feature record: C_FEATURE:1c_restrict
+    Feature record: C_FEATURE:0c_static_assert
+    Feature record: C_FEATURE:1c_variadic_macros
+
+
+Detecting C [-std=c90] compiler features compiled with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_46711/fast"
+/usr/bin/make -f CMakeFiles/cmTC_46711.dir/build.make CMakeFiles/cmTC_46711.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_46711.dir/feature_tests.c.o
+/usr/bin/cc   -std=c90 -o CMakeFiles/cmTC_46711.dir/feature_tests.c.o   -c /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/feature_tests.c
+Linking C executable cmTC_46711
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_46711.dir/link.txt --verbose=1
+/usr/bin/cc      CMakeFiles/cmTC_46711.dir/feature_tests.c.o  -o cmTC_46711 
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+    Feature record: C_FEATURE:1c_function_prototypes
+    Feature record: C_FEATURE:0c_restrict
+    Feature record: C_FEATURE:0c_static_assert
+    Feature record: C_FEATURE:0c_variadic_macros
+Determining if the CXX compiler works passed with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_054e9/fast"
+/usr/bin/make -f CMakeFiles/cmTC_054e9.dir/build.make CMakeFiles/cmTC_054e9.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_054e9.dir/testCXXCompiler.cxx.o
+/usr/bin/c++     -o CMakeFiles/cmTC_054e9.dir/testCXXCompiler.cxx.o -c /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp/testCXXCompiler.cxx
+Linking CXX executable cmTC_054e9
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_054e9.dir/link.txt --verbose=1
+/usr/bin/c++       CMakeFiles/cmTC_054e9.dir/testCXXCompiler.cxx.o  -o cmTC_054e9 
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+Detecting CXX compiler ABI info compiled with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_bdd00/fast"
+/usr/bin/make -f CMakeFiles/cmTC_bdd00.dir/build.make CMakeFiles/cmTC_bdd00.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_bdd00.dir/CMakeCXXCompilerABI.cpp.o
+/usr/bin/c++     -o CMakeFiles/cmTC_bdd00.dir/CMakeCXXCompilerABI.cpp.o -c /usr/local/share/cmake-3.13/Modules/CMakeCXXCompilerABI.cpp
+Linking CXX executable cmTC_bdd00
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_bdd00.dir/link.txt --verbose=1
+/usr/bin/c++      -v CMakeFiles/cmTC_bdd00.dir/CMakeCXXCompilerABI.cpp.o  -o cmTC_bdd00 
+Using built-in specs.
+COLLECT_GCC=/usr/bin/c++
+COLLECT_LTO_WRAPPER=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper
+Target: x86_64-linux-gnu
+Configured with: ../src/configure -v --with-pkgversion='Ubuntu 5.4.0-6ubuntu1~16.04.10' --with-bugurl=file:///usr/share/doc/gcc-5/README.Bugs --enable-languages=c,ada,c++,java,go,d,fortran,objc,obj-c++ --prefix=/usr --program-suffix=-5 --enable-shared --enable-linker-build-id --libexecdir=/usr/lib --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --with-sysroot=/ --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-gnu-unique-object --disable-vtable-verify --enable-libmpx --enable-plugin --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk --enable-gtk-cairo --with-java-home=/usr/lib/jvm/java-1.5.0-gcj-5-amd64/jre --enable-java-home --with-jvm-root-dir=/usr/lib/jvm/java-1.5.0-gcj-5-amd64 --with-jvm-jar-dir=/usr/lib/jvm-exports/java-1.5.0-gcj-5-amd64 --with-arch-directory=amd64 --with-ecj-jar=/usr/share/java/eclipse-ecj.jar --enable-objc-gc --enable-multiarch --disable-werror --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu
+Thread model: posix
+gcc version 5.4.0 20160609 (Ubuntu 5.4.0-6ubuntu1~16.04.10) 
+COMPILER_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/
+LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../:/lib/:/usr/lib/
+COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_bdd00' '-shared-libgcc' '-mtune=generic' '-march=x86-64'
+ /usr/lib/gcc/x86_64-linux-gnu/5/collect2 -plugin /usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so -plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper -plugin-opt=-fresolution=/tmp/ccN09hl4.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --sysroot=/ --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -z relro -o cmTC_bdd00 /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o -L/usr/lib/gcc/x86_64-linux-gnu/5 -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/5/../../.. CMakeFiles/cmTC_bdd00.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-linux-gnu/5/crtend.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+Parsed CXX implicit link information from above output:
+  link line regex: [^( *|.*[/\])(ld|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\]+-)?ld|collect2)[^/\]*( |$)]
+  ignore line: [Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp]
+  ignore line: []
+  ignore line: [Run Build Command:"/usr/bin/make" "cmTC_bdd00/fast"]
+  ignore line: [/usr/bin/make -f CMakeFiles/cmTC_bdd00.dir/build.make CMakeFiles/cmTC_bdd00.dir/build]
+  ignore line: [make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp']
+  ignore line: [Building CXX object CMakeFiles/cmTC_bdd00.dir/CMakeCXXCompilerABI.cpp.o]
+  ignore line: [/usr/bin/c++     -o CMakeFiles/cmTC_bdd00.dir/CMakeCXXCompilerABI.cpp.o -c /usr/local/share/cmake-3.13/Modules/CMakeCXXCompilerABI.cpp]
+  ignore line: [Linking CXX executable cmTC_bdd00]
+  ignore line: [/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_bdd00.dir/link.txt --verbose=1]
+  ignore line: [/usr/bin/c++      -v CMakeFiles/cmTC_bdd00.dir/CMakeCXXCompilerABI.cpp.o  -o cmTC_bdd00 ]
+  ignore line: [Using built-in specs.]
+  ignore line: [COLLECT_GCC=/usr/bin/c++]
+  ignore line: [COLLECT_LTO_WRAPPER=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper]
+  ignore line: [Target: x86_64-linux-gnu]
+  ignore line: [Configured with: ../src/configure -v --with-pkgversion='Ubuntu 5.4.0-6ubuntu1~16.04.10' --with-bugurl=file:///usr/share/doc/gcc-5/README.Bugs --enable-languages=c,ada,c++,java,go,d,fortran,objc,obj-c++ --prefix=/usr --program-suffix=-5 --enable-shared --enable-linker-build-id --libexecdir=/usr/lib --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --with-sysroot=/ --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-gnu-unique-object --disable-vtable-verify --enable-libmpx --enable-plugin --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk --enable-gtk-cairo --with-java-home=/usr/lib/jvm/java-1.5.0-gcj-5-amd64/jre --enable-java-home --with-jvm-root-dir=/usr/lib/jvm/java-1.5.0-gcj-5-amd64 --with-jvm-jar-dir=/usr/lib/jvm-exports/java-1.5.0-gcj-5-amd64 --with-arch-directory=amd64 --with-ecj-jar=/usr/share/java/eclipse-ecj.jar --enable-objc-gc --enable-multiarch --disable-werror --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu]
+  ignore line: [Thread model: posix]
+  ignore line: [gcc version 5.4.0 20160609 (Ubuntu 5.4.0-6ubuntu1~16.04.10) ]
+  ignore line: [COMPILER_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/]
+  ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/5/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/5/../../../:/lib/:/usr/lib/]
+  ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_bdd00' '-shared-libgcc' '-mtune=generic' '-march=x86-64']
+  link line: [ /usr/lib/gcc/x86_64-linux-gnu/5/collect2 -plugin /usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so -plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper -plugin-opt=-fresolution=/tmp/ccN09hl4.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --sysroot=/ --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -z relro -o cmTC_bdd00 /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o -L/usr/lib/gcc/x86_64-linux-gnu/5 -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/5/../../.. CMakeFiles/cmTC_bdd00.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-linux-gnu/5/crtend.o /usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o]
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/collect2] ==> ignore
+    arg [-plugin] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/liblto_plugin.so] ==> ignore
+    arg [-plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper] ==> ignore
+    arg [-plugin-opt=-fresolution=/tmp/ccN09hl4.res] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+    arg [-plugin-opt=-pass-through=-lc] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+    arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+    arg [--sysroot=/] ==> ignore
+    arg [--build-id] ==> ignore
+    arg [--eh-frame-hdr] ==> ignore
+    arg [-m] ==> ignore
+    arg [elf_x86_64] ==> ignore
+    arg [--hash-style=gnu] ==> ignore
+    arg [--as-needed] ==> ignore
+    arg [-dynamic-linker] ==> ignore
+    arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+    arg [-zrelro] ==> ignore
+    arg [-o] ==> ignore
+    arg [cmTC_bdd00] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crt1.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crti.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/crtbegin.o] ==> ignore
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib]
+    arg [-L/lib/x86_64-linux-gnu] ==> dir [/lib/x86_64-linux-gnu]
+    arg [-L/lib/../lib] ==> dir [/lib/../lib]
+    arg [-L/usr/lib/x86_64-linux-gnu] ==> dir [/usr/lib/x86_64-linux-gnu]
+    arg [-L/usr/lib/../lib] ==> dir [/usr/lib/../lib]
+    arg [-L/usr/lib/gcc/x86_64-linux-gnu/5/../../..] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../..]
+    arg [CMakeFiles/cmTC_bdd00.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+    arg [-lstdc++] ==> lib [stdc++]
+    arg [-lm] ==> lib [m]
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [-lgcc] ==> lib [gcc]
+    arg [-lc] ==> lib [c]
+    arg [-lgcc_s] ==> lib [gcc_s]
+    arg [-lgcc] ==> lib [gcc]
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/crtend.o] ==> ignore
+    arg [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu/crtn.o] ==> ignore
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5] ==> [/usr/lib/gcc/x86_64-linux-gnu/5]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../../../lib] ==> [/usr/lib]
+  collapse library dir [/lib/x86_64-linux-gnu] ==> [/lib/x86_64-linux-gnu]
+  collapse library dir [/lib/../lib] ==> [/lib]
+  collapse library dir [/usr/lib/x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+  collapse library dir [/usr/lib/../lib] ==> [/usr/lib]
+  collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/5/../../..] ==> [/usr/lib]
+  implicit libs: [stdc++;m;gcc_s;gcc;c;gcc_s;gcc]
+  implicit dirs: [/usr/lib/gcc/x86_64-linux-gnu/5;/usr/lib/x86_64-linux-gnu;/usr/lib;/lib/x86_64-linux-gnu;/lib]
+  implicit fwks: []
+
+
+
+
+Detecting CXX [-std=c++1z] compiler features compiled with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_3bf08/fast"
+/usr/bin/make -f CMakeFiles/cmTC_3bf08.dir/build.make CMakeFiles/cmTC_3bf08.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_3bf08.dir/feature_tests.cxx.o
+/usr/bin/c++    -std=c++1z -o CMakeFiles/cmTC_3bf08.dir/feature_tests.cxx.o -c /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_3bf08
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_3bf08.dir/link.txt --verbose=1
+/usr/bin/c++       CMakeFiles/cmTC_3bf08.dir/feature_tests.cxx.o  -o cmTC_3bf08 
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:1cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:1cxx_alias_templates
+    Feature record: CXX_FEATURE:1cxx_alignas
+    Feature record: CXX_FEATURE:1cxx_alignof
+    Feature record: CXX_FEATURE:1cxx_attributes
+    Feature record: CXX_FEATURE:1cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:1cxx_auto_type
+    Feature record: CXX_FEATURE:1cxx_binary_literals
+    Feature record: CXX_FEATURE:1cxx_constexpr
+    Feature record: CXX_FEATURE:1cxx_contextual_conversions
+    Feature record: CXX_FEATURE:1cxx_decltype
+    Feature record: CXX_FEATURE:1cxx_decltype_auto
+    Feature record: CXX_FEATURE:1cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:1cxx_default_function_template_args
+    Feature record: CXX_FEATURE:1cxx_defaulted_functions
+    Feature record: CXX_FEATURE:1cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:1cxx_delegating_constructors
+    Feature record: CXX_FEATURE:1cxx_deleted_functions
+    Feature record: CXX_FEATURE:1cxx_digit_separators
+    Feature record: CXX_FEATURE:1cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:1cxx_explicit_conversions
+    Feature record: CXX_FEATURE:1cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:1cxx_extern_templates
+    Feature record: CXX_FEATURE:1cxx_final
+    Feature record: CXX_FEATURE:1cxx_func_identifier
+    Feature record: CXX_FEATURE:1cxx_generalized_initializers
+    Feature record: CXX_FEATURE:1cxx_generic_lambdas
+    Feature record: CXX_FEATURE:1cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:1cxx_inline_namespaces
+    Feature record: CXX_FEATURE:1cxx_lambdas
+    Feature record: CXX_FEATURE:1cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:1cxx_local_type_template_args
+    Feature record: CXX_FEATURE:1cxx_long_long_type
+    Feature record: CXX_FEATURE:1cxx_noexcept
+    Feature record: CXX_FEATURE:1cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:1cxx_nullptr
+    Feature record: CXX_FEATURE:1cxx_override
+    Feature record: CXX_FEATURE:1cxx_range_for
+    Feature record: CXX_FEATURE:1cxx_raw_string_literals
+    Feature record: CXX_FEATURE:1cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:1cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:1cxx_return_type_deduction
+    Feature record: CXX_FEATURE:1cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:1cxx_rvalue_references
+    Feature record: CXX_FEATURE:1cxx_sizeof_member
+    Feature record: CXX_FEATURE:1cxx_static_assert
+    Feature record: CXX_FEATURE:1cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:1cxx_thread_local
+    Feature record: CXX_FEATURE:1cxx_trailing_return_types
+    Feature record: CXX_FEATURE:1cxx_unicode_literals
+    Feature record: CXX_FEATURE:1cxx_uniform_initialization
+    Feature record: CXX_FEATURE:1cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:1cxx_user_literals
+    Feature record: CXX_FEATURE:1cxx_variable_templates
+    Feature record: CXX_FEATURE:1cxx_variadic_macros
+    Feature record: CXX_FEATURE:1cxx_variadic_templates
+
+
+Detecting CXX [-std=c++14] compiler features compiled with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_ede45/fast"
+/usr/bin/make -f CMakeFiles/cmTC_ede45.dir/build.make CMakeFiles/cmTC_ede45.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_ede45.dir/feature_tests.cxx.o
+/usr/bin/c++    -std=c++14 -o CMakeFiles/cmTC_ede45.dir/feature_tests.cxx.o -c /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_ede45
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ede45.dir/link.txt --verbose=1
+/usr/bin/c++       CMakeFiles/cmTC_ede45.dir/feature_tests.cxx.o  -o cmTC_ede45 
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:1cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:1cxx_alias_templates
+    Feature record: CXX_FEATURE:1cxx_alignas
+    Feature record: CXX_FEATURE:1cxx_alignof
+    Feature record: CXX_FEATURE:1cxx_attributes
+    Feature record: CXX_FEATURE:1cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:1cxx_auto_type
+    Feature record: CXX_FEATURE:1cxx_binary_literals
+    Feature record: CXX_FEATURE:1cxx_constexpr
+    Feature record: CXX_FEATURE:1cxx_contextual_conversions
+    Feature record: CXX_FEATURE:1cxx_decltype
+    Feature record: CXX_FEATURE:1cxx_decltype_auto
+    Feature record: CXX_FEATURE:1cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:1cxx_default_function_template_args
+    Feature record: CXX_FEATURE:1cxx_defaulted_functions
+    Feature record: CXX_FEATURE:1cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:1cxx_delegating_constructors
+    Feature record: CXX_FEATURE:1cxx_deleted_functions
+    Feature record: CXX_FEATURE:1cxx_digit_separators
+    Feature record: CXX_FEATURE:1cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:1cxx_explicit_conversions
+    Feature record: CXX_FEATURE:1cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:1cxx_extern_templates
+    Feature record: CXX_FEATURE:1cxx_final
+    Feature record: CXX_FEATURE:1cxx_func_identifier
+    Feature record: CXX_FEATURE:1cxx_generalized_initializers
+    Feature record: CXX_FEATURE:1cxx_generic_lambdas
+    Feature record: CXX_FEATURE:1cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:1cxx_inline_namespaces
+    Feature record: CXX_FEATURE:1cxx_lambdas
+    Feature record: CXX_FEATURE:1cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:1cxx_local_type_template_args
+    Feature record: CXX_FEATURE:1cxx_long_long_type
+    Feature record: CXX_FEATURE:1cxx_noexcept
+    Feature record: CXX_FEATURE:1cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:1cxx_nullptr
+    Feature record: CXX_FEATURE:1cxx_override
+    Feature record: CXX_FEATURE:1cxx_range_for
+    Feature record: CXX_FEATURE:1cxx_raw_string_literals
+    Feature record: CXX_FEATURE:1cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:1cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:1cxx_return_type_deduction
+    Feature record: CXX_FEATURE:1cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:1cxx_rvalue_references
+    Feature record: CXX_FEATURE:1cxx_sizeof_member
+    Feature record: CXX_FEATURE:1cxx_static_assert
+    Feature record: CXX_FEATURE:1cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:1cxx_thread_local
+    Feature record: CXX_FEATURE:1cxx_trailing_return_types
+    Feature record: CXX_FEATURE:1cxx_unicode_literals
+    Feature record: CXX_FEATURE:1cxx_uniform_initialization
+    Feature record: CXX_FEATURE:1cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:1cxx_user_literals
+    Feature record: CXX_FEATURE:1cxx_variable_templates
+    Feature record: CXX_FEATURE:1cxx_variadic_macros
+    Feature record: CXX_FEATURE:1cxx_variadic_templates
+
+
+Detecting CXX [-std=c++11] compiler features compiled with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_101df/fast"
+/usr/bin/make -f CMakeFiles/cmTC_101df.dir/build.make CMakeFiles/cmTC_101df.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_101df.dir/feature_tests.cxx.o
+/usr/bin/c++    -std=c++11 -o CMakeFiles/cmTC_101df.dir/feature_tests.cxx.o -c /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_101df
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_101df.dir/link.txt --verbose=1
+/usr/bin/c++       CMakeFiles/cmTC_101df.dir/feature_tests.cxx.o  -o cmTC_101df 
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:0cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:1cxx_alias_templates
+    Feature record: CXX_FEATURE:1cxx_alignas
+    Feature record: CXX_FEATURE:1cxx_alignof
+    Feature record: CXX_FEATURE:1cxx_attributes
+    Feature record: CXX_FEATURE:0cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:1cxx_auto_type
+    Feature record: CXX_FEATURE:0cxx_binary_literals
+    Feature record: CXX_FEATURE:1cxx_constexpr
+    Feature record: CXX_FEATURE:0cxx_contextual_conversions
+    Feature record: CXX_FEATURE:1cxx_decltype
+    Feature record: CXX_FEATURE:0cxx_decltype_auto
+    Feature record: CXX_FEATURE:1cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:1cxx_default_function_template_args
+    Feature record: CXX_FEATURE:1cxx_defaulted_functions
+    Feature record: CXX_FEATURE:1cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:1cxx_delegating_constructors
+    Feature record: CXX_FEATURE:1cxx_deleted_functions
+    Feature record: CXX_FEATURE:0cxx_digit_separators
+    Feature record: CXX_FEATURE:1cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:1cxx_explicit_conversions
+    Feature record: CXX_FEATURE:1cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:1cxx_extern_templates
+    Feature record: CXX_FEATURE:1cxx_final
+    Feature record: CXX_FEATURE:1cxx_func_identifier
+    Feature record: CXX_FEATURE:1cxx_generalized_initializers
+    Feature record: CXX_FEATURE:0cxx_generic_lambdas
+    Feature record: CXX_FEATURE:1cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:1cxx_inline_namespaces
+    Feature record: CXX_FEATURE:1cxx_lambdas
+    Feature record: CXX_FEATURE:0cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:1cxx_local_type_template_args
+    Feature record: CXX_FEATURE:1cxx_long_long_type
+    Feature record: CXX_FEATURE:1cxx_noexcept
+    Feature record: CXX_FEATURE:1cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:1cxx_nullptr
+    Feature record: CXX_FEATURE:1cxx_override
+    Feature record: CXX_FEATURE:1cxx_range_for
+    Feature record: CXX_FEATURE:1cxx_raw_string_literals
+    Feature record: CXX_FEATURE:1cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:0cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:0cxx_return_type_deduction
+    Feature record: CXX_FEATURE:1cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:1cxx_rvalue_references
+    Feature record: CXX_FEATURE:1cxx_sizeof_member
+    Feature record: CXX_FEATURE:1cxx_static_assert
+    Feature record: CXX_FEATURE:1cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:1cxx_thread_local
+    Feature record: CXX_FEATURE:1cxx_trailing_return_types
+    Feature record: CXX_FEATURE:1cxx_unicode_literals
+    Feature record: CXX_FEATURE:1cxx_uniform_initialization
+    Feature record: CXX_FEATURE:1cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:1cxx_user_literals
+    Feature record: CXX_FEATURE:0cxx_variable_templates
+    Feature record: CXX_FEATURE:1cxx_variadic_macros
+    Feature record: CXX_FEATURE:1cxx_variadic_templates
+
+
+Detecting CXX [-std=c++98] compiler features compiled with the following output:
+Change Dir: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_fbf8a/fast"
+/usr/bin/make -f CMakeFiles/cmTC_fbf8a.dir/build.make CMakeFiles/cmTC_fbf8a.dir/build
+make[1]: Entering directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_fbf8a.dir/feature_tests.cxx.o
+/usr/bin/c++    -std=c++98 -o CMakeFiles/cmTC_fbf8a.dir/feature_tests.cxx.o -c /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/feature_tests.cxx
+Linking CXX executable cmTC_fbf8a
+/usr/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_fbf8a.dir/link.txt --verbose=1
+/usr/bin/c++       CMakeFiles/cmTC_fbf8a.dir/feature_tests.cxx.o  -o cmTC_fbf8a 
+make[1]: Leaving directory '/home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug/CMakeFiles/CMakeTmp'
+
+
+    Feature record: CXX_FEATURE:0cxx_aggregate_default_initializers
+    Feature record: CXX_FEATURE:0cxx_alias_templates
+    Feature record: CXX_FEATURE:0cxx_alignas
+    Feature record: CXX_FEATURE:0cxx_alignof
+    Feature record: CXX_FEATURE:0cxx_attributes
+    Feature record: CXX_FEATURE:0cxx_attribute_deprecated
+    Feature record: CXX_FEATURE:0cxx_auto_type
+    Feature record: CXX_FEATURE:0cxx_binary_literals
+    Feature record: CXX_FEATURE:0cxx_constexpr
+    Feature record: CXX_FEATURE:0cxx_contextual_conversions
+    Feature record: CXX_FEATURE:0cxx_decltype
+    Feature record: CXX_FEATURE:0cxx_decltype_auto
+    Feature record: CXX_FEATURE:0cxx_decltype_incomplete_return_types
+    Feature record: CXX_FEATURE:0cxx_default_function_template_args
+    Feature record: CXX_FEATURE:0cxx_defaulted_functions
+    Feature record: CXX_FEATURE:0cxx_defaulted_move_initializers
+    Feature record: CXX_FEATURE:0cxx_delegating_constructors
+    Feature record: CXX_FEATURE:0cxx_deleted_functions
+    Feature record: CXX_FEATURE:0cxx_digit_separators
+    Feature record: CXX_FEATURE:0cxx_enum_forward_declarations
+    Feature record: CXX_FEATURE:0cxx_explicit_conversions
+    Feature record: CXX_FEATURE:0cxx_extended_friend_declarations
+    Feature record: CXX_FEATURE:0cxx_extern_templates
+    Feature record: CXX_FEATURE:0cxx_final
+    Feature record: CXX_FEATURE:0cxx_func_identifier
+    Feature record: CXX_FEATURE:0cxx_generalized_initializers
+    Feature record: CXX_FEATURE:0cxx_generic_lambdas
+    Feature record: CXX_FEATURE:0cxx_inheriting_constructors
+    Feature record: CXX_FEATURE:0cxx_inline_namespaces
+    Feature record: CXX_FEATURE:0cxx_lambdas
+    Feature record: CXX_FEATURE:0cxx_lambda_init_captures
+    Feature record: CXX_FEATURE:0cxx_local_type_template_args
+    Feature record: CXX_FEATURE:0cxx_long_long_type
+    Feature record: CXX_FEATURE:0cxx_noexcept
+    Feature record: CXX_FEATURE:0cxx_nonstatic_member_init
+    Feature record: CXX_FEATURE:0cxx_nullptr
+    Feature record: CXX_FEATURE:0cxx_override
+    Feature record: CXX_FEATURE:0cxx_range_for
+    Feature record: CXX_FEATURE:0cxx_raw_string_literals
+    Feature record: CXX_FEATURE:0cxx_reference_qualified_functions
+    Feature record: CXX_FEATURE:0cxx_relaxed_constexpr
+    Feature record: CXX_FEATURE:0cxx_return_type_deduction
+    Feature record: CXX_FEATURE:0cxx_right_angle_brackets
+    Feature record: CXX_FEATURE:0cxx_rvalue_references
+    Feature record: CXX_FEATURE:0cxx_sizeof_member
+    Feature record: CXX_FEATURE:0cxx_static_assert
+    Feature record: CXX_FEATURE:0cxx_strong_enums
+    Feature record: CXX_FEATURE:1cxx_template_template_parameters
+    Feature record: CXX_FEATURE:0cxx_thread_local
+    Feature record: CXX_FEATURE:0cxx_trailing_return_types
+    Feature record: CXX_FEATURE:0cxx_unicode_literals
+    Feature record: CXX_FEATURE:0cxx_uniform_initialization
+    Feature record: CXX_FEATURE:0cxx_unrestricted_unions
+    Feature record: CXX_FEATURE:0cxx_user_literals
+    Feature record: CXX_FEATURE:0cxx_variable_templates
+    Feature record: CXX_FEATURE:0cxx_variadic_macros
+    Feature record: CXX_FEATURE:0cxx_variadic_templates

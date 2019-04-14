@@ -3,12 +3,17 @@
 # Unauthorized copying of this file, via any medium is strictly prohibited.
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
+include_directories(../../src)
 
-AUX_SOURCE_DIRECTORY(./cache cache_files)
+set(cache_srcs
+        ../../src/cache/Cache.cpp
+        ../../src/cache/CacheMgr.cpp)
 
-set(vecwise_engine_src
-        ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
-        ${cache_files}
-        cache/DataObj.h)
+set(cache_test_src
+        ${unittest_srcs}
+        ${cache_srcs}
+        cache_tests.cpp)
 
-add_library(vecwise_engine SHARED ${vecwise_engine_src})
+add_executable(cache_tests ${cache_test_src})
+
+target_link_libraries(cache_tests ${unittest_libs})

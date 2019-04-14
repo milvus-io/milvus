@@ -1,0 +1,6 @@
+/usr/local/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_UNIT_TEST=on -G "CodeBlocks - Unix Makefiles" /home/yhmo/work/git/vecwise/vecwise_engine/cpp
+building vecwise_engine on x86 architecture
+building vecwise on Unix
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/yhmo/work/git/vecwise/vecwise_engine/cpp/cmake-build-debug
