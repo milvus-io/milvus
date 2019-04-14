@@ -5,15 +5,15 @@
 #-------------------------------------------------------------------------------
 link_directories(
         "${CMAKE_BINARY_DIR}/lib"
-        "${GTEST_LIBRARY_DIR}"
+        "${VECWISE_THIRD_PARTY}/lib"
 )
 
 set(unittest_srcs
         ${CMAKE_CURRENT_SOURCE_DIR}/vecwise_test.cpp)
 
 set(unittest_libs
-        gtest
-        gmock
+        gtest_main
+        gmock_main
         pthread)
 
 add_subdirectory(log)

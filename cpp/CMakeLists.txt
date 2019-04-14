@@ -43,24 +43,16 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/" ${CMAKE_MODUL
 
 set(VECWISE_ENGINE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
 set(VECWISE_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
+set(VECWISE_THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party/build)
 
 add_compile_definitions(PROFILER=${PROFILER})
 
 include_directories(${VECWISE_ENGINE_INCLUDE})
 include_directories(${VECWISE_ENGINE_SRC})
+include_directories(${VECWISE_THIRD_PARTY}/include)
 
 add_subdirectory(src)
 
 if (BUILD_UNIT_TEST)
-    include(CTest)
-    include(ConfigureGoogleTest)
-
-    if(GTEST_FOUND)
-        message(STATUS "Google C++ Testing Framework (Google Test) found in ${GTEST_ROOT}")
-        include_directories(${GTEST_INCLUDE_DIR})
-        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
-    else()
-        message(AUTHOR_WARNING "Google C++ Testing Framework (Google Test) not found: automated tests are disabled.")
-    endif(GTEST_FOUND)
-
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
 endif(BUILD_UNIT_TEST)
