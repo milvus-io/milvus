@@ -12,23 +12,23 @@ class DBMetaImpl : public Meta {
 public:
     DBMetaImpl(DBMetaOptions& options_);
 
-    virtual Status add_group(const std::string& group_id_, GroupSchema& group_info) override;
-    virtual Status get_group(const std::string& group_id_, GroupSchema& group_info) override;
-    virtual Status has_group(const std::string& group_id_, bool& has_or_not) override;
+    virtual Status add_group(const std::string& group_id_, GroupSchema& group_info_) override;
+    virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) override;
+    virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
-    virtual Status add_group_file(const std::string& group_id,
-                                  GroupFileSchema& group_file_info) override;
-    virtual Status has_group_file(const std::string& group_id,
-                                  const std::string& file_id,
-                                  bool& has_or_not) override;
-    virtual Status get_group_file(const std::string& group_id,
-                                  const std::string& file_id,
-                                  GroupFileSchema& group_file_info) override;
-    virtual Status mark_group_file_as_index(const std::string& group_id,
-                                            const std::string& file_id) override;
+    virtual Status add_group_file(const std::string& group_id_,
+                                  GroupFileSchema& group_file_info_) override;
+    virtual Status has_group_file(const std::string& group_id_,
+                                  const std::string& file_id_,
+                                  bool& has_or_not_) override;
+    virtual Status get_group_file(const std::string& group_id_,
+                                  const std::string& file_id_,
+                                  GroupFileSchema& group_file_info_) override;
+    virtual Status mark_group_file_as_index(const std::string& group_id_,
+                                            const std::string& file_id_) override;
 
-    virtual Status get_group_files(const std::string& group_id,
-                                   GroupFilesSchema& group_files_info) override;
+    virtual Status get_group_files(const std::string& group_id_,
+                                   GroupFilesSchema& group_files_info_) override;
 
 private:
 
