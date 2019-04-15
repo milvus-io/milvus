@@ -10,7 +10,7 @@ namespace engine {
 
 class DBMetaImpl : public Meta {
 public:
-    DBMetaImpl(DBMetaOptions& options_);
+    DBMetaImpl(const DBMetaOptions& options_);
 
     virtual Status add_group(const GroupOptions& options_,
             const std::string& group_id_,
