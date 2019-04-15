@@ -1,5 +1,6 @@
 #include <chrono>
 #include <assert.h>
+#include <iostream>
 
 #include "id_generators.h"
 
@@ -17,18 +18,17 @@ IDNumber SimpleIDGenerator::getNextIDNumber() {
     return micros * MAX_IDS_PER_MICRO;
 }
 
-IDNumbers&& SimpleIDGenerator::getNextIDNumbers(size_t n) {
+void SimpleIDGenerator::getNextIDNumbers(size_t n, IDNumbers& ids) {
     assert(n < MAX_IDS_PER_MICRO);
     auto now = std::chrono::system_clock::now();
     auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
             now.time_since_epoch()).count();
     micros *= MAX_IDS_PER_MICRO;
 
-    IDNumbers ids = IDNumbers(n);
+    ids.clear();
     for (int pos=0; pos<n; ++pos) {
-        ids[pos] = micros + pos;
+        ids.push_back(micros+pos);
     }
-    return std::move(ids);
 }
 
 
