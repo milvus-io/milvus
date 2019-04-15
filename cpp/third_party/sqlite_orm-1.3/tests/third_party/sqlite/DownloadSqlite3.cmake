@@ -1,0 +1,16 @@
+cmake_minimum_required (VERSION 3.2)
+
+file(DOWNLOAD ${SQLITE3_LINK} ${SQLITE3_ARCH_NAME}
+     INACTIVITY_TIMEOUT 5
+     STATUS SQLITE3_DOWNLOADED
+     SHOW_PROGRESS)
+
+if(NOT SQLITE3_DOWNLOADED)
+    message(FATAL_ERROR "Unable to download ${SQLITE3_LINK}")
+endif()
+
+file(SHA1 ${SQLITE3_ARCH_NAME} SQLITE3_SHA1)
+if(${SQLITE3_SHA1} STREQUAL ${SQLITE3_ARCH_SHA1})
+else()
+    message(FATAL_ERROR "Invalid hash: ${SQLITE3_SHA1} != ${SQLITE3_ARCH_SHA1}")
+endif()
