@@ -1,16 +1,15 @@
+#include <assert.h>
 #include "env.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-Env::Env()
-    : _bg_work_cv(&_bg_work_mutex),
-      _bg_work_started(false) {
+Env::Env() : _bg_work_started(false) {
 }
 
 void Env::schedule(void (*function_)(void* arg_), void* arg_) {
-    std::lock_guard<std::mutex> lock;
+    std::unique_lock<std::mutex> lock(_bg_work_mutex);
 
     if (!_bg_work_started) {
         _bg_work_started = true;
@@ -27,9 +26,9 @@ void Env::schedule(void (*function_)(void* arg_), void* arg_) {
 
 void Env::backgroud_thread_main() {
     while (true) {
-        std::lock_guard<std::mutex> lock;
+        std::unique_lock<std::mutex> lock(_bg_work_mutex);
         while (_bg_work_queue.empty()) {
-            _bg_work_cv.wait();
+            _bg_work_cv.wait(lock);
         }
 
         assert(!_bg_work_queue.empty());
