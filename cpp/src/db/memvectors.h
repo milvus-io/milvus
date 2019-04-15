@@ -33,8 +33,14 @@ public:
 
     ~MemVectors();
 
+    const std::string& location() const { return _file_location; }
+
 private:
-    const char* _file_location;
+    MemVectors() = delete;
+    MemVectors(const MemVectors&) = delete;
+    MemVectors& operator=(const MemVectors&) = delete;
+
+    const std::string _file_location;
     IDGenerator* _pIdGenerator;
     size_t _dimension;
     faiss::Index* _pInnerIndex;
@@ -49,7 +55,7 @@ typedef std::shared_ptr<MemVectors> VectorsPtr;
 class MemManager {
 public:
     MemManager(const std::shared_ptr<Meta>& meta_)
-        : _pMeta(meta_), _last_compact_time(std::time(nullptr)) {}
+        : _pMeta(meta_) /*_last_compact_time(std::time(nullptr))*/ {}
 
     VectorsPtr get_mem_by_group(const std::string& group_id_);
 
@@ -68,7 +74,7 @@ private:
     MemMap _memMap;
     ImmMemPool _immMems;
     std::shared_ptr<Meta> _pMeta;
-    std::time_t _last_compact_time;
+    /* std::time_t _last_compact_time; */
     std::mutex _mutex;
 }; // MemManager
 
