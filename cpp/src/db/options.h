@@ -1,5 +1,4 @@
-#ifndef VECENGINE_OPTIONS_H_
-#define VECENGINE_OPTIONS_H_
+#pragma once
 
 #include <string>
 #include <memory>
@@ -12,6 +11,7 @@ class MetaOptions;
 class Env;
 
 struct Options {
+    Options();
     uint16_t  memory_sync_interval = 10;
     uint16_t  raw_file_merge_trigger_number = 100;
     size_t  raw_to_index_trigger_size = 100000;
@@ -39,5 +39,3 @@ struct DBMetaOptions : public MetaOptions {
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#endif // VECENGINE_OPTIONS_H_

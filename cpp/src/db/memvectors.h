@@ -4,6 +4,8 @@
 #include <map>
 #include <string>
 #include <ctime>
+#include <memory>
+#include <mutex>
 #include "id_generators.h"
 #include "status.h"
 
@@ -21,7 +23,7 @@ class MemVectors {
 public:
     explicit MemVectors(size_t dimension_, const std::string& file_location_);
 
-    IDNumbers&& add(size_t n, const float* vectors);
+    void add(size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
     size_t total() const;
 
@@ -32,7 +34,7 @@ public:
     ~MemVectors();
 
 private:
-    std::string _file_location;
+    const char* _file_location;
     IDGenerator* _pIdGenerator;
     size_t _dimension;
     faiss::Index* _pInnerIndex;
@@ -42,10 +44,10 @@ private:
 
 
 class Meta;
+typedef std::shared_ptr<MemVectors> VectorsPtr;
 
 class MemManager {
 public:
-    typedef std::shared_ptr<MemVectors> VectorsPtr;
     MemManager(const std::shared_ptr<Meta>& meta_)
         : _pMeta(meta_), _last_compact_time(std::time(nullptr)) {}
 
@@ -59,6 +61,7 @@ public:
 private:
     Status add_vectors_no_lock(const std::string& group_id_,
             size_t n_, const float* vectors_, IDNumbers& vector_ids_);
+    Status mark_memory_as_immutable();
 
     typedef std::map<std::string, VectorsPtr> MemMap;
     typedef std::vector<VectorsPtr> ImmMemPool;
