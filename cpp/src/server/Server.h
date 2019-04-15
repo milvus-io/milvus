@@ -5,7 +5,6 @@
  ******************************************************************************/
 #pragma once
 
-#include "ServerConfig.h"
 #include "utils/Error.h"
 
 #include <cstdint>
@@ -41,7 +40,6 @@ class Server {
     int pid_fd = -1;
     std::string pid_filename_;
     std::string config_filename_;
-    ServerConfig* opt_config_ptr_ = nullptr;
 };  // Server
 
 }   // server
