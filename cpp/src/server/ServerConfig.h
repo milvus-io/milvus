@@ -15,19 +15,17 @@ namespace vecwise {
 namespace server {
 
 static const std::string CONFIG_SERVER = "server_config";
-static const std::string CONFIG_ADDRESS = "address";
-static const std::string CONFIG_PORT = "port";
-
+static const std::string CONFIG_LOG = "log_config";
 
 class ServerConfig {
  public:
-    static ServerConfig *GetInstance();
+    static ServerConfig &GetInstance();
 
     ServerError LoadConfigFile(const std::string& config_filename);
     void PrintAll() const;
 
-    ConfigNode GetServerConfig() const;
-    ConfigNode& GetServerConfig();
+    ConfigNode GetConfig(const std::string& name) const;
+    ConfigNode& GetConfig(const std::string& name);
 
     std::string GetServerAddress() const;
     std::string GetServerPort() const;

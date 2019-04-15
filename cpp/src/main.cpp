@@ -14,7 +14,6 @@
 
 #include "utils/SignalUtil.h"
 #include "utils/CommonUtil.h"
-#include "utils/LogUtil.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -24,8 +23,6 @@ using namespace zilliz::vecwise;
 
 int
 main(int argc, char *argv[]) {
-    zilliz::vecwise::server::InitLog();
-
     printf("Vecwise engine server start...\n");
 
 //    zilliz::lib::gpu::InitMemoryAllocator();

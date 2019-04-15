@@ -17,10 +17,13 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-ServerConfig*
+static const std::string CONFIG_ADDRESS = "address";
+static const std::string CONFIG_PORT = "port";
+
+ServerConfig&
 ServerConfig::GetInstance() {
     static ServerConfig config;
-    return &config;
+    return config;
 }
 
 ServerError
@@ -63,28 +66,28 @@ ServerConfig::PrintAll() const {
 }
 
 ConfigNode
-ServerConfig::GetServerConfig() const {
+ServerConfig::GetConfig(const std::string& name) const {
     const IConfigMgr* mgr = IConfigMgr::GetInstance();
     const ConfigNode& root_node = mgr->GetRootNode();
-    return root_node.GetChild(CONFIG_SERVER);
+    return root_node.GetChild(name);
 }
 
 ConfigNode&
-ServerConfig::GetServerConfig() {
+ServerConfig::GetConfig(const std::string& name) {
     IConfigMgr* mgr = IConfigMgr::GetInstance();
     ConfigNode& root_node = mgr->GetRootNode();
-    return root_node.GetChild(CONFIG_SERVER);
+    return root_node.GetChild(name);
 }
 
 std::string
 ServerConfig::GetServerAddress() const {
-    ConfigNode server_config = GetServerConfig();
+    ConfigNode server_config = GetConfig(CONFIG_SERVER);
     return server_config.GetValue(CONFIG_ADDRESS);
 }
 
 std::string
 ServerConfig::GetServerPort() const {
-    ConfigNode server_config = GetServerConfig();
+    ConfigNode server_config = GetConfig(CONFIG_SERVER);
     return server_config.GetValue(CONFIG_PORT);
 }
 
