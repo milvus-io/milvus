@@ -10,7 +10,7 @@ namespace engine {
 class IDGenerator {
 public:
     virtual IDNumber getNextIDNumber() = 0;
-    virtual IDNumbers&& getNextIDNumbers(size_t n_) = 0;
+    virtual void getNextIDNumbers(size_t n, IDNumbers& ids) = 0;
 
     virtual ~IDGenerator();
 
@@ -20,7 +20,7 @@ public:
 class SimpleIDGenerator : public IDGenerator {
 public:
     virtual IDNumber getNextIDNumber() override;
-    virtual IDNumbers&& getNextIDNumbers(size_t n_) override;
+    virtual void getNextIDNumbers(size_t n, IDNumbers& ids) override;
 
 private:
     const size_t MAX_IDS_PER_MICRO = 1000;
