@@ -21,6 +21,8 @@ public:
 
     virtual ~Env();
 
+    static Env* Default();
+
 protected:
     void backgroud_thread_main();
     static void BackgroundThreadEntryPoint(Env* env) {

@@ -1,9 +1,9 @@
-#ifndef VECENGINE_DB_IMPL_H_
-#define VECENGINE_DB_IMPL_H_
+#pragma once
 
 #include <mutex>
 #include <condition_variable>
 #include <memory>
+#include <atomic>
 #include "db.h"
 #include "memvectors.h"
 #include "types.h"
@@ -18,7 +18,7 @@ class DBImpl : public DB {
 public:
     DBImpl(const Options& options_, const std::string& name_);
 
-    virtual Status add_group(GroupOptions options_,
+    virtual Status add_group(const GroupOptions& options_,
             const std::string& group_id_,
             GroupSchema& group_info_) override;
     virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) override;
@@ -36,12 +36,14 @@ public:
 private:
 
     void try_schedule_compaction();
+    void start_timer_task(int interval_);
+    void background_timer_task(int interval_);
 
     static void BGWork(void* db);
     void background_call();
     void background_compaction();
 
-    const _dbname;
+    const std::string& _dbname;
     Env* const _env;
     const Options _options;
 
@@ -59,7 +61,3 @@ private:
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#endif // VECENGINE_DB_META_IMPL_H_
-
-#endif // VECENGINE_DB_IMPL_H_

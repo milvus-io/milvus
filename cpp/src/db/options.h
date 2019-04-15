@@ -16,6 +16,7 @@ struct Options {
     uint16_t  raw_file_merge_trigger_number = 100;
     size_t  raw_to_index_trigger_size = 100000;
     std::shared_ptr<MetaOptions> pMetaOptions;
+    Env* env;
 }; // Options
 
 

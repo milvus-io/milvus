@@ -4,8 +4,8 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-DBMetaImpl::DBMetaImpl(const DBMetaOptions& options_)
-    : _options(options_) {
+DBMetaImpl::DBMetaImpl(const MetaOptions& options_)
+    : _options(static_cast<const DBMetaOptions&>(options_)) {
     initialize();
 }
 
