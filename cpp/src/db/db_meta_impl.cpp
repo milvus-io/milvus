@@ -1,4 +1,7 @@
+#include <sstream>
+#include <iostream>
 #include "db_meta_impl.h"
+#include "id_generators.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -23,6 +26,12 @@ Status DBMetaImpl::add_group(const GroupOptions& options_,
 
 Status DBMetaImpl::get_group(const std::string& group_id_, GroupSchema& group_info_) {
     //PXU TODO
+    std::stringstream ss;
+    SimpleIDGenerator g;
+    ss.str("");
+    ss << "/tmp/test/" << g.getNextIDNumber() << ".log";
+    group_info_.dimension = 64;
+    group_info_.next_file_location = ss.str();
     return Status::OK();
 }
 
