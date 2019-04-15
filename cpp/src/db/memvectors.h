@@ -7,8 +7,10 @@
 #include "id_generators.h"
 #include "status.h"
 
-class faiss::IndexIDMap;
-class faiss::Index;
+namespace faiss {
+    class IndexIDMap;
+    class Index;
+}
 
 
 namespace zilliz {
