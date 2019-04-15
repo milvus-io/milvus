@@ -6,6 +6,7 @@
 #include "SignalUtil.h"
 #include "CommonUtil.h"
 #include "server/Server.h"
+#include "utils/Log.h"
 
 #include <signal.h>
 #include <execinfo.h>
