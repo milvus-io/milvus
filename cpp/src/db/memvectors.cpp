@@ -1,6 +1,7 @@
 #include <faiss/IndexFlat.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/index_io.h>
+#include <iostream>
 
 #include "memvectors.h"
 #include "db_meta.h"
@@ -74,7 +75,7 @@ Status MemManager::add_vectors(const std::string& group_id_,
         size_t n_,
         const float* vectors_,
         IDNumbers& vector_ids_) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::unique_lock<std::mutex> lock(_mutex);
     return add_vectors_no_lock(group_id_, n_, vectors_, vector_ids_);
 }
 
@@ -92,11 +93,12 @@ Status MemManager::add_vectors_no_lock(const std::string& group_id,
 }
 
 Status MemManager::mark_memory_as_immutable() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::unique_lock<std::mutex> lock(_mutex);
     for (auto& kv: _memMap) {
         _immMems.push_back(kv.second);
     }
     _memMap.clear();
+    return Status::OK();
 }
 
 /* bool MemManager::need_serialize(double interval) { */
@@ -118,7 +120,7 @@ Status MemManager::serialize() {
         mem->serialize();
     }
     _immMems.clear();
-    /* _last_compact_time = std::time(nullptr); */
+    return Status::OK();
 }
 
 
