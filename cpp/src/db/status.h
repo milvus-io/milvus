@@ -1,5 +1,6 @@
-#ifndef VECENGINE_STATUS_H_
-#define VECENGINE_STATUS_H_
+#pragma once
+
+#include <string>
 
 namespace zilliz {
 namespace vecwise {
@@ -7,26 +8,28 @@ namespace engine {
 
 class Status {
 public:
-    Status() noexcept : _state(nullptr) {}
-    ~Status() { delete[] _state; }
+    Status() noexcept : state_(nullptr) {}
+    ~Status() { delete[] state_; }
 
-    Status(const Status& rhs_);
-    Status& operator=(const Status& rhs_);
+    Status(const Status& rhs);
+    Status& operator=(const Status& rhs);
 
-    Status(const Status&& rhs_) noexcept : _state(rhs_._state) { rhs_._state = nullptr; }
-    Status& operator=(const Status& rhs_) noexcept;
+    Status(Status&& rhs) noexcept : state_(rhs.state_) { rhs.state_ = nullptr; }
+    Status& operator=(Status&& rhs_) noexcept;
 
     static Status OK() { return Status(); }
-    static Status NotFound(const std::string& msg_, const std::string& msg2_="") {
-        return Status(kNotFound, msg_, msg2_);
+    static Status NotFound(const std::string& msg, const std::string& msg2="") {
+        return Status(kNotFound, msg, msg2);
     }
 
-    bool ok() const { return _state == nullptr; }
+    bool ok() const { return state_ == nullptr; }
 
     bool IsNotFound() const { return code() == kNotFound; }
 
+    std::string ToString() const;
+
 private:
-    const char* _state;
+    const char* state_;
 
     enum Code {
         kOK = 0,
@@ -34,32 +37,30 @@ private:
     };
 
     Code code() const {
-        return (_state == nullptr) ? kOK : static_cast<Code>(_state[4])
+        return (state_ == nullptr) ? kOK : static_cast<Code>(state_[4]);
     }
-
+    Status(Code code, const std::string& msg, const std::string& msg2);
     static const char* CopyState(const char* s);
 
 }; // Status
 
-inline Status::Status(const Status* rhs_) {
-    _state = (rhs_._state == nullptr) ? nullptr : CopyState(rhs_._state);
+inline Status::Status(const Status& rhs) {
+    state_ = (rhs.state_ == nullptr) ? nullptr : CopyState(rhs.state_);
 }
 
-inline Status& Status::operator=(const Status& rhs_) {
-    if (_state != rhs_._state) {
+inline Status& Status::operator=(const Status& rhs) {
+    if (state_ != rhs.state_) {
         delete[] state_;
-        _state = (rhs_._state == nullptr) ? nullptr : CopyState(rhs_._state);
+        state_ = (rhs.state_ == nullptr) ? nullptr : CopyState(rhs.state_);
     }
     return *this;
 }
 
-inline Status& Status::operator=(Status&& rhs_) noexcept {
-    std::swap(_state, rhs_._state);
+inline Status& Status::operator=(Status&& rhs) noexcept {
+    std::swap(state_, rhs.state_);
     return *this;
 }
 
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#endif // VECENGINE_STATUS_H_
