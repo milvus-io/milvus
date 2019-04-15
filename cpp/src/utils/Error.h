@@ -6,6 +6,8 @@
 #pragma once
 
 #include <cstdint>
+#include <exception>
+#include <string>
 
 namespace zilliz {
 namespace vecwise {
@@ -28,6 +30,27 @@ constexpr ServerError SERVER_NULL_POINTER = ToGlobalServerErrorCode(0x003);
 constexpr ServerError SERVER_INVALID_ARGUMENT = ToGlobalServerErrorCode(0x004);
 constexpr ServerError SERVER_FILE_NOT_FOUND = ToGlobalServerErrorCode(0x005);
 constexpr ServerError SERVER_NOT_IMPLEMENT = ToGlobalServerErrorCode(0x006);
+constexpr ServerError SERVER_BLOCKING_QUEUE_EMPTY = ToGlobalServerErrorCode(0x007);
+
+class ServerException : public std::exception {
+public:
+    ServerException(ServerError error_code,
+              const std::string &message = std::string())
+            : error_code_(error_code), message_(message) {}
+
+public:
+    ServerError error_code() const {
+        return error_code_;
+    }
+
+    virtual const char *what() const noexcept {
+        return message_.c_str();
+    }
+
+private:
+    ServerError error_code_;
+    std::string message_;
+};
 
 }  // namespace server
 }  // namespace vecwise
