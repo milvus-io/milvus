@@ -4,9 +4,11 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include "Server.h"
+#include "ServerConfig.h"
 #include "utils/CommonUtil.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
+#include "utils/LogUtil.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -26,8 +28,7 @@ Server::Instance() {
     return &server;
 }
 
-Server::Server()
-    : opt_config_ptr_(nullptr){
+Server::Server() {
 
 }
 Server::~Server() {
@@ -142,12 +143,14 @@ Server::Start() {
                 return 1;
             }
 
+            zilliz::vecwise::server::InitLog();
+
             //log path is defined by LoadConfig, so InitLog must be called after LoadConfig
-            ServerConfig *config = ServerConfig::GetInstance();
-            ConfigNode server_config = config->GetServerConfig();
+            ServerConfig &config = ServerConfig::GetInstance();
+            ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
 
             //print config into console and log
-            opt_config_ptr_->PrintAll();
+            config.PrintAll();
 
             // Handle Signal
             signal(SIGINT, SignalUtil::HandleSignal);
@@ -206,8 +209,7 @@ Server::Stop() {
 
 ServerError
 Server::LoadConfig() {
-    opt_config_ptr_ = ServerConfig::GetInstance();
-    opt_config_ptr_->LoadConfigFile(config_filename_);
+    ServerConfig::GetInstance().LoadConfigFile(config_filename_);
 
     return SERVER_SUCCESS;
 }
