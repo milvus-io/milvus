@@ -1,5 +1,10 @@
-#ifndef VECENGINE_DB_META_H_
-#define VECENGINE_DB_META_H_
+#pragma once
+
+#include <string>
+#include <cstddef>
+#include <vector>
+#include "options.h"
+#include "status.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -59,5 +64,3 @@ public:
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#endif // VECENGINE_DB_META_H_
