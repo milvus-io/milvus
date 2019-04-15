@@ -13,13 +13,13 @@
 #define ARITHMETIC_RIGHT_SHIFT 1
 
 /* Defines automake version */
-/* #undef AUTOMAKE_VERSION */
+#define AUTOMAKE_VERSION 1.15.1
 
 /* Use *.h extension for parser header file */
 /* #undef BISON_USE_PARSER_H_EXTENSION */
 
 /* Defines bison version */
-#define BISON_VERSION 0.0
+#define BISON_VERSION 3.0.4
 
 /* Define to one of `_getb67', `GETB67', `getb67' for Cray-2 and Cray-YMP
    systems. This function is required for `alloca.c' support on those systems.
@@ -89,10 +89,10 @@
 #define HAVE_INTTYPES_H 1
 
 /* Define to 1 if you have the <lauxlib.h> header file. */
-/* #undef HAVE_LAUXLIB_H */
+#define HAVE_LAUXLIB_H 1
 
 /* define if libevent is available */
-/* #undef HAVE_LIBEVENT */
+#define HAVE_LIBEVENT /**/
 
 /* Define to 1 if you have the <libintl.h> header file. */
 #define HAVE_LIBINTL_H 1
@@ -110,13 +110,13 @@
 #define HAVE_LIMITS_H 1
 
 /* Define to 1 if you have the <luaconf.h> header file. */
-/* #undef HAVE_LUACONF_H */
+#define HAVE_LUACONF_H 1
 
 /* Define to 1 if you have the <lualib.h> header file. */
-/* #undef HAVE_LUALIB_H */
+#define HAVE_LUALIB_H 1
 
 /* Define to 1 if you have the <lua.h> header file. */
-/* #undef HAVE_LUA_H */
+#define HAVE_LUA_H 1
 
 /* Define to 1 if your system has a GNU libc compatible `malloc' function, and
    to 0 otherwise. */
