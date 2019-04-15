@@ -1,5 +1,4 @@
-#ifndef UTILS_ID_GENERATORS_H_
-#define UTILS_ID_GENERATORS_H_
+#pragma once
 
 #include <vector>
 #include "types.h"
@@ -24,7 +23,7 @@ public:
     virtual IDNumbers&& getNextIDNumbers(size_t n_) override;
 
 private:
-    const MAX_IDS_PER_MICRO = 1000;
+    const size_t MAX_IDS_PER_MICRO = 1000;
 
 }; // SimpleIDGenerator
 
@@ -32,5 +31,3 @@ private:
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#endif // UTILS_ID_GENERATORS_H_
