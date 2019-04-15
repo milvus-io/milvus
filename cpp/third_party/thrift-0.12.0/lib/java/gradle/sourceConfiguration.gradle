@@ -1,0 +1,84 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements. See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership. The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License. You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+// Following Gradle best practices to keep build logic organized
+
+// ----------------------------------------------------------------------------
+// source sets for main and test sources
+sourceSets {
+    main {
+        java {
+            srcDir 'src'
+        }
+    }
+    test {
+        java {
+            srcDir 'test'
+            // see functionalTests.gradle for these files
+            exclude '**/test/TestClient.java'
+            exclude '**/test/TestServer.java'
+            exclude '**/test/TestNonblockingServer.java'
+        }
+        resources {
+            srcDir 'test'
+            include 'log4j.properties'
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Compiler configuration details
+
+sourceCompatibility = '1.6'
+targetCompatibility = '1.6'
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+    options.debug = true
+    options.deprecation = true
+    // options.compilerArgs.addAll('-Xlint:unchecked')
+}
+
+// ----------------------------------------------------------------------------
+// Jar packaging details
+processResources {
+    into('META-INF') {
+        from "$thriftRoot/LICENSE"
+        from "$thriftRoot/NOTICE"
+        rename('(.+)', '$1.txt')
+    }
+}
+
+jar {
+    project.test.dependsOn it
+    manifest {
+        attributes([
+            "Implementation-Version": "${project.version}",
+            "Bundle-ManifestVersion": "2",
+            "Bundle-SymbolicName": "${project.group}",
+            "Bundle-Name": "Apache Thrift",
+            "Bundle-Version": "${project.version}",
+            "Bundle-Description": "Apache Thrift library",
+            "Bundle-License": "${project.license}",
+            "Bundle-ActivationPolicy": "lazy",
+            "Export-Package": "${project.group}.async;uses:=\"${project.group}.protocol,${project.group}.transport,org.slf4j,${project.group}\";version=\"${version}\",${project.group}.protocol;uses:=\"${project.group}.transport,${project.group},${project.group}.scheme\";version=\"${version}\",${project.group}.server;uses:=\"${project.group}.transport,${project.group}.protocol,${project.group},org.slf4j,javax.servlet,javax.servlet.http\";version=\"${version}\",${project.group}.transport;uses:=\"${project.group}.protocol,${project.group},org.apache.http.client,org.apache.http.params,org.apache.http.entity,org.apache.http.client.methods,org.apache.http,org.slf4j,javax.net.ssl,javax.net,javax.security.sasl,javax.security.auth.callback\";version=\"${version}\",${project.group};uses:=\"${project.group}.protocol,${project.group}.async,${project.group}.server,${project.group}.transport,org.slf4j,org.apache.log4j,${project.group}.scheme\";version=\"${version}\",${project.group}.meta_data;uses:=\"${project.group}\";version=\"${version}\",${project.group}.scheme;uses:=\"${project.group}.protocol,${project.group}\";version=\"${version}\"",
+            "Import-Package": "javax.net,javax.net.ssl,javax.security.auth.callback,javax.security.sasl,javax.servlet;resolution:=optional,javax.servlet.http;resolution:=optional,org.slf4j;resolution:=optional;version=\"[1.4,2)\",org.apache.http.client;resolution:=optional,org.apache.http.params;resolution:=optional,org.apache.http.entity;resolution:=optional,org.apache.http.client.methods;resolution:=optional,org.apache.http;resolution:=optional"
+        ])
+    }
+}

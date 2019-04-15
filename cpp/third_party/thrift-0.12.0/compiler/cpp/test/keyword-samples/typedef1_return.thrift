@@ -1,0 +1,1 @@
+typedef bool return

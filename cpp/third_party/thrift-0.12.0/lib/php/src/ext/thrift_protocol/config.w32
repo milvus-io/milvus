@@ -1,0 +1,8 @@
+// $Id: config.w32 250404 2008-01-11 13:37:24Z rrichards $
+// vim:ft=javascript
+
+ARG_WITH("thrift_protocol", "whether to enable the thrift_protocol extension", "yes");
+
+if (PHP_THRIFT_PROTOCOL == "yes"){
+  EXTENSION("thrift_protocol", "php_thrift_protocol.cpp")
+}

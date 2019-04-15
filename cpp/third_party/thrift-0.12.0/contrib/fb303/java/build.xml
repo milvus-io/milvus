@@ -1,0 +1,199 @@
+<?xml version="1.0"?>
+<!--
+ Licensed to the Apache Software Foundation (ASF) under one
+ or more contributor license agreements. See the NOTICE file
+ distributed with this work for additional information
+ regarding copyright ownership. The ASF licenses this file
+ to you under the Apache License, Version 2.0 (the
+ "License"); you may not use this file except in compliance
+ with the License. You may obtain a copy of the License at
+
+ http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing,
+ software distributed under the License is distributed on an
+ "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ KIND, either express or implied. See the License for the
+ specific language governing permissions and limitations
+ under the License.
+ -->
+<project name="libfb303" default="dist" basedir="."
+  xmlns:artifact="antlib:org.apache.maven.artifact.ant">
+
+  <!-- project wide settings. All directories relative to basedir -->
+  <property name="thrift.root" location="${basedir}/../../../"/>
+  <property name="fb303.artifactid" value="libfb303"/>
+  <property name="interface.dir" value="${basedir}/../if"/>
+  <property name="thrift.java.dir" location="${thrift.root}/lib/java"/>
+  <property name="build.tools.dir" location="${thrift.java.dir}/build/tools/"/>
+  <property name="thrift_compiler" value="${thrift.root}/compiler/cpp/thrift"/>
+  <property file="${basedir}/build.properties"/>
+
+  <!-- inherit from the java build file for version and other properties -->
+  <property file="${thrift.java.dir}/gradle.properties" />
+
+  <property environment="env"/>
+
+  <condition property="version" value="${thrift.version}">
+    <isset property="release"/>
+  </condition>
+  <property name="version" value="${thrift.version}-SNAPSHOT"/>
+
+  <property name="fb303.final.name" value="${fb303.artifactid}-${version}"/>
+
+  <property name="src" value="${basedir}/src"/>
+  <property name="gen" value="${basedir}/gen-java"/>
+  <property name="build.dir" value="${basedir}/build"/>
+  <property name="build.lib.dir" value="${build.dir}/lib"/>
+  <property name="build.classes.dir" value="${build.dir}/classes"/>
+
+  <property name="fb303.jar.file" location="${build.dir}/${fb303.final.name}.jar"/>
+  <property name="fb303.pom.xml" location="${build.dir}/${fb303.final.name}.pom"/>
+
+  <target name="init" depends="setup.init,mvn.init" unless="init.finished">
+    <property name="init.finished" value="true"/>
+  </target>
+
+  <target name="setup.init">
+    <tstamp/>
+    <mkdir dir="${build.dir}"/>
+    <mkdir dir="${build.classes.dir}"/>
+    <mkdir dir="${build.lib.dir}"/>
+  </target>
+
+  <!-- generate fb303 thrift code -->
+  <target name="generate">
+    <echo message="generating thrift fb303 files"/>
+    <exec executable="${thrift_compiler}" failonerror="true">
+      <arg line="--gen java -o ${basedir} ${interface.dir}/fb303.thrift"/>
+    </exec>
+  </target>
+
+  <!-- compile the base and thrift generated code and jar them -->
+  <target name="dist" depends="init,generate">
+    <echo message="Building ${fb303.final.name}.jar"/>
+    <javac destdir="${build.classes.dir}" debug="on">
+      <classpath>
+        <fileset dir="${thrift.java.dir}/build/libs">
+          <include name="libthrift*.jar" />
+          <exclude name="libthrift*javadoc.jar" />
+          <exclude name="libthrift*sources.jar" />
+        </fileset>
+        <fileset dir="${thrift.java.dir}/build/deps">
+          <include name="*.jar"/>
+        </fileset>
+      </classpath>
+      <src path="${src}"/>
+      <src path="${gen}"/>
+      <include name="**/*.java"/>
+    </javac>
+    <jar jarfile="${build.dir}/${fb303.final.name}.jar" basedir="${build.classes.dir}">
+    </jar>
+  </target>
+
+  <!-- copy the build jar to the distribution library directory -->
+  <target name="install" depends="dist">
+    <copy todir="${install.path}">
+      <fileset dir="${build.lib.dir}" includes="*.jar"/>
+      <fileset dir="${build.lib.dir}" includes="${fb303.final.name}.jar"/>
+    </copy>
+  </target>
+
+  <target name="clean">
+    <delete dir="${build.dir}"/>
+    <delete dir="${gen}"/>
+  </target>
+
+  <target name="mvn.ant.tasks.download" depends="setup.init,mvn.ant.tasks.check" unless="mvn.ant.tasks.found">
+    <get src="${mvn.ant.task.url}/${mvn.ant.task.jar}" dest="${build.tools.dir}/${mvn.ant.task.jar}" usetimestamp="true"/>
+  </target>
+
+  <target name="mvn.ant.tasks.check">
+    <condition property="mvn.ant.tasks.found">
+      <typefound uri="antlib:org.apache.maven.artifact.ant" name="artifact"/>
+    </condition>
+  </target>
+
+  <target name="mvn.init" depends="mvn.ant.tasks.download" unless="mvn.finished">
+    <echo message="${mvn.ant.task.jar}"/>
+    <!-- Download mvn ant tasks, download dependencies, and setup pom file -->
+    <typedef uri="antlib:org.apache.maven.artifact.ant" classpath="${build.tools.dir}/${mvn.ant.task.jar}"/>
+
+    <!-- remote repositories used to download dependencies from -->
+    <artifact:remoteRepository id="central" url="${mvn.repo}"/>
+    <artifact:remoteRepository id="apache" url="${apache.repo}"/>
+
+    <!-- Pom file information -->
+    <artifact:pom id="pom"
+      groupId="${thrift.groupid}"
+      artifactId="${fb303.artifactid}"
+      version="${version}"
+      url="http://thrift.apache.org"
+      name="Apache Thrift"
+      description="Thrift is a software framework for scalable cross-language services development."
+      packaging="jar"
+    >
+      <remoteRepository refid="central"/>
+      <remoteRepository refid="apache"/>
+      <license name="The Apache Software License, Version 2.0" url="${license}"/>
+      <scm connection="scm:git:https://git-wip-us.apache.org/repos/asf/thrift.git"
+      developerConnection="scm:git:https://git-wip-us.apache.org/repos/asf/thrift.git"
+      url="https://git-wip-us.apache.org/repos/asf?p=thrift.git"
+    />
+      <!-- Thrift Developers -->
+      <developer id="mcslee" name="Mark Slee"/>
+      <developer id="dreiss" name="David Reiss"/>
+      <developer id="aditya" name="Aditya Agarwal"/>
+      <developer id="marck" name="Marc Kwiatkowski"/>
+      <developer id="jwang" name="James Wang"/>
+      <developer id="cpiro" name="Chris Piro"/>
+      <developer id="bmaurer" name="Ben Maurer"/>
+      <developer id="kclark" name="Kevin Clark"/>
+      <developer id="jake" name="Jake Luciani"/>
+      <developer id="bryanduxbury" name="Bryan Duxbury"/>
+      <developer id="esteve" name="Esteve Fernandez"/>
+      <developer id="todd" name="Todd Lipcon"/>
+      <developer id="geechorama" name="Andrew McGeachie"/>
+      <developer id="molinaro" name="Anthony Molinaro"/>
+      <developer id="roger" name="Roger Meier"/>
+      <developer id="jfarrell" name="Jake Farrell"/>
+      <developer id="jensg" name="Jens Geyer"/>
+      <developer id="carl" name="Carl Yeksigian"/>
+
+      <!-- Thrift dependencies list -->
+      <dependency groupId="org.apache.thrift" artifactId="libthrift" version="${version}"/>
+    </artifact:pom>
+
+    <!-- Generate the pom file -->
+    <artifact:writepom pomRefId="pom" file="${fb303.pom.xml}"/>
+
+    <property name="mvn.finished" value="true"/>
+  </target>
+
+  <macrodef name="signAndDeploy">
+    <!-- Sign and deploy jars to apache repo -->
+    <attribute name="file"/>
+    <attribute name="classifier" default=""/>
+    <attribute name="packaging" default="jar"/>
+    <attribute name="pom" default=""/>
+    <sequential>
+      <artifact:mvn fork="true">
+        <arg value="org.apache.maven.plugins:maven-gpg-plugin:1.1:sign-and-deploy-file"/>
+        <arg value="-DrepositoryId=${maven-repository-id}"/>
+        <arg value="-Durl=${maven-repository-url}"/>
+        <arg value="-DpomFile=@{pom}"/>
+        <arg value="-Dfile=@{file}"/>
+        <arg value="-Dclassifier=@{classifier}"/>
+        <arg value="-Dpackaging=@{packaging}"/>
+        <arg value="-Pgpg"/>
+      </artifact:mvn>
+    </sequential>
+  </macrodef>
+
+  <target name="publish" depends="clean,dist">
+    <!-- Compile, packages and then send release to apache maven repo -->
+    <!-- run with: ant -Drelease=true publish-->
+    <signAndDeploy file="${fb303.pom.xml}" packaging="pom" classifier="" pom="${fb303.pom.xml}"/>
+    <signAndDeploy file="${fb303.jar.file}" packaging="jar" classifier="" pom="${fb303.pom.xml}"/>
+  </target>
+</project>

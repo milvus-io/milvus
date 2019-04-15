@@ -1,0 +1,32 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
+<link href="style.css" rel="stylesheet" type="text/css"/>
+<title>Thrift module: shared</title></head><body>
+<div class="container-fluid">
+<h1>Thrift module: shared</h1>
+<pre>This Thrift file can be included by other Thrift files that want to share
+these definitions.
+</pre><br/><table class="table-bordered table-striped table-condensed"><thead><th>Module</th><th>Services</th><th>Data types</th><th>Constants</th></thead>
+<tr>
+<td>shared</td><td><a href="#Svc_SharedService">SharedService</a><br/>
+<ul>
+<li><a href="#Fn_SharedService_getStruct">getStruct</a></li>
+</ul>
+</td>
+<td><a href="#Struct_SharedStruct">SharedStruct</a><br/>
+</td>
+<td></code></td>
+</tr></table>
+<hr/><h2 id="Structs">Data structures</h2>
+<div class="definition"><h3 id="Struct_SharedStruct">Struct: SharedStruct</h3>
+<table class="table-bordered table-striped table-condensed"><thead><th>Key</th><th>Field</th><th>Type</th><th>Description</th><th>Requiredness</th><th>Default value</th></thead>
+<tr><td>1</td><td>key</td><td><code>i32</code></td><td></td><td>default</td><td></td></tr>
+<tr><td>2</td><td>value</td><td><code>string</code></td><td></td><td>default</td><td></td></tr>
+</table><br/></div><hr/><h2 id="Services">Services</h2>
+<h3 id="Svc_SharedService">Service: SharedService</h3>
+<div class="definition"><h4 id="Fn_SharedService_getStruct">Function: SharedService.getStruct</h4>
+<pre><code><a href="#Struct_SharedStruct">SharedStruct</a></code> getStruct(<code>i32</code> key)
+</pre></div></div></body></html>
