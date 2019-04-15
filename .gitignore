@@ -6,3 +6,6 @@ __pycache__
 build
 cmake-build-debug
 cmake_build
+*.o
+*.lo
+*.tar.gz
