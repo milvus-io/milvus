@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <chrono>
 #include "db_impl.h"
 
 namespace vecengine {
@@ -9,8 +10,10 @@ DBImpl::DBImpl(const Options& options_, const std::string& name_)
       _options(options_),
       _bg_work_finish_signal(_mutex),
       _bg_compaction_scheduled(false),
+      _shutting_down(false),
       _pMeta(new DBMetaImpl(*(_options.pMetaOptions))),
       _pMemMgr(new MemManager(_pMeta)) {
+    start_timer_task(Options.memory_sync_interval);
 }
 
 Status DBImpl::add_group(const GroupOptions& options_,
@@ -39,7 +42,27 @@ Status DBImpl::get_group_files(const std::string& group_id_,
 
 Status DBImpl::add_vectors(const std::string& group_id_,
         size_t n, const float* vectors, IDNumbers& vector_ids_) {
-    return _pMemMgr->add_vectors(group_id_, n, vectors, vector_ids_);
+    Status status = _pMemMgr->add_vectors(group_id_, n, vectors, vector_ids_);
+    if (!status.ok()) {
+        return status;
+    }
+}
+
+void DBImpl::start_timer_task(int interval_) {
+    std::thread bg_task(&DBImpl::background_timer_task, this, interval_);
+    bg_task.detach();
+}
+
+void DBImpl::background_timer_task(int interval_) {
+    Status status;
+    while (true) {
+        if (!_bg_error.ok()) break;
+        if (_shutting_down.load(std::memory_order_acquire)) break;
+
+        std::this_thread::sleep_for(std::chrono::seconds(interval_));
+
+        try_schedule_compaction();
+    }
 }
 
 void DBImpl::try_schedule_compaction() {
@@ -61,14 +84,21 @@ void DBImpl::background_call() {
     if (!_bg_error.ok()) return;
 
     background_compaction();
+
+    _bg_compaction_scheduled = false;
+    _bg_work_finish_signal.notify_all();
 }
 
 void DBImpl::background_compaction() {
-
+    _pMemMgr->serialize();
 }
 
-void DBImpl::compact_memory() {
-
+DBImpl::~DBImpl() {
+    std::lock_guard<std::mutex> _mutex;
+    _shutting_down.store(true, std::memory_order_release);
+    while (_bg_compaction_scheduled) {
+        _bg_work_finish_signal.wait();
+    }
 }
 
 /*

@@ -3,6 +3,7 @@
 
 #include <map>
 #include <string>
+#include <ctime>
 #include "id_generators.h"
 #include "status.h"
 
@@ -42,20 +43,28 @@ class Meta;
 
 class MemManager {
 public:
-    MemManager(const std::shared_ptr<Meta>& meta_) : _pMeta(meta_) {}
+    typedef std::shared_ptr<MemVectors> VectorsPtr;
+    MemManager(const std::shared_ptr<Meta>& meta_)
+        : _pMeta(meta_), _last_compact_time(std::time(nullptr)) {}
 
-    MemVectors* get_mem_by_group(const std::string& group_id_);
+    VectorsPtr get_mem_by_group(const std::string& group_id_);
 
     Status add_vectors(const std::string& group_id_,
             size_t n_, const float* vectors_, IDNumbers& vector_ids_);
+
+    Status serialize();
 
 private:
     Status add_vectors_no_lock(const std::string& group_id_,
             size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
-    typedef std::map<std::string, MemVectors> MemMap;
+    typedef std::map<std::string, VectorsPtr> MemMap;
+    typedef std::vector<VectorsPtr> ImmMemPool;
     MemMap _memMap;
+    ImmMemPool _immMems;
     std::shared_ptr<Meta> _pMeta;
+    std::time_t _last_compact_time;
+    std::mutex _mutex;
 }; // MemManager
 
 
