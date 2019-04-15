@@ -1,6 +1,8 @@
 server_config:
   address: 127.0.0.1
-  port: 21001
+  port: 33001
+  transfer_protocol: json   #optional: binary, compact, json, simple_json, debug
+  server_mode: thread_pool    #optional: simple, non_blocking, hsha, thread_pool, thread_selector
 
 log_config:
   global:
@@ -29,3 +31,6 @@ log_config:
   fatal:
     enabled: false
     filename: "/tmp/logs/vecwise/vecwise_engine-%datetime{%h:%m}-fatal.log"
+
+cache_config:
+    cache_capacity: 16  # unit: GB
