@@ -2,7 +2,7 @@
 #### Step 1: install necessery tools
 
     centos7 : yum install gfortran
-    ubunut : sudo apt-install install gfortran
+    ubuntu16.04 : sudo apt-install install gfortran libsqlite3-dev
 
 #### Step 2: build third-parties
 
