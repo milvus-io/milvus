@@ -53,7 +53,7 @@ include_directories(${VECWISE_ENGINE_SRC})
 include_directories(${VECWISE_THIRD_PARTY_BUILD}/include)
 
 link_directories(${CMAKE_CURRRENT_BINARY_DIR})
-link_directories(./third_party/build/lib)
+link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib)
 
 #execute_process(COMMAND bash build.sh
 #                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
