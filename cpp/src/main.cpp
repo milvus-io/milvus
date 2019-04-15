@@ -10,9 +10,13 @@
 #include <cstring>
 #include <string>
 #include <signal.h>
+#include <easylogging++.h>
 
 #include "utils/SignalUtil.h"
 #include "utils/CommonUtil.h"
+#include "utils/LogUtil.h"
+
+INITIALIZE_EASYLOGGINGPP
 
 void print_help(const std::string &app_name);
 
@@ -20,7 +24,9 @@ using namespace zilliz::vecwise;
 
 int
 main(int argc, char *argv[]) {
-    server::CommonUtil::PrintInfo("Vecwise engine server start");
+    zilliz::vecwise::server::InitLog();
+
+    printf("Vecwise engine server start...\n");
 
 //    zilliz::lib::gpu::InitMemoryAllocator();
 
