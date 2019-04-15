@@ -2,6 +2,8 @@
 #include <faiss/MetaIndexes.h>
 #include <faiss/index_io.h>
 #include <iostream>
+#include <sstream>
+#include <thread>
 
 #include "memvectors.h"
 #include "db_meta.h"
@@ -12,7 +14,7 @@ namespace vecwise {
 namespace engine {
 
 MemVectors::MemVectors(size_t dimension_, const std::string& file_location_) :
-    _file_location(file_location_.c_str()),
+    _file_location(file_location_),
     _pIdGenerator(new SimpleIDGenerator()),
     _dimension(dimension_),
     _pInnerIndex(new faiss::IndexFlat(_dimension)),
@@ -20,8 +22,11 @@ MemVectors::MemVectors(size_t dimension_, const std::string& file_location_) :
 }
 
 void MemVectors::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
-    vector_ids_ = _pIdGenerator->getNextIDNumbers(n_);
+    _pIdGenerator->getNextIDNumbers(n_, vector_ids_);
     _pIdMapIndex->add_with_ids(n_, vectors_, &vector_ids_[0]);
+    for(auto i=0 ; i<n_; i++) {
+        vector_ids_.push_back(i);
+    }
 }
 
 size_t MemVectors::total() const {
@@ -33,7 +38,12 @@ size_t MemVectors::approximate_size() const {
 }
 
 void MemVectors::serialize() {
-    faiss::write_index(_pIdMapIndex, _file_location);
+    /* std::stringstream ss; */
+    /* ss << "/tmp/test/" << _pIdGenerator->getNextIDNumber(); */
+    /* faiss::write_index(_pIdMapIndex, ss.str().c_str()); */
+    /* std::cout << _pIdMapIndex->ntotal << std::endl; */
+    /* std::cout << _file_location << std::endl; */
+    faiss::write_index(_pIdMapIndex, _file_location.c_str());
 }
 
 MemVectors::~MemVectors() {
@@ -66,6 +76,7 @@ VectorsPtr MemManager::get_mem_by_group(const std::string& group_id) {
     if (!status.ok()) {
         return nullptr;
     }
+
     _memMap[group_id] = std::shared_ptr<MemVectors>(new MemVectors(group_info.dimension,
                 group_info.next_file_location));
     return _memMap[group_id];
@@ -83,7 +94,7 @@ Status MemManager::add_vectors_no_lock(const std::string& group_id,
         size_t n,
         const float* vectors,
         IDNumbers& vector_ids) {
-    auto mem = get_mem_by_group(group_id);
+    std::shared_ptr<MemVectors> mem = get_mem_by_group(group_id);
     if (mem == nullptr) {
         return Status::NotFound("Group " + group_id + " not found!");
     }
@@ -97,6 +108,7 @@ Status MemManager::mark_memory_as_immutable() {
     for (auto& kv: _memMap) {
         _immMems.push_back(kv.second);
     }
+
     _memMap.clear();
     return Status::OK();
 }
