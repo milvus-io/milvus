@@ -1,39 +1,47 @@
+#include <stdio.h>
+#include <cstring>
+#include <assert.h>
 #include "status.h"
 
-namespace vecengine {
+namespace zilliz {
+namespace vecwise {
+namespace engine {
 
-const char* Status::CopyState(const char* state_) {
+const char* Status::CopyState(const char* state) {
     uint32_t size;
-    memcpy(&size, state_, sizeof(size));
-    char result = new char[size+5];
-    memcpy(result, state_, size+5);
+    std::memcpy(&size, state, sizeof(size));
+    char* result = new char[size+5];
+    memcpy(result, state, size+5);
     return result;
 }
 
-Status::Status(Code code_, const std::string& msg_, const std::string& msg2_) {
-    assert(code_ != kOK);
-    const uint32_t len1 = msg_.size();
-    const uint32_t len2 = msg2_.size();
+Status::Status(Code code, const std::string& msg, const std::string& msg2) {
+    assert(code != kOK);
+    const uint32_t len1 = msg.size();
+    const uint32_t len2 = msg2.size();
     const uint32_t size = len1 + (len2 ? (2+len2) : 0);
     char* result = new char[size+5];
-    memcpy(result, &size, sizeof(size));
+    std::memcpy(result, &size, sizeof(size));
     result[4] = static_cast<char>(code);
-    memcpy(result+5, msg_.data(), len1);
+    memcpy(result+5, msg.data(), len1);
     if (len2) {
         result[5 + len1] = ':';
         result[6 + len1] = ' ';
-        memcpy(result + 7 + len1, msg2_.data(), len2);
+        memcpy(result + 7 + len1, msg2.data(), len2);
     }
-    _state = result;
+    state_ = result;
 }
 
 std::string Status::ToString() const {
-    if (_state == nullptr) return "OK";
+    if (state_ == nullptr) return "OK";
     char tmp[30];
     const char* type;
     switch (code()) {
         case kOK:
             type = "OK";
+            break;
+        case kNotFound:
+            type = "NotFound: ";
             break;
         default:
             snprintf(tmp, sizeof(tmp), "Unkown code(%d): ",
@@ -49,4 +57,6 @@ std::string Status::ToString() const {
     return result;
 }
 
-} // namespace vecengine
+} // namespace engine
+} // namespace vecwise
+} // namespace zilliz
