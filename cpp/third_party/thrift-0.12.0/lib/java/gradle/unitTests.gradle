@@ -1,0 +1,82 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements. See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership. The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License. You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+// Following Gradle best practices to keep build logic organized
+
+// Bundle the test classes in a JAR for other Ant based builds
+task testJar(type: Jar, group: 'Build') {
+    description = 'Assembles a jar archive containing the test classes.'
+    project.test.dependsOn it
+
+    classifier 'test'
+    from sourceSets.test.output
+}
+
+// ----------------------------------------------------------------------------
+// Unit test tasks and configurations
+
+// Help the up to date algorithm to make these tests done
+ext.markTaskDone = { task ->
+    def buildFile = file("$buildDir/${task.name}.flag")
+    task.inputs.files task.classpath
+    task.outputs.file buildFile
+    task.doLast {
+        buildFile.text = 'Passed!'
+    }
+}
+
+task deprecatedEqualityTest(type: JavaExec, group: 'Verification') {
+    description = 'Run the non-JUnit test suite '
+    classpath = sourceSets.test.runtimeClasspath
+    main 'org.apache.thrift.test.EqualityTest'
+    markTaskDone(it)
+}
+
+task deprecatedJavaBeansTest(type: JavaExec, group: 'Verification') {
+    description = 'Run the non-JUnit test suite '
+    classpath = sourceSets.test.runtimeClasspath
+    main 'org.apache.thrift.test.JavaBeansTest'
+    markTaskDone(it)
+}
+
+// Main Unit Test task configuration
+test {
+    description="Run the full test suite"
+    dependsOn deprecatedEqualityTest, deprecatedJavaBeansTest
+
+    // Allow repeating tests even after successful execution
+    if (project.hasProperty('rerunTests')) {
+        outputs.upToDateWhen { false }
+    }
+
+    include '**/Test*.class'
+    exclude '**/Test*\$*.class'
+
+    maxHeapSize = '512m'
+    forkEvery = 1
+
+    systemProperties = [
+        'build.test': "${compileTestJava.destinationDir}",
+        'test.port': "${testPort}",
+        'javax.net.ssl.trustStore': "${projectDir}/test/.truststore",
+        'javax.net.ssl.trustStorePassword': 'thrift',
+        'javax.net.ssl.keyStore': "${projectDir}/test/.keystore",
+        'javax.net.ssl.keyStorePassword': 'thrift'
+    ]
+}

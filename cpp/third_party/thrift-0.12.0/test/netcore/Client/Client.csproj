@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netcoreapp2.0</TargetFramework>
+    <AssemblyName>Client</AssemblyName>
+    <PackageId>Client</PackageId>
+    <OutputType>Exe</OutputType>
+    <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
+    <GenerateAssemblyDescriptionAttribute>false</GenerateAssemblyDescriptionAttribute>
+    <GenerateAssemblyConfigurationAttribute>false</GenerateAssemblyConfigurationAttribute>
+    <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
+    <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
+    <GenerateAssemblyCopyrightAttribute>false</GenerateAssemblyCopyrightAttribute>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Net.Http.WinHttpHandler" Version="[4.4,)" />
+    <PackageReference Include="System.Runtime.Serialization.Primitives" Version="[4.3,)" />
+    <PackageReference Include="System.ServiceModel.Primitives" Version="[4.4,)" />
+    <PackageReference Include="System.Threading" Version="[4.3,)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\lib\netcore\Thrift\Thrift.csproj" />
+  </ItemGroup>
+  <Target Name="PreBuild" BeforeTargets="_GenerateRestoreProjectSpec;Restore;Compile">
+    <Exec Condition="'$(OS)' == 'Windows_NT'" Command="where thrift" ConsoleToMSBuild="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="PathToThrift" />
+    </Exec>
+    <Exec Condition="Exists('$(PathToThrift)')" Command="&quot;$(PathToThrift)&quot; -out $(ProjectDir) -gen netcore:wcf,union,serial,hashcode -r ./../../ThriftTest.thrift" />
+    <Exec Condition="Exists('thrift')" Command="thrift -out $(ProjectDir) -gen netcore:wcf,union,serial,hashcode -r ./../../ThriftTest.thrift" />
+    <Exec Condition="Exists('$(ProjectDir)/../../../compiler/cpp/thrift')" Command="$(ProjectDir)/../../../compiler/cpp/thrift -out $(ProjectDir) -gen netcore:wcf,union,serial,hashcode -r ./../../ThriftTest.thrift" />
+  </Target>
+</Project>

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Server": {
+      "commandName": "Project",
+      "commandLineArgs": "-p:multiplexed"
+    }
+  }
+}

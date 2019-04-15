@@ -1,0 +1,15 @@
+[package]
+name = "kitchen-sink"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Apache Thrift Developers <dev@thrift.apache.org>"]
+publish = false
+
+[dependencies]
+clap = "<2.28.0"
+ordered-float = "0.3.0"
+try_from = "0.2.0"
+
+[dependencies.thrift]
+path = "../"
+

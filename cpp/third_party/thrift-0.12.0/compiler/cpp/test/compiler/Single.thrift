@@ -1,0 +1,1 @@
+const string foo = "bar"

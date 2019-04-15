@@ -1,0 +1,112 @@
+#
+## Licensed to the Apache Software Foundation (ASF) under one
+## or more contributor license agreements. See the NOTICE file
+## distributed with this work for additional information
+## regarding copyright ownership. The ASF licenses this file
+## to you under the Apache License, Version 2.0 (the
+## "License"); you may not use this file except in compliance
+## with the License. You may obtain a copy of the License at
+##
+##   http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing,
+## software distributed under the License is distributed on an
+## "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+## KIND, either express or implied. See the License for the
+## specific language governing permissions and limitations
+## under the License.
+##
+#
+
+# EditorConfig: http://editorconfig.org
+# see doc/coding_standards.md
+
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# ActionScript
+# [*.as]
+
+# C
+# [*.c]
+
+# C++
+[*.cpp]
+indent_style = space
+indent_size = 2
+
+# C-Sharp
+# [*.cs]
+
+# D
+# [*.d]
+
+# Erlang
+# [*.erl]
+
+# Go-lang
+[*.go]
+indent_style = tab
+indent_size = 8
+
+# C header files
+# [*.h]
+
+# Haskell
+# [*.hs]
+
+# Haxe
+# [*.hx]
+
+# Java
+# [*.java]
+
+# Javascript
+[*.js]
+indent_style = space
+indent_size = 2
+
+# JSON
+[*.json]
+indent_style = space
+indent_size = 2
+
+# Lua
+# [*.lua]
+
+[*.markdown]
+indent_style = space
+trim_trailing_whitespace = false
+
+[*.md]
+indent_style = space
+trim_trailing_whitespace = false
+
+# OCaml
+# [*.ml]
+
+# Delphi Pascal
+# [*.pas]
+
+# PHP
+# [*.php]
+
+# Perl
+# [*.pm]
+
+# Python
+# [*.py]
+
+# Ruby
+# [*.rb]
+
+# Typescript
+# [*.ts]
+
+# XML
+# [*.xml]

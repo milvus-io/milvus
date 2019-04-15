@@ -1,0 +1,155 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements. See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership. The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License. You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+// Following Gradle best practices to keep build logic organized
+
+// ----------------------------------------------------------------------------
+// Functional testing harness creation. This helps run the cross-check tests.
+// The Makefile precross target invokes the shadowJar task and the tests.json
+// code is changed to call runclient or runserver as needed.
+
+// ----------------------------------------------------------------------------
+// Cross Test sources are separated in their own sourceSet
+//
+sourceSets {
+    crossTest {
+        java {
+            srcDir 'test'
+            include '**/test/TestClient.java'
+            include '**/test/TestServer.java'
+            include '**/test/TestNonblockingServer.java'
+        }
+    }
+}
+
+configurations {
+    crossTestCompile { extendsFrom testCompile }
+    crossTestRuntime { extendsFrom crossTestCompile, testRuntime }
+}
+
+dependencies {
+    crossTestCompile sourceSets.main.output
+    crossTestCompile sourceSets.test.output
+}
+
+// I am using shadow plugin to make a self contained functional test Uber JAR that
+// eliminates startup problems with wrapping the cross-check harness in Gradle.
+// This is used by the runner scripts as the single classpath entry which
+// allows the process to be as lightweight as it can.
+shadowJar {
+    description = 'Assemble a test JAR file for cross-check execution'
+    // make sure the runners are created when this runs
+    dependsOn 'generateRunnerScriptForClient', 'generateRunnerScriptForServer', 'generateRunnerScriptForNonblockingServer'
+
+    baseName = 'functionalTest'
+    destinationDir = file("$buildDir/functionalTestJar")
+    classifier = null
+
+    // We do not need a version number for this internal jar
+    version = null
+
+    // Bundle the complete set of unit test classes including generated code
+    // and the runtime dependencies in one JAR to expedite execution.
+    from sourceSets.test.output
+    from sourceSets.crossTest.output
+    configurations = [project.configurations.testRuntime]
+}
+
+// Common script runner configuration elements
+def scriptExt = ''
+def execExt = ''
+def scriptHead = '#!/bin/bash'
+def args = '$*'
+
+// Although this is marked internal it is an available and stable interface
+if (org.gradle.internal.os.OperatingSystem.current().windows) {
+    scriptExt = '.bat'
+    execExt = '.exe'
+    scriptHead = '@echo off'
+    args = '%*'
+}
+
+// The Java executable to use with the runner scripts
+def javaExe = file("${System.getProperty('java.home')}/bin/java${execExt}").canonicalPath
+// The common Uber jar path
+def jarPath = shadowJar.archivePath.canonicalPath
+def trustStore = file('test/.truststore').canonicalPath
+def keyStore = file('test/.keystore').canonicalPath
+
+task generateRunnerScriptForClient(group: 'Build') {
+    description = 'Generate a runner script for cross-check tests with TestClient'
+
+    def clientFile = file("$buildDir/runclient${scriptExt}")
+
+    def runClientText = """\
+${scriptHead}
+
+"${javaExe}" -cp "$jarPath" "-Djavax.net.ssl.trustStore=$trustStore" -Djavax.net.ssl.trustStorePassword=thrift org.apache.thrift.test.TestClient $args
+"""
+    inputs.property 'runClientText', runClientText
+    outputs.file clientFile
+
+    doLast {
+        clientFile.parentFile.mkdirs()
+        clientFile.text = runClientText
+        clientFile.setExecutable(true, false)
+    }
+}
+
+task generateRunnerScriptForServer(group: 'Build') {
+    description = 'Generate a runner script for cross-check tests with TestServer'
+
+    def serverFile = file("$buildDir/runserver${scriptExt}")
+
+    def runServerText = """\
+${scriptHead}
+
+"${javaExe}" -cp "$jarPath" "-Djavax.net.ssl.keyStore=$keyStore" -Djavax.net.ssl.keyStorePassword=thrift org.apache.thrift.test.TestServer $args
+"""
+
+    inputs.property 'runServerText', runServerText
+    outputs.file serverFile
+
+    doLast {
+        serverFile.parentFile.mkdirs()
+        serverFile.text = runServerText
+        serverFile.setExecutable(true, false)
+    }
+}
+
+task generateRunnerScriptForNonblockingServer(group: 'Build') {
+    description = 'Generate a runner script for cross-check tests with TestNonblockingServer'
+
+    def serverFile = file("$buildDir/runnonblockingserver${scriptExt}")
+
+    def runServerText = """\
+${scriptHead}
+
+"${javaExe}" -cp "$jarPath" "-Djavax.net.ssl.keyStore=$keyStore" -Djavax.net.ssl.keyStorePassword=thrift org.apache.thrift.test.TestNonblockingServer $args
+"""
+
+    inputs.property 'runServerText', runServerText
+    outputs.file serverFile
+
+    doLast {
+        serverFile.parentFile.mkdirs()
+        serverFile.text = runServerText
+        serverFile.setExecutable(true, false)
+    }
+}

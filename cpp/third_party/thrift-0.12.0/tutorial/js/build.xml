@@ -1,0 +1,92 @@
+<!--
+ Licensed to the Apache Software Foundation (ASF) under one
+ or more contributor license agreements. See the NOTICE file
+ distributed with this work for additional information
+ regarding copyright ownership. The ASF licenses this file
+ to you under the Apache License, Version 2.0 (the
+ "License"); you may not use this file except in compliance
+ with the License. You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing,
+ software distributed under the License is distributed on an
+ "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ KIND, either express or implied. See the License for the
+ specific language governing permissions and limitations
+ under the License.
+-->
+<project name="tutorial" default="test" basedir=".">
+
+  <description>Thrift JavaScript Tutorial</description>
+
+  <property name="src" location="src" />
+  <property name="javasrc" location="../java/src" />
+  <property name="gen" location="../java/gen-java" />
+  <property name="build" location="build" />
+
+  <!-- the root directory, where you unpack thrift distibution (e.g. thrift-0.x.x.tar.gz) -->
+  <property name="thrift.dir" location="../../" />
+  <!-- JavaScript tutorial depends on the java tutorial thrift handler and server infrastructure -->
+  <property name="thrift.java.dir" location="${thrift.dir}/lib/java" />
+
+  <path id="libs.classpath">
+    <fileset dir="${thrift.java.dir}/build/libs">
+      <include name="libthrift*.jar" />
+      <exclude name="libthrift*test.jar" />
+      <exclude name="libthrift*javadoc.jar" />
+      <exclude name="libthrift*sources.jar" />
+    </fileset>
+    <fileset dir="${thrift.java.dir}/build/deps">
+      <include name="*.jar" />
+    </fileset>
+  </path>
+  <path id="build.classpath">
+    <path refid="libs.classpath" />
+    <pathelement path="${gen}" />
+    <pathelement path="${build}" />
+  </path>
+
+  <target name="init">
+    <tstamp />
+    <mkdir dir="${build}"/>
+  </target>
+
+  <target name="compile" depends="init">
+    <javac compiler="modern" includeantruntime="false" srcdir="${gen}" destdir="${build}" classpathref="libs.classpath" />
+    <javac compiler="modern" includeantruntime="false" srcdir="${javasrc}" destdir="${build}" classpathref="build.classpath">
+      <exclude name="JavaClient.java"/>
+      <exclude name="JavaServer.java"/>
+      <include name="CalculatorHandler.java"/>
+    </javac>
+    <javac compiler="modern" includeantruntime="false" srcdir="${src}" destdir="${build}" classpathref="build.classpath">
+      <compilerarg value="-Xlint:all"/>
+    </javac>
+  </target>
+
+  <target name="test" depends="tutorial" />
+
+  <target name="tutorial" depends="compile">
+    <jar jarfile="tutorial-js.jar" basedir="${build}"/>
+  </target>
+
+  <target name="tutorialserver" description="run the test server" depends="tutorial, generate">
+    <java classname="Httpd" fork="true"
+      classpathref="build.classpath" failonerror="true">
+      <arg value="../../" />
+    </java>
+  </target>
+
+  <target name="generate">
+    <exec executable="../../compiler/cpp/thrift" failonerror="true">
+      <arg line="--gen js -r  ../tutorial.thrift"/>
+    </exec>
+  </target>
+
+  <target name="clean">
+    <delete dir="${build}" />
+    <delete dir="gen-js"/>
+    <delete file="tutorial-js.jar" />
+  </target>
+
+</project>

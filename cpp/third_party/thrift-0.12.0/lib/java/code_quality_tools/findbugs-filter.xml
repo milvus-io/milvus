@@ -1,0 +1,51 @@
+<FindBugsFilter>
+    <!--
+        This file controls filtering some of the more obnoxious findbugs reports.
+        Some may be worthy of examination and resolution, others are too nit-picky.
+    -->
+    <Match>
+        <Or>
+            <!-- Filter the missing serialVersionUID errors -->
+            <Bug code="SnVI" />
+            <!-- Filter Malicious code vulnerability Warnings -->
+            <Bug code="EI,EI2" />
+            <!-- Filter Unchecked/unconfirmed cast -->
+            <Bug code="BC" />
+            <!-- Filter Should return a zero length array rather than null? -->
+            <Bug code="PZLA" />
+            <!-- Filter Redundant nullcheck -->
+            <Bug code="RCN" />
+            <!-- Filter Exception is caught when Exception is not thrown -->
+            <Bug code="REC" />
+            <!-- Filter Switch statement found where default case is missing -->
+            <Bug code="SF" />
+            <!-- Filter Unread public/protected field -->
+            <Bug code="UrF" />
+            <!-- Filter Field not initialized in constructor and dereferenced -->
+            <Bug code="UwF" />
+        </Or>
+    </Match>
+     <Match>
+        <!-- Filter method invokes System.exit(...), which shuts down the entire virtual machine -->
+        <Class name="org.apache.thrift.transport.TFileTransport" />
+        <Method name="printUsage" />
+        <Bug code="Dm" />
+     </Match>
+     <Match>
+        <!-- Filter method might ignore java.lang.Exception -->
+       <Class name="org.apache.thrift.transport.TSimpleFileTransport" />
+       <Method name="close" />
+       <Bug code="DE" />
+     </Match>
+     <Match>
+        <!-- Filter method might ignore java.lang.Exception -->
+       <Class name="org.apache.thrift.TNonblockingMultiFetchClient$MultiFetch" />
+       <Method name="run" />
+       <Bug code="DE" />
+     </Match>
+     <Match>
+        <!-- Filter Class defines non-transient non-serializable instance field -->
+       <Class name="org.apache.thrift.server.TServlet" />
+       <Bug code="Se" />
+     </Match>
+</FindBugsFilter>

@@ -1,0 +1,53 @@
+{
+   boost/get_once_per_thread_epoch/ignore
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:_ZN5boost6detail25get_once_per_thread_epochEv
+}
+{
+   boostthreads/once/ignore
+   Helgrind:Race
+   fun:_ZN5boost13thread_detail17enter_once_regionERNS_9once_flagE
+   fun:_ZN5boost6detail23get_current_thread_dataEv
+   fun:_ZN5boost6detail20interruption_checkerC1EP15pthread_mutex_tP14pthread_cond_t
+   fun:_ZN5boost22condition_variable_any4waitINS_11unique_lockINS_11timed_mutexEEEEEvRT_
+   fun:_ZN6apache6thrift11concurrency7Monitor4Impl11waitForeverEv
+   fun:_ZN6apache6thrift11concurrency7Monitor4Impl19waitForTimeRelativeEl
+   fun:_ZN6apache6thrift11concurrency7Monitor4Impl4waitEl
+   fun:_ZNK6apache6thrift11concurrency7Monitor4waitEl
+   fun:_ZN6apache6thrift11concurrency11BoostThread5startEv
+   fun:_ZN6apache6thrift11concurrency4test18ThreadFactoryTests12reapNThreadsEii
+   fun:main
+}
+{
+   pthread/creation-tls/ignore
+   Helgrind:Race
+   fun:mempcpy
+   fun:_dl_allocate_tls_init
+   fun:get_cached_stack
+   fun:allocate_stack
+   fun:pthread_create@@GLIBC_2.2*
+   obj:/usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so
+   fun:_ZN6apache6thrift11concurrency13PthreadThread5startEv
+   fun:_ZN6apache6thrift11concurrency4test18ThreadFactoryTests12reapNThreadsEii
+   fun:main
+}
+{
+   boost-thread/creation-tls/ignore
+   Helgrind:Race
+   fun:mempcpy
+   fun:_dl_allocate_tls_init
+   fun:get_cached_stack
+   fun:allocate_stack
+   fun:pthread_create@@GLIBC_2.2.5
+   obj:/usr/lib/valgrind/vgpreload_helgrind-amd64-linux.so
+   fun:_ZN5boost6thread21start_thread_noexceptEv
+   fun:_ZN5boost6thread12start_threadEv
+   fun:_ZN5boost6threadC1ISt5_BindIFPFPvS3_ES3_EEEEOT_
+   fun:_ZN6apache6thrift11concurrency11BoostThread5startEv
+   fun:_ZN6apache6thrift11concurrency4test18ThreadFactoryTests12reapNThreadsEii
+   fun:main
+}
+
+
