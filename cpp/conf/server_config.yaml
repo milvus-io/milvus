@@ -1,3 +1,31 @@
 server_config:
   address: 127.0.0.1
   port: 21001
+
+log_config:
+  global:
+    format: "%datetime | %level | %logger | %msg"
+    filename: "/tmp/logs/vecwise/vecwise_engine-%datetime{%h:%m}-global.log"
+    enabled: true
+    to_file: true
+    to_standard_output: true
+    subsecond_precision: 3
+    performance_tracking: false
+    max_log_file_size: 2097152  # throw log files away after 2mb
+  debug:
+    filename: "/tmp/logs/vecwise/vecwise_engine-%datetime{%h:%m}-debug.log"
+    enabled: true
+  warning:
+    filename: "/tmp/logs/vecwise/vecwise_engine-%datetime{%h:%m}-warning.log"
+  trace:
+    filename: "/tmp/logs/vecwise/vecwise_engine-%datetime{%h:%m}-trace.log"
+  verbose:
+    format: "%datetime{%d/%m/%y} | %level-%vlevel | %msg"
+    to_file: false
+    to_standard_output: true
+  error:
+    enabled: false
+    filename: "/tmp/logs/vecwise/vecwise_engine-%datetime{%h:%m}-error.log"
+  fatal:
+    enabled: false
+    filename: "/tmp/logs/vecwise/vecwise_engine-%datetime{%h:%m}-fatal.log"
