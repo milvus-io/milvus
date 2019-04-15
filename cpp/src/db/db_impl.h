@@ -49,6 +49,7 @@ private:
     std::condition_variable _bg_work_finish_signal;
     bool _bg_compaction_scheduled;
     Status _bg_error;
+    std::atomic<bool> _shutting_down;
 
     std::shared_ptr<Meta> _pMeta;
     std::shared_ptr<MemManager> _pMemMgr;

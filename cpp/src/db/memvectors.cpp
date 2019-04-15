@@ -52,7 +52,7 @@ MemVectors::~MemVectors() {
  * MemManager
  */
 
-MemVectors* MemManager::get_mem_by_group(const std::string& group_id_) {
+VectorsPtr MemManager::get_mem_by_group(const std::string& group_id_) {
     auto memIt = _memMap.find(group_id_);
     if memIt != _memMap.end() {
         return &(memIt->second);
@@ -63,15 +63,16 @@ MemVectors* MemManager::get_mem_by_group(const std::string& group_id_) {
     if (!status.ok()) {
         return nullptr;
     }
-    _memMap[group_id] = MemVectors(group_info.dimension, group_info.next_file_location);
-    return &(_memMap[group_id]);
+    _memMap[group_id] = std::shared_ptr<MemVectors>(new MemVectors(group_info.dimension,
+                group_info.next_file_location));
+    return _memMap[group_id];
 }
 
 Status MemManager::add_vectors(const std::string& group_id_,
         size_t n_,
         const float* vectors_,
         IDNumbers& vector_ids_) {
-    // PXU TODO
+    std::lock_guard<std::mutex> lock(_mutex);
     return add_vectors_no_lock(group_id_, n_, vectors_, vector_ids_);
 }
 
@@ -84,6 +85,36 @@ Status MemManager::add_vectors_no_lock(const std::string& group_id_,
         return Status::NotFound("Group " + group_id_ " not found!");
     }
     return mem->add(n, vectors, vector_ids_);
+}
+
+Status MemManager::mark_memory_as_immutable() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    for (auto& kv: _memMap) {
+        _immMems.push_back(kv.second);
+    }
+    _memMap.clear();
+}
+
+/* bool MemManager::need_serialize(double interval) { */
+/*     if (_immMems.size() > 0) { */
+/*         return false; */
+/*     } */
+
+/*     auto diff = std::difftime(std::time(nullptr), _last_compact_time); */
+/*     if (diff >= interval) { */
+/*         return true; */
+/*     } */
+
+/*     return false; */
+/* } */
+
+Status MemManager::serialize() {
+    mark_memory_as_immutable();
+    for (auto& mem : _immMems) {
+        mem->serialize()
+    }
+    _immMems.clear();
+    /* _last_compact_time = std::time(nullptr); */
 }
 
 
