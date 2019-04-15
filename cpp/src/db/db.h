@@ -5,6 +5,7 @@
 #include "options.h"
 #include "db_meta.h"
 #include "status.h"
+#include "types.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -16,7 +17,7 @@ class DB {
 public:
     static DB* Open(const Options& options_, const std::string& name_);
 
-    virtual Status add_group(GroupOptions options_,
+    virtual Status add_group(const GroupOptions& options_,
             const std::string& group_id_,
             GroupSchema& group_info_) = 0;
     virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) = 0;
@@ -26,7 +27,7 @@ public:
                                    GroupFilesSchema& group_files_info_) = 0;
 
     virtual Status add_vectors(const std::string& group_id_,
-            size_t n, const float* vectors) = 0;
+            size_t n, const float* vectors, IDNumbers& vector_ids_) = 0;
 
     DB() = default;
     DB(const DB&) = delete;

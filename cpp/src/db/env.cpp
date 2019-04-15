@@ -43,6 +43,11 @@ void Env::backgroud_thread_main() {
 
 Env::~Env() {}
 
+Env* Env::Default() {
+    static Env env;
+    return &env;
+}
+
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
