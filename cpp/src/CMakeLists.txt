@@ -25,6 +25,7 @@ add_executable(vecwise_engine_server
         ${server_files}
         ${utils_files}
         ${wrapper_files}
+        ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc
         )
 
 set(dependency_libs
