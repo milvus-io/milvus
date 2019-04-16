@@ -13,6 +13,7 @@
 #include "thrift/gen-cpp/VectorService_constants.h"
 
 #include <thrift/protocol/TBinaryProtocol.h>
+#include <thrift/protocol/TJSONProtocol.h>
 #include <thrift/server/TSimpleServer.h>
 #include <thrift/server/TThreadPoolServer.h>
 #include <thrift/transport/TServerSocket.h>
@@ -112,18 +113,20 @@ void ServiceWrapper::StartService() {
 
     ::apache::thrift::stdcxx::shared_ptr<VecServiceHandler> handler(new VecServiceHandler());
     ::apache::thrift::stdcxx::shared_ptr<TProcessor> processor(new VecServiceProcessor(handler));
+    ::apache::thrift::stdcxx::shared_ptr<TServerTransport> serverTransport(new TServerSocket(address, port));
+    ::apache::thrift::stdcxx::shared_ptr<TTransportFactory> transportFactory(new TBufferedTransportFactory());
+
+    ::apache::thrift::stdcxx::shared_ptr<TProtocolFactory> protocolFactory;
+    if(protocol == "binary") {
+        protocolFactory.reset(new TBinaryProtocolFactory());
+    } else if(protocol == "json") {
+        protocolFactory.reset(new TJSONProtocolFactory());
+    }
 
     if(mode == "simple") {
-        ::apache::thrift::stdcxx::shared_ptr<TServerTransport> serverTransport(new TServerSocket(address, port));
-        ::apache::thrift::stdcxx::shared_ptr<TTransportFactory> transportFactory(new TBufferedTransportFactory());
-        ::apache::thrift::stdcxx::shared_ptr<TProtocolFactory> protocolFactory(new TBinaryProtocolFactory());
         s_server.reset(new TSimpleServer(processor, serverTransport, transportFactory, protocolFactory));
         s_server->serve();
     } else if(mode == "thread_pool") {
-        ::apache::thrift::stdcxx::shared_ptr<TServerTransport> serverTransport(new TServerSocket(port));
-        ::apache::thrift::stdcxx::shared_ptr<TTransportFactory> transportFactory(new TBufferedTransportFactory());
-        ::apache::thrift::stdcxx::shared_ptr<TProtocolFactory> protocolFactory(new TBinaryProtocolFactory());
-
         ::apache::thrift::stdcxx::shared_ptr<ThreadManager> threadManager(ThreadManager::newSimpleThreadManager(1));
         ::apache::thrift::stdcxx::shared_ptr<PosixThreadFactory> threadFactory(new PosixThreadFactory());
         threadManager->threadFactory(threadFactory);
