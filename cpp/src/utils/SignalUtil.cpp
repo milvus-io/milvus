@@ -19,6 +19,7 @@ void SignalUtil::HandleSignal(int signum){
     CommonUtil::PrintInfo("Server received signal:" + std::to_string(signum));
 
     switch(signum){
+        case SIGINT:
         case SIGUSR2:{
             server::Server* server_ptr = server::Server::Instance();
             server_ptr->Stop();
