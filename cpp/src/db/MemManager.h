@@ -6,8 +6,8 @@
 #include <ctime>
 #include <memory>
 #include <mutex>
-#include "id_generators.h"
-#include "status.h"
+#include "IDGenerator.h"
+#include "Status.h"
 
 namespace faiss {
     class IndexIDMap;

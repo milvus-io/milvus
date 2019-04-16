@@ -4,8 +4,8 @@
 #include <condition_variable>
 #include <memory>
 #include <atomic>
-#include "db.h"
-#include "memvectors.h"
+#include "DB.h"
+#include "MemManager.h"
 #include "Types.h"
 
 namespace zilliz {

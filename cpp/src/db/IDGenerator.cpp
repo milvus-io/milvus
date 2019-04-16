@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <iostream>
 
-#include "id_generators.h"
+#include "IDGenerator.h"
 
 
 namespace zilliz {

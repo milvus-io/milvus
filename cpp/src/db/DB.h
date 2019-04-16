@@ -2,9 +2,9 @@
 #define VECENGINE_DB_H_
 
 #include <string>
-#include "options.h"
-#include "db_meta.h"
-#include "status.h"
+#include "Options.h"
+#include "Meta.h"
+#include "Status.h"
 #include "Types.h"
 
 namespace zilliz {

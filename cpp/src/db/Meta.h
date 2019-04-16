@@ -5,8 +5,8 @@
 #include <vector>
 #include <map>
 #include <ctime>
-#include "options.h"
-#include "status.h"
+#include "Options.h"
+#include "Status.h"
 
 namespace zilliz {
 namespace vecwise {
