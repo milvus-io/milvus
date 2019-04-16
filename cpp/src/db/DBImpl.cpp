@@ -19,6 +19,7 @@ DBImpl::DBImpl(const Options& options_, const std::string& name_)
       _options(options_),
       _bg_compaction_scheduled(false),
       _shutting_down(false),
+      bg_build_index_started_(false),
       _pMeta(new meta::DBMetaImpl(_options.meta)),
       _pMemMgr(new MemManager(_pMeta)) {
     start_timer_task(options_.memory_sync_interval);
@@ -145,13 +146,52 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
         return Status::OK();
     }
 
+    bool has_merge = false;
+
     for (auto& kv : raw_files) {
         auto files = kv.second;
         if (files.size() <= _options.raw_file_merge_trigger_number) {
             continue;
         }
+        has_merge = true;
         merge_files(group_id, kv.first, kv.second);
     }
+
+    if (has_merge) {
+        try_build_index();
+    }
+
+    return Status::OK();
+}
+
+Status DBImpl::build_index(const meta::GroupFileSchema& file) {
+    //PXU TODO
+    return Status::OK();
+}
+
+Status DBImpl::background_build_index() {
+    assert(bg_build_index_started_);
+    meta::GroupFilesSchema to_index_files;
+    // PXU TODO
+    /* _pMeta->files_to_index(to_index_files); */
+    Status status;
+    for (auto& file : to_index_files) {
+        status = build_index(file);
+        if (!status.ok()) {
+            _bg_error = status;
+            return status;
+        }
+    }
+
+    bg_build_index_started_ = false;
+    return Status::OK();
+}
+
+Status DBImpl::try_build_index() {
+    if (bg_build_index_started_) return Status::OK();
+    bg_build_index_started_ = true;
+    std::thread build_index_task(&DBImpl::background_build_index, this);
+    build_index_task.detach();
     return Status::OK();
 }
 
