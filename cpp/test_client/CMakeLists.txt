@@ -21,6 +21,7 @@ set(service_files
 
 add_executable(test_client
     ./main.cpp
+    ../src/server/ServerConfig.cpp
     ${client_src}
     ${service_files}
     ${config_files}
