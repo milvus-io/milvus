@@ -3,12 +3,17 @@
 #include <string>
 #include <cstddef>
 #include <vector>
+#include <map>
+#include <ctime>
 #include "options.h"
 #include "status.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
+namespace meta {
+
+typedef int DateT;
 
 struct GroupSchema {
     size_t id;
@@ -22,19 +27,24 @@ struct GroupSchema {
 
 struct GroupFileSchema {
     typedef enum {
+        NEW,
         RAW,
-        INDEX
+        INDEX,
+        TO_DELETE,
     } FILE_TYPE;
 
     size_t id;
     std::string group_id;
     std::string file_id;
-    int files_type = RAW;
+    int file_type = NEW;
     size_t rows;
+    DateT date;
+    uint16_t dimension;
     std::string location = "";
 }; // GroupFileSchema
 
 typedef std::vector<GroupFileSchema> GroupFilesSchema;
+typedef std::map<DateT, GroupFilesSchema> DatePartionedGroupFilesSchema;
 
 
 class Meta {
@@ -47,6 +57,9 @@ public:
 
     virtual Status add_group_file(const std::string& group_id_,
                                   GroupFileSchema& group_file_info_) = 0;
+    virtual Status add_group_file(const std::string& group_id,
+                                  DateT date,
+                                  GroupFileSchema& group_file_info) = 0;
     virtual Status has_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
                                   bool& has_or_not_) = 0;
@@ -59,8 +72,14 @@ public:
                                    const int date_delta_,
                                    GroupFilesSchema& group_files_info_) = 0;
 
+    virtual Status update_files(const GroupFilesSchema& files) = 0;
+
+    static DateT GetDate(const std::time_t& t);
+    static DateT GetDate();
+
 }; // MetaData
 
+} // namespace meta
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
