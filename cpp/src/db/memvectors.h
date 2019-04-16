@@ -19,6 +19,10 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
+namespace meta {
+    class Meta;
+}
+
 class MemVectors {
 public:
     explicit MemVectors(const std::string& group_id,
@@ -52,12 +56,11 @@ private:
 }; // MemVectors
 
 
-class Meta;
 typedef std::shared_ptr<MemVectors> VectorsPtr;
 
 class MemManager {
 public:
-    MemManager(const std::shared_ptr<Meta>& meta_)
+    MemManager(const std::shared_ptr<meta::Meta>& meta_)
         : _pMeta(meta_) /*_last_compact_time(std::time(nullptr))*/ {}
 
     VectorsPtr get_mem_by_group(const std::string& group_id_);
@@ -76,7 +79,7 @@ private:
     typedef std::vector<VectorsPtr> ImmMemPool;
     MemMap _memMap;
     ImmMemPool _immMems;
-    std::shared_ptr<Meta> _pMeta;
+    std::shared_ptr<meta::Meta> _pMeta;
     /* std::time_t _last_compact_time; */
     std::mutex _mutex;
 }; // MemManager
