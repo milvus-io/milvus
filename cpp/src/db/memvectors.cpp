@@ -13,10 +13,12 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-MemVectors::MemVectors(size_t dimension_, const std::string& file_location_) :
-    _file_location(file_location_),
+MemVectors::MemVectors(const std::string& group_id,
+        size_t dimension, const std::string& file_location) :
+    group_id_(group_id),
+    _file_location(file_location),
     _pIdGenerator(new SimpleIDGenerator()),
-    _dimension(dimension_),
+    _dimension(dimension),
     _pInnerIndex(new faiss::IndexFlat(_dimension)),
     _pIdMapIndex(new faiss::IndexIDMap(_pInnerIndex)) {
 }
@@ -37,13 +39,15 @@ size_t MemVectors::approximate_size() const {
     return total() * _dimension;
 }
 
-void MemVectors::serialize() {
+Status MemVectors::serialize(std::string& group_id) {
     /* std::stringstream ss; */
     /* ss << "/tmp/test/" << _pIdGenerator->getNextIDNumber(); */
     /* faiss::write_index(_pIdMapIndex, ss.str().c_str()); */
     /* std::cout << _pIdMapIndex->ntotal << std::endl; */
     /* std::cout << _file_location << std::endl; */
     faiss::write_index(_pIdMapIndex, _file_location.c_str());
+    group_id = group_id_;
+    return Status::OK();
 }
 
 MemVectors::~MemVectors() {
@@ -71,14 +75,15 @@ VectorsPtr MemManager::get_mem_by_group(const std::string& group_id) {
         return memIt->second;
     }
 
-    GroupSchema group_info;
-    Status status = _pMeta->get_group(group_id, group_info);
+    meta::GroupFileSchema group_file;
+    auto status = _pMeta->add_group_file(group_id, group_file);
     if (!status.ok()) {
         return nullptr;
     }
 
-    _memMap[group_id] = std::shared_ptr<MemVectors>(new MemVectors(group_info.dimension,
-                group_info.next_file_location));
+    _memMap[group_id] = std::shared_ptr<MemVectors>(new MemVectors(group_file.group_id,
+                group_file.dimension,
+                group_file.location));
     return _memMap[group_id];
 }
 
@@ -126,10 +131,13 @@ Status MemManager::mark_memory_as_immutable() {
 /*     return false; */
 /* } */
 
-Status MemManager::serialize() {
+Status MemManager::serialize(std::vector<std::string>& group_ids) {
     mark_memory_as_immutable();
+    std::string group_id;
+    group_ids.clear();
     for (auto& mem : _immMems) {
-        mem->serialize();
+        mem->serialize(group_id);
+        group_ids.push_back(group_id);
     }
     _immMems.clear();
     return Status::OK();

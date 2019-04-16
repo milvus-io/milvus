@@ -19,9 +19,15 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
+namespace meta {
+    class Meta;
+}
+
 class MemVectors {
 public:
-    explicit MemVectors(size_t dimension_, const std::string& file_location_);
+    explicit MemVectors(const std::string& group_id,
+            size_t dimension,
+            const std::string& file_location);
 
     void add(size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
@@ -29,7 +35,7 @@ public:
 
     size_t approximate_size() const;
 
-    void serialize();
+    Status serialize(std::string& group_id);
 
     ~MemVectors();
 
@@ -40,6 +46,7 @@ private:
     MemVectors(const MemVectors&) = delete;
     MemVectors& operator=(const MemVectors&) = delete;
 
+    std::string group_id_;
     const std::string _file_location;
     IDGenerator* _pIdGenerator;
     size_t _dimension;
@@ -49,12 +56,11 @@ private:
 }; // MemVectors
 
 
-class Meta;
 typedef std::shared_ptr<MemVectors> VectorsPtr;
 
 class MemManager {
 public:
-    MemManager(const std::shared_ptr<Meta>& meta_)
+    MemManager(const std::shared_ptr<meta::Meta>& meta_)
         : _pMeta(meta_) /*_last_compact_time(std::time(nullptr))*/ {}
 
     VectorsPtr get_mem_by_group(const std::string& group_id_);
@@ -62,7 +68,7 @@ public:
     Status add_vectors(const std::string& group_id_,
             size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
-    Status serialize();
+    Status serialize(std::vector<std::string>& group_ids);
 
 private:
     Status add_vectors_no_lock(const std::string& group_id_,
@@ -73,7 +79,7 @@ private:
     typedef std::vector<VectorsPtr> ImmMemPool;
     MemMap _memMap;
     ImmMemPool _immMems;
-    std::shared_ptr<Meta> _pMeta;
+    std::shared_ptr<meta::Meta> _pMeta;
     /* std::time_t _last_compact_time; */
     std::mutex _mutex;
 }; // MemManager
