@@ -21,7 +21,9 @@ namespace engine {
 
 class MemVectors {
 public:
-    explicit MemVectors(size_t dimension_, const std::string& file_location_);
+    explicit MemVectors(const std::string& group_id,
+            size_t dimension,
+            const std::string& file_location);
 
     void add(size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
@@ -29,7 +31,7 @@ public:
 
     size_t approximate_size() const;
 
-    void serialize();
+    Status serialize(std::string& group_id);
 
     ~MemVectors();
 
@@ -40,6 +42,7 @@ private:
     MemVectors(const MemVectors&) = delete;
     MemVectors& operator=(const MemVectors&) = delete;
 
+    std::string group_id_;
     const std::string _file_location;
     IDGenerator* _pIdGenerator;
     size_t _dimension;
@@ -62,7 +65,7 @@ public:
     Status add_vectors(const std::string& group_id_,
             size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
-    Status serialize();
+    Status serialize(std::vector<std::string>& group_ids);
 
 private:
     Status add_vectors_no_lock(const std::string& group_id_,

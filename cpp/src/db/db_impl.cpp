@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <chrono>
 #include <thread>
+#include <iostream>
 #include "db_impl.h"
 #include "db_meta_impl.h"
 #include "env.h"
@@ -100,7 +101,11 @@ void DBImpl::background_call() {
 }
 
 void DBImpl::background_compaction() {
-    _pMemMgr->serialize();
+    std::vector<std::string> group_ids;
+    _pMemMgr->serialize(group_ids);
+    for (auto group_id : group_ids) {
+        std::cout << __func__ << " group_id=" << group_id << std::endl;
+    }
 }
 
 DBImpl::~DBImpl() {
