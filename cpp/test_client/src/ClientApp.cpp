@@ -16,6 +16,8 @@
 
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/protocol/TJSONProtocol.h>
+#include <thrift/protocol/TCompactProtocol.h>
+#include <thrift/protocol/TDebugProtocol.h>
 #include <thrift/server/TSimpleServer.h>
 #include <thrift/server/TThreadPoolServer.h>
 #include <thrift/transport/TServerSocket.h>
@@ -52,6 +54,10 @@ void ClientApp::Run(const std::string &config_file) {
         protocol_ptr.reset(new TBinaryProtocol(transport_ptr));
     } else if(protocol == "json") {
         protocol_ptr.reset(new TJSONProtocol(transport_ptr));
+    } else if(protocol == "compact") {
+        protocol_ptr.reset(new TCompactProtocol(transport_ptr));
+    } else if(protocol == "debug") {
+        protocol_ptr.reset(new TDebugProtocol(transport_ptr));
     } else {
         CLIENT_LOG_ERROR << "Service protocol: " << protocol << " is not supported currently";
         return;
