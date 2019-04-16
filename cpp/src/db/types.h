@@ -10,6 +10,9 @@ typedef long IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 
+typedef std::vector<IDNumber> QueryResult;
+typedef std::vector<QueryResult> QueryResults;
+
 
 } // namespace engine
 } // namespace vecwise
