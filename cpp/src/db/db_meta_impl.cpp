@@ -30,6 +30,7 @@ Status DBMetaImpl::get_group(const std::string& group_id_, GroupSchema& group_in
     SimpleIDGenerator g;
     ss.str("");
     ss << "/tmp/test/" << g.getNextIDNumber() << ".log";
+    group_info_.group_id = "1";
     group_info_.dimension = 64;
     group_info_.next_file_location = ss.str();
     return Status::OK();
