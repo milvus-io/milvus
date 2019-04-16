@@ -1,8 +1,8 @@
 #include <sstream>
 #include <iostream>
 #include <boost/filesystem.hpp>
-#include "db_meta_impl.h"
-#include "id_generators.h"
+#include "DBMetaImpl.h"
+#include "IDGenerator.h"
 
 namespace zilliz {
 namespace vecwise {

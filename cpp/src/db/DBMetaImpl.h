@@ -1,8 +1,8 @@
 #ifndef VECENGINE_DB_META_IMPL_H_
 #define VECENGINE_DB_META_IMPL_H_
 
-#include "db_meta.h"
-#include "options.h"
+#include "Meta.h"
+#include "Options.h"
 
 namespace zilliz {
 namespace vecwise {

@@ -5,8 +5,8 @@
 #include <sstream>
 #include <thread>
 
-#include "memvectors.h"
-#include "db_meta.h"
+#include "MemManager.h"
+#include "Meta.h"
 
 
 namespace zilliz {
