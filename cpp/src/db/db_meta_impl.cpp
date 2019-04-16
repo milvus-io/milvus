@@ -6,6 +6,7 @@
 namespace zilliz {
 namespace vecwise {
 namespace engine {
+namespace meta {
 
 DBMetaImpl::DBMetaImpl(const MetaOptions& options_)
     : _options(static_cast<const DBMetaOptions&>(options_)) {
@@ -26,13 +27,6 @@ Status DBMetaImpl::add_group(const GroupOptions& options_,
 
 Status DBMetaImpl::get_group(const std::string& group_id_, GroupSchema& group_info_) {
     //PXU TODO
-    std::stringstream ss;
-    SimpleIDGenerator g;
-    ss.str("");
-    ss << "/tmp/test/" << g.getNextIDNumber() << ".log";
-    group_info_.group_id = "1";
-    group_info_.dimension = 64;
-    group_info_.next_file_location = ss.str();
     return Status::OK();
 }
 
@@ -41,9 +35,24 @@ Status DBMetaImpl::has_group(const std::string& group_id_, bool& has_or_not_) {
     return Status::OK();
 }
 
-Status DBMetaImpl::add_group_file(const std::string& group_id_,
-                              GroupFileSchema& group_file_info_) {
+Status DBMetaImpl::add_group_file(const std::string& group_id,
+                              GroupFileSchema& group_file_info) {
+    return add_group_file(group_id, Meta::GetDate(), group_file_info);
+}
+
+Status DBMetaImpl::add_group_file(const std::string& group_id,
+                              DateT date,
+                              GroupFileSchema& group_file_info) {
     //PXU TODO
+    std::stringstream ss;
+    SimpleIDGenerator g;
+    ss << "/tmp/test/" << date
+                       << "/" << g.getNextIDNumber()
+                       << ".log";
+    group_file_info.group_id = "1";
+    group_file_info.dimension = 64;
+    group_file_info.location = ss.str();
+    group_file_info.date = date;
     return Status::OK();
 }
 
@@ -73,6 +82,12 @@ Status DBMetaImpl::update_group_file(const GroupFileSchema& group_file_) {
     return Status::OK();
 }
 
+Status DBMetaImpl::update_files(const GroupFilesSchema& files) {
+    //PXU TODO
+    return Status::OK();
+}
+
+} // namespace meta
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz

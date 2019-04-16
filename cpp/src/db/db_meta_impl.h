@@ -7,6 +7,7 @@
 namespace zilliz {
 namespace vecwise {
 namespace engine {
+namespace meta {
 
 class DBMetaImpl : public Meta {
 public:
@@ -18,6 +19,9 @@ public:
     virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) override;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
+    virtual Status add_group_file(const std::string& group_id,
+                                  DateT date,
+                                  GroupFileSchema& group_file_info) override;
     virtual Status add_group_file(const std::string& group_id_,
                                   GroupFileSchema& group_file_info_) override;
     virtual Status has_group_file(const std::string& group_id_,
@@ -32,6 +36,8 @@ public:
                                    const int date_delta_,
                                    GroupFilesSchema& group_files_info_) override;
 
+    virtual Status update_files(const GroupFilesSchema& files) override;
+
 private:
 
     Status initialize();
@@ -40,6 +46,7 @@ private:
 
 }; // DBMetaImpl
 
+} // namespace meta
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
