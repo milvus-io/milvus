@@ -30,5 +30,13 @@ Set config in cpp/conf/server_config.yaml
 
 Then luanch server with config:
     
+    cd [build output path]/src
     vecwise_engine_server -c [sourcecode path]/cpp/conf/server_config.yaml
+
+### Luanch test_client(only for debug)
+
+Client use same config file with server:
+    
+    cd [build output path]/test_client
+    test_client -c [sourcecode path]/cpp/conf/server_config.yaml
 
