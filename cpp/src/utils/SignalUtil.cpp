@@ -24,7 +24,6 @@ void SignalUtil::HandleSignal(int signum){
             server_ptr->Stop();
 
             exit(0);
-
         }
         default:{
             SignalUtil::PrintStacktrace();
