@@ -5,10 +5,12 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include "Server.h"
 #include "ServerConfig.h"
+#include "ServiceWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 #include "utils/LogUtil.h"
+
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -157,9 +159,8 @@ Server::Start() {
             signal(SIGHUP, SignalUtil::HandleSignal);
             signal(SIGTERM, SignalUtil::HandleSignal);
 
-            StartService();
-
             CommonUtil::PrintInfo("Vecwise server is running...");
+            StartService();
 
         } catch(std::exception& ex){
             std::string info = "Vecwise server encounter exception: " + std::string(ex.what());
@@ -216,12 +217,12 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
-
+    ServiceWrapper::StartService();
 }
 
 void
 Server::StopService() {
-
+    ServiceWrapper::StopService();
 }
 
 }
