@@ -5,7 +5,7 @@
 #include "options.h"
 #include "db_meta.h"
 #include "status.h"
-#include "types.h"
+#include "Types.h"
 
 namespace zilliz {
 namespace vecwise {
