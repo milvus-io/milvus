@@ -41,6 +41,9 @@ public:
     virtual ~DBImpl();
 
 private:
+    Status background_build_index();
+    Status build_index(const meta::GroupFileSchema&);
+    Status try_build_index();
     Status merge_files(const std::string& group_id,
             const meta::DateT& date,
             const meta::GroupFilesSchema& files);
@@ -63,6 +66,8 @@ private:
     bool _bg_compaction_scheduled;
     Status _bg_error;
     std::atomic<bool> _shutting_down;
+
+    bool bg_build_index_started_;
 
     std::shared_ptr<meta::Meta> _pMeta;
     std::shared_ptr<MemManager> _pMemMgr;
