@@ -6,7 +6,7 @@
 #include <atomic>
 #include "db.h"
 #include "memvectors.h"
-#include "types.h"
+#include "Types.h"
 
 namespace zilliz {
 namespace vecwise {
