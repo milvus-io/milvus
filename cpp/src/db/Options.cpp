@@ -1,5 +1,6 @@
 #include "Options.h"
 #include "Env.h"
+#include "DBMetaImpl.h"
 
 namespace zilliz {
 namespace vecwise {
