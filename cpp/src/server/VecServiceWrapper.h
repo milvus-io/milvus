@@ -14,7 +14,7 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-class ServiceWrapper {
+class VecServiceWrapper {
 public:
     static void StartService();
     static void StopService();
