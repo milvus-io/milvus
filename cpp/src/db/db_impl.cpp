@@ -138,7 +138,6 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
     meta::DatePartionedGroupFilesSchema raw_files;
     auto status = _pMeta->files_to_merge(group_id, raw_files);
     if (!status.ok()) {
-        _bg_error = status;
         return status;
     }
 
@@ -147,19 +146,27 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
     }
 
     for (auto& kv : raw_files) {
+        auto files = kv.second;
+        if (files.size() <= _options.raw_file_merge_trigger_number) {
+            continue;
+        }
         merge_files(group_id, kv.first, kv.second);
     }
+    return Status::OK();
 }
 
 void DBImpl::background_compaction() {
     std::vector<std::string> group_ids;
     _pMemMgr->serialize(group_ids);
+
+    Status status;
     for (auto group_id : group_ids) {
-        std::cout << __func__ << " group_id=" << group_id << std::endl;
-    }
-
-    if (group_ids.size() > 0) {
-
+        /* std::cout << __func__ << " group_id=" << group_id << std::endl; */
+        status = background_merge_files(group_id);
+        if (!status.ok()) {
+            _bg_error = status;
+            return;
+        }
     }
 }
 
