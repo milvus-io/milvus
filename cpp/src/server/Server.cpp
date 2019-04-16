@@ -6,7 +6,7 @@
 #include "Server.h"
 #include "ServerConfig.h"
 #include "ServiceWrapper.h"
-#include "utils/CommonUtil.h"
+#include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 #include "utils/LogUtil.h"
@@ -50,11 +50,11 @@ Server::Daemonize() {
         return;
     }
 
-    CommonUtil::PrintInfo("Vecwise server run in daemonize mode");
+    SERVER_LOG_INFO << "Vecwise server run in daemonize mode";
 
 //    std::string log_path(GetLogDirFullPath());
 //    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
-//    CommonUtil::PrintInfo("Log will be exported to: " + log_path);
+//    SERVER_LOG_INFO << "Log will be exported to: " + log_path);
 
     pid_t pid = 0;
 
@@ -106,7 +106,7 @@ Server::Daemonize() {
         close(fd);
     }
 
-    CommonUtil::PrintInfo("Redirect stdin/stdout/stderr to /dev/null");
+    SERVER_LOG_INFO << "Redirect stdin/stdout/stderr to /dev/null";
 
     // Redirect stdin/stdout/stderr to /dev/null
     stdin = fopen("/dev/null", "r");
@@ -116,11 +116,11 @@ Server::Daemonize() {
     if (!pid_filename_.empty()) {
         pid_fd = open(pid_filename_.c_str(), O_RDWR | O_CREAT, 0640);
         if (pid_fd < 0) {
-            CommonUtil::PrintInfo("Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno));
+            SERVER_LOG_INFO << "Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
         if (lockf(pid_fd, F_TLOCK, 0) < 0) {
-            CommonUtil::PrintInfo("Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno));
+            SERVER_LOG_INFO << "Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
 
@@ -159,14 +159,12 @@ Server::Start() {
             signal(SIGHUP, SignalUtil::HandleSignal);
             signal(SIGTERM, SignalUtil::HandleSignal);
 
-            CommonUtil::PrintInfo("Vecwise server is running...");
+            SERVER_LOG_INFO << "Vecwise server is running...";
             StartService();
 
         } catch(std::exception& ex){
-            std::string info = "Vecwise server encounter exception: " + std::string(ex.what());
-            CommonUtil::PrintError(info);
-
-            CommonUtil::PrintInfo("Is another server instance running?");
+            SERVER_LOG_ERROR << "Vecwise server encounter exception: " << std::string(ex.what())
+                             << "Is another server instance running?";
             break;
         }
     } while(false);
@@ -177,7 +175,7 @@ Server::Start() {
 
 void
 Server::Stop() {
-    CommonUtil::PrintInfo("Vecwise server will be closed");
+    SERVER_LOG_INFO << "Vecwise server will be closed";
 
     // Unlock and close lockfile
     if (pid_fd != -1) {
@@ -204,7 +202,7 @@ Server::Stop() {
     StopService();
 
 
-    CommonUtil::PrintInfo("Vecwise server closed");
+    SERVER_LOG_INFO << "Vecwise server closed";
 }
 
 

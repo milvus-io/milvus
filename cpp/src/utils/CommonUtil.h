@@ -15,9 +15,6 @@ namespace server {
 
 class CommonUtil {
  public:
-    static void PrintInfo(const std::string& info);
-    static void PrintError(const std::string& info);
-
     static bool GetSystemMemInfo(unsigned long &totalMem, unsigned long &freeMem);
     static bool GetSystemAvailableThreads(unsigned int &threadCnt);
 

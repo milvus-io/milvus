@@ -5,7 +5,7 @@
  ******************************************************************************/
 #include "ConfigNode.h"
 #include "utils/Error.h"
-#include "utils/CommonUtil.h"
+#include "utils/Log.h"
 
 #include <sstream>
 #include <string>
@@ -177,18 +177,18 @@ void ConfigNode::ClearSequences() {
 void
 ConfigNode::PrintAll(const std::string& prefix) const {
     for(auto& elem : config_) {
-        CommonUtil::PrintInfo(prefix + elem.first + ": " + elem.second);
+        SERVER_LOG_INFO << prefix << elem.first + ": " << elem.second;
     }
 
     for(auto& elem : sequences_) {
-        CommonUtil::PrintInfo(prefix + elem.first + ": ");
+        SERVER_LOG_INFO << prefix << elem.first << ": ";
         for(auto& str : elem.second) {
-            CommonUtil::PrintInfo(prefix + "    - " + str);
+            SERVER_LOG_INFO << prefix << "    - " << str;
         }
     }
 
     for(auto& elem : children_) {
-        CommonUtil::PrintInfo(prefix + elem.first + ": ");
+        SERVER_LOG_INFO << prefix << elem.first << ": ";
         elem.second.PrintAll(prefix + "    ");
     }
 }
