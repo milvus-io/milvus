@@ -135,7 +135,7 @@ void ServiceWrapper::StartService() {
         s_server.reset(new TSimpleServer(processor, serverTransport, transportFactory, protocolFactory));
         s_server->serve();
     } else if(mode == "thread_pool") {
-        ::apache::thrift::stdcxx::shared_ptr<ThreadManager> threadManager(ThreadManager::newSimpleThreadManager(1));
+        ::apache::thrift::stdcxx::shared_ptr<ThreadManager> threadManager(ThreadManager::newSimpleThreadManager());
         ::apache::thrift::stdcxx::shared_ptr<PosixThreadFactory> threadFactory(new PosixThreadFactory());
         threadManager->threadFactory(threadFactory);
         threadManager->start();
