@@ -41,3 +41,11 @@ set(client_libs
     pthread)
 
 target_link_libraries(test_client ${client_libs})
+
+add_executable(skeleton_server
+        ../src/thrift/gen-cpp/VecService_server.skeleton.cpp
+        ../src/thrift/gen-cpp/VecService.cpp
+        ../src/thrift/gen-cpp/VectorService_constants.cpp
+        ../src/thrift/gen-cpp/VectorService_types.cpp)
+
+target_link_libraries(skeleton_server thrift)
