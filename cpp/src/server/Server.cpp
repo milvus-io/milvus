@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include "Server.h"
 #include "ServerConfig.h"
-#include "ServiceWrapper.h"
+#include "VecServiceWrapper.h"
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
@@ -215,12 +215,12 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
-    ServiceWrapper::StartService();
+    VecServiceWrapper::StartService();
 }
 
 void
 Server::StopService() {
-    ServiceWrapper::StopService();
+    VecServiceWrapper::StopService();
 }
 
 }

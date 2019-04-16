@@ -66,7 +66,6 @@ struct VecTimeRangeList {
 }
 
 service VecService {
-    void dummy();
     /**
      * group interfaces
      */
