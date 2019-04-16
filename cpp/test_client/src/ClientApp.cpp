@@ -47,37 +47,43 @@ void ClientApp::Run(const std::string &config_file) {
     std::string mode = server_config.GetValue(server::CONFIG_SERVER_MODE, "thread_pool");
 
     CLIENT_LOG_INFO << "Connect to server: " << address << ":" << std::to_string(port);
-    ::apache::thrift::stdcxx::shared_ptr<TSocket> socket_ptr(new ::apache::thrift::transport::TSocket(address, port));
-    ::apache::thrift::stdcxx::shared_ptr<TTransport> transport_ptr(new TBufferedTransport(socket_ptr));
-    ::apache::thrift::stdcxx::shared_ptr<TProtocol> protocol_ptr;
-    if(protocol == "binary") {
-        protocol_ptr.reset(new TBinaryProtocol(transport_ptr));
-    } else if(protocol == "json") {
-        protocol_ptr.reset(new TJSONProtocol(transport_ptr));
-    } else if(protocol == "compact") {
-        protocol_ptr.reset(new TCompactProtocol(transport_ptr));
-    } else if(protocol == "debug") {
-        protocol_ptr.reset(new TDebugProtocol(transport_ptr));
-    } else {
-        CLIENT_LOG_ERROR << "Service protocol: " << protocol << " is not supported currently";
-        return;
-    }
 
-    transport_ptr->open();
-    VecServiceClient client(protocol_ptr);
     try {
-        client.dummy();
+        stdcxx::shared_ptr<TSocket> socket_ptr(new transport::TSocket(address, port));
+        stdcxx::shared_ptr<TTransport> transport_ptr(new TBufferedTransport(socket_ptr));
+        stdcxx::shared_ptr<TProtocol> protocol_ptr;
+        if(protocol == "binary") {
+            protocol_ptr.reset(new TBinaryProtocol(transport_ptr));
+        } else if(protocol == "json") {
+            protocol_ptr.reset(new TJSONProtocol(transport_ptr));
+        } else if(protocol == "compact") {
+            protocol_ptr.reset(new TCompactProtocol(transport_ptr));
+        } else if(protocol == "debug") {
+            protocol_ptr.reset(new TDebugProtocol(transport_ptr));
+        } else {
+            CLIENT_LOG_ERROR << "Service protocol: " << protocol << " is not supported currently";
+            return;
+        }
 
-        VecGroup group;
-        group.id = "test_group";
-        group.dimension = 256;
-        group.index_type = 0;
-        client.add_group(group);
+        transport_ptr->open();
+        VecServiceClient client(protocol_ptr);
+        try {
+            VecGroup group;
+            group.id = "test_group";
+            group.dimension = 256;
+            group.index_type = 0;
+            client.add_group(group);
+
+
+
+        } catch (apache::thrift::TException& ex) {
+            printf("%s", ex.what());
+        }
+
+        transport_ptr->close();
     } catch (apache::thrift::TException& ex) {
-        printf("%s", ex.what());
+        CLIENT_LOG_ERROR << "Server encounter exception: " << ex.what();
     }
-
-    transport_ptr->close();
 
     CLIENT_LOG_INFO << "Test finished";
 }
