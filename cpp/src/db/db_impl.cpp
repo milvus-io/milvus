@@ -52,6 +52,12 @@ Status DBImpl::add_vectors(const std::string& group_id_,
     }
 }
 
+Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
+        const float* vectors, QueryResults& results) {
+    // PXU TODO
+    return Status::OK();
+}
+
 void DBImpl::start_timer_task(int interval_) {
     std::thread bg_task(&DBImpl::background_timer_task, this, interval_);
     bg_task.detach();

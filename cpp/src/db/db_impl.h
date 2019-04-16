@@ -31,6 +31,9 @@ public:
     virtual Status add_vectors(const std::string& group_id_,
             size_t n, const float* vectors, IDNumbers& vector_ids_) override;
 
+    virtual Status search(const std::string& group_id, size_t k, size_t nq,
+            const float* vectors, QueryResults& results) override;
+
     virtual ~DBImpl();
 
 private:
