@@ -17,9 +17,6 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-static const std::string CONFIG_ADDRESS = "address";
-static const std::string CONFIG_PORT = "port";
-
 ServerConfig&
 ServerConfig::GetInstance() {
     static ServerConfig config;
@@ -77,18 +74,6 @@ ServerConfig::GetConfig(const std::string& name) {
     IConfigMgr* mgr = IConfigMgr::GetInstance();
     ConfigNode& root_node = mgr->GetRootNode();
     return root_node.GetChild(name);
-}
-
-std::string
-ServerConfig::GetServerAddress() const {
-    ConfigNode server_config = GetConfig(CONFIG_SERVER);
-    return server_config.GetValue(CONFIG_ADDRESS);
-}
-
-std::string
-ServerConfig::GetServerPort() const {
-    ConfigNode server_config = GetConfig(CONFIG_SERVER);
-    return server_config.GetValue(CONFIG_PORT);
 }
 
 

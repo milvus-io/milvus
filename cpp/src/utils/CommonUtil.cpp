@@ -33,12 +33,12 @@ namespace fs = boost::filesystem;
 
 void CommonUtil::PrintInfo(const std::string& info){
     SERVER_LOG_INFO << info;
-//    std::cout << info << std::endl;
+    std::cout << "Info:" << info << std::endl;
 }
 
 void CommonUtil::PrintError(const std::string& info){
     SERVER_LOG_ERROR << info;
-//    std::cout << info << std::endl;
+    std::cout << "Error:" << info << std::endl;
 }
 
 bool CommonUtil::GetSystemMemInfo(unsigned long &totalMem, unsigned long &freeMem) {
