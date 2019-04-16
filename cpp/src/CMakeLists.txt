@@ -8,11 +8,15 @@ aux_source_directory(cache cache_files)
 aux_source_directory(config config_files)
 aux_source_directory(server server_files)
 aux_source_directory(utils utils_files)
+aux_source_directory(wrapper wrapper_files)
 
 set(vecwise_engine_src
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
         ${cache_files}
-        )
+        ${wrapper_files})
+
+include_directories(/usr/local/cuda/include)
+find_library(cuda_library cudart cublas HINTS /usr/local/cuda/lib64)
 
 add_library(vecwise_engine STATIC ${vecwise_engine_src})
 
@@ -20,6 +24,7 @@ add_executable(vecwise_engine_server
         ${config_files}
         ${server_files}
         ${utils_files}
+        ${wrapper_files}
         )
 
 set(dependency_libs
@@ -28,4 +33,4 @@ set(dependency_libs
         boost_system
         boost_filesystem
         )
-target_link_libraries(vecwise_engine_server ${dependency_libs})
+target_link_libraries(vecwise_engine_server ${dependency_libs} ${cuda_library})
