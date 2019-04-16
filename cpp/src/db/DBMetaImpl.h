@@ -45,7 +45,7 @@ private:
 
     Status initialize();
 
-    const DBMetaOptions& _options;
+    const DBMetaOptions _options;
 
 }; // DBMetaImpl
 
