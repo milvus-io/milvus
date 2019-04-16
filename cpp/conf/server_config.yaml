@@ -2,7 +2,7 @@ server_config:
   address: 127.0.0.1
   port: 33001
   transfer_protocol: json   #optional: binary, compact, json, simple_json, debug
-  server_mode: thread_pool    #optional: simple, non_blocking, hsha, thread_pool, thread_selector
+  server_mode: simple    #optional: simple, non_blocking, hsha, thread_pool, thread_selector
 
 log_config:
   global:

@@ -19,6 +19,7 @@
 #include <thrift/server/TSimpleServer.h>
 #include <thrift/server/TThreadPoolServer.h>
 #include <thrift/transport/TServerSocket.h>
+#include <thrift/transport/TSocket.h>
 #include <thrift/transport/TBufferTransports.h>
 #include <thrift/concurrency/PosixThreadFactory.h>
 
@@ -41,20 +42,34 @@ void ClientApp::Run(const std::string &config_file) {
     std::string protocol = server_config.GetValue(server::CONFIG_SERVER_PROTOCOL, "binary");
     std::string mode = server_config.GetValue(server::CONFIG_SERVER_MODE, "thread_pool");
 
-    ::apache::thrift::stdcxx::shared_ptr<TProtocolFactory> protocolFactory;
+
+    ::apache::thrift::stdcxx::shared_ptr<TSocket> socket_ptr(new ::apache::thrift::transport::TSocket("localhost", 9090));
+    ::apache::thrift::stdcxx::shared_ptr<TTransport> transport_ptr(new TBufferedTransport(socket_ptr));
+    ::apache::thrift::stdcxx::shared_ptr<TProtocol> protocol_ptr;
     if(protocol == "binary") {
-        protocolFactory.reset(new TBinaryProtocolFactory());
+        protocol_ptr.reset(new TBinaryProtocol(transport_ptr));
     } else if(protocol == "json") {
-        protocolFactory.reset(new TJSONProtocolFactory());
-    }
-
-    if(mode == "simple") {
-
-    } else if(mode == "thread_pool") {
-
+        protocol_ptr.reset(new TJSONProtocol(transport_ptr));
     } else {
-        server::CommonUtil::PrintError("Server mode: " + mode + " is not supported currently");
+        server::CommonUtil::PrintError("Service protocol: " + protocol + " is not supported currently");
+        return;
     }
+
+    transport_ptr->open();
+    VecServiceClient client(protocol_ptr);
+    try {
+        client.dummy();
+//        VecGroup group;
+//        group.id = "test_group";
+//        group.dimension = 256;
+//        group.index_type = 0;
+//        client.add_group(group);
+    } catch (apache::thrift::TException& ex) {
+        printf("%s", ex.what());
+    }
+
+    transport_ptr->close();
+    server::CommonUtil::PrintInfo("test_client exit...");
 }
 
 }

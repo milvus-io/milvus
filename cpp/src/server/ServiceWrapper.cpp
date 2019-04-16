@@ -38,6 +38,11 @@ public:
         // Your initialization goes here
     }
 
+    void dummy() {
+        // Your implementation goes here
+        printf("dummy\n");
+    }
+
     /**
      * group interfaces
      *
@@ -121,6 +126,9 @@ void ServiceWrapper::StartService() {
         protocolFactory.reset(new TBinaryProtocolFactory());
     } else if(protocol == "json") {
         protocolFactory.reset(new TJSONProtocolFactory());
+    } else {
+        CommonUtil::PrintError("Service protocol: " + protocol + " is not supported currently");
+        return;
     }
 
     if(mode == "simple") {
@@ -135,7 +143,8 @@ void ServiceWrapper::StartService() {
         s_server.reset(new TThreadPoolServer(processor, serverTransport, transportFactory, protocolFactory, threadManager));
         s_server->serve();
     } else {
-        CommonUtil::PrintError("Server mode: " + mode + " is not supported currently");
+        CommonUtil::PrintError("Service mode: " + mode + " is not supported currently");
+        return;
     }
 }
 
