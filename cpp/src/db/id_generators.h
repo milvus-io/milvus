@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vector>
-#include "types.h"
+#include "Types.h"
 
 namespace zilliz {
 namespace vecwise {
