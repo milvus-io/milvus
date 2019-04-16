@@ -136,11 +136,11 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
 
 Status DBImpl::background_merge_files(const std::string& group_id) {
     meta::DatePartionedGroupFilesSchema raw_files;
-    /* auto status = _pMeta->get_small_raw_files(group_id, raw_files); */
-    /* if (!status.ok()) { */
-    /*     _bg_error = status; */
-    /*     return status; */
-    /* } */
+    auto status = _pMeta->files_to_merge(group_id, raw_files);
+    if (!status.ok()) {
+        _bg_error = status;
+        return status;
+    }
 
     if (raw_files.size() == 0) {
         return Status::OK();
