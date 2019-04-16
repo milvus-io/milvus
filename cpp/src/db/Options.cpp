@@ -1,5 +1,5 @@
-#include "options.h"
-#include "env.h"
+#include "Options.h"
+#include "Env.h"
 
 namespace zilliz {
 namespace vecwise {

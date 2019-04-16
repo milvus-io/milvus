@@ -5,9 +5,9 @@
 #include <faiss/IndexFlat.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/index_io.h>
-#include "db_impl.h"
-#include "db_meta_impl.h"
-#include "env.h"
+#include "DBImpl.h"
+#include "DBMetaImpl.h"
+#include "Env.h"
 
 namespace zilliz {
 namespace vecwise {

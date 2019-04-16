@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <cstring>
 #include <assert.h>
-#include "status.h"
+#include "Status.h"
 
 namespace zilliz {
 namespace vecwise {

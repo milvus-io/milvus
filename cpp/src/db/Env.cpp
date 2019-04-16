@@ -1,5 +1,5 @@
 #include <assert.h>
-#include "env.h"
+#include "Env.h"
 
 namespace zilliz {
 namespace vecwise {
