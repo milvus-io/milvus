@@ -19,7 +19,7 @@ DBImpl::DBImpl(const Options& options_, const std::string& name_)
       _options(options_),
       _bg_compaction_scheduled(false),
       _shutting_down(false),
-      _pMeta(new meta::DBMetaImpl(*(_options.pMetaOptions))),
+      _pMeta(new meta::DBMetaImpl(_options.meta)),
       _pMemMgr(new MemManager(_pMeta)) {
     start_timer_task(options_.memory_sync_interval);
 }
