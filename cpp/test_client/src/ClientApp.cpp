@@ -43,7 +43,7 @@ void ClientApp::Run(const std::string &config_file) {
     std::string mode = server_config.GetValue(server::CONFIG_SERVER_MODE, "thread_pool");
 
 
-    ::apache::thrift::stdcxx::shared_ptr<TSocket> socket_ptr(new ::apache::thrift::transport::TSocket("localhost", 9090));
+    ::apache::thrift::stdcxx::shared_ptr<TSocket> socket_ptr(new ::apache::thrift::transport::TSocket(address, port));
     ::apache::thrift::stdcxx::shared_ptr<TTransport> transport_ptr(new TBufferedTransport(socket_ptr));
     ::apache::thrift::stdcxx::shared_ptr<TProtocol> protocol_ptr;
     if(protocol == "binary") {
@@ -59,17 +59,17 @@ void ClientApp::Run(const std::string &config_file) {
     VecServiceClient client(protocol_ptr);
     try {
         client.dummy();
-//        VecGroup group;
-//        group.id = "test_group";
-//        group.dimension = 256;
-//        group.index_type = 0;
-//        client.add_group(group);
+
+        VecGroup group;
+        group.id = "test_group";
+        group.dimension = 256;
+        group.index_type = 0;
+        client.add_group(group);
     } catch (apache::thrift::TException& ex) {
         printf("%s", ex.what());
     }
 
     transport_ptr->close();
-    server::CommonUtil::PrintInfo("test_client exit...");
 }
 
 }
