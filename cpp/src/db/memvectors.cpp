@@ -75,15 +75,15 @@ VectorsPtr MemManager::get_mem_by_group(const std::string& group_id) {
         return memIt->second;
     }
 
-    GroupSchema group_info;
-    Status status = _pMeta->get_group(group_id, group_info);
+    meta::GroupFileSchema group_file;
+    auto status = _pMeta->add_group_file(group_id, group_file);
     if (!status.ok()) {
         return nullptr;
     }
 
-    _memMap[group_id] = std::shared_ptr<MemVectors>(new MemVectors(group_info.group_id,
-                group_info.dimension,
-                group_info.next_file_location));
+    _memMap[group_id] = std::shared_ptr<MemVectors>(new MemVectors(group_file.group_id,
+                group_file.dimension,
+                group_file.location));
     return _memMap[group_id];
 }
 
