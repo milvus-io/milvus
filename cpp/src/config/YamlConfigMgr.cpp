@@ -4,7 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "YamlConfigMgr.h"
-#include "utils/CommonUtil.h"
+#include "utils/Log.h"
 
 #include <sys/stat.h>
 
@@ -16,7 +16,7 @@ ServerError YamlConfigMgr::LoadConfigFile(const std::string &filename) {
     struct stat directoryStat;
     int statOK = stat(filename.c_str(), &directoryStat);
     if (statOK != 0) {
-        CommonUtil::PrintError("File not found: " + filename);
+        SERVER_LOG_ERROR << "File not found: " << filename;
         return SERVER_UNEXPECTED_ERROR;
     }
 
@@ -25,7 +25,7 @@ ServerError YamlConfigMgr::LoadConfigFile(const std::string &filename) {
         LoadConfigNode(node_, config_);
     }
     catch (YAML::Exception& e) {
-        CommonUtil::PrintError("Failed to load config file: " + std::string(e.what ()));
+        SERVER_LOG_ERROR << "Failed to load config file: " << std::string(e.what ());
         return SERVER_UNEXPECTED_ERROR;
     }
 
@@ -33,7 +33,7 @@ ServerError YamlConfigMgr::LoadConfigFile(const std::string &filename) {
 }
 
 void YamlConfigMgr::Print() const {
-    CommonUtil::PrintInfo("System config content:");
+    SERVER_LOG_INFO << "System config content:";
     config_.PrintAll();
 }
 

@@ -5,7 +5,7 @@
  ******************************************************************************/
 #include "ClientApp.h"
 #include "server/ServerConfig.h"
-#include "utils/CommonUtil.h"
+#include "Log.h"
 
 #include <iostream>
 #include <yaml-cpp/yaml.h>
@@ -36,13 +36,15 @@ void ClientApp::Run(const std::string &config_file) {
     server::ServerConfig& config = server::ServerConfig::GetInstance();
     config.LoadConfigFile(config_file);
 
+    CLIENT_LOG_INFO << "Load config file:" << config_file;
+
     server::ConfigNode server_config = config.GetConfig(server::CONFIG_SERVER);
     std::string address = server_config.GetValue(server::CONFIG_SERVER_ADDRESS, "127.0.0.1");
     int32_t port = server_config.GetInt32Value(server::CONFIG_SERVER_PORT, 33001);
     std::string protocol = server_config.GetValue(server::CONFIG_SERVER_PROTOCOL, "binary");
     std::string mode = server_config.GetValue(server::CONFIG_SERVER_MODE, "thread_pool");
 
-
+    CLIENT_LOG_INFO << "Connect to server: " << address << ":" << std::to_string(port);
     ::apache::thrift::stdcxx::shared_ptr<TSocket> socket_ptr(new ::apache::thrift::transport::TSocket(address, port));
     ::apache::thrift::stdcxx::shared_ptr<TTransport> transport_ptr(new TBufferedTransport(socket_ptr));
     ::apache::thrift::stdcxx::shared_ptr<TProtocol> protocol_ptr;
@@ -51,7 +53,7 @@ void ClientApp::Run(const std::string &config_file) {
     } else if(protocol == "json") {
         protocol_ptr.reset(new TJSONProtocol(transport_ptr));
     } else {
-        server::CommonUtil::PrintError("Service protocol: " + protocol + " is not supported currently");
+        CLIENT_LOG_ERROR << "Service protocol: " << protocol << " is not supported currently";
         return;
     }
 
@@ -70,6 +72,8 @@ void ClientApp::Run(const std::string &config_file) {
     }
 
     transport_ptr->close();
+
+    CLIENT_LOG_INFO << "Test finished";
 }
 
 }

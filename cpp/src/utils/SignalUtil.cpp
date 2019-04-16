@@ -4,7 +4,6 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include "SignalUtil.h"
-#include "CommonUtil.h"
 #include "server/Server.h"
 #include "utils/Log.h"
 
@@ -16,7 +15,7 @@ namespace vecwise {
 namespace server {
 
 void SignalUtil::HandleSignal(int signum){
-    CommonUtil::PrintInfo("Server received signal:" + std::to_string(signum));
+    SERVER_LOG_INFO << "Server received signal:" << std::to_string(signum);
 
     switch(signum){
         case SIGINT:
@@ -33,7 +32,7 @@ void SignalUtil::HandleSignal(int signum){
             info += std::to_string(signum);
 //            SendSignalMessage(signum, info);
 
-            CommonUtil::PrintInfo(info);
+            SERVER_LOG_INFO << info;
 
             server::Server* server_ptr = server::Server::Instance();
             server_ptr->Stop();
@@ -44,7 +43,7 @@ void SignalUtil::HandleSignal(int signum){
 }
 
 void SignalUtil::PrintStacktrace() {
-    CommonUtil::PrintInfo("Call stack:");
+    SERVER_LOG_INFO << "Call stack:";
 
     const int size = 32;
     void* array[size];
@@ -52,7 +51,7 @@ void SignalUtil::PrintStacktrace() {
     char ** stacktrace = backtrace_symbols(array, stack_num);
     for (int i = 0; i < stack_num; ++i) {
         std::string info = stacktrace[i];
-        CommonUtil::PrintInfo(info);
+        SERVER_LOG_INFO << info;
     }
     free(stacktrace);
 }
