@@ -21,7 +21,6 @@
 class VecServiceIf {
  public:
   virtual ~VecServiceIf() {}
-  virtual void dummy() = 0;
 
   /**
    * group interfaces
@@ -82,9 +81,6 @@ class VecServiceIfSingletonFactory : virtual public VecServiceIfFactory {
 class VecServiceNull : virtual public VecServiceIf {
  public:
   virtual ~VecServiceNull() {}
-  void dummy() {
-    return;
-  }
   void add_group(const VecGroup& /* group */) {
     return;
   }
@@ -107,80 +103,6 @@ class VecServiceNull : virtual public VecServiceIf {
   void search_vector_batch(VecSearchResultList& /* _return */, const std::string& /* group_id */, const int64_t /* top_k */, const VecTensorList& /* tensor_list */, const VecTimeRangeList& /* time_range_list */) {
     return;
   }
-};
-
-
-class VecService_dummy_args {
- public:
-
-  VecService_dummy_args(const VecService_dummy_args&);
-  VecService_dummy_args& operator=(const VecService_dummy_args&);
-  VecService_dummy_args() {
-  }
-
-  virtual ~VecService_dummy_args() throw();
-
-  bool operator == (const VecService_dummy_args & /* rhs */) const
-  {
-    return true;
-  }
-  bool operator != (const VecService_dummy_args &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const VecService_dummy_args & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-};
-
-
-class VecService_dummy_pargs {
- public:
-
-
-  virtual ~VecService_dummy_pargs() throw();
-
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-};
-
-
-class VecService_dummy_result {
- public:
-
-  VecService_dummy_result(const VecService_dummy_result&);
-  VecService_dummy_result& operator=(const VecService_dummy_result&);
-  VecService_dummy_result() {
-  }
-
-  virtual ~VecService_dummy_result() throw();
-
-  bool operator == (const VecService_dummy_result & /* rhs */) const
-  {
-    return true;
-  }
-  bool operator != (const VecService_dummy_result &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const VecService_dummy_result & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-};
-
-
-class VecService_dummy_presult {
- public:
-
-
-  virtual ~VecService_dummy_presult() throw();
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-
 };
 
 typedef struct _VecService_add_group_args__isset {
@@ -1032,9 +954,6 @@ class VecServiceClient : virtual public VecServiceIf {
   apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> getOutputProtocol() {
     return poprot_;
   }
-  void dummy();
-  void send_dummy();
-  void recv_dummy();
   void add_group(const VecGroup& group);
   void send_add_group(const VecGroup& group);
   void recv_add_group();
@@ -1071,7 +990,6 @@ class VecServiceProcessor : public ::apache::thrift::TDispatchProcessor {
   typedef  void (VecServiceProcessor::*ProcessFunction)(int32_t, ::apache::thrift::protocol::TProtocol*, ::apache::thrift::protocol::TProtocol*, void*);
   typedef std::map<std::string, ProcessFunction> ProcessMap;
   ProcessMap processMap_;
-  void process_dummy(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_add_group(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_get_group(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_del_group(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
@@ -1082,7 +1000,6 @@ class VecServiceProcessor : public ::apache::thrift::TDispatchProcessor {
  public:
   VecServiceProcessor(::apache::thrift::stdcxx::shared_ptr<VecServiceIf> iface) :
     iface_(iface) {
-    processMap_["dummy"] = &VecServiceProcessor::process_dummy;
     processMap_["add_group"] = &VecServiceProcessor::process_add_group;
     processMap_["get_group"] = &VecServiceProcessor::process_get_group;
     processMap_["del_group"] = &VecServiceProcessor::process_del_group;
@@ -1118,15 +1035,6 @@ class VecServiceMultiface : virtual public VecServiceIf {
     ifaces_.push_back(iface);
   }
  public:
-  void dummy() {
-    size_t sz = ifaces_.size();
-    size_t i = 0;
-    for (; i < (sz - 1); ++i) {
-      ifaces_[i]->dummy();
-    }
-    ifaces_[i]->dummy();
-  }
-
   void add_group(const VecGroup& group) {
     size_t sz = ifaces_.size();
     size_t i = 0;
@@ -1224,9 +1132,6 @@ class VecServiceConcurrentClient : virtual public VecServiceIf {
   apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> getOutputProtocol() {
     return poprot_;
   }
-  void dummy();
-  int32_t send_dummy();
-  void recv_dummy(const int32_t seqid);
   void add_group(const VecGroup& group);
   int32_t send_add_group(const VecGroup& group);
   void recv_add_group(const int32_t seqid);
