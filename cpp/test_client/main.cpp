@@ -42,7 +42,6 @@ main(int argc, char *argv[]) {
                 char *config_filename_ptr = strdup(optarg);
                 config_filename = config_filename_ptr;
                 free(config_filename_ptr);
-                printf("Loading configuration from: %s\n", config_filename.c_str());
                 break;
             }
             case 'h':

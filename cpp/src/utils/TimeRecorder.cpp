@@ -4,7 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include "TimeRecorder.h"
-#include "utils/CommonUtil.h"
+#include "utils/Log.h"
 
 
 namespace zilliz {
@@ -87,31 +87,31 @@ TimeRecorder::PrintTimeRecord(const std::string &msg, double span) {
 
     switch (log_level_) {
         case 0: {
-            CommonUtil::PrintInfo(strLog);
+            SERVER_LOG_TRACE << strLog;
             break;
         }
         case 1: {
-            CommonUtil::PrintInfo(strLog);
+            SERVER_LOG_DEBUG << strLog;
             break;
         }
         case 2: {
-            CommonUtil::PrintInfo(strLog);
+            SERVER_LOG_INFO << strLog;
             break;
         }
         case 3: {
-            CommonUtil::PrintInfo(strLog);
+            SERVER_LOG_WARNING << strLog;
             break;
         }
         case 4: {
-            CommonUtil::PrintInfo(strLog);
+            SERVER_LOG_ERROR << strLog;
             break;
         }
         case 5: {
-            CommonUtil::PrintInfo(strLog);
+            SERVER_LOG_FATAL << strLog;
             break;
         }
         default: {
-            CommonUtil::PrintInfo(strLog);
+            SERVER_LOG_INFO << strLog;
             break;
         }
     }
