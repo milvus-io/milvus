@@ -14,7 +14,10 @@
 
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/protocol/TJSONProtocol.h>
+#include <thrift/protocol/TDebugProtocol.h>
+#include <thrift/protocol/TCompactProtocol.h>
 #include <thrift/server/TSimpleServer.h>
+//#include <thrift/server/TNonblockingServer.h>
 #include <thrift/server/TThreadPoolServer.h>
 #include <thrift/transport/TServerSocket.h>
 #include <thrift/transport/TBufferTransports.h>
@@ -40,7 +43,7 @@ public:
 
     void dummy() {
         // Your implementation goes here
-        printf("dummy() called\n");
+        SERVER_LOG_INFO << "dummy() called";
     }
 
     /**
@@ -50,17 +53,17 @@ public:
      */
     void add_group(const VecGroup& group) {
         // Your implementation goes here
-        printf("add_group\n");
+        SERVER_LOG_INFO << "add_group() called";
     }
 
     void get_group(VecGroup& _return, const std::string& group_id) {
         // Your implementation goes here
-        printf("get_group\n");
+        SERVER_LOG_INFO << "get_group() called";
     }
 
     void del_group(const std::string& group_id) {
         // Your implementation goes here
-        printf("del_group\n");
+        SERVER_LOG_INFO << "del_group() called";
     }
 
     /**
@@ -72,12 +75,12 @@ public:
      */
     int64_t add_vector(const std::string& group_id, const VecTensor& tensor) {
         // Your implementation goes here
-        printf("add_vector\n");
+        SERVER_LOG_INFO << "add_vector() called";
     }
 
     void add_vector_batch(VecTensorIdList& _return, const std::string& group_id, const VecTensorList& tensor_list) {
         // Your implementation goes here
-        printf("add_vector_batch\n");
+        SERVER_LOG_INFO << "add_vector_batch() called";
     }
 
     /**
@@ -91,12 +94,12 @@ public:
      */
     void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list) {
         // Your implementation goes here
-        printf("search_vector\n");
+        SERVER_LOG_INFO << "search_vector() called";
     }
 
     void search_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecTimeRangeList& time_range_list) {
         // Your implementation goes here
-        printf("search_vector_batch\n");
+        SERVER_LOG_INFO << "search_vector_batch() called";
     }
 
 };
@@ -118,29 +121,48 @@ void ServiceWrapper::StartService() {
 
     ::apache::thrift::stdcxx::shared_ptr<VecServiceHandler> handler(new VecServiceHandler());
     ::apache::thrift::stdcxx::shared_ptr<TProcessor> processor(new VecServiceProcessor(handler));
-    ::apache::thrift::stdcxx::shared_ptr<TServerTransport> serverTransport(new TServerSocket(address, port));
-    ::apache::thrift::stdcxx::shared_ptr<TTransportFactory> transportFactory(new TBufferedTransportFactory());
+    ::apache::thrift::stdcxx::shared_ptr<TServerTransport> server_transport(new TServerSocket(address, port));
+    ::apache::thrift::stdcxx::shared_ptr<TTransportFactory> transport_factory(new TBufferedTransportFactory());
 
-    ::apache::thrift::stdcxx::shared_ptr<TProtocolFactory> protocolFactory;
+    ::apache::thrift::stdcxx::shared_ptr<TProtocolFactory> protocol_factory;
     if(protocol == "binary") {
-        protocolFactory.reset(new TBinaryProtocolFactory());
+        protocol_factory.reset(new TBinaryProtocolFactory());
     } else if(protocol == "json") {
-        protocolFactory.reset(new TJSONProtocolFactory());
+        protocol_factory.reset(new TJSONProtocolFactory());
+    } else if(protocol == "compact") {
+        protocol_factory.reset(new TCompactProtocolFactory());
+    } else if(protocol == "debug") {
+        protocol_factory.reset(new TDebugProtocolFactory());
     } else {
         SERVER_LOG_INFO << "Service protocol: " << protocol << " is not supported currently";
         return;
     }
 
     if(mode == "simple") {
-        s_server.reset(new TSimpleServer(processor, serverTransport, transportFactory, protocolFactory));
+        s_server.reset(new TSimpleServer(processor, server_transport, transport_factory, protocol_factory));
         s_server->serve();
+//    } else if(mode == "non_blocking") {
+//        ::apache::thrift::stdcxx::shared_ptr<TNonblockingServerTransport> nb_server_transport(new TServerSocket(address, port));
+//        ::apache::thrift::stdcxx::shared_ptr<ThreadManager> threadManager(ThreadManager::newSimpleThreadManager());
+//        ::apache::thrift::stdcxx::shared_ptr<PosixThreadFactory> threadFactory(new PosixThreadFactory());
+//        threadManager->threadFactory(threadFactory);
+//        threadManager->start();
+//
+//        s_server.reset(new TNonblockingServer(processor,
+//                                              protocol_factory,
+//                                              nb_server_transport,
+//                                              threadManager));
     } else if(mode == "thread_pool") {
         ::apache::thrift::stdcxx::shared_ptr<ThreadManager> threadManager(ThreadManager::newSimpleThreadManager());
         ::apache::thrift::stdcxx::shared_ptr<PosixThreadFactory> threadFactory(new PosixThreadFactory());
         threadManager->threadFactory(threadFactory);
         threadManager->start();
 
-        s_server.reset(new TThreadPoolServer(processor, serverTransport, transportFactory, protocolFactory, threadManager));
+        s_server.reset(new TThreadPoolServer(processor,
+                                             server_transport,
+                                             transport_factory,
+                                             protocol_factory,
+                                             threadManager));
         s_server->serve();
     } else {
         SERVER_LOG_INFO << "Service mode: " << mode << " is not supported currently";
