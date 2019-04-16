@@ -6,7 +6,7 @@
 #include "ServiceWrapper.h"
 #include "ServerConfig.h"
 
-#include "utils/CommonUtil.h"
+#include "utils/Log.h"
 
 #include "thrift/gen-cpp/VecService.h"
 #include "thrift/gen-cpp/VectorService_types.h"
@@ -40,7 +40,7 @@ public:
 
     void dummy() {
         // Your implementation goes here
-        printf("dummy\n");
+        printf("dummy() called\n");
     }
 
     /**
@@ -127,7 +127,7 @@ void ServiceWrapper::StartService() {
     } else if(protocol == "json") {
         protocolFactory.reset(new TJSONProtocolFactory());
     } else {
-        CommonUtil::PrintError("Service protocol: " + protocol + " is not supported currently");
+        SERVER_LOG_INFO << "Service protocol: " << protocol << " is not supported currently";
         return;
     }
 
@@ -143,7 +143,7 @@ void ServiceWrapper::StartService() {
         s_server.reset(new TThreadPoolServer(processor, serverTransport, transportFactory, protocolFactory, threadManager));
         s_server->serve();
     } else {
-        CommonUtil::PrintError("Service mode: " + mode + " is not supported currently");
+        SERVER_LOG_INFO << "Service mode: " << mode << " is not supported currently";
         return;
     }
 }
