@@ -1,5 +1,6 @@
 #include <sstream>
 #include <iostream>
+#include <boost/filesystem.hpp>
 #include "db_meta_impl.h"
 #include "id_generators.h"
 
@@ -53,6 +54,27 @@ Status DBMetaImpl::add_group_file(const std::string& group_id,
     group_file_info.dimension = 64;
     group_file_info.location = ss.str();
     group_file_info.date = date;
+    return Status::OK();
+}
+
+Status DBMetaImpl::files_to_merge(const std::string& group_id,
+        DatePartionedGroupFilesSchema& files) {
+    //PXU TODO
+    files.clear();
+    std::stringstream ss;
+    ss << "/tmp/test/" << Meta::GetDate();
+    boost::filesystem::path path(ss.str().c_str());
+    boost::filesystem::directory_iterator end_itr;
+    GroupFilesSchema gfiles;
+    DateT date = Meta::GetDate();
+    files[date] = gfiles;
+    for (boost::filesystem::directory_iterator itr(path); itr != end_itr; ++itr) {
+        std::cout << itr->path().string() << std::endl;
+        GroupFileSchema f;
+        f.location = itr->path().string();
+        files[date].push_back(f);
+    }
+
     return Status::OK();
 }
 
