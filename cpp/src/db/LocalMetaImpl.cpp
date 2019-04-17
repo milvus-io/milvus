@@ -15,7 +15,7 @@ namespace vecwise {
 namespace engine {
 namespace meta {
 
-long GetFileSize(const std::string& filename)
+long LocalMetaImpl::GetFileSize(const std::string& filename)
 {
     struct stat stat_buf;
     int rc = stat(filename.c_str(), &stat_buf);
