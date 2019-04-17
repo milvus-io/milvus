@@ -11,6 +11,7 @@ namespace meta {
 
 class LocalMetaImpl : public Meta {
 public:
+    const size_t INDEX_TRIGGER_SIZE = 1024*1024*500;
     LocalMetaImpl(const DBMetaOptions& options_);
 
     virtual Status add_group(const GroupOptions& options_,
@@ -49,6 +50,12 @@ public:
 
 private:
 
+    Status GetGroupMetaInfoByPath(const std::string& path, GroupSchema& group_info);
+    std::string GetGroupMetaPathByGroupPath(const std::string& group_path);
+    Status GetGroupMetaInfo(const std::string& group_id, GroupSchema& group_info);
+    std::string GetNextGroupFileLocationByPartition(const std::string& group_id, DateT& date,
+        GroupFileSchema::FILE_TYPE file_type);
+    std::string GetGroupDatePartitionPath(const std::string& group_id, DateT& date);
     std::string GetGroupPath(const std::string& group_id);
     std::string GetGroupMetaPath(const std::string& group_id);
 
