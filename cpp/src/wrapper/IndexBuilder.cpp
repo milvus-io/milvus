@@ -21,9 +21,11 @@ IndexBuilder::IndexBuilder(const Operand_ptr &opd) {
     opd_ = opd;
 }
 
-Index_ptr IndexBuilder::build_all(const long &nb, const vector<float> &xb,
-                                  const vector<long> &ids,
-                                  const long &nt, const vector<float> &xt) {
+Index_ptr IndexBuilder::build_all(const long &nb,
+                                  const float* xb,
+                                  const long* ids,
+                                  const long &nt,
+                                  const float* xt) {
     std::shared_ptr<faiss::Index> index = nullptr;
     index.reset(faiss::index_factory(opd_->d, opd_->index_type.c_str()));
 
@@ -31,14 +33,20 @@ Index_ptr IndexBuilder::build_all(const long &nb, const vector<float> &xb,
         // currently only cpu resources are used.
         std::lock_guard<std::mutex> lk(cpu_resource);
         if (!index->is_trained) {
-            nt == 0 || xt.empty() ? index->train(nb, xb.data())
-                                  : index->train(nt, xt.data());
+            nt == 0 || xt == nullptr ? index->train(nb, xb)
+                                  : index->train(nt, xt);
         }
-        index->add(nb, xb.data());
-        index->add_with_ids(nb, xb.data(), ids.data()); // todo(linxj): support add_with_idmap
+        index->add_with_ids(nb, xb, ids); // todo(linxj): support add_with_idmap
     }
 
     return std::make_shared<Index>(index);
+
+}
+
+Index_ptr IndexBuilder::build_all(const long &nb, const vector<float> &xb,
+                                  const vector<long> &ids,
+                                  const long &nt, const vector<float> &xt) {
+    return build_all(nb, xb.data(), ids.data(), nt, xt.data());
 }
 
 // Be Factory pattern later

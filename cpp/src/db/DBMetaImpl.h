@@ -41,6 +41,8 @@ public:
     virtual Status files_to_merge(const std::string& group_id,
             DatePartionedGroupFilesSchema& files) override;
 
+    virtual Status files_to_index(GroupFilesSchema&) override;
+
 private:
 
     Status initialize();
