@@ -21,9 +21,13 @@ public:
 
     virtual Status add_group_file(const std::string& group_id,
                                   DateT date,
-                                  GroupFileSchema& group_file_info) override;
+                                  GroupFileSchema& group_file_info,
+                                  GroupFileSchema::FILE_TYPE file_type=GroupFileSchema::RAW) override;
+
     virtual Status add_group_file(const std::string& group_id_,
-                                  GroupFileSchema& group_file_info_) override;
+                                  GroupFileSchema& group_file_info_,
+                                  GroupFileSchema::FILE_TYPE file_type=GroupFileSchema::RAW) override;
+
     virtual Status has_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
                                   bool& has_or_not_) override;
