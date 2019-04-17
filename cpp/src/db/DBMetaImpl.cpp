@@ -75,11 +75,14 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
     boost::filesystem::path path(ss.str().c_str());
     boost::filesystem::directory_iterator end_itr;
     for (boost::filesystem::directory_iterator itr(path); itr != end_itr; ++itr) {
-        std::cout << itr->path().string() << std::endl;
+        /* std::cout << itr->path().string() << std::endl; */
         GroupFileSchema f;
         f.location = itr->path().string();
-        if (1024*1024*50 >= GetFileSize(f.location)) continue;
-        std::cout << "About to index " << f.location << std::endl;
+        std::string suffixStr = f.location.substr(f.location.find_last_of('.') + 1);
+        if (suffixStr == "index") continue;
+        if (1024*1024*1000 >= GetFileSize(f.location)) continue;
+        std::cout << "[About to index] " << f.location << std::endl;
+        f.date = Meta::GetDate();
         files.push_back(f);
     }
     return Status::OK();
@@ -97,10 +100,12 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
     DateT date = Meta::GetDate();
     files[date] = gfiles;
     for (boost::filesystem::directory_iterator itr(path); itr != end_itr; ++itr) {
-        std::cout << itr->path().string() << std::endl;
+        /* std::cout << itr->path().string() << std::endl; */
         GroupFileSchema f;
         f.location = itr->path().string();
-        if (1024*1024*50 < GetFileSize(f.location)) continue;
+        std::string suffixStr = f.location.substr(f.location.find_last_of('.') + 1);
+        if (suffixStr == "index") continue;
+        if (1024*1024*1000 < GetFileSize(f.location)) continue;
         std::cout << "About to merge " << f.location << std::endl;
         files[date].push_back(f);
     }

@@ -41,7 +41,7 @@ public:
     virtual ~DBImpl();
 
 private:
-    Status background_build_index();
+    void background_build_index();
     Status build_index(const meta::GroupFileSchema&);
     Status try_build_index();
     Status merge_files(const std::string& group_id,
