@@ -45,5 +45,6 @@ set(dependency_libs
         pthread
         faiss
         vecwise_engine
+        sqlite3
         )
 target_link_libraries(vecwise_engine_server ${dependency_libs} ${cuda_library})
