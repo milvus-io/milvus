@@ -4,6 +4,7 @@
 #include <iostream>
 #include <boost/filesystem.hpp>
 #include <fstream>
+#include <sqlite_orm/sqlite_orm.h>
 #include "DBMetaImpl.h"
 #include "IDGenerator.h"
 
@@ -11,6 +12,8 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 namespace meta {
+
+using namespace sqlite_orm;
 
 long GetFileSize(const std::string& filename)
 {
@@ -25,21 +28,43 @@ DBMetaImpl::DBMetaImpl(const DBMetaOptions& options_)
 }
 
 Status DBMetaImpl::initialize() {
-    // PXU TODO: Create DB Connection
-    if (boost::filesystem::is_directory(_options.path)) {
+    if (!boost::filesystem::is_directory(_options.path)) {
+        assert(boost::filesystem::create_directory(_options.path));
     }
-    else if (boost::filesystem::create_directory(_options.path)) {
-        // PXU TODO: New MetaDB
-    } else {
-        return Status::InvalidDBPath("Cannot Create " + _options.path);
-    }
+
+    auto db = make_storage(_options.path + "/meta.sqlite",
+            make_table("Groups",
+                      make_column("id", &GroupSchema::id, primary_key()),
+                      make_column("group_id", &GroupSchema::group_id, unique()),
+                      make_column("dimension", &GroupSchema::dimension),
+                      make_column("files_cnt", &GroupSchema::files_cnt, default_value(0))));
+
+    db.sync_schema();
+
     return Status::OK();
 }
 
 Status DBMetaImpl::add_group(const GroupOptions& options_,
             const std::string& group_id_,
             GroupSchema& group_info_) {
-    //PXU TODO
+    auto db = make_storage(_options.path + "/meta.sqlite",
+            make_table("Groups",
+                      make_column("id", &GroupSchema::id, primary_key()),
+                      make_column("group_id", &GroupSchema::group_id, unique()),
+                      make_column("dimension", &GroupSchema::dimension),
+                      make_column("files_cnt", &GroupSchema::files_cnt, default_value(0))));
+
+    group_info_.dimension = options_.dimension;
+    group_info_.group_id = group_id_;
+    group_info_.files_cnt = 0;
+    group_info_.id = -1;
+    try {
+        auto id = db.insert(group_info_);
+        std::cout << "id=" << id << std::endl;
+         group_info_.id = id;
+    } catch(std::system_error& e) {
+        return Status::GroupError("Add Group " + group_id_ + " Error");
+    }
     return Status::OK();
 }
 
