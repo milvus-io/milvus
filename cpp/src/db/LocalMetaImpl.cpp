@@ -85,17 +85,15 @@ Status LocalMetaImpl::initialize() {
     return Status::OK();
 }
 
-Status LocalMetaImpl::add_group(const GroupOptions& options,
-            const std::string& group_id,
-            GroupSchema& group_info) {
+Status LocalMetaImpl::add_group(GroupSchema& group_info) {
     std::string real_gid;
     size_t id = SimpleIDGenerator().getNextIDNumber();
-    if (group_id == "") {
+    if (group_info.group_id == "") {
         std::stringstream ss;
         ss << id;
         real_gid = ss.str();
     } else {
-        real_gid = group_id;
+        real_gid = group_info.group_id;
     }
 
     bool group_exist;
@@ -111,7 +109,6 @@ Status LocalMetaImpl::add_group(const GroupOptions& options,
     group_info.files_cnt = 0;
     group_info.id = 0;
     group_info.location = GetGroupPath(real_gid);
-    group_info.dimension = options.dimension;
 
     boost::property_tree::ptree out;
     out.put("files_cnt", group_info.files_cnt);
@@ -121,14 +118,14 @@ Status LocalMetaImpl::add_group(const GroupOptions& options,
     return Status::OK();
 }
 
-Status LocalMetaImpl::get_group(const std::string& group_id, GroupSchema& group_info) {
+Status LocalMetaImpl::get_group(GroupSchema& group_info) {
     bool group_exist;
-    has_group(group_id, group_exist);
+    has_group(group_info.group_id, group_exist);
     if (!group_exist) {
-        return Status::NotFound("Group " + group_id + " Not Found");
+        return Status::NotFound("Group " + group_info.group_id + " Not Found");
     }
 
-    return GetGroupMetaInfo(group_id, group_info);
+    return GetGroupMetaInfo(group_info.group_id, group_info);
 }
 
 Status LocalMetaImpl::has_group(const std::string& group_id, bool& has_or_not) {
@@ -147,7 +144,7 @@ Status LocalMetaImpl::add_group_file(const std::string& group_id,
                               GroupFileSchema& group_file_info,
                               GroupFileSchema::FILE_TYPE file_type) {
     GroupSchema group_info;
-    auto status = get_group(group_id, group_info);
+    auto status = get_group(group_info);
     if (!status.ok()) {
         return status;
     }

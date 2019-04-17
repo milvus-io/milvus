@@ -48,10 +48,8 @@ typedef std::map<DateT, GroupFilesSchema> DatePartionedGroupFilesSchema;
 
 class Meta {
 public:
-    virtual Status add_group(const GroupOptions& options_,
-            const std::string& group_id_,
-            GroupSchema& group_info_) = 0;
-    virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) = 0;
+    virtual Status add_group(GroupSchema& group_info) = 0;
+    virtual Status get_group(GroupSchema& group_info) = 0;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
 
     virtual Status add_group_file(const std::string& group_id_,
