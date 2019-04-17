@@ -53,6 +53,7 @@ private:
     std::string GetGroupMetaPath(const std::string& group_id);
 
     Status CreateGroupMeta(const GroupSchema& group_schema);
+    long GetFileSize(const std::string& filename);
 
     Status initialize();
 
