@@ -43,11 +43,10 @@ VecServiceHandler::add_group(const VecGroup &group) {
                         << ", group.index_type = " << group.index_type;
 
     try {
-        engine::GroupOptions gopt;
-        gopt.dimension = (size_t)group.dimension;
-        gopt.has_id = !group.id.empty();
         engine::meta::GroupSchema group_info;
-        engine::Status stat = DB()->add_group(gopt, group.id, group_info);
+        group_info.dimension = (size_t)group.dimension;
+        group_info.group_id = group.id;
+        engine::Status stat = DB()->add_group(group_info);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         }
@@ -65,7 +64,8 @@ VecServiceHandler::get_group(VecGroup &_return, const std::string &group_id) {
 
     try {
         engine::meta::GroupSchema group_info;
-        engine::Status stat = DB()->get_group(group_id, group_info);
+        group_info.group_id = group_id;
+        engine::Status stat = DB()->get_group(group_info);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
