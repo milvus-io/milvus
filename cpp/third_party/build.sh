@@ -5,9 +5,6 @@ BUILD_TYPE="Release"
 while getopts "p:t:d:h" arg
 do
         case $arg in
-             p)
-                HOME_PATH=$OPTARG # PG_HOME
-                ;;
              t)
                 BUILD_TYPE=$OPTARG # BUILD_TYPE
                 ;;
@@ -19,7 +16,7 @@ parameter:
 -t: build type
 
 usage:
-./build.sh -p \${PG_HOME} -t \${BUILD_TYPE}
+./build.sh -t \${BUILD_TYPE}
                 "
                 exit 0
                 ;;
@@ -30,13 +27,13 @@ usage:
         esac
 done
 
-if [ -n ${HOME_PATH} ];then
-  export PG_HOME=${HOME_PATH}
+if [[ -d build ]]; then
+	rm ./build -r
 fi
 
 while IFS='' read -r line || [[ -n "$line" ]]; do
     cd $line
-	./build.sh #pwd is used in the script. Thus you have to run it in its directory
+	./build.sh -t ${BUILD_TYPE}
         if [ $? -ne 0 ];then
            exit 1
         fi
