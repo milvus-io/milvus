@@ -26,6 +26,13 @@ DBMetaImpl::DBMetaImpl(const DBMetaOptions& options_)
 
 Status DBMetaImpl::initialize() {
     // PXU TODO: Create DB Connection
+    if (boost::filesystem::is_directory(_options.path)) {
+    }
+    else if (boost::filesystem::create_directory(_options.path)) {
+        // PXU TODO: New MetaDB
+    } else {
+        return Status::InvalidDBPath("Cannot Create " + _options.path);
+    }
     return Status::OK();
 }
 
@@ -60,7 +67,8 @@ Status DBMetaImpl::add_group_file(const std::string& group_id,
     std::stringstream ss;
     SimpleIDGenerator g;
     std::string suffix = (file_type == GroupFileSchema::RAW) ? ".raw" : ".index";
-    ss << "/tmp/test/" << date
+    /* ss << "/tmp/test/" << date */
+    ss << _options.path << "/" << date
                        << "/" << g.getNextIDNumber()
                        << suffix;
     group_file_info.group_id = "1";
@@ -74,7 +82,8 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
     // PXU TODO
     files.clear();
     std::stringstream ss;
-    ss << "/tmp/test/" << Meta::GetDate();
+    /* ss << "/tmp/test/" << Meta::GetDate(); */
+    ss << _options.path << "/" << Meta::GetDate();
     boost::filesystem::path path(ss.str().c_str());
     boost::filesystem::directory_iterator end_itr;
     for (boost::filesystem::directory_iterator itr(path); itr != end_itr; ++itr) {
@@ -96,7 +105,8 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
     //PXU TODO
     files.clear();
     std::stringstream ss;
-    ss << "/tmp/test/" << Meta::GetDate();
+    /* ss << "/tmp/test/" << Meta::GetDate(); */
+    ss << _options.path << "/" << Meta::GetDate();
     boost::filesystem::path path(ss.str().c_str());
     boost::filesystem::directory_iterator end_itr;
     GroupFilesSchema gfiles;
