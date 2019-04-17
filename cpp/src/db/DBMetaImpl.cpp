@@ -15,6 +15,19 @@ namespace meta {
 
 using namespace sqlite_orm;
 
+inline auto StoragePrototype(const std::string& path) {
+    return make_storage(path,
+            make_table("Groups",
+                      make_column("id", &GroupSchema::id, primary_key()),
+                      make_column("group_id", &GroupSchema::group_id, unique()),
+                      make_column("dimension", &GroupSchema::dimension),
+                      make_column("files_cnt", &GroupSchema::files_cnt, default_value(0))));
+
+}
+
+using ConnectorT = decltype(StoragePrototype(""));
+static std::unique_ptr<ConnectorT> ConnectorPtr;
+
 long GetFileSize(const std::string& filename)
 {
     struct stat stat_buf;
@@ -32,14 +45,9 @@ Status DBMetaImpl::initialize() {
         assert(boost::filesystem::create_directory(_options.path));
     }
 
-    auto db = make_storage(_options.path + "/meta.sqlite",
-            make_table("Groups",
-                      make_column("id", &GroupSchema::id, primary_key()),
-                      make_column("group_id", &GroupSchema::group_id, unique()),
-                      make_column("dimension", &GroupSchema::dimension),
-                      make_column("files_cnt", &GroupSchema::files_cnt, default_value(0))));
+    ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(_options.path+"/meta.sqlite"));
 
-    db.sync_schema();
+    ConnectorPtr->sync_schema();
 
     return Status::OK();
 }
@@ -47,19 +55,13 @@ Status DBMetaImpl::initialize() {
 Status DBMetaImpl::add_group(const GroupOptions& options_,
             const std::string& group_id_,
             GroupSchema& group_info_) {
-    auto db = make_storage(_options.path + "/meta.sqlite",
-            make_table("Groups",
-                      make_column("id", &GroupSchema::id, primary_key()),
-                      make_column("group_id", &GroupSchema::group_id, unique()),
-                      make_column("dimension", &GroupSchema::dimension),
-                      make_column("files_cnt", &GroupSchema::files_cnt, default_value(0))));
 
     group_info_.dimension = options_.dimension;
     group_info_.group_id = group_id_;
     group_info_.files_cnt = 0;
     group_info_.id = -1;
     try {
-        auto id = db.insert(group_info_);
+        auto id = ConnectorPtr->insert(group_info_);
         std::cout << "id=" << id << std::endl;
          group_info_.id = id;
     } catch(std::system_error& e) {
@@ -69,7 +71,7 @@ Status DBMetaImpl::add_group(const GroupOptions& options_,
 }
 
 Status DBMetaImpl::get_group(const std::string& group_id_, GroupSchema& group_info_) {
-    //PXU TODO
+
     return Status::OK();
 }
 
