@@ -3,6 +3,8 @@ server_config:
   port: 33001
   transfer_protocol: json   #optional: binary, compact, json, debug
   server_mode: thread_pool    #optional: simple, thread_pool
+  db_backend_url: http://127.0.0.1
+  db_name: vecwise
 
 log_config:
   global:

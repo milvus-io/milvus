@@ -45,7 +45,7 @@ class VecServiceHandler : virtual public VecServiceIf {
    * @param group_id
    * @param tensor
    */
-  int64_t add_vector(const std::string& group_id, const VecTensor& tensor) {
+  void add_vector(VecTensorIdList& _return, const std::string& group_id, const VecTensor& tensor) {
     // Your implementation goes here
     printf("add_vector\n");
   }
