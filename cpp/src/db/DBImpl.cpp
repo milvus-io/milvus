@@ -6,6 +6,7 @@
 #include <faiss/MetaIndexes.h>
 #include <faiss/index_io.h>
 #include <faiss/AutoTune.h>
+#include <wrapper/IndexBuilder.h>
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
@@ -165,12 +166,28 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
 }
 
 Status DBImpl::build_index(const meta::GroupFileSchema& file) {
-    //PXU TODO
-    std::cout << ">>Building Index for: " << file.location << std::endl;
+    meta::GroupFileSchema group_file;
+    Status status = _pMeta->add_group_file(file.group_id, file.date, group_file);
+    if (!status.ok()) {
+        return status;
+    }
+
+    auto opd = std::make_shared<Operand>();
+    opd->index_type = "IDMap,Flat";
+    IndexBuilderPtr pBuilder = GetIndexBuilder(opd);
+
+    auto from_index = dynamic_cast<faiss::IndexIDMap*>(faiss::read_index(file.location.c_str()));
+    auto index = pBuilder->build_all(from_index->ntotal,
+            dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
+            from_index->id_map.data());
+    /* std::cout << "raw size=" << from_index->ntotal << "   index size=" << index->ntotal << std::endl; */
+    // PXU TODO: Remove
+    auto location = group_file.location + ".index";
+    write_index(index, location.c_str());
     return Status::OK();
 }
 
-Status DBImpl::background_build_index() {
+void DBImpl::background_build_index() {
     assert(bg_build_index_started_);
     meta::GroupFilesSchema to_index_files;
     _pMeta->files_to_index(to_index_files);
@@ -179,12 +196,11 @@ Status DBImpl::background_build_index() {
         status = build_index(file);
         if (!status.ok()) {
             _bg_error = status;
-            return status;
+            return;
         }
     }
 
     bg_build_index_started_ = false;
-    return Status::OK();
 }
 
 Status DBImpl::try_build_index() {
