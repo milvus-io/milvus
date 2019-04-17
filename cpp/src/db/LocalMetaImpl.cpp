@@ -26,8 +26,49 @@ std::string LocalMetaImpl::GetGroupPath(const std::string& group_id) {
     return _options.path + "/" + group_id;
 }
 
+std::string LocalMetaImpl::GetGroupDatePartitionPath(const std::string& group_id, DateT& date) {
+    std::stringstream ss;
+    ss << GetGroupPath(group_id) << "/" << date;
+    return ss.str();
+}
+
+std::string LocalMetaImpl::GetNextGroupFileLocationByPartition(const std::string& group_id, DateT& date,
+        GroupFileSchema::FILE_TYPE file_type) {
+    std::string suffix = (file_type == GroupFileSchema::RAW) ? ".raw" : ".index";
+    SimpleIDGenerator g;
+    std::stringstream ss;
+    ss << GetGroupPath(group_id) << "/" << date << "/" << g.getNextIDNumber() << suffix;
+    return ss.str();
+}
+
+std::string LocalMetaImpl::GetGroupMetaPathByGroupPath(const std::string& group_path) {
+    return group_path + "/" + "meta";
+}
+
 std::string LocalMetaImpl::GetGroupMetaPath(const std::string& group_id) {
-    return GetGroupPath(group_id) + "/" + "meta";
+    return GetGroupMetaPathByGroupPath(GetGroupPath(group_id));
+}
+
+Status LocalMetaImpl::GetGroupMetaInfoByPath(const std::string& path, GroupSchema& group_info) {
+    boost::property_tree::ptree ptree;
+    boost::property_tree::read_json(path, ptree);
+    auto files_cnt = ptree.get_child("files_cnt").data();
+    auto dimension = ptree.get_child("dimension").data();
+    /* std::cout << dimension << std::endl; */
+    /* std::cout << files_cnt << std::endl; */
+
+    group_info.id = std::stoi(group_info.group_id);
+    group_info.files_cnt = std::stoi(files_cnt);
+    group_info.dimension = std::stoi(dimension);
+    group_info.location = GetGroupPath(group_info.group_id);
+
+    return Status::OK();
+
+}
+
+Status LocalMetaImpl::GetGroupMetaInfo(const std::string& group_id, GroupSchema& group_info) {
+    group_info.group_id = group_id;
+    return GetGroupMetaInfoByPath(GetGroupMetaPath(group_id), group_info);
 }
 
 LocalMetaImpl::LocalMetaImpl(const DBMetaOptions& options_)
@@ -87,26 +128,11 @@ Status LocalMetaImpl::get_group(const std::string& group_id, GroupSchema& group_
         return Status::NotFound("Group " + group_id + " Not Found");
     }
 
-    boost::property_tree::ptree ptree;
-    boost::property_tree::read_json(GetGroupMetaPath(group_id), ptree);
-    auto files_cnt = ptree.get_child("files_cnt").data();
-    auto dimension = ptree.get_child("dimension").data();
-    std::cout << dimension << std::endl;
-    std::cout << files_cnt << std::endl;
-
-    group_info.id = std::stoi(group_id);
-    group_info.group_id = group_id;
-    group_info.files_cnt = std::stoi(files_cnt);
-    group_info.dimension = std::stoi(dimension);
-    group_info.location = GetGroupPath(group_id);
-
-    return Status::OK();
+    return GetGroupMetaInfo(group_id, group_info);
 }
 
 Status LocalMetaImpl::has_group(const std::string& group_id, bool& has_or_not) {
     has_or_not = boost::filesystem::is_directory(GetGroupPath(group_id));
-    /* if (!has_or_not) return Status::OK(); */
-    /* boost::filesystem::is_regular_file() */
     return Status::OK();
 }
 
@@ -120,62 +146,73 @@ Status LocalMetaImpl::add_group_file(const std::string& group_id,
                               DateT date,
                               GroupFileSchema& group_file_info,
                               GroupFileSchema::FILE_TYPE file_type) {
-    //PXU TODO
-    std::stringstream ss;
-    SimpleIDGenerator g;
-    std::string suffix = (file_type == GroupFileSchema::RAW) ? ".raw" : ".index";
-    ss << "/tmp/test/" << date
-                       << "/" << g.getNextIDNumber()
-                       << suffix;
-    group_file_info.group_id = "1";
-    group_file_info.dimension = 64;
-    group_file_info.location = ss.str();
+    GroupSchema group_info;
+    auto status = get_group(group_id, group_info);
+    if (!status.ok()) {
+        return status;
+    }
+    auto location = GetNextGroupFileLocationByPartition(group_id, date, file_type);
+    group_file_info.group_id = group_id;
+    group_file_info.dimension = group_info.dimension;
+    group_file_info.location = location;
     group_file_info.date = date;
     return Status::OK();
 }
 
 Status LocalMetaImpl::files_to_index(GroupFilesSchema& files) {
-    // PXU TODO
     files.clear();
-    std::stringstream ss;
-    ss << "/tmp/test/" << Meta::GetDate();
-    boost::filesystem::path path(ss.str().c_str());
+
+    std::string suffix;
     boost::filesystem::directory_iterator end_itr;
-    for (boost::filesystem::directory_iterator itr(path); itr != end_itr; ++itr) {
-        /* std::cout << itr->path().string() << std::endl; */
-        GroupFileSchema f;
-        f.location = itr->path().string();
-        std::string suffixStr = f.location.substr(f.location.find_last_of('.') + 1);
-        if (suffixStr == "index") continue;
-        if (1024*1024*1000 >= GetFileSize(f.location)) continue;
-        std::cout << "[About to index] " << f.location << std::endl;
-        f.date = Meta::GetDate();
-        files.push_back(f);
+    for (boost::filesystem::directory_iterator itr(_options.path); itr != end_itr; ++itr) {
+        auto group_path = itr->path().string();
+        GroupSchema group_info;
+        GetGroupMetaInfoByPath(GetGroupMetaPathByGroupPath(group_path), group_info);
+        for (boost::filesystem::directory_iterator innerItr(group_path); innerItr != end_itr; ++innerItr) {
+            auto partition_path = innerItr->path().string();
+            for (boost::filesystem::directory_iterator fItr(partition_path); fItr != end_itr; ++fItr) {
+                auto location = fItr->path().string();
+                suffix = location.substr(location.find_last_of('.') + 1);
+                if (suffix == "index") continue;
+                if (INDEX_TRIGGER_SIZE >= GetFileSize(location)) continue;
+                std::cout << "[About to index] " << location << std::endl;
+                GroupFileSchema f;
+                f.location = location;
+                /* f.group_id = group_id; */
+                f.dimension = group_info.dimension;
+                files.push_back(f);
+            }
+        }
     }
+
     return Status::OK();
 }
 
 Status LocalMetaImpl::files_to_merge(const std::string& group_id,
         DatePartionedGroupFilesSchema& files) {
-    //PXU TODO
     files.clear();
-    std::stringstream ss;
-    ss << "/tmp/test/" << Meta::GetDate();
-    boost::filesystem::path path(ss.str().c_str());
-    boost::filesystem::directory_iterator end_itr;
-    GroupFilesSchema gfiles;
-    DateT date = Meta::GetDate();
-    files[date] = gfiles;
-    for (boost::filesystem::directory_iterator itr(path); itr != end_itr; ++itr) {
-        /* std::cout << itr->path().string() << std::endl; */
-        GroupFileSchema f;
-        f.location = itr->path().string();
-        std::string suffixStr = f.location.substr(f.location.find_last_of('.') + 1);
-        if (suffixStr == "index") continue;
-        if (1024*1024*1000 < GetFileSize(f.location)) continue;
-        std::cout << "About to merge " << f.location << std::endl;
-        files[date].push_back(f);
-    }
+    /* std::string suffix; */
+    /* boost::filesystem::directory_iterator end_itr; */
+    /* for (boost::filesystem::directory_iterator itr(_options.path); itr != end_itr; ++itr) { */
+    /*     auto group_path = itr->path().string(); */
+    /*     GroupSchema group_info; */
+    /*     GetGroupMetaInfoByPath(GetGroupMetaPathByGroupPath(group_path), group_info); */
+    /*     for (boost::filesystem::directory_iterator innerItr(group_path); innerItr != end_itr; ++innerItr) { */
+    /*         auto partition_path = innerItr->path().string(); */
+    /*         for (boost::filesystem::directory_iterator fItr(partition_path); fItr != end_itr; ++fItr) { */
+    /*             auto location = fItr->path().string(); */
+    /*             suffix = location.substr(location.find_last_of('.') + 1); */
+    /*             if (suffix == "index") continue; */
+    /*             if (INDEX_TRIGGER_SIZE < GetFileSize(location)) continue; */
+    /*             std::cout << "[About to index] " << location << std::endl; */
+    /*             GroupFileSchema f; */
+    /*             f.location = location; */
+    /*             f.group_id = group_id; */
+    /*             f.dimension = group_info.dimension; */
+    /*             files.push_back(f); */
+    /*         } */
+    /*     } */
+    /* } */
 
     return Status::OK();
 }
