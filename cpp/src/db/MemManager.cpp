@@ -1,10 +1,9 @@
-/* #include <faiss/IndexFlat.h> */
-/* #include <faiss/MetaIndexes.h> */
 #include <faiss/AutoTune.h>
-#include <faiss/index_io.h>
 #include <iostream>
 #include <sstream>
 #include <thread>
+
+#include <wrapper/Index.h>
 
 #include "MemManager.h"
 #include "Meta.h"
@@ -45,7 +44,8 @@ Status MemVectors::serialize(std::string& group_id) {
     /* faiss::write_index(pIndex_, ss.str().c_str()); */
     /* std::cout << pIndex_->ntotal << std::endl; */
     /* std::cout << _file_location << std::endl; */
-    faiss::write_index(pIndex_, _file_location.c_str());
+    /* faiss::write_index(pIndex_, _file_location.c_str()); */
+    write_index(pIndex_, _file_location.c_str());
     group_id = group_id_;
     return Status::OK();
 }
