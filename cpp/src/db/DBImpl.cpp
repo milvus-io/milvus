@@ -5,6 +5,7 @@
 #include <faiss/IndexFlat.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/index_io.h>
+#include <faiss/AutoTune.h>
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
@@ -113,21 +114,20 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         return status;
     }
 
-    faiss::IndexFlat innerIndex(group_file.dimension);
-    faiss::IndexIDMap index(&innerIndex);
+    std::shared_ptr<faiss::Index> index(faiss::index_factory(group_file.dimension, "IDMap,Flat"));
 
     meta::GroupFilesSchema updated;
 
     for (auto& file : files) {
         auto file_index = dynamic_cast<faiss::IndexIDMap*>(faiss::read_index(file.location.c_str()));
-        index.add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat*>(file_index->index)->xb.data(),
+        index->add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat*>(file_index->index)->xb.data(),
                 file_index->id_map.data());
         auto file_schema = file;
         file_schema.file_type = meta::GroupFileSchema::TO_DELETE;
         updated.push_back(file_schema);
     }
 
-    faiss::write_index(&index, group_file.location.c_str());
+    faiss::write_index(index.get(), group_file.location.c_str());
     group_file.file_type = meta::GroupFileSchema::RAW;
     updated.push_back(group_file);
     status = _pMeta->update_files(updated);
