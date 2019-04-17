@@ -166,14 +166,14 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
 
 Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     //PXU TODO
+    std::cout << ">>Building Index for: " << file.location << std::endl;
     return Status::OK();
 }
 
 Status DBImpl::background_build_index() {
     assert(bg_build_index_started_);
     meta::GroupFilesSchema to_index_files;
-    // PXU TODO
-    /* _pMeta->files_to_index(to_index_files); */
+    _pMeta->files_to_index(to_index_files);
     Status status;
     for (auto& file : to_index_files) {
         status = build_index(file);

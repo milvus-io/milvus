@@ -77,6 +77,8 @@ public:
     virtual Status files_to_merge(const std::string& group_id,
             DatePartionedGroupFilesSchema& files) = 0;
 
+    virtual Status files_to_index(GroupFilesSchema&) = 0;
+
     static DateT GetDate(const std::time_t& t);
     static DateT GetDate();
 
