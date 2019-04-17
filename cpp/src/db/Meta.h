@@ -56,10 +56,13 @@ public:
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
 
     virtual Status add_group_file(const std::string& group_id_,
-                                  GroupFileSchema& group_file_info_) = 0;
+                                  GroupFileSchema& group_file_info_,
+                                  GroupFileSchema::FILE_TYPE file_type=GroupFileSchema::RAW) = 0;
     virtual Status add_group_file(const std::string& group_id,
                                   DateT date,
-                                  GroupFileSchema& group_file_info) = 0;
+                                  GroupFileSchema& group_file_info,
+                                  GroupFileSchema::FILE_TYPE file_type=GroupFileSchema::RAW) = 0;
+
     virtual Status has_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
                                   bool& has_or_not_) = 0;
