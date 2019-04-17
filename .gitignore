@@ -9,5 +9,6 @@ cmake_build
 *.o
 *.lo
 *.tar.gz
+*.log
 
 cpp/third_party/thrift-0.12.0/
