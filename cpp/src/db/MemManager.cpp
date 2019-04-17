@@ -1,5 +1,6 @@
-#include <faiss/IndexFlat.h>
-#include <faiss/MetaIndexes.h>
+/* #include <faiss/IndexFlat.h> */
+/* #include <faiss/MetaIndexes.h> */
+#include <faiss/AutoTune.h>
 #include <faiss/index_io.h>
 #include <iostream>
 #include <sstream>
@@ -19,20 +20,19 @@ MemVectors::MemVectors(const std::string& group_id,
     _file_location(file_location),
     _pIdGenerator(new SimpleIDGenerator()),
     _dimension(dimension),
-    _pInnerIndex(new faiss::IndexFlat(_dimension)),
-    _pIdMapIndex(new faiss::IndexIDMap(_pInnerIndex)) {
+    pIndex_(faiss::index_factory(_dimension, "IDMap,Flat")) {
 }
 
 void MemVectors::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
     _pIdGenerator->getNextIDNumbers(n_, vector_ids_);
-    _pIdMapIndex->add_with_ids(n_, vectors_, &vector_ids_[0]);
+    pIndex_->add_with_ids(n_, vectors_, &vector_ids_[0]);
     for(auto i=0 ; i<n_; i++) {
         vector_ids_.push_back(i);
     }
 }
 
 size_t MemVectors::total() const {
-    return _pIdMapIndex->ntotal;
+    return pIndex_->ntotal;
 }
 
 size_t MemVectors::approximate_size() const {
@@ -42,10 +42,10 @@ size_t MemVectors::approximate_size() const {
 Status MemVectors::serialize(std::string& group_id) {
     /* std::stringstream ss; */
     /* ss << "/tmp/test/" << _pIdGenerator->getNextIDNumber(); */
-    /* faiss::write_index(_pIdMapIndex, ss.str().c_str()); */
-    /* std::cout << _pIdMapIndex->ntotal << std::endl; */
+    /* faiss::write_index(pIndex_, ss.str().c_str()); */
+    /* std::cout << pIndex_->ntotal << std::endl; */
     /* std::cout << _file_location << std::endl; */
-    faiss::write_index(_pIdMapIndex, _file_location.c_str());
+    faiss::write_index(pIndex_, _file_location.c_str());
     group_id = group_id_;
     return Status::OK();
 }
@@ -55,13 +55,9 @@ MemVectors::~MemVectors() {
         delete _pIdGenerator;
         _pIdGenerator = nullptr;
     }
-    if (_pIdMapIndex != nullptr) {
-        delete _pIdMapIndex;
-        _pIdMapIndex = nullptr;
-    }
-    if (_pInnerIndex != nullptr) {
-        delete _pInnerIndex;
-        _pInnerIndex = nullptr;
+    if (pIndex_ != nullptr) {
+        delete pIndex_;
+        pIndex_ = nullptr;
     }
 }
 
