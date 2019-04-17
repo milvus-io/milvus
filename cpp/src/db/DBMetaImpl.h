@@ -9,6 +9,8 @@ namespace vecwise {
 namespace engine {
 namespace meta {
 
+auto StoragePrototype(const std::string& path);
+
 class DBMetaImpl : public Meta {
 public:
     DBMetaImpl(const DBMetaOptions& options_);
