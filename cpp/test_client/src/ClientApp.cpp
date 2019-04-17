@@ -68,13 +68,19 @@ void ClientApp::Run(const std::string &config_file) {
         transport_ptr->open();
         VecServiceClient client(protocol_ptr);
         try {
+            const int32_t dim = 256;
             VecGroup group;
             group.id = "test_group";
-            group.dimension = 256;
+            group.dimension = dim;
             group.index_type = 0;
             client.add_group(group);
 
-
+            VecTensor tensor;
+            for(int32_t i = 0; i < dim; i++) {
+                tensor.tensor.push_back((double)i);
+            }
+            VecTensorIdList result;
+            client.add_vector(result, group.id, tensor);
 
         } catch (apache::thrift::TException& ex) {
             printf("%s", ex.what());

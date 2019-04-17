@@ -8,6 +8,7 @@ aux_source_directory(cache cache_files)
 aux_source_directory(config config_files)
 aux_source_directory(server server_files)
 aux_source_directory(utils utils_files)
+aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
 
 set(service_files
@@ -18,6 +19,7 @@ set(service_files
 set(vecwise_engine_src
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
         ${cache_files}
+        ${db_files}
         ${wrapper_files})
 
 include_directories(/usr/local/cuda/include)
@@ -42,5 +44,6 @@ set(dependency_libs
         thrift
         pthread
         faiss
+        vecwise_engine
         )
 target_link_libraries(vecwise_engine_server ${dependency_libs} ${cuda_library})

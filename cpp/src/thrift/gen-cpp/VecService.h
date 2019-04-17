@@ -38,7 +38,7 @@ class VecServiceIf {
    * @param group_id
    * @param tensor
    */
-  virtual int64_t add_vector(const std::string& group_id, const VecTensor& tensor) = 0;
+  virtual void add_vector(VecTensorIdList& _return, const std::string& group_id, const VecTensor& tensor) = 0;
   virtual void add_vector_batch(VecTensorIdList& _return, const std::string& group_id, const VecTensorList& tensor_list) = 0;
 
   /**
@@ -90,9 +90,8 @@ class VecServiceNull : virtual public VecServiceIf {
   void del_group(const std::string& /* group_id */) {
     return;
   }
-  int64_t add_vector(const std::string& /* group_id */, const VecTensor& /* tensor */) {
-    int64_t _return = 0;
-    return _return;
+  void add_vector(VecTensorIdList& /* _return */, const std::string& /* group_id */, const VecTensor& /* tensor */) {
+    return;
   }
   void add_vector_batch(VecTensorIdList& /* _return */, const std::string& /* group_id */, const VecTensorList& /* tensor_list */) {
     return;
@@ -492,16 +491,16 @@ class VecService_add_vector_result {
 
   VecService_add_vector_result(const VecService_add_vector_result&);
   VecService_add_vector_result& operator=(const VecService_add_vector_result&);
-  VecService_add_vector_result() : success(0) {
+  VecService_add_vector_result() {
   }
 
   virtual ~VecService_add_vector_result() throw();
-  int64_t success;
+  VecTensorIdList success;
   VecException e;
 
   _VecService_add_vector_result__isset __isset;
 
-  void __set_success(const int64_t val);
+  void __set_success(const VecTensorIdList& val);
 
   void __set_e(const VecException& val);
 
@@ -535,7 +534,7 @@ class VecService_add_vector_presult {
 
 
   virtual ~VecService_add_vector_presult() throw();
-  int64_t* success;
+  VecTensorIdList* success;
   VecException e;
 
   _VecService_add_vector_presult__isset __isset;
@@ -963,9 +962,9 @@ class VecServiceClient : virtual public VecServiceIf {
   void del_group(const std::string& group_id);
   void send_del_group(const std::string& group_id);
   void recv_del_group();
-  int64_t add_vector(const std::string& group_id, const VecTensor& tensor);
+  void add_vector(VecTensorIdList& _return, const std::string& group_id, const VecTensor& tensor);
   void send_add_vector(const std::string& group_id, const VecTensor& tensor);
-  int64_t recv_add_vector();
+  void recv_add_vector(VecTensorIdList& _return);
   void add_vector_batch(VecTensorIdList& _return, const std::string& group_id, const VecTensorList& tensor_list);
   void send_add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
   void recv_add_vector_batch(VecTensorIdList& _return);
@@ -1063,13 +1062,14 @@ class VecServiceMultiface : virtual public VecServiceIf {
     ifaces_[i]->del_group(group_id);
   }
 
-  int64_t add_vector(const std::string& group_id, const VecTensor& tensor) {
+  void add_vector(VecTensorIdList& _return, const std::string& group_id, const VecTensor& tensor) {
     size_t sz = ifaces_.size();
     size_t i = 0;
     for (; i < (sz - 1); ++i) {
-      ifaces_[i]->add_vector(group_id, tensor);
+      ifaces_[i]->add_vector(_return, group_id, tensor);
     }
-    return ifaces_[i]->add_vector(group_id, tensor);
+    ifaces_[i]->add_vector(_return, group_id, tensor);
+    return;
   }
 
   void add_vector_batch(VecTensorIdList& _return, const std::string& group_id, const VecTensorList& tensor_list) {
@@ -1141,9 +1141,9 @@ class VecServiceConcurrentClient : virtual public VecServiceIf {
   void del_group(const std::string& group_id);
   int32_t send_del_group(const std::string& group_id);
   void recv_del_group(const int32_t seqid);
-  int64_t add_vector(const std::string& group_id, const VecTensor& tensor);
+  void add_vector(VecTensorIdList& _return, const std::string& group_id, const VecTensor& tensor);
   int32_t send_add_vector(const std::string& group_id, const VecTensor& tensor);
-  int64_t recv_add_vector(const int32_t seqid);
+  void recv_add_vector(VecTensorIdList& _return, const int32_t seqid);
   void add_vector_batch(VecTensorIdList& _return, const std::string& group_id, const VecTensorList& tensor_list);
   int32_t send_add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
   void recv_add_vector_batch(VecTensorIdList& _return, const int32_t seqid);
