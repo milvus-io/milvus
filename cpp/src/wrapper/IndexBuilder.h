@@ -20,6 +20,12 @@ public:
     explicit IndexBuilder(const Operand_ptr &opd);
 
     Index_ptr build_all(const long &nb,
+                        const float* xb,
+                        const long* ids,
+                        const long &nt = 0,
+                        const float* xt = nullptr);
+
+    Index_ptr build_all(const long &nb,
                         const std::vector<float> &xb,
                         const std::vector<long> &ids,
                         const long &nt = 0,
@@ -47,5 +53,3 @@ extern IndexBuilderPtr GetIndexBuilder(const Operand_ptr &opd);
 }
 }
 }
-
-
