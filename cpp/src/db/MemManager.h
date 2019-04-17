@@ -10,7 +10,6 @@
 #include "Status.h"
 
 namespace faiss {
-    class IndexIDMap;
     class Index;
 }
 
@@ -50,8 +49,7 @@ private:
     const std::string _file_location;
     IDGenerator* _pIdGenerator;
     size_t _dimension;
-    faiss::Index* _pInnerIndex;
-    faiss::IndexIDMap* _pIdMapIndex;
+    faiss::Index* pIndex_;
 
 }; // MemVectors
 
