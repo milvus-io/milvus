@@ -15,7 +15,7 @@ class Env;
 
 class DB {
 public:
-    static DB* Open(const Options& options_, const std::string& name_);
+    static DB* Open(const Options& options);
 
     virtual Status add_group(const GroupOptions& options_,
             const std::string& group_id_,

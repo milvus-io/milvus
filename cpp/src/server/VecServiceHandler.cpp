@@ -21,13 +21,12 @@ namespace {
         if(s_db == nullptr) {
             engine::Options opt;
 
+            std::string db_path = "/tmp/test";
             ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
             opt.meta.backend_uri = config.GetValue(CONFIG_SERVER_DB_URL);
-            opt.meta.dbname = config.GetValue(CONFIG_SERVER_DB_NAME);
+            opt.meta.path = db_path;
 
-            std::string db_path = "/tmp/test";
-            CommonUtil::CreateDirectory(db_path);
-            s_db = engine::DB::Open(opt, db_path);
+            s_db = engine::DB::Open(opt);
         }
         return s_db;
     }
