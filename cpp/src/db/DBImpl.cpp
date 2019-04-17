@@ -167,7 +167,8 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
 
 Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     meta::GroupFileSchema group_file;
-    Status status = _pMeta->add_group_file(file.group_id, file.date, group_file);
+    Status status = _pMeta->add_group_file(file.group_id, file.date,
+            group_file, meta::GroupFileSchema::INDEX);
     if (!status.ok()) {
         return status;
     }
@@ -182,8 +183,16 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
             from_index->id_map.data());
     /* std::cout << "raw size=" << from_index->ntotal << "   index size=" << index->ntotal << std::endl; */
     // PXU TODO: Remove
-    auto location = group_file.location + ".index";
-    write_index(index, location.c_str());
+    /* auto location = group_file.location + ".index"; */
+    write_index(index, group_file.location.c_str());
+    group_file.file_type = meta::GroupFileSchema::INDEX;
+
+    /* auto to_remove = file; */
+    /* to_remove.file_type = TO_DELETE; */
+
+    /* GroupFilesSchema update_files = {to_remove, group_file}; */
+    /* _pMeta->update_files(update_files); */
+
     return Status::OK();
 }
 
