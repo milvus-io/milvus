@@ -26,17 +26,12 @@ DBImpl::DBImpl(const Options& options)
     start_timer_task(_options.memory_sync_interval);
 }
 
-Status DBImpl::add_group(const GroupOptions& options,
-        const std::string& group_id,
-        meta::GroupSchema& group_info) {
-    assert((!options.has_id) ||
-            (options.has_id && ("" != group_id)));
-
-    return _pMeta->add_group(options, group_id, group_info);
+Status DBImpl::add_group(meta::GroupSchema& group_info) {
+    return _pMeta->add_group(group_info);
 }
 
-Status DBImpl::get_group(const std::string& group_id_, meta::GroupSchema& group_info_) {
-    return _pMeta->get_group(group_id_, group_info_);
+Status DBImpl::get_group(meta::GroupSchema& group_info) {
+    return _pMeta->get_group(group_info);
 }
 
 Status DBImpl::has_group(const std::string& group_id_, bool& has_or_not_) {

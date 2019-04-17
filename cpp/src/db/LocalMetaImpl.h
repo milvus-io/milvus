@@ -14,10 +14,8 @@ public:
     const size_t INDEX_TRIGGER_SIZE = 1024*1024*500;
     LocalMetaImpl(const DBMetaOptions& options_);
 
-    virtual Status add_group(const GroupOptions& options_,
-            const std::string& group_id_,
-            GroupSchema& group_info_) override;
-    virtual Status get_group(const std::string& group_id_, GroupSchema& group_info_) override;
+    virtual Status add_group(GroupSchema& group_info_) override;
+    virtual Status get_group(GroupSchema& group_info_) override;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
     virtual Status add_group_file(const std::string& group_id,
