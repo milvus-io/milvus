@@ -47,19 +47,22 @@ Status DBMetaImpl::has_group(const std::string& group_id_, bool& has_or_not_) {
 }
 
 Status DBMetaImpl::add_group_file(const std::string& group_id,
-                              GroupFileSchema& group_file_info) {
+                              GroupFileSchema& group_file_info,
+                              GroupFileSchema::FILE_TYPE file_type) {
     return add_group_file(group_id, Meta::GetDate(), group_file_info);
 }
 
 Status DBMetaImpl::add_group_file(const std::string& group_id,
                               DateT date,
-                              GroupFileSchema& group_file_info) {
+                              GroupFileSchema& group_file_info,
+                              GroupFileSchema::FILE_TYPE file_type) {
     //PXU TODO
     std::stringstream ss;
     SimpleIDGenerator g;
+    std::string suffix = (file_type == GroupFileSchema::RAW) ? ".raw" : ".index";
     ss << "/tmp/test/" << date
                        << "/" << g.getNextIDNumber()
-                       << ".log";
+                       << suffix;
     group_file_info.group_id = "1";
     group_file_info.dimension = 64;
     group_file_info.location = ss.str();
