@@ -15,16 +15,15 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-DBImpl::DBImpl(const Options& options_, const std::string& name_)
-    : _dbname(name_),
-      _env(options_.env),
-      _options(options_),
+DBImpl::DBImpl(const Options& options)
+    : _env(options.env),
+      _options(options),
       _bg_compaction_scheduled(false),
       _shutting_down(false),
       bg_build_index_started_(false),
       _pMeta(new meta::DBMetaImpl(_options.meta)),
       _pMemMgr(new MemManager(_pMeta)) {
-    start_timer_task(options_.memory_sync_interval);
+    start_timer_task(_options.memory_sync_interval);
 }
 
 Status DBImpl::add_group(const GroupOptions& options,
@@ -249,8 +248,8 @@ DBImpl::~DBImpl() {
 
 DB::~DB() {}
 
-DB* DB::Open(const Options& options_, const std::string& name_) {
-    DBImpl* impl = new DBImpl(options_, name_);
+DB* DB::Open(const Options& options) {
+    DBImpl* impl = new DBImpl(options);
     return impl;
 }
 

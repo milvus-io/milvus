@@ -9,9 +9,9 @@ namespace vecwise {
 namespace engine {
 namespace meta {
 
-class DBMetaImpl : public Meta {
+class LocalMetaImpl : public Meta {
 public:
-    DBMetaImpl(const DBMetaOptions& options_);
+    LocalMetaImpl(const DBMetaOptions& options_);
 
     virtual Status add_group(const GroupOptions& options_,
             const std::string& group_id_,
@@ -49,11 +49,16 @@ public:
 
 private:
 
+    std::string GetGroupPath(const std::string& group_id);
+    std::string GetGroupMetaPath(const std::string& group_id);
+
+    Status CreateGroupMeta(const GroupSchema& group_schema);
+
     Status initialize();
 
     const DBMetaOptions _options;
 
-}; // DBMetaImpl
+}; // LocalMetaImpl
 
 } // namespace meta
 } // namespace engine

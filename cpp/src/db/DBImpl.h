@@ -20,7 +20,7 @@ namespace meta {
 
 class DBImpl : public DB {
 public:
-    DBImpl(const Options& options_, const std::string& name_);
+    DBImpl(const Options& options);
 
     virtual Status add_group(const GroupOptions& options_,
             const std::string& group_id_,
@@ -57,7 +57,6 @@ private:
     void background_call();
     void background_compaction();
 
-    const std::string& _dbname;
     Env* const _env;
     const Options _options;
 
