@@ -22,10 +22,8 @@ class DBImpl : public DB {
 public:
     DBImpl(const Options& options);
 
-    virtual Status add_group(const GroupOptions& options_,
-            const std::string& group_id_,
-            meta::GroupSchema& group_info_) override;
-    virtual Status get_group(const std::string& group_id_, meta::GroupSchema& group_info_) override;
+    virtual Status add_group(meta::GroupSchema& group_info) override;
+    virtual Status get_group(meta::GroupSchema& group_info) override;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
     virtual Status get_group_files(const std::string& group_id_,

@@ -52,25 +52,26 @@ Status DBMetaImpl::initialize() {
     return Status::OK();
 }
 
-Status DBMetaImpl::add_group(const GroupOptions& options_,
-            const std::string& group_id_,
-            GroupSchema& group_info_) {
-
-    group_info_.dimension = options_.dimension;
-    group_info_.group_id = group_id_;
-    group_info_.files_cnt = 0;
-    group_info_.id = -1;
+Status DBMetaImpl::add_group(GroupSchema& group_info) {
+    if (group_info.group_id == "") {
+        std::stringstream ss;
+        SimpleIDGenerator g;
+        ss << g.getNextIDNumber();
+        group_info.group_id = ss.str();
+    }
+    group_info.files_cnt = 0;
+    group_info.id = -1;
     try {
-        auto id = ConnectorPtr->insert(group_info_);
+        auto id = ConnectorPtr->insert(group_info);
         std::cout << "id=" << id << std::endl;
-         group_info_.id = id;
+        group_info.id = id;
     } catch(std::system_error& e) {
-        return Status::GroupError("Add Group " + group_id_ + " Error");
+        return Status::GroupError("Add Group " + group_info.group_id + " Error");
     }
     return Status::OK();
 }
 
-Status DBMetaImpl::get_group(const std::string& group_id_, GroupSchema& group_info_) {
+Status DBMetaImpl::get_group(GroupSchema& group_info_) {
 
     return Status::OK();
 }
