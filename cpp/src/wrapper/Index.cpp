@@ -62,6 +62,10 @@ bool Index::search(idx_t n, const float *data, idx_t k, float *distances, long *
     return true;
 }
 
+void write_index(const Index_ptr &index, const std::string &file_name) {
+    write_index(index->index_.get(), file_name.c_str());
+}
+
 }
 }
 }

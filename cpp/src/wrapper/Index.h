@@ -23,6 +23,9 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
+class Index;
+using Index_ptr = std::shared_ptr<Index>;
+
 class Index {
     typedef long idx_t;
 
@@ -61,6 +64,7 @@ public:
 //    virtual bool index_display();
 
 private:
+    friend void write_index(const Index_ptr &index, const std::string &file_name);
     std::shared_ptr<faiss::Index> index_ = nullptr;
 //    std::vector<faiss::gpu::GpuResources *> res_;
 //    std::vector<int> devs_;
@@ -69,9 +73,8 @@ private:
 //    faiss::gpu::GpuMultipleClonerOptions *options = new faiss::gpu::GpuMultipleClonerOptions();
 };
 
-using Index_ptr = std::shared_ptr<Index>;
 
-extern void write_index(const Index_ptr &index, const std::string &file_name);
+void write_index(const Index_ptr &index, const std::string &file_name);
 
 extern Index_ptr read_index(const std::string &file_name);
 
@@ -79,4 +82,3 @@ extern Index_ptr read_index(const std::string &file_name);
 }
 }
 }
-
