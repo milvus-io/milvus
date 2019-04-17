@@ -78,7 +78,7 @@ service VecService {
      * vector interfaces
      *
      */
-    i64 add_vector(2: string group_id, 3: VecTensor tensor) throws(1: VecException e);
+    VecTensorIdList add_vector(2: string group_id, 3: VecTensor tensor) throws(1: VecException e);
     VecTensorIdList add_vector_batch(2: string group_id, 3: VecTensorList tensor_list) throws(1: VecException e);
 
     /**
