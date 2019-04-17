@@ -1,6 +1,9 @@
+#include <sys/stat.h>
+#include <unistd.h>
 #include <sstream>
 #include <iostream>
 #include <boost/filesystem.hpp>
+#include <fstream>
 #include "DBMetaImpl.h"
 #include "IDGenerator.h"
 
@@ -8,6 +11,13 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 namespace meta {
+
+long GetFileSize(const std::string& filename)
+{
+    struct stat stat_buf;
+    int rc = stat(filename.c_str(), &stat_buf);
+    return rc == 0 ? stat_buf.st_size : -1;
+}
 
 DBMetaImpl::DBMetaImpl(const MetaOptions& options_)
     : _options(static_cast<const DBMetaOptions&>(options_)) {
@@ -57,6 +67,24 @@ Status DBMetaImpl::add_group_file(const std::string& group_id,
     return Status::OK();
 }
 
+Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
+    // PXU TODO
+    files.clear();
+    std::stringstream ss;
+    ss << "/tmp/test/" << Meta::GetDate();
+    boost::filesystem::path path(ss.str().c_str());
+    boost::filesystem::directory_iterator end_itr;
+    for (boost::filesystem::directory_iterator itr(path); itr != end_itr; ++itr) {
+        std::cout << itr->path().string() << std::endl;
+        GroupFileSchema f;
+        f.location = itr->path().string();
+        if (1024*1024*50 >= GetFileSize(f.location)) continue;
+        std::cout << "About to index " << f.location << std::endl;
+        files.push_back(f);
+    }
+    return Status::OK();
+}
+
 Status DBMetaImpl::files_to_merge(const std::string& group_id,
         DatePartionedGroupFilesSchema& files) {
     //PXU TODO
@@ -72,6 +100,8 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
         std::cout << itr->path().string() << std::endl;
         GroupFileSchema f;
         f.location = itr->path().string();
+        if (1024*1024*50 < GetFileSize(f.location)) continue;
+        std::cout << "About to merge " << f.location << std::endl;
         files[date].push_back(f);
     }
 
