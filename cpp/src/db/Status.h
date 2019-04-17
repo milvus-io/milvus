@@ -22,9 +22,19 @@ public:
         return Status(kNotFound, msg, msg2);
     }
 
+    static Status InvalidDBPath(const std::string& msg, const std::string& msg2="") {
+        return Status(kInvalidDBPath, msg, msg2);
+    }
+    static Status GroupError(const std::string& msg, const std::string& msg2="") {
+        return Status(kGroupError, msg, msg2);
+    }
+
     bool ok() const { return state_ == nullptr; }
 
     bool IsNotFound() const { return code() == kNotFound; }
+
+    bool IsInvalidDBPath() const { return code() == kInvalidDBPath; }
+    bool IsGroupError() const { return code() == kGroupError; }
 
     std::string ToString() const;
 
@@ -34,6 +44,9 @@ private:
     enum Code {
         kOK = 0,
         kNotFound,
+
+        kInvalidDBPath,
+        kGroupError,
     };
 
     Code code() const {

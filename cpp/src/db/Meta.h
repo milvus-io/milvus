@@ -21,7 +21,6 @@ struct GroupSchema {
     size_t files_cnt = 0;
     uint16_t dimension;
     std::string location = "";
-    std::string next_file_location = "";
 }; // GroupSchema
 
 

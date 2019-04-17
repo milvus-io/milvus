@@ -9,13 +9,10 @@ namespace engine {
 
 class Env;
 
-struct MetaOptions {
-}; // MetaOptions
-
-
-struct DBMetaOptions : public MetaOptions {
+struct DBMetaOptions {
+    /* DBMetaOptions(const std::string&, const std::string&); */
+    std::string path;
     std::string backend_uri;
-    std::string dbname;
 }; // DBMetaOptions
 
 
