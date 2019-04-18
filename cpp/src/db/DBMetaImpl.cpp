@@ -258,6 +258,7 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
         group_file.rows = std::get<4>(file);
         group_file.date = std::get<5>(file);
         group_file.dimension = group_info.dimension;
+        GetGroupFilePath(group_file);
         auto dateItr = files.find(group_file.date);
         if (dateItr == files.end()) {
             files[group_file.date] = GroupFilesSchema();
