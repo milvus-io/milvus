@@ -37,16 +37,19 @@ struct GroupFileSchema {
 
 inline auto initStorage(const std::string &path) {
     return make_storage(path,
-                        make_table("COMPANY",
-                                   make_column("ID", &Employee::id, primary_key()),
-                                   make_column("AGE", &Employee::age)));
+                        // Add table below
+                        make_table("Groups",
+                                   make_column("id", &GroupSchema::id, primary_key()),
+                                   make_column("group_id", &GroupSchema::group_id, unique()),
+                                   make_column("dimension", &GroupSchema::dimension),
+                                   make_column("files_cnt", &GroupSchema::files_cnt, default_value(0))));
 }
 
 using SqliteDB = decltype(initStorage(""));
 using SqliteDBPtr= std::shared_ptr<Db>;
 
 class Connection {
-protected:
+ protected:
     static SqliteDBPtr connect_;
 };
 
