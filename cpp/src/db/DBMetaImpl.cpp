@@ -156,13 +156,16 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
     group_file.file_id = ss.str();
     group_file.dimension = group_info.dimension;
     GetGroupFilePath(group_file);
-    try {
+
+    auto commited = ConnectorPtr->transaction([&] () mutable {
         auto id = ConnectorPtr->insert(group_file);
-        std::cout << __func__ << " id=" << id << std::endl;
         group_info.id = id;
-    } catch(std::system_error& e) {
-        return Status::GroupError("Add GroupFile Group "
-                + group_info.group_id + " File " + group_file.file_id + " Error");
+        std::cout << __func__ << " id=" << id << std::endl;
+        return true;
+    });
+
+    if (!commited) {
+        return Status::DBTransactionError("Add file Error");
     }
 
     auto partition_path = GetGroupDatePartitionPath(group_file.group_id, group_file.date);
