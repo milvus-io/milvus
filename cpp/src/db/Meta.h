@@ -14,6 +14,7 @@ namespace engine {
 namespace meta {
 
 typedef int DateT;
+const DateT EmptyDate = -1;
 
 struct GroupSchema {
     size_t id;
@@ -28,6 +29,7 @@ struct GroupFileSchema {
     typedef enum {
         NEW,
         RAW,
+        TO_INDEX,
         INDEX,
         TO_DELETE,
     } FILE_TYPE;
@@ -37,7 +39,7 @@ struct GroupFileSchema {
     std::string file_id;
     int file_type = NEW;
     size_t rows;
-    DateT date;
+    DateT date = EmptyDate;
     uint16_t dimension;
     std::string location = "";
 }; // GroupFileSchema
@@ -52,13 +54,7 @@ public:
     virtual Status get_group(GroupSchema& group_info) = 0;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
 
-    virtual Status add_group_file(const std::string& group_id_,
-                                  GroupFileSchema& group_file_info_,
-                                  GroupFileSchema::FILE_TYPE file_type=GroupFileSchema::RAW) = 0;
-    virtual Status add_group_file(const std::string& group_id,
-                                  DateT date,
-                                  GroupFileSchema& group_file_info,
-                                  GroupFileSchema::FILE_TYPE file_type=GroupFileSchema::RAW) = 0;
+    virtual Status add_group_file(GroupFileSchema& group_file_info) = 0;
 
     virtual Status has_group_file(const std::string& group_id_,
                                   const std::string& file_id_,

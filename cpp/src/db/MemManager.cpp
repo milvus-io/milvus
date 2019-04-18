@@ -72,7 +72,8 @@ VectorsPtr MemManager::get_mem_by_group(const std::string& group_id) {
     }
 
     meta::GroupFileSchema group_file;
-    auto status = _pMeta->add_group_file(group_id, group_file);
+    group_file.group_id = group_id;
+    auto status = _pMeta->add_group_file(group_file);
     if (!status.ok()) {
         return nullptr;
     }

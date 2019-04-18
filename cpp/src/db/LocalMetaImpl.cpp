@@ -133,26 +133,17 @@ Status LocalMetaImpl::has_group(const std::string& group_id, bool& has_or_not) {
     return Status::OK();
 }
 
-Status LocalMetaImpl::add_group_file(const std::string& group_id,
-                              GroupFileSchema& group_file_info,
-                              GroupFileSchema::FILE_TYPE file_type) {
-    return add_group_file(group_id, Meta::GetDate(), group_file_info);
-}
-
-Status LocalMetaImpl::add_group_file(const std::string& group_id,
-                              DateT date,
-                              GroupFileSchema& group_file_info,
-                              GroupFileSchema::FILE_TYPE file_type) {
+Status LocalMetaImpl::add_group_file(GroupFileSchema& group_file_info) {
     GroupSchema group_info;
-    auto status = get_group(group_info);
-    if (!status.ok()) {
-        return status;
-    }
-    auto location = GetNextGroupFileLocationByPartition(group_id, date, file_type);
-    group_file_info.group_id = group_id;
-    group_file_info.dimension = group_info.dimension;
-    group_file_info.location = location;
-    group_file_info.date = date;
+    /* auto status = get_group(group_info); */
+    /* if (!status.ok()) { */
+    /*     return status; */
+    /* } */
+    /* auto location = GetNextGroupFileLocationByPartition(group_id, date, file_type); */
+    /* group_file_info.group_id = group_id; */
+    /* group_file_info.dimension = group_info.dimension; */
+    /* group_file_info.location = location; */
+    /* group_file_info.date = date; */
     return Status::OK();
 }
 
