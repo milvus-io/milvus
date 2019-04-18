@@ -1,6 +1,8 @@
 #ifndef VECENGINE_DB_META_IMPL_H_
 #define VECENGINE_DB_META_IMPL_H_
 
+#include <thread>
+#include <mutex>
 #include "Meta.h"
 #include "Options.h"
 
@@ -42,12 +44,14 @@ public:
 
 private:
 
+    Status get_group_no_lock(GroupSchema& group_info);
     std::string GetGroupPath(const std::string& group_id);
     std::string GetGroupDatePartitionPath(const std::string& group_id, DateT& date);
     void GetGroupFilePath(GroupFileSchema& group_file);
     Status initialize();
 
     const DBMetaOptions _options;
+    std::mutex mutex_;
 
 }; // DBMetaImpl
 
