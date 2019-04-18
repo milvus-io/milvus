@@ -28,6 +28,9 @@ public:
     static Status GroupError(const std::string& msg, const std::string& msg2="") {
         return Status(kGroupError, msg, msg2);
     }
+    static Status DBTransactionError(const std::string& msg, const std::string& msg2="") {
+        return Status(kDBTransactionError, msg, msg2);
+    }
 
     bool ok() const { return state_ == nullptr; }
 
@@ -35,6 +38,7 @@ public:
 
     bool IsInvalidDBPath() const { return code() == kInvalidDBPath; }
     bool IsGroupError() const { return code() == kGroupError; }
+    bool IsDBTransactionError() const { return code() == kDBTransactionError; }
 
     std::string ToString() const;
 
@@ -47,6 +51,7 @@ private:
 
         kInvalidDBPath,
         kGroupError,
+        kDBTransactionError,
     };
 
     Code code() const {

@@ -104,7 +104,9 @@ void DBImpl::background_call() {
 Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         const meta::GroupFilesSchema& files) {
     meta::GroupFileSchema group_file;
-    Status status = _pMeta->add_group_file(group_id, date, group_file);
+    group_file.group_id = group_id;
+    group_file.date = date;
+    Status status = _pMeta->add_group_file(group_file);
     if (!status.ok()) {
         return status;
     }
@@ -161,8 +163,9 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
 
 Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     meta::GroupFileSchema group_file;
-    Status status = _pMeta->add_group_file(file.group_id, file.date,
-            group_file, meta::GroupFileSchema::INDEX);
+    group_file.group_id = file.group_id;
+    group_file.date = file.date;
+    Status status = _pMeta->add_group_file(group_file);
     if (!status.ok()) {
         return status;
     }
@@ -176,16 +179,14 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
             dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
             from_index->id_map.data());
     /* std::cout << "raw size=" << from_index->ntotal << "   index size=" << index->ntotal << std::endl; */
-    // PXU TODO: Remove
-    /* auto location = group_file.location + ".index"; */
     write_index(index, group_file.location.c_str());
     group_file.file_type = meta::GroupFileSchema::INDEX;
 
-    /* auto to_remove = file; */
-    /* to_remove.file_type = TO_DELETE; */
+    auto to_remove = file;
+    to_remove.file_type = meta::GroupFileSchema::TO_DELETE;
 
-    /* GroupFilesSchema update_files = {to_remove, group_file}; */
-    /* _pMeta->update_files(update_files); */
+    meta::GroupFilesSchema update_files = {to_remove, group_file};
+    _pMeta->update_files(update_files);
 
     return Status::OK();
 }

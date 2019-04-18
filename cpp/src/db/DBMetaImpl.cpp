@@ -17,11 +17,19 @@ using namespace sqlite_orm;
 
 inline auto StoragePrototype(const std::string& path) {
     return make_storage(path,
-            make_table("Groups",
+            make_table("Group",
                       make_column("id", &GroupSchema::id, primary_key()),
                       make_column("group_id", &GroupSchema::group_id, unique()),
                       make_column("dimension", &GroupSchema::dimension),
-                      make_column("files_cnt", &GroupSchema::files_cnt, default_value(0))));
+                      make_column("files_cnt", &GroupSchema::files_cnt, default_value(0))),
+            make_table("GroupFile",
+                      make_column("id", &GroupFileSchema::id, primary_key()),
+                      make_column("group_id", &GroupFileSchema::group_id),
+                      make_column("file_id", &GroupFileSchema::file_id),
+                      make_column("file_type", &GroupFileSchema::file_type),
+                      make_column("rows", &GroupFileSchema::rows, default_value(0)),
+                      make_column("date", &GroupFileSchema::date))
+            );
 
 }
 
@@ -33,6 +41,26 @@ long GetFileSize(const std::string& filename)
     struct stat stat_buf;
     int rc = stat(filename.c_str(), &stat_buf);
     return rc == 0 ? stat_buf.st_size : -1;
+}
+
+std::string DBMetaImpl::GetGroupPath(const std::string& group_id) {
+    return _options.path + "/" + group_id;
+}
+
+std::string DBMetaImpl::GetGroupDatePartitionPath(const std::string& group_id, DateT& date) {
+    std::stringstream ss;
+    ss << GetGroupPath(group_id) << "/" << date;
+    return ss.str();
+}
+
+void DBMetaImpl::GetGroupFilePath(GroupFileSchema& group_file) {
+    if (group_file.date == EmptyDate) {
+        group_file.date = Meta::GetDate();
+    }
+    std::stringstream ss;
+    ss << GetGroupDatePartitionPath(group_file.group_id, group_file.date)
+       << "/" << group_file.file_id;
+    group_file.location = ss.str();
 }
 
 DBMetaImpl::DBMetaImpl(const DBMetaOptions& options_)
@@ -103,74 +131,105 @@ Status DBMetaImpl::has_group(const std::string& group_id, bool& has_or_not) {
     return Status::OK();
 }
 
-Status DBMetaImpl::add_group_file(const std::string& group_id,
-                              GroupFileSchema& group_file_info,
-                              GroupFileSchema::FILE_TYPE file_type) {
-    return add_group_file(group_id, Meta::GetDate(), group_file_info);
-}
+Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
+    if (group_file.date == EmptyDate) {
+        group_file.date = Meta::GetDate();
+    }
+    GroupSchema group_info;
+    group_info.group_id = group_file.group_id;
+    auto status = get_group(group_info);
+    if (!status.ok()) {
+        return status;
+    }
 
-Status DBMetaImpl::add_group_file(const std::string& group_id,
-                              DateT date,
-                              GroupFileSchema& group_file_info,
-                              GroupFileSchema::FILE_TYPE file_type) {
-    //PXU TODO
-    std::stringstream ss;
     SimpleIDGenerator g;
-    std::string suffix = (file_type == GroupFileSchema::RAW) ? ".raw" : ".index";
-    /* ss << "/tmp/test/" << date */
-    ss << _options.path << "/" << date
-                       << "/" << g.getNextIDNumber()
-                       << suffix;
-    group_file_info.group_id = "1";
-    group_file_info.dimension = 64;
-    group_file_info.location = ss.str();
-    group_file_info.date = date;
+    group_file.file_type = GroupFileSchema::NEW;
+    group_file.file_id = g.getNextIDNumber();
+    group_file.dimension = group_info.dimension;
+    GetGroupFilePath(group_file);
+    try {
+        auto id = ConnectorPtr->insert(group_file);
+        std::cout << __func__ << " id=" << id << std::endl;
+        group_info.id = id;
+    } catch(std::system_error& e) {
+        return Status::GroupError("Add GroupFile Group "
+                + group_info.group_id + " File " + group_file.file_id + " Error");
+    }
     return Status::OK();
 }
 
 Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
-    // PXU TODO
     files.clear();
-    std::stringstream ss;
-    /* ss << "/tmp/test/" << Meta::GetDate(); */
-    ss << _options.path << "/" << Meta::GetDate();
-    boost::filesystem::path path(ss.str().c_str());
-    boost::filesystem::directory_iterator end_itr;
-    for (boost::filesystem::directory_iterator itr(path); itr != end_itr; ++itr) {
-        /* std::cout << itr->path().string() << std::endl; */
-        GroupFileSchema f;
-        f.location = itr->path().string();
-        std::string suffixStr = f.location.substr(f.location.find_last_of('.') + 1);
-        if (suffixStr == "index") continue;
-        if (1024*1024*1000 >= GetFileSize(f.location)) continue;
-        std::cout << "[About to index] " << f.location << std::endl;
-        f.date = Meta::GetDate();
-        files.push_back(f);
+
+    auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
+                                               &GroupFileSchema::group_id,
+                                               &GroupFileSchema::file_id,
+                                               &GroupFileSchema::file_type,
+                                               &GroupFileSchema::rows,
+                                               &GroupFileSchema::date),
+                                      where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_INDEX));
+
+    std::map<std::string, GroupSchema> groups;
+
+    for (auto& file : selected) {
+        GroupFileSchema group_file;
+        group_file.id = std::get<0>(file);
+        group_file.group_id = std::get<1>(file);
+        group_file.file_id = std::get<2>(file);
+        group_file.file_type = std::get<3>(file);
+        group_file.rows = std::get<4>(file);
+        group_file.date = std::get<5>(file);
+        auto groupItr = groups.find(group_file.group_id);
+        if (groupItr == groups.end()) {
+            GroupSchema group_info;
+            group_info.group_id = group_file.group_id;
+            auto status = get_group(group_info);
+            if (!status.ok()) {
+                return status;
+            }
+            groups[group_file.group_id] = group_info;
+        }
+        group_file.dimension = groups[group_file.group_id].dimension;
+        files.push_back(group_file);
     }
+
     return Status::OK();
 }
 
 Status DBMetaImpl::files_to_merge(const std::string& group_id,
         DatePartionedGroupFilesSchema& files) {
-    //PXU TODO
     files.clear();
-    std::stringstream ss;
-    /* ss << "/tmp/test/" << Meta::GetDate(); */
-    ss << _options.path << "/" << Meta::GetDate();
-    boost::filesystem::path path(ss.str().c_str());
-    boost::filesystem::directory_iterator end_itr;
-    GroupFilesSchema gfiles;
-    DateT date = Meta::GetDate();
-    files[date] = gfiles;
-    for (boost::filesystem::directory_iterator itr(path); itr != end_itr; ++itr) {
-        /* std::cout << itr->path().string() << std::endl; */
-        GroupFileSchema f;
-        f.location = itr->path().string();
-        std::string suffixStr = f.location.substr(f.location.find_last_of('.') + 1);
-        if (suffixStr == "index") continue;
-        if (1024*1024*1000 < GetFileSize(f.location)) continue;
-        std::cout << "About to merge " << f.location << std::endl;
-        files[date].push_back(f);
+
+    auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
+                                               &GroupFileSchema::group_id,
+                                               &GroupFileSchema::file_id,
+                                               &GroupFileSchema::file_type,
+                                               &GroupFileSchema::rows,
+                                               &GroupFileSchema::date));
+                                      /* where(is_equal(&GroupFileSchema::file_type, GroupFileSchema::RAW) && */
+                                      /*       is_equal(&GroupFileSchema::group_id, group_id))); */
+
+    GroupSchema group_info;
+    group_info.group_id = group_id;
+    auto status = get_group(group_info);
+    if (!status.ok()) {
+        return status;
+    }
+
+    for (auto& file : selected) {
+        GroupFileSchema group_file;
+        group_file.id = std::get<0>(file);
+        group_file.group_id = std::get<1>(file);
+        group_file.file_id = std::get<2>(file);
+        group_file.file_type = std::get<3>(file);
+        group_file.rows = std::get<4>(file);
+        group_file.date = std::get<5>(file);
+        group_file.dimension = group_info.dimension;
+        auto dateItr = files.find(group_file.date);
+        if (dateItr == files.end()) {
+            files[group_file.date] = GroupFilesSchema();
+        }
+        files[group_file.date].push_back(group_file);
     }
 
     return Status::OK();
@@ -203,7 +262,15 @@ Status DBMetaImpl::update_group_file(const GroupFileSchema& group_file_) {
 }
 
 Status DBMetaImpl::update_files(const GroupFilesSchema& files) {
-    //PXU TODO
+    auto commited = ConnectorPtr->transaction([&] () mutable {
+        for (auto& file : files) {
+            ConnectorPtr->update(file);
+        }
+        return true;
+    });
+    if (!commited) {
+        return Status::DBTransactionError("Update files Error");
+    }
     return Status::OK();
 }
 

@@ -18,14 +18,7 @@ public:
     virtual Status get_group(GroupSchema& group_info_) override;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
-    virtual Status add_group_file(const std::string& group_id,
-                                  DateT date,
-                                  GroupFileSchema& group_file_info,
-                                  GroupFileSchema::FILE_TYPE file_type=GroupFileSchema::RAW) override;
-
-    virtual Status add_group_file(const std::string& group_id_,
-                                  GroupFileSchema& group_file_info_,
-                                  GroupFileSchema::FILE_TYPE file_type=GroupFileSchema::RAW) override;
+    virtual Status add_group_file(GroupFileSchema& group_file_info) = 0;
 
     virtual Status has_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
