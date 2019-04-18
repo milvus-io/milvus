@@ -124,8 +124,15 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         updated.push_back(file_schema);
     }
 
+    auto index_size = group_file.dimension * index->ntotal;
     faiss::write_index(index.get(), group_file.location.c_str());
-    group_file.file_type = meta::GroupFileSchema::RAW;
+
+    std::cout << "Merged size=" << index_size << std::endl;
+    if (index_size >= _options.index_trigger_size) {
+        group_file.file_type = meta::GroupFileSchema::TO_INDEX;
+    } else {
+        group_file.file_type = meta::GroupFileSchema::RAW;
+    }
     updated.push_back(group_file);
     status = _pMeta->update_files(updated);
 

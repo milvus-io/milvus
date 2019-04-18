@@ -75,6 +75,8 @@ public:
 
     virtual Status files_to_index(GroupFilesSchema&) = 0;
 
+    virtual Status cleanup() = 0;
+
     static DateT GetDate(const std::time_t& t);
     static DateT GetDate();
 
