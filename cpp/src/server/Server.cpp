@@ -9,7 +9,6 @@
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
-#include "utils/LogUtil.h"
 
 
 #include <fcntl.h>
@@ -144,8 +143,6 @@ Server::Start() {
             if(LoadConfig() != SERVER_SUCCESS) {
                 return 1;
             }
-
-            zilliz::vecwise::server::InitLog();
 
             //log path is defined by LoadConfig, so InitLog must be called after LoadConfig
             ServerConfig &config = ServerConfig::GetInstance();

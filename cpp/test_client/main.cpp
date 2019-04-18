@@ -11,14 +11,19 @@
 #include <easylogging++.h>
 
 #include "src/ClientApp.h"
+#include "src/FaissTest.h"
 
 INITIALIZE_EASYLOGGINGPP
 
 void print_help(const std::string &app_name);
 
+
 int
 main(int argc, char *argv[]) {
     printf("Client start...\n");
+
+//    FaissTest::test();
+//    return 0;
 
     std::string app_name = basename(argv[0]);
     static struct option long_options[] = {{"conf_file", required_argument, 0, 'c'},

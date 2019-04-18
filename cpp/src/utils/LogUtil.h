@@ -12,7 +12,7 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-int32_t InitLog();
+int32_t InitLog(const std::string& log_config_file);
 
 inline std::string GetFileName(std::string filename) {
     int pos = filename.find_last_of('/');
