@@ -51,8 +51,9 @@ Status MemVectors::serialize(std::string& group_id) {
     schema_.rows = rows;
     schema_.file_type = (rows >= options_.index_trigger_size) ?
         meta::GroupFileSchema::TO_INDEX : meta::GroupFileSchema::RAW;
-    pMeta_->update_group_file(schema_);
-    return Status::OK();
+
+    auto status = pMeta_->update_group_file(schema_);
+    return status;
 }
 
 MemVectors::~MemVectors() {
