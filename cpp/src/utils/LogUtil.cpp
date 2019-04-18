@@ -13,7 +13,7 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-int32_t InitLog() {
+int32_t InitLog(const std::string& log_config_file) {
 #if 0
     ServerConfig &config = ServerConfig::GetInstance();
     ConfigNode log_config = config.GetConfig(CONFIG_LOG);
@@ -48,7 +48,7 @@ int32_t InitLog() {
     el::Configurations conf;
     conf.parseFromText(str_config);
 #else
-    el::Configurations conf("../../conf/vecwise_engine_log.conf");
+    el::Configurations conf(log_config_file);
 #endif
 
     el::Loggers::reconfigureAllLoggers(conf);
