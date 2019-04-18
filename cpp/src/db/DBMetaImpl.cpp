@@ -71,8 +71,23 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
     return Status::OK();
 }
 
-Status DBMetaImpl::get_group(GroupSchema& group_info_) {
+Status DBMetaImpl::get_group(GroupSchema& group_info) {
+    auto groups = ConnectorPtr->select(columns(&GroupSchema::id,
+                                              &GroupSchema::group_id,
+                                              &GroupSchema::files_cnt,
+                                              &GroupSchema::dimension),
+                                      where(c(&GroupSchema::group_id) == group_info.group_id));
+    assert(groups.size() <= 1);
+    if (groups.size() == 1) {
+        group_info.id = std::get<0>(groups[0]);
+        group_info.files_cnt = std::get<2>(groups[0]);
+        group_info.dimension = std::get<3>(groups[0]);
+    } else {
+        return Status::NotFound("Group " + group_info.group_id + " not found");
+    }
 
+    std::cout << __func__ << ": gid=" << group_info.group_id
+        << " dimension=" << group_info.dimension << std::endl;
     return Status::OK();
 }
 
