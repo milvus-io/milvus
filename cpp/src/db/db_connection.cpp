@@ -6,22 +6,18 @@
 
 #include "db_connection.h"
 
-#include <string>
-#include <iostream>
-#include <thread>
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-using std::cout;
-using std::endl;
 using std::string;
+using namespace sqlite_orm;
 
-string storage_file_name = "default.sqlite"
+string storage_file_name = "default.sqlite";
 
-DbPtr connect() {
-    DbPtr temp = std::make_shared<SqliteDB>(initStorage(storage_file_name));
+SqliteDBPtr connect() {
+    SqliteDBPtr temp = std::make_shared<SqliteDB>(initStorage(storage_file_name));
     temp->sync_schema();
     temp->open_forever(); // thread safe option
     temp->pragma.journal_mode(journal_mode::WAL); // WAL => write ahead log

@@ -6,6 +6,11 @@
 
 #pragma once
 
+#include <string>
+#include <memory>
+
+#include <sqlite_orm/sqlite_orm.h>
+
 
 namespace zilliz {
 namespace vecwise {
@@ -36,8 +41,9 @@ struct GroupFileSchema {
 }; // GroupFileSchema
 
 inline auto initStorage(const std::string &path) {
+    using namespace sqlite_orm;
     return make_storage(path,
-                        // Add table below
+        // Add table below
                         make_table("Groups",
                                    make_column("id", &GroupSchema::id, primary_key()),
                                    make_column("group_id", &GroupSchema::group_id, unique()),
@@ -46,7 +52,7 @@ inline auto initStorage(const std::string &path) {
 }
 
 using SqliteDB = decltype(initStorage(""));
-using SqliteDBPtr= std::shared_ptr<Db>;
+using SqliteDBPtr= std::shared_ptr<SqliteDB>;
 
 class Connection {
  protected:
