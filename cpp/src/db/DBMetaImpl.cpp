@@ -33,7 +33,7 @@ inline auto StoragePrototype(const std::string& path) {
 
 }
 
-using ConnectorT = decltype(StoragePrototype(""));
+using ConnectorT = decltype(StoragePrototype("/tmp/dummy.sqlite3"));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
 
 long GetFileSize(const std::string& filename)
@@ -76,6 +76,8 @@ Status DBMetaImpl::initialize() {
     ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(_options.path+"/meta.sqlite"));
 
     ConnectorPtr->sync_schema();
+
+    cleanup();
 
     return Status::OK();
 }
@@ -211,6 +213,7 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
         group_file.file_type = std::get<3>(file);
         group_file.rows = std::get<4>(file);
         group_file.date = std::get<5>(file);
+        GetGroupFilePath(group_file);
         auto groupItr = groups.find(group_file.group_id);
         if (groupItr == groups.end()) {
             GroupSchema group_info;
@@ -314,6 +317,42 @@ Status DBMetaImpl::update_files(const GroupFilesSchema& files) {
         return Status::DBTransactionError("Update files Error");
     }
     return Status::OK();
+}
+
+Status DBMetaImpl::cleanup() {
+    std::unique_lock<std::mutex> lk(mutex_);
+    auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
+                                               &GroupFileSchema::group_id,
+                                               &GroupFileSchema::file_id,
+                                               &GroupFileSchema::file_type,
+                                               &GroupFileSchema::rows,
+                                               &GroupFileSchema::date),
+                                      where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_DELETE or
+                                            c(&GroupFileSchema::file_type) == (int)GroupFileSchema::NEW));
+
+    GroupFilesSchema updated;
+
+    for (auto& file : selected) {
+        GroupFileSchema group_file;
+        group_file.id = std::get<0>(file);
+        group_file.group_id = std::get<1>(file);
+        group_file.file_id = std::get<2>(file);
+        group_file.file_type = std::get<3>(file);
+        group_file.rows = std::get<4>(file);
+        group_file.date = std::get<5>(file);
+        GetGroupFilePath(group_file);
+        if (group_file.file_type == GroupFileSchema::TO_DELETE) {
+            boost::filesystem::remove(group_file.location);
+        }
+        ConnectorPtr->remove<GroupFileSchema>(group_file.id);
+        std::cout << "Removing id=" << group_file.id << " location=" << group_file.location << std::endl;
+    }
+
+    return Status::OK();
+}
+
+DBMetaImpl::~DBMetaImpl() {
+    cleanup();
 }
 
 } // namespace meta

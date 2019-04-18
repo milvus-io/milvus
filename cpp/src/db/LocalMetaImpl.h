@@ -34,6 +34,8 @@ public:
 
     virtual Status update_files(const GroupFilesSchema& files) override;
 
+    virtual Status cleanup() override;
+
     virtual Status files_to_merge(const std::string& group_id,
             DatePartionedGroupFilesSchema& files) override;
 

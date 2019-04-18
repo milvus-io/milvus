@@ -236,6 +236,11 @@ Status LocalMetaImpl::update_files(const GroupFilesSchema& files) {
     return Status::OK();
 }
 
+Status LocalMetaImpl::cleanup() {
+    //PXU TODO
+    return Status::OK();
+}
+
 } // namespace meta
 } // namespace engine
 } // namespace vecwise

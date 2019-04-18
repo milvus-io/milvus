@@ -42,6 +42,10 @@ public:
 
     virtual Status files_to_index(GroupFilesSchema&) override;
 
+    virtual Status cleanup() override;
+
+    virtual ~DBMetaImpl();
+
 private:
 
     Status get_group_no_lock(GroupSchema& group_info);
