@@ -89,12 +89,16 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
     }
     group_info.files_cnt = 0;
     group_info.id = -1;
-    try {
+
+    auto commited = ConnectorPtr->transaction([&] () mutable {
         auto id = ConnectorPtr->insert(group_info);
-        std::cout << "id=" << id << std::endl;
         group_info.id = id;
-    } catch(std::system_error& e) {
-        return Status::GroupError("Add Group " + group_info.group_id + " Error");
+        std::cout << __func__ << " id=" << id << std::endl;
+        return true;
+    });
+
+    if (!commited) {
+        return Status::DBTransactionError("Add Group Error");
     }
 
     auto group_path = GetGroupPath(group_info.group_id);
@@ -159,7 +163,7 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
 
     auto commited = ConnectorPtr->transaction([&] () mutable {
         auto id = ConnectorPtr->insert(group_file);
-        group_info.id = id;
+        group_file.id = id;
         std::cout << __func__ << " id=" << id << std::endl;
         return true;
     });
