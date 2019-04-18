@@ -8,6 +8,7 @@
 #include <mutex>
 #include "IDGenerator.h"
 #include "Status.h"
+#include "Meta.h"
 
 namespace faiss {
     class Index;
@@ -24,9 +25,8 @@ namespace meta {
 
 class MemVectors {
 public:
-    explicit MemVectors(const std::string& group_id,
-            size_t dimension,
-            const std::string& file_location);
+    explicit MemVectors(const std::shared_ptr<meta::Meta>&,
+            const meta::GroupFileSchema&, const Options&);
 
     void add(size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
@@ -38,17 +38,17 @@ public:
 
     ~MemVectors();
 
-    const std::string& location() const { return _file_location; }
+    const std::string& location() const { return schema_.location; }
 
 private:
     MemVectors() = delete;
     MemVectors(const MemVectors&) = delete;
     MemVectors& operator=(const MemVectors&) = delete;
 
-    std::string group_id_;
-    const std::string _file_location;
+    std::shared_ptr<meta::Meta> pMeta_;
+    Options options_;
+    meta::GroupFileSchema schema_;
     IDGenerator* _pIdGenerator;
-    size_t _dimension;
     faiss::Index* pIndex_;
 
 }; // MemVectors
@@ -58,8 +58,8 @@ typedef std::shared_ptr<MemVectors> VectorsPtr;
 
 class MemManager {
 public:
-    MemManager(const std::shared_ptr<meta::Meta>& meta_)
-        : _pMeta(meta_) /*_last_compact_time(std::time(nullptr))*/ {}
+    MemManager(const std::shared_ptr<meta::Meta>& meta_, const Options& options)
+        : _pMeta(meta_), options_(options) {}
 
     VectorsPtr get_mem_by_group(const std::string& group_id_);
 
@@ -78,7 +78,7 @@ private:
     MemMap _memMap;
     ImmMemPool _immMems;
     std::shared_ptr<meta::Meta> _pMeta;
-    /* std::time_t _last_compact_time; */
+    Options options_;
     std::mutex _mutex;
 }; // MemManager
 
