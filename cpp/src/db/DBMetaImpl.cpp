@@ -96,6 +96,13 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
     } catch(std::system_error& e) {
         return Status::GroupError("Add Group " + group_info.group_id + " Error");
     }
+
+    auto group_path = GetGroupPath(group_info.group_id);
+
+    if (!boost::filesystem::is_directory(group_path)) {
+        assert(boost::filesystem::create_directory(group_path));
+    }
+
     return Status::OK();
 }
 
@@ -143,8 +150,10 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
     }
 
     SimpleIDGenerator g;
+    std::stringstream ss;
+    ss << g.getNextIDNumber();
     group_file.file_type = GroupFileSchema::NEW;
-    group_file.file_id = g.getNextIDNumber();
+    group_file.file_id = ss.str();
     group_file.dimension = group_info.dimension;
     GetGroupFilePath(group_file);
     try {
@@ -155,6 +164,13 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
         return Status::GroupError("Add GroupFile Group "
                 + group_info.group_id + " File " + group_file.file_id + " Error");
     }
+
+    auto partition_path = GetGroupDatePartitionPath(group_file.group_id, group_file.date);
+
+    if (!boost::filesystem::is_directory(partition_path)) {
+        assert(boost::filesystem::create_directory(partition_path));
+    }
+
     return Status::OK();
 }
 
