@@ -20,7 +20,7 @@ SqliteDBPtr connect() {
     SqliteDBPtr temp = std::make_shared<SqliteDB>(initStorage(storage_file_name));
     temp->sync_schema();
     temp->open_forever(); // thread safe option
-    temp->pragma.journal_mode(journal_mode::WAL); // WAL => write ahead log
+    //temp->pragma.journal_mode(journal_mode::WAL); // WAL => write ahead log
     return temp;
 }
 
