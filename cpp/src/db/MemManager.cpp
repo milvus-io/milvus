@@ -13,13 +13,13 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-MemVectors::MemVectors(const std::string& group_id,
-        size_t dimension, const std::string& file_location) :
-    group_id_(group_id),
-    _file_location(file_location),
+MemVectors::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
+        const meta::GroupFileSchema& schema, const Options& options)
+  : pMeta_(meta_ptr),
+    options_(options),
+    schema_(schema),
     _pIdGenerator(new SimpleIDGenerator()),
-    _dimension(dimension),
-    pIndex_(faiss::index_factory(_dimension, "IDMap,Flat")) {
+    pIndex_(faiss::index_factory(schema_.dimension, "IDMap,Flat")) {
 }
 
 void MemVectors::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
@@ -35,7 +35,7 @@ size_t MemVectors::total() const {
 }
 
 size_t MemVectors::approximate_size() const {
-    return total() * _dimension;
+    return total() * schema_.dimension;
 }
 
 Status MemVectors::serialize(std::string& group_id) {
@@ -45,8 +45,13 @@ Status MemVectors::serialize(std::string& group_id) {
     /* std::cout << pIndex_->ntotal << std::endl; */
     /* std::cout << _file_location << std::endl; */
     /* faiss::write_index(pIndex_, _file_location.c_str()); */
-    write_index(pIndex_, _file_location.c_str());
-    group_id = group_id_;
+    group_id = schema_.group_id;
+    auto rows = approximate_size();
+    write_index(pIndex_, schema_.location.c_str());
+    schema_.rows = rows;
+    schema_.file_type = (rows >= options_.index_trigger_size) ?
+        meta::GroupFileSchema::TO_INDEX : meta::GroupFileSchema::RAW;
+    pMeta_->update_group_file(schema_);
     return Status::OK();
 }
 
@@ -78,9 +83,7 @@ VectorsPtr MemManager::get_mem_by_group(const std::string& group_id) {
         return nullptr;
     }
 
-    _memMap[group_id] = std::shared_ptr<MemVectors>(new MemVectors(group_file.group_id,
-                group_file.dimension,
-                group_file.location));
+    _memMap[group_id] = std::shared_ptr<MemVectors>(new MemVectors(_pMeta, group_file, options_));
     return _memMap[group_id];
 }
 

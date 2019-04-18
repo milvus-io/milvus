@@ -22,7 +22,7 @@ DBImpl::DBImpl(const Options& options)
       _shutting_down(false),
       bg_build_index_started_(false),
       _pMeta(new meta::DBMetaImpl(_options.meta)),
-      _pMemMgr(new MemManager(_pMeta)) {
+      _pMemMgr(new MemManager(_pMeta, _options)) {
     start_timer_task(_options.memory_sync_interval);
 }
 
@@ -147,7 +147,7 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
 
     for (auto& kv : raw_files) {
         auto files = kv.second;
-        if (files.size() <= _options.raw_file_merge_trigger_number) {
+        if (files.size() <= _options.merge_trigger_number) {
             continue;
         }
         has_merge = true;
