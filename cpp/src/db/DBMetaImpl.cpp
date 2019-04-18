@@ -205,9 +205,9 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
                                                &GroupFileSchema::file_id,
                                                &GroupFileSchema::file_type,
                                                &GroupFileSchema::rows,
-                                               &GroupFileSchema::date));
-                                      /* where(is_equal(&GroupFileSchema::file_type, GroupFileSchema::RAW) && */
-                                      /*       is_equal(&GroupFileSchema::group_id, group_id))); */
+                                               &GroupFileSchema::date),
+                                      where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::RAW and
+                                            c(&GroupFileSchema::group_id) == group_id));
 
     GroupSchema group_info;
     group_info.group_id = group_id;
