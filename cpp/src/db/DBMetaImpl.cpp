@@ -91,8 +91,15 @@ Status DBMetaImpl::get_group(GroupSchema& group_info) {
     return Status::OK();
 }
 
-Status DBMetaImpl::has_group(const std::string& group_id_, bool& has_or_not_) {
-    //PXU TODO
+Status DBMetaImpl::has_group(const std::string& group_id, bool& has_or_not) {
+    auto groups = ConnectorPtr->select(columns(&GroupSchema::id),
+                                      where(c(&GroupSchema::group_id) == group_id));
+    assert(groups.size() <= 1);
+    if (groups.size() == 1) {
+        has_or_not = true;
+    } else {
+        has_or_not = false;
+    }
     return Status::OK();
 }
 
