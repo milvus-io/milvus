@@ -15,25 +15,13 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-namespace {
-    static engine::DB* DB() {
-        static engine::DB* s_db = nullptr;
-        if(s_db == nullptr) {
-            engine::Options opt;
-
-            std::string db_path = "/tmp/test";
-            ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
-            opt.meta.backend_uri = config.GetValue(CONFIG_SERVER_DB_URL);
-            opt.meta.path = db_path;
-
-            s_db = engine::DB::Open(opt);
-        }
-        return s_db;
-    }
-}
-
 VecServiceHandler::VecServiceHandler() {
+    zilliz::vecwise::engine::Options opt;
+    ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
+    opt.meta.backend_uri = config.GetValue(CONFIG_SERVER_DB_URL);
+    opt.meta.path = "/tmp/test";
 
+    zilliz::vecwise::engine::DB::Open(opt, &db_);
 }
 
 void
@@ -46,7 +34,7 @@ VecServiceHandler::add_group(const VecGroup &group) {
         engine::meta::GroupSchema group_info;
         group_info.dimension = (size_t)group.dimension;
         group_info.group_id = group.id;
-        engine::Status stat = DB()->add_group(group_info);
+        engine::Status stat = db_->add_group(group_info);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         }
@@ -65,7 +53,7 @@ VecServiceHandler::get_group(VecGroup &_return, const std::string &group_id) {
     try {
         engine::meta::GroupSchema group_info;
         group_info.group_id = group_id;
-        engine::Status stat = DB()->get_group(group_info);
+        engine::Status stat = db_->get_group(group_info);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
@@ -101,7 +89,7 @@ VecServiceHandler::add_vector(VecTensorIdList& _return, const std::string &group
     try {
         engine::IDNumbers vector_ids;
         std::vector<float> vec_f(tensor.tensor.begin(), tensor.tensor.end());
-        engine::Status stat = DB()->add_vectors(group_id, 1, vec_f.data(), vector_ids);
+        engine::Status stat = db_->add_vectors(group_id, 1, vec_f.data(), vector_ids);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
@@ -129,7 +117,7 @@ VecServiceHandler::add_vector_batch(VecTensorIdList &_return,
         }
 
         engine::IDNumbers vector_ids;
-        engine::Status stat = DB()->add_vectors(group_id, tensor_list.tensor_list.size(), vec_f.data(), vector_ids);
+        engine::Status stat = db_->add_vectors(group_id, tensor_list.tensor_list.size(), vec_f.data(), vector_ids);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
@@ -157,7 +145,7 @@ VecServiceHandler::search_vector(VecSearchResult &_return,
     try {
         engine::QueryResults results;
         std::vector<float> vec_f(tensor.tensor.begin(), tensor.tensor.end());
-        engine::Status stat = DB()->search(group_id, (size_t)top_k, 1, vec_f.data(), results);
+        engine::Status stat = db_->search(group_id, (size_t)top_k, 1, vec_f.data(), results);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
@@ -190,7 +178,7 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
         }
 
         engine::QueryResults results;
-        engine::Status stat = DB()->search(group_id, (size_t)top_k, tensor_list.tensor_list.size(), vec_f.data(), results);
+        engine::Status stat = db_->search(group_id, (size_t)top_k, tensor_list.tensor_list.size(), vec_f.data(), results);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
@@ -204,6 +192,13 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
         SERVER_LOG_INFO << "search_vector_batch() finished";
     } catch (std::exception& ex) {
         SERVER_LOG_ERROR << ex.what();
+    }
+}
+
+VecServiceHandler::~VecServiceHandler() {
+    if (db_ != nullptr) {
+        delete db_;
+        db_ = nullptr;
     }
 }
 

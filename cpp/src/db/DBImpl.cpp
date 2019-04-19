@@ -265,9 +265,10 @@ DBImpl::~DBImpl() {
 
 DB::~DB() {}
 
-DB* DB::Open(const Options& options) {
-    DBImpl* impl = new DBImpl(options);
-    return impl;
+void DB::Open(const Options& options, DB** dbptr) {
+    *dbptr = nullptr;
+    *dbptr = new DBImpl(options);
+    return;
 }
 
 } // namespace engine

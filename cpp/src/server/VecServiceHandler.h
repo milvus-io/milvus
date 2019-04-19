@@ -17,6 +17,14 @@
 
 namespace zilliz {
 namespace vecwise {
+namespace engine {
+    class DB;
+}
+}
+}
+
+namespace zilliz {
+namespace vecwise {
 namespace server {
 
 class VecServiceHandler : virtual public VecServiceIf {
@@ -65,6 +73,11 @@ public:
                              const int64_t top_k,
                              const VecTensorList& tensor_list,
                              const VecTimeRangeList& time_range_list);
+
+    ~VecServiceHandler();
+
+private:
+    zilliz::vecwise::engine::DB* db_;
 
 };
 
