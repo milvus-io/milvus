@@ -6,7 +6,13 @@
 
 cmake_minimum_required(VERSION 3.12)
 
-project(vecwise_engine)
+project(vecwise_engine LANGUAGES CUDA CXX)
+
+find_package(CUDA)
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES -arch sm_60 --expt-extended-lambda")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
+message("CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}")
+message("CUDA_NVCC_FLAGS=${CUDA_NVCC_FLAGS}")
 
 set(CMAKE_CXX_STANDARD 14)
 
