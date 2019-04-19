@@ -38,6 +38,10 @@ public:
     virtual Status files_to_merge(const std::string& group_id,
             DatePartionedGroupFilesSchema& files) override;
 
+    virtual Status files_to_search(const std::string& group_id,
+                                  std::vector<DateT> partition,
+                                  DatePartionedGroupFilesSchema& files) override;
+
     virtual Status files_to_index(GroupFilesSchema&) override;
 
     virtual Status cleanup() override;

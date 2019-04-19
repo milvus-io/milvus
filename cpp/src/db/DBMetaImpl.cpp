@@ -226,6 +226,48 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
     return Status::OK();
 }
 
+Status DBMetaImpl::files_to_search(const std::string &group_id,
+                                   std::vector<DateT> partition,
+                                   DatePartionedGroupFilesSchema &files) {
+    // TODO: support data partition
+    files.clear();
+    auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
+                                                 &GroupFileSchema::group_id,
+                                                 &GroupFileSchema::file_id,
+                                                 &GroupFileSchema::file_type,
+                                                 &GroupFileSchema::rows,
+                                                 &GroupFileSchema::date),
+                                         where(c(&GroupFileSchema::group_id) == group_id and
+                                             (c(&GroupFileSchema::file_type) == (int) GroupFileSchema::RAW or
+                                                 c(&GroupFileSchema::file_type) == (int) GroupFileSchema::INDEX)));
+
+    GroupSchema group_info;
+    group_info.group_id = group_id;
+    auto status = get_group_no_lock(group_info);
+    if (!status.ok()) {
+        return status;
+    }
+
+    for (auto& file : selected) {
+        GroupFileSchema group_file;
+        group_file.id = std::get<0>(file);
+        group_file.group_id = std::get<1>(file);
+        group_file.file_id = std::get<2>(file);
+        group_file.file_type = std::get<3>(file);
+        group_file.rows = std::get<4>(file);
+        group_file.date = std::get<5>(file);
+        group_file.dimension = group_info.dimension;
+        GetGroupFilePath(group_file);
+        auto dateItr = files.find(group_file.date);
+        if (dateItr == files.end()) {
+            files[group_file.date] = GroupFilesSchema();
+        }
+        files[group_file.date].push_back(group_file);
+    }
+
+    return Status::OK();
+}
+
 Status DBMetaImpl::files_to_merge(const std::string& group_id,
         DatePartionedGroupFilesSchema& files) {
     files.clear();

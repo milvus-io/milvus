@@ -7,6 +7,8 @@
 #include <faiss/index_io.h>
 #include <faiss/AutoTune.h>
 #include <wrapper/IndexBuilder.h>
+#include <cstring>
+#include <wrapper/Topk.h>
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
@@ -53,9 +55,82 @@ Status DBImpl::add_vectors(const std::string& group_id_,
     }
 }
 
-Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
-        const float* vectors, QueryResults& results) {
-    // PXU TODO
+Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
+                      const float *vectors, QueryResults &results) {
+    meta::DatePartionedGroupFilesSchema files;
+    std::vector<meta::DateT> partition;
+    auto status = _pMeta->files_to_search(group_id, partition, files);
+    if (!status.ok()) { return status; }
+
+    // TODO: optimized
+    meta::GroupFilesSchema index_files;
+    meta::GroupFilesSchema raw_files;
+    for (auto &day_files : files) {
+        for (auto &file : day_files.second) {
+            file.file_type == meta::GroupFileSchema::RAW ?
+            raw_files.push_back(file) :
+            index_files.push_back(file);
+        }
+    }
+    int dim = raw_files[0].dimension;
+
+
+    // merge raw files
+    faiss::Index *index(faiss::index_factory(dim, "IDMap,Flat"));
+
+    for (auto &file : raw_files) {
+        auto file_index = dynamic_cast<faiss::IndexIDMap *>(faiss::read_index(file.location.c_str()));
+        index->add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat *>(file_index->index)->xb.data(),
+                            file_index->id_map.data());
+    }
+    float *xb = dynamic_cast<faiss::IndexFlat *>(index)->xb.data();
+    int64_t *ids = dynamic_cast<faiss::IndexIDMap *>(index)->id_map.data();
+    long totoal = index->ntotal;
+
+    std::vector<float> distence;
+    std::vector<long> result_ids;
+    {
+        // allocate memory
+        float *output_distence;
+        long *output_ids;
+        output_distence = (float *) malloc(k * sizeof(float));
+        output_ids = (long *) malloc(k * sizeof(long));
+
+        // build and search in raw file
+        // TODO: HardCode
+        auto opd = std::make_shared<Operand>();
+        opd->index_type = "IDMap,Flat";
+        IndexBuilderPtr builder = GetIndexBuilder(opd);
+        auto index = builder->build_all(totoal, xb, ids);
+
+        index->search(nq, vectors, k, output_distence, output_ids);
+        distence.insert(distence.begin(), output_distence, output_distence + k);
+        result_ids.insert(result_ids.begin(), output_ids, output_ids + k);
+        memset(output_distence, 0, k * sizeof(float));
+        memset(output_ids, 0, k * sizeof(long));
+
+        // search in index file
+        for (auto &file : index_files) {
+            auto index = read_index(file.location.c_str());
+            index->search(nq, vectors, k, output_distence, output_ids);
+            distence.insert(distence.begin(), output_distence, output_distence + k);
+            result_ids.insert(result_ids.begin(), output_ids, output_ids + k);
+            memset(output_distence, 0, k * sizeof(float));
+            memset(output_ids, 0, k * sizeof(long));
+        }
+
+        // TopK
+        TopK(distence.data(), distence.size(), k, output_distence, output_ids);
+        distence.clear();
+        result_ids.clear();
+        distence.insert(distence.begin(), output_distence, output_distence + k);
+        result_ids.insert(result_ids.begin(), output_ids, output_ids + k);
+
+        // free
+        free(output_distence);
+        free(output_ids);
+    }
+
     return Status::OK();
 }
 
