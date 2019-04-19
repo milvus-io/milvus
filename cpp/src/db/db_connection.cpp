@@ -24,7 +24,7 @@ SqliteDBPtr connect() {
     return temp;
 }
 
-SqliteDBPtr Connection::connect_ = connect();
+/* SqliteDBPtr Connection::connect_ = connect(); */
 
 }
 }
