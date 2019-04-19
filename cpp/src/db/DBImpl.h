@@ -64,7 +64,9 @@ private:
     Status _bg_error;
     std::atomic<bool> _shutting_down;
 
+    std::mutex build_index_mutex_;
     bool bg_build_index_started_;
+    std::condition_variable bg_build_index_finish_signal_;
 
     std::shared_ptr<meta::Meta> _pMeta;
     std::shared_ptr<MemManager> _pMemMgr;

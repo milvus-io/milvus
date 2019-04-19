@@ -107,7 +107,9 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     group_file.group_id = group_id;
     group_file.date = date;
     Status status = _pMeta->add_group_file(group_file);
+
     if (!status.ok()) {
+        std::cout << status.ToString() << std::endl;
         return status;
     }
 
@@ -127,7 +129,6 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     auto index_size = group_file.dimension * index->ntotal;
     faiss::write_index(index.get(), group_file.location.c_str());
 
-    std::cout << "Merged size=" << index_size << std::endl;
     if (index_size >= _options.index_trigger_size) {
         group_file.file_type = meta::GroupFileSchema::TO_INDEX;
     } else {
@@ -201,6 +202,7 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
 }
 
 void DBImpl::background_build_index() {
+    std::lock_guard<std::mutex> lock(build_index_mutex_);
     assert(bg_build_index_started_);
     meta::GroupFilesSchema to_index_files;
     _pMeta->files_to_index(to_index_files);
@@ -214,6 +216,7 @@ void DBImpl::background_build_index() {
     }
 
     bg_build_index_started_ = false;
+    bg_build_index_finish_signal_.notify_all();
 }
 
 Status DBImpl::try_build_index() {
@@ -230,7 +233,6 @@ void DBImpl::background_compaction() {
 
     Status status;
     for (auto group_id : group_ids) {
-        /* std::cout << __func__ << " group_id=" << group_id << std::endl; */
         status = background_merge_files(group_id);
         if (!status.ok()) {
             _bg_error = status;
@@ -240,11 +242,21 @@ void DBImpl::background_compaction() {
 }
 
 DBImpl::~DBImpl() {
-    std::unique_lock<std::mutex> lock(_mutex);
-    _shutting_down.store(true, std::memory_order_release);
-    while (_bg_compaction_scheduled) {
-        _bg_work_finish_signal.wait(lock);
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        _shutting_down.store(true, std::memory_order_release);
+        while (_bg_compaction_scheduled) {
+            _bg_work_finish_signal.wait(lock);
+        }
     }
+    {
+        std::unique_lock<std::mutex> lock(build_index_mutex_);
+        while (bg_build_index_started_) {
+            bg_build_index_finish_signal_.wait(lock);
+        }
+    }
+    std::vector<std::string> ids;
+    _pMemMgr->serialize(ids);
 }
 
 /*
