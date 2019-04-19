@@ -76,6 +76,7 @@ Status DBMetaImpl::initialize() {
     ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(_options.path+"/meta.sqlite"));
 
     ConnectorPtr->sync_schema();
+    ConnectorPtr->open_forever(); // thread safe option
 
     cleanup();
 
@@ -93,8 +94,6 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
     group_info.id = -1;
 
     {
-        std::unique_lock<std::mutex> lk(mutex_);
-
         try {
             auto id = ConnectorPtr->insert(group_info);
             group_info.id = id;
@@ -114,7 +113,6 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
 }
 
 Status DBMetaImpl::get_group(GroupSchema& group_info) {
-    std::unique_lock<std::mutex> lk(mutex_);
     return get_group_no_lock(group_info);
 }
 
@@ -139,7 +137,6 @@ Status DBMetaImpl::get_group_no_lock(GroupSchema& group_info) {
 }
 
 Status DBMetaImpl::has_group(const std::string& group_id, bool& has_or_not) {
-    std::unique_lock<std::mutex> lk(mutex_);
     auto groups = ConnectorPtr->select(columns(&GroupSchema::id),
                                       where(c(&GroupSchema::group_id) == group_id));
     assert(groups.size() <= 1);
@@ -171,8 +168,6 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
     GetGroupFilePath(group_file);
 
     {
-        std::unique_lock<std::mutex> lk(mutex_);
-
         try {
             auto id = ConnectorPtr->insert(group_file);
             group_file.id = id;
@@ -194,7 +189,6 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
 Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
     files.clear();
 
-    std::unique_lock<std::mutex> lk(mutex_);
     auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
                                                &GroupFileSchema::group_id,
                                                &GroupFileSchema::file_id,
@@ -235,7 +229,6 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
         DatePartionedGroupFilesSchema& files) {
     files.clear();
 
-    std::unique_lock<std::mutex> lk(mutex_);
     auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
                                                &GroupFileSchema::group_id,
                                                &GroupFileSchema::file_id,
@@ -294,7 +287,6 @@ Status DBMetaImpl::get_group_files(const std::string& group_id_,
 }
 
 Status DBMetaImpl::update_group_file(const GroupFileSchema& group_file) {
-    std::unique_lock<std::mutex> lk(mutex_);
     auto commited = ConnectorPtr->transaction([&] () mutable {
         ConnectorPtr->update(group_file);
         return true;
@@ -306,7 +298,6 @@ Status DBMetaImpl::update_group_file(const GroupFileSchema& group_file) {
 }
 
 Status DBMetaImpl::update_files(const GroupFilesSchema& files) {
-    std::unique_lock<std::mutex> lk(mutex_);
     auto commited = ConnectorPtr->transaction([&] () mutable {
         for (auto& file : files) {
             ConnectorPtr->update(file);
@@ -320,7 +311,6 @@ Status DBMetaImpl::update_files(const GroupFilesSchema& files) {
 }
 
 Status DBMetaImpl::cleanup() {
-    std::unique_lock<std::mutex> lk(mutex_);
     auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
                                                &GroupFileSchema::group_id,
                                                &GroupFileSchema::file_id,
