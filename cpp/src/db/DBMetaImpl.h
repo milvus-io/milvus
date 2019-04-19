@@ -1,8 +1,6 @@
 #ifndef VECENGINE_DB_META_IMPL_H_
 #define VECENGINE_DB_META_IMPL_H_
 
-#include <thread>
-#include <mutex>
 #include "Meta.h"
 #include "Options.h"
 
@@ -55,8 +53,6 @@ private:
     Status initialize();
 
     const DBMetaOptions _options;
-    std::mutex mutex_;
-
 }; // DBMetaImpl
 
 } // namespace meta
