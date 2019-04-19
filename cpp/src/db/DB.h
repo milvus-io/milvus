@@ -15,7 +15,7 @@ class Env;
 
 class DB {
 public:
-    static DB* Open(const Options& options);
+    static void Open(const Options& options, DB** dbptr);
 
     virtual Status add_group(meta::GroupSchema& group_info_) = 0;
     virtual Status get_group(meta::GroupSchema& group_info_) = 0;
