@@ -27,7 +27,7 @@ find_library(cuda_library cudart cublas HINTS /usr/local/cuda/lib64)
 
 add_library(vecwise_engine STATIC ${vecwise_engine_src})
 
-add_executable(vecwise_server
+cuda_add_executable(vecwise_server
         ${config_files}
         ${server_files}
         ${utils_files}
