@@ -133,6 +133,7 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     } else {
         group_file.file_type = meta::GroupFileSchema::RAW;
     }
+    group_file.rows = index_size;
     updated.push_back(group_file);
     status = _pMeta->update_files(updated);
 
@@ -188,6 +189,7 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     /* std::cout << "raw size=" << from_index->ntotal << "   index size=" << index->ntotal << std::endl; */
     write_index(index, group_file.location.c_str());
     group_file.file_type = meta::GroupFileSchema::INDEX;
+    group_file.rows = file.dimension * index->ntotal;
 
     auto to_remove = file;
     to_remove.file_type = meta::GroupFileSchema::TO_DELETE;

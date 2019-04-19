@@ -165,6 +165,7 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
     group_file.file_type = GroupFileSchema::NEW;
     group_file.file_id = ss.str();
     group_file.dimension = group_info.dimension;
+    group_file.rows = 0;
     GetGroupFilePath(group_file);
 
     {
