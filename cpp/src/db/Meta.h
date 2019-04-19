@@ -70,6 +70,10 @@ public:
 
     virtual Status update_files(const GroupFilesSchema& files) = 0;
 
+    virtual Status files_to_search(const std::string& group_id,
+                                   std::vector<DateT> partition,
+                                   DatePartionedGroupFilesSchema& files) = 0;
+
     virtual Status files_to_merge(const std::string& group_id,
             DatePartionedGroupFilesSchema& files) = 0;
 

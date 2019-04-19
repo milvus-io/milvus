@@ -11,6 +11,7 @@
 #endif
 
 #include "Index.h"
+#include "faiss/index_io.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -64,6 +65,12 @@ bool Index::search(idx_t n, const float *data, idx_t k, float *distances, long *
 
 void write_index(const Index_ptr &index, const std::string &file_name) {
     write_index(index->index_.get(), file_name.c_str());
+}
+
+Index_ptr read_index(const std::string &file_name) {
+    std::shared_ptr<faiss::Index> raw_index = nullptr;
+    raw_index.reset(faiss::read_index(file_name.c_str()));
+    return std::make_shared<Index>(raw_index);
 }
 
 }
