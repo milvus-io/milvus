@@ -14,7 +14,8 @@ link_directories("/usr/local/cuda/lib64")
 set(wrapper_test_src
         ${unittest_srcs}
         ${wrapper_src}
-        wrapper_test.cpp)
+        wrapper_test.cpp
+        )
 
 add_executable(wrapper_test ${wrapper_test_src})
 
