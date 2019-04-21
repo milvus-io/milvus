@@ -18,4 +18,5 @@ set(unittest_libs
 
 add_subdirectory(cache)
 add_subdirectory(log)
+add_subdirectory(db)
 add_subdirectory(faiss_wrapper)

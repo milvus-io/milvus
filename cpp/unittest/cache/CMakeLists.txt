@@ -10,8 +10,8 @@ aux_source_directory(../../src/cache cache_srcs)
 set(cache_test_src
         ${unittest_srcs}
         ${cache_srcs}
-        cache_tests.cpp)
+        cache_test.cpp)
 
-add_executable(cache_tests ${cache_test_src})
+add_executable(cache_test ${cache_test_src})
 
-target_link_libraries(cache_tests ${unittest_libs})
+target_link_libraries(cache_test ${unittest_libs})
