@@ -5,31 +5,28 @@
 #-------------------------------------------------------------------------------
 include_directories(../../src)
 
+aux_source_directory(../../src/db db_srcs)
 aux_source_directory(../../src/wrapper wrapper_src)
 
-# Make sure that your call to link_directories takes place before your call to the relevant add_executable.
 include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
 
-set(wrapper_test_src
-        ${unittest_srcs}
-        ${wrapper_src}
-        wrapper_test.cpp
-        )
 
-add_executable(wrapper_test ${wrapper_test_src})
+set(db_test_src
+    ${unittest_srcs}
+    ${db_srcs}
+    ${wrapper_src}
+    db_tests.cpp)
 
-set(wrapper_libs
+cuda_add_executable(db_test ${db_test_src})
+
+set(db_libs
         faiss
         cudart
         cublas
         sqlite3
+        boost_system
+        boost_filesystem
         )
-target_link_libraries(wrapper_test ${unittest_libs} ${wrapper_libs})
 
-set(topk_test_src
-        topk_test.cpp
-        ${CMAKE_SOURCE_DIR}/src/wrapper/Topk.cu)
-
-cuda_add_executable(topk_test ${topk_test_src})
-target_link_libraries(topk_test ${unittest_libs} ${faiss_libs})
+target_link_libraries(db_test ${unittest_libs} ${db_libs})
