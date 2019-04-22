@@ -25,6 +25,7 @@ struct VecGroup {
 }
 
 struct VecTensor {
+    1: string uid;
 	2: list<double> tensor;
 }
 
@@ -32,12 +33,8 @@ struct VecTensorList {
 	1: list<VecTensor> tensor_list;
 }
 
-struct VecTensorIdList {
-	1: list<i64> id_list;
-}
-
 struct VecSearchResult {
-    1: list<i64> id_list;
+    1: list<string> id_list;
 }
 
 struct VecSearchResultList {
@@ -78,8 +75,8 @@ service VecService {
      * vector interfaces
      *
      */
-    VecTensorIdList add_vector(2: string group_id, 3: VecTensor tensor) throws(1: VecException e);
-    VecTensorIdList add_vector_batch(2: string group_id, 3: VecTensorList tensor_list) throws(1: VecException e);
+    void add_vector(2: string group_id, 3: VecTensor tensor) throws(1: VecException e);
+    void add_vector_batch(2: string group_id, 3: VecTensorList tensor_list) throws(1: VecException e);
 
     /**
      * search interfaces

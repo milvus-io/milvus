@@ -710,14 +710,6 @@ uint32_t VecService_add_vector_result::read(::apache::thrift::protocol::TProtoco
     }
     switch (fid)
     {
-      case 0:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->success.read(iprot);
-          this->__isset.success = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
       case 1:
         if (ftype == ::apache::thrift::protocol::T_STRUCT) {
           xfer += this->e.read(iprot);
@@ -744,11 +736,7 @@ uint32_t VecService_add_vector_result::write(::apache::thrift::protocol::TProtoc
 
   xfer += oprot->writeStructBegin("VecService_add_vector_result");
 
-  if (this->__isset.success) {
-    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_STRUCT, 0);
-    xfer += this->success.write(oprot);
-    xfer += oprot->writeFieldEnd();
-  } else if (this->__isset.e) {
+  if (this->__isset.e) {
     xfer += oprot->writeFieldBegin("e", ::apache::thrift::protocol::T_STRUCT, 1);
     xfer += this->e.write(oprot);
     xfer += oprot->writeFieldEnd();
@@ -784,14 +772,6 @@ uint32_t VecService_add_vector_presult::read(::apache::thrift::protocol::TProtoc
     }
     switch (fid)
     {
-      case 0:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += (*(this->success)).read(iprot);
-          this->__isset.success = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
       case 1:
         if (ftype == ::apache::thrift::protocol::T_STRUCT) {
           xfer += this->e.read(iprot);
@@ -933,14 +913,6 @@ uint32_t VecService_add_vector_batch_result::read(::apache::thrift::protocol::TP
     }
     switch (fid)
     {
-      case 0:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->success.read(iprot);
-          this->__isset.success = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
       case 1:
         if (ftype == ::apache::thrift::protocol::T_STRUCT) {
           xfer += this->e.read(iprot);
@@ -967,11 +939,7 @@ uint32_t VecService_add_vector_batch_result::write(::apache::thrift::protocol::T
 
   xfer += oprot->writeStructBegin("VecService_add_vector_batch_result");
 
-  if (this->__isset.success) {
-    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_STRUCT, 0);
-    xfer += this->success.write(oprot);
-    xfer += oprot->writeFieldEnd();
-  } else if (this->__isset.e) {
+  if (this->__isset.e) {
     xfer += oprot->writeFieldBegin("e", ::apache::thrift::protocol::T_STRUCT, 1);
     xfer += this->e.write(oprot);
     xfer += oprot->writeFieldEnd();
@@ -1007,14 +975,6 @@ uint32_t VecService_add_vector_batch_presult::read(::apache::thrift::protocol::T
     }
     switch (fid)
     {
-      case 0:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += (*(this->success)).read(iprot);
-          this->__isset.success = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
       case 1:
         if (ftype == ::apache::thrift::protocol::T_STRUCT) {
           xfer += this->e.read(iprot);
@@ -1718,10 +1678,10 @@ void VecServiceClient::recv_del_group()
   return;
 }
 
-void VecServiceClient::add_vector(VecTensorIdList& _return, const std::string& group_id, const VecTensor& tensor)
+void VecServiceClient::add_vector(const std::string& group_id, const VecTensor& tensor)
 {
   send_add_vector(group_id, tensor);
-  recv_add_vector(_return);
+  recv_add_vector();
 }
 
 void VecServiceClient::send_add_vector(const std::string& group_id, const VecTensor& tensor)
@@ -1739,7 +1699,7 @@ void VecServiceClient::send_add_vector(const std::string& group_id, const VecTen
   oprot_->getTransport()->flush();
 }
 
-void VecServiceClient::recv_add_vector(VecTensorIdList& _return)
+void VecServiceClient::recv_add_vector()
 {
 
   int32_t rseqid = 0;
@@ -1765,25 +1725,20 @@ void VecServiceClient::recv_add_vector(VecTensorIdList& _return)
     iprot_->getTransport()->readEnd();
   }
   VecService_add_vector_presult result;
-  result.success = &_return;
   result.read(iprot_);
   iprot_->readMessageEnd();
   iprot_->getTransport()->readEnd();
 
-  if (result.__isset.success) {
-    // _return pointer has now been filled
-    return;
-  }
   if (result.__isset.e) {
     throw result.e;
   }
-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "add_vector failed: unknown result");
+  return;
 }
 
-void VecServiceClient::add_vector_batch(VecTensorIdList& _return, const std::string& group_id, const VecTensorList& tensor_list)
+void VecServiceClient::add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list)
 {
   send_add_vector_batch(group_id, tensor_list);
-  recv_add_vector_batch(_return);
+  recv_add_vector_batch();
 }
 
 void VecServiceClient::send_add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list)
@@ -1801,7 +1756,7 @@ void VecServiceClient::send_add_vector_batch(const std::string& group_id, const 
   oprot_->getTransport()->flush();
 }
 
-void VecServiceClient::recv_add_vector_batch(VecTensorIdList& _return)
+void VecServiceClient::recv_add_vector_batch()
 {
 
   int32_t rseqid = 0;
@@ -1827,19 +1782,14 @@ void VecServiceClient::recv_add_vector_batch(VecTensorIdList& _return)
     iprot_->getTransport()->readEnd();
   }
   VecService_add_vector_batch_presult result;
-  result.success = &_return;
   result.read(iprot_);
   iprot_->readMessageEnd();
   iprot_->getTransport()->readEnd();
 
-  if (result.__isset.success) {
-    // _return pointer has now been filled
-    return;
-  }
   if (result.__isset.e) {
     throw result.e;
   }
-  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "add_vector_batch failed: unknown result");
+  return;
 }
 
 void VecServiceClient::search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list)
@@ -2181,8 +2131,7 @@ void VecServiceProcessor::process_add_vector(int32_t seqid, ::apache::thrift::pr
 
   VecService_add_vector_result result;
   try {
-    iface_->add_vector(result.success, args.group_id, args.tensor);
-    result.__isset.success = true;
+    iface_->add_vector(args.group_id, args.tensor);
   } catch (VecException &e) {
     result.e = e;
     result.__isset.e = true;
@@ -2238,8 +2187,7 @@ void VecServiceProcessor::process_add_vector_batch(int32_t seqid, ::apache::thri
 
   VecService_add_vector_batch_result result;
   try {
-    iface_->add_vector_batch(result.success, args.group_id, args.tensor_list);
-    result.__isset.success = true;
+    iface_->add_vector_batch(args.group_id, args.tensor_list);
   } catch (VecException &e) {
     result.e = e;
     result.__isset.e = true;
@@ -2645,10 +2593,10 @@ void VecServiceConcurrentClient::recv_del_group(const int32_t seqid)
   } // end while(true)
 }
 
-void VecServiceConcurrentClient::add_vector(VecTensorIdList& _return, const std::string& group_id, const VecTensor& tensor)
+void VecServiceConcurrentClient::add_vector(const std::string& group_id, const VecTensor& tensor)
 {
   int32_t seqid = send_add_vector(group_id, tensor);
-  recv_add_vector(_return, seqid);
+  recv_add_vector(seqid);
 }
 
 int32_t VecServiceConcurrentClient::send_add_vector(const std::string& group_id, const VecTensor& tensor)
@@ -2670,7 +2618,7 @@ int32_t VecServiceConcurrentClient::send_add_vector(const std::string& group_id,
   return cseqid;
 }
 
-void VecServiceConcurrentClient::recv_add_vector(VecTensorIdList& _return, const int32_t seqid)
+void VecServiceConcurrentClient::recv_add_vector(const int32_t seqid)
 {
 
   int32_t rseqid = 0;
@@ -2709,22 +2657,16 @@ void VecServiceConcurrentClient::recv_add_vector(VecTensorIdList& _return, const
         throw TProtocolException(TProtocolException::INVALID_DATA);
       }
       VecService_add_vector_presult result;
-      result.success = &_return;
       result.read(iprot_);
       iprot_->readMessageEnd();
       iprot_->getTransport()->readEnd();
 
-      if (result.__isset.success) {
-        // _return pointer has now been filled
-        sentry.commit();
-        return;
-      }
       if (result.__isset.e) {
         sentry.commit();
         throw result.e;
       }
-      // in a bad state, don't commit
-      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "add_vector failed: unknown result");
+      sentry.commit();
+      return;
     }
     // seqid != rseqid
     this->sync_.updatePending(fname, mtype, rseqid);
@@ -2734,10 +2676,10 @@ void VecServiceConcurrentClient::recv_add_vector(VecTensorIdList& _return, const
   } // end while(true)
 }
 
-void VecServiceConcurrentClient::add_vector_batch(VecTensorIdList& _return, const std::string& group_id, const VecTensorList& tensor_list)
+void VecServiceConcurrentClient::add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list)
 {
   int32_t seqid = send_add_vector_batch(group_id, tensor_list);
-  recv_add_vector_batch(_return, seqid);
+  recv_add_vector_batch(seqid);
 }
 
 int32_t VecServiceConcurrentClient::send_add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list)
@@ -2759,7 +2701,7 @@ int32_t VecServiceConcurrentClient::send_add_vector_batch(const std::string& gro
   return cseqid;
 }
 
-void VecServiceConcurrentClient::recv_add_vector_batch(VecTensorIdList& _return, const int32_t seqid)
+void VecServiceConcurrentClient::recv_add_vector_batch(const int32_t seqid)
 {
 
   int32_t rseqid = 0;
@@ -2798,22 +2740,16 @@ void VecServiceConcurrentClient::recv_add_vector_batch(VecTensorIdList& _return,
         throw TProtocolException(TProtocolException::INVALID_DATA);
       }
       VecService_add_vector_batch_presult result;
-      result.success = &_return;
       result.read(iprot_);
       iprot_->readMessageEnd();
       iprot_->getTransport()->readEnd();
 
-      if (result.__isset.success) {
-        // _return pointer has now been filled
-        sentry.commit();
-        return;
-      }
       if (result.__isset.e) {
         sentry.commit();
         throw result.e;
       }
-      // in a bad state, don't commit
-      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "add_vector_batch failed: unknown result");
+      sentry.commit();
+      return;
     }
     // seqid != rseqid
     this->sync_.updatePending(fname, mtype, rseqid);

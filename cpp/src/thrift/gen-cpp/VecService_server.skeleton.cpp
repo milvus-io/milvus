@@ -45,12 +45,12 @@ class VecServiceHandler : virtual public VecServiceIf {
    * @param group_id
    * @param tensor
    */
-  void add_vector(VecTensorIdList& _return, const std::string& group_id, const VecTensor& tensor) {
+  void add_vector(const std::string& group_id, const VecTensor& tensor) {
     // Your implementation goes here
     printf("add_vector\n");
   }
 
-  void add_vector_batch(VecTensorIdList& _return, const std::string& group_id, const VecTensorList& tensor_list) {
+  void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list) {
     // Your implementation goes here
     printf("add_vector_batch\n");
   }
