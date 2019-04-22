@@ -9,6 +9,7 @@
 #include <wrapper/IndexBuilder.h>
 #include <cstring>
 #include <wrapper/Topk.h>
+#include <easylogging++.h>
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
@@ -184,7 +185,7 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     Status status = _pMeta->add_group_file(group_file);
 
     if (!status.ok()) {
-        std::cout << status.ToString() << std::endl;
+        LOG(INFO) << status.ToString() << std::endl;
         return status;
     }
 
@@ -199,6 +200,8 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         auto file_schema = file;
         file_schema.file_type = meta::GroupFileSchema::TO_DELETE;
         updated.push_back(file_schema);
+        LOG(DEBUG) << "About to merge file " << file_schema.file_id <<
+            " of size=" << file_schema.rows;
     }
 
     auto index_size = group_file.dimension * index->ntotal;
@@ -212,6 +215,8 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     group_file.rows = index_size;
     updated.push_back(group_file);
     status = _pMeta->update_files(updated);
+    LOG(DEBUG) << "New merged file " << group_file.file_id <<
+        " of size=" << group_file.rows;
 
     return status;
 }
@@ -262,12 +267,12 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     IndexBuilderPtr pBuilder = GetIndexBuilder(opd);
 
     auto from_index = dynamic_cast<faiss::IndexIDMap*>(faiss::read_index(file.location.c_str()));
-    std::cout << "Preparing build_index for file_id=" << file.file_id
+    LOG(DEBUG) << "Preparing build_index for file_id=" << file.file_id
         << " with new index_file_id=" << group_file.file_id << std::endl;
     auto index = pBuilder->build_all(from_index->ntotal,
             dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
             from_index->id_map.data());
-    std::cout << "Ending build_index for file_id=" << file.file_id
+    LOG(DEBUG) << "Ending build_index for file_id=" << file.file_id
         << " with new index_file_id=" << group_file.file_id << std::endl;
     /* std::cout << "raw size=" << from_index->ntotal << "   index size=" << index->ntotal << std::endl; */
     write_index(index, group_file.location.c_str());
