@@ -27,13 +27,13 @@ public:
     virtual Status get_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
                                   GroupFileSchema& group_file_info_) override;
-    virtual Status update_group_file(const GroupFileSchema& group_file_) override;
+    virtual Status update_group_file(GroupFileSchema& group_file_) override;
 
     virtual Status get_group_files(const std::string& group_id_,
                                    const int date_delta_,
                                    GroupFilesSchema& group_files_info_) override;
 
-    virtual Status update_files(const GroupFilesSchema& files) override;
+    virtual Status update_files(GroupFilesSchema& files) override;
 
     virtual Status files_to_merge(const std::string& group_id,
             DatePartionedGroupFilesSchema& files) override;
@@ -46,10 +46,13 @@ public:
 
     virtual Status cleanup() override;
 
+    virtual Status cleanup_ttl_files(uint16_t seconds) override;
+
     virtual ~DBMetaImpl();
 
 private:
 
+    long GetMicroSecTimeStamp();
     Status get_group_no_lock(GroupSchema& group_info);
     std::string GetGroupPath(const std::string& group_id);
     std::string GetGroupDatePartitionPath(const std::string& group_id, DateT& date);
