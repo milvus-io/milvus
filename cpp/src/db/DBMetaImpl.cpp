@@ -3,6 +3,7 @@
 #include <sstream>
 #include <iostream>
 #include <boost/filesystem.hpp>
+#include <chrono>
 #include <fstream>
 #include <sqlite_orm/sqlite_orm.h>
 #include "DBMetaImpl.h"
@@ -46,6 +47,14 @@ long GetFileSize(const std::string& filename)
 
 std::string DBMetaImpl::GetGroupPath(const std::string& group_id) {
     return _options.path + "/" + group_id;
+}
+
+long DBMetaImpl::GetMicroSecTimeStamp() {
+    auto now = std::chrono::system_clock::now();
+    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
+            now.time_since_epoch()).count();
+
+    return micros;
 }
 
 std::string DBMetaImpl::GetGroupDatePartitionPath(const std::string& group_id, DateT& date) {
@@ -167,7 +176,7 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
     group_file.file_id = ss.str();
     group_file.dimension = group_info.dimension;
     group_file.rows = 0;
-    group_file.updated_time = ConnectorPtr->select(datetime("now", "localtime")).front();
+    group_file.updated_time = GetMicroSecTimeStamp(); //ConnectorPtr->select(datetime("now", "localtime +1 hour")).front();
     GetGroupFilePath(group_file);
 
     {
@@ -332,7 +341,7 @@ Status DBMetaImpl::get_group_files(const std::string& group_id_,
 }
 
 Status DBMetaImpl::update_group_file(GroupFileSchema& group_file) {
-    group_file.updated_time = ConnectorPtr->select(datetime("now", "localtime")).front();
+    group_file.updated_time = GetMicroSecTimeStamp();
     auto commited = ConnectorPtr->transaction([&] () mutable {
         ConnectorPtr->update(group_file);
         return true;
@@ -346,7 +355,7 @@ Status DBMetaImpl::update_group_file(GroupFileSchema& group_file) {
 Status DBMetaImpl::update_files(GroupFilesSchema& files) {
     auto commited = ConnectorPtr->transaction([&] () mutable {
         for (auto& file : files) {
-            file.updated_time = ConnectorPtr->select(datetime("now", "localtime")).front();
+            file.updated_time = GetMicroSecTimeStamp();
             ConnectorPtr->update(file);
         }
         return true;

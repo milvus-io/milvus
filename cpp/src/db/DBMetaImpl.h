@@ -50,6 +50,7 @@ public:
 
 private:
 
+    long GetMicroSecTimeStamp();
     Status get_group_no_lock(GroupSchema& group_info);
     std::string GetGroupPath(const std::string& group_id);
     std::string GetGroupDatePartitionPath(const std::string& group_id, DateT& date);

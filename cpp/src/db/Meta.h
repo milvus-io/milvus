@@ -42,7 +42,7 @@ struct GroupFileSchema {
     DateT date = EmptyDate;
     uint16_t dimension;
     std::string location = "";
-    std::string updated_time = "";
+    long updated_time;
 }; // GroupFileSchema
 
 typedef std::vector<GroupFileSchema> GroupFilesSchema;
