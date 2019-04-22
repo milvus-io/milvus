@@ -1573,7 +1573,7 @@ sst_file_reader_test: table/sst_file_reader_test.o $(LIBOBJECTS) $(TESTHARNESS)
 
 #-------------------------------------------------
 # make install related stuff
-INSTALL_PATH ?= /usr/local
+INSTALL_PATH ?= ../build
 
 uninstall:
 	rm -rf $(INSTALL_PATH)/include/rocksdb \
