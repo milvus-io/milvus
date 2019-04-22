@@ -1,0 +1,25 @@
+<div class="post">
+  <header class="post-header">
+    <h1 class="post-title">{% if include.truncate %}<a href="{{ page.url | absolute_url }}">{{ page.title }}</a>{% else %}{{ page.title }}{% endif %}</h1>
+  </header>
+
+  <article class="post-content">
+   {% if include.truncate %}
+      {% if page.content contains '<!--truncate-->' %}
+        {{ page.content | split:'<!--truncate-->' | first }}
+        <div class="read-more">
+          <a href="{{ page.url | absolute_url }}" >
+            ...Read More
+          </a>
+        </div>
+      {% else %}
+        {{ page.content }}
+      {% endif %}
+    {% else %}
+      {{ content }}
+
+      <p><a class="edit-page-link" href="https://github.com/{{ site.ghrepo }}/blob/master/docs/{{ page.path }}" target="_blank">Edit on GitHub</a></p>
+    {% endif %}
+  </article>
+  {% include doc_paging.html %}
+</div>

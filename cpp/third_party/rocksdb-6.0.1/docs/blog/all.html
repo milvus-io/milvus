@@ -1,0 +1,20 @@
+---
+id: all
+layout: blog
+category: blog
+---
+
+<div class="posts">
+  <div class="post">
+    <h1>All Posts</h1>
+    {% for post in site.posts %}
+      {% assign author = site.data.authors[post.author] %}
+      <p>
+        <strong>
+          <a href="{{ post.url }}">{{ post.title }}</a>
+        </strong>
+          on {{ post.date | date: "%B %e, %Y" }} by {{ author.display_name }}
+      </p>
+    {% endfor %}
+  </div>
+</div>

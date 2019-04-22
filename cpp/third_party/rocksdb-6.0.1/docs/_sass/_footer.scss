@@ -1,0 +1,82 @@
+.footerContainer {
+  background: $secondary-bg;
+  color: $primary-bg;
+  overflow: hidden;
+  padding: 0 10px;
+  text-align: left;
+
+  .footerWrapper {
+    border-top: 1px solid $primary-bg;
+    padding: 0;
+
+    .footerBlocks {
+      align-items: center;
+      align-content: center;
+      display: flex;
+      flex-flow: row wrap;
+      margin: 0 -20px;
+      padding: 10px 0;
+    }
+
+    .footerSection {
+      box-sizing: border-box;
+      flex: 1 1 25%;
+      font-size: 14px;
+      min-width: 275px;
+      padding: 0px 20px;
+
+      a {
+        border: 0;
+        color: inherit;
+        display: inline-block;
+        line-height: 1.2em;
+      }
+
+      .footerLink {
+        padding-right: 20px;
+      }
+    }
+
+    .fbOpenSourceFooter {
+      align-items: center;
+      display: flex;
+      flex-flow: row nowrap;
+      max-width: 25%;
+
+      .facebookOSSLogoSvg {
+        flex: 0 0 31px;
+        height: 30px;
+        margin-right: 10px;
+        width: 31px;
+
+        path {
+          fill: $primary-bg;
+        }
+
+        .middleRing {
+          opacity: 0.7;
+        }
+
+        .innerRing {
+          opacity: 0.45;
+        }
+      }
+
+      h2 {
+        display: block;
+        font-weight: 900;
+        line-height: 1em;
+      }
+    }
+  }
+}
+
+@media only screen and (min-width: 900px) {
+  .footerSection {
+    &.rightAlign {
+      margin-left: auto;
+      max-width: 25%;
+      text-align: right;
+    }
+  }
+}

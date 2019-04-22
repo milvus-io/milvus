@@ -1,0 +1,115 @@
+.gridBlock {
+  margin: -5px 0;
+  padding: 0;
+  padding-bottom: 20px;
+
+  .blockElement {
+    padding: 5px 0;
+
+    img {
+      max-width: 100%;
+    }
+
+    h3 {
+      border-bottom: 1px solid rgba($primary-bg, 0.5);
+      color: $primary-bg;
+      font-size: 18px;
+      margin: 0;
+      padding: 10px 0;
+    }
+  }
+
+  .gridClear {
+    clear: both;
+  }
+
+}
+
+.gridBlock .alignCenter {
+	text-align: center;
+}
+.gridBlock .alignRight {
+	text-align: right;
+}
+.gridBlock .imageAlignSide {
+	align-items: center;
+	display: flex;
+	flex-flow: row wrap;
+}
+.blockImage {
+	max-width: 150px;
+	width: 50%;
+}
+.imageAlignTop .blockImage {
+	margin-bottom: 20px;
+}
+.imageAlignTop.alignCenter .blockImage {
+	margin-left: auto;
+	margin-right: auto;
+}
+.imageAlignSide .blockImage {
+	flex: 0 1 100px;
+	margin-right: 20px;
+}
+.imageAlignSide .blockContent {
+	flex: 1 1;
+}
+
+@media only screen and (max-width: 1023px) {
+	.responsiveList .blockContent {
+		position: relative;
+	}
+	.responsiveList .blockContent > div {
+		padding-left: 20px;
+	}
+	.responsiveList .blockContent::before {
+		content: "\2022";
+		position: absolute;
+	}
+}
+
+@media only screen and (min-width: 1024px) {
+  .gridBlock {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin: -10px -10px 10px -10px;
+
+    .twoByGridBlock {
+      box-sizing: border-box;
+      flex: 1 0 50%;
+      padding: 10px;
+    }
+
+    .fourByGridBlock {
+      box-sizing: border-box;
+      flex: 1 0 25%;
+      padding: 10px;
+    }
+  }
+
+  h2 + .gridBlock {
+    padding-top: 20px;
+  }
+}
+
+@media only screen and (min-width: 1400px) {
+  .gridBlock {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin: -10px -20px 10px -20px;
+
+    .twoByGridBlock {
+      box-sizing: border-box;
+      flex: 1 0 50%;
+      padding: 10px 20px;
+    }
+
+    .fourByGridBlock {
+      box-sizing: border-box;
+      flex: 1 0 25%;
+      padding: 10px 20px;
+    }
+  }
+}

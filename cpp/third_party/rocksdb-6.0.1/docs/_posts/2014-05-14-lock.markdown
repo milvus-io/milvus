@@ -1,0 +1,88 @@
+---
+title: Reducing Lock Contention in RocksDB
+layout: post
+author: sdong
+category: blog
+redirect_from:
+  - /blog/521/lock/
+---
+
+In this post, we briefly introduce the recent improvements we did to RocksDB to improve the issue of lock contention costs.
+
+RocksDB has a simple thread synchronization mechanism (See [RocksDB Architecture Guide](https://github.com/facebook/rocksdb/wiki/Rocksdb-Architecture-Guide)  to understand terms used below, like SST tables or mem tables). SST tables are immutable after being written and mem tables are lock-free data structures supporting single writer and multiple readers. There is only one single major lock, the DB mutex (DBImpl.mutex_) protecting all the meta operations, including:
+
+<!--truncate-->
+
+  * Increase or decrease reference counters of mem tables and SST tables
+
+
+  * Change and check meta data structures, before and after finishing compactions, flushes and new mem table creations
+
+
+  * Coordinating writers
+
+
+This DB mutex used to be scalability bottleneck preventing us from scaling to more than 16 threads. To address the issue, we improved RocksDB in several ways.
+
+1. Consolidate reference counters and introduce "super version". For every read operation, mutex was acquired, and reference counters for each mem table and each SST table were increased. One such operation is not expensive but if you are building a high throughput server with lots of reads, the lock contention will become the bottleneck. This is especially true if you store all your data in RAM.
+
+To solve this problem, we created a meta-meta data structure called “[super version](https://reviews.facebook.net/rROCKSDB1fdb3f7dc60e96394e3e5b69a46ede5d67fb976c)”, which holds reference counters to all those mem table and SST tables, so that readers only need to increase the reference counters for this single data structure. In RocksDB, list of live mem tables and SST tables only changes infrequently, which would happen when new mem tables are created or flush/compaction happens. Now, at those times, a new super version is created with their reference counters increased. A super version lists live mem tables and SST tables so a reader only needs acquire the lock in order to find the latest super version and increase its reference counter. From the super version, the reader can find all the mem and SST tables which are safety accessible as long as the reader holds the reference count for the super version.
+
+2. We replace some reference counters to stc::atomic objects, so that decreasing reference count of an object usually doesn’t need to be inside the mutex any more.
+
+3. Make fetching super version and reference counting lock-free in read queries. After consolidating reference counting to one single super version and removing the locking for decreasing reference counts, in read case, we only acquire mutex for one thing: fetch the latest super version and increase the reference count for that (dereference the counter is done in an atomic decrease). We designed and implemented a (mostly) lock-free approach to do it. See [details](https://github.com/facebook/rocksdb/raw/gh-pages/talks/2014-03-27-RocksDB-Meetup-Lei-Lockless-Get.pdf). We will write a separate blog post for that.
+
+4. Avoid disk I/O inside the mutex. As we know, each disk I/O to hard drives takes several milliseconds. It can be even longer if file system journal is involved or I/Os are queued. Even occasional disk I/O within mutex can cause huge performance outliers.
+We identified in two situations, we might do disk I/O inside mutex and we removed them:
+(1) Opening and closing transactional log files. We moved those operations out of the mutex.
+(2) Information logging. In multiple places we write to logs within mutex. There is a chance that file write will wait for disk I/O to finish before finishing, even if fsync() is not issued, especially in EXT systems. We occasionally see 100+ milliseconds write() latency on EXT. Instead of removing those logging, we came up with a solution of delay logging. When inside mutex, instead of directly writing to the log file, we write to a log buffer, with the timing information. As soon as mutex is released, we flush the log buffer to log files.
+
+5. Reduce object creation inside the mutex.
+Object creation can be slow because it involves malloc (in our case). Malloc sometimes is slow because it needs to lock some shared data structures. Allocating can also be slow because we sometimes do expensive operations in some of our classes' constructors. For these reasons, we try to reduce object creations inside the mutex. Here are two examples:
+
+(1) std::vector uses malloc inside. We introduced “[autovector](https://reviews.facebook.net/rROCKSDBc01676e46d3be08c3c140361ef1f5884f47d3b3c)” data structure, in which memory for first a few elements are pre-allocated as members of the autovector class. When an autovector is used as a stack variable, no malloc will be needed unless the pre-allocated buffer is used up. This autovector is quite useful for manipulating those meta data structures. Those meta operations are often locked inside DB mutex.
+
+(2) When building an iterator, we used to creating iterator of every live men table and SST table within the mutex and a merging iterator on top of them. Besides malloc, some of those iterators can be quite expensive to create, like sorting. Now, instead of doing that, we simply increase the reference counters of them, and release the mutex before creating any iterator.
+
+6. Deal with mutexes in LRU caches.
+When I said there was only one single major lock, I was lying. In RocksDB, all LRU caches had exclusive mutexes within to protect writes to the LRU lists, which are done in both of read and write operations. LRU caches are used in block cache and table cache. Both of them are accessed more frequently than DB data structures. Lock contention of these two locks are as intense as the DB mutex. Even if LRU cache is sharded into ShardedLRUCache, we can still see lock contentions, especially table caches. We further address this issue in two way:
+(1) Bypassing table caches. A table cache maintains list of SST table’s read handlers. Those handlers contain SST files’ descriptors, table metadata, and possibly data indexes, as well as bloom filters. When the table handler needs to be evicted based on LRU, those information is cleared. When the SST table needs to be read and its table handler is not in LRU cache, the table is opened and those metadata is loaded. In some cases, users want to tune the system in a way that table handler evictions should never happen. It is common for high-throughput, low-latency servers. We introduce a mode where table cache is bypassed in read queries. In this mode, all table handlers are cached and accessed directly, so there is no need to query and adjust table caches for reading the database. It is the users’ responsibility to reserve enough resource for it. This mode can be turned on by setting options.max_open_files=-1.
+
+(2) [New PlainTable format](//github.com/facebook/rocksdb/wiki/PlainTable-Format) (optimized for SST in ramfs/tmpfs) does not organize data by blocks. Data are located by memory addresses so no block cache is needed.
+
+With all of those improvements, lock contention is not a bottleneck anymore, which is shown in our [memory-only benchmark](https://github.com/facebook/rocksdb/wiki/RocksDB-In-Memory-Workload-Performance-Benchmarks) . Furthermore, lock contentions are not causing some huge (50 milliseconds+) latency outliers they used to cause.
+
+### Comments
+
+**[Lee Hounshell](lee@apsalar.com)**
+
+Please post an example of reading the same rocksdb concurrently.
+
+We are using the latest 3.0 rocksdb; however, when two separate processes
+try and open the same rocksdb for reading, only one of the open requests
+succeed. The other open always fails with “db/LOCK: Resource temporarily unavailable” So far we have not found an option that allows sharing the rocksdb for reads. An example would be most appreciated.
+
+**[Siying Dong](siying.d@fb.com)**
+
+Sorry for the delay. We don’t have feature support for this scenario yet. Here is an example you can work around this problem. You can build a snapshot of the DB by doing this:
+
+1. create a separate directory on the same host for a snapshot of the DB.
+1. call `DB::DisableFileDeletions()`
+1. call `DB::GetLiveFiles()` to get a full list of the files.
+1. for all the files except manifest, add a hardlink file in your new directory pointing to the original file
+1. copy the manifest file and truncate the size (you can read the comments of `DB::GetLiveFiles()` for more information)
+1. call `DB::EnableFileDeletions()`
+1. now you can open the snapshot directory in another process to access those files. Please remember to delete the directory after reading the data to allow those files to be recycled.
+
+By the way, the best way to ask those questions is in our [facebook group](https://www.facebook.com/groups/rocksdb.dev/). Let us know if you need any further help.
+
+**[Darshan](darshan.ghumare@gmail.com)**
+
+Will this consistency problem of RocksDB all occurs in case of single put/write?
+What all ACID properties is supported by RocksDB, only durability irrespective of single or batch write?
+
+**[Siying Dong](siying.d@fb.com)**
+
+We recently [introduced optimistic transaction](https://reviews.facebook.net/D33435) which can help you ensure all of ACID.
+
+This blog post is mainly about optimizations in implementation. The RocksDB consistency semantic is not changed.

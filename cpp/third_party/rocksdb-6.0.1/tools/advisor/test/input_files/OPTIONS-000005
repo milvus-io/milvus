@@ -1,0 +1,49 @@
+# This is a RocksDB option file.
+#
+# For detailed file format spec, please refer to the example file
+# in examples/rocksdb_option_file_example.ini
+#
+
+[Version]
+  rocksdb_version=5.14.0
+  options_file_version=1.1
+
+[DBOptions]
+  manual_wal_flush=false
+  allow_ingest_behind=false
+  db_write_buffer_size=0
+  db_log_dir=
+  random_access_max_buffer_size=1048576
+
+[CFOptions "default"]
+  ttl=0
+  max_bytes_for_level_base=268435456
+  max_bytes_for_level_multiplier=10.000000
+  level0_file_num_compaction_trigger=4
+  level0_stop_writes_trigger=36
+  write_buffer_size=4194000
+  min_write_buffer_number_to_merge=1
+  num_levels=7
+  compaction_filter_factory=nullptr
+  compaction_style=kCompactionStyleLevel
+
+[TableOptions/BlockBasedTable "default"]
+  block_align=false
+  index_type=kBinarySearch
+
+[CFOptions "col_fam_A"]
+ttl=0
+max_bytes_for_level_base=268435456
+max_bytes_for_level_multiplier=10.000000
+level0_file_num_compaction_trigger=5
+level0_stop_writes_trigger=36
+write_buffer_size=1024000
+min_write_buffer_number_to_merge=1
+num_levels=5
+compaction_filter_factory=nullptr
+compaction_style=kCompactionStyleLevel
+
+[TableOptions/BlockBasedTable "col_fam_A"]
+block_align=true
+block_restart_interval=16
+index_type=kBinarySearch

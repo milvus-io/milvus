@@ -1,0 +1,19 @@
+<div class="navGroup{% if currentgroup == group %} navGroupActive navGroupCurrent{% endif %}">
+  <h3><i>+</i><span>{{ grouptitle }}</span></h3>
+  <ul>
+    {% if include.data_collection %}
+      {% for item in group.items %}
+        {% for collectionitem in include.data_collection %}
+        {% if collectionitem.docid == item.id %}
+          {% assign groupitem = collectionitem %}
+          {% include nav/collection_nav_group_item.html %}
+        {% endif %}
+        {% endfor %}
+      {% endfor %}
+    {% else %}
+      {% for groupitem in groupitems %}
+      {% include nav/collection_nav_group_item.html %}
+      {% endfor %}
+    {% endif %}
+  </ul>
+</div>

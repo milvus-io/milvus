@@ -1,0 +1,47 @@
+table {
+  background: $lightergrey;
+  border: 1px solid $lightgrey;
+  border-collapse: collapse;
+  display:table;
+  margin: 20px 0;
+
+  thead {
+    border-bottom: 1px solid $lightgrey;
+    display: table-header-group;
+  }
+  tbody {
+    display: table-row-group;
+  }
+  tr {
+    display: table-row;
+    &:nth-of-type(odd) {
+      background: $greyish;
+    }
+
+    th, td {
+      border-right: 1px dotted $lightgrey;
+      display: table-cell;
+      font-size: 14px;
+      line-height: 1.3em;
+      padding: 10px;
+      text-align: left;
+
+      &:last-of-type {
+        border-right: 0;
+      }
+
+      code {
+        color: $green;
+        display: inline-block;
+        font-size: 12px;
+      }
+    }
+
+    th {
+      color: #000000;
+      font-weight: bold;
+      font-family: $header-font-family;
+      text-transform: uppercase;
+    }
+  }
+}

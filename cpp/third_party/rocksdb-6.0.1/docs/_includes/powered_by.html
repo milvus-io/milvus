@@ -1,0 +1,28 @@
+{% if site.data.powered_by.first.items or site.data.powered_by_highlight.first.items %}
+<div class="poweredByContainer">
+  <div class="wrapper mainWrapper poweredByWrapper">
+    {% if site.data.powered_by_highlight.first.title %}
+    <h2>{{ site.data.powered_by_highlight.first.title }}</h2>
+    {% else %}
+    <h2>{{ site.data.powered_by.first.title }}</h2>
+    {% endif %}
+    {% if site.data.powered_by_highlight.first.items %}
+    <div class="poweredByItems">
+      {% for item in site.data.powered_by_highlight.first.items %}
+      <div class="poweredByItem itemLarge">
+        <a href="{{ item.url }}" target="_blank"><img src="{{ item.img }}" alt="{{ item.name }}" /></a>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="poweredByItems">
+      {% for item in site.data.powered_by.first.items %}
+      <div class="poweredByItem itemSmall">
+        <a href="{{ item.url }}" target="_blank">{{ item.name }}</a>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="poweredByMessage">Does your app use {{ site.title }}? Add it to this list with <a href="https://github.com/{{ site.ghrepo }}/edit/gh-pages/_data/powered_by.yml" target="_blank">a pull request!</a></div>
+  </div>
+</div>
+{% endif %}

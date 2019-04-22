@@ -1,0 +1,123 @@
+sudo: false
+dist: trusty
+language: cpp
+os:
+  - linux
+  - osx
+compiler:
+  - clang
+  - gcc
+osx_image: xcode8.3
+jdk:
+  - oraclejdk7
+cache:
+  - ccache
+  - apt
+
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - curl
+      - g++-8
+      - libbz2-dev
+      - libgflags-dev
+      - libsnappy-dev
+      - mingw-w64
+      - zlib1g-dev
+env:
+  - TEST_GROUP=platform_dependent # 16-18 minutes
+  - TEST_GROUP=1 # 33-35 minutes
+  - TEST_GROUP=2 # 18-20 minutes
+  - TEST_GROUP=3 # 20-22 minutes
+  - TEST_GROUP=4 # 12-14 minutes
+  # Run java tests
+  - JOB_NAME=java_test # 4-11 minutes
+  # Build ROCKSDB_LITE
+  - JOB_NAME=lite_build # 3-4 minutes
+  # Build examples
+  - JOB_NAME=examples # 5-7 minutes
+  - JOB_NAME=cmake # 3-5 minutes
+  - JOB_NAME=cmake-gcc8 # 3-5 minutes
+  - JOB_NAME=cmake-mingw # 3 minutes
+
+matrix:
+  exclude:
+  - os: osx
+    env: TEST_GROUP=1
+  - os: osx
+    env: TEST_GROUP=2
+  - os: osx
+    env: TEST_GROUP=3
+  - os: osx
+    env: TEST_GROUP=4
+  - os: osx
+    env: JOB_NAME=cmake-gcc8
+  - os : osx
+    env: JOB_NAME=cmake-mingw
+  - os : linux
+    compiler: clang
+  - os : osx
+    compiler: gcc
+
+# https://docs.travis-ci.com/user/caching/#ccache-cache
+install:
+  - if [ "${TRAVIS_OS_NAME}" == osx ]; then
+      brew install ccache zstd lz4 snappy xz;
+      PATH=$PATH:/usr/local/opt/ccache/libexec;
+    fi
+  - if [ "${JOB_NAME}" == cmake-gcc8 ]; then
+      CC=gcc-8 && CXX=g++-8;
+    fi
+  - if [[ "${JOB_NAME}" == cmake* ]] && [ "${TRAVIS_OS_NAME}" == linux ]; then
+      mkdir cmake-dist && curl -sfSL https://cmake.org/files/v3.8/cmake-3.8.1-Linux-x86_64.tar.gz | tar --strip-components=1 -C cmake-dist -xz && export PATH=$PWD/cmake-dist/bin:$PATH;
+    fi
+
+before_script:
+  # Increase the maximum number of open file descriptors, since some tests use
+  # more FDs than the default limit.
+  - ulimit -n 8192
+
+script:
+  - ${CXX} --version
+  - if [ `command -v ccache` ]; then ccache -C; fi
+  - case $TEST_GROUP in
+    platform_dependent)
+      OPT=-DTRAVIS V=1 ROCKSDBTESTS_END=db_block_cache_test make -j4 all_but_some_tests check_some
+      ;;
+    1)
+      OPT=-DTRAVIS V=1 ROCKSDBTESTS_START=db_block_cache_test ROCKSDBTESTS_END=full_filter_block_test make -j4 check_some
+      ;;
+    2)
+      OPT=-DTRAVIS V=1 make -j4 tools && OPT=-DTRAVIS V=1 ROCKSDBTESTS_START=full_filter_block_test ROCKSDBTESTS_END=write_batch_with_index_test make -j4 check_some
+      ;;
+    3)
+      OPT=-DTRAVIS V=1 ROCKSDBTESTS_START=write_batch_with_index_test ROCKSDBTESTS_END=write_prepared_transaction_test make -j4 check_some
+      ;;
+    4)
+      OPT=-DTRAVIS V=1 ROCKSDBTESTS_START=write_prepared_transaction_test make -j4 check_some
+      ;;
+    esac
+  - case $JOB_NAME in
+    java_test)
+      OPT=-DTRAVIS V=1 make clean jclean && make rocksdbjava jtest
+      ;;
+    lite_build)
+      OPT='-DTRAVIS -DROCKSDB_LITE' V=1 make -j4 static_lib tools
+      ;;
+    examples)
+      OPT=-DTRAVIS V=1 make -j4 static_lib && cd examples && make -j4
+      ;;
+    cmake-mingw)
+      mkdir build && cd build && cmake -DJNI=1 .. -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ -DCMAKE_SYSTEM_NAME=Windows && make -j4 rocksdb rocksdbjni
+      ;;
+    cmake*)
+      mkdir build && cd build && cmake -DJNI=1 .. -DCMAKE_BUILD_TYPE=Release && make -j4 rocksdb rocksdbjni
+      ;;
+    esac
+notifications:
+    email:
+      - leveldb@fb.com
+    webhooks:
+      - https://buildtimetrend.herokuapp.com/travis

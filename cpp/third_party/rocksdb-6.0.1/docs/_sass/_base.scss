@@ -1,0 +1,492 @@
+body {
+  background: $secondary-bg;
+  color: $text;
+	font: normal #{$base-font-size}/#{$base-line-height} $base-font-family;
+  height: 100vh;
+	text-align: left;
+	text-rendering: optimizeLegibility;
+}
+
+img {
+  max-width: 100%;
+}
+
+article {
+  p {
+    img {
+      max-width: 100%;
+      display:block;
+      margin-left: auto;
+      margin-right: auto;
+    }
+  }
+}
+
+a {
+  border-bottom: 1px dotted $primary-bg;
+  color: $text;
+  text-decoration: none;
+  -webkit-transition: background 0.3s, color 0.3s;
+  transition: background 0.3s, color 0.3s;
+}
+
+blockquote {
+  padding: 15px 30px 15px 15px;
+  margin: 20px 0 0 10px;
+  background-color: rgba(204, 122, 111, 0.1);
+  border-left: 10px solid rgba(191, 87, 73, 0.2);
+}
+
+#fb_oss a {
+  border: 0;
+}
+
+h1, h2, h3, h4 {
+  font-family: $header-font-family;
+  font-weight: 900;
+}
+
+.navPusher {
+  border-top: $header-height + $header-ptop + $header-pbot solid $primary-bg;
+	height: 100%;
+	left: 0;
+	position: relative;
+	z-index: 99;
+}
+
+.homeContainer {
+  background: $primary-bg;
+  color: $primary-overlay;
+
+  a {
+    color: $primary-overlay;
+  }
+
+  .homeSplashFade {
+    color: white;
+  }
+
+  .homeWrapper {
+    padding: 2em 10px;
+    text-align: left;
+
+      .wrapper {
+        margin: 0px auto;
+        max-width: $content-width;
+        padding: 0 20px;
+      }
+
+      .projectLogo {
+        img {
+          height: 100px;
+          margin-bottom: 0px;
+        }
+      }
+
+      h1#project_title {
+        font-family: $header-font-family;
+        font-size: 300%;
+        letter-spacing: -0.08em;
+        line-height: 1em;
+        margin-bottom: 80px;
+      }
+
+      h2#project_tagline {
+        font-family: $header-font-family;
+        font-size: 200%;
+        letter-spacing: -0.04em;
+        line-height: 1em;
+      }
+  }
+}
+
+.wrapper {
+	margin: 0px auto;
+	max-width: $content-width;
+	padding: 0 10px;
+}
+
+.projectLogo {
+  display: none;
+
+  img {
+    height: 100px;
+    margin-bottom: 0px;
+  }
+}
+
+section#intro {
+  margin: 40px 0;
+}
+
+.fbossFontLight {
+  font-family: $base-font-family;
+  font-weight: 300;
+  font-style: normal;
+}
+
+.fb-like {
+  display: block;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.center {
+  display: block;
+  text-align: center;
+}
+
+.mainContainer {
+  background: $secondary-bg;
+  overflow: auto;
+
+  .mainWrapper {
+    padding: 4vh 10px;
+    text-align: left;
+
+    .allShareBlock {
+      padding: 10px 0;
+
+      .pluginBlock {
+        margin: 12px 0;
+        padding: 0;
+      }
+    }
+
+    a {
+      &:hover,
+      &:focus {
+        background: $primary-bg;
+        color: $primary-overlay;
+      }
+    }
+
+    em, i {
+      font-style: italic;
+    }
+
+    strong, b {
+      font-weight: bold;
+    }
+
+    h1 {
+      font-size: 300%;
+      line-height: 1em;
+      padding: 1.4em 0 1em;
+      text-align: left;
+    }
+
+    h2 {
+      font-size: 250%;
+      line-height: 1em;
+      margin-bottom: 20px;
+      padding: 1.4em 0 20px;
+      text-align: left;
+
+      & {
+        border-bottom: 1px solid darken($primary-bg, 10%);
+        color: darken($primary-bg, 10%);
+        font-size: 22px;
+        padding: 10px 0;
+      }
+
+      &.blockHeader {
+        border-bottom: 1px solid white;
+        color: white;
+        font-size: 22px;
+        margin-bottom: 20px;
+        padding: 10px 0;
+      }
+    }
+
+    h3 {
+      font-size: 150%;
+      line-height: 1.2em;
+      padding: 1em 0 0.8em;
+    }
+
+    h4 {
+      font-size: 130%;
+      line-height: 1.2em;
+      padding: 1em 0 0.8em;
+    }
+
+    p {
+      padding: 0.8em 0;
+    }
+
+    ul {
+      list-style: disc;
+    }
+
+    ol, ul {
+      padding-left: 24px;
+      li {
+        padding-bottom: 4px;
+        padding-left: 6px;
+      }
+    }
+
+    strong {
+      font-weight: bold;
+    }
+
+    .post {
+      position: relative;
+
+      .katex {
+        font-weight: 700;
+      }
+
+      &.basicPost {
+        margin-top: 30px;
+      }
+
+      a {
+        color: $primary-bg;
+
+        &:hover,
+        &:focus {
+          color: #fff;
+        }
+      }
+
+      h2 {
+        border-bottom: 4px solid $primary-bg;
+        font-size: 130%;
+      }
+
+      h3 {
+        border-bottom: 1px solid $primary-bg;
+        font-size: 110%;
+      }
+
+      ol {
+        list-style: decimal outside none;
+      }
+
+      .post-header {
+        padding: 1em 0;
+
+        h1 {
+          font-size: 150%;
+          line-height: 1em;
+          padding: 0.4em 0 0;
+
+          a {
+            border: none;
+          }
+        }
+
+        .post-meta {
+          color: $primary-bg;
+          font-family: $header-font-family;
+          text-align: center;
+        }
+      }
+
+      .postSocialPlugins {
+        padding-top: 1em;
+      }
+
+      .docPagination {
+        background: $primary-bg;
+        bottom: 0px;
+        left: 0px;
+        position: absolute;
+        right: 0px;
+
+        .pager {
+          display: inline-block;
+          width: 50%;
+        }
+
+        .pagingNext {
+          float: right;
+          text-align: right;
+        }
+
+        a {
+          border: none;
+          color: $primary-overlay;
+          display: block;
+          padding: 4px 12px;
+
+          &:hover {
+            background-color: $secondary-bg;
+            color: $text;
+          }
+
+          .pagerLabel {
+            display: inline;
+          }
+
+          .pagerTitle {
+            display: none;
+          }
+        }
+      }
+    }
+
+    .posts {
+      .post {
+        margin-bottom: 6vh;
+      }
+    }
+  }
+}
+
+#integrations_title  {
+  font-size: 250%;
+  margin: 80px 0;
+}
+
+.ytVideo {
+  height: 0;
+  overflow: hidden;
+  padding-bottom: 53.4%; /* 16:9 */
+  padding-top: 25px;
+  position: relative;
+}
+
+.ytVideo iframe,
+.ytVideo object,
+.ytVideo embed {
+  height: 100%;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+@media only screen and (min-width: 480px) {
+  h1#project_title {
+    font-size: 500%;
+  }
+
+  h2#project_tagline {
+    font-size: 250%;
+  }
+
+  .projectLogo {
+    img {
+      margin-bottom: 10px;
+      height: 200px;
+    }
+  }
+
+  .homeContainer .homeWrapper {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .mainContainer {
+    .mainWrapper {
+      .post {
+        h2 {
+          font-size: 180%;
+        }
+
+        h3 {
+          font-size: 120%;
+        }
+
+        .docPagination {
+          a {
+            .pagerLabel {
+              display: none;
+            }
+            .pagerTitle {
+              display: inline;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@media only screen and (min-width: 900px) {
+  .homeContainer {
+    .homeWrapper {
+      position: relative;
+
+      #inner {
+        box-sizing: border-box;
+        max-width: 600px;
+        padding-right: 40px;
+      }
+
+      .projectLogo {
+        align-items: center;
+        bottom: 0;
+        display: flex;
+        justify-content: flex-end;
+        left: 0;
+        padding: 2em 20px 4em;
+        position: absolute;
+        right: 20px;
+        top: 0;
+
+        img {
+          height: 100%;
+          max-height: 250px;
+        }
+      }
+    }
+  }
+}
+
+@media only screen and (min-width: 1024px) {
+  .mainContainer {
+    .mainWrapper {
+      .post {
+        box-sizing: border-box;
+        display: block;
+
+        .post-header {
+          h1 {
+            font-size: 250%;
+          }
+        }
+      }
+
+      .posts {
+        .post {
+          margin-bottom: 4vh;
+          width: 100%;
+        }
+      }
+    }
+  }
+}
+
+@media only screen and (min-width: 1200px) {
+  .homeContainer {
+    .homeWrapper {
+      #inner {
+        max-width: 750px;
+      }
+    }
+  }
+
+  .wrapper {
+    max-width: 1100px;
+  }
+}
+
+@media only screen and (min-width: 1500px) {
+  .homeContainer {
+    .homeWrapper {
+      #inner {
+        max-width: 1100px;
+        padding-bottom: 40px;
+        padding-top: 40px;
+      }
+    }
+  }
+
+  .wrapper {
+    max-width: 1400px;
+  }
+}

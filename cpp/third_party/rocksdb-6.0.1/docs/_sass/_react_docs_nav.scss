@@ -1,0 +1,332 @@
+.docsNavContainer {
+  background: $sidenav;
+  height: 35px;
+  left: 0;
+  position: fixed;
+  width: 100%;
+  z-index: 100;
+}
+
+.docMainWrapper {
+  .wrapper {
+    &.mainWrapper {
+      padding-left: 0;
+      padding-right: 0;
+      padding-top: 10px;
+    }
+  }
+}
+
+.docsSliderActive {
+  .docsNavContainer {
+    box-sizing: border-box;
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 50px;
+  }
+
+  .mainContainer {
+    display: none;
+  }
+}
+
+.navBreadcrumb {
+  box-sizing: border-box;
+  display: flex;
+  flex-flow: row nowrap;
+  font-size: 12px;
+  height: 35px;
+  overflow: hidden;
+  padding: 5px 10px;
+
+  a, span {
+    border: 0;
+    color: $sidenav-text;
+  }
+
+  i {
+    padding: 0 3px;
+  }
+}
+
+nav.toc {
+  position: relative;
+
+  section {
+    padding: 0px;
+    position: relative;
+
+    .navGroups {
+      display: none;
+      padding: 40px 10px 10px;
+    }
+  }
+
+  .toggleNav {
+    background: $sidenav;
+    color: $sidenav-text;
+    position: relative;
+    transition: background-color 0.3s, color 0.3s;
+
+    .navToggle {
+      cursor: pointer;
+      height: 24px;
+      margin-right: 10px;
+      position: relative;
+      text-align: left;
+      width: 18px;
+
+      &::before, &::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 0;
+        left: 8px;
+        width: 3px;
+        height: 6px;
+        border: 5px solid $sidenav-text;
+        border-width: 5px 0;
+        margin-top: -8px;
+        transform: rotate(45deg);
+        z-index: 1;
+      }
+
+      &::after {
+        transform: rotate(-45deg);
+      }
+
+      i {
+        &::before, &::after {
+          content: "";
+          position: absolute;
+          top: 50%;
+          left: 2px;
+          background: transparent;
+          border-width: 0 5px 5px;
+          border-style: solid;
+          border-color: transparent $sidenav-text;
+          height: 0;
+          margin-top: -7px;
+          opacity: 1;
+          width: 5px;
+          z-index: 10;
+        }
+
+        &::after {
+          border-width: 5px 5px 0;
+          margin-top: 2px;
+        }
+      }
+    }
+
+    .navGroup {
+      background: $sidenav-overlay;
+      margin: 1px 0;
+
+      ul {
+        display: none;
+      }
+
+      h3 {
+        background: $sidenav-overlay;
+        color: $sidenav-text;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 1.2em;
+        padding: 10px;
+        transition: color 0.2s;
+
+        i:not(:empty) {
+          width: 16px;
+          height: 16px;
+          display: inline-block;
+          box-sizing: border-box;
+          text-align: center;
+          color: rgba($sidenav-text, 0.5);
+          margin-right: 10px;
+          transition: color 0.2s;
+        }
+
+        &:hover {
+          color: $primary-bg;
+
+          i:not(:empty) {
+            color: $primary-bg;
+          }
+        }
+      }
+
+      &.navGroupActive {
+        background: $sidenav-active;
+        color: $sidenav-text;
+
+        ul {
+          display: block;
+          padding-bottom: 10px;
+          padding-top: 10px;
+        }
+
+        h3 {
+          background: $primary-bg;
+          color: $primary-overlay;
+
+          i {
+            display: none;
+          }
+        }
+      }
+    }
+
+    ul {
+      padding-left: 0;
+      padding-right: 24px;
+
+      li {
+        list-style-type: none;
+        padding-bottom: 0;
+        padding-left: 0;
+
+        a {
+          border: none;
+          color: $sidenav-text;
+          display: inline-block;
+          font-size: 14px;
+          line-height: 1.1em;
+          margin: 2px 10px 5px;
+          padding: 5px 0 2px;
+          transition: color 0.3s;
+
+          &:hover,
+          &:focus {
+            color: $primary-bg;
+          }
+
+          &.navItemActive {
+            color: $primary-bg;
+            font-weight: 900;
+          }
+        }
+      }
+    }
+  }
+
+  .toggleNavActive {
+    .navBreadcrumb {
+      background: $sidenav;
+      margin-bottom: 20px;
+      position: fixed;
+      width: 100%;
+    }
+
+    section {
+      .navGroups {
+        display: block;
+      }
+    }
+
+
+    .navToggle {
+      &::before, &::after {
+        border-width: 6px 0;
+        height: 0px;
+        margin-top: -6px;
+      }
+
+      i {
+        opacity: 0;
+      }
+    }
+  }
+}
+
+.docsNavVisible {
+  .navPusher {
+    .mainContainer {
+      padding-top: 35px;
+    }
+  }
+}
+
+@media only screen and (min-width: 900px) {
+  .navBreadcrumb {
+    padding: 5px 0;
+  }
+
+  nav.toc {
+    section {
+      .navGroups {
+        padding: 40px 0 0;
+      }
+    }
+  }
+}
+
+@media only screen and (min-width: 1024px) {
+  .navToggle {
+    display: none;
+  }
+
+  .docsSliderActive {
+    .mainContainer {
+      display: block;
+    }
+  }
+
+  .docsNavVisible {
+    .navPusher {
+      .mainContainer {
+        padding-top: 0;
+      }
+    }
+  }
+
+  .docsNavContainer {
+    background: none;
+    box-sizing: border-box;
+    height: auto;
+    margin: 40px 40px 0 0;
+    overflow-y: auto;
+    position: relative;
+    width: 300px;
+  }
+
+  nav.toc {
+    section {
+      .navGroups {
+        display: block;
+        padding-top: 0px;
+      }
+    }
+
+    .toggleNavActive {
+      .navBreadcrumb {
+        margin-bottom: 0;
+        position: relative;
+      }
+    }
+  }
+
+  .docMainWrapper {
+    display: flex;
+    flex-flow: row nowrap;
+    margin-bottom: 40px;
+
+    .wrapper {
+      padding-left: 0;
+      padding-right: 0;
+
+      &.mainWrapper {
+        padding-top: 0;
+      }
+    }
+  }
+
+  .navBreadcrumb {
+    display: none;
+    h2 {
+      padding: 0 10px;
+    }
+  }
+}

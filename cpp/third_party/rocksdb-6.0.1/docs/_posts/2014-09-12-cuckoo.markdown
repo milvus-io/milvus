@@ -1,0 +1,74 @@
+---
+title: Cuckoo Hashing Table Format
+layout: post
+author: radheshyam
+category: blog
+redirect_from:
+  - /blog/1427/new-bloom-filter-format/
+---
+
+## Introduction
+
+We recently introduced a new [Cuckoo Hashing](http://en.wikipedia.org/wiki/Cuckoo_hashing) based SST file format which is optimized for fast point lookups. The new format was built for applications which require very high point lookup rates (~4Mqps) in read only mode but do not use operations like range scan, merge operator, etc. But, the existing RocksDB file formats were built to support range scan and other operations and the current best point lookup in RocksDB is 1.2 Mqps given by [PlainTable](https://github.com/facebook/rocksdb/wiki/PlainTable-Format)[ format](https://github.com/facebook/rocksdb/wiki/PlainTable-Format). This prompted a hashing based file format, which we present here. The new table format uses a cache friendly version of Cuckoo Hashing algorithm with only 1 or 2 memory accesses per lookup.
+
+<!--truncate-->
+
+Goals:
+
+  * Reduce memory accesses per lookup to 1 or 2
+
+
+  * Get an end to end point lookup rate of at least 4 Mqps
+
+
+  * Minimize database size
+
+
+Assumptions:
+
+  * Key length and value length are fixed
+
+
+  * The database is operated in read only mode
+
+
+Non-goals:
+
+
+  * While optimizing the performance of Get() operation was our primary goal, compaction and build times were secondary. We may work on improving them in future.
+
+
+Details for setting up the table format can be found in [GitHub](https://github.com/facebook/rocksdb/wiki/CuckooTable-Format).
+
+
+## Cuckoo Hashing Algorithm
+
+In order to achieve high lookup speeds, we did multiple optimizations, including a cache friendly cuckoo hash algorithm. Cuckoo Hashing uses multiple hash functions, _h1, ..., __hn._
+
+### Original Cuckoo Hashing
+
+To insert any new key _k_, we compute hashes of the key _h1(k), ..., __hn__(k)_. We insert the key in the first hash location that is free. If all the locations are blocked, we try to move one of the colliding keys to a different location by trying to re-insert it.
+
+Finding smallest set of keys to displace in order to accommodate the new key is naturally a shortest path problem in a directed graph where nodes are buckets of hash table and there is an edge from bucket _A_ to bucket _B_ if the element stored in bucket _A_ can be accommodated in bucket _B_ using one of the hash functions. The source nodes are the possible hash locations for the given key _k_ and destination is any one of the empty buckets. We use this algorithm to handle collision.
+
+To retrieve a key _k_, we compute hashes, _h1(k), ..., __hn__(k)_ and the key must be present in one of these locations.
+
+Our goal is to minimize average (and maximum) number of hash functions required and hence the number of memory accesses. In our experiments, with a hash utilization of 90%, we found that the average number of lookups is 1.8 and maximum is 3. Around 44% of keys are accommodated in first hash location and 33% in second location.
+
+
+### Cache Friendly Cuckoo Hashing
+
+We noticed the following two sub-optimal properties in original Cuckoo implementation:
+
+
+  * If the key is not present in first hash location, we jump to second hash location which may not be in cache. This results in many cache misses.
+
+
+  * Because only 44% of keys are located in first cuckoo block, we couldn't have an optimal prefetching strategy - prefetching all hash locations for a key is wasteful. But prefetching only the first hash location helps only 44% of cases.
+
+
+
+The solution is to insert more keys near first location. In case of collision in the first hash location - _h1(k)_, we try to insert it in next few buckets, _h1(k)+1, _h1(k)+2, _..., h1(k)+t-1_. If all of these _t_ locations are occupied, we skip over to next hash function _h2_ and repeat the process. We call the set of _t_ buckets as a _Cuckoo Block_. We chose _t_ such that size of a block is not bigger than a cache line and we prefetch the first cuckoo block.
+
+
+With the new algorithm, for 90% hash utilization, we found that 85% of keys are accommodated in first Cuckoo Block. Prefetching the first cuckoo block yields best results. For a database of 100 million keys with key length 8 and value length 4, the hash algorithm alone can achieve 9.6 Mqps and we are working on improving it further. End to end RocksDB performance results can be found [here](https://github.com/facebook/rocksdb/wiki/CuckooTable-Format).

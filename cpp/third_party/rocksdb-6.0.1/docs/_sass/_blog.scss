@@ -1,0 +1,47 @@
+.blogContainer {
+  .posts {
+    margin-top: 60px;
+
+    .post {
+      border: 1px solid $primary-bg;
+      border-radius: 3px;
+      padding: 10px 20px 20px;
+    }
+  }
+
+  .lonePost {
+    margin-top: 60px;
+
+    .post {
+      padding: 10px 0px 0px;
+    }
+  }
+
+  .post-header {
+    h1 {
+      text-align: center;
+    }
+
+    .post-authorName {
+      color: rgba($text, 0.7);
+      font-size: 14px;
+      font-weight: 900;
+      margin-top: 0;
+      padding: 0;
+      text-align: center;
+    }
+
+    .authorPhoto {
+      border-radius: 50%;
+      height: 50px;
+      left: 50%;
+      margin-left: auto;
+      margin-right: auto;
+      display: inline-block;
+      overflow: hidden;
+      position: static;
+      top: -25px;
+      width: 50px;
+    }
+  }
+}

@@ -1,0 +1,26 @@
+---
+title: FlushWAL; less fwrite, faster writes
+layout: post
+author: maysamyabandeh
+category: blog
+---
+
+When `DB::Put` is called, the data is written to both memtable (to be flushed to SST files later) and the WAL (write-ahead log) if it is enabled. In the case of a crash, RocksDB can recover as much as the memtable state that is reflected into the WAL. By default RocksDB automatically flushes the WAL from the application memory to the OS buffer after each `::Put`. It however can be configured to perform the flush manually after an explicit call to `::FlushWAL`. Not doing fwrite syscall after each `::Put` offers a tradeoff between reliability and write latency for the general case. As we explain below, some applications such as MyRocks benefit from this API to gain higher write throughput with however no compromise in reliability.
+
+### How much is the gain?
+
+Using `::FlushWAL` API along with setting `DBOptions.concurrent_prepare`, MyRocks achieves 40% higher throughput in Sysbench's [update-nonindex](https://github.com/akopytov/sysbench/blob/master/src/lua/oltp_update_non_index.lua) benchmark.
+
+### Write, Flush, and Sync
+
+The write to the WAL is first written to the application memory buffer. The buffer in the next step is "flushed" to OS buffer by calling fwrite syscall. The OS buffer is later "synced" to the persistent storage. The data in the OS buffer, although not persisted yet, will survive the application crash. By default, the flush occurs automatically upon each call to `DB::Put` or `DB::Write`. The user can additionally request sync after each write by setting `WriteOptions::sync`.
+
+### FlushWAL API
+
+The user can turn off the automatic flush of the WAL by setting `DBOptions::manual_wal_flush`. In that case, the WAL buffer is flushed when it is either full or `DB::FlushWAL` is called by the user. The API also accepts a boolean argument should we want to sync right after the flush: `::FlushWAL(true)`.
+
+### Success story: MyRocks
+
+Some applications that use RocksDB, already have other machinsims in place to provide reliability. MySQL for example uses 2PC (two-phase commit) to write to both binlog as well as the storage engine such as InnoDB and MyRocks. The group commit logic in MySQL allows the 1st phase (Prepare) to be run in parallel but after a commit group is formed performs the 2nd phase (Commit) in a serial manner. This makes low commit latency in the storage engine essential for acheiving high throughput. The commit in MyRocks includes writing to the RocksDB WAL, which as explaiend above, by default incures the latency of flushing the WAL new appends to the OS buffer.
+
+Since binlog helps in recovering from some failure scenarios, MySQL can provide reliability without however needing a storage WAL flush after each individual commit. MyRocks benefits from this property, disables automatic WAL flush in RocksDB, and manually calls `::FlushWAL` when requested by MySQL.

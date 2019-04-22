@@ -1,0 +1,37 @@
+<div id="fixed_header" class="fixedHeaderContainer{% if include.alwayson %} visible{% endif %}">
+  <div class="headerWrapper wrapper">
+    <header>
+      <a href="{{ '/' | absolute_url }}">
+        <img src="{{ '/static/logo.svg' }}">
+        <h2>{{ site.title }}</h2>
+      </a>
+
+      <div class="navigationWrapper navigationFull" id="flat_nav">
+        <nav class="navigation">
+          <ul>
+            {% for item in site.data.nav %}
+            <li class="navItem{% if page.collection == item.category or page.category == item.category %} navItemActive{% endif %}">
+              {% if item.category == "external" %}
+                <a href="{{ item.href }}">{{ item.title }}</a>
+              {% else %}
+                {% comment %}
+                I removed `relative_url` from here for now until the problem we are having with
+                GitHub pages is resolved. Yes, I know this is exactly the same as the if above.
+                See: https://github.com/facebook/rocksdb/commit/800e51553ee029f29581f7f338cbc988c7f6da62
+                {% endcomment %}
+                <a href="{{ item.href }}">{{ item.title }}</a>
+              {% endif %}
+            </li>
+            {% endfor %}
+            {% if site.searchconfig %}
+            {% include nav_search.html inputselector="search_input" %}
+            {% endif %}
+          </ul>
+        </nav>
+      </div>
+      <div class="navigationWrapper navigationSlider" id="navigation_wrap">
+        {% include nav/header_nav.html %}
+      </div>
+    </header>
+  </div>
+</div>

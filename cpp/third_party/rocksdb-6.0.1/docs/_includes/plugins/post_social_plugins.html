@@ -1,0 +1,41 @@
+<div class="postSocialPlugins">
+  <a
+    href="https://twitter.com/share"
+    class="twitter-share-button"
+    data-url="{{ page.url | replace:'index.html','' | absolute_url }}"
+    data-text="{% if page.title %}{{ page.title }}{% else %}{{ site.title }}{% endif %}"
+    data-hashtags="flowtype">Tweet</a>
+  <div
+    class="fb-like"
+    data-href="{{ page.url | replace:'index.html','' | absolute_url }}"
+    data-layout="button_count"
+    data-action="like"
+    data-show-faces="false"
+    data-share="true"></div>
+</div>
+<script>
+  window.fbAsyncInit = function() {
+  FB.init({
+    appId      : '{{ site.fbappid }}',
+    xfbml      : true,
+    version    : 'v2.2'
+  });
+  };
+
+  (function(d, s, id){
+   var js, fjs = d.getElementsByTagName(s)[0];
+   if (d.getElementById(id)) {return;}
+   js = d.createElement(s); js.id = id;
+   js.src = "//connect.facebook.net/en_US/sdk.js";
+   fjs.parentNode.insertBefore(js, fjs);
+   }(document, 'script', 'facebook-jssdk'));
+</script>
+
+<script>!function(d,s,id){
+  var js,fjs=d.getElementsByTagName(s)[0],p=/^http:/.test(d.location)?'http':'https';
+  if(!d.getElementById(id)){
+  js=d.createElement(s);js.id=id;js.src=p+'://platform.twitter.com/widgets.js';
+  fjs.parentNode.insertBefore(js,fjs);
+  }
+  }(document, 'script', 'twitter-wjs');
+</script>

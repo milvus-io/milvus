@@ -1,0 +1,15 @@
+version: 1.0.{build}
+image: Visual Studio 2017
+before_build:
+- md %APPVEYOR_BUILD_FOLDER%\build
+- cd %APPVEYOR_BUILD_FOLDER%\build
+- cmake -G "Visual Studio 15 Win64" -DOPTDBG=1 -DWITH_XPRESS=1 -DPORTABLE=1 -DJNI=1 ..
+- cd ..
+build:
+  project: build\rocksdb.sln
+  parallel: true
+  verbosity: normal
+test:
+test_script:
+- ps: build_tools\run_ci_db_test.ps1 -SuiteRun db_basic_test,db_test2,db_test,env_basic_test,env_test -Concurrency 8
+

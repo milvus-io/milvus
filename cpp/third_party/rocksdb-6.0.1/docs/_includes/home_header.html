@@ -1,0 +1,22 @@
+<div class="homeContainer">
+  <div class="homeSplashFade">
+    <div id="home_wrap" class="wrapper homeWrapper">
+      <div id="inner">
+        <h2 id="project_tagline">{{ site.tagline }}</h2>
+        <section id="intro">
+          <p>{% if page.excerpt %}{{ page.excerpt | strip_html }}{% else %}{{ site.description }}{% endif %}</p>
+        </section>
+        <div id="promo" class="section promoSection">
+          {% for promo in site.data.promo %}
+            <div class="promoRow">
+            {% include plugins/{{promo.type}}.html href=promo.href text=promo.text children=promo.children %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="projectLogo">
+        <img src="{{ '/static/logo.svg' }}" alt="{{ site.title }}">
+      </div>
+    </div>
+  </div>
+</div>

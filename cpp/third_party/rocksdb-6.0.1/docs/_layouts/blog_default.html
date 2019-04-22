@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+  {% include head.html %}
+  <body class="docsNavVisible">
+    {% include nav.html alwayson=true %}
+    <div class="navPusher">
+      <div class="docMainWrapper wrapper">
+      {% include nav/collection_nav.html navdata=site.posts type="blog" sectionpath="/blog/" sectiontitle="Blog" %}
+      {{ content }}
+      </div>
+      {% include footer.html %}
+    </div>
+  </body>
+</html>

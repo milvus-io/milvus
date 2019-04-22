@@ -1,0 +1,64 @@
+<div class="docsNavContainer">
+  <nav class="toc" id="doc_nav">
+    <div class="toggleNav" id="collection_nav">
+      <section class="navWrapper wrapper">
+        <div class="navBreadcrumb wrapper">
+          <div class="navToggle" id="collection_nav_toggler">
+            <i></i>
+          </div>
+          <h2>
+            <a href="{{ include.sectionpath }}">{{ include.sectiontitle }}</a>
+            {% if include.currentgroup %}
+            <i>›</i>
+            <span>{{ include.currentgroup }}</span>
+            {% endif %}
+          </h2>
+        </div>
+        <div class="navGroups">
+          {% if include.type == "blog" %}
+            {% assign grouptitle = "All Posts" %}
+            {% assign groupitems = include.navdata %}
+            {% include nav/collection_nav_group.html %}
+          {% else %}
+          {% for group in include.navdata %}
+            {% assign grouptitle = group.title %}
+            {% for item in group.items %}
+              {% if item.id == page.docid %}
+              {% assign currentgroup = group %}
+              {% endif %}
+            {% endfor %}
+            {% include nav/collection_nav_group.html %}
+          {% endfor %}
+          {% endif %}
+        </div>
+      </section>
+    </div>
+  </nav>
+</div>
+<script>
+  var docsevent = document.createEvent('Event');
+  docsevent.initEvent('docs_slide', true, true);
+  document.addEventListener('docs_slide', function (e) {
+    document.body.classList.toggle('docsSliderActive');
+  }, false);
+
+  var collectionNav = document.getElementById('collection_nav');
+  var collectionNavToggler =
+    document.getElementById('collection_nav_toggler');
+  collectionNavToggler.addEventListener('click', function(e) {
+    collectionNav.classList.toggle('toggleNavActive');
+    document.dispatchEvent(docsevent);
+  });
+
+  var groups = document.getElementsByClassName('navGroup');
+  for(var i = 0; i < groups.length; i++) {
+    var thisGroup = groups[i];
+    thisGroup.onclick = function() {
+      for(var j = 0; j < groups.length; j++) {
+        var group = groups[j];
+        group.classList.remove('navGroupActive');
+      }
+      this.classList.add('navGroupActive');
+    }
+  }
+</script>

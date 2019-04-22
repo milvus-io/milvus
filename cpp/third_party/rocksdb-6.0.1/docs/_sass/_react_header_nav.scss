@@ -1,0 +1,141 @@
+.navigationFull {
+  display: none;
+}
+
+.navigationSlider {
+  position: absolute;
+  right: 0px;
+
+  .navSlideout {
+    cursor: pointer;
+    padding-top: 4px;
+    position: absolute;
+    right: 10px;
+    top: 0;
+    transition: top 0.3s;
+    z-index: 101;
+  }
+
+  .slidingNav {
+    background: $secondary-bg;
+    box-sizing: border-box;
+    height: 0px;
+    overflow-x: hidden;
+    padding: 0;
+    position: absolute;
+    right: 0px;
+    top: 0;
+    transition: height 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55), width 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    width: 0;
+
+    ul {
+      flex-flow: column nowrap;
+      list-style: none;
+      padding: 10px;
+
+      li {
+        margin: 0;
+        padding: 2px 0;
+
+        a {
+          color: $primary-bg;
+          display: inline;
+          margin: 3px 5px;
+          padding: 2px 0px;
+          transition: background-color 0.3s;
+
+          &:focus,
+          &:hover {
+            border-bottom: 2px solid $primary-bg;
+          }
+        }
+      }
+    }
+  }
+
+  .navSlideoutActive {
+    .slidingNav {
+      height: auto;
+      padding-top: $header-height + $header-pbot;
+      width: 300px;
+    }
+
+    .navSlideout {
+      top: -2px;
+      .menuExpand {
+        span:nth-child(1) {
+          background-color: $text;
+          top: 16px;
+          transform: rotate(45deg);
+        }
+        span:nth-child(2) {
+          opacity: 0;
+        }
+        span:nth-child(3) {
+          background-color: $text;
+          transform: rotate(-45deg);
+        }
+      }
+    }
+  }
+}
+
+.menuExpand {
+  display: flex;
+  flex-flow: column nowrap;
+  height: 20px;
+  justify-content: space-between;
+
+  span {
+    background: $primary-overlay;
+    border-radius: 3px;
+    display: block;
+    flex: 0 0 4px;
+    height: 4px;
+    position: relative;
+    top: 0;
+    transition: background-color 0.3s, top 0.3s, opacity 0.3s, transform 0.3s;
+    width: 20px;
+  }
+}
+
+.navPusher {
+  border-top: $header-height + $header-ptop + $header-pbot solid $primary-bg;
+	position: relative;
+	left: 0;
+	z-index: 99;
+	height: 100%;
+
+  &::after {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 0;
+    height: 0;
+    background: rgba(0,0,0,0.4);
+    content: '';
+    opacity: 0;
+    -webkit-transition: opacity 0.5s, width 0.1s 0.5s, height 0.1s 0.5s;
+    transition: opacity 0.5s, width 0.1s 0.5s, height 0.1s 0.5s;
+  }
+
+  .sliderActive &::after {
+    width: 100%;
+    height: 100%;
+    opacity: 1;
+    -webkit-transition: opacity 0.5s;
+    transition: opacity 0.5s;
+    z-index: 100;
+  }
+}
+
+
+@media only screen and (min-width: 1024px) {
+  .navigationFull {
+    display: block;
+  }
+
+  .navigationSlider {
+    display: none;
+  }
+}
