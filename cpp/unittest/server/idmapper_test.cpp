@@ -4,13 +4,16 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
-
+#include "server/ServerConfig.h"
 #include "server/VecIdMapper.h"
 
 using namespace zilliz::vecwise;
 
 
 TEST(IdMapperTest, IDMAPPER_TEST) {
+    server::ConfigNode& server_config = server::ServerConfig::GetInstance().GetConfig("server_config");
+    server_config.SetValue("db_path", "/tmp/vecwise_test");
+
     server::IVecIdMapper* mapper = server::IVecIdMapper::GetInstance();
 
     std::vector<int64_t> nid = {1,50, 900, 10000};

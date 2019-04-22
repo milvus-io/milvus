@@ -5,14 +5,30 @@
 #-------------------------------------------------------------------------------
 include_directories(../../src)
 
+aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(./ test_srcs)
 
-add_executable(server_test
-        ${unittest_srcs}
-        ${cache_srcs}
-        ${test_srcs}
+set(require_files
         ../../src/server/VecIdMapper.cpp
+        ../../src/server/ServerConfig.cpp
         )
 
-target_link_libraries(server_test ${unittest_libs})
+add_executable(server_test
+        ${unittest_srcs}
+        ${config_files}
+        ${cache_srcs}
+        ${test_srcs}
+        ${require_files}
+        )
+
+set(require_libs
+        yaml-cpp
+        boost_system
+        boost_filesystem
+        pthread)
+
+target_link_libraries(server_test
+        ${unittest_libs}
+        ${require_libs}
+        )
