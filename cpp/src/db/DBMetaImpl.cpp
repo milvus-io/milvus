@@ -366,6 +366,38 @@ Status DBMetaImpl::update_files(GroupFilesSchema& files) {
     return Status::OK();
 }
 
+Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
+    auto now = GetMicroSecTimeStamp();
+    auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
+                                               &GroupFileSchema::group_id,
+                                               &GroupFileSchema::file_id,
+                                               &GroupFileSchema::file_type,
+                                               &GroupFileSchema::rows,
+                                               &GroupFileSchema::date),
+                                      where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_DELETE and
+                                            c(&GroupFileSchema::updated_time) > now - 1000000*seconds));
+
+    GroupFilesSchema updated;
+
+    for (auto& file : selected) {
+        GroupFileSchema group_file;
+        group_file.id = std::get<0>(file);
+        group_file.group_id = std::get<1>(file);
+        group_file.file_id = std::get<2>(file);
+        group_file.file_type = std::get<3>(file);
+        group_file.rows = std::get<4>(file);
+        group_file.date = std::get<5>(file);
+        GetGroupFilePath(group_file);
+        if (group_file.file_type == GroupFileSchema::TO_DELETE) {
+            boost::filesystem::remove(group_file.location);
+        }
+        ConnectorPtr->remove<GroupFileSchema>(group_file.id);
+        std::cout << "Removing deleted id=" << group_file.id << " location=" << group_file.location << std::endl;
+    }
+
+    return Status::OK();
+}
+
 Status DBMetaImpl::cleanup() {
     auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
                                                &GroupFileSchema::group_id,

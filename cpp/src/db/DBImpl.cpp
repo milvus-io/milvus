@@ -242,6 +242,8 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
         try_build_index();
     }
 
+    _pMeta->cleanup_ttl_files(1);
+
     return Status::OK();
 }
 

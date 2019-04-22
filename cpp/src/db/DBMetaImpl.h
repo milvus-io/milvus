@@ -46,6 +46,8 @@ public:
 
     virtual Status cleanup() override;
 
+    virtual Status cleanup_ttl_files(uint16_t seconds) override;
+
     virtual ~DBMetaImpl();
 
 private:

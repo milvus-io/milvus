@@ -41,6 +41,8 @@ public:
 
     virtual Status files_to_index(GroupFilesSchema&) override;
 
+    virtual Status cleanup_ttl_files(uint16_t seconds) override;
+
 private:
 
     Status GetGroupMetaInfoByPath(const std::string& path, GroupSchema& group_info);
