@@ -6,12 +6,13 @@
 include_directories(../../src)
 
 aux_source_directory(../../src/cache cache_srcs)
+aux_source_directory(./ test_srcs)
 
-set(cache_test_src
+add_executable(server_test
         ${unittest_srcs}
         ${cache_srcs}
-        cache_test.cpp)
+        ${test_srcs}
+        ../../src/server/VecIdMapper.cpp
+        )
 
-add_executable(cache_test ${cache_test_src})
-
-target_link_libraries(cache_test ${unittest_libs})
+target_link_libraries(server_test ${unittest_libs})

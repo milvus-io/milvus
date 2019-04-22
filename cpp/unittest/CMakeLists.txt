@@ -16,7 +16,6 @@ set(unittest_libs
         gmock_main
         pthread)
 
-add_subdirectory(cache)
-add_subdirectory(log)
+add_subdirectory(server)
 add_subdirectory(db)
 add_subdirectory(faiss_wrapper)
