@@ -20,7 +20,8 @@ VecServiceHandler::VecServiceHandler() {
     zilliz::vecwise::engine::Options opt;
     ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
     opt.meta.backend_uri = config.GetValue(CONFIG_SERVER_DB_URL);
-    opt.meta.path = "/tmp/test";
+    std::string db_path = config.GetValue(CONFIG_SERVER_DB_PATH);
+    opt.meta.path = db_path + "/db";
 
     zilliz::vecwise::engine::DB::Open(opt, &db_);
 }

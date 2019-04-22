@@ -53,22 +53,22 @@ private:
     std::unordered_map<INTEGER_ID, std::string> ids_;
 };
 
-//class RocksIdMapper : public IVecIdMapper{
-//public:
-//    RocksIdMapper();
-//    ~RocksIdMapper();
-//
-//    ServerError Put(INTEGER_ID nid, const std::string& sid) override;
-//    ServerError Put(const std::vector<INTEGER_ID>& nid, const std::vector<std::string>& sid) override;
-//    ServerError Put(const INTEGER_ID *nid, uint64_t count, const std::vector<std::string>& sid) override;
-//
-//    ServerError Get(INTEGER_ID nid, std::string& sid) const override;
-//    ServerError Get(const std::vector<INTEGER_ID>& nid, std::vector<std::string>& sid) const override;
-//    ServerError Get(const INTEGER_ID *nid, uint64_t count, std::vector<std::string>& sid) const override;
-//
-//    ServerError Delete(INTEGER_ID nid) override;
-//
-//};
+class RocksIdMapper : public IVecIdMapper{
+public:
+    RocksIdMapper(const std::string& store_path);
+    ~RocksIdMapper();
+
+    ServerError Put(INTEGER_ID nid, const std::string& sid) override;
+    ServerError Put(const std::vector<INTEGER_ID>& nid, const std::vector<std::string>& sid) override;
+    ServerError Put(const INTEGER_ID *nid, uint64_t count, const std::vector<std::string>& sid) override;
+
+    ServerError Get(INTEGER_ID nid, std::string& sid) const override;
+    ServerError Get(const std::vector<INTEGER_ID>& nid, std::vector<std::string>& sid) const override;
+    ServerError Get(const INTEGER_ID *nid, uint64_t count, std::vector<std::string>& sid) const override;
+
+    ServerError Delete(INTEGER_ID nid) override;
+
+};
 
 }
 }

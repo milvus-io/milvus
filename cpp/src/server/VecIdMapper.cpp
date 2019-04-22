@@ -5,7 +5,7 @@
  ******************************************************************************/
 
 #include "VecIdMapper.h"
-
+#include "ServerConfig.h"
 #include "utils/Log.h"
 
 namespace zilliz {
@@ -13,10 +13,19 @@ namespace vecwise {
 namespace server {
 
 IVecIdMapper* IVecIdMapper::GetInstance() {
+#if 1
     static SimpleIdMapper s_mapper;
     return &s_mapper;
+#else
+    ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
+    std::string db_path = config.GetValue(CONFIG_SERVER_DB_PATH);
+    db_path += "/id_mapping";
+    static RocksIdMapper s_mapper(db_path);
+    return &s_mapper;
+#endif
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 SimpleIdMapper::SimpleIdMapper() {
 
 }
@@ -82,6 +91,43 @@ ServerError SimpleIdMapper::Get(const INTEGER_ID *nid, uint64_t count, std::vect
 
 ServerError SimpleIdMapper::Delete(INTEGER_ID nid) {
     ids_.erase(nid);
+    return SERVER_SUCCESS;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+RocksIdMapper::RocksIdMapper(const std::string& store_path) {
+
+}
+RocksIdMapper::~RocksIdMapper() {
+
+}
+
+ServerError RocksIdMapper::Put(INTEGER_ID nid, const std::string& sid) {
+    return SERVER_SUCCESS;
+}
+
+ServerError RocksIdMapper::Put(const std::vector<INTEGER_ID>& nid, const std::vector<std::string>& sid) {
+    return SERVER_SUCCESS;
+}
+
+ServerError RocksIdMapper::Put(const INTEGER_ID *nid, uint64_t count, const std::vector<std::string>& sid) {
+    return SERVER_SUCCESS;
+}
+
+ServerError RocksIdMapper::Get(INTEGER_ID nid, std::string& sid) const {
+    return SERVER_SUCCESS;
+}
+
+ServerError RocksIdMapper::Get(const std::vector<INTEGER_ID>& nid, std::vector<std::string>& sid) const {
+    return SERVER_SUCCESS;
+}
+
+ServerError RocksIdMapper::Get(const INTEGER_ID *nid, uint64_t count, std::vector<std::string>& sid) const {
+    return SERVER_SUCCESS;
+}
+
+ServerError RocksIdMapper::Delete(INTEGER_ID nid) {
     return SERVER_SUCCESS;
 }
 
