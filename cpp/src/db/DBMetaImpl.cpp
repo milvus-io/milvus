@@ -28,6 +28,7 @@ inline auto StoragePrototype(const std::string& path) {
                       make_column("file_id", &GroupFileSchema::file_id),
                       make_column("file_type", &GroupFileSchema::file_type),
                       make_column("rows", &GroupFileSchema::rows, default_value(0)),
+                      make_column("updated_time", &GroupFileSchema::updated_time),
                       make_column("date", &GroupFileSchema::date))
             );
 
@@ -166,6 +167,7 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
     group_file.file_id = ss.str();
     group_file.dimension = group_info.dimension;
     group_file.rows = 0;
+    group_file.updated_time = ConnectorPtr->select(datetime("now", "localtime")).front();
     GetGroupFilePath(group_file);
 
     {
@@ -329,7 +331,8 @@ Status DBMetaImpl::get_group_files(const std::string& group_id_,
     return Status::OK();
 }
 
-Status DBMetaImpl::update_group_file(const GroupFileSchema& group_file) {
+Status DBMetaImpl::update_group_file(GroupFileSchema& group_file) {
+    group_file.updated_time = ConnectorPtr->select(datetime("now", "localtime")).front();
     auto commited = ConnectorPtr->transaction([&] () mutable {
         ConnectorPtr->update(group_file);
         return true;
@@ -340,9 +343,10 @@ Status DBMetaImpl::update_group_file(const GroupFileSchema& group_file) {
     return Status::OK();
 }
 
-Status DBMetaImpl::update_files(const GroupFilesSchema& files) {
+Status DBMetaImpl::update_files(GroupFilesSchema& files) {
     auto commited = ConnectorPtr->transaction([&] () mutable {
         for (auto& file : files) {
+            file.updated_time = ConnectorPtr->select(datetime("now", "localtime")).front();
             ConnectorPtr->update(file);
         }
         return true;

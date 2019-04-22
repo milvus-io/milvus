@@ -42,6 +42,7 @@ struct GroupFileSchema {
     DateT date = EmptyDate;
     uint16_t dimension;
     std::string location = "";
+    std::string updated_time = "";
 }; // GroupFileSchema
 
 typedef std::vector<GroupFileSchema> GroupFilesSchema;
@@ -62,13 +63,13 @@ public:
     virtual Status get_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
                                   GroupFileSchema& group_file_info_) = 0;
-    virtual Status update_group_file(const GroupFileSchema& group_file_) = 0;
+    virtual Status update_group_file(GroupFileSchema& group_file_) = 0;
 
     virtual Status get_group_files(const std::string& group_id_,
                                    const int date_delta_,
                                    GroupFilesSchema& group_files_info_) = 0;
 
-    virtual Status update_files(const GroupFilesSchema& files) = 0;
+    virtual Status update_files(GroupFilesSchema& files) = 0;
 
     virtual Status files_to_search(const std::string& group_id,
                                    std::vector<DateT> partition,
