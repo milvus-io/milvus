@@ -5,6 +5,7 @@ __pycache__
 .env
 build
 cmake-build-debug
+cmake-build-release
 cmake_build
 *.o
 *.lo
