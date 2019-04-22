@@ -242,6 +242,8 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
         try_build_index();
     }
 
+    _pMeta->cleanup_ttl_files(1);
+
     return Status::OK();
 }
 
@@ -255,13 +257,18 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     }
 
     auto opd = std::make_shared<Operand>();
+    opd->d = file.dimension;
     opd->index_type = "IDMap,Flat";
     IndexBuilderPtr pBuilder = GetIndexBuilder(opd);
 
     auto from_index = dynamic_cast<faiss::IndexIDMap*>(faiss::read_index(file.location.c_str()));
+    std::cout << "Preparing build_index for file_id=" << file.file_id
+        << " with new index_file_id=" << group_file.file_id << std::endl;
     auto index = pBuilder->build_all(from_index->ntotal,
             dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
             from_index->id_map.data());
+    std::cout << "Ending build_index for file_id=" << file.file_id
+        << " with new index_file_id=" << group_file.file_id << std::endl;
     /* std::cout << "raw size=" << from_index->ntotal << "   index size=" << index->ntotal << std::endl; */
     write_index(index, group_file.location.c_str());
     group_file.file_type = meta::GroupFileSchema::INDEX;
