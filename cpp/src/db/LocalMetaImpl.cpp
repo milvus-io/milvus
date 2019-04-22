@@ -226,12 +226,12 @@ Status LocalMetaImpl::get_group_files(const std::string& group_id_,
     return Status::OK();
 }
 
-Status LocalMetaImpl::update_group_file(const GroupFileSchema& group_file_) {
+Status LocalMetaImpl::update_group_file(GroupFileSchema& group_file_) {
     //PXU TODO
     return Status::OK();
 }
 
-Status LocalMetaImpl::update_files(const GroupFilesSchema& files) {
+Status LocalMetaImpl::update_files(GroupFilesSchema& files) {
     //PXU TODO
     return Status::OK();
 }
