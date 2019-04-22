@@ -82,7 +82,7 @@ VecServiceHandler::del_group(const std::string &group_id) {
 
 
 void
-VecServiceHandler::add_vector(VecTensorIdList& _return, const std::string &group_id, const VecTensor &tensor) {
+VecServiceHandler::add_vector(const std::string &group_id, const VecTensor &tensor) {
     SERVER_LOG_INFO << "add_vector() called";
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size();
 
@@ -93,7 +93,6 @@ VecServiceHandler::add_vector(VecTensorIdList& _return, const std::string &group
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
-            _return.id_list.swap(vector_ids);
         }
 
         SERVER_LOG_INFO << "add_vector() finished";
@@ -103,8 +102,7 @@ VecServiceHandler::add_vector(VecTensorIdList& _return, const std::string &group
 }
 
 void
-VecServiceHandler::add_vector_batch(VecTensorIdList &_return,
-                                    const std::string &group_id,
+VecServiceHandler::add_vector_batch(const std::string &group_id,
                                     const VecTensorList &tensor_list) {
     SERVER_LOG_INFO << "add_vector_batch() called";
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector list size = "
@@ -121,7 +119,6 @@ VecServiceHandler::add_vector_batch(VecTensorIdList &_return,
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
-            _return.id_list.swap(vector_ids);
         }
 
         SERVER_LOG_INFO << "add_vector_batch() finished";
@@ -149,8 +146,10 @@ VecServiceHandler::search_vector(VecSearchResult &_return,
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
-            if(results.size() > 0) {
-                _return.id_list.swap(results[0]);
+            if(!results.empty()) {
+                for(auto id : results[0]) {
+                    _return.id_list.push_back(std::to_string(id));
+                }
             }
         }
 
@@ -184,7 +183,9 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
         } else {
             for(engine::QueryResult& res : results){
                 VecSearchResult v_res;
-                v_res.id_list.swap(res);
+                for(auto id : results[0]) {
+                    v_res.id_list.push_back(std::to_string(id));
+                }
                 _return.result_list.push_back(v_res);
             }
         }

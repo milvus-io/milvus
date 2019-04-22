@@ -43,8 +43,6 @@ class VecTensor;
 
 class VecTensorList;
 
-class VecTensorIdList;
-
 class VecSearchResult;
 
 class VecSearchResultList;
@@ -160,7 +158,8 @@ void swap(VecGroup &a, VecGroup &b);
 std::ostream& operator<<(std::ostream& out, const VecGroup& obj);
 
 typedef struct _VecTensor__isset {
-  _VecTensor__isset() : tensor(false) {}
+  _VecTensor__isset() : uid(false), tensor(false) {}
+  bool uid :1;
   bool tensor :1;
 } _VecTensor__isset;
 
@@ -169,18 +168,23 @@ class VecTensor : public virtual ::apache::thrift::TBase {
 
   VecTensor(const VecTensor&);
   VecTensor& operator=(const VecTensor&);
-  VecTensor() {
+  VecTensor() : uid() {
   }
 
   virtual ~VecTensor() throw();
+  std::string uid;
   std::vector<double>  tensor;
 
   _VecTensor__isset __isset;
+
+  void __set_uid(const std::string& val);
 
   void __set_tensor(const std::vector<double> & val);
 
   bool operator == (const VecTensor & rhs) const
   {
+    if (!(uid == rhs.uid))
+      return false;
     if (!(tensor == rhs.tensor))
       return false;
     return true;
@@ -243,48 +247,6 @@ void swap(VecTensorList &a, VecTensorList &b);
 
 std::ostream& operator<<(std::ostream& out, const VecTensorList& obj);
 
-typedef struct _VecTensorIdList__isset {
-  _VecTensorIdList__isset() : id_list(false) {}
-  bool id_list :1;
-} _VecTensorIdList__isset;
-
-class VecTensorIdList : public virtual ::apache::thrift::TBase {
- public:
-
-  VecTensorIdList(const VecTensorIdList&);
-  VecTensorIdList& operator=(const VecTensorIdList&);
-  VecTensorIdList() {
-  }
-
-  virtual ~VecTensorIdList() throw();
-  std::vector<int64_t>  id_list;
-
-  _VecTensorIdList__isset __isset;
-
-  void __set_id_list(const std::vector<int64_t> & val);
-
-  bool operator == (const VecTensorIdList & rhs) const
-  {
-    if (!(id_list == rhs.id_list))
-      return false;
-    return true;
-  }
-  bool operator != (const VecTensorIdList &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const VecTensorIdList & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-  virtual void printTo(std::ostream& out) const;
-};
-
-void swap(VecTensorIdList &a, VecTensorIdList &b);
-
-std::ostream& operator<<(std::ostream& out, const VecTensorIdList& obj);
-
 typedef struct _VecSearchResult__isset {
   _VecSearchResult__isset() : id_list(false) {}
   bool id_list :1;
@@ -299,11 +261,11 @@ class VecSearchResult : public virtual ::apache::thrift::TBase {
   }
 
   virtual ~VecSearchResult() throw();
-  std::vector<int64_t>  id_list;
+  std::vector<std::string>  id_list;
 
   _VecSearchResult__isset __isset;
 
-  void __set_id_list(const std::vector<int64_t> & val);
+  void __set_id_list(const std::vector<std::string> & val);
 
   bool operator == (const VecSearchResult & rhs) const
   {

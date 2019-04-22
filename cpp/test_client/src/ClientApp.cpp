@@ -29,6 +29,7 @@ void ClientApp::Run(const std::string &config_file) {
     try {
         ClientSession session(address, port, protocol);
 
+        //add group
         const int32_t dim = 256;
         VecGroup group;
         group.id = "test_group";
@@ -36,16 +37,34 @@ void ClientApp::Run(const std::string &config_file) {
         group.index_type = 0;
         session.interface()->add_group(group);
 
+        //add vectors
         for(int64_t k = 0; k < 10000; k++) {
             VecTensor tensor;
             for(int32_t i = 0; i < dim; i++) {
                 tensor.tensor.push_back((double)(i + k));
             }
+            tensor.uid = "vec_" + std::to_string(k);
 
-            VecTensorIdList result;
-            session.interface()->add_vector(result, group.id, tensor);
+            session.interface()->add_vector(group.id, tensor);
 
             CLIENT_LOG_INFO << "add vector no." << k;
+        }
+
+        //search vector
+        {
+            VecTensor tensor;
+            for (int32_t i = 0; i < dim; i++) {
+                tensor.tensor.push_back((double) (i + 100));
+            }
+
+            VecSearchResult res;
+            VecTimeRangeList range;
+            session.interface()->search_vector(res, group.id, 10, tensor, range);
+
+            std::cout << "Search result: " << std::endl;
+            for(auto id : res.id_list) {
+                std::cout << id << std::endl;
+            }
         }
 
     } catch (std::exception& ex) {
