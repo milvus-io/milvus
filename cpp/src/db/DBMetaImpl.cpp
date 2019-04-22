@@ -6,6 +6,7 @@
 #include <chrono>
 #include <fstream>
 #include <sqlite_orm/sqlite_orm.h>
+#include <easylogging++.h>
 #include "DBMetaImpl.h"
 #include "IDGenerator.h"
 
@@ -107,7 +108,7 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
         try {
             auto id = ConnectorPtr->insert(group_info);
             group_info.id = id;
-            std::cout << __func__ << " id=" << id << std::endl;
+            LOG(DEBUG) << "Add group " << id;
         } catch (...) {
             return Status::DBTransactionError("Add Group Error");
         }
@@ -141,8 +142,6 @@ Status DBMetaImpl::get_group_no_lock(GroupSchema& group_info) {
         return Status::NotFound("Group " + group_info.group_id + " not found");
     }
 
-    std::cout << __func__ << ": gid=" << group_info.group_id
-        << " dimension=" << group_info.dimension << std::endl;
     return Status::OK();
 }
 
@@ -183,7 +182,6 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
         try {
             auto id = ConnectorPtr->insert(group_file);
             group_file.id = id;
-            std::cout << __func__ << " id=" << id << std::endl;
         } catch (...) {
             return Status::DBTransactionError("Add file Error");
         }
@@ -392,7 +390,7 @@ Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
             boost::filesystem::remove(group_file.location);
         }
         ConnectorPtr->remove<GroupFileSchema>(group_file.id);
-        std::cout << "Removing deleted id=" << group_file.id << " location=" << group_file.location << std::endl;
+        LOG(DEBUG) << "Removing deleted id=" << group_file.id << " location=" << group_file.location << std::endl;
     }
 
     return Status::OK();
@@ -423,7 +421,7 @@ Status DBMetaImpl::cleanup() {
             boost::filesystem::remove(group_file.location);
         }
         ConnectorPtr->remove<GroupFileSchema>(group_file.id);
-        std::cout << "Removing id=" << group_file.id << " location=" << group_file.location << std::endl;
+        LOG(DEBUG) << "Removing id=" << group_file.id << " location=" << group_file.location << std::endl;
     }
 
     return Status::OK();
