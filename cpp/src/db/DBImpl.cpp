@@ -344,6 +344,10 @@ void DBImpl::background_compaction() {
     }
 }
 
+Status DBImpl::drop_all() {
+    return _pMeta->drop_all();
+}
+
 DBImpl::~DBImpl() {
     {
         std::unique_lock<std::mutex> lock(_mutex);
