@@ -261,9 +261,7 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
         merge_files(group_id, kv.first, kv.second);
     }
 
-    if (has_merge) {
-        try_build_index();
-    }
+    try_build_index();
 
     _pMeta->cleanup_ttl_files(1);
 
