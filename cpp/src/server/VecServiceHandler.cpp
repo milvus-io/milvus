@@ -200,11 +200,9 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
             for(engine::QueryResult& res : results){
-                for(auto nid : results) {
-                    VecSearchResult v_res;
-                    IVecIdMapper::GetInstance()->Get(nid, v_res.id_list);
-                    _return.result_list.push_back(v_res);
-                }
+                VecSearchResult v_res;
+                IVecIdMapper::GetInstance()->Get(res.data(), res.size(), v_res.id_list);
+                _return.result_list.push_back(v_res);
             }
         }
 
