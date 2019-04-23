@@ -56,6 +56,7 @@ Status DBImpl::add_vectors(const std::string& group_id_,
     }
 }
 
+// TODO(XUPENG): add search range based on time
 Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
                       const float *vectors, QueryResults &results) {
     meta::DatePartionedGroupFilesSchema files;
@@ -63,75 +64,92 @@ Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
     auto status = _pMeta->files_to_search(group_id, partition, files);
     if (!status.ok()) { return status; }
 
-    // TODO: optimized
     meta::GroupFilesSchema index_files;
     meta::GroupFilesSchema raw_files;
     for (auto &day_files : files) {
         for (auto &file : day_files.second) {
-            file.file_type == meta::GroupFileSchema::RAW ?
-            raw_files.push_back(file) :
-            index_files.push_back(file);
+            file.file_type == meta::GroupFileSchema::INDEX ?
+            index_files.push_back(file) : raw_files.push_back(file);
         }
     }
-    int dim = raw_files[0].dimension;
 
+    int dim = 0;
+    if (!index_files.empty()) {
+        dim = index_files[0].dimension;
+    } else if (!raw_files.empty()) {
+        dim = raw_files[0].dimension;
+    } else {
+        return Status::OK();
+    }
 
-    // merge raw files
+    // merge raw files and build flat index.
     faiss::Index *index(faiss::index_factory(dim, "IDMap,Flat"));
-
     for (auto &file : raw_files) {
         auto file_index = dynamic_cast<faiss::IndexIDMap *>(faiss::read_index(file.location.c_str()));
-        index->add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat *>(file_index->index)->xb.data(),
+        index->add_with_ids(file_index->ntotal,
+                            dynamic_cast<faiss::IndexFlat *>(file_index->index)->xb.data(),
                             file_index->id_map.data());
     }
-    float *xb = dynamic_cast<faiss::IndexFlat *>(index)->xb.data();
-    int64_t *ids = dynamic_cast<faiss::IndexIDMap *>(index)->id_map.data();
-    long totoal = index->ntotal;
 
-    std::vector<float> distence;
-    std::vector<long> result_ids;
     {
-        // allocate memory
+        // [{ids, distence}, ...]
+        using SearchResult = std::pair<std::vector<long>, std::vector<float>>;
+        std::vector<SearchResult> batchresult(nq); // allocate nq cells.
+
+        auto cluster = [&](long *nns, float *dis) -> void {
+            for (int i = 0; i < nq; ++i) {
+                auto f_begin = batchresult[i].first.cbegin();
+                auto s_begin = batchresult[i].second.cbegin();
+                batchresult[i].first.insert(f_begin, nns + i * k, nns + i * k + k);
+                batchresult[i].second.insert(s_begin, dis + i * k, dis + i * k + k);
+            }
+        };
+
+        // Allocate Memory
         float *output_distence;
         long *output_ids;
-        output_distence = (float *) malloc(k * sizeof(float));
-        output_ids = (long *) malloc(k * sizeof(long));
+        output_distence = (float *) malloc(k * nq * sizeof(float));
+        output_ids = (long *) malloc(k * nq * sizeof(long));
+        memset(output_distence, 0, k * nq * sizeof(float));
+        memset(output_ids, 0, k * nq * sizeof(long));
 
-        // build and search in raw file
-        // TODO: HardCode
-        auto opd = std::make_shared<Operand>();
-        opd->index_type = "IDMap,Flat";
-        IndexBuilderPtr builder = GetIndexBuilder(opd);
-        auto index = builder->build_all(totoal, xb, ids);
-
+        // search in raw file
         index->search(nq, vectors, k, output_distence, output_ids);
-        distence.insert(distence.begin(), output_distence, output_distence + k);
-        result_ids.insert(result_ids.begin(), output_ids, output_ids + k);
-        memset(output_distence, 0, k * sizeof(float));
-        memset(output_ids, 0, k * sizeof(long));
+        cluster(output_ids, output_distence); // cluster to each query
+        memset(output_distence, 0, k * nq * sizeof(float));
+        memset(output_ids, 0, k * nq * sizeof(long));
 
-        // search in index file
+        // Search in index file
         for (auto &file : index_files) {
             auto index = read_index(file.location.c_str());
             index->search(nq, vectors, k, output_distence, output_ids);
-            distence.insert(distence.begin(), output_distence, output_distence + k);
-            result_ids.insert(result_ids.begin(), output_ids, output_ids + k);
-            memset(output_distence, 0, k * sizeof(float));
-            memset(output_ids, 0, k * sizeof(long));
+            cluster(output_ids, output_distence); // cluster to each query
+            memset(output_distence, 0, k * nq * sizeof(float));
+            memset(output_ids, 0, k * nq * sizeof(long));
         }
 
-        // TopK
-        TopK(distence.data(), distence.size(), k, output_distence, output_ids);
-        distence.clear();
-        result_ids.clear();
-        distence.insert(distence.begin(), output_distence, output_distence + k);
-        result_ids.insert(result_ids.begin(), output_ids, output_ids + k);
+        auto cluster_topk = [&]() -> void {
+            QueryResult res;
+            for (auto &result_pair : batchresult) {
+                auto &dis = result_pair.second;
+                auto &nns = result_pair.first;
+                TopK(dis.data(), dis.size(), k, output_distence, output_ids);
+                for (int i = 0; i < k; ++i) {
+                    res.emplace_back(nns[output_ids[i]]); // mapping
+                }
+                results.push_back(res); // append to result list
+                res.clear();
+            }
+        };
+        cluster_topk();
 
-        // free
         free(output_distence);
         free(output_ids);
     }
 
+    if (results.empty()) {
+        return Status::NotFound("Group " + group_id + ", search result not found!");
+    }
     return Status::OK();
 }
 

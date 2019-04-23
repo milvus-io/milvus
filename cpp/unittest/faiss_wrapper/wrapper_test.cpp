@@ -92,3 +92,35 @@ TEST(build_test, Wrapper_Test) {
     delete[] result_ids;
 }
 
+TEST(search_test, Wrapper_Test) {
+    const int dim = 256;
+
+    size_t nb = 25000;
+    size_t nq = 100;
+    size_t k = 100;
+    std::vector<float> xb(nb*dim);
+    std::vector<float> xq(nq*dim);
+    std::vector<long> ids(nb*dim);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis_xt(-1.0, 1.0);
+    for (size_t i = 0; i < nb*dim; i++) {
+        xb[i] = dis_xt(gen);
+        ids[i] = i;
+    }
+    for (size_t i = 0; i < nq*dim; i++) {
+        xq[i] = dis_xt(gen);
+    }
+
+    // result data
+    std::vector<long> nns_gt(nq*k); // nns = nearst neg search
+    std::vector<long> nns(nq*k);
+    std::vector<float> dis_gt(nq*k);
+    std::vector<float> dis(nq*k);
+    faiss::Index* index_gt(faiss::index_factory(dim, "IDMap,Flat"));
+    index_gt->add_with_ids(nb, xb.data(), ids.data());
+    index_gt->search(nq, xq.data(), 10, dis_gt.data(), nns_gt.data());
+    std::cout << "data: " << nns_gt[0];
+
+}
