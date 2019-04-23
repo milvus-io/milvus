@@ -24,6 +24,7 @@ set(vecwise_engine_src
         ${wrapper_files}
         )
 
+include_directories(/usr/include)
 include_directories(/usr/local/cuda/include)
 find_library(cuda_library cudart cublas HINTS /usr/local/cuda/lib64)
 
@@ -37,6 +38,8 @@ set(engine_libs
         sqlite3
         )
 
+link_libraries(/usr/lib/x86_64-linux-gnu)
+
 target_link_libraries(vecwise_engine ${engine_libs} ${cuda_library})
 
 add_executable(vecwise_server
@@ -48,12 +51,17 @@ add_executable(vecwise_server
         )
 
 set(server_libs
+        vecwise_engine
+        rocksdb
+        thrift
+        pthread
         yaml-cpp
         boost_system
         boost_filesystem
-        thrift
         pthread
-        vecwise_engine
+        snappy
+        bz2
+        z
         )
 
 target_link_libraries(vecwise_server ${server_libs})

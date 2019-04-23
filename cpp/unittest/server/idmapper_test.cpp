@@ -21,13 +21,15 @@ TEST(IdMapperTest, IDMAPPER_TEST) {
     server::ServerError err = mapper->Put(nid, sid);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
-    sid.clear();
-    err = mapper->Put(nid, sid);
+    err = mapper->Put(nid, std::vector<std::string>());
     ASSERT_NE(err, server::SERVER_SUCCESS);
 
     std::vector<std::string> res;
     err = mapper->Get(nid, res);
     ASSERT_EQ(res.size(), nid.size());
+    for(size_t i = 0; i < res.size(); i++) {
+        ASSERT_EQ(res[i], sid[i]);
+    }
 
     std::string str_id;
     err = mapper->Get(50, str_id);

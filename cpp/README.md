@@ -1,8 +1,11 @@
 ### Compilation
 #### Step 1: install necessery tools
 
-    centos7 : yum install gfortran
-    ubuntu16.04 : sudo apt-install install gfortran libsqlite3-dev
+    centos7 : 
+        yum install gfortran libsqlite3-dev libsnappy-dev zlib bzip2
+        
+    ubuntu16.04 : 
+        sudo apt-install install gfortran libsqlite3-dev libsnappy-dev zlib bzip2
 
 #### Step 2: build third-parties
 Note: If you want to debug into third-parties, you can build debug with CXXFLAGS='-g -O0' with option 
