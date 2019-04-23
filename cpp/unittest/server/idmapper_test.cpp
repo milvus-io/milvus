@@ -6,13 +6,16 @@
 #include <gtest/gtest.h>
 #include "server/ServerConfig.h"
 #include "server/VecIdMapper.h"
+#include "utils/TimeRecorder.h"
+#include "utils/CommonUtil.h"
 
 using namespace zilliz::vecwise;
 
 
 TEST(IdMapperTest, IDMAPPER_TEST) {
+    std::string db_path = "/tmp/vecwise_test";
     server::ConfigNode& server_config = server::ServerConfig::GetInstance().GetConfig("server_config");
-    server_config.SetValue("db_path", "/tmp/vecwise_test");
+    server_config.SetValue("db_path", db_path);
 
     server::IVecIdMapper* mapper = server::IVecIdMapper::GetInstance();
 
@@ -40,5 +43,32 @@ TEST(IdMapperTest, IDMAPPER_TEST) {
 
     err = mapper->Get(900, str_id);
     ASSERT_NE(err, server::SERVER_SUCCESS);
+
+
+    //performance?
+    nid.clear();
+    sid.clear();
+    const int64_t count = 1000000;
+    for(int64_t i = 0; i < count; i++) {
+        nid.push_back(i+100000);
+        sid.push_back("val_" + std::to_string(i));
+    }
+
+    {
+        std::string str_info = "Insert " + std::to_string(count) + " k/v into mapper";
+        server::TimeRecorder rc(str_info);
+        err = mapper->Put(nid, sid);
+        ASSERT_EQ(err, server::SERVER_SUCCESS);
+        rc.Record("done!");
+    }
+
+    {
+        std::string str_info = "Get " + std::to_string(count) + " k/v from mapper";
+        server::TimeRecorder rc(str_info);
+        std::vector<std::string> res;
+        err = mapper->Get(nid, res);
+        ASSERT_EQ(res.size(), nid.size());
+        rc.Record("done!");
+    }
 }
 
