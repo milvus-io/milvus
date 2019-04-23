@@ -246,9 +246,9 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
         return status;
     }
 
-    if (raw_files.size() == 0) {
-        return Status::OK();
-    }
+    /* if (raw_files.size() == 0) { */
+    /*     return Status::OK(); */
+    /* } */
 
     bool has_merge = false;
 
