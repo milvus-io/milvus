@@ -19,7 +19,7 @@ TEST(IdMapperTest, IDMAPPER_TEST) {
 
     server::IVecIdMapper* mapper = server::IVecIdMapper::GetInstance();
 
-    std::vector<int64_t> nid = {1,50, 900, 10000};
+    std::vector<std::string> nid = {"1", "50", "900", "10000"};
     std::vector<std::string> sid = {"one", "fifty", "nine zero zero", "many"};
     server::ServerError err = mapper->Put(nid, sid);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
@@ -35,22 +35,21 @@ TEST(IdMapperTest, IDMAPPER_TEST) {
     }
 
     std::string str_id;
-    err = mapper->Get(50, str_id);
+    err = mapper->Get(nid[1], str_id);
     ASSERT_EQ(str_id, "fifty");
 
-    err = mapper->Delete(900);
+    err = mapper->Delete(nid[2]);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
-    err = mapper->Get(900, str_id);
+    err = mapper->Get(nid[2], str_id);
     ASSERT_NE(err, server::SERVER_SUCCESS);
 
-
-    //performance?
+    //test performance
     nid.clear();
     sid.clear();
     const int64_t count = 1000000;
     for(int64_t i = 0; i < count; i++) {
-        nid.push_back(i+100000);
+        nid.push_back(std::to_string(i+100000));
         sid.push_back("val_" + std::to_string(i));
     }
 

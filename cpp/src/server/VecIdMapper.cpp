@@ -40,28 +40,24 @@ SimpleIdMapper::~SimpleIdMapper() {
 
 }
 
-ServerError SimpleIdMapper::Put(INTEGER_ID nid, const std::string& sid) {
+ServerError SimpleIdMapper::Put(const std::string& nid, const std::string& sid) {
     ids_[nid] = sid;
     return SERVER_SUCCESS;
 }
 
-ServerError SimpleIdMapper::Put(const std::vector<INTEGER_ID>& nid, const std::vector<std::string>& sid) {
-    return Put(nid.data(), nid.size(), sid);
-}
-
-ServerError SimpleIdMapper::Put(const INTEGER_ID *nid, uint64_t count, const std::vector<std::string>& sid) {
-    if(count != sid.size()) {
+ServerError SimpleIdMapper::Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid) {
+    if(nid.size() != sid.size()) {
         return SERVER_INVALID_ARGUMENT;
     }
 
-    for(int64_t i = 0; i < count; i++) {
+    for(size_t i = 0; i < nid.size(); i++) {
         ids_[nid[i]] = sid[i];
     }
 
     return SERVER_SUCCESS;
 }
 
-ServerError SimpleIdMapper::Get(INTEGER_ID nid, std::string& sid) const {
+ServerError SimpleIdMapper::Get(const std::string& nid, std::string& sid) const {
     auto iter = ids_.find(nid);
     if(iter == ids_.end()) {
         return SERVER_INVALID_ARGUMENT;
@@ -72,15 +68,11 @@ ServerError SimpleIdMapper::Get(INTEGER_ID nid, std::string& sid) const {
     return SERVER_SUCCESS;
 }
 
-ServerError SimpleIdMapper::Get(const std::vector<INTEGER_ID>& nid, std::vector<std::string>& sid) const {
-    return Get(nid.data(), nid.size(), sid);
-}
-
-ServerError SimpleIdMapper::Get(const INTEGER_ID *nid, uint64_t count, std::vector<std::string>& sid) const {
+ServerError SimpleIdMapper::Get(const std::vector<std::string>& nid, std::vector<std::string>& sid) const {
     sid.clear();
 
     ServerError err = SERVER_SUCCESS;
-    for(uint64_t i = 0; i < count; i++) {
+    for(size_t i = 0; i < nid.size(); i++) {
         auto iter = ids_.find(nid[i]);
         if(iter == ids_.end()) {
             sid.push_back("");
@@ -95,7 +87,7 @@ ServerError SimpleIdMapper::Get(const INTEGER_ID *nid, uint64_t count, std::vect
     return err;
 }
 
-ServerError SimpleIdMapper::Delete(INTEGER_ID nid) {
+ServerError SimpleIdMapper::Delete(const std::string& nid) {
     ids_.erase(nid);
     return SERVER_SUCCESS;
 }
@@ -124,13 +116,12 @@ RocksIdMapper::~RocksIdMapper() {
     }
 }
 
-ServerError RocksIdMapper::Put(INTEGER_ID nid, const std::string& sid) {
+ServerError RocksIdMapper::Put(const std::string& nid, const std::string& sid) {
     if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }
 
-    std::string str_id = std::to_string(nid);//NOTE: keep a local virible here, since the Slice require a char* pointer
-    rocksdb::Slice key(str_id);
+    rocksdb::Slice key(nid);
     rocksdb::Slice value(sid);
     rocksdb::Status s = db_->Put(rocksdb::WriteOptions(), key, value);
     if(!s.ok()) {
@@ -141,33 +132,28 @@ ServerError RocksIdMapper::Put(INTEGER_ID nid, const std::string& sid) {
     return SERVER_SUCCESS;
 }
 
-ServerError RocksIdMapper::Put(const std::vector<INTEGER_ID>& nid, const std::vector<std::string>& sid) {
-    return Put(nid.data(), nid.size(), sid);
-}
-
-ServerError RocksIdMapper::Put(const INTEGER_ID *nid, uint64_t count, const std::vector<std::string>& sid) {
-    if(count != sid.size()) {
+ServerError RocksIdMapper::Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid) {
+    if(nid.size() != sid.size()) {
         return SERVER_INVALID_ARGUMENT;
     }
 
     ServerError err = SERVER_SUCCESS;
-    for(int64_t i = 0; i < count; i++) {
+    for(size_t i = 0; i < nid.size(); i++) {
         err = Put(nid[i], sid[i]);
         if(err != SERVER_SUCCESS) {
             return err;
         }
     }
 
-    return SERVER_SUCCESS;
+    return err;
 }
 
-ServerError RocksIdMapper::Get(INTEGER_ID nid, std::string& sid) const {
+ServerError RocksIdMapper::Get(const std::string& nid, std::string& sid) const {
     if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }
 
-    std::string str_id = std::to_string(nid);//NOTE: keep a local virible here, since the Slice require a char* pointer
-    rocksdb::Slice key(str_id);
+    rocksdb::Slice key(nid);
     rocksdb::Status s = db_->Get(rocksdb::ReadOptions(), key, &sid);
     if(!s.ok()) {
         SERVER_LOG_ERROR << "ID mapper failed to get:" << s.ToString();
@@ -177,15 +163,11 @@ ServerError RocksIdMapper::Get(INTEGER_ID nid, std::string& sid) const {
     return SERVER_SUCCESS;
 }
 
-ServerError RocksIdMapper::Get(const std::vector<INTEGER_ID>& nid, std::vector<std::string>& sid) const {
-    return Get(nid.data(), nid.size(), sid);
-}
-
-ServerError RocksIdMapper::Get(const INTEGER_ID *nid, uint64_t count, std::vector<std::string>& sid) const {
+ServerError RocksIdMapper::Get(const std::vector<std::string>& nid, std::vector<std::string>& sid) const {
     sid.clear();
 
     ServerError err = SERVER_SUCCESS;
-    for(uint64_t i = 0; i < count; i++) {
+    for(size_t i = 0; i < nid.size(); i++) {
         std::string str_id;
         ServerError temp_err = Get(nid[i], str_id);
         if(temp_err != SERVER_SUCCESS) {
@@ -201,13 +183,12 @@ ServerError RocksIdMapper::Get(const INTEGER_ID *nid, uint64_t count, std::vecto
     return err;
 }
 
-ServerError RocksIdMapper::Delete(INTEGER_ID nid) {
+ServerError RocksIdMapper::Delete(const std::string& nid) {
     if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }
 
-    std::string str_id = std::to_string(nid);//NOTE: keep a local virible here, since the Slice require a char* pointer
-    rocksdb::Slice key(str_id);
+    rocksdb::Slice key(nid);
     rocksdb::Status s = db_->Delete(rocksdb::WriteOptions(), key);
     if(!s.ok()) {
         SERVER_LOG_ERROR << "ID mapper failed to delete:" << s.ToString();
