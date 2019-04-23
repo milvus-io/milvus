@@ -88,35 +88,37 @@ ServerError CommonUtil::CreateDirectory(const std::string &path) {
     return SERVER_SUCCESS;
 }
 
-void RemoveDirectory(const std::string &path) {
-    DIR *pDir = NULL;
-    struct dirent *dmsg;
-    char szFileName[256];
-    char szFolderName[256];
+namespace {
+    void RemoveDirectory(const std::string &path) {
+        DIR *pDir = NULL;
+        struct dirent *dmsg;
+        char szFileName[256];
+        char szFolderName[256];
 
-    strcpy(szFolderName, path.c_str());
-    strcat(szFolderName, "/%s");
-    if ((pDir = opendir(path.c_str())) != NULL) {
-        while ((dmsg = readdir(pDir)) != NULL) {
-            if (strcmp(dmsg->d_name, ".") != 0
-                && strcmp(dmsg->d_name, "..") != 0) {
-                sprintf(szFileName, szFolderName, dmsg->d_name);
-                std::string tmp = szFileName;
-                if (tmp.find(".") == std::string::npos) {
-                    RemoveDirectory(szFileName);
+        strcpy(szFolderName, path.c_str());
+        strcat(szFolderName, "/%s");
+        if ((pDir = opendir(path.c_str())) != NULL) {
+            while ((dmsg = readdir(pDir)) != NULL) {
+                if (strcmp(dmsg->d_name, ".") != 0
+                    && strcmp(dmsg->d_name, "..") != 0) {
+                    sprintf(szFileName, szFolderName, dmsg->d_name);
+                    std::string tmp = szFileName;
+                    if (tmp.find(".") == std::string::npos) {
+                        RemoveDirectory(szFileName);
+                    }
+                    remove(szFileName);
                 }
-                remove(szFileName);
             }
         }
-    }
 
-    if (pDir != NULL) {
-        closedir(pDir);
+        if (pDir != NULL) {
+            closedir(pDir);
+        }
+        remove(path.c_str());
     }
-    remove(path.c_str());
 }
 
-ServerError DeleteDirectory(const std::string &path) {
+ServerError CommonUtil::DeleteDirectory(const std::string &path) {
     struct stat directoryStat;
     int statOK = stat(path.c_str(), &directoryStat);
     if (statOK != 0)
@@ -126,7 +128,7 @@ ServerError DeleteDirectory(const std::string &path) {
     return SERVER_SUCCESS;
 }
 
-bool IsFileExist(const std::string &path) {
+bool CommonUtil::IsFileExist(const std::string &path) {
     return (access(path.c_str(), F_OK) == 0);
 }
 

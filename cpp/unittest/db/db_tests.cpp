@@ -24,7 +24,7 @@ TEST(DBTest, DB_TEST) {
 
     engine::Options opt;
     opt.meta.backend_uri = "http://127.0.0.1";
-    opt.meta.path = "/tmp/db_test";
+    opt.meta.path = "/tmp/vecwise_test/db_test";
 
     engine::DB* db = nullptr;
     engine::DB::Open(opt, &db);

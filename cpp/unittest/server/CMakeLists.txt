@@ -14,6 +14,7 @@ set(require_files
         ../../src/server/VecIdMapper.cpp
         ../../src/server/ServerConfig.cpp
         ../../src/utils/CommonUtil.cpp
+        ../../src/utils/TimeRecorder.cpp
         )
 
 add_executable(server_test
