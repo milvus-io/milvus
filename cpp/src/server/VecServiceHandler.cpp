@@ -100,7 +100,8 @@ VecServiceHandler::add_vector(const std::string &group_id, const VecTensor &tens
             if(vector_ids.size() != 1) {
                 SERVER_LOG_ERROR << "Vector ID not returned";
             } else {
-                IVecIdMapper::GetInstance()->Put(vector_ids[0], tensor.uid);
+                std::string nid = group_id + "_" + std::to_string(vector_ids[0]);
+                IVecIdMapper::GetInstance()->Put(nid, tensor.uid);
             }
         }
 
@@ -131,8 +132,10 @@ VecServiceHandler::add_vector_batch(const std::string &group_id,
             if(vector_ids.size() != tensor_list.tensor_list.size()) {
                 SERVER_LOG_ERROR << "Vector ID not returned";
             } else {
+                std::string nid_prefix = group_id + "_";
                 for(size_t i = 0; i < vector_ids.size(); i++) {
-                    IVecIdMapper::GetInstance()->Put(vector_ids[i], tensor_list.tensor_list[i].uid);
+                    std::string nid = nid_prefix + std::to_string(vector_ids[i]);
+                    IVecIdMapper::GetInstance()->Put(nid, tensor_list.tensor_list[i].uid);
                 }
             }
         }
@@ -163,9 +166,11 @@ VecServiceHandler::search_vector(VecSearchResult &_return,
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
             if(!results.empty()) {
+                std::string nid_prefix = group_id + "_";
                 for(auto id : results[0]) {
                     std::string sid;
-                    IVecIdMapper::GetInstance()->Get(id, sid);
+                    std::string nid = nid_prefix + std::to_string(id);
+                    IVecIdMapper::GetInstance()->Get(nid, sid);
                     _return.id_list.push_back(sid);
                 }
             }
@@ -201,7 +206,14 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
         } else {
             for(engine::QueryResult& res : results){
                 VecSearchResult v_res;
-                IVecIdMapper::GetInstance()->Get(res.data(), res.size(), v_res.id_list);
+                std::string nid_prefix = group_id + "_";
+                for(auto id : results[0]) {
+                    std::string sid;
+                    std::string nid = nid_prefix + std::to_string(id);
+                    IVecIdMapper::GetInstance()->Get(nid, sid);
+                    v_res.id_list.push_back(sid);
+                }
+
                 _return.result_list.push_back(v_res);
             }
         }
