@@ -7,6 +7,8 @@
 #include <faiss/IndexFlat.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/AutoTune.h>
+#include <thread>
+#include <easylogging++.h>
 
 #include "db/DB.h"
 #include "faiss/Index.h"
@@ -27,6 +29,7 @@ TEST(DBTest, DB_TEST) {
     static const int group_dim = 256;
 
     engine::Options opt;
+    opt.memory_sync_interval = 1;
     opt.meta.backend_uri = "http://127.0.0.1";
     opt.meta.path = "/tmp/vecwise_test/db_test";
 
@@ -38,7 +41,6 @@ TEST(DBTest, DB_TEST) {
     group_info.dimension = group_dim;
     group_info.group_id = group_name;
     engine::Status stat = db->add_group(group_info);
-    //ASSERT_STATS(stat);
 
     engine::meta::GroupSchema group_info_get;
     group_info_get.group_id = group_name;
@@ -47,21 +49,48 @@ TEST(DBTest, DB_TEST) {
     ASSERT_EQ(group_info_get.dimension, group_dim);
 
     engine::IDNumbers vector_ids;
-    std::vector<float> vec_f;
-    for(int i = 0; i < group_dim; i++){
-        vec_f.push_back((float)i);
-        vector_ids.push_back(i+1);
+    engine::IDNumbers target_ids;
+
+    int d = 256;
+    int nb = 10;
+    float *xb = new float[d * nb];
+    for(int i = 0; i < nb; i++) {
+        for(int j = 0; j < d; j++) xb[d * i + j] = drand48();
+        xb[d * i] += i / 2000.;
     }
-    stat = db->add_vectors(group_name, 1, vec_f.data(), vector_ids);
+
+    int qb = 1;
+    float *qxb = new float[d * qb];
+    for(int i = 0; i < qb; i++) {
+        for(int j = 0; j < d; j++) qxb[d * i + j] = drand48();
+        qxb[d * i] += i / 2000.;
+    }
+
+    int loop = 500000;
+
+    for (auto i=0; i<loop; ++i) {
+        if (i==40) {
+            db->add_vectors(group_name, qb, qxb, target_ids);
+        } else {
+            db->add_vectors(group_name, nb, xb, vector_ids);
+        }
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    engine::QueryResults results;
+    int k = 10;
+    LOG(DEBUG) << "PRE";
+    stat = db->search(group_name, k, qb, qxb, results);
+    LOG(DEBUG) << "POST";
     ASSERT_STATS(stat);
+    ASSERT_EQ(results[0][0], target_ids[0]);
 
-    //engine::QueryResults results;
-    //std::vector<float> vec_s = vec_f;
-    //stat = db->search(group_name, 1, 1, vec_f.data(), results);
-    //ASSERT_STATS(stat);
-    //ASSERT_EQ(results.size(), 1);
-    //ASSERT_EQ(results[0][0], vector_ids[0]);
-
+    delete [] xb;
+    delete [] qxb;
+    delete db;
+    engine::DB::Open(opt, &db);
+    db->drop_all();
     delete db;
 }
 
@@ -140,5 +169,8 @@ TEST(SearchTest, DB_TEST) {
 
     // TODO(linxj): add groundTruth assert
 
+    delete db;
+    engine::DB::Open(opt, &db);
+    db->drop_all();
     delete db;
 }
