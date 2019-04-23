@@ -30,6 +30,8 @@ public:
     virtual Status search(const std::string& group_id, size_t k, size_t nq,
             const float* vectors, QueryResults& results) = 0;
 
+    virtual Status drop_all() = 0;
+
     DB() = default;
     DB(const DB&) = delete;
     DB& operator=(const DB&) = delete;

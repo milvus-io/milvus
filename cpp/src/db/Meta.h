@@ -83,6 +83,8 @@ public:
     virtual Status cleanup() = 0;
     virtual Status cleanup_ttl_files(uint16_t) = 0;
 
+    virtual Status drop_all() = 0;
+
     static DateT GetDate(const std::time_t& t);
     static DateT GetDate();
 
