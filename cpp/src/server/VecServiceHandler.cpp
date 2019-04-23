@@ -23,6 +23,8 @@ VecServiceHandler::VecServiceHandler() {
     std::string db_path = config.GetValue(CONFIG_SERVER_DB_PATH);
     opt.meta.path = db_path + "/db";
 
+    CommonUtil::CreateDirectory(opt.meta.path);
+
     zilliz::vecwise::engine::DB::Open(opt, &db_);
 }
 

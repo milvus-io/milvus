@@ -11,6 +11,10 @@
 #include <vector>
 #include <unordered_map>
 
+namespace rocksdb {
+    class DB;
+}
+
 namespace zilliz {
 namespace vecwise {
 namespace server {
@@ -68,6 +72,8 @@ public:
 
     ServerError Delete(INTEGER_ID nid) override;
 
+private:
+    rocksdb::DB* db_;
 };
 
 }
