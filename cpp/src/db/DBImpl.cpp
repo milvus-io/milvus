@@ -96,7 +96,6 @@ Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
         index->add_with_ids(file_index->ntotal,
                             dynamic_cast<faiss::IndexFlat *>(file_index->index)->xb.data(),
                             file_index->id_map.data());
-        delete file_index;
     }
 
     {
