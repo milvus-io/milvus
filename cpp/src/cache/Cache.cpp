@@ -5,6 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "Cache.h"
+#include "utils/Log.h"
 
 #include <set>
 
@@ -203,10 +204,10 @@ void Cache::print() {
         }
     }
 
-//    AGENT_LOG_DEBUG << "[Still Pinned count]: " << still_pinned_count;
-//    AGENT_LOG_DEBUG << "[Pinned Memory total size(byte)]: " << total_pinned_size;
-//    AGENT_LOG_DEBUG << "[valid_empty total size(byte)]: " << total_valid_empty_size;
-//    AGENT_LOG_DEBUG << "[free memory size(byte)]: " << capacity_ - total_pinned_size - total_valid_empty_size;
+    SERVER_LOG_DEBUG << "[Still Pinned count]: " << still_pinned_count;
+    SERVER_LOG_DEBUG << "[Pinned Memory total size(byte)]: " << total_pinned_size;
+    SERVER_LOG_DEBUG << "[valid_empty total size(byte)]: " << total_valid_empty_size;
+    SERVER_LOG_DEBUG << "[free memory size(byte)]: " << capacity_ - total_pinned_size - total_valid_empty_size;
 }
 
 }   // cache
