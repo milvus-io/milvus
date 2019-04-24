@@ -66,7 +66,7 @@ TEST(DBTest, DB_TEST) {
         qxb[d * i] += i / 2000.;
     }
 
-    int loop = 50000;
+    int loop = 500000;
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
@@ -76,7 +76,7 @@ TEST(DBTest, DB_TEST) {
         }
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    std::this_thread::sleep_for(std::chrono::seconds(10));
 
     long count = 0;
     db->count(group_name, count);
@@ -127,7 +127,7 @@ TEST(SearchTest, DB_TEST) {
 
 
     // prepare raw data
-    size_t nb = 25000;
+    size_t nb = 250000;
     size_t nq = 10;
     size_t k = 5;
     std::vector<float> xb(nb*group_dim);
@@ -162,10 +162,11 @@ TEST(SearchTest, DB_TEST) {
     const int batch_size = 100;
     for (int j = 0; j < nb / batch_size; ++j) {
         stat = db->add_vectors(group_name, batch_size, xb.data()+batch_size*j*group_dim, ids);
+        if (j == 200){ sleep(1);}
         ASSERT_STATS(stat);
     }
 
-    //sleep(10); // wait until build index finish
+    sleep(3); // wait until build index finish
 
     engine::QueryResults results;
     stat = db->search(group_name, k, nq, xq.data(), results);
@@ -174,6 +175,7 @@ TEST(SearchTest, DB_TEST) {
     // TODO(linxj): add groundTruth assert
 
     delete db;
+
     engine::DB::Open(opt, &db);
     db->drop_all();
     delete db;
