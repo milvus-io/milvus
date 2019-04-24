@@ -66,7 +66,7 @@ TEST(DBTest, DB_TEST) {
         qxb[d * i] += i / 2000.;
     }
 
-    int loop = 500000;
+    int loop = 50000;
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
@@ -77,6 +77,10 @@ TEST(DBTest, DB_TEST) {
     }
 
     std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    long count = 0;
+    db->count(group_name, count);
+    LOG(DEBUG) << "Count=" << count;
 
     engine::QueryResults results;
     int k = 10;

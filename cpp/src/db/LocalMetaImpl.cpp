@@ -251,6 +251,11 @@ Status LocalMetaImpl::drop_all() {
     return Status::OK();
 }
 
+Status LocalMetaImpl::count(const std::string& group_id, long& result) {
+    // PXU TODO
+    return Status::OK();
+}
+
 } // namespace meta
 } // namespace engine
 } // namespace vecwise

@@ -50,6 +50,8 @@ public:
 
     virtual Status drop_all() override;
 
+    virtual Status count(const std::string& group_id, long& result) override;
+
     virtual ~DBMetaImpl();
 
 private:

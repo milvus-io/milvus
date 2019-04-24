@@ -43,6 +43,8 @@ public:
 
     virtual Status cleanup_ttl_files(uint16_t seconds) override;
 
+    virtual Status count(const std::string& group_id, long& result) override;
+
     virtual Status drop_all() override;
 
 private:
