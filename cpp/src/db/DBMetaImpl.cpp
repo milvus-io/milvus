@@ -427,6 +427,13 @@ Status DBMetaImpl::cleanup() {
     return Status::OK();
 }
 
+Status DBMetaImpl::drop_all() {
+    if (boost::filesystem::is_directory(_options.path)) {
+        boost::filesystem::remove_all(_options.path);
+    }
+    return Status::OK();
+}
+
 DBMetaImpl::~DBMetaImpl() {
     cleanup();
 }

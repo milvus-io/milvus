@@ -246,6 +246,11 @@ Status LocalMetaImpl::cleanup_ttl_files(uint16_t seconds) {
     return Status::OK();
 }
 
+Status LocalMetaImpl::drop_all() {
+    // PXU TODO
+    return Status::OK();
+}
+
 } // namespace meta
 } // namespace engine
 } // namespace vecwise
