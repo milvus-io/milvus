@@ -35,6 +35,7 @@ struct VecTensorList {
 
 struct VecSearchResult {
     1: list<string> id_list;
+    2: list<double> distance_list;
 }
 
 struct VecSearchResultList {

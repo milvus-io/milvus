@@ -248,8 +248,9 @@ void swap(VecTensorList &a, VecTensorList &b);
 std::ostream& operator<<(std::ostream& out, const VecTensorList& obj);
 
 typedef struct _VecSearchResult__isset {
-  _VecSearchResult__isset() : id_list(false) {}
+  _VecSearchResult__isset() : id_list(false), distance_list(false) {}
   bool id_list :1;
+  bool distance_list :1;
 } _VecSearchResult__isset;
 
 class VecSearchResult : public virtual ::apache::thrift::TBase {
@@ -262,14 +263,19 @@ class VecSearchResult : public virtual ::apache::thrift::TBase {
 
   virtual ~VecSearchResult() throw();
   std::vector<std::string>  id_list;
+  std::vector<double>  distance_list;
 
   _VecSearchResult__isset __isset;
 
   void __set_id_list(const std::vector<std::string> & val);
 
+  void __set_distance_list(const std::vector<double> & val);
+
   bool operator == (const VecSearchResult & rhs) const
   {
     if (!(id_list == rhs.id_list))
+      return false;
+    if (!(distance_list == rhs.distance_list))
       return false;
     return true;
   }

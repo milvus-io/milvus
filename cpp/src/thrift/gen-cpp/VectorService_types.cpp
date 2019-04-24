@@ -550,6 +550,10 @@ VecSearchResult::~VecSearchResult() throw() {
 void VecSearchResult::__set_id_list(const std::vector<std::string> & val) {
   this->id_list = val;
 }
+
+void VecSearchResult::__set_distance_list(const std::vector<double> & val) {
+  this->distance_list = val;
+}
 std::ostream& operator<<(std::ostream& out, const VecSearchResult& obj)
 {
   obj.printTo(out);
@@ -598,6 +602,26 @@ uint32_t VecSearchResult::read(::apache::thrift::protocol::TProtocol* iprot) {
           xfer += iprot->skip(ftype);
         }
         break;
+      case 2:
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          {
+            this->distance_list.clear();
+            uint32_t _size26;
+            ::apache::thrift::protocol::TType _etype29;
+            xfer += iprot->readListBegin(_etype29, _size26);
+            this->distance_list.resize(_size26);
+            uint32_t _i30;
+            for (_i30 = 0; _i30 < _size26; ++_i30)
+            {
+              xfer += iprot->readDouble(this->distance_list[_i30]);
+            }
+            xfer += iprot->readListEnd();
+          }
+          this->__isset.distance_list = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
       default:
         xfer += iprot->skip(ftype);
         break;
@@ -618,10 +642,22 @@ uint32_t VecSearchResult::write(::apache::thrift::protocol::TProtocol* oprot) co
   xfer += oprot->writeFieldBegin("id_list", ::apache::thrift::protocol::T_LIST, 1);
   {
     xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->id_list.size()));
-    std::vector<std::string> ::const_iterator _iter26;
-    for (_iter26 = this->id_list.begin(); _iter26 != this->id_list.end(); ++_iter26)
+    std::vector<std::string> ::const_iterator _iter31;
+    for (_iter31 = this->id_list.begin(); _iter31 != this->id_list.end(); ++_iter31)
     {
-      xfer += oprot->writeString((*_iter26));
+      xfer += oprot->writeString((*_iter31));
+    }
+    xfer += oprot->writeListEnd();
+  }
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("distance_list", ::apache::thrift::protocol::T_LIST, 2);
+  {
+    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_DOUBLE, static_cast<uint32_t>(this->distance_list.size()));
+    std::vector<double> ::const_iterator _iter32;
+    for (_iter32 = this->distance_list.begin(); _iter32 != this->distance_list.end(); ++_iter32)
+    {
+      xfer += oprot->writeDouble((*_iter32));
     }
     xfer += oprot->writeListEnd();
   }
@@ -635,22 +671,26 @@ uint32_t VecSearchResult::write(::apache::thrift::protocol::TProtocol* oprot) co
 void swap(VecSearchResult &a, VecSearchResult &b) {
   using ::std::swap;
   swap(a.id_list, b.id_list);
+  swap(a.distance_list, b.distance_list);
   swap(a.__isset, b.__isset);
 }
 
-VecSearchResult::VecSearchResult(const VecSearchResult& other27) {
-  id_list = other27.id_list;
-  __isset = other27.__isset;
+VecSearchResult::VecSearchResult(const VecSearchResult& other33) {
+  id_list = other33.id_list;
+  distance_list = other33.distance_list;
+  __isset = other33.__isset;
 }
-VecSearchResult& VecSearchResult::operator=(const VecSearchResult& other28) {
-  id_list = other28.id_list;
-  __isset = other28.__isset;
+VecSearchResult& VecSearchResult::operator=(const VecSearchResult& other34) {
+  id_list = other34.id_list;
+  distance_list = other34.distance_list;
+  __isset = other34.__isset;
   return *this;
 }
 void VecSearchResult::printTo(std::ostream& out) const {
   using ::apache::thrift::to_string;
   out << "VecSearchResult(";
   out << "id_list=" << to_string(id_list);
+  out << ", " << "distance_list=" << to_string(distance_list);
   out << ")";
 }
 
@@ -694,14 +734,14 @@ uint32_t VecSearchResultList::read(::apache::thrift::protocol::TProtocol* iprot)
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->result_list.clear();
-            uint32_t _size29;
-            ::apache::thrift::protocol::TType _etype32;
-            xfer += iprot->readListBegin(_etype32, _size29);
-            this->result_list.resize(_size29);
-            uint32_t _i33;
-            for (_i33 = 0; _i33 < _size29; ++_i33)
+            uint32_t _size35;
+            ::apache::thrift::protocol::TType _etype38;
+            xfer += iprot->readListBegin(_etype38, _size35);
+            this->result_list.resize(_size35);
+            uint32_t _i39;
+            for (_i39 = 0; _i39 < _size35; ++_i39)
             {
-              xfer += this->result_list[_i33].read(iprot);
+              xfer += this->result_list[_i39].read(iprot);
             }
             xfer += iprot->readListEnd();
           }
@@ -730,10 +770,10 @@ uint32_t VecSearchResultList::write(::apache::thrift::protocol::TProtocol* oprot
   xfer += oprot->writeFieldBegin("result_list", ::apache::thrift::protocol::T_LIST, 1);
   {
     xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->result_list.size()));
-    std::vector<VecSearchResult> ::const_iterator _iter34;
-    for (_iter34 = this->result_list.begin(); _iter34 != this->result_list.end(); ++_iter34)
+    std::vector<VecSearchResult> ::const_iterator _iter40;
+    for (_iter40 = this->result_list.begin(); _iter40 != this->result_list.end(); ++_iter40)
     {
-      xfer += (*_iter34).write(oprot);
+      xfer += (*_iter40).write(oprot);
     }
     xfer += oprot->writeListEnd();
   }
@@ -750,13 +790,13 @@ void swap(VecSearchResultList &a, VecSearchResultList &b) {
   swap(a.__isset, b.__isset);
 }
 
-VecSearchResultList::VecSearchResultList(const VecSearchResultList& other35) {
-  result_list = other35.result_list;
-  __isset = other35.__isset;
+VecSearchResultList::VecSearchResultList(const VecSearchResultList& other41) {
+  result_list = other41.result_list;
+  __isset = other41.__isset;
 }
-VecSearchResultList& VecSearchResultList::operator=(const VecSearchResultList& other36) {
-  result_list = other36.result_list;
-  __isset = other36.__isset;
+VecSearchResultList& VecSearchResultList::operator=(const VecSearchResultList& other42) {
+  result_list = other42.result_list;
+  __isset = other42.__isset;
   return *this;
 }
 void VecSearchResultList::printTo(std::ostream& out) const {
@@ -927,23 +967,23 @@ void swap(VecDateTime &a, VecDateTime &b) {
   swap(a.__isset, b.__isset);
 }
 
-VecDateTime::VecDateTime(const VecDateTime& other37) {
-  year = other37.year;
-  month = other37.month;
-  day = other37.day;
-  hour = other37.hour;
-  minute = other37.minute;
-  second = other37.second;
-  __isset = other37.__isset;
+VecDateTime::VecDateTime(const VecDateTime& other43) {
+  year = other43.year;
+  month = other43.month;
+  day = other43.day;
+  hour = other43.hour;
+  minute = other43.minute;
+  second = other43.second;
+  __isset = other43.__isset;
 }
-VecDateTime& VecDateTime::operator=(const VecDateTime& other38) {
-  year = other38.year;
-  month = other38.month;
-  day = other38.day;
-  hour = other38.hour;
-  minute = other38.minute;
-  second = other38.second;
-  __isset = other38.__isset;
+VecDateTime& VecDateTime::operator=(const VecDateTime& other44) {
+  year = other44.year;
+  month = other44.month;
+  day = other44.day;
+  hour = other44.hour;
+  minute = other44.minute;
+  second = other44.second;
+  __isset = other44.__isset;
   return *this;
 }
 void VecDateTime::printTo(std::ostream& out) const {
@@ -1085,19 +1125,19 @@ void swap(VecTimeRange &a, VecTimeRange &b) {
   swap(a.__isset, b.__isset);
 }
 
-VecTimeRange::VecTimeRange(const VecTimeRange& other39) {
-  time_begin = other39.time_begin;
-  begine_closed = other39.begine_closed;
-  time_end = other39.time_end;
-  end_closed = other39.end_closed;
-  __isset = other39.__isset;
+VecTimeRange::VecTimeRange(const VecTimeRange& other45) {
+  time_begin = other45.time_begin;
+  begine_closed = other45.begine_closed;
+  time_end = other45.time_end;
+  end_closed = other45.end_closed;
+  __isset = other45.__isset;
 }
-VecTimeRange& VecTimeRange::operator=(const VecTimeRange& other40) {
-  time_begin = other40.time_begin;
-  begine_closed = other40.begine_closed;
-  time_end = other40.time_end;
-  end_closed = other40.end_closed;
-  __isset = other40.__isset;
+VecTimeRange& VecTimeRange::operator=(const VecTimeRange& other46) {
+  time_begin = other46.time_begin;
+  begine_closed = other46.begine_closed;
+  time_end = other46.time_end;
+  end_closed = other46.end_closed;
+  __isset = other46.__isset;
   return *this;
 }
 void VecTimeRange::printTo(std::ostream& out) const {
@@ -1150,14 +1190,14 @@ uint32_t VecTimeRangeList::read(::apache::thrift::protocol::TProtocol* iprot) {
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->range_list.clear();
-            uint32_t _size41;
-            ::apache::thrift::protocol::TType _etype44;
-            xfer += iprot->readListBegin(_etype44, _size41);
-            this->range_list.resize(_size41);
-            uint32_t _i45;
-            for (_i45 = 0; _i45 < _size41; ++_i45)
+            uint32_t _size47;
+            ::apache::thrift::protocol::TType _etype50;
+            xfer += iprot->readListBegin(_etype50, _size47);
+            this->range_list.resize(_size47);
+            uint32_t _i51;
+            for (_i51 = 0; _i51 < _size47; ++_i51)
             {
-              xfer += this->range_list[_i45].read(iprot);
+              xfer += this->range_list[_i51].read(iprot);
             }
             xfer += iprot->readListEnd();
           }
@@ -1186,10 +1226,10 @@ uint32_t VecTimeRangeList::write(::apache::thrift::protocol::TProtocol* oprot) c
   xfer += oprot->writeFieldBegin("range_list", ::apache::thrift::protocol::T_LIST, 1);
   {
     xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->range_list.size()));
-    std::vector<VecTimeRange> ::const_iterator _iter46;
-    for (_iter46 = this->range_list.begin(); _iter46 != this->range_list.end(); ++_iter46)
+    std::vector<VecTimeRange> ::const_iterator _iter52;
+    for (_iter52 = this->range_list.begin(); _iter52 != this->range_list.end(); ++_iter52)
     {
-      xfer += (*_iter46).write(oprot);
+      xfer += (*_iter52).write(oprot);
     }
     xfer += oprot->writeListEnd();
   }
@@ -1206,13 +1246,13 @@ void swap(VecTimeRangeList &a, VecTimeRangeList &b) {
   swap(a.__isset, b.__isset);
 }
 
-VecTimeRangeList::VecTimeRangeList(const VecTimeRangeList& other47) {
-  range_list = other47.range_list;
-  __isset = other47.__isset;
+VecTimeRangeList::VecTimeRangeList(const VecTimeRangeList& other53) {
+  range_list = other53.range_list;
+  __isset = other53.__isset;
 }
-VecTimeRangeList& VecTimeRangeList::operator=(const VecTimeRangeList& other48) {
-  range_list = other48.range_list;
-  __isset = other48.__isset;
+VecTimeRangeList& VecTimeRangeList::operator=(const VecTimeRangeList& other54) {
+  range_list = other54.range_list;
+  __isset = other54.__isset;
   return *this;
 }
 void VecTimeRangeList::printTo(std::ostream& out) const {
