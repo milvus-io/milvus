@@ -47,7 +47,7 @@ Status MemVectors::serialize(std::string& group_id) {
     /* faiss::write_index(pIndex_, _file_location.c_str()); */
     group_id = schema_.group_id;
     auto rows = approximate_size();
-    write_index(pIndex_, schema_.location.c_str());
+    write_index(pIndex_.get(), schema_.location.c_str());
     schema_.rows = rows;
     schema_.file_type = (rows >= options_.index_trigger_size) ?
         meta::GroupFileSchema::TO_INDEX : meta::GroupFileSchema::RAW;
@@ -60,10 +60,6 @@ MemVectors::~MemVectors() {
     if (_pIdGenerator != nullptr) {
         delete _pIdGenerator;
         _pIdGenerator = nullptr;
-    }
-    if (pIndex_ != nullptr) {
-        delete pIndex_;
-        pIndex_ = nullptr;
     }
 }
 
