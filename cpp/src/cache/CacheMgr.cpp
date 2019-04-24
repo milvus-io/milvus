@@ -47,14 +47,6 @@ void CacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
     cache_->insert(key, data);
 }
 
-void CacheMgr::InsertItem(const std::string& key, const std::shared_ptr<char>& data, int64_t size) {
-    if(cache_ == nullptr) {
-        return;
-    }
-
-    cache_->insert(key, data, size);
-}
-
 void CacheMgr::EraseItem(const std::string& key) {
     if(cache_ == nullptr) {
         return;

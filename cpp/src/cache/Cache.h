@@ -30,10 +30,6 @@ private:
         : data_(data) {
         }
 
-        CacheObj(const std::shared_ptr<char>& data, int64_t size) {
-            data_ = std::make_shared<DataObj>(data, size);
-        }
-
     public:
         DataObjPtr data_ = nullptr;
     };
@@ -52,7 +48,6 @@ public:
     bool exists(const std::string& key);
     DataObjPtr get(const std::string& key);
     void insert(const std::string& key, const DataObjPtr& data);
-    void insert(const std::string& key, const std::shared_ptr<char>& data, int64_t size);
     void erase(const std::string& key);
     void print();
     void clear();

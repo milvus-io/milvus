@@ -69,11 +69,6 @@ void Cache::insert(const std::string& key, const DataObjPtr& data_ptr) {
     }
 }
 
-void Cache::insert(const std::string& key, const std::shared_ptr<char>& data, int64_t size) {
-    DataObjPtr ptr = std::make_shared<DataObj>(data, size);
-    insert(key, ptr);
-}
-
 void Cache::erase(const std::string& key) {
     std::lock_guard<std::mutex> lock(mutex_);
     if(!lru_.exists(key)){
