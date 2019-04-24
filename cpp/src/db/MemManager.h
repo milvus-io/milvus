@@ -49,7 +49,7 @@ private:
     Options options_;
     meta::GroupFileSchema schema_;
     IDGenerator* _pIdGenerator;
-    faiss::Index* pIndex_;
+    std::shared_ptr<faiss::Index> pIndex_;
 
 }; // MemVectors
 
