@@ -52,7 +52,7 @@ TEST(DBTest, DB_TEST) {
     engine::IDNumbers target_ids;
 
     int d = 256;
-    int nb = 10;
+    int nb = 2;
     float *xb = new float[d * nb];
     for(int i = 0; i < nb; i++) {
         for(int j = 0; j < d; j++) xb[d * i + j] = drand48();
@@ -66,7 +66,7 @@ TEST(DBTest, DB_TEST) {
         qxb[d * i] += i / 2000.;
     }
 
-    int loop = 500000;
+    int loop = 1000000;
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
@@ -76,7 +76,7 @@ TEST(DBTest, DB_TEST) {
         }
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(10));
+    std::this_thread::sleep_for(std::chrono::seconds(3));
 
     long count = 0;
     db->count(group_name, count);
@@ -84,11 +84,13 @@ TEST(DBTest, DB_TEST) {
 
     engine::QueryResults results;
     int k = 10;
-    LOG(DEBUG) << "PRE";
-    stat = db->search(group_name, k, qb, qxb, results);
-    LOG(DEBUG) << "POST";
-    ASSERT_STATS(stat);
-    ASSERT_EQ(results[0][0], target_ids[0]);
+    for (auto i=0; i<5; ++i) {
+        LOG(DEBUG) << "PRE" << i;
+        stat = db->search(group_name, k, qb, qxb, results);
+        LOG(DEBUG) << "POST" << i;
+        ASSERT_STATS(stat);
+        ASSERT_EQ(results[0][0], target_ids[0]);
+    }
 
     delete [] xb;
     delete [] qxb;
