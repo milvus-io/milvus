@@ -83,21 +83,6 @@ Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
         return Status::OK();
     }
 
-    // merge raw files and build flat index.
-    faiss::Index *index(faiss::index_factory(dim, "IDMap,Flat"));
-    for (auto &file : raw_files) {
-        auto to_merge = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
-        if (!to_merge) {
-            LOG(DEBUG) << "Disk io from: " << file.location;
-            to_merge = read_index(file.location.c_str());
-            zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(file.location, to_merge);
-        }
-        auto file_index = dynamic_cast<faiss::IndexIDMap *>(to_merge->data().get());
-        index->add_with_ids(file_index->ntotal,
-                            dynamic_cast<faiss::IndexFlat *>(file_index->index)->xb.data(),
-                            file_index->id_map.data());
-    }
-
     {
         // [{ids, distence}, ...]
         using SearchResult = std::pair<std::vector<long>, std::vector<float>>;
@@ -120,25 +105,20 @@ Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
         memset(output_distence, 0, k * nq * sizeof(float));
         memset(output_ids, 0, k * nq * sizeof(long));
 
-        // search in raw file
-        index->search(nq, vectors, k, output_distence, output_ids);
-        cluster(output_ids, output_distence); // cluster to each query
-        memset(output_distence, 0, k * nq * sizeof(float));
-        memset(output_ids, 0, k * nq * sizeof(long));
-
-        // Search in index file
-        for (auto &file : index_files) {
-            auto index = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
-            if (!index) {
-                LOG(DEBUG) << "Disk io from: " << file.location;
-                index = read_index(file.location.c_str());
-                zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(file.location, index);
+        auto search_in_index = [&](meta::GroupFilesSchema& file_vec) -> void {
+            for (auto &file : file_vec) {
+                auto index = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
+                if (!index) {
+                    LOG(DEBUG) << "Disk io from: " << file.location;
+                    index = read_index(file.location.c_str());
+                    zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(file.location, index);
+                }
+                index->search(nq, vectors, k, output_distence, output_ids);
+                cluster(output_ids, output_distence); // cluster to each query
+                memset(output_distence, 0, k * nq * sizeof(float));
+                memset(output_ids, 0, k * nq * sizeof(long));
             }
-            index->search(nq, vectors, k, output_distence, output_ids);
-            cluster(output_ids, output_distence); // cluster to each query
-            memset(output_distence, 0, k * nq * sizeof(float));
-            memset(output_ids, 0, k * nq * sizeof(long));
-        }
+        };
 
         auto cluster_topk = [&]() -> void {
             QueryResult res;
@@ -151,8 +131,13 @@ Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
                 }
                 results.push_back(res); // append to result list
                 res.clear();
+                memset(output_distence, 0, k * nq * sizeof(float));
+                memset(output_ids, 0, k * nq * sizeof(long));
             }
         };
+
+        search_in_index(raw_files);
+        search_in_index(index_files);
         cluster_topk();
 
         free(output_distence);
