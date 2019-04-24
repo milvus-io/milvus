@@ -239,7 +239,6 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     LOG(DEBUG) << "New merged file " << group_file.file_id <<
         " of size=" << group_file.rows;
 
-    /* auto to_cache = zilliz::vecwise::cache::DataObj(std::make_shared<Index>(index)); */
     zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(
             group_file.location, std::make_shared<Index>(index));
 
@@ -289,7 +288,12 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     opd->index_type = "IDMap,Flat";
     IndexBuilderPtr pBuilder = GetIndexBuilder(opd);
 
-    auto from_index = dynamic_cast<faiss::IndexIDMap*>(faiss::read_index(file.location.c_str()));
+    auto to_index = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
+    if (!to_index) {
+        to_index = read_index(file.location.c_str());
+    }
+    auto from_index = dynamic_cast<faiss::IndexIDMap*>(to_index->data().get());
+
     LOG(DEBUG) << "Preparing build_index for file_id=" << file.file_id
         << " with new index_file_id=" << group_file.file_id << std::endl;
     auto index = pBuilder->build_all(from_index->ntotal,
@@ -308,7 +312,8 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     meta::GroupFilesSchema update_files = {to_remove, group_file};
     _pMeta->update_files(update_files);
 
-    delete from_index;
+    zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(group_file.location, index);
+
 
     return Status::OK();
 }
