@@ -6,21 +6,32 @@
 include_directories(../../src)
 
 aux_source_directory(../../src/db db_srcs)
+aux_source_directory(../../src/config config_files)
+aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(../../src/wrapper wrapper_src)
 
 include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
 
+set(require_files
+        ../../src/server/ServerConfig.cpp
+        ../../src/utils/CommonUtil.cpp
+        ../../src/utils/TimeRecorder.cpp
+        )
 
 set(db_test_src
     ${unittest_srcs}
+    ${config_files}
+    ${cache_srcs}
     ${db_srcs}
     ${wrapper_src}
+    ${require_files}
     db_tests.cpp)
 
 cuda_add_executable(db_test ${db_test_src})
 
 set(db_libs
+        yaml-cpp
         faiss
         cudart
         cublas
