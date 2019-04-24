@@ -172,6 +172,7 @@ VecServiceHandler::search_vector(VecSearchResult &_return,
                     std::string nid = nid_prefix + std::to_string(id);
                     IVecIdMapper::GetInstance()->Get(nid, sid);
                     _return.id_list.push_back(sid);
+                    _return.distance_list.push_back(0.0);//TODO: return distance
                 }
             }
         }
@@ -212,6 +213,7 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
                     std::string nid = nid_prefix + std::to_string(id);
                     IVecIdMapper::GetInstance()->Get(nid, sid);
                     v_res.id_list.push_back(sid);
+                    v_res.distance_list.push_back(0.0);//TODO: return distance
                 }
 
                 _return.result_list.push_back(v_res);
