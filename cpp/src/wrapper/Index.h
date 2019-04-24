@@ -62,6 +62,9 @@ public:
 //    virtual bool remove_ids_range(const faiss::IDSelector &sel, long &nremove);
 
 //    virtual bool index_display();
+//
+    virtual std::shared_ptr<faiss::Index> data() { return index_; }
+    virtual const std::shared_ptr<faiss::Index>& data() const { return index_; }
 
 private:
     friend void write_index(const Index_ptr &index, const std::string &file_name);
