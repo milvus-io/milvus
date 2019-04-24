@@ -35,4 +35,5 @@ log_config:
     filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-fatal.log"
 
 cache_config:
-    cache_capacity: 16  # unit: GB
+    cpu_cache_capacity: 16   # unit: GB
+    gpu_cache_capacity:  2   # unit: GB

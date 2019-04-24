@@ -11,8 +11,10 @@ namespace vecwise {
 namespace cache {
 
 CacheMgr::CacheMgr() {
-    //TODO: loada config to initialize cache
-    cache_ = std::make_shared<Cache>(16, 1UL<<32);
+}
+
+CacheMgr::~CacheMgr() {
+
 }
 
 uint64_t CacheMgr::ItemCount() const {
@@ -85,6 +87,13 @@ int64_t CacheMgr::CacheCapacity() const {
     }
 
     return cache_->capacity();
+}
+
+void CacheMgr::SetCapacity(int64_t capacity) {
+    if(cache_ == nullptr) {
+        return;
+    }
+    cache_->set_capacity(capacity);
 }
 
 }

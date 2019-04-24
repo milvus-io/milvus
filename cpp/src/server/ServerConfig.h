@@ -25,7 +25,8 @@ static const std::string CONFIG_SERVER_DB_PATH = "db_path";
 static const std::string CONFIG_LOG = "log_config";
 
 static const std::string CONFIG_CACHE = "cache_config";
-static const std::string CONFIG_CACHE_CAPACITY = "cache_capacity";
+static const std::string CONFIG_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
+static const std::string CONFIG_GPU_CACHE_CAPACITY = "gpu_cache_capacity";
 
 class ServerConfig {
  public:

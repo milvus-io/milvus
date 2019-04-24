@@ -14,32 +14,30 @@ namespace cache {
 
 class CacheMgr {
 public:
-    static CacheMgr& GetInstance() {
-        static CacheMgr mgr;
-        return mgr;
-    }
+    virtual uint64_t ItemCount() const;
 
-    uint64_t ItemCount() const;
+    virtual bool ItemExists(const std::string& key);
 
-    bool ItemExists(const std::string& key);
+    virtual DataObjPtr GetItem(const std::string& key);
 
-    DataObjPtr GetItem(const std::string& key);
+    virtual void InsertItem(const std::string& key, const DataObjPtr& data);
 
-    void InsertItem(const std::string& key, const DataObjPtr& data);
+    virtual void EraseItem(const std::string& key);
 
-    void EraseItem(const std::string& key);
+    virtual void PrintInfo();
 
-    void PrintInfo();
+    virtual void ClearCache();
 
-    void ClearCache();
+    virtual int64_t CacheUsage() const;
+    virtual int64_t CacheCapacity() const;
 
-    int64_t CacheUsage() const;
-    int64_t CacheCapacity() const;
+    virtual void SetCapacity(int64_t capacity);
 
-private:
+protected:
     CacheMgr();
+    virtual ~CacheMgr();
 
-private:
+protected:
     CachePtr cache_;
 };
 
