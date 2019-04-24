@@ -6,10 +6,11 @@
 #include <faiss/MetaIndexes.h>
 #include <faiss/index_io.h>
 #include <faiss/AutoTune.h>
-#include <wrapper/IndexBuilder.h>
 #include <cstring>
 #include <wrapper/Topk.h>
 #include <easylogging++.h>
+#include <wrapper/IndexBuilder.h>
+#include <cache/CpuCacheMgr.h>
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
@@ -237,6 +238,10 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     status = _pMeta->update_files(updated);
     LOG(DEBUG) << "New merged file " << group_file.file_id <<
         " of size=" << group_file.rows;
+
+    /* auto to_cache = zilliz::vecwise::cache::DataObj(std::make_shared<Index>(index)); */
+    zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(
+            group_file.location, std::make_shared<Index>(index));
 
     return status;
 }
