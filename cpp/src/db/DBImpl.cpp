@@ -89,6 +89,7 @@ Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
         index->add_with_ids(file_index->ntotal,
                             dynamic_cast<faiss::IndexFlat *>(file_index->index)->xb.data(),
                             file_index->id_map.data());
+        delete file_index;
     }
 
     {
@@ -220,6 +221,7 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         updated.push_back(file_schema);
         LOG(DEBUG) << "About to merge file " << file_schema.file_id <<
             " of size=" << file_schema.rows;
+        delete file_index;
     }
 
     auto index_size = group_file.dimension * index->ntotal;
@@ -300,6 +302,8 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
 
     meta::GroupFilesSchema update_files = {to_remove, group_file};
     _pMeta->update_files(update_files);
+
+    delete from_index;
 
     return Status::OK();
 }
