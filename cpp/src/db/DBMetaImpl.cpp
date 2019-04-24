@@ -427,6 +427,31 @@ Status DBMetaImpl::cleanup() {
     return Status::OK();
 }
 
+Status DBMetaImpl::count(const std::string& group_id, long& result) {
+
+    auto selected = ConnectorPtr->select(columns(&GroupFileSchema::rows,
+                                               &GroupFileSchema::date),
+                                      where((c(&GroupFileSchema::file_type) == (int)GroupFileSchema::RAW or
+                                             c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_INDEX or
+                                             c(&GroupFileSchema::file_type) == (int)GroupFileSchema::INDEX) and
+                                            c(&GroupFileSchema::group_id) == group_id));
+
+    GroupSchema group_info;
+    group_info.group_id = group_id;
+    auto status = get_group_no_lock(group_info);
+    if (!status.ok()) {
+        return status;
+    }
+
+    result = 0;
+    for (auto& file : selected) {
+        result += std::get<0>(file);
+    }
+
+    result /= group_info.dimension;
+    return Status::OK();
+}
+
 Status DBMetaImpl::drop_all() {
     if (boost::filesystem::is_directory(_options.path)) {
         boost::filesystem::remove_all(_options.path);

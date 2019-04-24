@@ -348,6 +348,10 @@ Status DBImpl::drop_all() {
     return _pMeta->drop_all();
 }
 
+Status DBImpl::count(const std::string& group_id, long& result) {
+    return _pMeta->count(group_id, result);
+}
+
 DBImpl::~DBImpl() {
     {
         std::unique_lock<std::mutex> lock(_mutex);
