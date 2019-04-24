@@ -41,12 +41,30 @@ DataObjPtr CacheMgr::GetItem(const std::string& key) {
     return cache_->get(key);
 }
 
+engine::Index_ptr CacheMgr::GetIndex(const std::string& key) {
+    DataObjPtr obj = GetItem(key);
+    if(obj != nullptr) {
+        return obj->data();
+    }
+
+    return nullptr;
+}
+
 void CacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
     if(cache_ == nullptr) {
         return;
     }
 
     cache_->insert(key, data);
+}
+
+void CacheMgr::InsertItem(const std::string& key, const engine::Index_ptr& index) {
+    if(cache_ == nullptr) {
+        return;
+    }
+
+    DataObjPtr obj = std::make_shared<DataObj>(index);
+    cache_->insert(key, obj);
 }
 
 void CacheMgr::EraseItem(const std::string& key) {
