@@ -6,10 +6,7 @@
 
 #pragma once
 
-#include "faiss/AutoTune.h"
-#include "faiss/AuxIndexStructures.h"
-#include "faiss/gpu/GpuAutoTune.h"
-#include "faiss/index_io.h"
+#include "wrapper/Index.h"
 
 #include <memory>
 
@@ -19,24 +16,23 @@ namespace cache {
 
 class DataObj {
 public:
-    DataObj(const std::shared_ptr<faiss::Index>& index)
+    DataObj(const engine::Index_ptr& index)
             : index_(index)
     {}
 
-    std::shared_ptr<faiss::Index> data() { return index_; }
-    const std::shared_ptr<faiss::Index>& data() const { return index_; }
+    engine::Index_ptr data() { return index_; }
+    const engine::Index_ptr& data() const { return index_; }
 
     int64_t size() const {
         if(index_ == nullptr) {
             return 0;
         }
 
-        return index_->ntotal*(index_->d*4 + sizeof(faiss::Index::idx_t));
+        return index_->ntotal*(index_->dim*4);
     }
 
 private:
-    std::shared_ptr<faiss::Index> index_ = nullptr;
-    int64_t size_ = 0;
+    engine::Index_ptr index_ = nullptr;
 };
 
 using DataObjPtr = std::shared_ptr<DataObj>;
