@@ -19,8 +19,10 @@ public:
     virtual bool ItemExists(const std::string& key);
 
     virtual DataObjPtr GetItem(const std::string& key);
+    virtual engine::Index_ptr GetIndex(const std::string& key);
 
     virtual void InsertItem(const std::string& key, const DataObjPtr& data);
+    virtual void InsertItem(const std::string& key, const engine::Index_ptr& index);
 
     virtual void EraseItem(const std::string& key);
 
