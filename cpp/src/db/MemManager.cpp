@@ -4,6 +4,7 @@
 #include <thread>
 
 #include <wrapper/Index.h>
+#include <cache/CpuCacheMgr.h>
 
 #include "MemManager.h"
 #include "Meta.h"
@@ -53,6 +54,10 @@ Status MemVectors::serialize(std::string& group_id) {
         meta::GroupFileSchema::TO_INDEX : meta::GroupFileSchema::RAW;
 
     auto status = pMeta_->update_group_file(schema_);
+
+    zilliz::vecwise::cache::CpuCacheMgr::GetInstance(
+            )->InsertItem(schema_.location, std::make_shared<Index>(pIndex_));
+
     return status;
 }
 
