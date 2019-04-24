@@ -86,7 +86,13 @@ Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
     // merge raw files and build flat index.
     faiss::Index *index(faiss::index_factory(dim, "IDMap,Flat"));
     for (auto &file : raw_files) {
-        auto file_index = dynamic_cast<faiss::IndexIDMap *>(faiss::read_index(file.location.c_str()));
+        auto to_merge = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
+        if (!to_merge) {
+            LOG(DEBUG) << "Disk io from: " << file.location;
+            to_merge = read_index(file.location.c_str());
+            zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(file.location, to_merge);
+        }
+        auto file_index = dynamic_cast<faiss::IndexIDMap *>(to_merge->data().get());
         index->add_with_ids(file_index->ntotal,
                             dynamic_cast<faiss::IndexFlat *>(file_index->index)->xb.data(),
                             file_index->id_map.data());
@@ -123,7 +129,12 @@ Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
 
         // Search in index file
         for (auto &file : index_files) {
-            auto index = read_index(file.location.c_str());
+            auto index = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
+            if (!index) {
+                LOG(DEBUG) << "Disk io from: " << file.location;
+                index = read_index(file.location.c_str());
+                zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(file.location, index);
+            }
             index->search(nq, vectors, k, output_distence, output_ids);
             cluster(output_ids, output_distence); // cluster to each query
             memset(output_distence, 0, k * nq * sizeof(float));
