@@ -22,11 +22,7 @@ IVecIdMapper* IVecIdMapper::GetInstance() {
     static SimpleIdMapper s_mapper;
     return &s_mapper;
 #else
-    ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
-    std::string db_path = config.GetValue(CONFIG_SERVER_DB_PATH);
-    db_path += "/id_mapping";
-    CommonUtil::CreateDirectory(db_path);
-    static RocksIdMapper s_mapper(db_path);
+    static RocksIdMapper s_mapper;
     return &s_mapper;
 #endif
 }
@@ -94,7 +90,12 @@ ServerError SimpleIdMapper::Delete(const std::string& nid) {
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-RocksIdMapper::RocksIdMapper(const std::string& store_path) {
+RocksIdMapper::RocksIdMapper() {
+    ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
+    std::string db_path = config.GetValue(CONFIG_SERVER_DB_PATH);
+    db_path += "/id_mapping";
+    CommonUtil::CreateDirectory(db_path);
+
     rocksdb::Options options;
     // Optimize RocksDB. This is the easiest way to get RocksDB to perform well
     options.IncreaseParallelism();
@@ -103,7 +104,7 @@ RocksIdMapper::RocksIdMapper(const std::string& store_path) {
     options.create_if_missing = true;
 
     // open DB
-    rocksdb::Status s = rocksdb::DB::Open(options, store_path, &db_);
+    rocksdb::Status s = rocksdb::DB::Open(options, db_path, &db_);
     if(!s.ok()) {
         SERVER_LOG_ERROR << "ID mapper failed to initialize:" << s.ToString();
         db_ = nullptr;

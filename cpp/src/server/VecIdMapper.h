@@ -54,7 +54,7 @@ private:
 
 class RocksIdMapper : public IVecIdMapper{
 public:
-    RocksIdMapper(const std::string& store_path);
+    RocksIdMapper();
     ~RocksIdMapper();
 
     ServerError Put(const std::string& nid, const std::string& sid) override;

@@ -6,6 +6,9 @@
 include_directories(../../src)
 include_directories(/usr/include)
 
+include_directories(/usr/local/cuda/include)
+find_library(cuda_library cudart cublas HINTS /usr/local/cuda/lib64)
+
 aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(./ test_srcs)
@@ -34,6 +37,7 @@ set(require_libs
         bz2
         z
         rocksdb
+        faiss
         )
 
 link_libraries(/usr/lib/x86_64-linux-gnu)
@@ -41,4 +45,5 @@ link_libraries(/usr/lib/x86_64-linux-gnu)
 target_link_libraries(server_test
         ${unittest_libs}
         ${require_libs}
+        ${cuda_library}
         )

@@ -6,6 +6,11 @@
 
 #pragma once
 
+#include "faiss/AutoTune.h"
+#include "faiss/AuxIndexStructures.h"
+#include "faiss/gpu/GpuAutoTune.h"
+#include "faiss/index_io.h"
+
 #include <memory>
 
 namespace zilliz {
@@ -14,17 +19,23 @@ namespace cache {
 
 class DataObj {
 public:
-    DataObj(const std::shared_ptr<char>& data, int64_t size)
-            : data_(data), size_(size)
+    DataObj(const std::shared_ptr<faiss::Index>& index)
+            : index_(index)
     {}
 
-    std::shared_ptr<char> data() { return data_; }
-    const std::shared_ptr<char>& data() const { return data_; }
+    std::shared_ptr<faiss::Index> data() { return index_; }
+    const std::shared_ptr<faiss::Index>& data() const { return index_; }
 
-    int64_t size() const { return size_; }
+    int64_t size() const {
+        if(index_ == nullptr) {
+            return 0;
+        }
+
+        return index_->ntotal*(index_->d*4 + sizeof(faiss::Index::idx_t));
+    }
 
 private:
-    std::shared_ptr<char> data_ = nullptr;
+    std::shared_ptr<faiss::Index> index_ = nullptr;
     int64_t size_ = 0;
 };
 

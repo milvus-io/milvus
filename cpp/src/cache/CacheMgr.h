@@ -26,7 +26,6 @@ public:
     DataObjPtr GetItem(const std::string& key);
 
     void InsertItem(const std::string& key, const DataObjPtr& data);
-    void InsertItem(const std::string& key, const std::shared_ptr<char>& data, int64_t size);
 
     void EraseItem(const std::string& key);
 
