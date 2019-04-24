@@ -214,7 +214,11 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     meta::GroupFilesSchema updated;
 
     for (auto& file : files) {
-        auto file_index = dynamic_cast<faiss::IndexIDMap*>(faiss::read_index(file.location.c_str()));
+        auto to_merge = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
+        if (!to_merge) {
+            to_merge = read_index(file.location.c_str());
+        }
+        auto file_index = dynamic_cast<faiss::IndexIDMap*>(to_merge->data().get());
         index->add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat*>(file_index->index)->xb.data(),
                 file_index->id_map.data());
         auto file_schema = file;
@@ -222,7 +226,6 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         updated.push_back(file_schema);
         LOG(DEBUG) << "About to merge file " << file_schema.file_id <<
             " of size=" << file_schema.rows;
-        delete file_index;
     }
 
     auto index_size = group_file.dimension * index->ntotal;
