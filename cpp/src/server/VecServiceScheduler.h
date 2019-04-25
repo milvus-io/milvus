@@ -17,7 +17,7 @@ namespace server {
 
 class BaseTask {
 protected:
-    BaseTask(const std::string& task_group);
+    BaseTask(const std::string& task_group, bool async = false);
     virtual ~BaseTask();
 
 public:
@@ -27,6 +27,9 @@ public:
     std::string TaskGroup() const { return task_group_; }
 
     ServerError ErrorCode() const { return error_code_; }
+
+    bool IsAsync() const { return async_; }
+
 protected:
     virtual ServerError OnExecute() = 0;
 
@@ -35,6 +38,7 @@ protected:
     std::condition_variable finish_cond_;
 
     std::string task_group_;
+    bool async_;
     bool done_;
     ServerError error_code_;
 };
@@ -54,9 +58,6 @@ public:
     void Start();
     void Stop();
 
-    //async
-    ServerError PushTask(const BaseTaskPtr& task_ptr);
-    //sync
     ServerError ExecuteTask(const BaseTaskPtr& task_ptr);
 
 protected:
