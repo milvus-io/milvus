@@ -25,6 +25,7 @@ BaseTask::~BaseTask() {
 ServerError BaseTask::Execute() {
     error_code_ = OnExecute();
     done_ = true;
+    finish_cond_.notify_all();
     return error_code_;
 }
 
@@ -72,12 +73,25 @@ void VecServiceScheduler::Stop() {
     stopped_ = true;
 }
 
-ServerError VecServiceScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
+ServerError VecServiceScheduler::PushTask(const BaseTaskPtr& task_ptr) {
     if(task_ptr == nullptr) {
         return SERVER_NULL_POINTER;
     }
 
     return PutTaskToQueue(task_ptr);
+}
+
+ServerError VecServiceScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
+    if(task_ptr == nullptr) {
+        return SERVER_NULL_POINTER;
+    }
+
+    ServerError err = PutTaskToQueue(task_ptr);
+    if(err != SERVER_SUCCESS) {
+        return err;
+    }
+
+    return task_ptr->WaitToFinish();
 }
 
 namespace {
@@ -120,6 +134,8 @@ ServerError VecServiceScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
         execute_threads_.push_back(thread);
         SERVER_LOG_INFO << "Create new thread for task group: " << group_name;
     }
+
+    return SERVER_SUCCESS;
 }
 
 }

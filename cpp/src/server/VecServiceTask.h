@@ -67,13 +67,31 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class AddVectorTask : public BaseTask {
+class AddSingleVectorTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(const std::string& group_id,
+                              const VecTensor &tensor);
+
+protected:
+    AddSingleVectorTask(const std::string& group_id,
+                        const VecTensor &tensor);
+
+    ServerError OnExecute() override;
+
+
+private:
+    std::string group_id_;
+    const VecTensor& tensor_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class AddBatchVectorTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& group_id,
                               const VecTensorList &tensor_list);
 
 protected:
-    AddVectorTask(const std::string& group_id,
+    AddBatchVectorTask(const std::string& group_id,
                   const VecTensorList &tensor_list);
 
     ServerError OnExecute() override;
@@ -87,28 +105,28 @@ private:
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class SearchVectorTask : public BaseTask {
 public:
-    static BaseTaskPtr Create(VecSearchResultList& result,
-                              const std::string& group_id,
+    static BaseTaskPtr Create(const std::string& group_id,
                               const int64_t top_k,
                               const VecTensorList& tensor_list,
-                              const VecTimeRangeList& time_range_list);
+                              const VecTimeRangeList& time_range_list,
+                              VecSearchResultList& result);
 
 protected:
-    SearchVectorTask(VecSearchResultList& result,
-                     const std::string& group_id,
+    SearchVectorTask(const std::string& group_id,
                      const int64_t top_k,
                      const VecTensorList& tensor_list,
-                     const VecTimeRangeList& time_range_list);
+                     const VecTimeRangeList& time_range_list,
+                     VecSearchResultList& result);
 
     ServerError OnExecute() override;
 
 
 private:
-    VecSearchResultList& result_;
     std::string group_id_;
     int64_t top_k_;
     const VecTensorList& tensor_list_;
     const VecTimeRangeList& time_range_list_;
+    VecSearchResultList& result_;
 };
 
 }

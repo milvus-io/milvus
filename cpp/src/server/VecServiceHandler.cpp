@@ -9,6 +9,7 @@
 #include "VecIdMapper.h"
 #include "utils/Log.h"
 #include "utils/CommonUtil.h"
+#include "utils/TimeRecorder.h"
 
 #include "db/DB.h"
 #include "db/Env.h"
@@ -73,9 +74,7 @@ VecServiceHandler::add_vector(const std::string &group_id, const VecTensor &tens
     SERVER_LOG_INFO << "add_vector() called";
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size();
 
-    VecTensorList tensor_list;
-    tensor_list.tensor_list.push_back(tensor);
-    BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, tensor_list);
+    BaseTaskPtr task_ptr = AddSingleVectorTask::Create(group_id, tensor);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 
@@ -88,10 +87,11 @@ VecServiceHandler::add_vector_batch(const std::string &group_id,
     SERVER_LOG_INFO << "add_vector_batch() called";
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector list size = "
                      << tensor_list.tensor_list.size();
-
-    BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, tensor_list);
+    TimeRecorder rc("Add VECTOR BATCH");
+    BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, tensor_list);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
+    rc.Elapse("DONE!");
 
     SERVER_LOG_INFO << "add_vector_batch() finished";
 }
@@ -108,28 +108,17 @@ VecServiceHandler::search_vector(VecSearchResult &_return,
                         << ", vector size = " << tensor.tensor.size()
                         << ", time range list size = " << time_range_list.range_list.size();
 
-    try {
-        engine::QueryResults results;
-        std::vector<float> vec_f(tensor.tensor.begin(), tensor.tensor.end());
-        engine::Status stat = db_->search(group_id, (size_t)top_k, 1, vec_f.data(), results);
-        if(!stat.ok()) {
-            SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
-        } else {
-            if(!results.empty()) {
-                std::string nid_prefix = group_id + "_";
-                for(auto id : results[0]) {
-                    std::string sid;
-                    std::string nid = nid_prefix + std::to_string(id);
-                    IVecIdMapper::GetInstance()->Get(nid, sid);
-                    _return.id_list.push_back(sid);
-                    _return.distance_list.push_back(0.0);//TODO: return distance
-                }
-            }
-        }
+    VecTensorList tensor_list;
+    tensor_list.tensor_list.push_back(tensor);
+    VecSearchResultList result;
+    BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, tensor_list, time_range_list, result);
+    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
+    scheduler.ExecuteTask(task_ptr);
 
-
-    } catch (std::exception& ex) {
-        SERVER_LOG_ERROR << ex.what();
+    if(!result.result_list.empty()) {
+        _return = result.result_list[0];
+    } else {
+        SERVER_LOG_ERROR << "No search result returned";
     }
 
     SERVER_LOG_INFO << "search_vector() finished";
@@ -146,36 +135,9 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
                      << ", vector list size = " << tensor_list.tensor_list.size()
                      << ", time range list size = " << time_range_list.range_list.size();
 
-    try {
-        std::vector<float> vec_f;
-        for(const VecTensor& tensor : tensor_list.tensor_list) {
-            vec_f.insert(vec_f.begin(), tensor.tensor.begin(), tensor.tensor.end());
-        }
-
-        engine::QueryResults results;
-        engine::Status stat = db_->search(group_id, (size_t)top_k, tensor_list.tensor_list.size(), vec_f.data(), results);
-        if(!stat.ok()) {
-            SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
-        } else {
-            for(engine::QueryResult& res : results){
-                VecSearchResult v_res;
-                std::string nid_prefix = group_id + "_";
-                for(auto id : results[0]) {
-                    std::string sid;
-                    std::string nid = nid_prefix + std::to_string(id);
-                    IVecIdMapper::GetInstance()->Get(nid, sid);
-                    v_res.id_list.push_back(sid);
-                    v_res.distance_list.push_back(0.0);//TODO: return distance
-                }
-
-                _return.result_list.push_back(v_res);
-            }
-        }
-
-
-    } catch (std::exception& ex) {
-        SERVER_LOG_ERROR << ex.what();
-    }
+    BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, tensor_list, time_range_list, _return);
+    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
+    scheduler.ExecuteTask(task_ptr);
 
     SERVER_LOG_INFO << "search_vector_batch() finished";
 }
