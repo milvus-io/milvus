@@ -11,10 +11,11 @@ namespace vecwise {
 namespace server {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-BaseTask::BaseTask(const std::string& task_group)
-        : task_group_(task_group),
-          done_(false),
-          error_code_(SERVER_SUCCESS) {
+BaseTask::BaseTask(const std::string& task_group, bool async)
+    : task_group_(task_group),
+      async_(async),
+      done_(false),
+      error_code_(SERVER_SUCCESS) {
 
 }
 
@@ -73,14 +74,6 @@ void VecServiceScheduler::Stop() {
     stopped_ = true;
 }
 
-ServerError VecServiceScheduler::PushTask(const BaseTaskPtr& task_ptr) {
-    if(task_ptr == nullptr) {
-        return SERVER_NULL_POINTER;
-    }
-
-    return PutTaskToQueue(task_ptr);
-}
-
 ServerError VecServiceScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
     if(task_ptr == nullptr) {
         return SERVER_NULL_POINTER;
@@ -91,7 +84,11 @@ ServerError VecServiceScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
         return err;
     }
 
-    return task_ptr->WaitToFinish();
+    if(task_ptr->IsAsync()) {
+        return SERVER_SUCCESS;//async execution, caller need to call WaitToFinish at somewhere
+    }
+
+    return task_ptr->WaitToFinish();//sync execution
 }
 
 namespace {

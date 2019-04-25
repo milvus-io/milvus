@@ -16,8 +16,8 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-static const std::string NORMAL_TASK_GROUP = "normal";
-static const std::string SEARCH_TASK_GROUP = "search";
+static const std::string DQL_TASK_GROUP = "dql";
+static const std::string DDL_DML_TASK_GROUP = "ddl_dml";
 
 namespace {
     class DBWrapper {
@@ -53,7 +53,7 @@ namespace {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 AddGroupTask::AddGroupTask(int32_t dimension,
                            const std::string& group_id)
-: BaseTask(NORMAL_TASK_GROUP),
+: BaseTask(DDL_DML_TASK_GROUP),
   dimension_(dimension),
   group_id_(group_id) {
 
@@ -81,7 +81,7 @@ ServerError AddGroupTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 GetGroupTask::GetGroupTask(const std::string& group_id, int32_t&  dimension)
-    : BaseTask(NORMAL_TASK_GROUP),
+    : BaseTask(DDL_DML_TASK_GROUP),
       group_id_(group_id),
       dimension_(dimension) {
 
@@ -111,7 +111,7 @@ ServerError GetGroupTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DeleteGroupTask::DeleteGroupTask(const std::string& group_id)
-    : BaseTask(NORMAL_TASK_GROUP),
+    : BaseTask(DDL_DML_TASK_GROUP),
       group_id_(group_id) {
 
 }
@@ -132,7 +132,7 @@ ServerError DeleteGroupTask::OnExecute() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 AddSingleVectorTask::AddSingleVectorTask(const std::string& group_id,
                                          const VecTensor &tensor)
-    : BaseTask(NORMAL_TASK_GROUP),
+    : BaseTask(DDL_DML_TASK_GROUP),
       group_id_(group_id),
       tensor_(tensor) {
 
@@ -169,7 +169,7 @@ ServerError AddSingleVectorTask::OnExecute() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 AddBatchVectorTask::AddBatchVectorTask(const std::string& group_id,
                              const VecTensorList &tensor_list)
-    : BaseTask(NORMAL_TASK_GROUP),
+    : BaseTask(DDL_DML_TASK_GROUP),
       group_id_(group_id),
       tensor_list_(tensor_list) {
 
@@ -233,7 +233,7 @@ SearchVectorTask::SearchVectorTask(const std::string& group_id,
                                    const VecTensorList& tensor_list,
                                    const VecTimeRangeList& time_range_list,
                                    VecSearchResultList& result)
-    : BaseTask(SEARCH_TASK_GROUP),
+    : BaseTask(DQL_TASK_GROUP),
       group_id_(group_id),
       top_k_(top_k),
       tensor_list_(tensor_list),
