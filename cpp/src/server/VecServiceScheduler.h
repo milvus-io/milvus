@@ -54,6 +54,9 @@ public:
     void Start();
     void Stop();
 
+    //async
+    ServerError PushTask(const BaseTaskPtr& task_ptr);
+    //sync
     ServerError ExecuteTask(const BaseTaskPtr& task_ptr);
 
 protected:

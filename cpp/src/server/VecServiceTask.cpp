@@ -8,6 +8,7 @@
 #include "VecIdMapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 #include "db/DB.h"
 #include "db/Env.h"
 
@@ -16,6 +17,7 @@ namespace vecwise {
 namespace server {
 
 static const std::string NORMAL_TASK_GROUP = "normal";
+static const std::string SEARCH_TASK_GROUP = "search";
 
 namespace {
     class DBWrapper {
@@ -128,7 +130,44 @@ ServerError DeleteGroupTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-AddVectorTask::AddVectorTask(const std::string& group_id,
+AddSingleVectorTask::AddSingleVectorTask(const std::string& group_id,
+                                         const VecTensor &tensor)
+    : BaseTask(NORMAL_TASK_GROUP),
+      group_id_(group_id),
+      tensor_(tensor) {
+
+}
+
+BaseTaskPtr AddSingleVectorTask::Create(const std::string& group_id,
+                                        const VecTensor &tensor) {
+    return std::shared_ptr<BaseTask>(new AddSingleVectorTask(group_id, tensor));
+}
+
+ServerError AddSingleVectorTask::OnExecute() {
+    try {
+        engine::IDNumbers vector_ids;
+        std::vector<float> vec_f(tensor_.tensor.begin(), tensor_.tensor.end());
+        engine::Status stat = DB()->add_vectors(group_id_, 1, vec_f.data(), vector_ids);
+        if(!stat.ok()) {
+            SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+        } else {
+            if(vector_ids.empty()) {
+                SERVER_LOG_ERROR << "Vector ID not returned";
+            } else {
+                std::string nid = group_id_ + "_" + std::to_string(vector_ids[0]);
+                IVecIdMapper::GetInstance()->Put(nid, tensor_.uid);
+                SERVER_LOG_TRACE << "nid = " << vector_ids[0] << ", sid = " << tensor_.uid;
+            }
+        }
+
+    } catch (std::exception& ex) {
+        SERVER_LOG_ERROR << ex.what();
+    }
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+AddBatchVectorTask::AddBatchVectorTask(const std::string& group_id,
                              const VecTensorList &tensor_list)
     : BaseTask(NORMAL_TASK_GROUP),
       group_id_(group_id),
@@ -136,31 +175,50 @@ AddVectorTask::AddVectorTask(const std::string& group_id,
 
 }
 
-BaseTaskPtr AddVectorTask::Create(const std::string& group_id,
+BaseTaskPtr AddBatchVectorTask::Create(const std::string& group_id,
                                   const VecTensorList &tensor_list) {
-    return std::shared_ptr<BaseTask>(new AddVectorTask(group_id, tensor_list));
+    return std::shared_ptr<BaseTask>(new AddBatchVectorTask(group_id, tensor_list));
 }
 
-ServerError AddVectorTask::OnExecute() {
+ServerError AddBatchVectorTask::OnExecute() {
     try {
-        std::vector<float> vec_f;
-        for(const VecTensor& tensor : tensor_list_.tensor_list) {
-            vec_f.insert(vec_f.begin(), tensor.tensor.begin(), tensor.tensor.end());
+        TimeRecorder rc("Add vector batch");
+
+        engine::meta::GroupSchema group_info;
+        group_info.group_id = group_id_;
+        engine::Status stat = DB()->get_group(group_info);
+        if(!stat.ok()) {
+            SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+            return SERVER_UNEXPECTED_ERROR;
         }
 
+        std::vector<float> vec_f;
+        vec_f.reserve(tensor_list_.tensor_list.size()*group_info.dimension*4);
+        for(const VecTensor& tensor : tensor_list_.tensor_list) {
+            if(tensor.tensor.size() != group_info.dimension) {
+                SERVER_LOG_ERROR << "Invalid vector data size: " << tensor.tensor.size()
+                << " vs. group dimension:" << group_info.dimension;
+                return SERVER_UNEXPECTED_ERROR;
+            }
+            vec_f.insert(vec_f.begin(), tensor.tensor.begin(), tensor.tensor.end());
+        }
+        rc.Record("prepare vectors data");
+
         engine::IDNumbers vector_ids;
-        engine::Status stat = DB()->add_vectors(group_id_, tensor_list_.tensor_list.size(), vec_f.data(), vector_ids);
+        stat = DB()->add_vectors(group_id_, tensor_list_.tensor_list.size(), vec_f.data(), vector_ids);
+        rc.Record("add vectors to engine");
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
-            if(vector_ids.size() != tensor_list_.tensor_list.size()) {
+            if(vector_ids.size() < tensor_list_.tensor_list.size()) {
                 SERVER_LOG_ERROR << "Vector ID not returned";
             } else {
                 std::string nid_prefix = group_id_ + "_";
-                for(size_t i = 0; i < vector_ids.size(); i++) {
+                for(size_t i = 0; i < tensor_list_.tensor_list.size(); i++) {
                     std::string nid = nid_prefix + std::to_string(vector_ids[i]);
                     IVecIdMapper::GetInstance()->Put(nid, tensor_list_.tensor_list[i].uid);
                 }
+                rc.Record("build id mapping");
             }
         }
 
@@ -170,26 +228,26 @@ ServerError AddVectorTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-SearchVectorTask::SearchVectorTask(VecSearchResultList& result,
-                                   const std::string& group_id,
+SearchVectorTask::SearchVectorTask(const std::string& group_id,
                                    const int64_t top_k,
                                    const VecTensorList& tensor_list,
-                                   const VecTimeRangeList& time_range_list)
-        : BaseTask(NORMAL_TASK_GROUP),
-          result_(result),
-          group_id_(group_id),
-          top_k_(top_k),
-          tensor_list_(tensor_list),
-          time_range_list_(time_range_list) {
+                                   const VecTimeRangeList& time_range_list,
+                                   VecSearchResultList& result)
+    : BaseTask(SEARCH_TASK_GROUP),
+      group_id_(group_id),
+      top_k_(top_k),
+      tensor_list_(tensor_list),
+      time_range_list_(time_range_list),
+      result_(result) {
 
 }
 
-BaseTaskPtr SearchVectorTask::Create(VecSearchResultList& result,
-                                     const std::string& group_id,
+BaseTaskPtr SearchVectorTask::Create(const std::string& group_id,
                                      const int64_t top_k,
                                      const VecTensorList& tensor_list,
-                                     const VecTimeRangeList& time_range_list) {
-    return std::shared_ptr<BaseTask>(new SearchVectorTask(result, group_id, top_k, tensor_list, time_range_list));
+                                     const VecTimeRangeList& time_range_list,
+                                     VecSearchResultList& result) {
+    return std::shared_ptr<BaseTask>(new SearchVectorTask(group_id, top_k, tensor_list, time_range_list, result));
 }
 
 ServerError SearchVectorTask::OnExecute() {
@@ -213,6 +271,9 @@ ServerError SearchVectorTask::OnExecute() {
                     IVecIdMapper::GetInstance()->Get(nid, sid);
                     v_res.id_list.push_back(sid);
                     v_res.distance_list.push_back(0.0);//TODO: return distance
+
+                    SERVER_LOG_TRACE << "nid = " << nid << ", string id = " << sid;
+
                 }
 
                 result_.result_list.push_back(v_res);

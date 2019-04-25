@@ -3,6 +3,7 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#include <utils/TimeRecorder.h>
 #include "ClientApp.h"
 #include "ClientSession.h"
 #include "server/ServerConfig.h"
@@ -37,21 +38,44 @@ void ClientApp::Run(const std::string &config_file) {
         group.index_type = 0;
         session.interface()->add_group(group);
 
-        //add vectors
-        for(int64_t k = 0; k < 10000; k++) {
-            VecTensor tensor;
-            for(int32_t i = 0; i < dim; i++) {
-                tensor.tensor.push_back((double)(i + k));
+        const int64_t count = 500;
+        //add vectors one by one
+        {
+
+            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
+            for (int64_t k = 0; k < count; k++) {
+                VecTensor tensor;
+                for (int32_t i = 0; i < dim; i++) {
+                    tensor.tensor.push_back((double) (i + k));
+                }
+                tensor.uid = "vec_" + std::to_string(k);
+
+                session.interface()->add_vector(group.id, tensor);
+
+                CLIENT_LOG_INFO << "add vector no." << k;
             }
-            tensor.uid = "vec_" + std::to_string(k);
+            rc.Elapse("done!");
+        }
 
-            session.interface()->add_vector(group.id, tensor);
-
-            CLIENT_LOG_INFO << "add vector no." << k;
+        //add vectors in one batch
+        {
+            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
+            VecTensorList vec_list;
+            for (int64_t k = 0; k < count; k++) {
+                VecTensor tensor;
+                for (int32_t i = 0; i < dim; i++) {
+                    tensor.tensor.push_back((double) (i + k));
+                }
+                tensor.uid = "vec_" + std::to_string(k);
+                vec_list.tensor_list.push_back(tensor);
+            }
+            session.interface()->add_vector_batch(group.id, vec_list);
+            rc.Elapse("done!");
         }
 
         //search vector
         {
+            server::TimeRecorder rc("Search top_k");
             VecTensor tensor;
             for (int32_t i = 0; i < dim; i++) {
                 tensor.tensor.push_back((double) (i + 100));
@@ -65,6 +89,7 @@ void ClientApp::Run(const std::string &config_file) {
             for(auto id : res.id_list) {
                 std::cout << id << std::endl;
             }
+            rc.Elapse("done!");
         }
 
     } catch (std::exception& ex) {

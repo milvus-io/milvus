@@ -40,8 +40,11 @@ rm -rf ./cmake_build
 mkdir cmake_build
 cd cmake_build
 
+CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+
 CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+-DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 $@ ../"
 echo ${CMAKE_CMD}
 
