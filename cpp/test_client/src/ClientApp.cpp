@@ -9,9 +9,26 @@
 #include "server/ServerConfig.h"
 #include "Log.h"
 
+#include <time.h>
+
 namespace zilliz {
 namespace vecwise {
 namespace client {
+
+namespace {
+    std::string CurrentTime() {
+        time_t tt;
+        time( &tt );
+        tt = tt + 8*3600;
+        tm* t= gmtime( &tt );
+
+        std::string str = std::to_string(t->tm_year + 1900) + "_" + std::to_string(t->tm_mon + 1)
+                + "_" + std::to_string(t->tm_mday) + "_" + std::to_string(t->tm_hour)
+                + "_" + std::to_string(t->tm_min) + "_" + std::to_string(t->tm_sec);
+
+        return str;
+    }
+}
 
 void ClientApp::Run(const std::string &config_file) {
     server::ServerConfig& config = server::ServerConfig::GetInstance();
@@ -33,7 +50,7 @@ void ClientApp::Run(const std::string &config_file) {
         //add group
         const int32_t dim = 256;
         VecGroup group;
-        group.id = "test_group";
+        group.id = CurrentTime();
         group.dimension = dim;
         group.index_type = 0;
         session.interface()->add_group(group);
@@ -73,6 +90,8 @@ void ClientApp::Run(const std::string &config_file) {
             rc.Elapse("done!");
         }
 
+        sleep(20);
+        
         //search vector
         {
             server::TimeRecorder rc("Search top_k");
