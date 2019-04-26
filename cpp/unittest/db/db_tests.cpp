@@ -15,6 +15,18 @@
 
 using namespace zilliz::vecwise;
 
+class DBTest : public ::testing::Test {
+protected:
+    virtual void SetUp() {
+        el::Configurations defaultConf;
+        defaultConf.setToDefault();
+        defaultConf.set(el::Level::Debug,
+                el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
+        el::Loggers::reconfigureLogger("default", defaultConf);
+    }
+
+};
+
 namespace {
     void ASSERT_STATS(engine::Status& stat) {
         ASSERT_TRUE(stat.ok());
@@ -24,7 +36,8 @@ namespace {
     }
 }
 
-TEST(DBTest, DB_TEST) {
+TEST_F(DBTest, DB_TEST) {
+
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
 
@@ -52,7 +65,7 @@ TEST(DBTest, DB_TEST) {
     engine::IDNumbers target_ids;
 
     int d = 256;
-    int nb = 2;
+    int nb = 10;
     float *xb = new float[d * nb];
     for(int i = 0; i < nb; i++) {
         for(int j = 0; j < d; j++) xb[d * i + j] = drand48();
@@ -66,7 +79,7 @@ TEST(DBTest, DB_TEST) {
         qxb[d * i] += i / 2000.;
     }
 
-    int loop = 1000000;
+    int loop = 500000;
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
@@ -98,9 +111,9 @@ TEST(DBTest, DB_TEST) {
     engine::DB::Open(opt, &db);
     db->drop_all();
     delete db;
-}
+};
 
-TEST(SearchTest, DB_TEST) {
+TEST_F(DBTest, SEARCH_TEST) {
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
 
@@ -181,4 +194,4 @@ TEST(SearchTest, DB_TEST) {
     engine::DB::Open(opt, &db);
     db->drop_all();
     delete db;
-}
+};
