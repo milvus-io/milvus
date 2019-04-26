@@ -27,6 +27,7 @@ namespace {
             ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
             opt.meta.backend_uri = config.GetValue(CONFIG_SERVER_DB_URL);
             std::string db_path = config.GetValue(CONFIG_SERVER_DB_PATH);
+            opt.memory_sync_interval = (uint16_t)config.GetInt32Value(CONFIG_SERVER_DB_FLUSH_INTERVAL, 10);
             opt.meta.path = db_path + "/db";
 
             CommonUtil::CreateDirectory(opt.meta.path);
@@ -155,9 +156,29 @@ BaseTaskPtr AddSingleVectorTask::Create(const std::string& group_id,
 
 ServerError AddSingleVectorTask::OnExecute() {
     try {
+        engine::meta::GroupSchema group_info;
+        group_info.group_id = group_id_;
+        engine::Status stat = DB()->get_group(group_info);
+        if(!stat.ok()) {
+            SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+            return SERVER_INVALID_ARGUMENT;
+        }
+
+        uint64_t vec_dim = group_info.dimension;
+        if(vec_dim != tensor_.tensor.size()) {
+            SERVER_LOG_ERROR << "Invalid vector dimension: " << tensor_.tensor.size()
+                             << " vs. group dimension:" << vec_dim;
+            return SERVER_INVALID_ARGUMENT;
+        }
+
+        std::vector<float> vec_f;
+        vec_f.resize(vec_dim);
+        for(uint64_t d = 0; d < vec_dim; d++) {
+            vec_f[d] = (float)(tensor_.tensor[d]);
+        }
+
         engine::IDNumbers vector_ids;
-        std::vector<float> vec_f(tensor_.tensor.begin(), tensor_.tensor.end());
-        engine::Status stat = DB()->add_vectors(group_id_, 1, vec_f.data(), vector_ids);
+        stat = DB()->add_vectors(group_id_, 1, vec_f.data(), vector_ids);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
             return SERVER_UNEXPECTED_ERROR;
@@ -213,10 +234,10 @@ ServerError AddBatchVectorTask::OnExecute() {
         vec_f.resize(vec_count*vec_dim);//allocate enough memory
         for(uint64_t i = 0; i < vec_count; i ++) {
             const std::vector<double>& tensor = tensor_list_.tensor_list[i].tensor;
-            if(tensor.size() != group_info.dimension) {
-                SERVER_LOG_ERROR << "Invalid vector data size: " << tensor.size()
-                                 << " vs. group dimension:" << group_info.dimension;
-                return SERVER_UNEXPECTED_ERROR;
+            if(tensor.size() != vec_dim) {
+                SERVER_LOG_ERROR << "Invalid vector dimension: " << tensor.size()
+                                 << " vs. group dimension:" << vec_dim;
+                return SERVER_INVALID_ARGUMENT;
             }
 
             for(uint64_t d = 0; d < vec_dim; d++) {
