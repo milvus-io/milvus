@@ -38,17 +38,12 @@ private:
 
 public:
     //mem_capacity, units:GB
-    Cache(int64_t mem_capacity, uint64_t cache_max_count);
+    Cache(int64_t capacity_gb, uint64_t cache_max_count);
     ~Cache() = default;
 
     int64_t usage() const { return usage_; }
-    int64_t capacity() const { return capacity_; }
-    void set_capacity(int64_t capacity) {
-        if(capacity > 0) {
-            capacity_ = capacity;
-            free_memory();
-        }
-    }
+    int64_t capacity() const { return capacity_; } //unit: BYTE
+    void set_capacity(int64_t capacity); //unit: BYTE
 
     size_t size() const;
     bool exists(const std::string& key);

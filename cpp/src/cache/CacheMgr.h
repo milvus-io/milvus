@@ -30,10 +30,9 @@ public:
 
     virtual void ClearCache();
 
-    virtual int64_t CacheUsage() const;
-    virtual int64_t CacheCapacity() const;
-
-    virtual void SetCapacity(int64_t capacity);
+    int64_t CacheUsage() const;
+    int64_t CacheCapacity() const;
+    void SetCapacity(int64_t capacity);
 
 protected:
     CacheMgr();

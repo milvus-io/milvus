@@ -13,11 +13,18 @@ namespace zilliz {
 namespace vecwise {
 namespace cache {
 
-Cache::Cache(int64_t mem_capacity, uint64_t cache_max_count)
+Cache::Cache(int64_t capacity, uint64_t cache_max_count)
     : usage_(0),
-      capacity_(mem_capacity*1024*1024*1024),
+      capacity_(capacity),
       lru_(cache_max_count) {
 //    AGENT_LOG_DEBUG << "Construct Cache with capacity " << std::to_string(mem_capacity)
+}
+
+void Cache::set_capacity(int64_t capacity) {
+    if(capacity > 0) {
+        capacity_ = capacity;
+        free_memory();
+    }
 }
 
 size_t Cache::size() const {

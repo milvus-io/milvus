@@ -56,20 +56,22 @@ void ClientApp::Run(const std::string &config_file) {
         group.index_type = 0;
         session.interface()->add_group(group);
 
-        const int64_t count = 500;
+        const int64_t count = 10000;
         //add vectors one by one
         {
-
-            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
+            std::vector<VecTensor> tensor_list;
             for (int64_t k = 0; k < count; k++) {
                 VecTensor tensor;
                 for (int32_t i = 0; i < dim; i++) {
                     tensor.tensor.push_back((double) (i + k));
                 }
                 tensor.uid = "s_vec_" + std::to_string(k);
+                tensor_list.push_back(tensor);
+            }
 
-                session.interface()->add_vector(group.id, tensor);
-
+            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
+            for (int64_t k = 0; k < count; k++) {
+                session.interface()->add_vector(group.id, tensor_list[k]);
                 CLIENT_LOG_INFO << "add vector no." << k;
             }
             rc.Elapse("done!");
@@ -77,7 +79,7 @@ void ClientApp::Run(const std::string &config_file) {
 
         //add vectors in one batch
         {
-            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
+
             VecTensorList vec_list;
             for (int64_t k = 0; k < count; k++) {
                 VecTensor tensor;
@@ -87,10 +89,13 @@ void ClientApp::Run(const std::string &config_file) {
                 tensor.uid = "m_vec_" + std::to_string(k);
                 vec_list.tensor_list.push_back(tensor);
             }
+
+            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
             session.interface()->add_vector_batch(group.id, vec_list);
             rc.Elapse("done!");
         }
 
+        std::cout << "Sleep " << flush_interval << " seconds..." << std::endl;
         sleep(flush_interval);
         
         //search vector
