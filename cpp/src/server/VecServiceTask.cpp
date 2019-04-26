@@ -72,11 +72,15 @@ ServerError AddGroupTask::OnExecute() {
         engine::Status stat = DB()->add_group(group_info);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+            return SERVER_UNEXPECTED_ERROR;
         }
 
     } catch (std::exception& ex) {
         SERVER_LOG_ERROR << ex.what();
+        return SERVER_UNEXPECTED_ERROR;
     }
+
+    return SERVER_SUCCESS;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -100,13 +104,17 @@ ServerError GetGroupTask::OnExecute() {
         engine::Status stat = DB()->get_group(group_info);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+            return SERVER_UNEXPECTED_ERROR;
         } else {
             dimension_ = (int32_t)group_info.dimension;
         }
 
     } catch (std::exception& ex) {
         SERVER_LOG_ERROR << ex.what();
+        return SERVER_UNEXPECTED_ERROR;
     }
+
+    return SERVER_SUCCESS;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -127,6 +135,8 @@ ServerError DeleteGroupTask::OnExecute() {
     } catch (std::exception& ex) {
         SERVER_LOG_ERROR << ex.what();
     }
+
+    return SERVER_SUCCESS;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -150,9 +160,11 @@ ServerError AddSingleVectorTask::OnExecute() {
         engine::Status stat = DB()->add_vectors(group_id_, 1, vec_f.data(), vector_ids);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+            return SERVER_UNEXPECTED_ERROR;
         } else {
             if(vector_ids.empty()) {
                 SERVER_LOG_ERROR << "Vector ID not returned";
+                return SERVER_UNEXPECTED_ERROR;
             } else {
                 std::string nid = group_id_ + "_" + std::to_string(vector_ids[0]);
                 IVecIdMapper::GetInstance()->Put(nid, tensor_.uid);
@@ -162,7 +174,10 @@ ServerError AddSingleVectorTask::OnExecute() {
 
     } catch (std::exception& ex) {
         SERVER_LOG_ERROR << ex.what();
+        return SERVER_UNEXPECTED_ERROR;
     }
+
+    return SERVER_SUCCESS;
 }
 
 
@@ -192,16 +207,23 @@ ServerError AddBatchVectorTask::OnExecute() {
             return SERVER_UNEXPECTED_ERROR;
         }
 
+        uint64_t vec_dim = group_info.dimension;
+        uint64_t vec_count = tensor_list_.tensor_list.size();
         std::vector<float> vec_f;
-        vec_f.reserve(tensor_list_.tensor_list.size()*group_info.dimension*4);
-        for(const VecTensor& tensor : tensor_list_.tensor_list) {
-            if(tensor.tensor.size() != group_info.dimension) {
-                SERVER_LOG_ERROR << "Invalid vector data size: " << tensor.tensor.size()
-                << " vs. group dimension:" << group_info.dimension;
+        vec_f.resize(vec_count*vec_dim);//allocate enough memory
+        for(uint64_t i = 0; i < vec_count; i ++) {
+            const std::vector<double>& tensor = tensor_list_.tensor_list[i].tensor;
+            if(tensor.size() != group_info.dimension) {
+                SERVER_LOG_ERROR << "Invalid vector data size: " << tensor.size()
+                                 << " vs. group dimension:" << group_info.dimension;
                 return SERVER_UNEXPECTED_ERROR;
             }
-            vec_f.insert(vec_f.begin(), tensor.tensor.begin(), tensor.tensor.end());
+
+            for(uint64_t d = 0; d < vec_dim; d++) {
+                vec_f[i*vec_dim + d] = (float)(tensor[d]);
+            }
         }
+
         rc.Record("prepare vectors data");
 
         engine::IDNumbers vector_ids;
@@ -212,6 +234,7 @@ ServerError AddBatchVectorTask::OnExecute() {
         } else {
             if(vector_ids.size() < tensor_list_.tensor_list.size()) {
                 SERVER_LOG_ERROR << "Vector ID not returned";
+                return SERVER_UNEXPECTED_ERROR;
             } else {
                 std::string nid_prefix = group_id_ + "_";
                 for(size_t i = 0; i < tensor_list_.tensor_list.size(); i++) {
@@ -224,7 +247,10 @@ ServerError AddBatchVectorTask::OnExecute() {
 
     } catch (std::exception& ex) {
         SERVER_LOG_ERROR << ex.what();
+        return SERVER_UNEXPECTED_ERROR;
     }
+
+    return SERVER_SUCCESS;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -261,6 +287,7 @@ ServerError SearchVectorTask::OnExecute() {
         engine::Status stat = DB()->search(group_id_, (size_t)top_k_, tensor_list_.tensor_list.size(), vec_f.data(), results);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+            return SERVER_UNEXPECTED_ERROR;
         } else {
             for(engine::QueryResult& res : results){
                 VecSearchResult v_res;
@@ -282,7 +309,10 @@ ServerError SearchVectorTask::OnExecute() {
 
     } catch (std::exception& ex) {
         SERVER_LOG_ERROR << ex.what();
+        return SERVER_UNEXPECTED_ERROR;
     }
+
+    return SERVER_SUCCESS;
 }
 
 }
