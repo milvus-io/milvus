@@ -5,7 +5,7 @@
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <fstream>
-#include <sqlite_orm/sqlite_orm.h>
+#include <sqlite_orm.h>
 #include <easylogging++.h>
 #include "DBMetaImpl.h"
 #include "IDGenerator.h"
@@ -88,6 +88,7 @@ Status DBMetaImpl::initialize() {
 
     ConnectorPtr->sync_schema();
     ConnectorPtr->open_forever(); // thread safe option
+    ConnectorPtr->pragma.journal_mode(journal_mode::WAL); // WAL => write ahead log
 
     cleanup();
 
