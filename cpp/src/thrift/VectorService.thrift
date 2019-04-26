@@ -33,6 +33,15 @@ struct VecTensorList {
 	1: list<VecTensor> tensor_list;
 }
 
+struct VecBinaryTensor {
+    1: string uid;
+	2: binary tensor;
+}
+
+struct VecBinaryTensorList {
+	1: list<VecBinaryTensor> tensor_list;
+}
+
 struct VecSearchResult {
     1: list<string> id_list;
     2: list<double> distance_list;
@@ -73,11 +82,13 @@ service VecService {
 
 
     /**
-     * vector interfaces
+     * insert vector interfaces
      *
      */
     void add_vector(2: string group_id, 3: VecTensor tensor) throws(1: VecException e);
     void add_vector_batch(2: string group_id, 3: VecTensorList tensor_list) throws(1: VecException e);
+    void add_binary_vector(2: string group_id, 3: VecBinaryTensor tensor) throws(1: VecException e);
+    void add_binary_vector_batch(2: string group_id, 3: VecBinaryTensorList tensor_list) throws(1: VecException e);
 
     /**
      * search interfaces

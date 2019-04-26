@@ -43,6 +43,10 @@ class VecTensor;
 
 class VecTensorList;
 
+class VecBinaryTensor;
+
+class VecBinaryTensorList;
+
 class VecSearchResult;
 
 class VecSearchResultList;
@@ -246,6 +250,96 @@ class VecTensorList : public virtual ::apache::thrift::TBase {
 void swap(VecTensorList &a, VecTensorList &b);
 
 std::ostream& operator<<(std::ostream& out, const VecTensorList& obj);
+
+typedef struct _VecBinaryTensor__isset {
+  _VecBinaryTensor__isset() : uid(false), tensor(false) {}
+  bool uid :1;
+  bool tensor :1;
+} _VecBinaryTensor__isset;
+
+class VecBinaryTensor : public virtual ::apache::thrift::TBase {
+ public:
+
+  VecBinaryTensor(const VecBinaryTensor&);
+  VecBinaryTensor& operator=(const VecBinaryTensor&);
+  VecBinaryTensor() : uid(), tensor() {
+  }
+
+  virtual ~VecBinaryTensor() throw();
+  std::string uid;
+  std::string tensor;
+
+  _VecBinaryTensor__isset __isset;
+
+  void __set_uid(const std::string& val);
+
+  void __set_tensor(const std::string& val);
+
+  bool operator == (const VecBinaryTensor & rhs) const
+  {
+    if (!(uid == rhs.uid))
+      return false;
+    if (!(tensor == rhs.tensor))
+      return false;
+    return true;
+  }
+  bool operator != (const VecBinaryTensor &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const VecBinaryTensor & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+  virtual void printTo(std::ostream& out) const;
+};
+
+void swap(VecBinaryTensor &a, VecBinaryTensor &b);
+
+std::ostream& operator<<(std::ostream& out, const VecBinaryTensor& obj);
+
+typedef struct _VecBinaryTensorList__isset {
+  _VecBinaryTensorList__isset() : tensor_list(false) {}
+  bool tensor_list :1;
+} _VecBinaryTensorList__isset;
+
+class VecBinaryTensorList : public virtual ::apache::thrift::TBase {
+ public:
+
+  VecBinaryTensorList(const VecBinaryTensorList&);
+  VecBinaryTensorList& operator=(const VecBinaryTensorList&);
+  VecBinaryTensorList() {
+  }
+
+  virtual ~VecBinaryTensorList() throw();
+  std::vector<VecBinaryTensor>  tensor_list;
+
+  _VecBinaryTensorList__isset __isset;
+
+  void __set_tensor_list(const std::vector<VecBinaryTensor> & val);
+
+  bool operator == (const VecBinaryTensorList & rhs) const
+  {
+    if (!(tensor_list == rhs.tensor_list))
+      return false;
+    return true;
+  }
+  bool operator != (const VecBinaryTensorList &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const VecBinaryTensorList & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+  virtual void printTo(std::ostream& out) const;
+};
+
+void swap(VecBinaryTensorList &a, VecBinaryTensorList &b);
+
+std::ostream& operator<<(std::ostream& out, const VecBinaryTensorList& obj);
 
 typedef struct _VecSearchResult__isset {
   _VecSearchResult__isset() : id_list(false), distance_list(false) {}

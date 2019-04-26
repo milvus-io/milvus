@@ -32,7 +32,7 @@ class VecServiceIf {
   virtual void del_group(const std::string& group_id) = 0;
 
   /**
-   * vector interfaces
+   * insert vector interfaces
    * 
    * 
    * @param group_id
@@ -40,6 +40,8 @@ class VecServiceIf {
    */
   virtual void add_vector(const std::string& group_id, const VecTensor& tensor) = 0;
   virtual void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list) = 0;
+  virtual void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor) = 0;
+  virtual void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list) = 0;
 
   /**
    * search interfaces
@@ -94,6 +96,12 @@ class VecServiceNull : virtual public VecServiceIf {
     return;
   }
   void add_vector_batch(const std::string& /* group_id */, const VecTensorList& /* tensor_list */) {
+    return;
+  }
+  void add_binary_vector(const std::string& /* group_id */, const VecBinaryTensor& /* tensor */) {
+    return;
+  }
+  void add_binary_vector_batch(const std::string& /* group_id */, const VecBinaryTensorList& /* tensor_list */) {
     return;
   }
   void search_vector(VecSearchResult& /* _return */, const std::string& /* group_id */, const int64_t /* top_k */, const VecTensor& /* tensor */, const VecTimeRangeList& /* time_range_list */) {
@@ -646,6 +654,228 @@ class VecService_add_vector_batch_presult {
 
 };
 
+typedef struct _VecService_add_binary_vector_args__isset {
+  _VecService_add_binary_vector_args__isset() : group_id(false), tensor(false) {}
+  bool group_id :1;
+  bool tensor :1;
+} _VecService_add_binary_vector_args__isset;
+
+class VecService_add_binary_vector_args {
+ public:
+
+  VecService_add_binary_vector_args(const VecService_add_binary_vector_args&);
+  VecService_add_binary_vector_args& operator=(const VecService_add_binary_vector_args&);
+  VecService_add_binary_vector_args() : group_id() {
+  }
+
+  virtual ~VecService_add_binary_vector_args() throw();
+  std::string group_id;
+  VecBinaryTensor tensor;
+
+  _VecService_add_binary_vector_args__isset __isset;
+
+  void __set_group_id(const std::string& val);
+
+  void __set_tensor(const VecBinaryTensor& val);
+
+  bool operator == (const VecService_add_binary_vector_args & rhs) const
+  {
+    if (!(group_id == rhs.group_id))
+      return false;
+    if (!(tensor == rhs.tensor))
+      return false;
+    return true;
+  }
+  bool operator != (const VecService_add_binary_vector_args &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const VecService_add_binary_vector_args & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+
+class VecService_add_binary_vector_pargs {
+ public:
+
+
+  virtual ~VecService_add_binary_vector_pargs() throw();
+  const std::string* group_id;
+  const VecBinaryTensor* tensor;
+
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _VecService_add_binary_vector_result__isset {
+  _VecService_add_binary_vector_result__isset() : e(false) {}
+  bool e :1;
+} _VecService_add_binary_vector_result__isset;
+
+class VecService_add_binary_vector_result {
+ public:
+
+  VecService_add_binary_vector_result(const VecService_add_binary_vector_result&);
+  VecService_add_binary_vector_result& operator=(const VecService_add_binary_vector_result&);
+  VecService_add_binary_vector_result() {
+  }
+
+  virtual ~VecService_add_binary_vector_result() throw();
+  VecException e;
+
+  _VecService_add_binary_vector_result__isset __isset;
+
+  void __set_e(const VecException& val);
+
+  bool operator == (const VecService_add_binary_vector_result & rhs) const
+  {
+    if (!(e == rhs.e))
+      return false;
+    return true;
+  }
+  bool operator != (const VecService_add_binary_vector_result &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const VecService_add_binary_vector_result & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _VecService_add_binary_vector_presult__isset {
+  _VecService_add_binary_vector_presult__isset() : e(false) {}
+  bool e :1;
+} _VecService_add_binary_vector_presult__isset;
+
+class VecService_add_binary_vector_presult {
+ public:
+
+
+  virtual ~VecService_add_binary_vector_presult() throw();
+  VecException e;
+
+  _VecService_add_binary_vector_presult__isset __isset;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+
+};
+
+typedef struct _VecService_add_binary_vector_batch_args__isset {
+  _VecService_add_binary_vector_batch_args__isset() : group_id(false), tensor_list(false) {}
+  bool group_id :1;
+  bool tensor_list :1;
+} _VecService_add_binary_vector_batch_args__isset;
+
+class VecService_add_binary_vector_batch_args {
+ public:
+
+  VecService_add_binary_vector_batch_args(const VecService_add_binary_vector_batch_args&);
+  VecService_add_binary_vector_batch_args& operator=(const VecService_add_binary_vector_batch_args&);
+  VecService_add_binary_vector_batch_args() : group_id() {
+  }
+
+  virtual ~VecService_add_binary_vector_batch_args() throw();
+  std::string group_id;
+  VecBinaryTensorList tensor_list;
+
+  _VecService_add_binary_vector_batch_args__isset __isset;
+
+  void __set_group_id(const std::string& val);
+
+  void __set_tensor_list(const VecBinaryTensorList& val);
+
+  bool operator == (const VecService_add_binary_vector_batch_args & rhs) const
+  {
+    if (!(group_id == rhs.group_id))
+      return false;
+    if (!(tensor_list == rhs.tensor_list))
+      return false;
+    return true;
+  }
+  bool operator != (const VecService_add_binary_vector_batch_args &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const VecService_add_binary_vector_batch_args & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+
+class VecService_add_binary_vector_batch_pargs {
+ public:
+
+
+  virtual ~VecService_add_binary_vector_batch_pargs() throw();
+  const std::string* group_id;
+  const VecBinaryTensorList* tensor_list;
+
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _VecService_add_binary_vector_batch_result__isset {
+  _VecService_add_binary_vector_batch_result__isset() : e(false) {}
+  bool e :1;
+} _VecService_add_binary_vector_batch_result__isset;
+
+class VecService_add_binary_vector_batch_result {
+ public:
+
+  VecService_add_binary_vector_batch_result(const VecService_add_binary_vector_batch_result&);
+  VecService_add_binary_vector_batch_result& operator=(const VecService_add_binary_vector_batch_result&);
+  VecService_add_binary_vector_batch_result() {
+  }
+
+  virtual ~VecService_add_binary_vector_batch_result() throw();
+  VecException e;
+
+  _VecService_add_binary_vector_batch_result__isset __isset;
+
+  void __set_e(const VecException& val);
+
+  bool operator == (const VecService_add_binary_vector_batch_result & rhs) const
+  {
+    if (!(e == rhs.e))
+      return false;
+    return true;
+  }
+  bool operator != (const VecService_add_binary_vector_batch_result &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const VecService_add_binary_vector_batch_result & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _VecService_add_binary_vector_batch_presult__isset {
+  _VecService_add_binary_vector_batch_presult__isset() : e(false) {}
+  bool e :1;
+} _VecService_add_binary_vector_batch_presult__isset;
+
+class VecService_add_binary_vector_batch_presult {
+ public:
+
+
+  virtual ~VecService_add_binary_vector_batch_presult() throw();
+  VecException e;
+
+  _VecService_add_binary_vector_batch_presult__isset __isset;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+
+};
+
 typedef struct _VecService_search_vector_args__isset {
   _VecService_search_vector_args__isset() : group_id(false), top_k(false), tensor(false), time_range_list(false) {}
   bool group_id :1;
@@ -952,6 +1182,12 @@ class VecServiceClient : virtual public VecServiceIf {
   void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
   void send_add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
   void recv_add_vector_batch();
+  void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor);
+  void send_add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor);
+  void recv_add_binary_vector();
+  void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
+  void send_add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
+  void recv_add_binary_vector_batch();
   void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list);
   void send_search_vector(const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list);
   void recv_search_vector(VecSearchResult& _return);
@@ -978,6 +1214,8 @@ class VecServiceProcessor : public ::apache::thrift::TDispatchProcessor {
   void process_del_group(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_add_vector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_add_vector_batch(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  void process_add_binary_vector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  void process_add_binary_vector_batch(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_search_vector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_search_vector_batch(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
  public:
@@ -988,6 +1226,8 @@ class VecServiceProcessor : public ::apache::thrift::TDispatchProcessor {
     processMap_["del_group"] = &VecServiceProcessor::process_del_group;
     processMap_["add_vector"] = &VecServiceProcessor::process_add_vector;
     processMap_["add_vector_batch"] = &VecServiceProcessor::process_add_vector_batch;
+    processMap_["add_binary_vector"] = &VecServiceProcessor::process_add_binary_vector;
+    processMap_["add_binary_vector_batch"] = &VecServiceProcessor::process_add_binary_vector_batch;
     processMap_["search_vector"] = &VecServiceProcessor::process_search_vector;
     processMap_["search_vector_batch"] = &VecServiceProcessor::process_search_vector_batch;
   }
@@ -1064,6 +1304,24 @@ class VecServiceMultiface : virtual public VecServiceIf {
     ifaces_[i]->add_vector_batch(group_id, tensor_list);
   }
 
+  void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor) {
+    size_t sz = ifaces_.size();
+    size_t i = 0;
+    for (; i < (sz - 1); ++i) {
+      ifaces_[i]->add_binary_vector(group_id, tensor);
+    }
+    ifaces_[i]->add_binary_vector(group_id, tensor);
+  }
+
+  void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list) {
+    size_t sz = ifaces_.size();
+    size_t i = 0;
+    for (; i < (sz - 1); ++i) {
+      ifaces_[i]->add_binary_vector_batch(group_id, tensor_list);
+    }
+    ifaces_[i]->add_binary_vector_batch(group_id, tensor_list);
+  }
+
   void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list) {
     size_t sz = ifaces_.size();
     size_t i = 0;
@@ -1129,6 +1387,12 @@ class VecServiceConcurrentClient : virtual public VecServiceIf {
   void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
   int32_t send_add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
   void recv_add_vector_batch(const int32_t seqid);
+  void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor);
+  int32_t send_add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor);
+  void recv_add_binary_vector(const int32_t seqid);
+  void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
+  int32_t send_add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
+  void recv_add_binary_vector_batch(const int32_t seqid);
   void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list);
   int32_t send_search_vector(const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list);
   void recv_search_vector(VecSearchResult& _return, const int32_t seqid);
