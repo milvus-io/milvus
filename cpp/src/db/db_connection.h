@@ -9,7 +9,7 @@
 #include <string>
 #include <memory>
 
-#include <sqlite_orm/sqlite_orm.h>
+#include <sqlite_orm.h>
 
 
 namespace zilliz {
@@ -62,7 +62,3 @@ class Connection {
 }
 }
 }
-
-
-
-
