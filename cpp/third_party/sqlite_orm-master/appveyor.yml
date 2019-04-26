@@ -1,0 +1,42 @@
+# Copyright (c) 2012-2019 Sebastien Rombauts (sebastien.rombauts@gmail.com)
+
+# build format
+version: "{build}"
+
+# scripts that run after cloning repository
+install:
+  - git submodule update --init --recursive
+ 
+image:
+  - Visual Studio 2017
+  
+# configurations to add to build matrix
+# TODO: MinGW Makefiles and MSYS Makefiles
+configuration:
+  - Debug
+  - Release
+
+environment:
+  matrix:
+  - arch: Win32
+  - arch: Win64
+
+init:
+  - echo %APPVEYOR_BUILD_WORKER_IMAGE% - %configuration% - %arch%
+  - if "%APPVEYOR_BUILD_WORKER_IMAGE%"=="Visual Studio 2017" (set vs=Visual Studio 15 2017)
+  - if "%APPVEYOR_BUILD_WORKER_IMAGE%"=="Visual Studio 2015" (set vs=Visual Studio 14 2015)
+  - if "%APPVEYOR_BUILD_WORKER_IMAGE%"=="Visual Studio 2013" (set vs=Visual Studio 12 2013)
+  - if "%arch%"=="Win64" (set generator="%vs% Win64")
+  - if "%arch%"=="Win32" (set generator="%vs%")
+  - echo %generator%
+ 
+# scripts to run before build
+before_build:
+  - mkdir compile
+  - cd compile
+  - cmake -DSqliteOrm_BuildTests=ON .. -G %generator%
+
+# build examples, and run tests (ie make & make test)
+build_script:
+  - cmake --build . --config %configuration%
+  - ctest --output-on-failure --build-config %configuration%
