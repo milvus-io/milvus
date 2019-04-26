@@ -23,6 +23,7 @@ public:
     virtual void getNextIDNumbers(size_t n, IDNumbers& ids) override;
 
 private:
+    void nextIDNumbers(size_t n, IDNumbers& ids);
     const size_t MAX_IDS_PER_MICRO = 1000;
 
 }; // SimpleIDGenerator
