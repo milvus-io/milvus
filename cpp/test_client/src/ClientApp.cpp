@@ -41,6 +41,7 @@ void ClientApp::Run(const std::string &config_file) {
     int32_t port = server_config.GetInt32Value(server::CONFIG_SERVER_PORT, 33001);
     std::string protocol = server_config.GetValue(server::CONFIG_SERVER_PROTOCOL, "binary");
     //std::string mode = server_config.GetValue(server::CONFIG_SERVER_MODE, "thread_pool");
+    int32_t flush_interval = server_config.GetInt32Value(server::CONFIG_SERVER_DB_FLUSH_INTERVAL);
 
     CLIENT_LOG_INFO << "Connect to server: " << address << ":" << std::to_string(port);
 
@@ -65,7 +66,7 @@ void ClientApp::Run(const std::string &config_file) {
                 for (int32_t i = 0; i < dim; i++) {
                     tensor.tensor.push_back((double) (i + k));
                 }
-                tensor.uid = "vec_" + std::to_string(k);
+                tensor.uid = "s_vec_" + std::to_string(k);
 
                 session.interface()->add_vector(group.id, tensor);
 
@@ -83,14 +84,14 @@ void ClientApp::Run(const std::string &config_file) {
                 for (int32_t i = 0; i < dim; i++) {
                     tensor.tensor.push_back((double) (i + k));
                 }
-                tensor.uid = "vec_" + std::to_string(k);
+                tensor.uid = "m_vec_" + std::to_string(k);
                 vec_list.tensor_list.push_back(tensor);
             }
             session.interface()->add_vector_batch(group.id, vec_list);
             rc.Elapse("done!");
         }
 
-        sleep(20);
+        sleep(flush_interval);
         
         //search vector
         {
