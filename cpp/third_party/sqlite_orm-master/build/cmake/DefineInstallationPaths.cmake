@@ -1,0 +1,12 @@
+# Define the default install paths
+set(BIN_INSTALL_DIR "bin" CACHE PATH "The binary install dir (default: bin)")
+set(LIB_INSTALL_DIR "lib${LIB_SUFFIX}" CACHE PATH "The library install dir (default: lib${LIB_SUFFIX})")
+set(INCLUDE_INSTALL_DIR "include" CACHE PATH "The library install dir (default: include)")
+set(CMAKE_INSTALL_DIR "lib/cmake" CACHE PATH "The subdirectory to install cmake config files (default: cmake)")
+set(PKGCONFIG_INSTALL_DIR "lib/pkgconfig" CACHE PATH "The subdirectory to install pkgconfig config files (default: lib/pkgconfig)")
+set(DOC_INSTALL_DIR "share/doc" CACHE PATH "The subdirectory to install documentation files (default: share/doc)")
+set(prefix "${CMAKE_INSTALL_PREFIX}")
+set(exec_prefix "${CMAKE_INSTALL_PREFIX}/bin")
+set(libdir "${CMAKE_INSTALL_PREFIX}/lib")
+set(includedir "${CMAKE_INSTALL_PREFIX}/include")
+set(cmakedir "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DIR}")
