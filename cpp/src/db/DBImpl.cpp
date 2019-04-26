@@ -113,6 +113,7 @@ Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
                     index = read_index(file.location.c_str());
                     zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(file.location, index);
                 }
+                LOG(DEBUG) << "Search Index Of Size: " << index->dim * index->ntotal * 4 /(1024*1024) << " M";
                 index->search(nq, vectors, k, output_distence, output_ids);
                 cluster(output_ids, output_distence); // cluster to each query
                 memset(output_distence, 0, k * nq * sizeof(float));
@@ -207,6 +208,7 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     std::shared_ptr<faiss::Index> index(faiss::index_factory(group_file.dimension, "IDMap,Flat"));
 
     meta::GroupFilesSchema updated;
+    long  index_size = 0;
 
     for (auto& file : files) {
         auto to_merge = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
@@ -221,9 +223,11 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         updated.push_back(file_schema);
         LOG(DEBUG) << "About to merge file " << file_schema.file_id <<
             " of size=" << file_schema.rows;
+        index_size = group_file.dimension * index->ntotal;
+
+        if (index_size >= _options.index_trigger_size) break;
     }
 
-    auto index_size = group_file.dimension * index->ntotal;
     faiss::write_index(index.get(), group_file.location.c_str());
 
     if (index_size >= _options.index_trigger_size) {
