@@ -21,6 +21,7 @@ static const std::string CONFIG_SERVER_PROTOCOL = "transfer_protocol";
 static const std::string CONFIG_SERVER_MODE = "server_mode";
 static const std::string CONFIG_SERVER_DB_URL = "db_backend_url";
 static const std::string CONFIG_SERVER_DB_PATH = "db_path";
+static const std::string CONFIG_SERVER_DB_FLUSH_INTERVAL = "db_flush_interval";
 
 static const std::string CONFIG_LOG = "log_config";
 

@@ -5,6 +5,7 @@ server_config:
   server_mode: thread_pool    #optional: simple, thread_pool
   db_path: /tmp/vecwise
   db_backend_url: http://127.0.0.1
+  db_flush_interval: 10   #unit: second
 
 log_config:
   global:
