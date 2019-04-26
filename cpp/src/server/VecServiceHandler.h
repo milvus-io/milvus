@@ -24,7 +24,9 @@ namespace server {
 
 class VecServiceHandler : virtual public VecServiceIf {
 public:
-    VecServiceHandler();
+    VecServiceHandler() {
+        // Your initialization goes here
+    }
 
     /**
      * group interfaces
@@ -38,7 +40,7 @@ public:
     void del_group(const std::string& group_id);
 
     /**
-     * vector interfaces
+     * insert vector interfaces
      *
      *
      * @param group_id
@@ -47,6 +49,10 @@ public:
     void add_vector(const std::string& group_id, const VecTensor& tensor);
 
     void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
+
+    void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor);
+
+    void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
 
     /**
      * search interfaces
@@ -57,22 +63,9 @@ public:
      * @param tensor
      * @param time_range_list
      */
-    void search_vector(VecSearchResult& _return,
-                       const std::string& group_id,
-                       const int64_t top_k,
-                       const VecTensor& tensor,
-                       const VecTimeRangeList& time_range_list);
+    void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list);
 
-    void search_vector_batch(VecSearchResultList& _return,
-                             const std::string& group_id,
-                             const int64_t top_k,
-                             const VecTensorList& tensor_list,
-                             const VecTimeRangeList& time_range_list);
-
-    ~VecServiceHandler();
-
-private:
-    zilliz::vecwise::engine::DB* db_;
+    void search_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecTimeRangeList& time_range_list);
 
 };
 

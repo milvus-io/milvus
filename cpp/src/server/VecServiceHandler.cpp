@@ -18,18 +18,6 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-VecServiceHandler::VecServiceHandler() {
-    zilliz::vecwise::engine::Options opt;
-    ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
-    opt.meta.backend_uri = config.GetValue(CONFIG_SERVER_DB_URL);
-    std::string db_path = config.GetValue(CONFIG_SERVER_DB_PATH);
-    opt.meta.path = db_path + "/db";
-
-    CommonUtil::CreateDirectory(opt.meta.path);
-
-    zilliz::vecwise::engine::DB::Open(opt, &db_);
-}
-
 void
 VecServiceHandler::add_group(const VecGroup &group) {
     SERVER_LOG_INFO << "add_group() called";
@@ -74,7 +62,7 @@ VecServiceHandler::add_vector(const std::string &group_id, const VecTensor &tens
     SERVER_LOG_INFO << "add_vector() called";
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size();
 
-    BaseTaskPtr task_ptr = AddSingleVectorTask::Create(group_id, tensor);
+    BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 
@@ -88,7 +76,7 @@ VecServiceHandler::add_vector_batch(const std::string &group_id,
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector list size = "
                      << tensor_list.tensor_list.size();
     TimeRecorder rc("Add VECTOR BATCH");
-    BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, tensor_list);
+    BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
     rc.Elapse("DONE!");
@@ -96,6 +84,33 @@ VecServiceHandler::add_vector_batch(const std::string &group_id,
     SERVER_LOG_INFO << "add_vector_batch() finished";
 }
 
+void
+VecServiceHandler::add_binary_vector(const std::string& group_id,
+                                     const VecBinaryTensor& tensor) {
+    SERVER_LOG_INFO << "add_vector_batch() called";
+    SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size()/4;
+
+    BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor);
+    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
+    scheduler.ExecuteTask(task_ptr);
+
+    SERVER_LOG_INFO << "add_vector_batch() finished";
+}
+
+void
+VecServiceHandler::add_binary_vector_batch(const std::string& group_id,
+                                           const VecBinaryTensorList& tensor_list) {
+    SERVER_LOG_INFO << "add_vector_batch() called";
+    SERVER_LOG_TRACE << "group_id = " << group_id << ", vector list size = "
+                     << tensor_list.tensor_list.size();
+    TimeRecorder rc("Add BINARY VECTOR BATCH");
+    BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list);
+    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
+    scheduler.ExecuteTask(task_ptr);
+    rc.Elapse("DONE!");
+
+    SERVER_LOG_INFO << "add_vector_batch() finished";
+}
 
 void
 VecServiceHandler::search_vector(VecSearchResult &_return,
@@ -142,12 +157,6 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
     SERVER_LOG_INFO << "search_vector_batch() finished";
 }
 
-VecServiceHandler::~VecServiceHandler() {
-    if (db_ != nullptr) {
-        delete db_;
-        db_ = nullptr;
-    }
-}
 
 }
 }

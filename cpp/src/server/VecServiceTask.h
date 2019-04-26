@@ -67,39 +67,61 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class AddSingleVectorTask : public BaseTask {
+class AddVectorTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& group_id,
-                              const VecTensor &tensor);
+                              const VecTensor* tensor);
+
+    static BaseTaskPtr Create(const std::string& group_id,
+                              const VecBinaryTensor* tensor);
 
 protected:
-    AddSingleVectorTask(const std::string& group_id,
-                        const VecTensor &tensor);
+    AddVectorTask(const std::string& group_id,
+                  const VecTensor* tensor);
+
+    AddVectorTask(const std::string& group_id,
+                  const VecBinaryTensor* tensor);
+
+    uint64_t GetVecDimension() const;
+    const double* GetVecData() const;
+    std::string GetVecID() const;
 
     ServerError OnExecute() override;
 
-
 private:
     std::string group_id_;
-    const VecTensor& tensor_;
+    const VecTensor* tensor_;
+    const VecBinaryTensor* bin_tensor_;
 };
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class AddBatchVectorTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& group_id,
-                              const VecTensorList &tensor_list);
+                              const VecTensorList* tensor_list);
+
+    static BaseTaskPtr Create(const std::string& group_id,
+                              const VecBinaryTensorList* tensor_list);
 
 protected:
     AddBatchVectorTask(const std::string& group_id,
-                  const VecTensorList &tensor_list);
+                  const VecTensorList* tensor_list);
+
+    AddBatchVectorTask(const std::string& group_id,
+                       const VecBinaryTensorList* tensor_list);
+
+    uint64_t GetVecListCount() const;
+    uint64_t GetVecDimension(uint64_t index) const;
+    const double* GetVecData(uint64_t index) const;
+    std::string GetVecID(uint64_t index) const;
 
     ServerError OnExecute() override;
 
-
 private:
     std::string group_id_;
-    const VecTensorList& tensor_list_;
+    const VecTensorList* tensor_list_;
+    const VecBinaryTensorList* bin_tensor_list_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

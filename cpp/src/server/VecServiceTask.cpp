@@ -141,20 +141,67 @@ ServerError DeleteGroupTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-AddSingleVectorTask::AddSingleVectorTask(const std::string& group_id,
-                                         const VecTensor &tensor)
+AddVectorTask::AddVectorTask(const std::string& group_id,
+                             const VecTensor* tensor)
     : BaseTask(DDL_DML_TASK_GROUP),
       group_id_(group_id),
-      tensor_(tensor) {
+      tensor_(tensor),
+      bin_tensor_(nullptr){
 
 }
 
-BaseTaskPtr AddSingleVectorTask::Create(const std::string& group_id,
-                                        const VecTensor &tensor) {
-    return std::shared_ptr<BaseTask>(new AddSingleVectorTask(group_id, tensor));
+BaseTaskPtr AddVectorTask::Create(const std::string& group_id,
+                                  const VecTensor* tensor) {
+    return std::shared_ptr<BaseTask>(new AddVectorTask(group_id, tensor));
 }
 
-ServerError AddSingleVectorTask::OnExecute() {
+AddVectorTask::AddVectorTask(const std::string& group_id,
+                             const VecBinaryTensor* tensor)
+        : BaseTask(DDL_DML_TASK_GROUP),
+          group_id_(group_id),
+          tensor_(nullptr),
+          bin_tensor_(tensor) {
+
+}
+
+BaseTaskPtr AddVectorTask::Create(const std::string& group_id,
+                                  const VecBinaryTensor* tensor) {
+    return std::shared_ptr<BaseTask>(new AddVectorTask(group_id, tensor));
+}
+
+
+uint64_t AddVectorTask::GetVecDimension() const {
+    if(tensor_) {
+        return (uint64_t) tensor_->tensor.size();
+    } else if(bin_tensor_) {
+        return (uint64_t) bin_tensor_->tensor.size()/8;
+    } else {
+        return 0;
+    }
+}
+
+const double* AddVectorTask::GetVecData() const {
+    if(tensor_) {
+        return (const double*)(tensor_->tensor.data());
+    } else if(bin_tensor_) {
+        return (const double*)(bin_tensor_->tensor.data());
+    } else {
+        return nullptr;
+    }
+
+}
+
+std::string AddVectorTask::GetVecID() const {
+    if(tensor_) {
+        return tensor_->uid;
+    } else if(bin_tensor_) {
+        return bin_tensor_->uid;
+    } else {
+        return "";
+    }
+}
+
+ServerError AddVectorTask::OnExecute() {
     try {
         engine::meta::GroupSchema group_info;
         group_info.group_id = group_id_;
@@ -164,17 +211,19 @@ ServerError AddSingleVectorTask::OnExecute() {
             return SERVER_INVALID_ARGUMENT;
         }
 
-        uint64_t vec_dim = group_info.dimension;
-        if(vec_dim != tensor_.tensor.size()) {
-            SERVER_LOG_ERROR << "Invalid vector dimension: " << tensor_.tensor.size()
-                             << " vs. group dimension:" << vec_dim;
+        uint64_t group_dim = group_info.dimension;
+        uint64_t vec_dim = GetVecDimension();
+        if(group_dim != vec_dim) {
+            SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
+                             << " vs. group dimension:" << group_dim;
             return SERVER_INVALID_ARGUMENT;
         }
 
         std::vector<float> vec_f;
         vec_f.resize(vec_dim);
+        const double* d_p = GetVecData();
         for(uint64_t d = 0; d < vec_dim; d++) {
-            vec_f[d] = (float)(tensor_.tensor[d]);
+            vec_f[d] = (float)(d_p[d]);
         }
 
         engine::IDNumbers vector_ids;
@@ -187,9 +236,10 @@ ServerError AddSingleVectorTask::OnExecute() {
                 SERVER_LOG_ERROR << "Vector ID not returned";
                 return SERVER_UNEXPECTED_ERROR;
             } else {
+                std::string uid = GetVecID();
                 std::string nid = group_id_ + "_" + std::to_string(vector_ids[0]);
-                IVecIdMapper::GetInstance()->Put(nid, tensor_.uid);
-                SERVER_LOG_TRACE << "nid = " << vector_ids[0] << ", sid = " << tensor_.uid;
+                IVecIdMapper::GetInstance()->Put(nid, uid);
+                SERVER_LOG_TRACE << "nid = " << vector_ids[0] << ", sid = " << uid;
             }
         }
 
@@ -204,16 +254,89 @@ ServerError AddSingleVectorTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 AddBatchVectorTask::AddBatchVectorTask(const std::string& group_id,
-                             const VecTensorList &tensor_list)
+                                       const VecTensorList* tensor_list)
     : BaseTask(DDL_DML_TASK_GROUP),
       group_id_(group_id),
-      tensor_list_(tensor_list) {
+      tensor_list_(tensor_list),
+      bin_tensor_list_(nullptr) {
 
 }
 
 BaseTaskPtr AddBatchVectorTask::Create(const std::string& group_id,
-                                  const VecTensorList &tensor_list) {
+                                       const VecTensorList* tensor_list) {
     return std::shared_ptr<BaseTask>(new AddBatchVectorTask(group_id, tensor_list));
+}
+
+AddBatchVectorTask::AddBatchVectorTask(const std::string& group_id,
+                                       const VecBinaryTensorList* tensor_list)
+        : BaseTask(DDL_DML_TASK_GROUP),
+          group_id_(group_id),
+          tensor_list_(nullptr),
+          bin_tensor_list_(tensor_list) {
+
+}
+
+BaseTaskPtr AddBatchVectorTask::Create(const std::string& group_id,
+                                       const VecBinaryTensorList* tensor_list) {
+    return std::shared_ptr<BaseTask>(new AddBatchVectorTask(group_id, tensor_list));
+}
+
+uint64_t AddBatchVectorTask::GetVecListCount() const {
+    if(tensor_list_) {
+        return (uint64_t) tensor_list_->tensor_list.size();
+    } else if(bin_tensor_list_) {
+        return (uint64_t) bin_tensor_list_->tensor_list.size();
+    } else {
+        return 0;
+    }
+}
+
+uint64_t AddBatchVectorTask::GetVecDimension(uint64_t index) const {
+    if(tensor_list_) {
+        if(index >= tensor_list_->tensor_list.size()){
+            return 0;
+        }
+        return (uint64_t) tensor_list_->tensor_list[index].tensor.size();
+    } else if(bin_tensor_list_) {
+        if(index >= bin_tensor_list_->tensor_list.size()){
+            return 0;
+        }
+        return (uint64_t) bin_tensor_list_->tensor_list[index].tensor.size();
+    } else {
+        return 0;
+    }
+}
+
+const double* AddBatchVectorTask::GetVecData(uint64_t index) const {
+    if(tensor_list_) {
+        if(index >= tensor_list_->tensor_list.size()){
+            return nullptr;
+        }
+        return tensor_list_->tensor_list[index].tensor.data();
+    } else if(bin_tensor_list_) {
+        if(index >= bin_tensor_list_->tensor_list.size()){
+            return nullptr;
+        }
+        return (const double*)bin_tensor_list_->tensor_list[index].tensor.data();
+    } else {
+        return nullptr;
+    }
+}
+
+std::string AddBatchVectorTask::GetVecID(uint64_t index) const {
+    if(tensor_list_) {
+        if(index >= tensor_list_->tensor_list.size()){
+            return 0;
+        }
+        return tensor_list_->tensor_list[index].uid;
+    } else if(bin_tensor_list_) {
+        if(index >= bin_tensor_list_->tensor_list.size()){
+            return 0;
+        }
+        return bin_tensor_list_->tensor_list[index].uid;
+    } else {
+        return "";
+    }
 }
 
 ServerError AddBatchVectorTask::OnExecute() {
@@ -228,39 +351,41 @@ ServerError AddBatchVectorTask::OnExecute() {
             return SERVER_UNEXPECTED_ERROR;
         }
 
-        uint64_t vec_dim = group_info.dimension;
-        uint64_t vec_count = tensor_list_.tensor_list.size();
+        uint64_t group_dim = group_info.dimension;
+        uint64_t vec_count = GetVecListCount();
         std::vector<float> vec_f;
-        vec_f.resize(vec_count*vec_dim);//allocate enough memory
+        vec_f.resize(vec_count*group_dim);//allocate enough memory
         for(uint64_t i = 0; i < vec_count; i ++) {
-            const std::vector<double>& tensor = tensor_list_.tensor_list[i].tensor;
-            if(tensor.size() != vec_dim) {
-                SERVER_LOG_ERROR << "Invalid vector dimension: " << tensor.size()
-                                 << " vs. group dimension:" << vec_dim;
+            uint64_t vec_dim = GetVecDimension(i);
+            if(vec_dim != group_dim) {
+                SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
+                                 << " vs. group dimension:" << group_dim;
                 return SERVER_INVALID_ARGUMENT;
             }
 
+            const double* d_p = GetVecData(i);
             for(uint64_t d = 0; d < vec_dim; d++) {
-                vec_f[i*vec_dim + d] = (float)(tensor[d]);
+                vec_f[i*vec_dim + d] = (float)(d_p[d]);
             }
         }
 
         rc.Record("prepare vectors data");
 
         engine::IDNumbers vector_ids;
-        stat = DB()->add_vectors(group_id_, tensor_list_.tensor_list.size(), vec_f.data(), vector_ids);
+        stat = DB()->add_vectors(group_id_, vec_count, vec_f.data(), vector_ids);
         rc.Record("add vectors to engine");
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
         } else {
-            if(vector_ids.size() < tensor_list_.tensor_list.size()) {
+            if(vector_ids.size() < vec_count) {
                 SERVER_LOG_ERROR << "Vector ID not returned";
                 return SERVER_UNEXPECTED_ERROR;
             } else {
                 std::string nid_prefix = group_id_ + "_";
-                for(size_t i = 0; i < tensor_list_.tensor_list.size(); i++) {
+                for(size_t i = 0; i < vec_count; i++) {
+                    std::string uid = GetVecID(i);
                     std::string nid = nid_prefix + std::to_string(vector_ids[i]);
-                    IVecIdMapper::GetInstance()->Put(nid, tensor_list_.tensor_list[i].uid);
+                    IVecIdMapper::GetInstance()->Put(nid, uid);
                 }
                 rc.Record("build id mapping");
             }

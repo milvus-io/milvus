@@ -39,7 +39,7 @@ class VecServiceHandler : virtual public VecServiceIf {
   }
 
   /**
-   * vector interfaces
+   * insert vector interfaces
    * 
    * 
    * @param group_id
@@ -53,6 +53,16 @@ class VecServiceHandler : virtual public VecServiceIf {
   void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list) {
     // Your implementation goes here
     printf("add_vector_batch\n");
+  }
+
+  void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor) {
+    // Your implementation goes here
+    printf("add_binary_vector\n");
+  }
+
+  void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list) {
+    // Your implementation goes here
+    printf("add_binary_vector_batch\n");
   }
 
   /**
