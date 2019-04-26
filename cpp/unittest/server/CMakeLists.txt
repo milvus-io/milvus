@@ -11,6 +11,7 @@ find_library(cuda_library cudart cublas HINTS /usr/local/cuda/lib64)
 
 aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
+aux_source_directory(../../src/wrapper wrapper_src)
 aux_source_directory(./ test_srcs)
 
 set(require_files
@@ -20,15 +21,17 @@ set(require_files
         ../../src/utils/TimeRecorder.cpp
         )
 
-add_executable(server_test
+cuda_add_executable(server_test
         ${unittest_srcs}
         ${config_files}
         ${cache_srcs}
+        ${wrapper_src}
         ${test_srcs}
         ${require_files}
         )
 
 set(require_libs
+        stdc++
         yaml-cpp
         boost_system
         boost_filesystem
@@ -38,6 +41,9 @@ set(require_libs
         z
         rocksdb
         faiss
+        cudart
+        cublas
+        sqlite3
         )
 
 link_libraries(/usr/lib/x86_64-linux-gnu)
