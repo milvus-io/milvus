@@ -368,13 +368,14 @@ Status DBMetaImpl::get_group_files(const std::string& group_id_,
 Status DBMetaImpl::update_group_file(GroupFileSchema& group_file) {
     group_file.updated_time = GetMicroSecTimeStamp();
     try {
-        auto commited = ConnectorPtr->transaction([&] () mutable {
-            ConnectorPtr->update(group_file);
-            return true;
-        });
-        if (!commited) {
-            return Status::DBTransactionError("Update file Error");
-        }
+        ConnectorPtr->update(group_file);
+        /* auto commited = ConnectorPtr->transaction([&] () mutable { */
+        /*     ConnectorPtr->update(group_file); */
+        /*     return true; */
+        /* }); */
+        /* if (!commited) { */
+        /*     return Status::DBTransactionError("Update file Error"); */
+        /* } */
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
         LOG(DEBUG) << "id= " << group_file.id << " file_id=" << group_file.file_id;
