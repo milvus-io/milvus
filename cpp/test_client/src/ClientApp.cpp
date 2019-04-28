@@ -57,7 +57,7 @@ void ClientApp::Run(const std::string &config_file) {
         session.interface()->add_group(group);
 
         //prepare data
-        const int64_t count = 100000;
+        const int64_t count = 10000;
         VecTensorList tensor_list;
         VecBinaryTensorList bin_tensor_list;
         for (int64_t k = 0; k < count; k++) {
@@ -79,36 +79,36 @@ void ClientApp::Run(const std::string &config_file) {
             bin_tensor_list.tensor_list.emplace_back(bin_tensor);
         }
 
-//        //add vectors one by one
-//        {
-//            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
-//            for (int64_t k = 0; k < count; k++) {
-//                session.interface()->add_vector(group.id, tensor_list.tensor_list[k]);
-//                if(k%1000 == 0) {
-//                    CLIENT_LOG_INFO << "add normal vector no." << k;
-//                }
-//            }
-//            rc.Elapse("done!");
-//        }
-//
-//        //add vectors in one batch
-//        {
-//            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
-//            session.interface()->add_vector_batch(group.id, tensor_list);
-//            rc.Elapse("done!");
-//        }
-//
-//        //add binary vectors one by one
-//        {
-//            server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors one by one");
-//            for (int64_t k = 0; k < count; k++) {
-//                session.interface()->add_binary_vector(group.id, bin_tensor_list.tensor_list[k]);
-//                if(k%1000 == 0) {
-//                    CLIENT_LOG_INFO << "add binary vector no." << k;
-//                }
-//            }
-//            rc.Elapse("done!");
-//        }
+        //add vectors one by one
+        {
+            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
+            for (int64_t k = 0; k < count; k++) {
+                session.interface()->add_vector(group.id, tensor_list.tensor_list[k]);
+                if(k%1000 == 0) {
+                    CLIENT_LOG_INFO << "add normal vector no." << k;
+                }
+            }
+            rc.Elapse("done!");
+        }
+
+        //add vectors in one batch
+        {
+            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
+            session.interface()->add_vector_batch(group.id, tensor_list);
+            rc.Elapse("done!");
+        }
+
+        //add binary vectors one by one
+        {
+            server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors one by one");
+            for (int64_t k = 0; k < count; k++) {
+                session.interface()->add_binary_vector(group.id, bin_tensor_list.tensor_list[k]);
+                if(k%1000 == 0) {
+                    CLIENT_LOG_INFO << "add binary vector no." << k;
+                }
+            }
+            rc.Elapse("done!");
+        }
 
         //add binary vectors in one batch
         {
@@ -134,8 +134,38 @@ void ClientApp::Run(const std::string &config_file) {
 
             std::cout << "Search result: " << std::endl;
             for(auto id : res.id_list) {
-                std::cout << id << std::endl;
+                std::cout << "\t" << id << std::endl;
             }
+            rc.Elapse("done!");
+        }
+
+        //search binary vector
+        {
+            server::TimeRecorder rc("Search binary batch top_k");
+            VecBinaryTensorList tensor_list;
+            for(int32_t k = 350; k < 360; k++) {
+                VecBinaryTensor bin_tensor;
+                bin_tensor.tensor.resize(dim * sizeof(double));
+                double* d_p = new double[dim];
+                for (int32_t i = 0; i < dim; i++) {
+                    d_p[i] = (double)(i + k);
+                }
+                memcpy(const_cast<char*>(bin_tensor.tensor.data()), d_p, dim * sizeof(double));
+                tensor_list.tensor_list.emplace_back(bin_tensor);
+            }
+
+            VecSearchResultList res;
+            VecTimeRangeList range;
+            session.interface()->search_binary_vector_batch(res, group.id, 5, tensor_list, range);
+
+            std::cout << "Search binary batch result: " << std::endl;
+            for(size_t i = 0 ; i < res.result_list.size(); i++) {
+                std::cout << "No " << i << ":" << std::endl;
+                for(auto id : res.result_list[i].id_list) {
+                    std::cout << "\t" << id << std::endl;
+                }
+            }
+
             rc.Elapse("done!");
         }
 

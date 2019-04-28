@@ -301,7 +301,7 @@ uint64_t AddBatchVectorTask::GetVecDimension(uint64_t index) const {
         if(index >= bin_tensor_list_->tensor_list.size()){
             return 0;
         }
-        return (uint64_t) bin_tensor_list_->tensor_list[index].tensor.size();
+        return (uint64_t) bin_tensor_list_->tensor_list[index].tensor.size()/8;
     } else {
         return 0;
     }
@@ -341,8 +341,6 @@ std::string AddBatchVectorTask::GetVecID(uint64_t index) const {
 
 ServerError AddBatchVectorTask::OnExecute() {
     try {
-        TimeRecorder rc("Add vector batch");
-
         engine::meta::GroupSchema group_info;
         group_info.group_id = group_id_;
         engine::Status stat = DB()->get_group(group_info);
@@ -351,6 +349,7 @@ ServerError AddBatchVectorTask::OnExecute() {
             return SERVER_UNEXPECTED_ERROR;
         }
 
+        TimeRecorder rc("Add vector batch");
         uint64_t group_dim = group_info.dimension;
         uint64_t vec_count = GetVecListCount();
         std::vector<float> vec_f;
@@ -402,13 +401,29 @@ ServerError AddBatchVectorTask::OnExecute() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 SearchVectorTask::SearchVectorTask(const std::string& group_id,
                                    const int64_t top_k,
-                                   const VecTensorList& tensor_list,
+                                   const VecTensorList* tensor_list,
                                    const VecTimeRangeList& time_range_list,
                                    VecSearchResultList& result)
     : BaseTask(DQL_TASK_GROUP),
       group_id_(group_id),
       top_k_(top_k),
       tensor_list_(tensor_list),
+      bin_tensor_list_(nullptr),
+      time_range_list_(time_range_list),
+      result_(result) {
+
+}
+
+SearchVectorTask::SearchVectorTask(const std::string& group_id,
+                                   const int64_t top_k,
+                                   const VecBinaryTensorList* bin_tensor_list,
+                                   const VecTimeRangeList& time_range_list,
+                                   VecSearchResultList& result)
+    : BaseTask(DQL_TASK_GROUP),
+      group_id_(group_id),
+      top_k_(top_k),
+      tensor_list_(nullptr),
+      bin_tensor_list_(bin_tensor_list),
       time_range_list_(time_range_list),
       result_(result) {
 
@@ -416,21 +431,101 @@ SearchVectorTask::SearchVectorTask(const std::string& group_id,
 
 BaseTaskPtr SearchVectorTask::Create(const std::string& group_id,
                                      const int64_t top_k,
-                                     const VecTensorList& tensor_list,
+                                     const VecTensorList* tensor_list,
                                      const VecTimeRangeList& time_range_list,
                                      VecSearchResultList& result) {
     return std::shared_ptr<BaseTask>(new SearchVectorTask(group_id, top_k, tensor_list, time_range_list, result));
 }
 
+BaseTaskPtr SearchVectorTask::Create(const std::string& group_id,
+                                     const int64_t top_k,
+                                     const VecBinaryTensorList* bin_tensor_list,
+                                     const VecTimeRangeList& time_range_list,
+                                     VecSearchResultList& result) {
+    return std::shared_ptr<BaseTask>(new SearchVectorTask(group_id, top_k, bin_tensor_list, time_range_list, result));
+}
+
+
+ServerError SearchVectorTask::GetTargetData(std::vector<float>& data) const {
+    if(tensor_list_ && !tensor_list_->tensor_list.empty()) {
+        uint64_t count = tensor_list_->tensor_list.size();
+        uint64_t dim = tensor_list_->tensor_list[0].tensor.size();
+        data.resize(count*dim);
+        for(size_t i = 0; i < count; i++) {
+            if(tensor_list_->tensor_list[i].tensor.size() != dim) {
+                SERVER_LOG_ERROR << "Invalid vector dimension: " << tensor_list_->tensor_list[i].tensor.size();
+                return SERVER_INVALID_ARGUMENT;
+            }
+            const double* d_p = tensor_list_->tensor_list[i].tensor.data();
+            for(int64_t k = 0; k < dim; k++) {
+                data[i*dim + k] = (float)(d_p[k]);
+            }
+        }
+    } else if(bin_tensor_list_ && !bin_tensor_list_->tensor_list.empty()) {
+        uint64_t count = bin_tensor_list_->tensor_list.size();
+        uint64_t dim = bin_tensor_list_->tensor_list[0].tensor.size()/8;
+        data.resize(count*dim);
+        for(size_t i = 0; i < count; i++) {
+            if(bin_tensor_list_->tensor_list[i].tensor.size()/8 != dim) {
+                SERVER_LOG_ERROR << "Invalid vector dimension: " << bin_tensor_list_->tensor_list[i].tensor.size()/8;
+                return SERVER_INVALID_ARGUMENT;
+            }
+            const double* d_p = (const double*)(bin_tensor_list_->tensor_list[i].tensor.data());
+            for(int64_t k = 0; k < dim; k++) {
+                data[i*dim + k] = (float)(d_p[k]);
+            }
+        }
+    }
+
+    return SERVER_SUCCESS;
+}
+
+uint64_t SearchVectorTask::GetTargetDimension() const {
+    if(tensor_list_ && !tensor_list_->tensor_list.empty()) {
+        return tensor_list_->tensor_list[0].tensor.size();
+    } else if(bin_tensor_list_ && !bin_tensor_list_->tensor_list.empty()) {
+        return bin_tensor_list_->tensor_list[0].tensor.size()/8;
+    }
+
+    return 0;
+}
+
+uint64_t SearchVectorTask::GetTargetCount() const {
+    if(tensor_list_) {
+        return tensor_list_->tensor_list.size();
+    } else if(bin_tensor_list_) {
+        return bin_tensor_list_->tensor_list.size();
+    }
+}
+
 ServerError SearchVectorTask::OnExecute() {
     try {
-        std::vector<float> vec_f;
-        for(const VecTensor& tensor : tensor_list_.tensor_list) {
-            vec_f.insert(vec_f.begin(), tensor.tensor.begin(), tensor.tensor.end());
+        engine::meta::GroupSchema group_info;
+        group_info.group_id = group_id_;
+        engine::Status stat = DB()->get_group(group_info);
+        if(!stat.ok()) {
+            SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+            return SERVER_UNEXPECTED_ERROR;
         }
 
+        uint64_t vec_dim = GetTargetDimension();
+        if(vec_dim != group_info.dimension) {
+            SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
+                             << " vs. group dimension:" << group_info.dimension;
+            return SERVER_INVALID_ARGUMENT;
+        }
+
+        TimeRecorder rc("Search vector");
+        std::vector<float> vec_f;
+        ServerError err = GetTargetData(vec_f);
+        if(err != SERVER_SUCCESS) {
+            return err;
+        }
+
+        uint64_t vec_count = GetTargetCount();
+
         engine::QueryResults results;
-        engine::Status stat = DB()->search(group_id_, (size_t)top_k_, tensor_list_.tensor_list.size(), vec_f.data(), results);
+        stat = DB()->search(group_id_, (size_t)top_k_, vec_count, vec_f.data(), results);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
             return SERVER_UNEXPECTED_ERROR;
@@ -438,7 +533,7 @@ ServerError SearchVectorTask::OnExecute() {
             for(engine::QueryResult& res : results){
                 VecSearchResult v_res;
                 std::string nid_prefix = group_id_ + "_";
-                for(auto id : results[0]) {
+                for(auto id : res) {
                     std::string sid;
                     std::string nid = nid_prefix + std::to_string(id);
                     IVecIdMapper::GetInstance()->Get(nid, sid);

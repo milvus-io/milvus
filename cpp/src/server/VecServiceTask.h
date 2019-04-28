@@ -129,24 +129,40 @@ class SearchVectorTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& group_id,
                               const int64_t top_k,
-                              const VecTensorList& tensor_list,
+                              const VecTensorList* tensor_list,
+                              const VecTimeRangeList& time_range_list,
+                              VecSearchResultList& result);
+
+    static BaseTaskPtr Create(const std::string& group_id,
+                              const int64_t top_k,
+                              const VecBinaryTensorList* bin_tensor_list,
                               const VecTimeRangeList& time_range_list,
                               VecSearchResultList& result);
 
 protected:
     SearchVectorTask(const std::string& group_id,
                      const int64_t top_k,
-                     const VecTensorList& tensor_list,
+                     const VecTensorList* tensor_list,
                      const VecTimeRangeList& time_range_list,
                      VecSearchResultList& result);
 
-    ServerError OnExecute() override;
+    SearchVectorTask(const std::string& group_id,
+                     const int64_t top_k,
+                     const VecBinaryTensorList* bin_tensor_list,
+                     const VecTimeRangeList& time_range_list,
+                     VecSearchResultList& result);
 
+    ServerError GetTargetData(std::vector<float>& data) const;
+    uint64_t GetTargetDimension() const;
+    uint64_t GetTargetCount() const;
+
+    ServerError OnExecute() override;
 
 private:
     std::string group_id_;
     int64_t top_k_;
-    const VecTensorList& tensor_list_;
+    const VecTensorList* tensor_list_;
+    const VecBinaryTensorList* bin_tensor_list_;
     const VecTimeRangeList& time_range_list_;
     VecSearchResultList& result_;
 };
