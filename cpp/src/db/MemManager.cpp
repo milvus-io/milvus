@@ -5,6 +5,7 @@
 
 #include <wrapper/Index.h>
 #include <cache/CpuCacheMgr.h>
+#include <easylogging++.h>
 
 #include "MemManager.h"
 #include "Meta.h"
@@ -135,6 +136,7 @@ Status MemManager::mark_memory_as_immutable() {
 
 Status MemManager::serialize(std::vector<std::string>& group_ids) {
     mark_memory_as_immutable();
+    std::unique_lock<std::mutex> lock(serialization_mtx_);
     std::string group_id;
     group_ids.clear();
     for (auto& mem : _immMems) {

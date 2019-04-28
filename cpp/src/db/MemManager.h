@@ -80,6 +80,7 @@ private:
     std::shared_ptr<meta::Meta> _pMeta;
     Options options_;
     std::mutex _mutex;
+    std::mutex serialization_mtx_;
 }; // MemManager
 
 
