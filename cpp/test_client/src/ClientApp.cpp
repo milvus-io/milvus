@@ -56,84 +56,64 @@ void ClientApp::Run(const std::string &config_file) {
         group.index_type = 0;
         session.interface()->add_group(group);
 
-        const int64_t count = 10000;
-        //add vectors one by one
-        {
-            std::vector<VecTensor> tensor_list;
-            for (int64_t k = 0; k < count; k++) {
-                VecTensor tensor;
-                for (int32_t i = 0; i < dim; i++) {
-                    tensor.tensor.push_back((double) (i + k));
-                }
-                tensor.uid = "s_vec_" + std::to_string(k);
-                tensor_list.emplace_back(tensor);
+        //prepare data
+        const int64_t count = 100000;
+        VecTensorList tensor_list;
+        VecBinaryTensorList bin_tensor_list;
+        for (int64_t k = 0; k < count; k++) {
+            VecTensor tensor;
+            tensor.tensor.reserve(dim);
+            VecBinaryTensor bin_tensor;
+            bin_tensor.tensor.resize(dim*sizeof(double));
+            double* d_p = (double*)(const_cast<char*>(bin_tensor.tensor.data()));
+            for (int32_t i = 0; i < dim; i++) {
+                double val = (double)(i + k);
+                tensor.tensor.push_back(val);
+                d_p[i] = val;
             }
 
-            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
-            for (int64_t k = 0; k < count; k++) {
-                session.interface()->add_vector(group.id, tensor_list[k]);
-                CLIENT_LOG_INFO << "add vector no." << k;
-            }
-            rc.Elapse("done!");
+            tensor.uid = "normal_vec_" + std::to_string(k);
+            tensor_list.tensor_list.emplace_back(tensor);
+
+            bin_tensor.uid = "binary_vec_" + std::to_string(k);
+            bin_tensor_list.tensor_list.emplace_back(bin_tensor);
         }
 
-        //add vectors in one batch
-        {
-
-            VecTensorList vec_list;
-            for (int64_t k = 0; k < count; k++) {
-                VecTensor tensor;
-                for (int32_t i = 0; i < dim; i++) {
-                    tensor.tensor.push_back((double) (i + k));
-                }
-                tensor.uid = "m_vec_" + std::to_string(k);
-                vec_list.tensor_list.emplace_back(tensor);
-            }
-
-            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
-            session.interface()->add_vector_batch(group.id, vec_list);
-            rc.Elapse("done!");
-        }
-
-        //add binary vectors one by one
-        {
-            std::vector<VecBinaryTensor> tensor_list;
-            for (int64_t k = 0; k < count; k++) {
-                VecBinaryTensor tensor;
-                tensor.tensor.resize(dim*8);
-                double* d_p = (double*)(const_cast<char*>(tensor.tensor.data()));
-                for (int32_t i = 0; i < dim; i++) {
-                    d_p[i] = (double)(i + k);
-                }
-                tensor.uid = "s_vec_" + std::to_string(k);
-                tensor_list.emplace_back(tensor);
-            }
-
-            server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors one by one");
-            for (int64_t k = 0; k < count; k++) {
-                session.interface()->add_binary_vector(group.id, tensor_list[k]);
-                CLIENT_LOG_INFO << "add vector no." << k;
-            }
-            rc.Elapse("done!");
-        }
+//        //add vectors one by one
+//        {
+//            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
+//            for (int64_t k = 0; k < count; k++) {
+//                session.interface()->add_vector(group.id, tensor_list.tensor_list[k]);
+//                if(k%1000 == 0) {
+//                    CLIENT_LOG_INFO << "add normal vector no." << k;
+//                }
+//            }
+//            rc.Elapse("done!");
+//        }
+//
+//        //add vectors in one batch
+//        {
+//            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
+//            session.interface()->add_vector_batch(group.id, tensor_list);
+//            rc.Elapse("done!");
+//        }
+//
+//        //add binary vectors one by one
+//        {
+//            server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors one by one");
+//            for (int64_t k = 0; k < count; k++) {
+//                session.interface()->add_binary_vector(group.id, bin_tensor_list.tensor_list[k]);
+//                if(k%1000 == 0) {
+//                    CLIENT_LOG_INFO << "add binary vector no." << k;
+//                }
+//            }
+//            rc.Elapse("done!");
+//        }
 
         //add binary vectors in one batch
         {
-
-            VecBinaryTensorList vec_list;
-            for (int64_t k = 0; k < count; k++) {
-                VecBinaryTensor tensor;
-                tensor.tensor.resize(dim*8);
-                double* d_p = (double*)(const_cast<char*>(tensor.tensor.data()));
-                for (int32_t i = 0; i < dim; i++) {
-                    d_p[i] = (double)(i + k);
-                }
-                tensor.uid = "m_vec_" + std::to_string(k);
-                vec_list.tensor_list.emplace_back(tensor);
-            }
-
             server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors in one batch");
-            session.interface()->add_binary_vector_batch(group.id, vec_list);
+            session.interface()->add_binary_vector_batch(group.id, bin_tensor_list);
             rc.Elapse("done!");
         }
 
