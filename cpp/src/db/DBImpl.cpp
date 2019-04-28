@@ -184,7 +184,8 @@ void DBImpl::background_call() {
     std::lock_guard<std::mutex> lock(_mutex);
     assert(_bg_compaction_scheduled);
 
-    if (!_bg_error.ok()) return;
+    if (!_bg_error.ok() || _shutting_down.load(std::memory_order_acquire))
+        return ;
 
     background_compaction();
 
