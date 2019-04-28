@@ -342,6 +342,7 @@ void DBImpl::background_build_index() {
 
 Status DBImpl::try_build_index() {
     if (bg_build_index_started_) return Status::OK();
+    if (_shutting_down.load(std::memory_order_acquire)) return Status::OK();
     bg_build_index_started_ = true;
     std::thread build_index_task(&DBImpl::background_build_index, this);
     build_index_task.detach();
