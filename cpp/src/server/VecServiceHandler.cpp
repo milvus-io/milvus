@@ -18,98 +18,104 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
+namespace {
+    class TimeRecordWrapper {
+    public:
+        TimeRecordWrapper(const std::string& func_name)
+        : recorder_(func_name), func_name_(func_name) {
+            SERVER_LOG_TRACE << func_name << " called";
+        }
+
+        ~TimeRecordWrapper() {
+            recorder_.Elapse("cost");
+            SERVER_LOG_TRACE << func_name_ << " finished";
+        }
+
+    private:
+        TimeRecorder recorder_;
+        std::string func_name_;
+    };
+    void TimeRecord(const std::string& func_name) {
+
+    }
+}
+
 void
 VecServiceHandler::add_group(const VecGroup &group) {
-    SERVER_LOG_INFO << "add_group() called";
+    TimeRecordWrapper rc("add_group()");
     SERVER_LOG_TRACE << "group.id = " << group.id << ", group.dimension = " << group.dimension
                         << ", group.index_type = " << group.index_type;
 
     BaseTaskPtr task_ptr = AddGroupTask::Create(group.dimension, group.id);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
-
-    SERVER_LOG_INFO << "add_group() finished";
 }
 
 void
 VecServiceHandler::get_group(VecGroup &_return, const std::string &group_id) {
-    SERVER_LOG_INFO << "get_group() called";
+    TimeRecordWrapper rc("get_group()");
     SERVER_LOG_TRACE << "group_id = " << group_id;
 
     _return.id = group_id;
     BaseTaskPtr task_ptr = GetGroupTask::Create(group_id, _return.dimension);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
-
-    SERVER_LOG_INFO << "get_group() finished";
 }
 
 void
 VecServiceHandler::del_group(const std::string &group_id) {
-    SERVER_LOG_INFO << "del_group() called";
+    TimeRecordWrapper rc("del_group()");
     SERVER_LOG_TRACE << "group_id = " << group_id;
 
     BaseTaskPtr task_ptr = DeleteGroupTask::Create(group_id);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
-
-    SERVER_LOG_INFO << "del_group() not implemented";
 }
 
 
 void
 VecServiceHandler::add_vector(const std::string &group_id, const VecTensor &tensor) {
-    SERVER_LOG_INFO << "add_vector() called";
+    TimeRecordWrapper rc("add_vector()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size();
 
     BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
-
-    SERVER_LOG_INFO << "add_vector() finished";
 }
 
 void
 VecServiceHandler::add_vector_batch(const std::string &group_id,
                                     const VecTensorList &tensor_list) {
-    SERVER_LOG_INFO << "add_vector_batch() called";
+    TimeRecordWrapper rc("add_vector_batch()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector list size = "
                      << tensor_list.tensor_list.size();
-    TimeRecorder rc("Add VECTOR BATCH");
+
     BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
-    rc.Elapse("DONE!");
-
-    SERVER_LOG_INFO << "add_vector_batch() finished";
 }
 
 void
 VecServiceHandler::add_binary_vector(const std::string& group_id,
                                      const VecBinaryTensor& tensor) {
-    SERVER_LOG_INFO << "add_vector_batch() called";
+    TimeRecordWrapper rc("add_binary_vector()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size()/4;
 
     BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
-
-    SERVER_LOG_INFO << "add_vector_batch() finished";
 }
 
 void
 VecServiceHandler::add_binary_vector_batch(const std::string& group_id,
                                            const VecBinaryTensorList& tensor_list) {
-    SERVER_LOG_INFO << "add_vector_batch() called";
+    TimeRecordWrapper rc("add_binary_vector_batch()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector list size = "
                      << tensor_list.tensor_list.size();
-    TimeRecorder rc("Add BINARY VECTOR BATCH");
+
     BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
-    rc.Elapse("DONE!");
-
-    SERVER_LOG_INFO << "add_vector_batch() finished";
 }
 
 void
@@ -118,7 +124,7 @@ VecServiceHandler::search_vector(VecSearchResult &_return,
                                  const int64_t top_k,
                                  const VecTensor &tensor,
                                  const VecTimeRangeList &time_range_list) {
-    SERVER_LOG_INFO << "search_vector() called";
+    TimeRecordWrapper rc("search_vector()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", top_k = " << top_k
                         << ", vector size = " << tensor.tensor.size()
                         << ", time range list size = " << time_range_list.range_list.size();
@@ -135,8 +141,6 @@ VecServiceHandler::search_vector(VecSearchResult &_return,
     } else {
         SERVER_LOG_ERROR << "No search result returned";
     }
-
-    SERVER_LOG_INFO << "search_vector() finished";
 }
 
 void
@@ -145,7 +149,7 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
                                        const int64_t top_k,
                                        const VecTensorList &tensor_list,
                                        const VecTimeRangeList &time_range_list) {
-    SERVER_LOG_INFO << "search_vector_batch() called";
+    TimeRecordWrapper rc("search_vector_batch()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", top_k = " << top_k
                      << ", vector list size = " << tensor_list.tensor_list.size()
                      << ", time range list size = " << time_range_list.range_list.size();
@@ -153,8 +157,6 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
     BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, tensor_list, time_range_list, _return);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
-
-    SERVER_LOG_INFO << "search_vector_batch() finished";
 }
 
 
