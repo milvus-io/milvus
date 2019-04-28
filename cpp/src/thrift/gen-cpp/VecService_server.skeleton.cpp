@@ -84,6 +84,16 @@ class VecServiceHandler : virtual public VecServiceIf {
     printf("search_vector_batch\n");
   }
 
+  void search_binary_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecTimeRangeList& time_range_list) {
+    // Your implementation goes here
+    printf("search_binary_vector\n");
+  }
+
+  void search_binary_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecTimeRangeList& time_range_list) {
+    // Your implementation goes here
+    printf("search_binary_vector_batch\n");
+  }
+
 };
 
 int main(int argc, char **argv) {
