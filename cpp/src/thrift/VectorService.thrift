@@ -96,4 +96,6 @@ service VecService {
      */
     VecSearchResult search_vector(2: string group_id, 3: i64 top_k, 4: VecTensor tensor, 5: VecTimeRangeList time_range_list) throws(1: VecException e);
     VecSearchResultList search_vector_batch(2: string group_id, 3: i64 top_k, 4: VecTensorList tensor_list, 5: VecTimeRangeList time_range_list) throws(1: VecException e);
+    VecSearchResult search_binary_vector(2: string group_id, 3: i64 top_k, 4: VecBinaryTensor tensor, 5: VecTimeRangeList time_range_list) throws(1: VecException e);
+    VecSearchResultList search_binary_vector_batch(2: string group_id, 3: i64 top_k, 4: VecBinaryTensorList tensor_list, 5: VecTimeRangeList time_range_list) throws(1: VecException e);
 }
