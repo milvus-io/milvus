@@ -24,10 +24,10 @@ namespace {
     public:
         DBWrapper() {
             zilliz::vecwise::engine::Options opt;
-            ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
-            opt.meta.backend_uri = config.GetValue(CONFIG_SERVER_DB_URL);
-            std::string db_path = config.GetValue(CONFIG_SERVER_DB_PATH);
-            opt.memory_sync_interval = (uint16_t)config.GetInt32Value(CONFIG_SERVER_DB_FLUSH_INTERVAL, 10);
+            ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
+            opt.meta.backend_uri = config.GetValue(CONFIG_DB_URL);
+            std::string db_path = config.GetValue(CONFIG_DB_PATH);
+            opt.memory_sync_interval = (uint16_t)config.GetInt32Value(CONFIG_DB_FLUSH_INTERVAL, 10);
             opt.meta.path = db_path + "/db";
 
             CommonUtil::CreateDirectory(opt.meta.path);
