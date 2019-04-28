@@ -92,26 +92,26 @@ TEST(AddVector, CLIENT_TEST) {
             }
         }
 
+//        //add vectors one by one
+//        {
+//            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
+//            for (int64_t k = 0; k < count; k++) {
+//                session.interface()->add_vector(group.id, tensor_list.tensor_list[k]);
+//                if (k % 1000 == 0) {
+//                    CLIENT_LOG_INFO << "add normal vector no." << k;
+//                }
+//            }
+//            rc.Elapse("done!");
+//        }
+//
+//        //add vectors in one batch
+//        {
+//            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
+//            session.interface()->add_vector_batch(group.id, tensor_list);
+//            rc.Elapse("done!");
+//        }
+
 #if 0
-        //add vectors one by one
-        {
-            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
-            for (int64_t k = 0; k < count; k++) {
-                session.interface()->add_vector(group.id, tensor_list.tensor_list[k]);
-                if (k % 1000 == 0) {
-                    CLIENT_LOG_INFO << "add normal vector no." << k;
-                }
-            }
-            rc.Elapse("done!");
-        }
-
-        //add vectors in one batch
-        {
-            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
-            session.interface()->add_vector_batch(group.id, tensor_list);
-            rc.Elapse("done!");
-        }
-
         //add binary vectors one by one
         {
             server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors one by one");
@@ -123,15 +123,14 @@ TEST(AddVector, CLIENT_TEST) {
             }
             rc.Elapse("done!");
         }
-
-#endif
-
+#else
         //add binary vectors in one batch
         {
             server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors in one batch");
             session.interface()->add_binary_vector_batch(group.id, bin_tensor_list);
             rc.Elapse("done!");
         }
+#endif
     } catch (std::exception &ex) {
         CLIENT_LOG_ERROR << "request encounter exception: " << ex.what();
         ASSERT_TRUE(false);
