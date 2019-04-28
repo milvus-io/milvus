@@ -12,8 +12,9 @@
 #include <gmock/gmock.h>
 #include <easylogging++.h>
 
-#include "src/ClientApp.h"
 #include "src/FaissTest.h"
+#include "src/Log.h"
+#include "server/ServerConfig.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -57,8 +58,10 @@ main(int argc, char *argv[]) {
         }
     }
 
-    zilliz::vecwise::client::ClientApp app;
-    app.Run(config_filename);
+    zilliz::vecwise::server::ServerConfig& config = zilliz::vecwise::server::ServerConfig::GetInstance();
+    config.LoadConfigFile(config_filename);
+
+    CLIENT_LOG_INFO << "Load config file:" << config_filename;
 
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
