@@ -46,8 +46,6 @@ set(require_libs
         sqlite3
         )
 
-link_libraries(/usr/lib/x86_64-linux-gnu)
-
 target_link_libraries(server_test
         ${unittest_libs}
         ${require_libs}

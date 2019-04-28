@@ -38,8 +38,6 @@ set(engine_libs
         sqlite3
         )
 
-link_libraries(/usr/lib/x86_64-linux-gnu)
-
 target_link_libraries(vecwise_engine ${engine_libs} ${cuda_library})
 
 add_executable(vecwise_server
