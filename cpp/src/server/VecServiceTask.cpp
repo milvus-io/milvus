@@ -341,6 +341,8 @@ std::string AddBatchVectorTask::GetVecID(uint64_t index) const {
 
 ServerError AddBatchVectorTask::OnExecute() {
     try {
+        TimeRecorder rc("AddBatchVectorTask");
+
         engine::meta::GroupSchema group_info;
         group_info.group_id = group_id_;
         engine::Status stat = DB()->get_group(group_info);
@@ -349,7 +351,8 @@ ServerError AddBatchVectorTask::OnExecute() {
             return SERVER_UNEXPECTED_ERROR;
         }
 
-        TimeRecorder rc("Add vector batch");
+        rc.Record("check group dimension");
+
         uint64_t group_dim = group_info.dimension;
         uint64_t vec_count = GetVecListCount();
         std::vector<float> vec_f;
@@ -500,6 +503,8 @@ uint64_t SearchVectorTask::GetTargetCount() const {
 
 ServerError SearchVectorTask::OnExecute() {
     try {
+        TimeRecorder rc("SearchVectorTask");
+
         engine::meta::GroupSchema group_info;
         group_info.group_id = group_id_;
         engine::Status stat = DB()->get_group(group_info);
@@ -515,7 +520,8 @@ ServerError SearchVectorTask::OnExecute() {
             return SERVER_INVALID_ARGUMENT;
         }
 
-        TimeRecorder rc("Search vector");
+        rc.Record("check group dimension");
+
         std::vector<float> vec_f;
         ServerError err = GetTargetData(vec_f);
         if(err != SERVER_SUCCESS) {
@@ -524,12 +530,15 @@ ServerError SearchVectorTask::OnExecute() {
 
         uint64_t vec_count = GetTargetCount();
 
+        rc.Record("prepare input data");
+
         engine::QueryResults results;
         stat = DB()->search(group_id_, (size_t)top_k_, vec_count, vec_f.data(), results);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
             return SERVER_UNEXPECTED_ERROR;
         } else {
+            rc.Record("do search");
             for(engine::QueryResult& res : results){
                 VecSearchResult v_res;
                 std::string nid_prefix = group_id_ + "_";
@@ -546,6 +555,7 @@ ServerError SearchVectorTask::OnExecute() {
 
                 result_.result_list.push_back(v_res);
             }
+            rc.Record("construct result");
         }
 
     } catch (std::exception& ex) {
