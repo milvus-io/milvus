@@ -65,7 +65,8 @@ TEST(AddVector, CLIENT_TEST) {
         session.interface()->add_group(group);
 
         //prepare data
-        const int64_t count = 10000;
+        CLIENT_LOG_INFO << "Preparing vectors...";
+        const int64_t count = 100000;
         VecTensorList tensor_list;
         VecBinaryTensorList bin_tensor_list;
         for (int64_t k = 0; k < count; k++) {
@@ -85,8 +86,13 @@ TEST(AddVector, CLIENT_TEST) {
 
             bin_tensor.uid = "binary_vec_" + std::to_string(k);
             bin_tensor_list.tensor_list.emplace_back(bin_tensor);
+
+            if((k+1)%10000 == 0) {
+                CLIENT_LOG_INFO << k+1 << " vectors built";
+            }
         }
 
+#if 0
         //add vectors one by one
         {
             server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
@@ -117,6 +123,8 @@ TEST(AddVector, CLIENT_TEST) {
             }
             rc.Elapse("done!");
         }
+
+#endif
 
         //add binary vectors in one batch
         {
@@ -168,7 +176,7 @@ TEST(SearchVector, CLIENT_TEST) {
 
         //search binary vector
         {
-            const int32_t anchor_index = 100;
+            const int32_t anchor_index = 300;
             const int32_t search_count = 10;
             const int64_t top_k = 10;
             server::TimeRecorder rc("Search binary batch top_k");
