@@ -33,6 +33,11 @@ link_directories(
     "${VECWISE_THIRD_PARTY_BUILD}/lib"
 )
 
+set(unittest_libs
+        gtest_main
+        gmock_main
+        pthread)
+
 set(client_libs
     yaml-cpp
     boost_system
@@ -44,7 +49,7 @@ set(client_libs
 include_directories(/usr/local/cuda/include)
 find_library(cuda_library cudart cublas HINTS /usr/local/cuda/lib64)
 
-target_link_libraries(test_client ${client_libs} ${cuda_library})
+target_link_libraries(test_client ${unittest_libs} ${client_libs} ${cuda_library})
 
 #add_executable(skeleton_server
 #        ../src/thrift/gen-cpp/VecService_server.skeleton.cpp

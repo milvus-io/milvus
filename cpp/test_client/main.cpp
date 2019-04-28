@@ -8,6 +8,8 @@
 #include <libgen.h>
 #include <cstring>
 #include <string>
+#include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include <easylogging++.h>
 
 #include "src/ClientApp.h"
@@ -26,19 +28,13 @@ main(int argc, char *argv[]) {
 //    return 0;
 
     std::string app_name = basename(argv[0]);
-    static struct option long_options[] = {{"conf_file", required_argument, 0, 'c'},
+    static struct option long_options[] = {{"conf_file", optional_argument, 0, 'c'},
                                            {"help", no_argument, 0, 'h'},
                                            {NULL, 0, 0, 0}};
 
     int option_index = 0;
-    std::string config_filename;
+    std::string config_filename = "../../conf/server_config.yaml";
     app_name = argv[0];
-
-    if(argc < 2) {
-        print_help(app_name);
-        printf("Client exit...\n");
-        return EXIT_FAILURE;
-    }
 
     int value;
     while ((value = getopt_long(argc, argv, "c:p:dh", long_options, &option_index)) != -1) {
@@ -64,8 +60,8 @@ main(int argc, char *argv[]) {
     zilliz::vecwise::client::ClientApp app;
     app.Run(config_filename);
 
-    printf("Client exit...\n");
-    return 0;
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }
 
 void
