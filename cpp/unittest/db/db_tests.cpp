@@ -82,7 +82,7 @@ TEST_F(DBTest, DB_TEST) {
     engine::IDNumbers target_ids;
 
     int d = 256;
-    int nb = 100;
+    int nb = 50;
     float *xb = new float[d * nb];
     for(int i = 0; i < nb; i++) {
         for(int j = 0; j < d; j++) xb[d * i + j] = drand48();
@@ -100,13 +100,12 @@ TEST_F(DBTest, DB_TEST) {
         engine::QueryResults results;
         int k = 10;
         std::this_thread::sleep_for(std::chrono::seconds(2));
-        /* std::this_thread::sleep_for(std::chrono::milliseconds(30)); */
 
         INIT_TIMER;
         std::stringstream ss;
         long count = 0;
 
-        for (auto j=0; j<5; ++j) {
+        for (auto j=0; j<8; ++j) {
             ss.str("");
             db->count(group_name, count);
 
@@ -122,7 +121,7 @@ TEST_F(DBTest, DB_TEST) {
         }
     });
 
-    int loop = 40000;
+    int loop = 100000;
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
@@ -130,7 +129,7 @@ TEST_F(DBTest, DB_TEST) {
         } else {
             db->add_vectors(group_name, nb, xb, vector_ids);
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
+        std::this_thread::sleep_for(std::chrono::microseconds(5));
     }
 
     search.join();
