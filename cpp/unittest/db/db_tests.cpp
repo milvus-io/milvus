@@ -9,11 +9,27 @@
 #include <faiss/AutoTune.h>
 #include <thread>
 #include <easylogging++.h>
+#include <chrono>
 
 #include "db/DB.h"
 #include "faiss/Index.h"
 
 using namespace zilliz::vecwise;
+
+#define TIMING
+
+#ifdef TIMING
+#define INIT_TIMER auto start = std::chrono::high_resolution_clock::now();
+#define START_TIMER  start = std::chrono::high_resolution_clock::now();
+#define STOP_TIMER(name)  LOG(DEBUG) << "RUNTIME of " << name << ": " << \
+    std::chrono::duration_cast<std::chrono::milliseconds>( \
+            std::chrono::high_resolution_clock::now()-start \
+    ).count() << " ms ";
+#else
+#define INIT_TIMER
+#define START_TIMER
+#define STOP_TIMER(name)
+#endif
 
 class DBTest : public ::testing::Test {
 protected:
@@ -65,7 +81,7 @@ TEST_F(DBTest, DB_TEST) {
     engine::IDNumbers target_ids;
 
     int d = 256;
-    int nb = 10;
+    int nb = 5;
     float *xb = new float[d * nb];
     for(int i = 0; i < nb; i++) {
         for(int j = 0; j < d; j++) xb[d * i + j] = drand48();
@@ -79,7 +95,7 @@ TEST_F(DBTest, DB_TEST) {
         qxb[d * i] += i / 2000.;
     }
 
-    int loop = 500000;
+    int loop = 2000000;
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
@@ -89,20 +105,27 @@ TEST_F(DBTest, DB_TEST) {
         }
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(3));
-
-    long count = 0;
-    db->count(group_name, count);
-    LOG(DEBUG) << "Count=" << count;
-
     engine::QueryResults results;
     int k = 10;
-    for (auto i=0; i<5; ++i) {
-        LOG(DEBUG) << "PRE" << i;
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    INIT_TIMER;
+
+    std::stringstream ss;
+    long count = 0;
+
+    for (auto j=0; j<15; ++j) {
+        ss.str("");
+        db->count(group_name, count);
+
+        ss << "Search " << j << " With Size " << count;
+
+        START_TIMER;
         stat = db->search(group_name, k, qb, qxb, results);
-        LOG(DEBUG) << "POST" << i;
+        STOP_TIMER(ss.str());
+
         ASSERT_STATS(stat);
         ASSERT_EQ(results[0][0], target_ids[0]);
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
     delete [] xb;
