@@ -327,12 +327,14 @@ void DBImpl::background_build_index() {
     _pMeta->files_to_index(to_index_files);
     Status status;
     for (auto& file : to_index_files) {
+        LOG(DEBUG) << "Buiding index for " << file.location;
         status = build_index(file);
         if (!status.ok()) {
             _bg_error = status;
             return;
         }
     }
+    LOG(DEBUG) << "All Buiding index Done";
 
     bg_build_index_started_ = false;
     bg_build_index_finish_signal_.notify_all();
@@ -370,17 +372,21 @@ Status DBImpl::count(const std::string& group_id, long& result) {
 
 DBImpl::~DBImpl() {
     {
+        LOG(DEBUG) << "Start wait background merge thread";
         std::unique_lock<std::mutex> lock(_mutex);
         _shutting_down.store(true, std::memory_order_release);
         while (_bg_compaction_scheduled) {
             _bg_work_finish_signal.wait(lock);
         }
+        LOG(DEBUG) << "Stop wait background merge thread";
     }
     {
+        LOG(DEBUG) << "Start wait background build index thread";
         std::unique_lock<std::mutex> lock(build_index_mutex_);
         while (bg_build_index_started_) {
             bg_build_index_finish_signal_.wait(lock);
         }
+        LOG(DEBUG) << "Stop wait background build index thread";
     }
     std::vector<std::string> ids;
     _pMemMgr->serialize(ids);
