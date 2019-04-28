@@ -5,7 +5,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
 #include <utils/TimeRecorder.h>
-#include "ClientApp.h"
 #include "ClientSession.h"
 #include "server/ServerConfig.h"
 #include "Log.h"
