@@ -91,8 +91,8 @@ ServerError SimpleIdMapper::Delete(const std::string& nid) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 RocksIdMapper::RocksIdMapper() {
-    ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
-    std::string db_path = config.GetValue(CONFIG_SERVER_DB_PATH);
+    ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
+    std::string db_path = config.GetValue(CONFIG_DB_PATH);
     db_path += "/id_mapping";
     CommonUtil::CreateDirectory(db_path);
 
@@ -102,6 +102,7 @@ RocksIdMapper::RocksIdMapper() {
     options.OptimizeLevelStyleCompaction();
     // create the DB if it's not already present
     options.create_if_missing = true;
+    options.max_open_files = config.GetInt32Value(CONFIG_DB_IDMAPPER_MAX_FILE, 128);
 
     // open DB
     rocksdb::Status s = rocksdb::DB::Open(options, db_path, &db_);

@@ -41,8 +41,8 @@ namespace {
 
     int32_t GetFlushInterval() {
         server::ServerConfig& config = server::ServerConfig::GetInstance();
-        server::ConfigNode server_config = config.GetConfig(server::CONFIG_SERVER);
-        return server_config.GetInt32Value(server::CONFIG_SERVER_DB_FLUSH_INTERVAL);
+        server::ConfigNode db_config = config.GetConfig(server::CONFIG_DB);
+        return db_config.GetInt32Value(server::CONFIG_DB_FLUSH_INTERVAL);
     }
 
     std::string GetGroupID() {
