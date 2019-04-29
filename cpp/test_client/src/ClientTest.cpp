@@ -12,6 +12,7 @@
 
 #include <time.h>
 
+using namespace zilliz;
 using namespace zilliz::vecwise;
 
 namespace {

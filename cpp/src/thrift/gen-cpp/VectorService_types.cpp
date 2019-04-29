@@ -11,7 +11,7 @@
 
 #include <thrift/TToString.h>
 
-
+namespace zilliz {
 
 int _kVecErrCodeValues[] = {
   VecErrCode::SUCCESS,
@@ -1793,4 +1793,4 @@ void VecSearchFilter::printTo(std::ostream& out) const {
   out << ")";
 }
 
-
+} // namespace

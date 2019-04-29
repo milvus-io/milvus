@@ -11,7 +11,7 @@
 #include <thrift/async/TConcurrentClientSyncInfo.h>
 #include "VectorService_types.h"
 
-
+namespace zilliz {
 
 #ifdef _MSC_VER
   #pragma warning( push )
@@ -1725,6 +1725,6 @@ class VecServiceConcurrentClient : virtual public VecServiceIf {
   #pragma warning( pop )
 #endif
 
-
+} // namespace
 
 #endif

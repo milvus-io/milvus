@@ -3,6 +3,16 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+namespace cl zilliz
+namespace cpp zilliz
+namespace py zilliz
+namespace d zilliz
+namespace dart zilliz
+namespace java zilliz
+namespace perl zilliz
+namespace php zilliz
+namespace haxe zilliz
+namespace netcore zilliz
 
 enum VecErrCode {
     SUCCESS = 0,
