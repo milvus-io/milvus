@@ -67,8 +67,11 @@ class VecServiceHandler : virtual public VecServiceIf {
 
   /**
    * search interfaces
-   * if time_range_list is empty, engine will search without time limit
-   * 
+   * you can use filter to reduce search result
+   * filter.attrib_filter can specify which attribute you need, for example:
+   * set attrib_filter = {"color":""} means you want to get "color" attribute for result vector
+   * set attrib_filter = {"color":"red"} means you want to get vectors which has attribute "color" equals "red"
+   * if filter.time_range is empty, engine will search without time limit
    * 
    * @param group_id
    * @param top_k
