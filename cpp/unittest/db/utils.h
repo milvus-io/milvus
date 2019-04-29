@@ -34,6 +34,7 @@ void ASSERT_STATS(zilliz::vecwise::engine::Status& stat);
 
 class DBTest : public ::testing::Test {
 protected:
+    void InitLog();
     virtual void SetUp() override;
 };
 
