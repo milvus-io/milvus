@@ -100,8 +100,11 @@ service VecService {
 
     /**
      * search interfaces
-     * if time_range_list is empty, engine will search without time limit
-     *
+     * you can use filter to reduce search result
+     * filter.attrib_filter can specify which attribute you need, for example:
+     * set attrib_filter = {"color":""} means you want to get "color" attribute for result vector
+     * set attrib_filter = {"color":"red"} means you want to get vectors which has attribute "color" equals "red"
+     * if filter.time_range is empty, engine will search without time limit
      */
     VecSearchResult search_vector(2: string group_id, 3: i64 top_k, 4: VecTensor tensor, 5: VecSearchFilter filter) throws(1: VecException e);
     VecSearchResultList search_vector_batch(2: string group_id, 3: i64 top_k, 4: VecTensorList tensor_list, 5: VecSearchFilter filter) throws(1: VecException e);
