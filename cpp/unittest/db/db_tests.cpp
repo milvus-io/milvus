@@ -4,15 +4,11 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
-#include <faiss/IndexFlat.h>
-#include <faiss/MetaIndexes.h>
-#include <faiss/AutoTune.h>
 #include <thread>
 #include <easylogging++.h>
 #include <chrono>
 
 #include "db/DB.h"
-#include "faiss/Index.h"
 
 using namespace zilliz::vecwise;
 
