@@ -17,22 +17,14 @@ TEST_F(DBTest, DB_TEST) {
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
 
-    engine::Options opt;
-    opt.meta.backend_uri = "http://127.0.0.1";
-    opt.meta.path = "/tmp/vecwise_test/db_test";
-
-    engine::DB* db = nullptr;
-    engine::DB::Open(opt, &db);
-    ASSERT_TRUE(db != nullptr);
-
     engine::meta::GroupSchema group_info;
     group_info.dimension = group_dim;
     group_info.group_id = group_name;
-    engine::Status stat = db->add_group(group_info);
+    engine::Status stat = db_->add_group(group_info);
 
     engine::meta::GroupSchema group_info_get;
     group_info_get.group_id = group_name;
-    stat = db->get_group(group_info_get);
+    stat = db_->get_group(group_info_get);
     ASSERT_STATS(stat);
     ASSERT_EQ(group_info_get.dimension, group_dim);
 
@@ -65,12 +57,12 @@ TEST_F(DBTest, DB_TEST) {
 
         for (auto j=0; j<15; ++j) {
             ss.str("");
-            db->count(group_name, count);
+            db_->count(group_name, count);
 
             ss << "Search " << j << " With Size " << count;
 
             START_TIMER;
-            stat = db->search(group_name, k, qb, qxb, results);
+            stat = db_->search(group_name, k, qb, qxb, results);
             STOP_TIMER(ss.str());
 
             ASSERT_STATS(stat);
@@ -83,9 +75,9 @@ TEST_F(DBTest, DB_TEST) {
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
-            db->add_vectors(group_name, qb, qxb, target_ids);
+            db_->add_vectors(group_name, qb, qxb, target_ids);
         } else {
-            db->add_vectors(group_name, nb, xb, vector_ids);
+            db_->add_vectors(group_name, nb, xb, vector_ids);
         }
         std::this_thread::sleep_for(std::chrono::microseconds(5));
     }
@@ -94,39 +86,22 @@ TEST_F(DBTest, DB_TEST) {
 
     delete [] xb;
     delete [] qxb;
-    delete db;
-    engine::DB::Open(opt, &db);
-    db->drop_all();
-    delete db;
 };
 
 TEST_F(DBTest, SEARCH_TEST) {
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
 
-    engine::Options opt;
-    opt.meta.backend_uri = "http://127.0.0.1";
-    opt.meta.path = "/tmp/search_test";
-    opt.index_trigger_size = 100000 * group_dim;
-    opt.memory_sync_interval = 1;
-    opt.merge_trigger_number = 1;
-
-    engine::DB* db = nullptr;
-    engine::DB::Open(opt, &db);
-    ASSERT_TRUE(db != nullptr);
-
     engine::meta::GroupSchema group_info;
     group_info.dimension = group_dim;
     group_info.group_id = group_name;
-    engine::Status stat = db->add_group(group_info);
-    //ASSERT_STATS(stat);
+    engine::Status stat = db_->add_group(group_info);
 
     engine::meta::GroupSchema group_info_get;
     group_info_get.group_id = group_name;
-    stat = db->get_group(group_info_get);
+    stat = db_->get_group(group_info_get);
     ASSERT_STATS(stat);
     ASSERT_EQ(group_info_get.dimension, group_dim);
-
 
     // prepare raw data
     size_t nb = 250000;
@@ -155,30 +130,19 @@ TEST_F(DBTest, SEARCH_TEST) {
     //std::vector<float> dis_gt(k*nq);
     std::vector<float> dis(k*nq);
 
-    // prepare ground-truth
-    //faiss::Index* index_gt(faiss::index_factory(group_dim, "IDMap,Flat"));
-    //index_gt->add_with_ids(nb, xb.data(), ids.data());
-    //index_gt->search(nq, xq.data(), 1, dis_gt.data(), nns_gt.data());
-
     // insert data
     const int batch_size = 100;
     for (int j = 0; j < nb / batch_size; ++j) {
-        stat = db->add_vectors(group_name, batch_size, xb.data()+batch_size*j*group_dim, ids);
+        stat = db_->add_vectors(group_name, batch_size, xb.data()+batch_size*j*group_dim, ids);
         if (j == 200){ sleep(1);}
         ASSERT_STATS(stat);
     }
 
-    sleep(3); // wait until build index finish
+    sleep(2); // wait until build index finish
 
     engine::QueryResults results;
-    stat = db->search(group_name, k, nq, xq.data(), results);
+    stat = db_->search(group_name, k, nq, xq.data(), results);
     ASSERT_STATS(stat);
 
     // TODO(linxj): add groundTruth assert
-
-    delete db;
-
-    engine::DB::Open(opt, &db);
-    db->drop_all();
-    delete db;
 };

@@ -6,6 +6,8 @@
 
 #include <iostream>
 #include <easylogging++.h>
+#include <thread>
+#include <boost/filesystem.hpp>
 
 #include "utils.h"
 #include "db/Factories.h"
@@ -29,6 +31,16 @@ void DBTest::InitLog() {
 
 void DBTest::SetUp() {
     InitLog();
+    auto options = engine::OptionsFactory::Build();
+    options.meta.path = "/tmp/vecwise_test";
+    engine::DB::Open(options, &db_);
+}
+
+void DBTest::TearDown() {
+    delete db_;
+    db_ = nullptr;
+    auto options = engine::OptionsFactory::Build();
+    boost::filesystem::remove_all("/tmp/vecwise_test");
 }
 
 void MetaTest::SetUp() {
