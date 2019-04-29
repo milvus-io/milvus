@@ -8,6 +8,7 @@
 #include <easylogging++.h>
 
 #include "utils.h"
+#include "db/Factories.h"
 
 using namespace zilliz::vecwise;
 
@@ -24,4 +25,13 @@ void DBTest::SetUp() {
     defaultConf.set(el::Level::Debug,
             el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
     el::Loggers::reconfigureLogger("default", defaultConf);
+}
+
+void MetaTest::SetUp() {
+    DBTest::SetUp();
+    impl_ = engine::DBMetaImplFactory::Build();
+}
+
+void MetaTest::TearDown() {
+    impl_->drop_all();
 }

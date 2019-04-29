@@ -10,6 +10,7 @@
 #include <chrono>
 
 #include "db/DB.h"
+#include "db/DBMetaImpl.h"
 
 
 #define TIMING
@@ -34,4 +35,13 @@ void ASSERT_STATS(zilliz::vecwise::engine::Status& stat);
 class DBTest : public ::testing::Test {
 protected:
     virtual void SetUp() override;
+};
+
+
+class MetaTest : public DBTest {
+protected:
+    std::shared_ptr<zilliz::vecwise::engine::meta::DBMetaImpl> impl_;
+
+    virtual void SetUp() override;
+    virtual void TearDown() override;
 };

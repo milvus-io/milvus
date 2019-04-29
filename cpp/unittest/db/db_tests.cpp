@@ -65,7 +65,7 @@ TEST_F(DBTest, DB_TEST) {
         std::stringstream ss;
         long count = 0;
 
-        for (auto j=0; j<8; ++j) {
+        for (auto j=0; j<15; ++j) {
             ss.str("");
             db->count(group_name, count);
 
