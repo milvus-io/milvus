@@ -12,6 +12,8 @@ using namespace ::apache::thrift::protocol;
 using namespace ::apache::thrift::transport;
 using namespace ::apache::thrift::server;
 
+using namespace  ::zilliz;
+
 class VecServiceHandler : virtual public VecServiceIf {
  public:
   VecServiceHandler() {

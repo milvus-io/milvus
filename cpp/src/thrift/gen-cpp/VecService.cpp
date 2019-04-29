@@ -6,7 +6,7 @@
  */
 #include "VecService.h"
 
-
+namespace zilliz {
 
 
 VecService_add_group_args::~VecService_add_group_args() throw() {
@@ -4673,5 +4673,5 @@ void VecServiceConcurrentClient::recv_search_binary_vector_batch(VecSearchResult
   } // end while(true)
 }
 
-
+} // namespace
 

@@ -9,7 +9,7 @@
 
 #include "VectorService_types.h"
 
-
+namespace zilliz {
 
 class VectorServiceConstants {
  public:
@@ -19,6 +19,6 @@ class VectorServiceConstants {
 
 extern const VectorServiceConstants g_VectorService_constants;
 
-
+} // namespace
 
 #endif

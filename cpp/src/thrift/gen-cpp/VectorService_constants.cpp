@@ -6,12 +6,12 @@
  */
 #include "VectorService_constants.h"
 
-
+namespace zilliz {
 
 const VectorServiceConstants g_VectorService_constants;
 
 VectorServiceConstants::VectorServiceConstants() {
 }
 
-
+} // namespace
 

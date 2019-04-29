@@ -18,7 +18,7 @@
 #include <thrift/stdcxx.h>
 
 
-
+namespace zilliz {
 
 struct VecErrCode {
   enum type {
@@ -648,6 +648,6 @@ void swap(VecSearchFilter &a, VecSearchFilter &b);
 
 std::ostream& operator<<(std::ostream& out, const VecSearchFilter& obj);
 
-
+} // namespace
 
 #endif
