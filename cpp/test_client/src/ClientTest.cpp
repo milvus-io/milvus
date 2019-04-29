@@ -158,18 +158,18 @@ TEST(SearchVector, CLIENT_TEST) {
             }
 
             VecSearchResult res;
-            VecTimeRangeList range;
-            session.interface()->search_vector(res, GetGroupID(), top_k, tensor, range);
+            VecSearchFilter filter;
+            session.interface()->search_vector(res, GetGroupID(), top_k, tensor, filter);
 
             std::cout << "Search result: " << std::endl;
-            for(auto id : res.id_list) {
-                std::cout << "\t" << id << std::endl;
+            for(VecSearchResultItem& item : res.result_list) {
+                std::cout << "\t" << item.uid << std::endl;
             }
             rc.Elapse("done!");
 
-            ASSERT_EQ(res.id_list.size(), (uint64_t)top_k);
-            if(!res.id_list.empty()) {
-                ASSERT_TRUE(res.id_list[0].find(std::to_string(anchor_index)) != std::string::npos);
+            ASSERT_EQ(res.result_list.size(), (uint64_t)top_k);
+            if(!res.result_list.empty()) {
+                ASSERT_TRUE(res.result_list[0].uid.find(std::to_string(anchor_index)) != std::string::npos);
             }
         }
 
@@ -192,14 +192,14 @@ TEST(SearchVector, CLIENT_TEST) {
             }
 
             VecSearchResultList res;
-            VecTimeRangeList range;
-            session.interface()->search_binary_vector_batch(res, GetGroupID(), top_k, tensor_list, range);
+            VecSearchFilter filter;
+            session.interface()->search_binary_vector_batch(res, GetGroupID(), top_k, tensor_list, filter);
 
             std::cout << "Search binary batch result: " << std::endl;
             for(size_t i = 0 ; i < res.result_list.size(); i++) {
                 std::cout << "No " << i << ":" << std::endl;
-                for(auto id : res.result_list[i].id_list) {
-                    std::cout << "\t" << id << std::endl;
+                for(VecSearchResultItem& item : res.result_list[i].result_list) {
+                    std::cout << "\t" << item.uid << std::endl;
                 }
             }
 
@@ -207,9 +207,9 @@ TEST(SearchVector, CLIENT_TEST) {
 
             ASSERT_EQ(res.result_list.size(), search_count);
             for(size_t i = 0 ; i < res.result_list.size(); i++) {
-                ASSERT_EQ(res.result_list[i].id_list.size(), (uint64_t) top_k);
-                if (!res.result_list[i].id_list.empty()) {
-                    ASSERT_TRUE(res.result_list[i].id_list[0].find(std::to_string(anchor_index + i)) != std::string::npos);
+                ASSERT_EQ(res.result_list[i].result_list.size(), (uint64_t) top_k);
+                if (!res.result_list[i].result_list.empty()) {
+                    ASSERT_TRUE(res.result_list[i].result_list[0].uid.find(std::to_string(anchor_index + i)) != std::string::npos);
                 }
             }
         }

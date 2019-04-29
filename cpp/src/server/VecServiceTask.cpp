@@ -405,14 +405,14 @@ ServerError AddBatchVectorTask::OnExecute() {
 SearchVectorTask::SearchVectorTask(const std::string& group_id,
                                    const int64_t top_k,
                                    const VecTensorList* tensor_list,
-                                   const VecTimeRangeList& time_range_list,
+                                   const VecSearchFilter& filter,
                                    VecSearchResultList& result)
     : BaseTask(DQL_TASK_GROUP),
       group_id_(group_id),
       top_k_(top_k),
       tensor_list_(tensor_list),
       bin_tensor_list_(nullptr),
-      time_range_list_(time_range_list),
+      filter_(filter),
       result_(result) {
 
 }
@@ -420,14 +420,14 @@ SearchVectorTask::SearchVectorTask(const std::string& group_id,
 SearchVectorTask::SearchVectorTask(const std::string& group_id,
                                    const int64_t top_k,
                                    const VecBinaryTensorList* bin_tensor_list,
-                                   const VecTimeRangeList& time_range_list,
+                                   const VecSearchFilter& filter,
                                    VecSearchResultList& result)
     : BaseTask(DQL_TASK_GROUP),
       group_id_(group_id),
       top_k_(top_k),
       tensor_list_(nullptr),
       bin_tensor_list_(bin_tensor_list),
-      time_range_list_(time_range_list),
+      filter_(filter),
       result_(result) {
 
 }
@@ -435,17 +435,17 @@ SearchVectorTask::SearchVectorTask(const std::string& group_id,
 BaseTaskPtr SearchVectorTask::Create(const std::string& group_id,
                                      const int64_t top_k,
                                      const VecTensorList* tensor_list,
-                                     const VecTimeRangeList& time_range_list,
+                                     const VecSearchFilter& filter,
                                      VecSearchResultList& result) {
-    return std::shared_ptr<BaseTask>(new SearchVectorTask(group_id, top_k, tensor_list, time_range_list, result));
+    return std::shared_ptr<BaseTask>(new SearchVectorTask(group_id, top_k, tensor_list, filter, result));
 }
 
 BaseTaskPtr SearchVectorTask::Create(const std::string& group_id,
                                      const int64_t top_k,
                                      const VecBinaryTensorList* bin_tensor_list,
-                                     const VecTimeRangeList& time_range_list,
+                                     const VecSearchFilter& filter,
                                      VecSearchResultList& result) {
-    return std::shared_ptr<BaseTask>(new SearchVectorTask(group_id, top_k, bin_tensor_list, time_range_list, result));
+    return std::shared_ptr<BaseTask>(new SearchVectorTask(group_id, top_k, bin_tensor_list, filter, result));
 }
 
 
@@ -546,8 +546,10 @@ ServerError SearchVectorTask::OnExecute() {
                     std::string sid;
                     std::string nid = nid_prefix + std::to_string(id);
                     IVecIdMapper::GetInstance()->Get(nid, sid);
-                    v_res.id_list.push_back(sid);
-                    v_res.distance_list.push_back(0.0);//TODO: return distance
+                    VecSearchResultItem item;
+                    item.uid = sid;
+                    item.distance = 0.0;////TODO: return distance
+                    v_res.result_list.emplace_back(item);
 
                     SERVER_LOG_TRACE << "nid = " << nid << ", string id = " << sid;
 

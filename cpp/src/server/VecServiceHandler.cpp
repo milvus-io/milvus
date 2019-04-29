@@ -123,16 +123,15 @@ VecServiceHandler::search_vector(VecSearchResult &_return,
                                  const std::string &group_id,
                                  const int64_t top_k,
                                  const VecTensor &tensor,
-                                 const VecTimeRangeList &time_range_list) {
+                                 const VecSearchFilter& filter) {
     TimeRecordWrapper rc("search_vector()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", top_k = " << top_k
-                        << ", vector dimension = " << tensor.tensor.size()
-                        << ", time range list size = " << time_range_list.range_list.size();
+                        << ", vector dimension = " << tensor.tensor.size();
 
     VecTensorList tensor_list;
     tensor_list.tensor_list.push_back(tensor);
     VecSearchResultList result;
-    BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, time_range_list, result);
+    BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, filter, result);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 
@@ -148,13 +147,12 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
                                        const std::string &group_id,
                                        const int64_t top_k,
                                        const VecTensorList &tensor_list,
-                                       const VecTimeRangeList &time_range_list) {
+                                       const VecSearchFilter& filter) {
     TimeRecordWrapper rc("search_vector_batch()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", top_k = " << top_k
-                     << ", vector list size = " << tensor_list.tensor_list.size()
-                     << ", time range list size = " << time_range_list.range_list.size();
+                     << ", vector list size = " << tensor_list.tensor_list.size();
 
-    BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, time_range_list, _return);
+    BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, filter, _return);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 }
@@ -164,16 +162,15 @@ VecServiceHandler::search_binary_vector(VecSearchResult& _return,
                                         const std::string& group_id,
                                         const int64_t top_k,
                                         const VecBinaryTensor& tensor,
-                                        const VecTimeRangeList& time_range_list) {
+                                        const VecSearchFilter& filter) {
     TimeRecordWrapper rc("search_binary_vector()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", top_k = " << top_k
-                     << ", vector dimension = " << tensor.tensor.size()
-                     << ", time range list size = " << time_range_list.range_list.size();
+                     << ", vector dimension = " << tensor.tensor.size();
 
     VecBinaryTensorList tensor_list;
     tensor_list.tensor_list.push_back(tensor);
     VecSearchResultList result;
-    BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, time_range_list, result);
+    BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, filter, result);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 
@@ -189,13 +186,12 @@ VecServiceHandler::search_binary_vector_batch(VecSearchResultList& _return,
                                               const std::string& group_id,
                                               const int64_t top_k,
                                               const VecBinaryTensorList& tensor_list,
-                                              const VecTimeRangeList& time_range_list) {
+                                              const VecSearchFilter& filter) {
     TimeRecordWrapper rc("search_binary_vector_batch()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", top_k = " << top_k
-                     << ", vector list size = " << tensor_list.tensor_list.size()
-                     << ", time range list size = " << time_range_list.range_list.size();
+                     << ", vector list size = " << tensor_list.tensor_list.size();
 
-    BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, time_range_list, _return);
+    BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, filter, _return);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 }

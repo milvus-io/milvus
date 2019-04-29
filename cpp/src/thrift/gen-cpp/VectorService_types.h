@@ -47,6 +47,8 @@ class VecBinaryTensor;
 
 class VecBinaryTensorList;
 
+class VecSearchResultItem;
+
 class VecSearchResult;
 
 class VecSearchResultList;
@@ -55,7 +57,7 @@ class VecDateTime;
 
 class VecTimeRange;
 
-class VecTimeRangeList;
+class VecSearchFilter;
 
 typedef struct _VecException__isset {
   _VecException__isset() : code(false), reason(false) {}
@@ -108,9 +110,7 @@ void swap(VecException &a, VecException &b);
 std::ostream& operator<<(std::ostream& out, const VecException& obj);
 
 typedef struct _VecGroup__isset {
-  _VecGroup__isset() : id(false), dimension(false), index_type(false) {}
-  bool id :1;
-  bool dimension :1;
+  _VecGroup__isset() : index_type(false) {}
   bool index_type :1;
 } _VecGroup__isset;
 
@@ -141,7 +141,9 @@ class VecGroup : public virtual ::apache::thrift::TBase {
       return false;
     if (!(dimension == rhs.dimension))
       return false;
-    if (!(index_type == rhs.index_type))
+    if (__isset.index_type != rhs.__isset.index_type)
+      return false;
+    else if (__isset.index_type && !(index_type == rhs.index_type))
       return false;
     return true;
   }
@@ -162,9 +164,8 @@ void swap(VecGroup &a, VecGroup &b);
 std::ostream& operator<<(std::ostream& out, const VecGroup& obj);
 
 typedef struct _VecTensor__isset {
-  _VecTensor__isset() : uid(false), tensor(false) {}
-  bool uid :1;
-  bool tensor :1;
+  _VecTensor__isset() : attrib(false) {}
+  bool attrib :1;
 } _VecTensor__isset;
 
 class VecTensor : public virtual ::apache::thrift::TBase {
@@ -178,6 +179,7 @@ class VecTensor : public virtual ::apache::thrift::TBase {
   virtual ~VecTensor() throw();
   std::string uid;
   std::vector<double>  tensor;
+  std::map<std::string, std::string>  attrib;
 
   _VecTensor__isset __isset;
 
@@ -185,11 +187,17 @@ class VecTensor : public virtual ::apache::thrift::TBase {
 
   void __set_tensor(const std::vector<double> & val);
 
+  void __set_attrib(const std::map<std::string, std::string> & val);
+
   bool operator == (const VecTensor & rhs) const
   {
     if (!(uid == rhs.uid))
       return false;
     if (!(tensor == rhs.tensor))
+      return false;
+    if (__isset.attrib != rhs.__isset.attrib)
+      return false;
+    else if (__isset.attrib && !(attrib == rhs.attrib))
       return false;
     return true;
   }
@@ -209,10 +217,6 @@ void swap(VecTensor &a, VecTensor &b);
 
 std::ostream& operator<<(std::ostream& out, const VecTensor& obj);
 
-typedef struct _VecTensorList__isset {
-  _VecTensorList__isset() : tensor_list(false) {}
-  bool tensor_list :1;
-} _VecTensorList__isset;
 
 class VecTensorList : public virtual ::apache::thrift::TBase {
  public:
@@ -224,8 +228,6 @@ class VecTensorList : public virtual ::apache::thrift::TBase {
 
   virtual ~VecTensorList() throw();
   std::vector<VecTensor>  tensor_list;
-
-  _VecTensorList__isset __isset;
 
   void __set_tensor_list(const std::vector<VecTensor> & val);
 
@@ -252,9 +254,8 @@ void swap(VecTensorList &a, VecTensorList &b);
 std::ostream& operator<<(std::ostream& out, const VecTensorList& obj);
 
 typedef struct _VecBinaryTensor__isset {
-  _VecBinaryTensor__isset() : uid(false), tensor(false) {}
-  bool uid :1;
-  bool tensor :1;
+  _VecBinaryTensor__isset() : attrib(false) {}
+  bool attrib :1;
 } _VecBinaryTensor__isset;
 
 class VecBinaryTensor : public virtual ::apache::thrift::TBase {
@@ -268,6 +269,7 @@ class VecBinaryTensor : public virtual ::apache::thrift::TBase {
   virtual ~VecBinaryTensor() throw();
   std::string uid;
   std::string tensor;
+  std::map<std::string, std::string>  attrib;
 
   _VecBinaryTensor__isset __isset;
 
@@ -275,11 +277,17 @@ class VecBinaryTensor : public virtual ::apache::thrift::TBase {
 
   void __set_tensor(const std::string& val);
 
+  void __set_attrib(const std::map<std::string, std::string> & val);
+
   bool operator == (const VecBinaryTensor & rhs) const
   {
     if (!(uid == rhs.uid))
       return false;
     if (!(tensor == rhs.tensor))
+      return false;
+    if (__isset.attrib != rhs.__isset.attrib)
+      return false;
+    else if (__isset.attrib && !(attrib == rhs.attrib))
       return false;
     return true;
   }
@@ -299,10 +307,6 @@ void swap(VecBinaryTensor &a, VecBinaryTensor &b);
 
 std::ostream& operator<<(std::ostream& out, const VecBinaryTensor& obj);
 
-typedef struct _VecBinaryTensorList__isset {
-  _VecBinaryTensorList__isset() : tensor_list(false) {}
-  bool tensor_list :1;
-} _VecBinaryTensorList__isset;
 
 class VecBinaryTensorList : public virtual ::apache::thrift::TBase {
  public:
@@ -314,8 +318,6 @@ class VecBinaryTensorList : public virtual ::apache::thrift::TBase {
 
   virtual ~VecBinaryTensorList() throw();
   std::vector<VecBinaryTensor>  tensor_list;
-
-  _VecBinaryTensorList__isset __isset;
 
   void __set_tensor_list(const std::vector<VecBinaryTensor> & val);
 
@@ -341,10 +343,66 @@ void swap(VecBinaryTensorList &a, VecBinaryTensorList &b);
 
 std::ostream& operator<<(std::ostream& out, const VecBinaryTensorList& obj);
 
+typedef struct _VecSearchResultItem__isset {
+  _VecSearchResultItem__isset() : distance(false), attrib(false) {}
+  bool distance :1;
+  bool attrib :1;
+} _VecSearchResultItem__isset;
+
+class VecSearchResultItem : public virtual ::apache::thrift::TBase {
+ public:
+
+  VecSearchResultItem(const VecSearchResultItem&);
+  VecSearchResultItem& operator=(const VecSearchResultItem&);
+  VecSearchResultItem() : uid(), distance(0) {
+  }
+
+  virtual ~VecSearchResultItem() throw();
+  std::string uid;
+  double distance;
+  std::map<std::string, std::string>  attrib;
+
+  _VecSearchResultItem__isset __isset;
+
+  void __set_uid(const std::string& val);
+
+  void __set_distance(const double val);
+
+  void __set_attrib(const std::map<std::string, std::string> & val);
+
+  bool operator == (const VecSearchResultItem & rhs) const
+  {
+    if (!(uid == rhs.uid))
+      return false;
+    if (__isset.distance != rhs.__isset.distance)
+      return false;
+    else if (__isset.distance && !(distance == rhs.distance))
+      return false;
+    if (__isset.attrib != rhs.__isset.attrib)
+      return false;
+    else if (__isset.attrib && !(attrib == rhs.attrib))
+      return false;
+    return true;
+  }
+  bool operator != (const VecSearchResultItem &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const VecSearchResultItem & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+  virtual void printTo(std::ostream& out) const;
+};
+
+void swap(VecSearchResultItem &a, VecSearchResultItem &b);
+
+std::ostream& operator<<(std::ostream& out, const VecSearchResultItem& obj);
+
 typedef struct _VecSearchResult__isset {
-  _VecSearchResult__isset() : id_list(false), distance_list(false) {}
-  bool id_list :1;
-  bool distance_list :1;
+  _VecSearchResult__isset() : result_list(false) {}
+  bool result_list :1;
 } _VecSearchResult__isset;
 
 class VecSearchResult : public virtual ::apache::thrift::TBase {
@@ -356,20 +414,15 @@ class VecSearchResult : public virtual ::apache::thrift::TBase {
   }
 
   virtual ~VecSearchResult() throw();
-  std::vector<std::string>  id_list;
-  std::vector<double>  distance_list;
+  std::vector<VecSearchResultItem>  result_list;
 
   _VecSearchResult__isset __isset;
 
-  void __set_id_list(const std::vector<std::string> & val);
-
-  void __set_distance_list(const std::vector<double> & val);
+  void __set_result_list(const std::vector<VecSearchResultItem> & val);
 
   bool operator == (const VecSearchResult & rhs) const
   {
-    if (!(id_list == rhs.id_list))
-      return false;
-    if (!(distance_list == rhs.distance_list))
+    if (!(result_list == rhs.result_list))
       return false;
     return true;
   }
@@ -431,15 +484,6 @@ void swap(VecSearchResultList &a, VecSearchResultList &b);
 
 std::ostream& operator<<(std::ostream& out, const VecSearchResultList& obj);
 
-typedef struct _VecDateTime__isset {
-  _VecDateTime__isset() : year(false), month(false), day(false), hour(false), minute(false), second(false) {}
-  bool year :1;
-  bool month :1;
-  bool day :1;
-  bool hour :1;
-  bool minute :1;
-  bool second :1;
-} _VecDateTime__isset;
 
 class VecDateTime : public virtual ::apache::thrift::TBase {
  public:
@@ -456,8 +500,6 @@ class VecDateTime : public virtual ::apache::thrift::TBase {
   int32_t hour;
   int32_t minute;
   int32_t second;
-
-  _VecDateTime__isset __isset;
 
   void __set_year(const int32_t val);
 
@@ -503,13 +545,6 @@ void swap(VecDateTime &a, VecDateTime &b);
 
 std::ostream& operator<<(std::ostream& out, const VecDateTime& obj);
 
-typedef struct _VecTimeRange__isset {
-  _VecTimeRange__isset() : time_begin(false), begine_closed(false), time_end(false), end_closed(false) {}
-  bool time_begin :1;
-  bool begine_closed :1;
-  bool time_end :1;
-  bool end_closed :1;
-} _VecTimeRange__isset;
 
 class VecTimeRange : public virtual ::apache::thrift::TBase {
  public:
@@ -524,8 +559,6 @@ class VecTimeRange : public virtual ::apache::thrift::TBase {
   bool begine_closed;
   VecDateTime time_end;
   bool end_closed;
-
-  _VecTimeRange__isset __isset;
 
   void __set_time_begin(const VecDateTime& val);
 
@@ -563,37 +596,47 @@ void swap(VecTimeRange &a, VecTimeRange &b);
 
 std::ostream& operator<<(std::ostream& out, const VecTimeRange& obj);
 
-typedef struct _VecTimeRangeList__isset {
-  _VecTimeRangeList__isset() : range_list(false) {}
-  bool range_list :1;
-} _VecTimeRangeList__isset;
+typedef struct _VecSearchFilter__isset {
+  _VecSearchFilter__isset() : attrib_filter(false), time_ranges(false) {}
+  bool attrib_filter :1;
+  bool time_ranges :1;
+} _VecSearchFilter__isset;
 
-class VecTimeRangeList : public virtual ::apache::thrift::TBase {
+class VecSearchFilter : public virtual ::apache::thrift::TBase {
  public:
 
-  VecTimeRangeList(const VecTimeRangeList&);
-  VecTimeRangeList& operator=(const VecTimeRangeList&);
-  VecTimeRangeList() {
+  VecSearchFilter(const VecSearchFilter&);
+  VecSearchFilter& operator=(const VecSearchFilter&);
+  VecSearchFilter() {
   }
 
-  virtual ~VecTimeRangeList() throw();
-  std::vector<VecTimeRange>  range_list;
+  virtual ~VecSearchFilter() throw();
+  std::map<std::string, std::string>  attrib_filter;
+  std::vector<VecTimeRange>  time_ranges;
 
-  _VecTimeRangeList__isset __isset;
+  _VecSearchFilter__isset __isset;
 
-  void __set_range_list(const std::vector<VecTimeRange> & val);
+  void __set_attrib_filter(const std::map<std::string, std::string> & val);
 
-  bool operator == (const VecTimeRangeList & rhs) const
+  void __set_time_ranges(const std::vector<VecTimeRange> & val);
+
+  bool operator == (const VecSearchFilter & rhs) const
   {
-    if (!(range_list == rhs.range_list))
+    if (__isset.attrib_filter != rhs.__isset.attrib_filter)
+      return false;
+    else if (__isset.attrib_filter && !(attrib_filter == rhs.attrib_filter))
+      return false;
+    if (__isset.time_ranges != rhs.__isset.time_ranges)
+      return false;
+    else if (__isset.time_ranges && !(time_ranges == rhs.time_ranges))
       return false;
     return true;
   }
-  bool operator != (const VecTimeRangeList &rhs) const {
+  bool operator != (const VecSearchFilter &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const VecTimeRangeList & ) const;
+  bool operator < (const VecSearchFilter & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -601,9 +644,9 @@ class VecTimeRangeList : public virtual ::apache::thrift::TBase {
   virtual void printTo(std::ostream& out) const;
 };
 
-void swap(VecTimeRangeList &a, VecTimeRangeList &b);
+void swap(VecSearchFilter &a, VecSearchFilter &b);
 
-std::ostream& operator<<(std::ostream& out, const VecTimeRangeList& obj);
+std::ostream& operator<<(std::ostream& out, const VecSearchFilter& obj);
 
 
 

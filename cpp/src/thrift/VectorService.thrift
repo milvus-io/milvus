@@ -19,32 +19,39 @@ exception VecException {
 }
 
 struct VecGroup {
-	1: string id;
-	2: i32 dimension;
-	3: i32 index_type;
+	1: required string id;
+	2: required i32 dimension;
+	3: optional i32 index_type;
 }
 
 struct VecTensor {
-    1: string uid;
-	2: list<double> tensor;
+    1: required string uid;
+	2: required list<double> tensor;
+	3: optional map<string, string> attrib;
 }
 
 struct VecTensorList {
-	1: list<VecTensor> tensor_list;
+	1: required list<VecTensor> tensor_list;
 }
 
 struct VecBinaryTensor {
-    1: string uid;
-	2: binary tensor;
+    1: required string uid;
+	2: required binary tensor;
+	3: optional map<string, string> attrib;
 }
 
 struct VecBinaryTensorList {
-	1: list<VecBinaryTensor> tensor_list;
+	1: required list<VecBinaryTensor> tensor_list;
+}
+
+struct VecSearchResultItem {
+    1: required string uid;
+    2: optional double distance;
+    3: optional map<string, string> attrib;
 }
 
 struct VecSearchResult {
-    1: list<string> id_list;
-    2: list<double> distance_list;
+    1: list<VecSearchResultItem> result_list;
 }
 
 struct VecSearchResultList {
@@ -53,23 +60,24 @@ struct VecSearchResultList {
 
 
 struct VecDateTime {
-    1: i32 year;
-    2: i32 month;
-    3: i32 day;
-    4: i32 hour;
-    5: i32 minute;
-    6: i32 second;
+    1: required i32 year;
+    2: required i32 month;
+    3: required i32 day;
+    4: required i32 hour;
+    5: required i32 minute;
+    6: required i32 second;
 }
 
 struct VecTimeRange {
-    1: VecDateTime time_begin;
-    2: bool begine_closed;
-    3: VecDateTime time_end;
-    4: bool end_closed;
+    1: required VecDateTime time_begin;
+    2: required bool begine_closed;
+    3: required VecDateTime time_end;
+    4: required bool end_closed;
 }
 
-struct VecTimeRangeList {
-    1: list<VecTimeRange> range_list;
+struct VecSearchFilter {
+    1: optional map<string, string> attrib_filter;
+    2: optional list<VecTimeRange> time_ranges;
 }
 
 service VecService {
@@ -93,9 +101,10 @@ service VecService {
     /**
      * search interfaces
      * if time_range_list is empty, engine will search without time limit
+     *
      */
-    VecSearchResult search_vector(2: string group_id, 3: i64 top_k, 4: VecTensor tensor, 5: VecTimeRangeList time_range_list) throws(1: VecException e);
-    VecSearchResultList search_vector_batch(2: string group_id, 3: i64 top_k, 4: VecTensorList tensor_list, 5: VecTimeRangeList time_range_list) throws(1: VecException e);
-    VecSearchResult search_binary_vector(2: string group_id, 3: i64 top_k, 4: VecBinaryTensor tensor, 5: VecTimeRangeList time_range_list) throws(1: VecException e);
-    VecSearchResultList search_binary_vector_batch(2: string group_id, 3: i64 top_k, 4: VecBinaryTensorList tensor_list, 5: VecTimeRangeList time_range_list) throws(1: VecException e);
+    VecSearchResult search_vector(2: string group_id, 3: i64 top_k, 4: VecTensor tensor, 5: VecSearchFilter filter) throws(1: VecException e);
+    VecSearchResultList search_vector_batch(2: string group_id, 3: i64 top_k, 4: VecTensorList tensor_list, 5: VecSearchFilter filter) throws(1: VecException e);
+    VecSearchResult search_binary_vector(2: string group_id, 3: i64 top_k, 4: VecBinaryTensor tensor, 5: VecSearchFilter filter) throws(1: VecException e);
+    VecSearchResultList search_binary_vector_batch(2: string group_id, 3: i64 top_k, 4: VecBinaryTensorList tensor_list, 5: VecSearchFilter filter) throws(1: VecException e);
 }

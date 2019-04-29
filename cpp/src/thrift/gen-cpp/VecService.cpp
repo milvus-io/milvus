@@ -1453,8 +1453,8 @@ uint32_t VecService_search_vector_args::read(::apache::thrift::protocol::TProtoc
         break;
       case 5:
         if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->time_range_list.read(iprot);
-          this->__isset.time_range_list = true;
+          xfer += this->filter.read(iprot);
+          this->__isset.filter = true;
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -1488,8 +1488,8 @@ uint32_t VecService_search_vector_args::write(::apache::thrift::protocol::TProto
   xfer += this->tensor.write(oprot);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("time_range_list", ::apache::thrift::protocol::T_STRUCT, 5);
-  xfer += this->time_range_list.write(oprot);
+  xfer += oprot->writeFieldBegin("filter", ::apache::thrift::protocol::T_STRUCT, 5);
+  xfer += this->filter.write(oprot);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -1519,8 +1519,8 @@ uint32_t VecService_search_vector_pargs::write(::apache::thrift::protocol::TProt
   xfer += (*(this->tensor)).write(oprot);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("time_range_list", ::apache::thrift::protocol::T_STRUCT, 5);
-  xfer += (*(this->time_range_list)).write(oprot);
+  xfer += oprot->writeFieldBegin("filter", ::apache::thrift::protocol::T_STRUCT, 5);
+  xfer += (*(this->filter)).write(oprot);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -1708,8 +1708,8 @@ uint32_t VecService_search_vector_batch_args::read(::apache::thrift::protocol::T
         break;
       case 5:
         if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->time_range_list.read(iprot);
-          this->__isset.time_range_list = true;
+          xfer += this->filter.read(iprot);
+          this->__isset.filter = true;
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -1743,8 +1743,8 @@ uint32_t VecService_search_vector_batch_args::write(::apache::thrift::protocol::
   xfer += this->tensor_list.write(oprot);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("time_range_list", ::apache::thrift::protocol::T_STRUCT, 5);
-  xfer += this->time_range_list.write(oprot);
+  xfer += oprot->writeFieldBegin("filter", ::apache::thrift::protocol::T_STRUCT, 5);
+  xfer += this->filter.write(oprot);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -1774,8 +1774,8 @@ uint32_t VecService_search_vector_batch_pargs::write(::apache::thrift::protocol:
   xfer += (*(this->tensor_list)).write(oprot);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("time_range_list", ::apache::thrift::protocol::T_STRUCT, 5);
-  xfer += (*(this->time_range_list)).write(oprot);
+  xfer += oprot->writeFieldBegin("filter", ::apache::thrift::protocol::T_STRUCT, 5);
+  xfer += (*(this->filter)).write(oprot);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -1963,8 +1963,8 @@ uint32_t VecService_search_binary_vector_args::read(::apache::thrift::protocol::
         break;
       case 5:
         if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->time_range_list.read(iprot);
-          this->__isset.time_range_list = true;
+          xfer += this->filter.read(iprot);
+          this->__isset.filter = true;
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -1998,8 +1998,8 @@ uint32_t VecService_search_binary_vector_args::write(::apache::thrift::protocol:
   xfer += this->tensor.write(oprot);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("time_range_list", ::apache::thrift::protocol::T_STRUCT, 5);
-  xfer += this->time_range_list.write(oprot);
+  xfer += oprot->writeFieldBegin("filter", ::apache::thrift::protocol::T_STRUCT, 5);
+  xfer += this->filter.write(oprot);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -2029,8 +2029,8 @@ uint32_t VecService_search_binary_vector_pargs::write(::apache::thrift::protocol
   xfer += (*(this->tensor)).write(oprot);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("time_range_list", ::apache::thrift::protocol::T_STRUCT, 5);
-  xfer += (*(this->time_range_list)).write(oprot);
+  xfer += oprot->writeFieldBegin("filter", ::apache::thrift::protocol::T_STRUCT, 5);
+  xfer += (*(this->filter)).write(oprot);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -2218,8 +2218,8 @@ uint32_t VecService_search_binary_vector_batch_args::read(::apache::thrift::prot
         break;
       case 5:
         if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->time_range_list.read(iprot);
-          this->__isset.time_range_list = true;
+          xfer += this->filter.read(iprot);
+          this->__isset.filter = true;
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -2253,8 +2253,8 @@ uint32_t VecService_search_binary_vector_batch_args::write(::apache::thrift::pro
   xfer += this->tensor_list.write(oprot);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("time_range_list", ::apache::thrift::protocol::T_STRUCT, 5);
-  xfer += this->time_range_list.write(oprot);
+  xfer += oprot->writeFieldBegin("filter", ::apache::thrift::protocol::T_STRUCT, 5);
+  xfer += this->filter.write(oprot);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -2284,8 +2284,8 @@ uint32_t VecService_search_binary_vector_batch_pargs::write(::apache::thrift::pr
   xfer += (*(this->tensor_list)).write(oprot);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("time_range_list", ::apache::thrift::protocol::T_STRUCT, 5);
-  xfer += (*(this->time_range_list)).write(oprot);
+  xfer += oprot->writeFieldBegin("filter", ::apache::thrift::protocol::T_STRUCT, 5);
+  xfer += (*(this->filter)).write(oprot);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -2822,13 +2822,13 @@ void VecServiceClient::recv_add_binary_vector_batch()
   return;
 }
 
-void VecServiceClient::search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list)
+void VecServiceClient::search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter)
 {
-  send_search_vector(group_id, top_k, tensor, time_range_list);
+  send_search_vector(group_id, top_k, tensor, filter);
   recv_search_vector(_return);
 }
 
-void VecServiceClient::send_search_vector(const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list)
+void VecServiceClient::send_search_vector(const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("search_vector", ::apache::thrift::protocol::T_CALL, cseqid);
@@ -2837,7 +2837,7 @@ void VecServiceClient::send_search_vector(const std::string& group_id, const int
   args.group_id = &group_id;
   args.top_k = &top_k;
   args.tensor = &tensor;
-  args.time_range_list = &time_range_list;
+  args.filter = &filter;
   args.write(oprot_);
 
   oprot_->writeMessageEnd();
@@ -2886,13 +2886,13 @@ void VecServiceClient::recv_search_vector(VecSearchResult& _return)
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "search_vector failed: unknown result");
 }
 
-void VecServiceClient::search_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecTimeRangeList& time_range_list)
+void VecServiceClient::search_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecSearchFilter& filter)
 {
-  send_search_vector_batch(group_id, top_k, tensor_list, time_range_list);
+  send_search_vector_batch(group_id, top_k, tensor_list, filter);
   recv_search_vector_batch(_return);
 }
 
-void VecServiceClient::send_search_vector_batch(const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecTimeRangeList& time_range_list)
+void VecServiceClient::send_search_vector_batch(const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecSearchFilter& filter)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("search_vector_batch", ::apache::thrift::protocol::T_CALL, cseqid);
@@ -2901,7 +2901,7 @@ void VecServiceClient::send_search_vector_batch(const std::string& group_id, con
   args.group_id = &group_id;
   args.top_k = &top_k;
   args.tensor_list = &tensor_list;
-  args.time_range_list = &time_range_list;
+  args.filter = &filter;
   args.write(oprot_);
 
   oprot_->writeMessageEnd();
@@ -2950,13 +2950,13 @@ void VecServiceClient::recv_search_vector_batch(VecSearchResultList& _return)
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "search_vector_batch failed: unknown result");
 }
 
-void VecServiceClient::search_binary_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecTimeRangeList& time_range_list)
+void VecServiceClient::search_binary_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecSearchFilter& filter)
 {
-  send_search_binary_vector(group_id, top_k, tensor, time_range_list);
+  send_search_binary_vector(group_id, top_k, tensor, filter);
   recv_search_binary_vector(_return);
 }
 
-void VecServiceClient::send_search_binary_vector(const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecTimeRangeList& time_range_list)
+void VecServiceClient::send_search_binary_vector(const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecSearchFilter& filter)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("search_binary_vector", ::apache::thrift::protocol::T_CALL, cseqid);
@@ -2965,7 +2965,7 @@ void VecServiceClient::send_search_binary_vector(const std::string& group_id, co
   args.group_id = &group_id;
   args.top_k = &top_k;
   args.tensor = &tensor;
-  args.time_range_list = &time_range_list;
+  args.filter = &filter;
   args.write(oprot_);
 
   oprot_->writeMessageEnd();
@@ -3014,13 +3014,13 @@ void VecServiceClient::recv_search_binary_vector(VecSearchResult& _return)
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "search_binary_vector failed: unknown result");
 }
 
-void VecServiceClient::search_binary_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecTimeRangeList& time_range_list)
+void VecServiceClient::search_binary_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecSearchFilter& filter)
 {
-  send_search_binary_vector_batch(group_id, top_k, tensor_list, time_range_list);
+  send_search_binary_vector_batch(group_id, top_k, tensor_list, filter);
   recv_search_binary_vector_batch(_return);
 }
 
-void VecServiceClient::send_search_binary_vector_batch(const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecTimeRangeList& time_range_list)
+void VecServiceClient::send_search_binary_vector_batch(const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecSearchFilter& filter)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("search_binary_vector_batch", ::apache::thrift::protocol::T_CALL, cseqid);
@@ -3029,7 +3029,7 @@ void VecServiceClient::send_search_binary_vector_batch(const std::string& group_
   args.group_id = &group_id;
   args.top_k = &top_k;
   args.tensor_list = &tensor_list;
-  args.time_range_list = &time_range_list;
+  args.filter = &filter;
   args.write(oprot_);
 
   oprot_->writeMessageEnd();
@@ -3513,7 +3513,7 @@ void VecServiceProcessor::process_search_vector(int32_t seqid, ::apache::thrift:
 
   VecService_search_vector_result result;
   try {
-    iface_->search_vector(result.success, args.group_id, args.top_k, args.tensor, args.time_range_list);
+    iface_->search_vector(result.success, args.group_id, args.top_k, args.tensor, args.filter);
     result.__isset.success = true;
   } catch (VecException &e) {
     result.e = e;
@@ -3570,7 +3570,7 @@ void VecServiceProcessor::process_search_vector_batch(int32_t seqid, ::apache::t
 
   VecService_search_vector_batch_result result;
   try {
-    iface_->search_vector_batch(result.success, args.group_id, args.top_k, args.tensor_list, args.time_range_list);
+    iface_->search_vector_batch(result.success, args.group_id, args.top_k, args.tensor_list, args.filter);
     result.__isset.success = true;
   } catch (VecException &e) {
     result.e = e;
@@ -3627,7 +3627,7 @@ void VecServiceProcessor::process_search_binary_vector(int32_t seqid, ::apache::
 
   VecService_search_binary_vector_result result;
   try {
-    iface_->search_binary_vector(result.success, args.group_id, args.top_k, args.tensor, args.time_range_list);
+    iface_->search_binary_vector(result.success, args.group_id, args.top_k, args.tensor, args.filter);
     result.__isset.success = true;
   } catch (VecException &e) {
     result.e = e;
@@ -3684,7 +3684,7 @@ void VecServiceProcessor::process_search_binary_vector_batch(int32_t seqid, ::ap
 
   VecService_search_binary_vector_batch_result result;
   try {
-    iface_->search_binary_vector_batch(result.success, args.group_id, args.top_k, args.tensor_list, args.time_range_list);
+    iface_->search_binary_vector_batch(result.success, args.group_id, args.top_k, args.tensor_list, args.filter);
     result.__isset.success = true;
   } catch (VecException &e) {
     result.e = e;
@@ -4309,13 +4309,13 @@ void VecServiceConcurrentClient::recv_add_binary_vector_batch(const int32_t seqi
   } // end while(true)
 }
 
-void VecServiceConcurrentClient::search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list)
+void VecServiceConcurrentClient::search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter)
 {
-  int32_t seqid = send_search_vector(group_id, top_k, tensor, time_range_list);
+  int32_t seqid = send_search_vector(group_id, top_k, tensor, filter);
   recv_search_vector(_return, seqid);
 }
 
-int32_t VecServiceConcurrentClient::send_search_vector(const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list)
+int32_t VecServiceConcurrentClient::send_search_vector(const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
@@ -4325,7 +4325,7 @@ int32_t VecServiceConcurrentClient::send_search_vector(const std::string& group_
   args.group_id = &group_id;
   args.top_k = &top_k;
   args.tensor = &tensor;
-  args.time_range_list = &time_range_list;
+  args.filter = &filter;
   args.write(oprot_);
 
   oprot_->writeMessageEnd();
@@ -4400,13 +4400,13 @@ void VecServiceConcurrentClient::recv_search_vector(VecSearchResult& _return, co
   } // end while(true)
 }
 
-void VecServiceConcurrentClient::search_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecTimeRangeList& time_range_list)
+void VecServiceConcurrentClient::search_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecSearchFilter& filter)
 {
-  int32_t seqid = send_search_vector_batch(group_id, top_k, tensor_list, time_range_list);
+  int32_t seqid = send_search_vector_batch(group_id, top_k, tensor_list, filter);
   recv_search_vector_batch(_return, seqid);
 }
 
-int32_t VecServiceConcurrentClient::send_search_vector_batch(const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecTimeRangeList& time_range_list)
+int32_t VecServiceConcurrentClient::send_search_vector_batch(const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecSearchFilter& filter)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
@@ -4416,7 +4416,7 @@ int32_t VecServiceConcurrentClient::send_search_vector_batch(const std::string& 
   args.group_id = &group_id;
   args.top_k = &top_k;
   args.tensor_list = &tensor_list;
-  args.time_range_list = &time_range_list;
+  args.filter = &filter;
   args.write(oprot_);
 
   oprot_->writeMessageEnd();
@@ -4491,13 +4491,13 @@ void VecServiceConcurrentClient::recv_search_vector_batch(VecSearchResultList& _
   } // end while(true)
 }
 
-void VecServiceConcurrentClient::search_binary_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecTimeRangeList& time_range_list)
+void VecServiceConcurrentClient::search_binary_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecSearchFilter& filter)
 {
-  int32_t seqid = send_search_binary_vector(group_id, top_k, tensor, time_range_list);
+  int32_t seqid = send_search_binary_vector(group_id, top_k, tensor, filter);
   recv_search_binary_vector(_return, seqid);
 }
 
-int32_t VecServiceConcurrentClient::send_search_binary_vector(const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecTimeRangeList& time_range_list)
+int32_t VecServiceConcurrentClient::send_search_binary_vector(const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecSearchFilter& filter)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
@@ -4507,7 +4507,7 @@ int32_t VecServiceConcurrentClient::send_search_binary_vector(const std::string&
   args.group_id = &group_id;
   args.top_k = &top_k;
   args.tensor = &tensor;
-  args.time_range_list = &time_range_list;
+  args.filter = &filter;
   args.write(oprot_);
 
   oprot_->writeMessageEnd();
@@ -4582,13 +4582,13 @@ void VecServiceConcurrentClient::recv_search_binary_vector(VecSearchResult& _ret
   } // end while(true)
 }
 
-void VecServiceConcurrentClient::search_binary_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecTimeRangeList& time_range_list)
+void VecServiceConcurrentClient::search_binary_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecSearchFilter& filter)
 {
-  int32_t seqid = send_search_binary_vector_batch(group_id, top_k, tensor_list, time_range_list);
+  int32_t seqid = send_search_binary_vector_batch(group_id, top_k, tensor_list, filter);
   recv_search_binary_vector_batch(_return, seqid);
 }
 
-int32_t VecServiceConcurrentClient::send_search_binary_vector_batch(const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecTimeRangeList& time_range_list)
+int32_t VecServiceConcurrentClient::send_search_binary_vector_batch(const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecSearchFilter& filter)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
@@ -4598,7 +4598,7 @@ int32_t VecServiceConcurrentClient::send_search_binary_vector_batch(const std::s
   args.group_id = &group_id;
   args.top_k = &top_k;
   args.tensor_list = &tensor_list;
-  args.time_range_list = &time_range_list;
+  args.filter = &filter;
   args.write(oprot_);
 
   oprot_->writeMessageEnd();
