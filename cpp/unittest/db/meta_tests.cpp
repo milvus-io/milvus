@@ -13,9 +13,7 @@
 
 using namespace zilliz::vecwise::engine;
 
-TEST_F(MetaTest, META_TEST) {
-    /* auto impl = DBMetaImplFactory::Build(); */
-
+TEST_F(MetaTest, GROUP_TEST) {
     auto group_id = "meta_test_group";
 
     meta::GroupSchema group;
@@ -30,5 +28,7 @@ TEST_F(MetaTest, META_TEST) {
     status = impl_->get_group(group);
     ASSERT_TRUE(!status.ok());
 
-    /* impl->drop_all(); */
+    group.group_id = group_id;
+    status = impl_->add_group(group);
+    ASSERT_TRUE(!status.ok());
 }
