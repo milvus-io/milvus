@@ -269,6 +269,7 @@ Status DBMetaImpl::files_to_search(const std::string &group_id,
                                              where(c(&GroupFileSchema::group_id) == group_id and
                                                  in(&GroupFileSchema::date, dates) and
                                                  (c(&GroupFileSchema::file_type) == (int) GroupFileSchema::RAW or
+                                                     c(&GroupFileSchema::file_type) == (int) GroupFileSchema::TO_INDEX or
                                                      c(&GroupFileSchema::file_type) == (int) GroupFileSchema::INDEX)));
 
         GroupSchema group_info;
