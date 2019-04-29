@@ -36,3 +36,31 @@ TEST_F(MetaTest, GROUP_TEST) {
     status = impl_->add_group(group);
     ASSERT_TRUE(!status.ok());
 }
+
+TEST_F(MetaTest, GROUP_FILE_TEST) {
+    auto group_id = "meta_test_group";
+
+    meta::GroupSchema group;
+    group.group_id = group_id;
+    auto status = impl_->add_group(group);
+
+    meta::GroupFileSchema group_file;
+    group_file.group_id = group.group_id;
+    status = impl_->add_group_file(group_file);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(group_file.file_type, meta::GroupFileSchema::NEW);
+
+    auto file_id = group_file.file_id;
+
+    auto new_file_type = meta::GroupFileSchema::INDEX;
+    group_file.file_type = new_file_type;
+
+    status = impl_->update_group_file(group_file);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(group_file.file_type, new_file_type);
+
+    /* group_file.file_type = meta::GroupFileSchema::NEW; */
+    /* status = impl_->get_group_file(group_file.group_id, group_file.file_id, group_file); */
+    /* ASSERT_TRUE(status.ok()); */
+    /* ASSERT_EQ(group_file.file_type, new_file_type); */
+}
