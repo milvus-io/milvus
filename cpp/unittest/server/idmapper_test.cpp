@@ -13,10 +13,6 @@ using namespace zilliz::vecwise;
 
 
 TEST(IdMapperTest, IDMAPPER_TEST) {
-    std::string db_path = "/tmp/vecwise_test";
-    server::ConfigNode& server_config = server::ServerConfig::GetInstance().GetConfig("server_config");
-    server_config.SetValue("db_path", db_path);
-
     server::IVecIdMapper* mapper = server::IVecIdMapper::GetInstance();
 
     std::vector<std::string> nid = {"1", "50", "900", "10000"};
