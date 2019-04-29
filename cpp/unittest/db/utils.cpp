@@ -19,7 +19,7 @@ void ASSERT_STATS(engine::Status& stat) {
     }
 }
 
-void DBTest::SetUp() {
+void DBTest::InitLog() {
     el::Configurations defaultConf;
     defaultConf.setToDefault();
     defaultConf.set(el::Level::Debug,
@@ -27,8 +27,12 @@ void DBTest::SetUp() {
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
+void DBTest::SetUp() {
+    InitLog();
+}
+
 void MetaTest::SetUp() {
-    DBTest::SetUp();
+    InitLog();
     impl_ = engine::DBMetaImplFactory::Build();
 }
 
