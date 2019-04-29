@@ -22,6 +22,8 @@ class CommonUtil {
     static bool IsDirectoryExit(const std::string &path);
     static ServerError CreateDirectory(const std::string &path);
     static ServerError DeleteDirectory(const std::string &path);
+
+    static std::string GetExePath();
 };
 
 }
