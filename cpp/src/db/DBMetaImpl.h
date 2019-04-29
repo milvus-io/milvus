@@ -39,7 +39,7 @@ public:
             DatePartionedGroupFilesSchema& files) override;
 
     virtual Status files_to_search(const std::string& group_id,
-                                  std::vector<DateT> partition,
+                                  const DatesT& partition,
                                   DatePartionedGroupFilesSchema& files) override;
 
     virtual Status files_to_index(GroupFilesSchema&) override;

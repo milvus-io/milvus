@@ -253,10 +253,12 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
 }
 
 Status DBMetaImpl::files_to_search(const std::string &group_id,
-                                   std::vector<DateT> partition,
+                                   const DatesT& partition,
                                    DatePartionedGroupFilesSchema &files) {
-    // TODO: support data partition
     files.clear();
+    DatesT today = {Meta::GetDate()};
+    const DatesT& dates = (partition.empty() == true) ? today : partition;
+
     try {
         auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
                                                      &GroupFileSchema::group_id,
@@ -265,6 +267,7 @@ Status DBMetaImpl::files_to_search(const std::string &group_id,
                                                      &GroupFileSchema::rows,
                                                      &GroupFileSchema::date),
                                              where(c(&GroupFileSchema::group_id) == group_id and
+                                                 in(&GroupFileSchema::date, dates) and
                                                  (c(&GroupFileSchema::file_type) == (int) GroupFileSchema::RAW or
                                                      c(&GroupFileSchema::file_type) == (int) GroupFileSchema::INDEX)));
 
