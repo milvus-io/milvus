@@ -26,6 +26,7 @@ set(db_test_src
     ${db_srcs}
     ${wrapper_src}
     ${require_files}
+    utils.cpp
     db_tests.cpp)
 
 cuda_add_executable(db_test ${db_test_src})

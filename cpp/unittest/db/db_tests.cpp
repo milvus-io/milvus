@@ -6,47 +6,11 @@
 #include <gtest/gtest.h>
 #include <thread>
 #include <easylogging++.h>
-#include <chrono>
 
+#include "utils.h"
 #include "db/DB.h"
 
 using namespace zilliz::vecwise;
-
-#define TIMING
-
-#ifdef TIMING
-#define INIT_TIMER auto start = std::chrono::high_resolution_clock::now();
-#define START_TIMER  start = std::chrono::high_resolution_clock::now();
-#define STOP_TIMER(name)  LOG(DEBUG) << "RUNTIME of " << name << ": " << \
-    std::chrono::duration_cast<std::chrono::milliseconds>( \
-            std::chrono::high_resolution_clock::now()-start \
-    ).count() << " ms ";
-#else
-#define INIT_TIMER
-#define START_TIMER
-#define STOP_TIMER(name)
-#endif
-
-class DBTest : public ::testing::Test {
-protected:
-    virtual void SetUp() {
-        el::Configurations defaultConf;
-        defaultConf.setToDefault();
-        defaultConf.set(el::Level::Debug,
-                el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
-        el::Loggers::reconfigureLogger("default", defaultConf);
-    }
-
-};
-
-namespace {
-    void ASSERT_STATS(engine::Status& stat) {
-        ASSERT_TRUE(stat.ok());
-        if(!stat.ok()) {
-            std::cout << stat.ToString() << std::endl;
-        }
-    }
-}
 
 TEST_F(DBTest, DB_TEST) {
 
