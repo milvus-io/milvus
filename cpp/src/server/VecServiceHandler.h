@@ -55,21 +55,23 @@ public:
     void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
 
     /**
-     * search interfaces
-     * if time_range_list is empty, engine will search without time limit
-     *
-     * @param group_id
-     * @param top_k
-     * @param tensor
-     * @param time_range_list
-     */
-    void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecTimeRangeList& time_range_list);
+   * search interfaces
+   * if time_range_list is empty, engine will search without time limit
+   *
+   *
+   * @param group_id
+   * @param top_k
+   * @param tensor
+   * @param filter
+   */
+    void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter);
 
-    void search_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecTimeRangeList& time_range_list);
+    void search_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecSearchFilter& filter);
 
-    void search_binary_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecTimeRangeList& time_range_list);
+    void search_binary_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecSearchFilter& filter);
 
-    void search_binary_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecTimeRangeList& time_range_list);
+    void search_binary_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecSearchFilter& filter);
+    
 };
 
 

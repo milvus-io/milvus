@@ -130,26 +130,26 @@ public:
     static BaseTaskPtr Create(const std::string& group_id,
                               const int64_t top_k,
                               const VecTensorList* tensor_list,
-                              const VecTimeRangeList& time_range_list,
+                              const VecSearchFilter& filter,
                               VecSearchResultList& result);
 
     static BaseTaskPtr Create(const std::string& group_id,
                               const int64_t top_k,
                               const VecBinaryTensorList* bin_tensor_list,
-                              const VecTimeRangeList& time_range_list,
+                              const VecSearchFilter& filter,
                               VecSearchResultList& result);
 
 protected:
     SearchVectorTask(const std::string& group_id,
                      const int64_t top_k,
                      const VecTensorList* tensor_list,
-                     const VecTimeRangeList& time_range_list,
+                     const VecSearchFilter& filter,
                      VecSearchResultList& result);
 
     SearchVectorTask(const std::string& group_id,
                      const int64_t top_k,
                      const VecBinaryTensorList* bin_tensor_list,
-                     const VecTimeRangeList& time_range_list,
+                     const VecSearchFilter& filter,
                      VecSearchResultList& result);
 
     ServerError GetTargetData(std::vector<float>& data) const;
@@ -163,7 +163,7 @@ private:
     int64_t top_k_;
     const VecTensorList* tensor_list_;
     const VecBinaryTensorList* bin_tensor_list_;
-    const VecTimeRangeList& time_range_list_;
+    const VecSearchFilter& filter_;
     VecSearchResultList& result_;
 };
 
