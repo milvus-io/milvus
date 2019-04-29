@@ -32,7 +32,6 @@ cuda_add_executable(server_test
 
 set(require_libs
         stdc++
-        yaml-cpp
         boost_system
         boost_filesystem
         pthread
