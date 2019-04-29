@@ -57,13 +57,20 @@ Status DBImpl::add_vectors(const std::string& group_id_,
     }
 }
 
-// TODO(XUPENG): add search range based on time
 Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
                       const float *vectors, QueryResults &results) {
+    meta::DatesT dates = {meta::Meta::GetDate()};
+    return search(group_id, k, nq, vectors, dates, results);
+}
+
+Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
+        const float* vectors, const meta::DatesT& dates, QueryResults& results) {
+
     meta::DatePartionedGroupFilesSchema files;
-    std::vector<meta::DateT> partition;
-    auto status = _pMeta->files_to_search(group_id, partition, files);
+    auto status = _pMeta->files_to_search(group_id, dates, files);
     if (!status.ok()) { return status; }
+
+    LOG(DEBUG) << "Search DateT Size=" << files.size();
 
     meta::GroupFilesSchema index_files;
     meta::GroupFilesSchema raw_files;
