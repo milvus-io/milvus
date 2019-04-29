@@ -133,19 +133,21 @@ bool CommonUtil::IsFileExist(const std::string &path) {
 }
 
 std::string CommonUtil::GetExePath() {
-    const size_t bug_len = 1024;
-    char exe_path[bug_len];
-    size_t cnt = readlink("/proc/self/exe", exe_path, bug_len);
-    if(cnt < 0|| cnt >= bug_len) {
+    const size_t buf_len = 1024;
+    char buf[buf_len];
+    size_t cnt = readlink("/proc/self/exe", buf, buf_len);
+    if(cnt < 0|| cnt >= buf_len) {
         return "";
     }
 
-    std::string store_path = exe_path;
-    if(store_path.rfind('/') != store_path.length()){
-        std::string sub_str = store_path.substr(0, store_path.rfind('/'));
+    buf[cnt] = '\0';
+
+    std::string exe_path = buf;
+    if(exe_path.rfind('/') != exe_path.length()){
+        std::string sub_str = exe_path.substr(0, exe_path.rfind('/'));
         return sub_str + "/";
     }
-    return store_path;
+    return exe_path;
 }
 
 }
