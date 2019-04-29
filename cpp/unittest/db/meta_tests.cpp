@@ -64,3 +64,64 @@ TEST_F(MetaTest, GROUP_FILE_TEST) {
     /* ASSERT_TRUE(status.ok()); */
     /* ASSERT_EQ(group_file.file_type, new_file_type); */
 }
+
+TEST_F(MetaTest, GROUP_FILES_TEST) {
+    auto group_id = "meta_test_group";
+
+    meta::GroupSchema group;
+    group.group_id = group_id;
+    auto status = impl_->add_group(group);
+
+    int new_files_cnt = 4;
+    int raw_files_cnt = 5;
+    int to_index_files_cnt = 6;
+    int index_files_cnt = 7;
+
+    meta::GroupFileSchema group_file;
+    group_file.group_id = group.group_id;
+
+    for (auto i=0; i<new_files_cnt; ++i) {
+        status = impl_->add_group_file(group_file);
+        group_file.file_type = meta::GroupFileSchema::NEW;
+        status = impl_->update_group_file(group_file);
+    }
+
+    for (auto i=0; i<raw_files_cnt; ++i) {
+        status = impl_->add_group_file(group_file);
+        group_file.file_type = meta::GroupFileSchema::RAW;
+        status = impl_->update_group_file(group_file);
+    }
+
+    for (auto i=0; i<to_index_files_cnt; ++i) {
+        status = impl_->add_group_file(group_file);
+        group_file.file_type = meta::GroupFileSchema::TO_INDEX;
+        status = impl_->update_group_file(group_file);
+    }
+
+    for (auto i=0; i<index_files_cnt; ++i) {
+        status = impl_->add_group_file(group_file);
+        group_file.file_type = meta::GroupFileSchema::INDEX;
+        status = impl_->update_group_file(group_file);
+    }
+
+    meta::GroupFilesSchema files;
+
+    status = impl_->files_to_index(files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(files.size(), to_index_files_cnt);
+
+    meta::DatePartionedGroupFilesSchema dated_files;
+    status = impl_->files_to_merge(group.group_id, dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[group_file.date].size(), raw_files_cnt);
+
+    status = impl_->files_to_index(files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(files.size(), to_index_files_cnt);
+
+    meta::DatesT dates = {group_file.date};
+    status = impl_->files_to_search(group_id, dates, dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[group_file.date].size(),
+            to_index_files_cnt+raw_files_cnt+index_files_cnt);
+}
