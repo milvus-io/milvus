@@ -55,15 +55,18 @@ public:
     void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
 
     /**
-   * search interfaces
-   * if time_range_list is empty, engine will search without time limit
-   *
-   *
-   * @param group_id
-   * @param top_k
-   * @param tensor
-   * @param filter
-   */
+     * search interfaces
+     * you can use filter to reduce search result
+     * filter.attrib_filter can specify which attribute you need, for example:
+     * set attrib_filter = {"color":""} means you want to get "color" attribute for result vector
+     * set attrib_filter = {"color":"red"} means you want to get vectors which has attribute "color" equals "red"
+     * if filter.time_range is empty, engine will search without time limit
+     *
+     * @param group_id
+     * @param top_k
+     * @param tensor
+     * @param filter
+     */
     void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter);
 
     void search_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecTensorList& tensor_list, const VecSearchFilter& filter);
@@ -71,7 +74,7 @@ public:
     void search_binary_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensor& tensor, const VecSearchFilter& filter);
 
     void search_binary_vector_batch(VecSearchResultList& _return, const std::string& group_id, const int64_t top_k, const VecBinaryTensorList& tensor_list, const VecSearchFilter& filter);
-    
+
 };
 
 

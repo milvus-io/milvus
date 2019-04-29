@@ -19,6 +19,8 @@ set(require_files
         ../../src/server/ServerConfig.cpp
         ../../src/utils/CommonUtil.cpp
         ../../src/utils/TimeRecorder.cpp
+        ../../src/utils/StringHelpFunctions.cpp
+        ../../src/utils/AttributeSerializer.cpp
         )
 
 cuda_add_executable(server_test

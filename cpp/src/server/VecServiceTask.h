@@ -7,6 +7,7 @@
 
 #include "VecServiceScheduler.h"
 #include "utils/Error.h"
+#include "utils/AttributeSerializer.h"
 #include "db/Types.h"
 
 #include "thrift/gen-cpp/VectorService_types.h"
@@ -85,6 +86,7 @@ protected:
     uint64_t GetVecDimension() const;
     const double* GetVecData() const;
     std::string GetVecID() const;
+    const AttribMap& GetVecAttrib() const;
 
     ServerError OnExecute() override;
 
@@ -115,6 +117,7 @@ protected:
     uint64_t GetVecDimension(uint64_t index) const;
     const double* GetVecData(uint64_t index) const;
     std::string GetVecID(uint64_t index) const;
+    const AttribMap& GetVecAttrib(uint64_t index) const;
 
     ServerError OnExecute() override;
 

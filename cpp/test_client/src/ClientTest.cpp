@@ -4,7 +4,8 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
-#include <utils/TimeRecorder.h>
+#include "utils/TimeRecorder.h"
+#include "utils/AttributeSerializer.h"
 #include "ClientSession.h"
 #include "server/ServerConfig.h"
 #include "Log.h"
@@ -15,6 +16,9 @@ using namespace zilliz::vecwise;
 
 namespace {
     static const int32_t VEC_DIMENSION = 256;
+
+    static const std::string TEST_ATTRIB_NUM = "number";
+    static const std::string TEST_ATTRIB_COMMENT = "comment";
 
     std::string CurrentTime() {
         time_t tt;
@@ -69,27 +73,39 @@ TEST(AddVector, CLIENT_TEST) {
         const int64_t count = 100000;
         VecTensorList tensor_list;
         VecBinaryTensorList bin_tensor_list;
-        for (int64_t k = 0; k < count; k++) {
-            VecTensor tensor;
-            tensor.tensor.reserve(VEC_DIMENSION);
-            VecBinaryTensor bin_tensor;
-            bin_tensor.tensor.resize(VEC_DIMENSION * sizeof(double));
-            double *d_p = (double *) (const_cast<char *>(bin_tensor.tensor.data()));
-            for (int32_t i = 0; i < VEC_DIMENSION; i++) {
-                double val = (double) (i + k);
-                tensor.tensor.push_back(val);
-                d_p[i] = val;
+        {
+            server::TimeRecorder rc(std::to_string(count) + " vectors built");
+            for (int64_t k = 0; k < count; k++) {
+                VecTensor tensor;
+                tensor.tensor.reserve(VEC_DIMENSION);
+                VecBinaryTensor bin_tensor;
+                bin_tensor.tensor.resize(VEC_DIMENSION * sizeof(double));
+                double *d_p = (double *) (const_cast<char *>(bin_tensor.tensor.data()));
+                for (int32_t i = 0; i < VEC_DIMENSION; i++) {
+                    double val = (double) (i + k);
+                    tensor.tensor.push_back(val);
+                    d_p[i] = val;
+                }
+
+                server::AttribMap attrib_map;
+                attrib_map[TEST_ATTRIB_NUM] = "No." + std::to_string(k);
+
+                tensor.uid = "normal_vec_" + std::to_string(k);
+                attrib_map[TEST_ATTRIB_COMMENT] = tensor.uid;
+                tensor.__set_attrib(attrib_map);
+                tensor_list.tensor_list.emplace_back(tensor);
+
+                bin_tensor.uid = "binary_vec_" + std::to_string(k);
+                attrib_map[TEST_ATTRIB_COMMENT] = bin_tensor.uid;
+                bin_tensor.__set_attrib(attrib_map);
+                bin_tensor_list.tensor_list.emplace_back(bin_tensor);
+
+                if ((k + 1) % 10000 == 0) {
+                    CLIENT_LOG_INFO << k + 1 << " vectors built";
+                }
             }
 
-            tensor.uid = "normal_vec_" + std::to_string(k);
-            tensor_list.tensor_list.emplace_back(tensor);
-
-            bin_tensor.uid = "binary_vec_" + std::to_string(k);
-            bin_tensor_list.tensor_list.emplace_back(bin_tensor);
-
-            if((k+1)%10000 == 0) {
-                CLIENT_LOG_INFO << k+1 << " vectors built";
-            }
+            rc.Elapse("done");
         }
 
 //        //add vectors one by one
@@ -164,6 +180,10 @@ TEST(SearchVector, CLIENT_TEST) {
             std::cout << "Search result: " << std::endl;
             for(VecSearchResultItem& item : res.result_list) {
                 std::cout << "\t" << item.uid << std::endl;
+
+                ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_NUM) != 0);
+                ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_COMMENT) != 0);
+                ASSERT_TRUE(item.attrib[TEST_ATTRIB_COMMENT].find(item.uid) != std::string::npos);
             }
             rc.Elapse("done!");
 
@@ -200,6 +220,9 @@ TEST(SearchVector, CLIENT_TEST) {
                 std::cout << "No " << i << ":" << std::endl;
                 for(VecSearchResultItem& item : res.result_list[i].result_list) {
                     std::cout << "\t" << item.uid << std::endl;
+                    ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_NUM) != 0);
+                    ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_COMMENT) != 0);
+                    ASSERT_TRUE(item.attrib[TEST_ATTRIB_COMMENT].find(item.uid) != std::string::npos);
                 }
             }
 
