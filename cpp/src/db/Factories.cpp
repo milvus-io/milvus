@@ -34,6 +34,11 @@ Options OptionsFactory::Build() {
     return options;
 }
 
+std::shared_ptr<meta::DBMetaImpl> DBMetaImplFactory::Build() {
+    DBMetaOptions options = DBMetaOptionsFactory::Build();
+    return std::shared_ptr<meta::DBMetaImpl>(new meta::DBMetaImpl(options));
+}
+
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
