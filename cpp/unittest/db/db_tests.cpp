@@ -18,8 +18,6 @@ TEST_F(DBTest, DB_TEST) {
     static const int group_dim = 256;
 
     engine::Options opt;
-    opt.memory_sync_interval = 1;
-    opt.index_trigger_size = 1024*group_dim;
     opt.meta.backend_uri = "http://127.0.0.1";
     opt.meta.path = "/tmp/vecwise_test/db_test";
 
