@@ -36,6 +36,9 @@ public:
     virtual Status search(const std::string& group_id, size_t k, size_t nq,
             const float* vectors, QueryResults& results) override;
 
+    virtual Status search(const std::string& group_id, size_t k, size_t nq,
+            const float* vectors, const meta::DatesT& dates, QueryResults& results) override;
+
     virtual Status drop_all() override;
 
     virtual Status count(const std::string& group_id, long& result) override;
