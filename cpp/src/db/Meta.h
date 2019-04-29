@@ -15,6 +15,7 @@ namespace meta {
 
 typedef int DateT;
 const DateT EmptyDate = -1;
+typedef std::vector<DateT> DatesT;
 
 struct GroupSchema {
     size_t id;
@@ -72,7 +73,7 @@ public:
     virtual Status update_files(GroupFilesSchema& files) = 0;
 
     virtual Status files_to_search(const std::string& group_id,
-                                   std::vector<DateT> partition,
+                                   const DatesT& partition,
                                    DatePartionedGroupFilesSchema& files) = 0;
 
     virtual Status files_to_merge(const std::string& group_id,
