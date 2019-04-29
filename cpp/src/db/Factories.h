@@ -7,7 +7,9 @@
 #pragma once
 
 #include <string>
+#include <memory>
 #include "db/DB.h"
+#include "DBMetaImpl.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -21,6 +23,9 @@ struct OptionsFactory {
     static Options Build();
 };
 
+struct DBMetaImplFactory {
+    static std::shared_ptr<meta::DBMetaImpl> Build();
+};
 
 } // namespace engine
 } // namespace vecwise
