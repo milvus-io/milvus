@@ -177,7 +177,7 @@ TEST(SearchVector, CLIENT_TEST) {
         {
             const int32_t anchor_index = 300;
             const int32_t search_count = 10;
-            const int64_t top_k = 10;
+            const int64_t top_k = 5;
             server::TimeRecorder rc("Search binary batch top_k");
             VecBinaryTensorList tensor_list;
             for(int32_t k = anchor_index; k < anchor_index + search_count; k++) {
