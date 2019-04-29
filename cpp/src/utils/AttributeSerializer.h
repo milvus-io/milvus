@@ -7,14 +7,18 @@
 
 #include <map>
 
+#include "Error.h"
+
 namespace zilliz {
 namespace vecwise {
 namespace server {
 
+using AttribMap = std::map<std::string, std::string>;
+
 class AttributeSerializer {
 public:
-    static void Encode(const std::map<std::string, std::string>& attrib, std::string& result);
-    static void Decode(const std::string& str, std::map<std::string, std::string>& result);
+    static ServerError Encode(const AttribMap& attrib_map, std::string& attrib_str);
+    static ServerError Decode(const std::string& attrib_str, AttribMap& attrib_map);
 };
 
 

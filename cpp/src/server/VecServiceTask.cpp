@@ -19,6 +19,8 @@ namespace server {
 static const std::string DQL_TASK_GROUP = "dql";
 static const std::string DDL_DML_TASK_GROUP = "ddl_dml";
 
+static const std::string VECTOR_UID = "uid";
+
 namespace {
     class DBWrapper {
     public:
@@ -201,6 +203,14 @@ std::string AddVectorTask::GetVecID() const {
     }
 }
 
+const AttribMap& AddVectorTask::GetVecAttrib() const {
+    if(tensor_) {
+        return tensor_->attrib;
+    } else {
+        return bin_tensor_->attrib;
+    }
+}
+
 ServerError AddVectorTask::OnExecute() {
     try {
         engine::meta::GroupSchema group_info;
@@ -238,8 +248,12 @@ ServerError AddVectorTask::OnExecute() {
             } else {
                 std::string uid = GetVecID();
                 std::string nid = group_id_ + "_" + std::to_string(vector_ids[0]);
-                IVecIdMapper::GetInstance()->Put(nid, uid);
-                SERVER_LOG_TRACE << "nid = " << vector_ids[0] << ", sid = " << uid;
+                AttribMap attrib = GetVecAttrib();
+                attrib[VECTOR_UID] = uid;
+                std::string attrib_str;
+                AttributeSerializer::Encode(attrib, attrib_str);
+                IVecIdMapper::GetInstance()->Put(nid, attrib_str);
+                SERVER_LOG_TRACE << "nid = " << vector_ids[0] << ", uid = " << uid;
             }
         }
 
@@ -339,6 +353,14 @@ std::string AddBatchVectorTask::GetVecID(uint64_t index) const {
     }
 }
 
+const AttribMap& AddBatchVectorTask::GetVecAttrib(uint64_t index) const {
+    if(tensor_list_) {
+        return tensor_list_->tensor_list[index].attrib;
+    } else {
+        return bin_tensor_list_->tensor_list[index].attrib;
+    }
+}
+
 ServerError AddBatchVectorTask::OnExecute() {
     try {
         TimeRecorder rc("AddBatchVectorTask");
@@ -387,7 +409,11 @@ ServerError AddBatchVectorTask::OnExecute() {
                 for(size_t i = 0; i < vec_count; i++) {
                     std::string uid = GetVecID(i);
                     std::string nid = nid_prefix + std::to_string(vector_ids[i]);
-                    IVecIdMapper::GetInstance()->Put(nid, uid);
+                    AttribMap attrib = GetVecAttrib(i);
+                    attrib[VECTOR_UID] = uid;
+                    std::string attrib_str;
+                    AttributeSerializer::Encode(attrib, attrib_str);
+                    IVecIdMapper::GetInstance()->Put(nid, attrib_str);
                 }
                 rc.Record("build id mapping");
             }
@@ -543,16 +569,20 @@ ServerError SearchVectorTask::OnExecute() {
                 VecSearchResult v_res;
                 std::string nid_prefix = group_id_ + "_";
                 for(auto id : res) {
-                    std::string sid;
+                    std::string attrib_str;
                     std::string nid = nid_prefix + std::to_string(id);
-                    IVecIdMapper::GetInstance()->Get(nid, sid);
+                    IVecIdMapper::GetInstance()->Get(nid, attrib_str);
+
+                    AttribMap attrib_map;
+                    AttributeSerializer::Decode(attrib_str, attrib_map);
+
                     VecSearchResultItem item;
-                    item.uid = sid;
+                    item.__set_attrib(attrib_map);
+                    item.uid = item.attrib[VECTOR_UID];
                     item.distance = 0.0;////TODO: return distance
                     v_res.result_list.emplace_back(item);
 
-                    SERVER_LOG_TRACE << "nid = " << nid << ", string id = " << sid;
-
+                    SERVER_LOG_TRACE << "nid = " << nid << ", uid = " << item.uid;
                 }
 
                 result_.result_list.push_back(v_res);
