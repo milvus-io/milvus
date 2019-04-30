@@ -1,7 +1,8 @@
-//
-// Created by yhmo on 19-4-17.
-//
-
+/*******************************************************************************
+ * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited.
+ * Proprietary and confidential.
+ ******************************************************************************/
 #include "FaissTest.h"
 
 #include "utils/TimeRecorder.h"
@@ -16,6 +17,9 @@
 
 #include <assert.h>
 
+namespace zilliz {
+namespace vecwise {
+namespace client {
 namespace {
     void test_flat() {
         zilliz::vecwise::server::TimeRecorder recorder("test_flat");
@@ -27,14 +31,14 @@ namespace {
         float *xb = new float[d * nb];
         float *xq = new float[d * nq];
 
-        for(int i = 0; i < nb; i++) {
-            for(int j = 0; j < d; j++)
+        for (int i = 0; i < nb; i++) {
+            for (int j = 0; j < d; j++)
                 xb[d * i + j] = drand48();
             xb[d * i] += i / 1000.;
         }
 
-        for(int i = 0; i < nq; i++) {
-            for(int j = 0; j < d; j++)
+        for (int i = 0; i < nq; i++) {
+            for (int j = 0; j < d; j++)
                 xq[d * i + j] = drand48();
             xq[d * i] += i / 1000.;
         }
@@ -61,21 +65,21 @@ namespace {
 
             // print results
             printf("I=\n");
-            for(int i = 0; i < 5; i++) {
-                for(int j = 0; j < k; j++)
+            for (int i = 0; i < 5; i++) {
+                for (int j = 0; j < k; j++)
                     printf("%5ld ", I[i * k + j]);
                 printf("\n");
             }
 
             printf("D=\n");
-            for(int i = 0; i < 5; i++) {
-                for(int j = 0; j < k; j++)
+            for (int i = 0; i < 5; i++) {
+                for (int j = 0; j < k; j++)
                     printf("%7g ", D[i * k + j]);
                 printf("\n");
             }
 
-            delete [] I;
-            delete [] D;
+            delete[] I;
+            delete[] D;
         }
 
         recorder.Record("search top 4");
@@ -88,27 +92,27 @@ namespace {
 
             // print results
             printf("I (5 first results)=\n");
-            for(int i = 0; i < 5; i++) {
-                for(int j = 0; j < k; j++)
+            for (int i = 0; i < 5; i++) {
+                for (int j = 0; j < k; j++)
                     printf("%5ld ", I[i * k + j]);
                 printf("\n");
             }
 
             printf("I (5 last results)=\n");
-            for(int i = nq - 5; i < nq; i++) {
-                for(int j = 0; j < k; j++)
+            for (int i = nq - 5; i < nq; i++) {
+                for (int j = 0; j < k; j++)
                     printf("%5ld ", I[i * k + j]);
                 printf("\n");
             }
 
-            delete [] I;
-            delete [] D;
+            delete[] I;
+            delete[] D;
         }
 
         recorder.Record("search xq");
 
-        delete [] xb;
-        delete [] xq;
+        delete[] xb;
+        delete[] xq;
 
         recorder.Record("delete data");
     }
@@ -123,14 +127,14 @@ namespace {
         float *xb = new float[d * nb];
         float *xq = new float[d * nq];
 
-        for(int i = 0; i < nb; i++) {
-            for(int j = 0; j < d; j++)
+        for (int i = 0; i < nb; i++) {
+            for (int j = 0; j < d; j++)
                 xb[d * i + j] = drand48();
             xb[d * i] += i / 1000.;
         }
 
-        for(int i = 0; i < nq; i++) {
-            for(int j = 0; j < d; j++)
+        for (int i = 0; i < nq; i++) {
+            for (int j = 0; j < d; j++)
                 xq[d * i + j] = drand48();
             xq[d * i] += i / 1000.;
         }
@@ -161,21 +165,21 @@ namespace {
 
             // print results
             printf("I (5 first results)=\n");
-            for(int i = 0; i < 5; i++) {
-                for(int j = 0; j < k; j++)
+            for (int i = 0; i < 5; i++) {
+                for (int j = 0; j < k; j++)
                     printf("%5ld ", I[i * k + j]);
                 printf("\n");
             }
 
             printf("I (5 last results)=\n");
-            for(int i = nq - 5; i < nq; i++) {
-                for(int j = 0; j < k; j++)
+            for (int i = nq - 5; i < nq; i++) {
+                for (int j = 0; j < k; j++)
                     printf("%5ld ", I[i * k + j]);
                 printf("\n");
             }
 
-            delete [] I;
-            delete [] D;
+            delete[] I;
+            delete[] D;
         }
 
         recorder.Record("search top 4");
@@ -209,27 +213,27 @@ namespace {
 
             // print results
             printf("I (5 first results)=\n");
-            for(int i = 0; i < 5; i++) {
-                for(int j = 0; j < k; j++)
+            for (int i = 0; i < 5; i++) {
+                for (int j = 0; j < k; j++)
                     printf("%5ld ", I[i * k + j]);
                 printf("\n");
             }
 
             printf("I (5 last results)=\n");
-            for(int i = nq - 5; i < nq; i++) {
-                for(int j = 0; j < k; j++)
+            for (int i = nq - 5; i < nq; i++) {
+                for (int j = 0; j < k; j++)
                     printf("%5ld ", I[i * k + j]);
                 printf("\n");
             }
 
-            delete [] I;
-            delete [] D;
+            delete[] I;
+            delete[] D;
         }
 
         recorder.Record("search xq");
 
-        delete [] xb;
-        delete [] xq;
+        delete[] xb;
+        delete[] xq;
 
         recorder.Record("delete data");
     }
@@ -243,4 +247,8 @@ void FaissTest::test() {
 
     test_flat();
     test_gpu();
+}
+
+}
+}
 }

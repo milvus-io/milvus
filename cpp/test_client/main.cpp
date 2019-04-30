@@ -14,6 +14,7 @@
 
 #include "src/FaissTest.h"
 #include "src/Log.h"
+#include "src/ClientTest.h"
 #include "server/ServerConfig.h"
 
 INITIALIZE_EASYLOGGINGPP
@@ -63,8 +64,13 @@ main(int argc, char *argv[]) {
 
     CLIENT_LOG_INFO << "Load config file:" << config_filename;
 
+#if 1
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
+#else
+    zilliz::vecwise::client::ClientTest::LoopTest();
+    return 0;
+#endif
 }
 
 void
