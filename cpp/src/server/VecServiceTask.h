@@ -119,6 +119,8 @@ protected:
     std::string GetVecID(uint64_t index) const;
     const AttribMap& GetVecAttrib(uint64_t index) const;
 
+    void ProcessIdMapping(engine::IDNumbers& vector_ids, uint64_t from, uint64_t to);
+
     ServerError OnExecute() override;
 
 private:
