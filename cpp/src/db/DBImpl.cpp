@@ -296,28 +296,13 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
         return status;
     }
 
-    auto opd = std::make_shared<Operand>();
-    opd->d = file.dimension;
-    opd->index_type = "IDMap,Flat";
-    IndexBuilderPtr pBuilder = GetIndexBuilder(opd);
+    FaissExecutionEngine to_index(file.dimension, file.location);
 
-    auto to_index = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
-    if (!to_index) {
-        to_index = read_index(file.location.c_str());
-    }
-    auto from_index = dynamic_cast<faiss::IndexIDMap*>(to_index->data().get());
+    to_index.Load();
+    auto index = to_index.BuildIndex(group_file.location);
 
-    /* LOG(DEBUG) << "Preparing build_index for file_id=" << file.file_id */
-    /*     << " with new index_file_id=" << group_file.file_id << std::endl; */
-    auto index = pBuilder->build_all(from_index->ntotal,
-            dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
-            from_index->id_map.data());
-    /* LOG(DEBUG) << "Ending build_index for file_id=" << file.file_id */
-    /*     << " with new index_file_id=" << group_file.file_id << std::endl; */
-    /* std::cout << "raw size=" << from_index->ntotal << "   index size=" << index->ntotal << std::endl; */
-    write_index(index, group_file.location.c_str());
     group_file.file_type = meta::GroupFileSchema::INDEX;
-    group_file.rows = file.dimension * index->ntotal;
+    group_file.rows = index->Size();
 
     auto to_remove = file;
     to_remove.file_type = meta::GroupFileSchema::TO_DELETE;
@@ -325,8 +310,7 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     meta::GroupFilesSchema update_files = {to_remove, group_file};
     _pMeta->update_files(update_files);
 
-    zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(group_file.location, index);
-
+    index->Cache();
 
     return Status::OK();
 }
