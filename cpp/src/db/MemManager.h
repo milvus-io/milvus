@@ -19,8 +19,7 @@ namespace meta {
     class Meta;
 }
 
-class FaissExecutionEngine;
-
+template <typename EngineT>
 class MemVectors {
 public:
     explicit MemVectors(const std::shared_ptr<meta::Meta>&,
@@ -47,15 +46,18 @@ private:
     Options options_;
     meta::GroupFileSchema schema_;
     IDGenerator* _pIdGenerator;
-    std::shared_ptr<FaissExecutionEngine> pEE_;
+    std::shared_ptr<EngineT> pEE_;
 
 }; // MemVectors
 
 
-typedef std::shared_ptr<MemVectors> VectorsPtr;
 
+template<typename EngineT>
 class MemManager {
 public:
+    typedef MemVectors<EngineT> ItemT;
+    typedef std::shared_ptr<ItemT> VectorsPtr;
+
     MemManager(const std::shared_ptr<meta::Meta>& meta_, const Options& options)
         : _pMeta(meta_), options_(options) {}
 
@@ -85,5 +87,6 @@ private:
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
+#include "MemManager.cpp"
 
 #endif

@@ -1,3 +1,6 @@
+#ifndef MEMMANGE_CPP__
+#define MEMMANGE_CPP__
+
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -5,23 +8,24 @@
 
 #include "MemManager.h"
 #include "Meta.h"
-#include "FaissExecutionEngine.h"
 
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-MemVectors::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
+template<typename EngineT>
+MemVectors<EngineT>::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
         const meta::GroupFileSchema& schema, const Options& options)
   : pMeta_(meta_ptr),
     options_(options),
     schema_(schema),
     _pIdGenerator(new SimpleIDGenerator()),
-    pEE_(new FaissExecutionEngine(schema_.dimension, schema_.location)) {
+    pEE_(new EngineT(schema_.dimension, schema_.location)) {
 }
 
-void MemVectors::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
+template<typename EngineT>
+void MemVectors<EngineT>::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
     _pIdGenerator->getNextIDNumbers(n_, vector_ids_);
     pEE_->AddWithIds(n_, vectors_, vector_ids_.data());
     for(auto i=0 ; i<n_; i++) {
@@ -29,15 +33,18 @@ void MemVectors::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
     }
 }
 
-size_t MemVectors::total() const {
+template<typename EngineT>
+size_t MemVectors<EngineT>::total() const {
     return pEE_->Count();
 }
 
-size_t MemVectors::approximate_size() const {
+template<typename EngineT>
+size_t MemVectors<EngineT>::approximate_size() const {
     return pEE_->Size();
 }
 
-Status MemVectors::serialize(std::string& group_id) {
+template<typename EngineT>
+Status MemVectors<EngineT>::serialize(std::string& group_id) {
     group_id = schema_.group_id;
     auto rows = approximate_size();
     pEE_->Serialize();
@@ -52,7 +59,8 @@ Status MemVectors::serialize(std::string& group_id) {
     return status;
 }
 
-MemVectors::~MemVectors() {
+template<typename EngineT>
+MemVectors<EngineT>::~MemVectors() {
     if (_pIdGenerator != nullptr) {
         delete _pIdGenerator;
         _pIdGenerator = nullptr;
@@ -63,7 +71,9 @@ MemVectors::~MemVectors() {
  * MemManager
  */
 
-VectorsPtr MemManager::get_mem_by_group(const std::string& group_id) {
+template<typename EngineT>
+typename MemManager<EngineT>::VectorsPtr MemManager<EngineT>::get_mem_by_group(
+        const std::string& group_id) {
     auto memIt = _memMap.find(group_id);
     if (memIt != _memMap.end()) {
         return memIt->second;
@@ -76,11 +86,12 @@ VectorsPtr MemManager::get_mem_by_group(const std::string& group_id) {
         return nullptr;
     }
 
-    _memMap[group_id] = std::shared_ptr<MemVectors>(new MemVectors(_pMeta, group_file, options_));
+    _memMap[group_id] = VectorsPtr(new MemVectors<EngineT>(_pMeta, group_file, options_));
     return _memMap[group_id];
 }
 
-Status MemManager::add_vectors(const std::string& group_id_,
+template<typename EngineT>
+Status MemManager<EngineT>::add_vectors(const std::string& group_id_,
         size_t n_,
         const float* vectors_,
         IDNumbers& vector_ids_) {
@@ -88,11 +99,12 @@ Status MemManager::add_vectors(const std::string& group_id_,
     return add_vectors_no_lock(group_id_, n_, vectors_, vector_ids_);
 }
 
-Status MemManager::add_vectors_no_lock(const std::string& group_id,
+template<typename EngineT>
+Status MemManager<EngineT>::add_vectors_no_lock(const std::string& group_id,
         size_t n,
         const float* vectors,
         IDNumbers& vector_ids) {
-    std::shared_ptr<MemVectors> mem = get_mem_by_group(group_id);
+    VectorsPtr mem = get_mem_by_group(group_id);
     if (mem == nullptr) {
         return Status::NotFound("Group " + group_id + " not found!");
     }
@@ -101,7 +113,8 @@ Status MemManager::add_vectors_no_lock(const std::string& group_id,
     return Status::OK();
 }
 
-Status MemManager::mark_memory_as_immutable() {
+template<typename EngineT>
+Status MemManager<EngineT>::mark_memory_as_immutable() {
     std::unique_lock<std::mutex> lock(_mutex);
     for (auto& kv: _memMap) {
         _immMems.push_back(kv.second);
@@ -111,20 +124,8 @@ Status MemManager::mark_memory_as_immutable() {
     return Status::OK();
 }
 
-/* bool MemManager::need_serialize(double interval) { */
-/*     if (_immMems.size() > 0) { */
-/*         return false; */
-/*     } */
-
-/*     auto diff = std::difftime(std::time(nullptr), _last_compact_time); */
-/*     if (diff >= interval) { */
-/*         return true; */
-/*     } */
-
-/*     return false; */
-/* } */
-
-Status MemManager::serialize(std::vector<std::string>& group_ids) {
+template<typename EngineT>
+Status MemManager<EngineT>::serialize(std::vector<std::string>& group_ids) {
     mark_memory_as_immutable();
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     std::string group_id;
@@ -141,3 +142,5 @@ Status MemManager::serialize(std::vector<std::string>& group_ids) {
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
+
+#endif

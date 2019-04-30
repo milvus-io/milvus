@@ -16,37 +16,43 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-DBImpl::DBImpl(const Options& options)
+template<typename EngineT>
+DBImpl<EngineT>::DBImpl(const Options& options)
     : _env(options.env),
       _options(options),
       _bg_compaction_scheduled(false),
       _shutting_down(false),
       bg_build_index_started_(false),
       _pMeta(new meta::DBMetaImpl(_options.meta)),
-      _pMemMgr(new MemManager(_pMeta, _options)) {
+      _pMemMgr(new MemManager<EngineT>(_pMeta, _options)) {
     start_timer_task(_options.memory_sync_interval);
 }
 
-Status DBImpl::add_group(meta::GroupSchema& group_info) {
+template<typename EngineT>
+Status DBImpl<EngineT>::add_group(meta::GroupSchema& group_info) {
     return _pMeta->add_group(group_info);
 }
 
-Status DBImpl::get_group(meta::GroupSchema& group_info) {
+template<typename EngineT>
+Status DBImpl<EngineT>::get_group(meta::GroupSchema& group_info) {
     return _pMeta->get_group(group_info);
 }
 
-Status DBImpl::has_group(const std::string& group_id_, bool& has_or_not_) {
+template<typename EngineT>
+Status DBImpl<EngineT>::has_group(const std::string& group_id_, bool& has_or_not_) {
     return _pMeta->has_group(group_id_, has_or_not_);
 }
 
-Status DBImpl::get_group_files(const std::string& group_id,
+template<typename EngineT>
+Status DBImpl<EngineT>::get_group_files(const std::string& group_id,
                                const int date_delta,
                                meta::GroupFilesSchema& group_files_info) {
     return _pMeta->get_group_files(group_id, date_delta, group_files_info);
 
 }
 
-Status DBImpl::add_vectors(const std::string& group_id_,
+template<typename EngineT>
+Status DBImpl<EngineT>::add_vectors(const std::string& group_id_,
         size_t n, const float* vectors, IDNumbers& vector_ids_) {
     Status status = _pMemMgr->add_vectors(group_id_, n, vectors, vector_ids_);
     if (!status.ok()) {
@@ -54,13 +60,15 @@ Status DBImpl::add_vectors(const std::string& group_id_,
     }
 }
 
-Status DBImpl::search(const std::string &group_id, size_t k, size_t nq,
+template<typename EngineT>
+Status DBImpl<EngineT>::search(const std::string &group_id, size_t k, size_t nq,
                       const float *vectors, QueryResults &results) {
     meta::DatesT dates = {meta::Meta::GetDate()};
     return search(group_id, k, nq, vectors, dates, results);
 }
 
-Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
+template<typename EngineT>
+Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
 
     meta::DatePartionedGroupFilesSchema files;
@@ -158,12 +166,14 @@ Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
     return Status::OK();
 }
 
-void DBImpl::start_timer_task(int interval_) {
-    std::thread bg_task(&DBImpl::background_timer_task, this, interval_);
+template<typename EngineT>
+void DBImpl<EngineT>::start_timer_task(int interval_) {
+    std::thread bg_task(&DBImpl<EngineT>::background_timer_task, this, interval_);
     bg_task.detach();
 }
 
-void DBImpl::background_timer_task(int interval_) {
+template<typename EngineT>
+void DBImpl<EngineT>::background_timer_task(int interval_) {
     Status status;
     while (true) {
         if (!_bg_error.ok()) break;
@@ -175,19 +185,22 @@ void DBImpl::background_timer_task(int interval_) {
     }
 }
 
-void DBImpl::try_schedule_compaction() {
+template<typename EngineT>
+void DBImpl<EngineT>::try_schedule_compaction() {
     if (_bg_compaction_scheduled) return;
     if (!_bg_error.ok()) return;
 
     _bg_compaction_scheduled = true;
-    _env->schedule(&DBImpl::BGWork, this);
+    _env->schedule(&DBImpl<EngineT>::BGWork, this);
 }
 
-void DBImpl::BGWork(void* db_) {
+template<typename EngineT>
+void DBImpl<EngineT>::BGWork(void* db_) {
     reinterpret_cast<DBImpl*>(db_)->background_call();
 }
 
-void DBImpl::background_call() {
+template<typename EngineT>
+void DBImpl<EngineT>::background_call() {
     std::lock_guard<std::mutex> lock(_mutex);
     assert(_bg_compaction_scheduled);
 
@@ -201,7 +214,8 @@ void DBImpl::background_call() {
 }
 
 
-Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
+template<typename EngineT>
+Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::DateT& date,
         const meta::GroupFilesSchema& files) {
     meta::GroupFileSchema group_file;
     group_file.group_id = group_id;
@@ -248,7 +262,8 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     return status;
 }
 
-Status DBImpl::background_merge_files(const std::string& group_id) {
+template<typename EngineT>
+Status DBImpl<EngineT>::background_merge_files(const std::string& group_id) {
     meta::DatePartionedGroupFilesSchema raw_files;
     auto status = _pMeta->files_to_merge(group_id, raw_files);
     if (!status.ok()) {
@@ -277,7 +292,8 @@ Status DBImpl::background_merge_files(const std::string& group_id) {
     return Status::OK();
 }
 
-Status DBImpl::build_index(const meta::GroupFileSchema& file) {
+template<typename EngineT>
+Status DBImpl<EngineT>::build_index(const meta::GroupFileSchema& file) {
     meta::GroupFileSchema group_file;
     group_file.group_id = file.group_id;
     group_file.date = file.date;
@@ -305,7 +321,8 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     return Status::OK();
 }
 
-void DBImpl::background_build_index() {
+template<typename EngineT>
+void DBImpl<EngineT>::background_build_index() {
     std::lock_guard<std::mutex> lock(build_index_mutex_);
     assert(bg_build_index_started_);
     meta::GroupFilesSchema to_index_files;
@@ -325,16 +342,18 @@ void DBImpl::background_build_index() {
     bg_build_index_finish_signal_.notify_all();
 }
 
-Status DBImpl::try_build_index() {
+template<typename EngineT>
+Status DBImpl<EngineT>::try_build_index() {
     if (bg_build_index_started_) return Status::OK();
     if (_shutting_down.load(std::memory_order_acquire)) return Status::OK();
     bg_build_index_started_ = true;
-    std::thread build_index_task(&DBImpl::background_build_index, this);
+    std::thread build_index_task(&DBImpl<EngineT>::background_build_index, this);
     build_index_task.detach();
     return Status::OK();
 }
 
-void DBImpl::background_compaction() {
+template<typename EngineT>
+void DBImpl<EngineT>::background_compaction() {
     std::vector<std::string> group_ids;
     _pMemMgr->serialize(group_ids);
 
@@ -348,15 +367,18 @@ void DBImpl::background_compaction() {
     }
 }
 
-Status DBImpl::drop_all() {
+template<typename EngineT>
+Status DBImpl<EngineT>::drop_all() {
     return _pMeta->drop_all();
 }
 
-Status DBImpl::count(const std::string& group_id, long& result) {
+template<typename EngineT>
+Status DBImpl<EngineT>::count(const std::string& group_id, long& result) {
     return _pMeta->count(group_id, result);
 }
 
-DBImpl::~DBImpl() {
+template<typename EngineT>
+DBImpl<EngineT>::~DBImpl() {
     {
         std::unique_lock<std::mutex> lock(_mutex);
         _shutting_down.store(true, std::memory_order_release);
@@ -382,7 +404,7 @@ DB::~DB() {}
 
 void DB::Open(const Options& options, DB** dbptr) {
     *dbptr = nullptr;
-    *dbptr = new DBImpl(options);
+    *dbptr = new DBImpl<FaissExecutionEngine>(options);
     return;
 }
 
