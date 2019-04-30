@@ -1,12 +1,15 @@
 #pragma once
 
 #include <vector>
+#include <memory>
 
 #include "Status.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
+
+class ExecutionEngine;
 
 class ExecutionEngine {
 public:
@@ -22,7 +25,11 @@ public:
 
     virtual Status Serialize() = 0;
 
+    virtual Status Load() = 0;
+
     virtual Status Merge(const std::string& location) = 0;
+
+    virtual std::shared_ptr<ExecutionEngine> BuildIndex(const std::string&) = 0;
 
     virtual Status Cache() = 0;
 
