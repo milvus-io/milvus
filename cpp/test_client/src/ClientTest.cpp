@@ -111,7 +111,52 @@ namespace {
 }
 
 void ClientTest::LoopTest() {
+    server::TimeRecorder rc("LoopTest");
 
+    std::string address, protocol;
+    int32_t port = 0;
+    GetServerAddress(address, port, protocol);
+    client::ClientSession session(address, port, protocol);
+
+    rc.Record("connection");
+
+    //add group
+    VecGroup group;
+    group.id = "loop_group";
+    group.dimension = VEC_DIMENSION;
+    group.index_type = 0;
+    session.interface()->add_group(group);
+    rc.Record("add group");
+
+    const int64_t batch = 10000;
+    for(int64_t i = 0; i < 1000; i++) {
+        VecTensorList tensor_list;
+        VecBinaryTensorList bin_tensor_list;
+        BuildVectors(i*batch, (i+1)*batch, tensor_list, bin_tensor_list);
+        rc.Record("build batch no." + std::to_string(i));
+
+        session.interface()->add_binary_vector_batch(group.id, bin_tensor_list);
+        rc.Record("add batch no." + std::to_string(i));
+
+        sleep(1);
+        rc.Record("sleep 1 second");
+
+        VecTensor tensor;
+        for (int32_t k = 0; k < VEC_DIMENSION; k++) {
+            tensor.tensor.push_back((double) (k + i*666));
+        }
+
+        //do search
+        VecSearchResult res;
+        VecSearchFilter filter;
+        session.interface()->search_vector(res, group.id, 10, tensor, filter);
+        rc.Record("search finish");
+
+        std::cout << "Search result: " << std::endl;
+        for(VecSearchResultItem& item : res.result_list) {
+            std::cout << "\t" << item.uid << std::endl;
+        }
+    }
 }
 
 TEST(AddVector, CLIENT_TEST) {
