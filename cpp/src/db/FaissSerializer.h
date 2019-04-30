@@ -15,11 +15,18 @@ namespace engine {
 
 class FaissSerializer : public Serializer {
 public:
-    FaissSerializer(uint16_t dimension);
-    virtual bool AddWithIds(long n, const float *xdata, const long *xids) override;
+    FaissSerializer(uint16_t dimension, const std::string& location);
+    virtual Status AddWithIds(long n, const float *xdata, const long *xids) override;
+
+    virtual size_t Count() const override;
+
+    virtual size_t Size() const override;
+
+    virtual Status Serialize() override;
 
 protected:
     std::shared_ptr<faiss::Index> pIndex_;
+    std::string location_;
 };
 
 

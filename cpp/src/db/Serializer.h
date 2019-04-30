@@ -2,6 +2,8 @@
 
 #include <vector>
 
+#include "Status.h"
+
 namespace zilliz {
 namespace vecwise {
 namespace engine {
@@ -9,10 +11,16 @@ namespace engine {
 class Serializer {
 public:
 
-    bool AddWithIds(const std::vector<float>& vectors,
+    Status AddWithIds(const std::vector<float>& vectors,
                               const std::vector<long>& vector_ids);
 
-    virtual bool AddWithIds(long n, const float *xdata, const long *xids) = 0;
+    virtual Status AddWithIds(long n, const float *xdata, const long *xids) = 0;
+
+    virtual size_t Count() const = 0;
+
+    virtual size_t Size() const = 0;
+
+    virtual Status Serialize() = 0;
 
     virtual ~Serializer() {}
 };
