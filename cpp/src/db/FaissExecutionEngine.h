@@ -22,6 +22,8 @@ public:
 
     virtual size_t Size() const override;
 
+    virtual Status Merge(const std::string& location) override;
+
     virtual Status Serialize() override;
 
     virtual Status Cache() override;

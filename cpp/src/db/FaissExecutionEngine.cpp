@@ -1,5 +1,8 @@
 #include <easylogging++.h>
 #include <faiss/AutoTune.h>
+#include <faiss/MetaIndexes.h>
+#include <faiss/IndexFlat.h>
+#include <faiss/index_io.h>
 #include <wrapper/Index.h>
 #include <cache/CpuCacheMgr.h>
 
@@ -31,6 +34,20 @@ size_t FaissExecutionEngine::Size() const {
 
 Status FaissExecutionEngine::Serialize() {
     write_index(pIndex_.get(), location_.c_str());
+    return Status::OK();
+}
+
+Status FaissExecutionEngine::Merge(const std::string& location) {
+    if (location == location_) {
+        return Status::Error("Cannot Merge Self");
+    }
+    auto to_merge = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
+    if (!to_merge) {
+        to_merge = read_index(location);
+    }
+    auto file_index = dynamic_cast<faiss::IndexIDMap*>(to_merge->data().get());
+    pIndex_->add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat*>(file_index->index)->xb.data(),
+            file_index->id_map.data());
     return Status::OK();
 }
 
