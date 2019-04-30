@@ -22,6 +22,8 @@ public:
 
     virtual Status Serialize() = 0;
 
+    virtual Status Merge(const std::string& location) = 0;
+
     virtual Status Cache() = 0;
 
     virtual ~ExecutionEngine() {}

@@ -11,9 +11,11 @@
 #include <easylogging++.h>
 #include <wrapper/IndexBuilder.h>
 #include <cache/CpuCacheMgr.h>
+
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
+#include "FaissExecutionEngine.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -220,30 +222,25 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         return status;
     }
 
-    std::shared_ptr<faiss::Index> index(faiss::index_factory(group_file.dimension, "IDMap,Flat"));
+    std::shared_ptr<ExecutionEngine> execution_engine(
+            new FaissExecutionEngine(group_file.dimension, group_file.location));
 
     meta::GroupFilesSchema updated;
     long  index_size = 0;
 
     for (auto& file : files) {
-        auto to_merge = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
-        if (!to_merge) {
-            to_merge = read_index(file.location);
-        }
-        auto file_index = dynamic_cast<faiss::IndexIDMap*>(to_merge->data().get());
-        index->add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat*>(file_index->index)->xb.data(),
-                file_index->id_map.data());
+        execution_engine->Merge(file.location);
         auto file_schema = file;
         file_schema.file_type = meta::GroupFileSchema::TO_DELETE;
         updated.push_back(file_schema);
         /* LOG(DEBUG) << "About to merge file " << file_schema.file_id << */
         /*     " of size=" << file_schema.rows; */
-        index_size = group_file.dimension * index->ntotal;
+        index_size = execution_engine->Size();
 
         if (index_size >= _options.index_trigger_size) break;
     }
 
-    faiss::write_index(index.get(), group_file.location.c_str());
+    execution_engine->Serialize();
 
     if (index_size >= _options.index_trigger_size) {
         group_file.file_type = meta::GroupFileSchema::TO_INDEX;
@@ -256,8 +253,7 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     /* LOG(DEBUG) << "New merged file " << group_file.file_id << */
     /*     " of size=" << group_file.rows; */
 
-    zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(
-            group_file.location, std::make_shared<Index>(index));
+    execution_engine->Cache();
 
     return status;
 }
