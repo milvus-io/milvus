@@ -1,6 +1,7 @@
 #include <easylogging++.h>
 #include <faiss/AutoTune.h>
 #include <wrapper/Index.h>
+#include <cache/CpuCacheMgr.h>
 
 #include "FaissSerializer.h"
 
@@ -33,6 +34,12 @@ Status FaissSerializer::Serialize() {
     return Status::OK();
 }
 
+Status FaissSerializer::Cache() {
+    zilliz::vecwise::cache::CpuCacheMgr::GetInstance(
+            )->InsertItem(location_, std::make_shared<Index>(pIndex_));
+
+    return Status::OK();
+}
 
 } // namespace engine
 } // namespace vecwise
