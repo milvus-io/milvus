@@ -2,14 +2,9 @@
 #include <chrono>
 #include <thread>
 #include <iostream>
-#include <faiss/IndexFlat.h>
-#include <faiss/MetaIndexes.h>
-#include <faiss/index_io.h>
-#include <faiss/AutoTune.h>
 #include <cstring>
 #include <wrapper/Topk.h>
 #include <easylogging++.h>
-#include <wrapper/IndexBuilder.h>
 #include <cache/CpuCacheMgr.h>
 
 #include "DBImpl.h"

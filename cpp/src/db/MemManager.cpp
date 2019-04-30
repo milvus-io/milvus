@@ -1,7 +1,6 @@
 #include <iostream>
 #include <sstream>
 #include <thread>
-
 #include <easylogging++.h>
 
 #include "MemManager.h"
