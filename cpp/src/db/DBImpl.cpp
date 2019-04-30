@@ -113,7 +113,7 @@ Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
 
         auto search_in_index = [&](meta::GroupFilesSchema& file_vec) -> void {
             for (auto &file : file_vec) {
-                FaissExecutionEngine index(file.dimension, file.location);
+                FaissExecutionEngineBase index(file.dimension, file.location);
                 index.Load();
                 auto file_size = index.PhysicalSize()/(1024*1024);
                 search_set_size += file_size;
@@ -213,7 +213,7 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         return status;
     }
 
-    FaissExecutionEngine index(group_file.dimension, group_file.location);
+    FaissExecutionEngineBase index(group_file.dimension, group_file.location);
 
     meta::GroupFilesSchema updated;
     long  index_size = 0;
@@ -286,7 +286,7 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
         return status;
     }
 
-    FaissExecutionEngine to_index(file.dimension, file.location);
+    FaissExecutionEngineBase to_index(file.dimension, file.location);
 
     to_index.Load();
     auto index = to_index.BuildIndex(group_file.location);
