@@ -54,19 +54,21 @@ TEST_F(DBTest, DB_TEST) {
         INIT_TIMER;
         std::stringstream ss;
         long count = 0;
+        long prev_count = -1;
 
-        for (auto j=0; j<15; ++j) {
+        for (auto j=0; j<10; ++j) {
             ss.str("");
             db_->count(group_name, count);
-
-            ss << "Search " << j << " With Size " << count;
+            prev_count = count;
 
             START_TIMER;
             stat = db_->search(group_name, k, qb, qxb, results);
+            ss << "Search " << j << " With Size " << (float)(count*group_dim*sizeof(float))/(1024*1024) << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_STATS(stat);
             ASSERT_EQ(results[0][0], target_ids[0]);
+            ASSERT_TRUE(count >= prev_count);
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     });
@@ -79,7 +81,7 @@ TEST_F(DBTest, DB_TEST) {
         } else {
             db_->add_vectors(group_name, nb, xb, vector_ids);
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(5));
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
     search.join();
