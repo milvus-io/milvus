@@ -8,7 +8,7 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-class Serializer {
+class ExecutionEngine {
 public:
 
     Status AddWithIds(const std::vector<float>& vectors,
@@ -24,7 +24,7 @@ public:
 
     virtual Status Cache() = 0;
 
-    virtual ~Serializer() {}
+    virtual ~ExecutionEngine() {}
 };
 
 
