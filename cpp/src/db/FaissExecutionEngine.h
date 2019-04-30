@@ -46,6 +46,42 @@ protected:
     std::string location_;
 };
 
+class FaissExecutionEngineBase : public ExecutionEngineBase<FaissExecutionEngineBase> {
+public:
+    FaissExecutionEngineBase(uint16_t dimension, const std::string& location);
+    FaissExecutionEngineBase(std::shared_ptr<faiss::Index> index, const std::string& location);
+
+    Status AddWithIds(const std::vector<float>& vectors,
+                              const std::vector<long>& vector_ids);
+
+    Status AddWithIds(long n, const float *xdata, const long *xids);
+
+    size_t Count() const;
+
+    size_t Size() const;
+
+    size_t PhysicalSize() const;
+
+    Status Serialize();
+
+    Status Load();
+
+    Status Merge(const std::string& location);
+
+    Status Search(long n,
+                  const float *data,
+                  long k,
+                  float *distances,
+                  long *labels) const;
+
+    std::shared_ptr<FaissExecutionEngineBase> BuildIndex(const std::string&);
+
+    Status Cache();
+protected:
+    std::shared_ptr<faiss::Index> pIndex_;
+    std::string location_;
+};
+
 
 } // namespace engine
 } // namespace vecwise

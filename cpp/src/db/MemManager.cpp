@@ -18,7 +18,7 @@ MemVectors::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
     options_(options),
     schema_(schema),
     _pIdGenerator(new SimpleIDGenerator()),
-    pEE_(new FaissExecutionEngine(schema_.dimension, schema_.location)) {
+    pEE_(new FaissExecutionEngineBase(schema_.dimension, schema_.location)) {
 }
 
 void MemVectors::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
