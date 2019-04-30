@@ -68,7 +68,14 @@ struct VecSearchResultList {
     1: list<VecSearchResult> result_list;
 }
 
-
+/**
+ * second;			Seconds.	[0-60] (1 leap second)
+ * minute;			Minutes.	[0-59]
+ * hour;			Hours.	    [0-23]
+ * day;			    Day.		[1-31]
+ * month;			Month.	    [0-11]
+ * year;			Year - 1900.
+ */
 struct VecDateTime {
     1: required i32 year;
     2: required i32 month;
