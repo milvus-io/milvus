@@ -21,6 +21,9 @@ public:
     static Status NotFound(const std::string& msg, const std::string& msg2="") {
         return Status(kNotFound, msg, msg2);
     }
+    static Status Error(const std::string& msg, const std::string& msg2="") {
+        return Status(kError, msg, msg2);
+    }
 
     static Status InvalidDBPath(const std::string& msg, const std::string& msg2="") {
         return Status(kInvalidDBPath, msg, msg2);
@@ -35,6 +38,7 @@ public:
     bool ok() const { return state_ == nullptr; }
 
     bool IsNotFound() const { return code() == kNotFound; }
+    bool IsError() const { return code() == kError; }
 
     bool IsInvalidDBPath() const { return code() == kInvalidDBPath; }
     bool IsGroupError() const { return code() == kGroupError; }
@@ -48,6 +52,7 @@ private:
     enum Code {
         kOK = 0,
         kNotFound,
+        kError,
 
         kInvalidDBPath,
         kGroupError,
