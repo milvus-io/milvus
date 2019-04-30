@@ -39,6 +39,10 @@ size_t FaissExecutionEngine::Size() const {
     return (size_t)(Count() * pIndex_->d);
 }
 
+size_t FaissExecutionEngine::PhysicalSize() const {
+    return (size_t)(Size()*sizeof(float));
+}
+
 Status FaissExecutionEngine::Serialize() {
     write_index(pIndex_.get(), location_.c_str());
     return Status::OK();
@@ -48,6 +52,8 @@ Status FaissExecutionEngine::Load() {
     auto index  = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     if (!index) {
         index = read_index(location_);
+        Cache();
+        LOG(DEBUG) << "Disk io from: " << location_;
     }
 
     pIndex_ = index->data();
@@ -83,6 +89,16 @@ std::shared_ptr<ExecutionEngine> FaissExecutionEngine::BuildIndex(const std::str
     std::shared_ptr<ExecutionEngine> new_ee(new FaissExecutionEngine(index->data(), location));
     new_ee->Serialize();
     return new_ee;
+}
+
+Status FaissExecutionEngine::Search(long n,
+                                    const float *data,
+                                    long k,
+                                    float *distances,
+                                    long *labels) const {
+
+    pIndex_->search(n, data, k, distances, labels);
+    return Status::OK();
 }
 
 Status FaissExecutionEngine::Cache() {

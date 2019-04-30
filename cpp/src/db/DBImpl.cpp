@@ -118,17 +118,13 @@ Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
 
         auto search_in_index = [&](meta::GroupFilesSchema& file_vec) -> void {
             for (auto &file : file_vec) {
-                auto index = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
-                if (!index) {
-                    LOG(DEBUG) << "Disk io from: " << file.location;
-                    index = read_index(file.location.c_str());
-                    zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(file.location, index);
-                }
-                auto file_size = index->dim * index->ntotal * 4 /(1024*1024);
+                FaissExecutionEngine index(file.dimension, file.location);
+                index.Load();
+                auto file_size = index.PhysicalSize()/(1024*1024);
                 search_set_size += file_size;
                 LOG(DEBUG) << "Search file_type " << file.file_type << " Of Size: "
                     << file_size << " M";
-                index->search(nq, vectors, k, output_distence, output_ids);
+                index.Search(nq, vectors, k, output_distence, output_ids);
                 cluster(output_ids, output_distence); // cluster to each query
                 memset(output_distence, 0, k * nq * sizeof(float));
                 memset(output_ids, 0, k * nq * sizeof(long));

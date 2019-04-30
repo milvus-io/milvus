@@ -24,12 +24,20 @@ public:
 
     virtual size_t Size() const override;
 
+    virtual size_t PhysicalSize() const override;
+
     virtual Status Merge(const std::string& location) override;
 
     virtual Status Serialize() override;
     virtual Status Load() override;
 
     virtual Status Cache() override;
+
+    virtual Status Search(long n,
+                          const float *data,
+                          long k,
+                          float *distances,
+                          long *labels) const override;
 
     virtual std::shared_ptr<ExecutionEngine> BuildIndex(const std::string&) override;
 
