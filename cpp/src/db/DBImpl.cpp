@@ -120,7 +120,8 @@ Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
                     index = read_index(file.location.c_str());
                     zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(file.location, index);
                 }
-                LOG(DEBUG) << "Search Index Of Size: " << index->dim * index->ntotal * 4 /(1024*1024) << " M";
+                LOG(DEBUG) << "Search file_type " << file.file_type << " Of Size: "
+                    << index->dim * index->ntotal * 4 /(1024*1024) << " M";
                 index->search(nq, vectors, k, output_distence, output_ids);
                 cluster(output_ids, output_distence); // cluster to each query
                 memset(output_distence, 0, k * nq * sizeof(float));
