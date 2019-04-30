@@ -76,7 +76,7 @@ namespace {
 
         int64_t count = to - from;
         server::TimeRecorder rc(std::to_string(count) + " vectors built");
-        for (int64_t k = from; k < count; k++) {
+        for (int64_t k = from; k < to; k++) {
             VecTensor tensor;
             tensor.tensor.reserve(VEC_DIMENSION);
             VecBinaryTensor bin_tensor;
