@@ -213,25 +213,24 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         return status;
     }
 
-    std::shared_ptr<ExecutionEngine> execution_engine(
-            new FaissExecutionEngine(group_file.dimension, group_file.location));
+    FaissExecutionEngine index(group_file.dimension, group_file.location);
 
     meta::GroupFilesSchema updated;
     long  index_size = 0;
 
     for (auto& file : files) {
-        execution_engine->Merge(file.location);
+        index.Merge(file.location);
         auto file_schema = file;
         file_schema.file_type = meta::GroupFileSchema::TO_DELETE;
         updated.push_back(file_schema);
         /* LOG(DEBUG) << "About to merge file " << file_schema.file_id << */
         /*     " of size=" << file_schema.rows; */
-        index_size = execution_engine->Size();
+        index_size = index.Size();
 
         if (index_size >= _options.index_trigger_size) break;
     }
 
-    execution_engine->Serialize();
+    index.Serialize();
 
     if (index_size >= _options.index_trigger_size) {
         group_file.file_type = meta::GroupFileSchema::TO_INDEX;
@@ -244,7 +243,7 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     /* LOG(DEBUG) << "New merged file " << group_file.file_id << */
     /*     " of size=" << group_file.rows; */
 
-    execution_engine->Cache();
+    index.Cache();
 
     return status;
 }
