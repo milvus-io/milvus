@@ -19,7 +19,7 @@ namespace meta {
     class Meta;
 }
 
-class FaissExecutionEngineBase;
+class FaissExecutionEngine;
 
 class MemVectors {
 public:
@@ -47,7 +47,7 @@ private:
     Options options_;
     meta::GroupFileSchema schema_;
     IDGenerator* _pIdGenerator;
-    std::shared_ptr<FaissExecutionEngineBase> pEE_;
+    std::shared_ptr<FaissExecutionEngine> pEE_;
 
 }; // MemVectors
 

@@ -16,6 +16,7 @@ namespace engine {
 const std::string RawIndexType = "IDMap,Flat";
 const std::string BuildIndexType = "IDMap,Flat";
 
+
 FaissExecutionEngine::FaissExecutionEngine(uint16_t dimension, const std::string& location)
     : pIndex_(faiss::index_factory(dimension, RawIndexType.c_str())),
       location_(location) {
@@ -74,7 +75,7 @@ Status FaissExecutionEngine::Merge(const std::string& location) {
     return Status::OK();
 }
 
-std::shared_ptr<ExecutionEngine> FaissExecutionEngine::BuildIndex(const std::string& location) {
+std::shared_ptr<FaissExecutionEngine> FaissExecutionEngine::BuildIndex(const std::string& location) {
     auto opd = std::make_shared<Operand>();
     opd->d = pIndex_->d;
     opd->index_type = BuildIndexType;
@@ -86,7 +87,7 @@ std::shared_ptr<ExecutionEngine> FaissExecutionEngine::BuildIndex(const std::str
             dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
             from_index->id_map.data());
 
-    std::shared_ptr<ExecutionEngine> new_ee(new FaissExecutionEngine(index->data(), location));
+    std::shared_ptr<FaissExecutionEngine> new_ee(new FaissExecutionEngine(index->data(), location));
     new_ee->Serialize();
     return new_ee;
 }
@@ -102,99 +103,6 @@ Status FaissExecutionEngine::Search(long n,
 }
 
 Status FaissExecutionEngine::Cache() {
-    zilliz::vecwise::cache::CpuCacheMgr::GetInstance(
-            )->InsertItem(location_, std::make_shared<Index>(pIndex_));
-
-    return Status::OK();
-}
-
-
-FaissExecutionEngineBase::FaissExecutionEngineBase(uint16_t dimension, const std::string& location)
-    : pIndex_(faiss::index_factory(dimension, RawIndexType.c_str())),
-      location_(location) {
-}
-
-FaissExecutionEngineBase::FaissExecutionEngineBase(std::shared_ptr<faiss::Index> index, const std::string& location)
-    : pIndex_(index),
-      location_(location) {
-}
-
-Status FaissExecutionEngineBase::AddWithIds(long n, const float *xdata, const long *xids) {
-    pIndex_->add_with_ids(n, xdata, xids);
-    return Status::OK();
-}
-
-size_t FaissExecutionEngineBase::Count() const {
-    return (size_t)(pIndex_->ntotal);
-}
-
-size_t FaissExecutionEngineBase::Size() const {
-    return (size_t)(Count() * pIndex_->d);
-}
-
-size_t FaissExecutionEngineBase::PhysicalSize() const {
-    return (size_t)(Size()*sizeof(float));
-}
-
-Status FaissExecutionEngineBase::Serialize() {
-    write_index(pIndex_.get(), location_.c_str());
-    return Status::OK();
-}
-
-Status FaissExecutionEngineBase::Load() {
-    auto index  = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
-    if (!index) {
-        index = read_index(location_);
-        Cache();
-        LOG(DEBUG) << "Disk io from: " << location_;
-    }
-
-    pIndex_ = index->data();
-    return Status::OK();
-}
-
-Status FaissExecutionEngineBase::Merge(const std::string& location) {
-    if (location == location_) {
-        return Status::Error("Cannot Merge Self");
-    }
-    auto to_merge = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
-    if (!to_merge) {
-        to_merge = read_index(location);
-    }
-    auto file_index = dynamic_cast<faiss::IndexIDMap*>(to_merge->data().get());
-    pIndex_->add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat*>(file_index->index)->xb.data(),
-            file_index->id_map.data());
-    return Status::OK();
-}
-
-std::shared_ptr<FaissExecutionEngineBase> FaissExecutionEngineBase::BuildIndex(const std::string& location) {
-    auto opd = std::make_shared<Operand>();
-    opd->d = pIndex_->d;
-    opd->index_type = BuildIndexType;
-    IndexBuilderPtr pBuilder = GetIndexBuilder(opd);
-
-    auto from_index = dynamic_cast<faiss::IndexIDMap*>(pIndex_.get());
-
-    auto index = pBuilder->build_all(from_index->ntotal,
-            dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
-            from_index->id_map.data());
-
-    std::shared_ptr<FaissExecutionEngineBase> new_ee(new FaissExecutionEngineBase(index->data(), location));
-    new_ee->Serialize();
-    return new_ee;
-}
-
-Status FaissExecutionEngineBase::Search(long n,
-                                    const float *data,
-                                    long k,
-                                    float *distances,
-                                    long *labels) const {
-
-    pIndex_->search(n, data, k, distances, labels);
-    return Status::OK();
-}
-
-Status FaissExecutionEngineBase::Cache() {
     zilliz::vecwise::cache::CpuCacheMgr::GetInstance(
             )->InsertItem(location_, std::make_shared<Index>(pIndex_));
 
