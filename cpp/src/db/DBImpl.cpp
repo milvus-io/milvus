@@ -228,7 +228,7 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     for (auto& file : files) {
         auto to_merge = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
         if (!to_merge) {
-            to_merge = read_index(file.location.c_str());
+            to_merge = read_index(file.location);
         }
         auto file_index = dynamic_cast<faiss::IndexIDMap*>(to_merge->data().get());
         index->add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat*>(file_index->index)->xb.data(),
