@@ -9,10 +9,11 @@ namespace zilliz {
 namespace vecwise {
 namespace client {
 
-class FaissTest {
+class ClientTest {
 public:
-    static void test();
+    static void LoopTest();
 };
+
 
 }
 }

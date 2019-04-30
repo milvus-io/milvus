@@ -3,6 +3,9 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
+
+#include "ClientTest.h"
+
 #include <gtest/gtest.h>
 #include "utils/TimeRecorder.h"
 #include "utils/AttributeSerializer.h"
@@ -14,6 +17,7 @@
 
 using namespace zilliz;
 using namespace zilliz::vecwise;
+using namespace zilliz::vecwise::client;
 
 namespace {
     static const int32_t VEC_DIMENSION = 256;
@@ -62,6 +66,52 @@ namespace {
         static std::string s_id(CurrentTime());
         return s_id;
     }
+
+    void BuildVectors(int64_t from, int64_t to,
+                      VecTensorList& tensor_list,
+                      VecBinaryTensorList& bin_tensor_list) {
+        if(to <= from) {
+            return;
+        }
+
+        int64_t count = to - from;
+        server::TimeRecorder rc(std::to_string(count) + " vectors built");
+        for (int64_t k = from; k < count; k++) {
+            VecTensor tensor;
+            tensor.tensor.reserve(VEC_DIMENSION);
+            VecBinaryTensor bin_tensor;
+            bin_tensor.tensor.resize(VEC_DIMENSION * sizeof(double));
+            double *d_p = (double *) (const_cast<char *>(bin_tensor.tensor.data()));
+            for (int32_t i = 0; i < VEC_DIMENSION; i++) {
+                double val = (double) (i + k);
+                tensor.tensor.push_back(val);
+                d_p[i] = val;
+            }
+
+            server::AttribMap attrib_map;
+            attrib_map[TEST_ATTRIB_NUM] = "No." + std::to_string(k);
+
+            tensor.uid = "normal_vec_" + std::to_string(k);
+            attrib_map[TEST_ATTRIB_COMMENT] = tensor.uid;
+            tensor.__set_attrib(attrib_map);
+            tensor_list.tensor_list.emplace_back(tensor);
+
+            bin_tensor.uid = "binary_vec_" + std::to_string(k);
+            attrib_map[TEST_ATTRIB_COMMENT] = bin_tensor.uid;
+            bin_tensor.__set_attrib(attrib_map);
+            bin_tensor_list.tensor_list.emplace_back(bin_tensor);
+
+            if ((k + 1) % 10000 == 0) {
+                CLIENT_LOG_INFO << k + 1 << " vectors built";
+            }
+        }
+
+        rc.Elapse("done");
+    }
+}
+
+void ClientTest::LoopTest() {
+
 }
 
 TEST(AddVector, CLIENT_TEST) {
@@ -83,40 +133,7 @@ TEST(AddVector, CLIENT_TEST) {
         const int64_t count = 100000;
         VecTensorList tensor_list;
         VecBinaryTensorList bin_tensor_list;
-        {
-            server::TimeRecorder rc(std::to_string(count) + " vectors built");
-            for (int64_t k = 0; k < count; k++) {
-                VecTensor tensor;
-                tensor.tensor.reserve(VEC_DIMENSION);
-                VecBinaryTensor bin_tensor;
-                bin_tensor.tensor.resize(VEC_DIMENSION * sizeof(double));
-                double *d_p = (double *) (const_cast<char *>(bin_tensor.tensor.data()));
-                for (int32_t i = 0; i < VEC_DIMENSION; i++) {
-                    double val = (double) (i + k);
-                    tensor.tensor.push_back(val);
-                    d_p[i] = val;
-                }
-
-                server::AttribMap attrib_map;
-                attrib_map[TEST_ATTRIB_NUM] = "No." + std::to_string(k);
-
-                tensor.uid = "normal_vec_" + std::to_string(k);
-                attrib_map[TEST_ATTRIB_COMMENT] = tensor.uid;
-                tensor.__set_attrib(attrib_map);
-                tensor_list.tensor_list.emplace_back(tensor);
-
-                bin_tensor.uid = "binary_vec_" + std::to_string(k);
-                attrib_map[TEST_ATTRIB_COMMENT] = bin_tensor.uid;
-                bin_tensor.__set_attrib(attrib_map);
-                bin_tensor_list.tensor_list.emplace_back(bin_tensor);
-
-                if ((k + 1) % 10000 == 0) {
-                    CLIENT_LOG_INFO << k + 1 << " vectors built";
-                }
-            }
-
-            rc.Elapse("done");
-        }
+        BuildVectors(0, count, tensor_list, bin_tensor_list);
 
 //        //add vectors one by one
 //        {
