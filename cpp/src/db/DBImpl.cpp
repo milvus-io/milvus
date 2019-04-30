@@ -70,7 +70,7 @@ Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
     auto status = _pMeta->files_to_search(group_id, dates, files);
     if (!status.ok()) { return status; }
 
-    LOG(DEBUG) << "Search DateT Size=" << files.size();
+    /* LOG(DEBUG) << "Search DateT Size=" << files.size(); */
 
     meta::GroupFilesSchema index_files;
     meta::GroupFilesSchema raw_files;
@@ -112,6 +112,8 @@ Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
         memset(output_distence, 0, k * nq * sizeof(float));
         memset(output_ids, 0, k * nq * sizeof(long));
 
+        long search_set_size = 0;
+
         auto search_in_index = [&](meta::GroupFilesSchema& file_vec) -> void {
             for (auto &file : file_vec) {
                 auto index = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(file.location);
@@ -120,8 +122,10 @@ Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
                     index = read_index(file.location.c_str());
                     zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(file.location, index);
                 }
+                auto file_size = index->dim * index->ntotal * 4 /(1024*1024);
+                search_set_size += file_size;
                 LOG(DEBUG) << "Search file_type " << file.file_type << " Of Size: "
-                    << index->dim * index->ntotal * 4 /(1024*1024) << " M";
+                    << file_size << " M";
                 index->search(nq, vectors, k, output_distence, output_ids);
                 cluster(output_ids, output_distence); // cluster to each query
                 memset(output_distence, 0, k * nq * sizeof(float));
@@ -147,6 +151,8 @@ Status DBImpl::search(const std::string& group_id, size_t k, size_t nq,
 
         search_in_index(raw_files);
         search_in_index(index_files);
+
+        LOG(DEBUG) << "Search Overall Set Size=" << search_set_size << " M";
         cluster_topk();
 
         free(output_distence);
@@ -230,8 +236,8 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
         auto file_schema = file;
         file_schema.file_type = meta::GroupFileSchema::TO_DELETE;
         updated.push_back(file_schema);
-        LOG(DEBUG) << "About to merge file " << file_schema.file_id <<
-            " of size=" << file_schema.rows;
+        /* LOG(DEBUG) << "About to merge file " << file_schema.file_id << */
+        /*     " of size=" << file_schema.rows; */
         index_size = group_file.dimension * index->ntotal;
 
         if (index_size >= _options.index_trigger_size) break;
@@ -247,8 +253,8 @@ Status DBImpl::merge_files(const std::string& group_id, const meta::DateT& date,
     group_file.rows = index_size;
     updated.push_back(group_file);
     status = _pMeta->update_files(updated);
-    LOG(DEBUG) << "New merged file " << group_file.file_id <<
-        " of size=" << group_file.rows;
+    /* LOG(DEBUG) << "New merged file " << group_file.file_id << */
+    /*     " of size=" << group_file.rows; */
 
     zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->InsertItem(
             group_file.location, std::make_shared<Index>(index));
@@ -305,13 +311,13 @@ Status DBImpl::build_index(const meta::GroupFileSchema& file) {
     }
     auto from_index = dynamic_cast<faiss::IndexIDMap*>(to_index->data().get());
 
-    LOG(DEBUG) << "Preparing build_index for file_id=" << file.file_id
-        << " with new index_file_id=" << group_file.file_id << std::endl;
+    /* LOG(DEBUG) << "Preparing build_index for file_id=" << file.file_id */
+    /*     << " with new index_file_id=" << group_file.file_id << std::endl; */
     auto index = pBuilder->build_all(from_index->ntotal,
             dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
             from_index->id_map.data());
-    LOG(DEBUG) << "Ending build_index for file_id=" << file.file_id
-        << " with new index_file_id=" << group_file.file_id << std::endl;
+    /* LOG(DEBUG) << "Ending build_index for file_id=" << file.file_id */
+    /*     << " with new index_file_id=" << group_file.file_id << std::endl; */
     /* std::cout << "raw size=" << from_index->ntotal << "   index size=" << index->ntotal << std::endl; */
     write_index(index, group_file.location.c_str());
     group_file.file_type = meta::GroupFileSchema::INDEX;
@@ -336,14 +342,14 @@ void DBImpl::background_build_index() {
     _pMeta->files_to_index(to_index_files);
     Status status;
     for (auto& file : to_index_files) {
-        LOG(DEBUG) << "Buiding index for " << file.location;
+        /* LOG(DEBUG) << "Buiding index for " << file.location; */
         status = build_index(file);
         if (!status.ok()) {
             _bg_error = status;
             return;
         }
     }
-    LOG(DEBUG) << "All Buiding index Done";
+    /* LOG(DEBUG) << "All Buiding index Done"; */
 
     bg_build_index_started_ = false;
     bg_build_index_finish_signal_.notify_all();
@@ -382,21 +388,17 @@ Status DBImpl::count(const std::string& group_id, long& result) {
 
 DBImpl::~DBImpl() {
     {
-        LOG(DEBUG) << "Start wait background merge thread";
         std::unique_lock<std::mutex> lock(_mutex);
         _shutting_down.store(true, std::memory_order_release);
         while (_bg_compaction_scheduled) {
             _bg_work_finish_signal.wait(lock);
         }
-        LOG(DEBUG) << "Stop wait background merge thread";
     }
     {
-        LOG(DEBUG) << "Start wait background build index thread";
         std::unique_lock<std::mutex> lock(build_index_mutex_);
         while (bg_build_index_started_) {
             bg_build_index_finish_signal_.wait(lock);
         }
-        LOG(DEBUG) << "Stop wait background build index thread";
     }
     std::vector<std::string> ids;
     _pMemMgr->serialize(ids);
