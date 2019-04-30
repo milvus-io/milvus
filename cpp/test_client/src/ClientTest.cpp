@@ -34,6 +34,15 @@ namespace {
         return str;
     }
 
+    void GetDate(int& year, int& month, int& day) {
+        time_t tt;
+        time( &tt );
+        tm* t= gmtime( &tt );
+        year = t->tm_year;
+        month = t->tm_mon;
+        day = t->tm_mday;
+    }
+
     void GetServerAddress(std::string& address, int32_t& port, std::string& protocol) {
         server::ServerConfig& config = server::ServerConfig::GetInstance();
         server::ConfigNode server_config = config.GetConfig(server::CONFIG_SERVER);
@@ -174,10 +183,22 @@ TEST(SearchVector, CLIENT_TEST) {
                 tensor.tensor.push_back((double) (i + anchor_index));
             }
 
+            //build time range
             VecSearchResult res;
             VecSearchFilter filter;
+            VecTimeRange range;
+            VecDateTime date;
+            GetDate(date.year, date.month, date.day);
+            range.time_begin = date;
+            range.time_end = date;
+            std::vector<VecTimeRange>  time_ranges;
+            time_ranges.emplace_back(range);
+            filter.__set_time_ranges(time_ranges);
+
+            //do search
             session.interface()->search_vector(res, GetGroupID(), top_k, tensor, filter);
 
+            //build result
             std::cout << "Search result: " << std::endl;
             for(VecSearchResultItem& item : res.result_list) {
                 std::cout << "\t" << item.uid << std::endl;
@@ -192,6 +213,17 @@ TEST(SearchVector, CLIENT_TEST) {
             if(!res.result_list.empty()) {
                 ASSERT_TRUE(res.result_list[0].uid.find(std::to_string(anchor_index)) != std::string::npos);
             }
+
+            //empty search
+            date.day > 0 ? date.day -= 1 : date.day += 1;
+            range.time_begin = date;
+            range.time_end = date;
+            time_ranges.clear();
+            time_ranges.emplace_back(range);
+            filter.__set_time_ranges(time_ranges);
+            session.interface()->search_vector(res, GetGroupID(), top_k, tensor, filter);
+
+            ASSERT_EQ(res.result_list.size(), 0);
         }
 
         //search binary vector

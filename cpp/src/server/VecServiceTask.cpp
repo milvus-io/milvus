@@ -11,6 +11,7 @@
 #include "utils/TimeRecorder.h"
 #include "db/DB.h"
 #include "db/Env.h"
+#include "db/Meta.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -20,6 +21,9 @@ static const std::string DQL_TASK_GROUP = "dql";
 static const std::string DDL_DML_TASK_GROUP = "ddl_dml";
 
 static const std::string VECTOR_UID = "uid";
+
+using DB_META = zilliz::vecwise::engine::meta::Meta;
+using DB_DATE = zilliz::vecwise::engine::meta::DateT;
 
 namespace {
     class DBWrapper {
@@ -50,6 +54,12 @@ namespace {
     zilliz::vecwise::engine::DB* DB() {
         static DBWrapper db_wrapper;
         return db_wrapper.DB();
+    }
+
+    DB_DATE MakeDbDate(const VecDateTime& dt) {
+        time_t  t_t;
+        CommonUtil::ConvertTime(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, t_t);
+        return DB_META::GetDate(t_t);
     }
 }
 
@@ -556,10 +566,16 @@ ServerError SearchVectorTask::OnExecute() {
 
         uint64_t vec_count = GetTargetCount();
 
+        std::vector<DB_DATE> dates;
+        for(const VecTimeRange& tr : filter_.time_ranges) {
+            dates.push_back(MakeDbDate(tr.time_begin));
+            dates.push_back(MakeDbDate(tr.time_end));
+        }
+
         rc.Record("prepare input data");
 
         engine::QueryResults results;
-        stat = DB()->search(group_id_, (size_t)top_k_, vec_count, vec_f.data(), results);
+        stat = DB()->search(group_id_, (size_t)top_k_, vec_count, vec_f.data(), dates, results);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
             return SERVER_UNEXPECTED_ERROR;

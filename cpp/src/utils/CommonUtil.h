@@ -6,6 +6,7 @@
 #pragma once
 
 #include <string>
+#include <time.h>
 
 #include "Error.h"
 
@@ -24,6 +25,8 @@ class CommonUtil {
     static ServerError DeleteDirectory(const std::string &path);
 
     static std::string GetExePath();
+
+    static void ConvertTime(int year, int month, int day, int hour, int minute, int second, time_t& t_t);
 };
 
 }

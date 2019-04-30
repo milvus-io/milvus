@@ -150,6 +150,17 @@ std::string CommonUtil::GetExePath() {
     return exe_path;
 }
 
+void CommonUtil::ConvertTime(int year, int month, int day, int hour, int minute, int second, time_t& t_t) {
+    tm t_m;
+    t_m.tm_year = year;
+    t_m.tm_mon = month;
+    t_m.tm_mday = day;
+    t_m.tm_hour = hour;
+    t_m.tm_min = minute;
+    t_m.tm_sec = second;
+    t_t = mktime(&t_m);
+}
+
 }
 }
 }
