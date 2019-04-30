@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 
-#include "Serializer.h"
+#include "ExecutionEngine.h"
 
 namespace faiss {
     class Index;
@@ -13,9 +13,9 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-class FaissSerializer : public Serializer {
+class FaissExecutionEngine : public ExecutionEngine {
 public:
-    FaissSerializer(uint16_t dimension, const std::string& location);
+    FaissExecutionEngine(uint16_t dimension, const std::string& location);
     virtual Status AddWithIds(long n, const float *xdata, const long *xids) override;
 
     virtual size_t Count() const override;

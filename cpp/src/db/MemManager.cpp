@@ -6,7 +6,7 @@
 
 #include "MemManager.h"
 #include "Meta.h"
-#include "FaissSerializer.h"
+#include "FaissExecutionEngine.h"
 
 
 namespace zilliz {
@@ -19,36 +19,36 @@ MemVectors::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
     options_(options),
     schema_(schema),
     _pIdGenerator(new SimpleIDGenerator()),
-    pSerializer_(new FaissSerializer(schema_.dimension, schema_.location)) {
+    pEE_(new FaissExecutionEngine(schema_.dimension, schema_.location)) {
 }
 
 void MemVectors::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
     _pIdGenerator->getNextIDNumbers(n_, vector_ids_);
-    pSerializer_->AddWithIds(n_, vectors_, vector_ids_.data());
+    pEE_->AddWithIds(n_, vectors_, vector_ids_.data());
     for(auto i=0 ; i<n_; i++) {
         vector_ids_.push_back(i);
     }
 }
 
 size_t MemVectors::total() const {
-    return pSerializer_->Count();
+    return pEE_->Count();
 }
 
 size_t MemVectors::approximate_size() const {
-    return pSerializer_->Size();
+    return pEE_->Size();
 }
 
 Status MemVectors::serialize(std::string& group_id) {
     group_id = schema_.group_id;
     auto rows = approximate_size();
-    pSerializer_->Serialize();
+    pEE_->Serialize();
     schema_.rows = rows;
     schema_.file_type = (rows >= options_.index_trigger_size) ?
         meta::GroupFileSchema::TO_INDEX : meta::GroupFileSchema::RAW;
 
     auto status = pMeta_->update_group_file(schema_);
 
-    pSerializer_->Cache();
+    pEE_->Cache();
 
     return status;
 }

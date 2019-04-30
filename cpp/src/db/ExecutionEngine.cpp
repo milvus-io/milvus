@@ -1,11 +1,11 @@
 #include <easylogging++.h>
-#include "Serializer.h"
+#include "ExecutionEngine.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-Status Serializer::AddWithIds(const std::vector<float>& vectors, const std::vector<long>& vector_ids) {
+Status ExecutionEngine::AddWithIds(const std::vector<float>& vectors, const std::vector<long>& vector_ids) {
     long n1 = (long)vectors.size();
     long n2 = (long)vector_ids.size();
     if (n1 != n2) {
