@@ -24,6 +24,8 @@ public:
 
     virtual Status Serialize() override;
 
+    virtual Status Cache() override;
+
 protected:
     std::shared_ptr<faiss::Index> pIndex_;
     std::string location_;

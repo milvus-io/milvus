@@ -22,6 +22,8 @@ public:
 
     virtual Status Serialize() = 0;
 
+    virtual Status Cache() = 0;
+
     virtual ~Serializer() {}
 };
 
