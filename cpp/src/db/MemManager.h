@@ -10,10 +10,6 @@
 #include "Status.h"
 #include "Meta.h"
 
-namespace faiss {
-    class Index;
-}
-
 
 namespace zilliz {
 namespace vecwise {
@@ -22,6 +18,8 @@ namespace engine {
 namespace meta {
     class Meta;
 }
+
+class Serializer;
 
 class MemVectors {
 public:
@@ -49,7 +47,7 @@ private:
     Options options_;
     meta::GroupFileSchema schema_;
     IDGenerator* _pIdGenerator;
-    std::shared_ptr<faiss::Index> pIndex_;
+    std::shared_ptr<Serializer> pSerializer_;
 
 }; // MemVectors
 
