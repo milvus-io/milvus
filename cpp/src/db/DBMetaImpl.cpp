@@ -1,4 +1,4 @@
-#include <sys/stat.h>
+
 #include <unistd.h>
 #include <sstream>
 #include <iostream>
@@ -109,7 +109,7 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
         try {
             auto id = ConnectorPtr->insert(group_info);
             group_info.id = id;
-            LOG(DEBUG) << "Add group " << id;
+            /* LOG(DEBUG) << "Add group " << id; */
         } catch (...) {
             return Status::DBTransactionError("Add Group Error");
         }
@@ -193,7 +193,7 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
         try {
             auto id = ConnectorPtr->insert(group_file);
             group_file.id = id;
-            LOG(DEBUG) << "Add group_file of file_id=" << group_file.file_id;
+            /* LOG(DEBUG) << "Add group_file of file_id=" << group_file.file_id; */
         } catch (...) {
             return Status::DBTransactionError("Add file Error");
         }
@@ -434,7 +434,7 @@ Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
                 boost::filesystem::remove(group_file.location);
             }
             ConnectorPtr->remove<GroupFileSchema>(group_file.id);
-            LOG(DEBUG) << "Removing deleted id=" << group_file.id << " location=" << group_file.location << std::endl;
+            /* LOG(DEBUG) << "Removing deleted id=" << group_file.id << " location=" << group_file.location << std::endl; */
         }
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
@@ -470,7 +470,7 @@ Status DBMetaImpl::cleanup() {
                 boost::filesystem::remove(group_file.location);
             }
             ConnectorPtr->remove<GroupFileSchema>(group_file.id);
-            LOG(DEBUG) << "Removing id=" << group_file.id << " location=" << group_file.location << std::endl;
+            /* LOG(DEBUG) << "Removing id=" << group_file.id << " location=" << group_file.location << std::endl; */
         }
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
