@@ -1,14 +1,12 @@
-#include <faiss/AutoTune.h>
 #include <iostream>
 #include <sstream>
 #include <thread>
 
-#include <wrapper/Index.h>
-#include <cache/CpuCacheMgr.h>
 #include <easylogging++.h>
 
 #include "MemManager.h"
 #include "Meta.h"
+#include "FaissSerializer.h"
 
 
 namespace zilliz {
@@ -21,43 +19,36 @@ MemVectors::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
     options_(options),
     schema_(schema),
     _pIdGenerator(new SimpleIDGenerator()),
-    pIndex_(faiss::index_factory(schema_.dimension, "IDMap,Flat")) {
+    pSerializer_(new FaissSerializer(schema_.dimension, schema_.location)) {
 }
 
 void MemVectors::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
     _pIdGenerator->getNextIDNumbers(n_, vector_ids_);
-    pIndex_->add_with_ids(n_, vectors_, &vector_ids_[0]);
+    pSerializer_->AddWithIds(n_, vectors_, vector_ids_.data());
     for(auto i=0 ; i<n_; i++) {
         vector_ids_.push_back(i);
     }
 }
 
 size_t MemVectors::total() const {
-    return pIndex_->ntotal;
+    return pSerializer_->Count();
 }
 
 size_t MemVectors::approximate_size() const {
-    return total() * schema_.dimension;
+    return pSerializer_->Size();
 }
 
 Status MemVectors::serialize(std::string& group_id) {
-    /* std::stringstream ss; */
-    /* ss << "/tmp/test/" << _pIdGenerator->getNextIDNumber(); */
-    /* faiss::write_index(pIndex_, ss.str().c_str()); */
-    /* std::cout << pIndex_->ntotal << std::endl; */
-    /* std::cout << _file_location << std::endl; */
-    /* faiss::write_index(pIndex_, _file_location.c_str()); */
     group_id = schema_.group_id;
     auto rows = approximate_size();
-    write_index(pIndex_.get(), schema_.location.c_str());
+    pSerializer_->Serialize();
     schema_.rows = rows;
     schema_.file_type = (rows >= options_.index_trigger_size) ?
         meta::GroupFileSchema::TO_INDEX : meta::GroupFileSchema::RAW;
 
     auto status = pMeta_->update_group_file(schema_);
 
-    zilliz::vecwise::cache::CpuCacheMgr::GetInstance(
-            )->InsertItem(schema_.location, std::make_shared<Index>(pIndex_));
+    pSerializer_->Cache();
 
     return status;
 }
