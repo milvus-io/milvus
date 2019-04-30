@@ -5,6 +5,7 @@
  ******************************************************************************/
 #include "VecServiceWrapper.h"
 #include "VecServiceHandler.h"
+#include "VecServiceScheduler.h"
 #include "ServerConfig.h"
 
 #include "utils/Log.h"
@@ -107,6 +108,9 @@ void VecServiceWrapper::StartService() {
 
 void VecServiceWrapper::StopService() {
     auto stop_server_worker = [&]{
+        VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
+        scheduler.Stop();
+
         if(s_server != nullptr) {
             s_server->stop();
         }

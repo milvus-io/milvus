@@ -56,6 +56,11 @@ void VecServiceScheduler::Start() {
 }
 
 void VecServiceScheduler::Stop() {
+    if(stopped_) {
+        return;
+    }
+
+    SERVER_LOG_INFO << "Scheduler gonna stop...";
     {
         std::lock_guard<std::mutex> lock(queue_mtx_);
         for(auto iter : task_groups_) {
@@ -72,6 +77,7 @@ void VecServiceScheduler::Stop() {
         iter->join();
     }
     stopped_ = true;
+    SERVER_LOG_INFO << "Scheduler stopped";
 }
 
 ServerError VecServiceScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {

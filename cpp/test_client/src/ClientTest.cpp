@@ -68,12 +68,13 @@ namespace {
     }
 
     void BuildVectors(int64_t from, int64_t to,
-                      VecTensorList& tensor_list,
-                      VecBinaryTensorList& bin_tensor_list) {
+                      VecTensorList* tensor_list,
+                      VecBinaryTensorList* bin_tensor_list) {
         if(to <= from) {
             return;
         }
 
+        static int64_t total_build = 0;
         int64_t count = to - from;
         server::TimeRecorder rc(std::to_string(count) + " vectors built");
         for (int64_t k = from; k < to; k++) {
@@ -91,18 +92,23 @@ namespace {
             server::AttribMap attrib_map;
             attrib_map[TEST_ATTRIB_NUM] = "No." + std::to_string(k);
 
-            tensor.uid = "normal_vec_" + std::to_string(k);
-            attrib_map[TEST_ATTRIB_COMMENT] = tensor.uid;
-            tensor.__set_attrib(attrib_map);
-            tensor_list.tensor_list.emplace_back(tensor);
+            if(tensor_list) {
+                tensor.uid = "normal_vec_" + std::to_string(k);
+                attrib_map[TEST_ATTRIB_COMMENT] = tensor.uid;
+                tensor.__set_attrib(attrib_map);
+                tensor_list->tensor_list.emplace_back(tensor);
+            }
 
-            bin_tensor.uid = "binary_vec_" + std::to_string(k);
-            attrib_map[TEST_ATTRIB_COMMENT] = bin_tensor.uid;
-            bin_tensor.__set_attrib(attrib_map);
-            bin_tensor_list.tensor_list.emplace_back(bin_tensor);
+            if(bin_tensor_list) {
+                bin_tensor.uid = "binary_vec_" + std::to_string(k);
+                attrib_map[TEST_ATTRIB_COMMENT] = bin_tensor.uid;
+                bin_tensor.__set_attrib(attrib_map);
+                bin_tensor_list->tensor_list.emplace_back(bin_tensor);
+            }
 
-            if ((k + 1) % 10000 == 0) {
-                CLIENT_LOG_INFO << k + 1 << " vectors built";
+            total_build++;
+            if (total_build % 10000 == 0) {
+                CLIENT_LOG_INFO << total_build << " vectors built";
             }
         }
 
@@ -130,13 +136,14 @@ void ClientTest::LoopTest() {
 
     const int64_t batch = 10000;
     for(int64_t i = 0; i < 1000; i++) {
-        VecTensorList tensor_list;
-        VecBinaryTensorList bin_tensor_list;
-        BuildVectors(i*batch, (i+1)*batch, tensor_list, bin_tensor_list);
-        rc.Record("build batch no." + std::to_string(i));
+        {
+            VecBinaryTensorList bin_tensor_list;
+            BuildVectors(i * batch, (i + 1) * batch, nullptr, &bin_tensor_list);
+            rc.Record("build batch no." + std::to_string(i));
 
-        session.interface()->add_binary_vector_batch(group.id, bin_tensor_list);
-        rc.Record("add batch no." + std::to_string(i));
+            session.interface()->add_binary_vector_batch(group.id, bin_tensor_list);
+            rc.Record("add batch no." + std::to_string(i));
+        }
 
         sleep(1);
         rc.Record("sleep 1 second");
@@ -178,7 +185,7 @@ TEST(AddVector, CLIENT_TEST) {
         const int64_t count = 100000;
         VecTensorList tensor_list;
         VecBinaryTensorList bin_tensor_list;
-        BuildVectors(0, count, tensor_list, bin_tensor_list);
+        BuildVectors(0, count, &tensor_list, &bin_tensor_list);
 
 //        //add vectors one by one
 //        {
