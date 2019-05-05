@@ -71,17 +71,21 @@ private:
 class AddVectorTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& group_id,
-                              const VecTensor* tensor);
+                              const VecTensor* tensor,
+                              std::string& id);
 
     static BaseTaskPtr Create(const std::string& group_id,
-                              const VecBinaryTensor* tensor);
+                              const VecBinaryTensor* tensor,
+                              std::string& id);
 
 protected:
     AddVectorTask(const std::string& group_id,
-                  const VecTensor* tensor);
+                  const VecTensor* tensor,
+                  std::string& id);
 
     AddVectorTask(const std::string& group_id,
-                  const VecBinaryTensor* tensor);
+                  const VecBinaryTensor* tensor,
+                  std::string& id);
 
     uint64_t GetVecDimension() const;
     const double* GetVecData() const;
@@ -94,6 +98,7 @@ private:
     std::string group_id_;
     const VecTensor* tensor_;
     const VecBinaryTensor* bin_tensor_;
+    std::string& tensor_id_;
 };
 
 
@@ -101,17 +106,21 @@ private:
 class AddBatchVectorTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& group_id,
-                              const VecTensorList* tensor_list);
+                              const VecTensorList* tensor_list,
+                              std::vector<std::string>& ids);
 
     static BaseTaskPtr Create(const std::string& group_id,
-                              const VecBinaryTensorList* tensor_list);
+                              const VecBinaryTensorList* tensor_list,
+                              std::vector<std::string>& ids);
 
 protected:
     AddBatchVectorTask(const std::string& group_id,
-                  const VecTensorList* tensor_list);
+                        const VecTensorList* tensor_list,
+                        std::vector<std::string>& ids);
 
     AddBatchVectorTask(const std::string& group_id,
-                       const VecBinaryTensorList* tensor_list);
+                       const VecBinaryTensorList* tensor_list,
+                       std::vector<std::string>& ids);
 
     uint64_t GetVecListCount() const;
     uint64_t GetVecDimension(uint64_t index) const;
@@ -119,7 +128,9 @@ protected:
     std::string GetVecID(uint64_t index) const;
     const AttribMap& GetVecAttrib(uint64_t index) const;
 
-    void ProcessIdMapping(engine::IDNumbers& vector_ids, uint64_t from, uint64_t to);
+    void ProcessIdMapping(engine::IDNumbers& vector_ids,
+                          uint64_t from, uint64_t to,
+                          std::vector<std::string>& tensor_ids);
 
     ServerError OnExecute() override;
 
@@ -127,6 +138,7 @@ private:
     std::string group_id_;
     const VecTensorList* tensor_list_;
     const VecBinaryTensorList* bin_tensor_list_;
+    std::vector<std::string>& tensor_ids_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

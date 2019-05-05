@@ -47,22 +47,22 @@ class VecServiceHandler : virtual public VecServiceIf {
    * @param group_id
    * @param tensor
    */
-  void add_vector(const std::string& group_id, const VecTensor& tensor) {
+  void add_vector(std::string& _return, const std::string& group_id, const VecTensor& tensor) {
     // Your implementation goes here
     printf("add_vector\n");
   }
 
-  void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list) {
+  void add_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecTensorList& tensor_list) {
     // Your implementation goes here
     printf("add_vector_batch\n");
   }
 
-  void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor) {
+  void add_binary_vector(std::string& _return, const std::string& group_id, const VecBinaryTensor& tensor) {
     // Your implementation goes here
     printf("add_binary_vector\n");
   }
 
-  void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list) {
+  void add_binary_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecBinaryTensorList& tensor_list) {
     // Your implementation goes here
     printf("add_binary_vector_batch\n");
   }

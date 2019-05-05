@@ -38,10 +38,10 @@ class VecServiceIf {
    * @param group_id
    * @param tensor
    */
-  virtual void add_vector(const std::string& group_id, const VecTensor& tensor) = 0;
-  virtual void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list) = 0;
-  virtual void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor) = 0;
-  virtual void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list) = 0;
+  virtual void add_vector(std::string& _return, const std::string& group_id, const VecTensor& tensor) = 0;
+  virtual void add_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecTensorList& tensor_list) = 0;
+  virtual void add_binary_vector(std::string& _return, const std::string& group_id, const VecBinaryTensor& tensor) = 0;
+  virtual void add_binary_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecBinaryTensorList& tensor_list) = 0;
 
   /**
    * search interfaces
@@ -98,16 +98,16 @@ class VecServiceNull : virtual public VecServiceIf {
   void del_group(const std::string& /* group_id */) {
     return;
   }
-  void add_vector(const std::string& /* group_id */, const VecTensor& /* tensor */) {
+  void add_vector(std::string& /* _return */, const std::string& /* group_id */, const VecTensor& /* tensor */) {
     return;
   }
-  void add_vector_batch(const std::string& /* group_id */, const VecTensorList& /* tensor_list */) {
+  void add_vector_batch(std::vector<std::string> & /* _return */, const std::string& /* group_id */, const VecTensorList& /* tensor_list */) {
     return;
   }
-  void add_binary_vector(const std::string& /* group_id */, const VecBinaryTensor& /* tensor */) {
+  void add_binary_vector(std::string& /* _return */, const std::string& /* group_id */, const VecBinaryTensor& /* tensor */) {
     return;
   }
-  void add_binary_vector_batch(const std::string& /* group_id */, const VecBinaryTensorList& /* tensor_list */) {
+  void add_binary_vector_batch(std::vector<std::string> & /* _return */, const std::string& /* group_id */, const VecBinaryTensorList& /* tensor_list */) {
     return;
   }
   void search_vector(VecSearchResult& /* _return */, const std::string& /* group_id */, const int64_t /* top_k */, const VecTensor& /* tensor */, const VecSearchFilter& /* filter */) {
@@ -501,7 +501,8 @@ class VecService_add_vector_pargs {
 };
 
 typedef struct _VecService_add_vector_result__isset {
-  _VecService_add_vector_result__isset() : e(false) {}
+  _VecService_add_vector_result__isset() : success(false), e(false) {}
+  bool success :1;
   bool e :1;
 } _VecService_add_vector_result__isset;
 
@@ -510,18 +511,23 @@ class VecService_add_vector_result {
 
   VecService_add_vector_result(const VecService_add_vector_result&);
   VecService_add_vector_result& operator=(const VecService_add_vector_result&);
-  VecService_add_vector_result() {
+  VecService_add_vector_result() : success() {
   }
 
   virtual ~VecService_add_vector_result() throw();
+  std::string success;
   VecException e;
 
   _VecService_add_vector_result__isset __isset;
+
+  void __set_success(const std::string& val);
 
   void __set_e(const VecException& val);
 
   bool operator == (const VecService_add_vector_result & rhs) const
   {
+    if (!(success == rhs.success))
+      return false;
     if (!(e == rhs.e))
       return false;
     return true;
@@ -538,7 +544,8 @@ class VecService_add_vector_result {
 };
 
 typedef struct _VecService_add_vector_presult__isset {
-  _VecService_add_vector_presult__isset() : e(false) {}
+  _VecService_add_vector_presult__isset() : success(false), e(false) {}
+  bool success :1;
   bool e :1;
 } _VecService_add_vector_presult__isset;
 
@@ -547,6 +554,7 @@ class VecService_add_vector_presult {
 
 
   virtual ~VecService_add_vector_presult() throw();
+  std::string* success;
   VecException e;
 
   _VecService_add_vector_presult__isset __isset;
@@ -612,7 +620,8 @@ class VecService_add_vector_batch_pargs {
 };
 
 typedef struct _VecService_add_vector_batch_result__isset {
-  _VecService_add_vector_batch_result__isset() : e(false) {}
+  _VecService_add_vector_batch_result__isset() : success(false), e(false) {}
+  bool success :1;
   bool e :1;
 } _VecService_add_vector_batch_result__isset;
 
@@ -625,14 +634,19 @@ class VecService_add_vector_batch_result {
   }
 
   virtual ~VecService_add_vector_batch_result() throw();
+  std::vector<std::string>  success;
   VecException e;
 
   _VecService_add_vector_batch_result__isset __isset;
+
+  void __set_success(const std::vector<std::string> & val);
 
   void __set_e(const VecException& val);
 
   bool operator == (const VecService_add_vector_batch_result & rhs) const
   {
+    if (!(success == rhs.success))
+      return false;
     if (!(e == rhs.e))
       return false;
     return true;
@@ -649,7 +663,8 @@ class VecService_add_vector_batch_result {
 };
 
 typedef struct _VecService_add_vector_batch_presult__isset {
-  _VecService_add_vector_batch_presult__isset() : e(false) {}
+  _VecService_add_vector_batch_presult__isset() : success(false), e(false) {}
+  bool success :1;
   bool e :1;
 } _VecService_add_vector_batch_presult__isset;
 
@@ -658,6 +673,7 @@ class VecService_add_vector_batch_presult {
 
 
   virtual ~VecService_add_vector_batch_presult() throw();
+  std::vector<std::string> * success;
   VecException e;
 
   _VecService_add_vector_batch_presult__isset __isset;
@@ -723,7 +739,8 @@ class VecService_add_binary_vector_pargs {
 };
 
 typedef struct _VecService_add_binary_vector_result__isset {
-  _VecService_add_binary_vector_result__isset() : e(false) {}
+  _VecService_add_binary_vector_result__isset() : success(false), e(false) {}
+  bool success :1;
   bool e :1;
 } _VecService_add_binary_vector_result__isset;
 
@@ -732,18 +749,23 @@ class VecService_add_binary_vector_result {
 
   VecService_add_binary_vector_result(const VecService_add_binary_vector_result&);
   VecService_add_binary_vector_result& operator=(const VecService_add_binary_vector_result&);
-  VecService_add_binary_vector_result() {
+  VecService_add_binary_vector_result() : success() {
   }
 
   virtual ~VecService_add_binary_vector_result() throw();
+  std::string success;
   VecException e;
 
   _VecService_add_binary_vector_result__isset __isset;
+
+  void __set_success(const std::string& val);
 
   void __set_e(const VecException& val);
 
   bool operator == (const VecService_add_binary_vector_result & rhs) const
   {
+    if (!(success == rhs.success))
+      return false;
     if (!(e == rhs.e))
       return false;
     return true;
@@ -760,7 +782,8 @@ class VecService_add_binary_vector_result {
 };
 
 typedef struct _VecService_add_binary_vector_presult__isset {
-  _VecService_add_binary_vector_presult__isset() : e(false) {}
+  _VecService_add_binary_vector_presult__isset() : success(false), e(false) {}
+  bool success :1;
   bool e :1;
 } _VecService_add_binary_vector_presult__isset;
 
@@ -769,6 +792,7 @@ class VecService_add_binary_vector_presult {
 
 
   virtual ~VecService_add_binary_vector_presult() throw();
+  std::string* success;
   VecException e;
 
   _VecService_add_binary_vector_presult__isset __isset;
@@ -834,7 +858,8 @@ class VecService_add_binary_vector_batch_pargs {
 };
 
 typedef struct _VecService_add_binary_vector_batch_result__isset {
-  _VecService_add_binary_vector_batch_result__isset() : e(false) {}
+  _VecService_add_binary_vector_batch_result__isset() : success(false), e(false) {}
+  bool success :1;
   bool e :1;
 } _VecService_add_binary_vector_batch_result__isset;
 
@@ -847,14 +872,19 @@ class VecService_add_binary_vector_batch_result {
   }
 
   virtual ~VecService_add_binary_vector_batch_result() throw();
+  std::vector<std::string>  success;
   VecException e;
 
   _VecService_add_binary_vector_batch_result__isset __isset;
+
+  void __set_success(const std::vector<std::string> & val);
 
   void __set_e(const VecException& val);
 
   bool operator == (const VecService_add_binary_vector_batch_result & rhs) const
   {
+    if (!(success == rhs.success))
+      return false;
     if (!(e == rhs.e))
       return false;
     return true;
@@ -871,7 +901,8 @@ class VecService_add_binary_vector_batch_result {
 };
 
 typedef struct _VecService_add_binary_vector_batch_presult__isset {
-  _VecService_add_binary_vector_batch_presult__isset() : e(false) {}
+  _VecService_add_binary_vector_batch_presult__isset() : success(false), e(false) {}
+  bool success :1;
   bool e :1;
 } _VecService_add_binary_vector_batch_presult__isset;
 
@@ -880,6 +911,7 @@ class VecService_add_binary_vector_batch_presult {
 
 
   virtual ~VecService_add_binary_vector_batch_presult() throw();
+  std::vector<std::string> * success;
   VecException e;
 
   _VecService_add_binary_vector_batch_presult__isset __isset;
@@ -1454,18 +1486,18 @@ class VecServiceClient : virtual public VecServiceIf {
   void del_group(const std::string& group_id);
   void send_del_group(const std::string& group_id);
   void recv_del_group();
-  void add_vector(const std::string& group_id, const VecTensor& tensor);
+  void add_vector(std::string& _return, const std::string& group_id, const VecTensor& tensor);
   void send_add_vector(const std::string& group_id, const VecTensor& tensor);
-  void recv_add_vector();
-  void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
+  void recv_add_vector(std::string& _return);
+  void add_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecTensorList& tensor_list);
   void send_add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
-  void recv_add_vector_batch();
-  void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor);
+  void recv_add_vector_batch(std::vector<std::string> & _return);
+  void add_binary_vector(std::string& _return, const std::string& group_id, const VecBinaryTensor& tensor);
   void send_add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor);
-  void recv_add_binary_vector();
-  void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
+  void recv_add_binary_vector(std::string& _return);
+  void add_binary_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecBinaryTensorList& tensor_list);
   void send_add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
-  void recv_add_binary_vector_batch();
+  void recv_add_binary_vector_batch(std::vector<std::string> & _return);
   void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter);
   void send_search_vector(const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter);
   void recv_search_vector(VecSearchResult& _return);
@@ -1574,40 +1606,44 @@ class VecServiceMultiface : virtual public VecServiceIf {
     ifaces_[i]->del_group(group_id);
   }
 
-  void add_vector(const std::string& group_id, const VecTensor& tensor) {
+  void add_vector(std::string& _return, const std::string& group_id, const VecTensor& tensor) {
     size_t sz = ifaces_.size();
     size_t i = 0;
     for (; i < (sz - 1); ++i) {
-      ifaces_[i]->add_vector(group_id, tensor);
+      ifaces_[i]->add_vector(_return, group_id, tensor);
     }
-    ifaces_[i]->add_vector(group_id, tensor);
+    ifaces_[i]->add_vector(_return, group_id, tensor);
+    return;
   }
 
-  void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list) {
+  void add_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecTensorList& tensor_list) {
     size_t sz = ifaces_.size();
     size_t i = 0;
     for (; i < (sz - 1); ++i) {
-      ifaces_[i]->add_vector_batch(group_id, tensor_list);
+      ifaces_[i]->add_vector_batch(_return, group_id, tensor_list);
     }
-    ifaces_[i]->add_vector_batch(group_id, tensor_list);
+    ifaces_[i]->add_vector_batch(_return, group_id, tensor_list);
+    return;
   }
 
-  void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor) {
+  void add_binary_vector(std::string& _return, const std::string& group_id, const VecBinaryTensor& tensor) {
     size_t sz = ifaces_.size();
     size_t i = 0;
     for (; i < (sz - 1); ++i) {
-      ifaces_[i]->add_binary_vector(group_id, tensor);
+      ifaces_[i]->add_binary_vector(_return, group_id, tensor);
     }
-    ifaces_[i]->add_binary_vector(group_id, tensor);
+    ifaces_[i]->add_binary_vector(_return, group_id, tensor);
+    return;
   }
 
-  void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list) {
+  void add_binary_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecBinaryTensorList& tensor_list) {
     size_t sz = ifaces_.size();
     size_t i = 0;
     for (; i < (sz - 1); ++i) {
-      ifaces_[i]->add_binary_vector_batch(group_id, tensor_list);
+      ifaces_[i]->add_binary_vector_batch(_return, group_id, tensor_list);
     }
-    ifaces_[i]->add_binary_vector_batch(group_id, tensor_list);
+    ifaces_[i]->add_binary_vector_batch(_return, group_id, tensor_list);
+    return;
   }
 
   void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter) {
@@ -1689,18 +1725,18 @@ class VecServiceConcurrentClient : virtual public VecServiceIf {
   void del_group(const std::string& group_id);
   int32_t send_del_group(const std::string& group_id);
   void recv_del_group(const int32_t seqid);
-  void add_vector(const std::string& group_id, const VecTensor& tensor);
+  void add_vector(std::string& _return, const std::string& group_id, const VecTensor& tensor);
   int32_t send_add_vector(const std::string& group_id, const VecTensor& tensor);
-  void recv_add_vector(const int32_t seqid);
-  void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
+  void recv_add_vector(std::string& _return, const int32_t seqid);
+  void add_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecTensorList& tensor_list);
   int32_t send_add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
-  void recv_add_vector_batch(const int32_t seqid);
-  void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor);
+  void recv_add_vector_batch(std::vector<std::string> & _return, const int32_t seqid);
+  void add_binary_vector(std::string& _return, const std::string& group_id, const VecBinaryTensor& tensor);
   int32_t send_add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor);
-  void recv_add_binary_vector(const int32_t seqid);
-  void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
+  void recv_add_binary_vector(std::string& _return, const int32_t seqid);
+  void add_binary_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecBinaryTensorList& tensor_list);
   int32_t send_add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
-  void recv_add_binary_vector_batch(const int32_t seqid);
+  void recv_add_binary_vector_batch(std::vector<std::string> & _return, const int32_t seqid);
   void search_vector(VecSearchResult& _return, const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter);
   int32_t send_search_vector(const std::string& group_id, const int64_t top_k, const VecTensor& tensor, const VecSearchFilter& filter);
   void recv_search_vector(VecSearchResult& _return, const int32_t seqid);

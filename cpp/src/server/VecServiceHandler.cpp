@@ -74,46 +74,49 @@ VecServiceHandler::del_group(const std::string &group_id) {
 
 
 void
-VecServiceHandler::add_vector(const std::string &group_id, const VecTensor &tensor) {
+VecServiceHandler::add_vector(std::string& _return, const std::string &group_id, const VecTensor &tensor) {
     TimeRecordWrapper rc("add_vector()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size();
 
-    BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor);
+    BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor, _return);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 }
 
 void
-VecServiceHandler::add_vector_batch(const std::string &group_id,
+VecServiceHandler::add_vector_batch(std::vector<std::string> & _return,
+                                    const std::string &group_id,
                                     const VecTensorList &tensor_list) {
     TimeRecordWrapper rc("add_vector_batch()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector list size = "
                      << tensor_list.tensor_list.size();
 
-    BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list);
+    BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list, _return);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 }
 
 void
-VecServiceHandler::add_binary_vector(const std::string& group_id,
+VecServiceHandler::add_binary_vector(std::string& _return,
+                                     const std::string& group_id,
                                      const VecBinaryTensor& tensor) {
     TimeRecordWrapper rc("add_binary_vector()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size()/4;
 
-    BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor);
+    BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor, _return);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 }
 
 void
-VecServiceHandler::add_binary_vector_batch(const std::string& group_id,
+VecServiceHandler::add_binary_vector_batch(std::vector<std::string> & _return,
+                                           const std::string& group_id,
                                            const VecBinaryTensorList& tensor_list) {
     TimeRecordWrapper rc("add_binary_vector_batch()");
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector list size = "
                      << tensor_list.tensor_list.size();
 
-    BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list);
+    BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list, _return);
     VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 }

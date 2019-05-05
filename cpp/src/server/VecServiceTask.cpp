@@ -162,31 +162,37 @@ ServerError DeleteGroupTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 AddVectorTask::AddVectorTask(const std::string& group_id,
-                             const VecTensor* tensor)
+                             const VecTensor* tensor,
+                             std::string& id)
     : BaseTask(DDL_DML_TASK_GROUP),
       group_id_(group_id),
       tensor_(tensor),
-      bin_tensor_(nullptr){
+      bin_tensor_(nullptr),
+      tensor_id_(id) {
 
 }
 
 BaseTaskPtr AddVectorTask::Create(const std::string& group_id,
-                                  const VecTensor* tensor) {
-    return std::shared_ptr<BaseTask>(new AddVectorTask(group_id, tensor));
+                                  const VecTensor* tensor,
+                                  std::string& id) {
+    return std::shared_ptr<BaseTask>(new AddVectorTask(group_id, tensor, id));
 }
 
 AddVectorTask::AddVectorTask(const std::string& group_id,
-                             const VecBinaryTensor* tensor)
+                             const VecBinaryTensor* tensor,
+                             std::string& id)
         : BaseTask(DDL_DML_TASK_GROUP),
           group_id_(group_id),
           tensor_(nullptr),
-          bin_tensor_(tensor) {
+          bin_tensor_(tensor),
+          tensor_id_(id) {
 
 }
 
 BaseTaskPtr AddVectorTask::Create(const std::string& group_id,
-                                  const VecBinaryTensor* tensor) {
-    return std::shared_ptr<BaseTask>(new AddVectorTask(group_id, tensor));
+                                  const VecBinaryTensor* tensor,
+                                  std::string& id) {
+    return std::shared_ptr<BaseTask>(new AddVectorTask(group_id, tensor, id));
 }
 
 
@@ -265,9 +271,16 @@ ServerError AddVectorTask::OnExecute() {
                 return SERVER_UNEXPECTED_ERROR;
             } else {
                 std::string uid = GetVecID();
-                std::string nid = group_id_ + "_" + std::to_string(vector_ids[0]);
+                std::string num_id = std::to_string(vector_ids[0]);
+                if(uid.empty()) {
+                    tensor_id_ = num_id;
+                } else {
+                    tensor_id_ = uid;
+                }
+
+                std::string nid = group_id_ + "_" + num_id;
                 AttribMap attrib = GetVecAttrib();
-                attrib[VECTOR_UID] = uid;
+                attrib[VECTOR_UID] = tensor_id_;
                 std::string attrib_str;
                 AttributeSerializer::Encode(attrib, attrib_str);
                 IVecIdMapper::GetInstance()->Put(nid, attrib_str);
@@ -286,31 +299,39 @@ ServerError AddVectorTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 AddBatchVectorTask::AddBatchVectorTask(const std::string& group_id,
-                                       const VecTensorList* tensor_list)
+                                       const VecTensorList* tensor_list,
+                                       std::vector<std::string>& ids)
     : BaseTask(DDL_DML_TASK_GROUP),
       group_id_(group_id),
       tensor_list_(tensor_list),
-      bin_tensor_list_(nullptr) {
-
+      bin_tensor_list_(nullptr),
+      tensor_ids_(ids) {
+    tensor_ids_.clear();
+    tensor_ids_.resize(tensor_list->tensor_list.size());
 }
 
 BaseTaskPtr AddBatchVectorTask::Create(const std::string& group_id,
-                                       const VecTensorList* tensor_list) {
-    return std::shared_ptr<BaseTask>(new AddBatchVectorTask(group_id, tensor_list));
+                                       const VecTensorList* tensor_list,
+                                       std::vector<std::string>& ids) {
+    return std::shared_ptr<BaseTask>(new AddBatchVectorTask(group_id, tensor_list, ids));
 }
 
 AddBatchVectorTask::AddBatchVectorTask(const std::string& group_id,
-                                       const VecBinaryTensorList* tensor_list)
-        : BaseTask(DDL_DML_TASK_GROUP),
-          group_id_(group_id),
-          tensor_list_(nullptr),
-          bin_tensor_list_(tensor_list) {
-
+                                       const VecBinaryTensorList* tensor_list,
+                                       std::vector<std::string>& ids)
+    : BaseTask(DDL_DML_TASK_GROUP),
+      group_id_(group_id),
+      tensor_list_(nullptr),
+      bin_tensor_list_(tensor_list),
+      tensor_ids_(ids) {
+    tensor_ids_.clear();
+    tensor_ids_.resize(tensor_list->tensor_list.size());
 }
 
 BaseTaskPtr AddBatchVectorTask::Create(const std::string& group_id,
-                                       const VecBinaryTensorList* tensor_list) {
-    return std::shared_ptr<BaseTask>(new AddBatchVectorTask(group_id, tensor_list));
+                                       const VecBinaryTensorList* tensor_list,
+                                       std::vector<std::string>& ids) {
+    return std::shared_ptr<BaseTask>(new AddBatchVectorTask(group_id, tensor_list, ids));
 }
 
 uint64_t AddBatchVectorTask::GetVecListCount() const {
@@ -379,11 +400,19 @@ const AttribMap& AddBatchVectorTask::GetVecAttrib(uint64_t index) const {
     }
 }
 
-void AddBatchVectorTask::ProcessIdMapping(engine::IDNumbers& vector_ids, uint64_t from, uint64_t to) {
+void AddBatchVectorTask::ProcessIdMapping(engine::IDNumbers& vector_ids,
+                                          uint64_t from, uint64_t to,
+                                          std::vector<std::string>& tensor_ids) {
     std::string nid_prefix = group_id_ + "_";
     for(size_t i = from; i < to; i++) {
         std::string uid = GetVecID(i);
-        std::string nid = nid_prefix + std::to_string(vector_ids[i]);
+        std::string num_id = std::to_string(vector_ids[i]);
+        if(uid.empty()) {
+            uid = num_id;
+        }
+        tensor_ids_[i] = uid;
+
+        std::string nid = nid_prefix + num_id;
         AttribMap attrib = GetVecAttrib(i);
         attrib[VECTOR_UID] = uid;
         std::string attrib_str;
@@ -437,7 +466,7 @@ ServerError AddBatchVectorTask::OnExecute() {
                 return SERVER_UNEXPECTED_ERROR;
             } else {
                 if(vec_count < USE_MT) {
-                    ProcessIdMapping(vector_ids, 0, vec_count);
+                    ProcessIdMapping(vector_ids, 0, vec_count, tensor_ids_);
                     rc.Record("built id mapping");
                 } else {
                     std::list<std::future<void>> threads_list;
@@ -446,7 +475,7 @@ ServerError AddBatchVectorTask::OnExecute() {
                     while(end_index < vec_count) {
                         threads_list.push_back(
                                 GetThreadPool().enqueue(&AddBatchVectorTask::ProcessIdMapping,
-                                                   this, vector_ids, begin_index, end_index));
+                                                   this, vector_ids, begin_index, end_index, tensor_ids_));
                         begin_index = end_index;
                         end_index += USE_MT;
                         if(end_index > vec_count) {

@@ -254,7 +254,7 @@ class Client(Iface):
 
         """
         self.send_add_vector(group_id, tensor)
-        self.recv_add_vector()
+        return self.recv_add_vector()
 
     def send_add_vector(self, group_id, tensor):
         self._oprot.writeMessageBegin('add_vector', TMessageType.CALL, self._seqid)
@@ -276,9 +276,11 @@ class Client(Iface):
         result = add_vector_result()
         result.read(iprot)
         iprot.readMessageEnd()
+        if result.success is not None:
+            return result.success
         if result.e is not None:
             raise result.e
-        return
+        raise TApplicationException(TApplicationException.MISSING_RESULT, "add_vector failed: unknown result")
 
     def add_vector_batch(self, group_id, tensor_list):
         """
@@ -288,7 +290,7 @@ class Client(Iface):
 
         """
         self.send_add_vector_batch(group_id, tensor_list)
-        self.recv_add_vector_batch()
+        return self.recv_add_vector_batch()
 
     def send_add_vector_batch(self, group_id, tensor_list):
         self._oprot.writeMessageBegin('add_vector_batch', TMessageType.CALL, self._seqid)
@@ -310,9 +312,11 @@ class Client(Iface):
         result = add_vector_batch_result()
         result.read(iprot)
         iprot.readMessageEnd()
+        if result.success is not None:
+            return result.success
         if result.e is not None:
             raise result.e
-        return
+        raise TApplicationException(TApplicationException.MISSING_RESULT, "add_vector_batch failed: unknown result")
 
     def add_binary_vector(self, group_id, tensor):
         """
@@ -322,7 +326,7 @@ class Client(Iface):
 
         """
         self.send_add_binary_vector(group_id, tensor)
-        self.recv_add_binary_vector()
+        return self.recv_add_binary_vector()
 
     def send_add_binary_vector(self, group_id, tensor):
         self._oprot.writeMessageBegin('add_binary_vector', TMessageType.CALL, self._seqid)
@@ -344,9 +348,11 @@ class Client(Iface):
         result = add_binary_vector_result()
         result.read(iprot)
         iprot.readMessageEnd()
+        if result.success is not None:
+            return result.success
         if result.e is not None:
             raise result.e
-        return
+        raise TApplicationException(TApplicationException.MISSING_RESULT, "add_binary_vector failed: unknown result")
 
     def add_binary_vector_batch(self, group_id, tensor_list):
         """
@@ -356,7 +362,7 @@ class Client(Iface):
 
         """
         self.send_add_binary_vector_batch(group_id, tensor_list)
-        self.recv_add_binary_vector_batch()
+        return self.recv_add_binary_vector_batch()
 
     def send_add_binary_vector_batch(self, group_id, tensor_list):
         self._oprot.writeMessageBegin('add_binary_vector_batch', TMessageType.CALL, self._seqid)
@@ -378,9 +384,11 @@ class Client(Iface):
         result = add_binary_vector_batch_result()
         result.read(iprot)
         iprot.readMessageEnd()
+        if result.success is not None:
+            return result.success
         if result.e is not None:
             raise result.e
-        return
+        raise TApplicationException(TApplicationException.MISSING_RESULT, "add_binary_vector_batch failed: unknown result")
 
     def search_vector(self, group_id, top_k, tensor, filter):
         """
@@ -665,7 +673,7 @@ class Processor(Iface, TProcessor):
         iprot.readMessageEnd()
         result = add_vector_result()
         try:
-            self._handler.add_vector(args.group_id, args.tensor)
+            result.success = self._handler.add_vector(args.group_id, args.tensor)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -691,7 +699,7 @@ class Processor(Iface, TProcessor):
         iprot.readMessageEnd()
         result = add_vector_batch_result()
         try:
-            self._handler.add_vector_batch(args.group_id, args.tensor_list)
+            result.success = self._handler.add_vector_batch(args.group_id, args.tensor_list)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -717,7 +725,7 @@ class Processor(Iface, TProcessor):
         iprot.readMessageEnd()
         result = add_binary_vector_result()
         try:
-            self._handler.add_binary_vector(args.group_id, args.tensor)
+            result.success = self._handler.add_binary_vector(args.group_id, args.tensor)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -743,7 +751,7 @@ class Processor(Iface, TProcessor):
         iprot.readMessageEnd()
         result = add_binary_vector_batch_result()
         try:
-            self._handler.add_binary_vector_batch(args.group_id, args.tensor_list)
+            result.success = self._handler.add_binary_vector_batch(args.group_id, args.tensor_list)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -1340,12 +1348,14 @@ add_vector_args.thrift_spec = (
 class add_vector_result(object):
     """
     Attributes:
+     - success
      - e
 
     """
 
 
-    def __init__(self, e=None,):
+    def __init__(self, success=None, e=None,):
+        self.success = success
         self.e = e
 
     def read(self, iprot):
@@ -1357,7 +1367,12 @@ class add_vector_result(object):
             (fname, ftype, fid) = iprot.readFieldBegin()
             if ftype == TType.STOP:
                 break
-            if fid == 1:
+            if fid == 0:
+                if ftype == TType.STRING:
+                    self.success = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                else:
+                    iprot.skip(ftype)
+            elif fid == 1:
                 if ftype == TType.STRUCT:
                     self.e = VecException()
                     self.e.read(iprot)
@@ -1373,6 +1388,10 @@ class add_vector_result(object):
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
         oprot.writeStructBegin('add_vector_result')
+        if self.success is not None:
+            oprot.writeFieldBegin('success', TType.STRING, 0)
+            oprot.writeString(self.success.encode('utf-8') if sys.version_info[0] == 2 else self.success)
+            oprot.writeFieldEnd()
         if self.e is not None:
             oprot.writeFieldBegin('e', TType.STRUCT, 1)
             self.e.write(oprot)
@@ -1395,7 +1414,7 @@ class add_vector_result(object):
         return not (self == other)
 all_structs.append(add_vector_result)
 add_vector_result.thrift_spec = (
-    None,  # 0
+    (0, TType.STRING, 'success', 'UTF8', None, ),  # 0
     (1, TType.STRUCT, 'e', [VecException, None], None, ),  # 1
 )
 
@@ -1479,12 +1498,14 @@ add_vector_batch_args.thrift_spec = (
 class add_vector_batch_result(object):
     """
     Attributes:
+     - success
      - e
 
     """
 
 
-    def __init__(self, e=None,):
+    def __init__(self, success=None, e=None,):
+        self.success = success
         self.e = e
 
     def read(self, iprot):
@@ -1496,7 +1517,17 @@ class add_vector_batch_result(object):
             (fname, ftype, fid) = iprot.readFieldBegin()
             if ftype == TType.STOP:
                 break
-            if fid == 1:
+            if fid == 0:
+                if ftype == TType.LIST:
+                    self.success = []
+                    (_etype81, _size78) = iprot.readListBegin()
+                    for _i82 in range(_size78):
+                        _elem83 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                        self.success.append(_elem83)
+                    iprot.readListEnd()
+                else:
+                    iprot.skip(ftype)
+            elif fid == 1:
                 if ftype == TType.STRUCT:
                     self.e = VecException()
                     self.e.read(iprot)
@@ -1512,6 +1543,13 @@ class add_vector_batch_result(object):
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
         oprot.writeStructBegin('add_vector_batch_result')
+        if self.success is not None:
+            oprot.writeFieldBegin('success', TType.LIST, 0)
+            oprot.writeListBegin(TType.STRING, len(self.success))
+            for iter84 in self.success:
+                oprot.writeString(iter84.encode('utf-8') if sys.version_info[0] == 2 else iter84)
+            oprot.writeListEnd()
+            oprot.writeFieldEnd()
         if self.e is not None:
             oprot.writeFieldBegin('e', TType.STRUCT, 1)
             self.e.write(oprot)
@@ -1534,7 +1572,7 @@ class add_vector_batch_result(object):
         return not (self == other)
 all_structs.append(add_vector_batch_result)
 add_vector_batch_result.thrift_spec = (
-    None,  # 0
+    (0, TType.LIST, 'success', (TType.STRING, 'UTF8', False), None, ),  # 0
     (1, TType.STRUCT, 'e', [VecException, None], None, ),  # 1
 )
 
@@ -1618,12 +1656,14 @@ add_binary_vector_args.thrift_spec = (
 class add_binary_vector_result(object):
     """
     Attributes:
+     - success
      - e
 
     """
 
 
-    def __init__(self, e=None,):
+    def __init__(self, success=None, e=None,):
+        self.success = success
         self.e = e
 
     def read(self, iprot):
@@ -1635,7 +1675,12 @@ class add_binary_vector_result(object):
             (fname, ftype, fid) = iprot.readFieldBegin()
             if ftype == TType.STOP:
                 break
-            if fid == 1:
+            if fid == 0:
+                if ftype == TType.STRING:
+                    self.success = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                else:
+                    iprot.skip(ftype)
+            elif fid == 1:
                 if ftype == TType.STRUCT:
                     self.e = VecException()
                     self.e.read(iprot)
@@ -1651,6 +1696,10 @@ class add_binary_vector_result(object):
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
         oprot.writeStructBegin('add_binary_vector_result')
+        if self.success is not None:
+            oprot.writeFieldBegin('success', TType.STRING, 0)
+            oprot.writeString(self.success.encode('utf-8') if sys.version_info[0] == 2 else self.success)
+            oprot.writeFieldEnd()
         if self.e is not None:
             oprot.writeFieldBegin('e', TType.STRUCT, 1)
             self.e.write(oprot)
@@ -1673,7 +1722,7 @@ class add_binary_vector_result(object):
         return not (self == other)
 all_structs.append(add_binary_vector_result)
 add_binary_vector_result.thrift_spec = (
-    None,  # 0
+    (0, TType.STRING, 'success', 'UTF8', None, ),  # 0
     (1, TType.STRUCT, 'e', [VecException, None], None, ),  # 1
 )
 
@@ -1757,12 +1806,14 @@ add_binary_vector_batch_args.thrift_spec = (
 class add_binary_vector_batch_result(object):
     """
     Attributes:
+     - success
      - e
 
     """
 
 
-    def __init__(self, e=None,):
+    def __init__(self, success=None, e=None,):
+        self.success = success
         self.e = e
 
     def read(self, iprot):
@@ -1774,7 +1825,17 @@ class add_binary_vector_batch_result(object):
             (fname, ftype, fid) = iprot.readFieldBegin()
             if ftype == TType.STOP:
                 break
-            if fid == 1:
+            if fid == 0:
+                if ftype == TType.LIST:
+                    self.success = []
+                    (_etype88, _size85) = iprot.readListBegin()
+                    for _i89 in range(_size85):
+                        _elem90 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                        self.success.append(_elem90)
+                    iprot.readListEnd()
+                else:
+                    iprot.skip(ftype)
+            elif fid == 1:
                 if ftype == TType.STRUCT:
                     self.e = VecException()
                     self.e.read(iprot)
@@ -1790,6 +1851,13 @@ class add_binary_vector_batch_result(object):
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
         oprot.writeStructBegin('add_binary_vector_batch_result')
+        if self.success is not None:
+            oprot.writeFieldBegin('success', TType.LIST, 0)
+            oprot.writeListBegin(TType.STRING, len(self.success))
+            for iter91 in self.success:
+                oprot.writeString(iter91.encode('utf-8') if sys.version_info[0] == 2 else iter91)
+            oprot.writeListEnd()
+            oprot.writeFieldEnd()
         if self.e is not None:
             oprot.writeFieldBegin('e', TType.STRUCT, 1)
             self.e.write(oprot)
@@ -1812,7 +1880,7 @@ class add_binary_vector_batch_result(object):
         return not (self == other)
 all_structs.append(add_binary_vector_batch_result)
 add_binary_vector_batch_result.thrift_spec = (
-    None,  # 0
+    (0, TType.LIST, 'success', (TType.STRING, 'UTF8', False), None, ),  # 0
     (1, TType.STRUCT, 'e', [VecException, None], None, ),  # 1
 )
 
