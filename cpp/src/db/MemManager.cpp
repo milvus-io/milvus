@@ -72,7 +72,7 @@ MemVectors<EngineT>::~MemVectors() {
  */
 
 template<typename EngineT>
-typename MemManager<EngineT>::VectorsPtr MemManager<EngineT>::get_mem_by_group(
+typename MemManager<EngineT>::MemVectorsPtr MemManager<EngineT>::get_mem_by_group(
         const std::string& group_id) {
     auto memIt = _memMap.find(group_id);
     if (memIt != _memMap.end()) {
@@ -86,7 +86,7 @@ typename MemManager<EngineT>::VectorsPtr MemManager<EngineT>::get_mem_by_group(
         return nullptr;
     }
 
-    _memMap[group_id] = VectorsPtr(new MemVectors<EngineT>(_pMeta, group_file, options_));
+    _memMap[group_id] = MemVectorsPtr(new MemVectors<EngineT>(_pMeta, group_file, options_));
     return _memMap[group_id];
 }
 
@@ -104,7 +104,7 @@ Status MemManager<EngineT>::add_vectors_no_lock(const std::string& group_id,
         size_t n,
         const float* vectors,
         IDNumbers& vector_ids) {
-    VectorsPtr mem = get_mem_by_group(group_id);
+    MemVectorsPtr mem = get_mem_by_group(group_id);
     if (mem == nullptr) {
         return Status::NotFound("Group " + group_id + " not found!");
     }
