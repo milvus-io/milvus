@@ -40,19 +40,19 @@ public:
     void del_group(const std::string& group_id);
 
     /**
-     * insert vector interfaces
-     *
-     *
-     * @param group_id
-     * @param tensor
-     */
-    void add_vector(const std::string& group_id, const VecTensor& tensor);
+   * insert vector interfaces
+   *
+   *
+   * @param group_id
+   * @param tensor
+   */
+    void add_vector(std::string& _return, const std::string& group_id, const VecTensor& tensor);
 
-    void add_vector_batch(const std::string& group_id, const VecTensorList& tensor_list);
+    void add_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecTensorList& tensor_list);
 
-    void add_binary_vector(const std::string& group_id, const VecBinaryTensor& tensor);
+    void add_binary_vector(std::string& _return, const std::string& group_id, const VecBinaryTensor& tensor);
 
-    void add_binary_vector_batch(const std::string& group_id, const VecBinaryTensorList& tensor_list);
+    void add_binary_vector_batch(std::vector<std::string> & _return, const std::string& group_id, const VecBinaryTensorList& tensor_list);
 
     /**
      * search interfaces

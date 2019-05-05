@@ -21,6 +21,7 @@ using namespace zilliz::vecwise::client;
 
 namespace {
     static const int32_t VEC_DIMENSION = 256;
+    static const int64_t BATCH_COUNT = 1000;
 
     static const std::string TEST_ATTRIB_NUM = "number";
     static const std::string TEST_ATTRIB_COMMENT = "comment";
@@ -94,14 +95,14 @@ namespace {
 
             if(tensor_list) {
                 tensor.uid = "normal_vec_" + std::to_string(k);
-                attrib_map[TEST_ATTRIB_COMMENT] = tensor.uid;
+                attrib_map[TEST_ATTRIB_COMMENT] = "this is vector " + tensor.uid;
                 tensor.__set_attrib(attrib_map);
                 tensor_list->tensor_list.emplace_back(tensor);
             }
 
             if(bin_tensor_list) {
                 bin_tensor.uid = "binary_vec_" + std::to_string(k);
-                attrib_map[TEST_ATTRIB_COMMENT] = bin_tensor.uid;
+                attrib_map[TEST_ATTRIB_COMMENT] = "this is binary vector " + bin_tensor.uid;
                 bin_tensor.__set_attrib(attrib_map);
                 bin_tensor_list->tensor_list.emplace_back(bin_tensor);
             }
@@ -116,55 +117,56 @@ namespace {
     }
 }
 
-void ClientTest::LoopTest() {
-    server::TimeRecorder rc("LoopTest");
-
-    std::string address, protocol;
-    int32_t port = 0;
-    GetServerAddress(address, port, protocol);
-    client::ClientSession session(address, port, protocol);
-
-    rc.Record("connection");
-
-    //add group
-    VecGroup group;
-    group.id = "loop_group";
-    group.dimension = VEC_DIMENSION;
-    group.index_type = 0;
-    session.interface()->add_group(group);
-    rc.Record("add group");
-
-    const int64_t batch = 10000;
-    for(int64_t i = 0; i < 1000; i++) {
-        {
-            VecBinaryTensorList bin_tensor_list;
-            BuildVectors(i * batch, (i + 1) * batch, nullptr, &bin_tensor_list);
-            rc.Record("build batch no." + std::to_string(i));
-
-            session.interface()->add_binary_vector_batch(group.id, bin_tensor_list);
-            rc.Record("add batch no." + std::to_string(i));
-        }
-
-        sleep(1);
-        rc.Record("sleep 1 second");
-
-        VecTensor tensor;
-        for (int32_t k = 0; k < VEC_DIMENSION; k++) {
-            tensor.tensor.push_back((double) (k + i*666));
-        }
-
-        //do search
-        VecSearchResult res;
-        VecSearchFilter filter;
-        session.interface()->search_vector(res, group.id, 10, tensor, filter);
-        rc.Record("search finish");
-
-        std::cout << "Search result: " << std::endl;
-        for(VecSearchResultItem& item : res.result_list) {
-            std::cout << "\t" << item.uid << std::endl;
-        }
-    }
-}
+//void ClientTest::LoopTest() {
+//    server::TimeRecorder rc("LoopTest");
+//
+//    std::string address, protocol;
+//    int32_t port = 0;
+//    GetServerAddress(address, port, protocol);
+//    client::ClientSession session(address, port, protocol);
+//
+//    rc.Record("connection");
+//
+//    //add group
+//    VecGroup group;
+//    group.id = "loop_group";
+//    group.dimension = VEC_DIMENSION;
+//    group.index_type = 0;
+//    session.interface()->add_group(group);
+//    rc.Record("add group");
+//
+//    const int64_t batch = 10000;
+//    for(int64_t i = 0; i < 1000; i++) {
+//        {
+//            VecBinaryTensorList bin_tensor_list;
+//            BuildVectors(i * batch, (i + 1) * batch, nullptr, &bin_tensor_list);
+//            rc.Record("build batch no." + std::to_string(i));
+//
+//            std::vector<std::string> ids;
+//            session.interface()->add_binary_vector_batch(ids, group.id, bin_tensor_list);
+//            rc.Record("add batch no." + std::to_string(i));
+//        }
+//
+//        sleep(1);
+//        rc.Record("sleep 1 second");
+//
+//        VecTensor tensor;
+//        for (int32_t k = 0; k < VEC_DIMENSION; k++) {
+//            tensor.tensor.push_back((double) (k + i*666));
+//        }
+//
+//        //do search
+//        VecSearchResult res;
+//        VecSearchFilter filter;
+//        session.interface()->search_vector(res, group.id, 10, tensor, filter);
+//        rc.Record("search finish");
+//
+//        std::cout << "Search result: " << std::endl;
+//        for(VecSearchResultItem& item : res.result_list) {
+//            std::cout << "\t" << item.uid << std::endl;
+//        }
+//    }
+//}
 
 TEST(AddVector, CLIENT_TEST) {
     try {
@@ -182,47 +184,57 @@ TEST(AddVector, CLIENT_TEST) {
 
         //prepare data
         CLIENT_LOG_INFO << "Preparing vectors...";
-        const int64_t count = 100000;
-        VecTensorList tensor_list;
-        VecBinaryTensorList bin_tensor_list;
-        BuildVectors(0, count, &tensor_list, &bin_tensor_list);
-
-//        //add vectors one by one
-//        {
-//            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
-//            for (int64_t k = 0; k < count; k++) {
-//                session.interface()->add_vector(group.id, tensor_list.tensor_list[k]);
-//                if (k % 1000 == 0) {
-//                    CLIENT_LOG_INFO << "add normal vector no." << k;
-//                }
-//            }
-//            rc.Elapse("done!");
-//        }
-//
-//        //add vectors in one batch
-//        {
-//            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
-//            session.interface()->add_vector_batch(group.id, tensor_list);
-//            rc.Elapse("done!");
-//        }
+        const int64_t count = BATCH_COUNT;
+        VecTensorList tensor_list_1, tensor_list_2;
+        VecBinaryTensorList bin_tensor_list_1, bin_tensor_list_2;
+        BuildVectors(0, count, &tensor_list_1, &bin_tensor_list_1);
+        BuildVectors(count, count*2, &tensor_list_2, &bin_tensor_list_2);
 
 #if 0
+        //add vectors one by one
+        {
+            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors one by one");
+            for (int64_t k = 0; k < count; k++) {
+                std::string id;
+                tensor_list_1.tensor_list[k].uid = "";
+                session.interface()->add_vector(id, group.id, tensor_list_1.tensor_list[k]);
+                if (k % 1000 == 0) {
+                    CLIENT_LOG_INFO << "add normal vector no." << k;
+                }
+                ASSERT_TRUE(!id.empty());
+            }
+            rc.Elapse("done!");
+        }
+
+        //add vectors in one batch
+        {
+            server::TimeRecorder rc("Add " + std::to_string(count) + " vectors in one batch");
+            std::vector<std::string> ids;
+            session.interface()->add_vector_batch(ids, group.id, tensor_list_2);
+            rc.Elapse("done!");
+        }
+
+#else
         //add binary vectors one by one
         {
             server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors one by one");
             for (int64_t k = 0; k < count; k++) {
-                session.interface()->add_binary_vector(group.id, bin_tensor_list.tensor_list[k]);
+                std::string id;
+                bin_tensor_list_1.tensor_list[k].uid = "";
+                session.interface()->add_binary_vector(id, group.id, bin_tensor_list_1.tensor_list[k]);
                 if (k % 1000 == 0) {
                     CLIENT_LOG_INFO << "add binary vector no." << k;
                 }
+                ASSERT_TRUE(!id.empty());
             }
             rc.Elapse("done!");
         }
-#else
+
         //add binary vectors in one batch
         {
             server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors in one batch");
-            session.interface()->add_binary_vector_batch(group.id, bin_tensor_list);
+            std::vector<std::string> ids;
+            session.interface()->add_binary_vector_batch(ids, group.id, bin_tensor_list_2);
             rc.Elapse("done!");
         }
 #endif
@@ -274,13 +286,13 @@ TEST(SearchVector, CLIENT_TEST) {
 
                 ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_NUM) != 0);
                 ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_COMMENT) != 0);
-                ASSERT_TRUE(item.attrib[TEST_ATTRIB_COMMENT].find(item.uid) != std::string::npos);
+                ASSERT_TRUE(!item.attrib[TEST_ATTRIB_COMMENT].empty());
             }
             rc.Elapse("done!");
 
             ASSERT_EQ(res.result_list.size(), (uint64_t)top_k);
             if(!res.result_list.empty()) {
-                ASSERT_TRUE(res.result_list[0].uid.find(std::to_string(anchor_index)) != std::string::npos);
+                ASSERT_TRUE(!res.result_list[0].uid.empty());
             }
 
             //empty search
@@ -297,7 +309,7 @@ TEST(SearchVector, CLIENT_TEST) {
 
         //search binary vector
         {
-            const int32_t anchor_index = 300;
+            const int32_t anchor_index = BATCH_COUNT + 200;
             const int32_t search_count = 10;
             const int64_t top_k = 5;
             server::TimeRecorder rc("Search binary batch top_k");
@@ -324,7 +336,7 @@ TEST(SearchVector, CLIENT_TEST) {
                     std::cout << "\t" << item.uid << std::endl;
                     ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_NUM) != 0);
                     ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_COMMENT) != 0);
-                    ASSERT_TRUE(item.attrib[TEST_ATTRIB_COMMENT].find(item.uid) != std::string::npos);
+                    ASSERT_TRUE(!item.attrib[TEST_ATTRIB_COMMENT].empty());
                 }
             }
 
