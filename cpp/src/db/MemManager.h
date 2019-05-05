@@ -22,6 +22,8 @@ namespace meta {
 template <typename EngineT>
 class MemVectors {
 public:
+    typedef typename EngineT::Ptr EnginePtr;
+
     explicit MemVectors(const std::shared_ptr<meta::Meta>&,
             const meta::GroupFileSchema&, const Options&);
 
@@ -46,7 +48,7 @@ private:
     Options options_;
     meta::GroupFileSchema schema_;
     IDGenerator* _pIdGenerator;
-    std::shared_ptr<EngineT> pEE_;
+    EnginePtr pEE_;
 
 }; // MemVectors
 

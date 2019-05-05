@@ -75,7 +75,7 @@ Status FaissExecutionEngine::Merge(const std::string& location) {
     return Status::OK();
 }
 
-std::shared_ptr<FaissExecutionEngine> FaissExecutionEngine::BuildIndex(const std::string& location) {
+FaissExecutionEngine::Ptr FaissExecutionEngine::BuildIndex(const std::string& location) {
     auto opd = std::make_shared<Operand>();
     opd->d = pIndex_->d;
     opd->index_type = BuildIndexType;
@@ -87,7 +87,7 @@ std::shared_ptr<FaissExecutionEngine> FaissExecutionEngine::BuildIndex(const std
             dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
             from_index->id_map.data());
 
-    std::shared_ptr<FaissExecutionEngine> new_ee(new FaissExecutionEngine(index->data(), location));
+    Ptr new_ee(new FaissExecutionEngine(index->data(), location));
     new_ee->Serialize();
     return new_ee;
 }
