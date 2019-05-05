@@ -21,6 +21,8 @@ namespace meta {
 template <typename EngineT>
 class DBImpl : public DB {
 public:
+    typedef typename meta::Meta::Ptr MetaPtr;
+
     DBImpl(const Options& options);
 
     virtual Status add_group(meta::GroupSchema& group_info) override;
@@ -78,7 +80,7 @@ private:
     bool bg_build_index_started_;
     std::condition_variable bg_build_index_finish_signal_;
 
-    std::shared_ptr<meta::Meta> _pMeta;
+    MetaPtr _pMeta;
     std::shared_ptr<MemManagerT> _pMemMgr;
 
 }; // DBImpl

@@ -5,6 +5,8 @@
 #include <vector>
 #include <map>
 #include <ctime>
+#include <memory>
+
 #include "Options.h"
 #include "Status.h"
 
@@ -50,8 +52,11 @@ typedef std::vector<GroupFileSchema> GroupFilesSchema;
 typedef std::map<DateT, GroupFilesSchema> DatePartionedGroupFilesSchema;
 
 
+class Meta;
 class Meta {
 public:
+    typedef std::shared_ptr<Meta> Ptr;
+
     virtual Status add_group(GroupSchema& group_info) = 0;
     virtual Status get_group(GroupSchema& group_info) = 0;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
