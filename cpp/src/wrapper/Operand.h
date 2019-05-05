@@ -11,6 +11,7 @@
 #include <iostream>
 #include <sstream>
 
+
 namespace zilliz {
 namespace vecwise {
 namespace engine {
@@ -21,11 +22,14 @@ struct Operand {
     friend std::istream &operator>>(std::istream &is, Operand &obj);
 
     int d;
-    std::string index_type = "IVF13864,Flat";
-    std::string metric_type = "L2"; //> L2 / Inner Product
+    std::string index_type = "IVF";
+    std::string metric_type = "L2"; //> L2 / IP(Inner Product)
     std::string preproc;
-    std::string postproc;
-    int ncent;
+    std::string postproc = "Flat";
+    std::string index_str;
+    int ncent = 0;
+
+    std::string get_index_type(const int &nb);
 };
 
 using Operand_ptr = std::shared_ptr<Operand>;

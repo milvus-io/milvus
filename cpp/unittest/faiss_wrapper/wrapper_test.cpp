@@ -18,17 +18,17 @@ TEST(operand_test, Wrapper_Test) {
     using std::endl;
 
     auto opd = std::make_shared<Operand>();
-    opd->index_type = "IDMap,Flat";
-    opd->preproc = "opq";
-    opd->postproc = "pq";
+    opd->index_type = "IVF";
+    opd->preproc = "OPQ";
+    opd->postproc = "PQ";
     opd->metric_type = "L2";
-    opd->ncent = 256;
     opd->d = 64;
 
     auto opd_str = operand_to_str(opd);
     auto new_opd = str_to_operand(opd_str);
 
-    assert(new_opd->index_type == opd->index_type);
+    // TODO: fix all place where using opd to build index.
+    assert(new_opd->get_index_type(10000) == opd->get_index_type(10000));
 }
 
 TEST(build_test, Wrapper_Test) {
@@ -56,7 +56,7 @@ TEST(build_test, Wrapper_Test) {
 
     //train the index
     auto opd = std::make_shared<Operand>();
-    opd->index_type = "IVF16,Flat";
+    opd->index_type = "IVF";
     opd->d = d;
     opd->ncent = ncentroids;
     IndexBuilderPtr index_builder_1 = GetIndexBuilder(opd);
@@ -120,7 +120,7 @@ TEST(gpu_build_test, Wrapper_Test) {
     for (int i = 0; i < nb; ++i) { ids[i] = i; }
 
     auto opd = std::make_shared<Operand>();
-    opd->index_type = "IVF256,Flat";
+    opd->index_type = "IVF";
     opd->d = d;
     opd->ncent = 256;
 
