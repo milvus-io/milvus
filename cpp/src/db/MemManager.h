@@ -24,6 +24,7 @@ class MemVectors {
 public:
     typedef typename EngineT::Ptr EnginePtr;
     typedef typename meta::Meta::Ptr MetaPtr;
+    typedef std::shared_ptr<MemVectors<EngineT>> Ptr;
 
     explicit MemVectors(const std::shared_ptr<meta::Meta>&,
             const meta::GroupFileSchema&, const Options&);
@@ -58,14 +59,14 @@ private:
 template<typename EngineT>
 class MemManager {
 public:
-    typedef MemVectors<EngineT> ItemT;
-    typedef std::shared_ptr<ItemT> VectorsPtr;
     typedef typename meta::Meta::Ptr MetaPtr;
+    typedef typename MemVectors<EngineT>::Ptr MemVectorsPtr;
+    typedef std::shared_ptr<MemManager<EngineT>> Ptr;
 
     MemManager(const std::shared_ptr<meta::Meta>& meta_, const Options& options)
         : _pMeta(meta_), options_(options) {}
 
-    VectorsPtr get_mem_by_group(const std::string& group_id_);
+    MemVectorsPtr get_mem_by_group(const std::string& group_id_);
 
     Status add_vectors(const std::string& group_id_,
             size_t n_, const float* vectors_, IDNumbers& vector_ids_);
@@ -77,8 +78,8 @@ private:
             size_t n_, const float* vectors_, IDNumbers& vector_ids_);
     Status mark_memory_as_immutable();
 
-    typedef std::map<std::string, VectorsPtr> MemMap;
-    typedef std::vector<VectorsPtr> ImmMemPool;
+    typedef std::map<std::string, MemVectorsPtr> MemMap;
+    typedef std::vector<MemVectorsPtr> ImmMemPool;
     MemMap _memMap;
     ImmMemPool _immMems;
     MetaPtr _pMeta;

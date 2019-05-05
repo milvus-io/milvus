@@ -22,6 +22,7 @@ template <typename EngineT>
 class DBImpl : public DB {
 public:
     typedef typename meta::Meta::Ptr MetaPtr;
+    typedef typename MemManager<EngineT>::Ptr MemManagerPtr;
 
     DBImpl(const Options& options);
 
@@ -49,7 +50,6 @@ public:
     virtual ~DBImpl();
 
 private:
-    typedef MemManager<EngineT> MemManagerT;
 
     void background_build_index();
     Status build_index(const meta::GroupFileSchema&);
@@ -81,7 +81,7 @@ private:
     std::condition_variable bg_build_index_finish_signal_;
 
     MetaPtr _pMeta;
-    std::shared_ptr<MemManagerT> _pMemMgr;
+    MemManagerPtr _pMemMgr;
 
 }; // DBImpl
 
