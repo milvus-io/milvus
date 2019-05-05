@@ -1,5 +1,9 @@
-#ifndef STORAGE_VECENGINE_MEMVECTORS_H_
-#define STORAGE_VECENGINE_MEMVECTORS_H_
+/*******************************************************************************
+ * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited.
+ * Proprietary and confidential.
+ ******************************************************************************/
+#pragma once
 
 #include <map>
 #include <string>
@@ -93,5 +97,3 @@ private:
 } // namespace vecwise
 } // namespace zilliz
 #include "MemManager.cpp"
-
-#endif
