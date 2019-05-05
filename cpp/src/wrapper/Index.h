@@ -39,11 +39,11 @@ public:
     virtual bool reset();
 
     /**
-       * @brief Same as add, but stores xids instead of sequential ids.
-       *
-       * @param data input matrix, size n * d
-       * @param if ids is not empty ids for the std::vectors
-       */
+    * @brief Same as add, but stores xids instead of sequential ids.
+    *
+    * @param data input matrix, size n * d
+    * @param if ids is not empty ids for the std::vectors
+    */
     virtual bool add_with_ids(idx_t n, const float *xdata, const long *xids);
 
     /**
@@ -57,23 +57,20 @@ public:
     */
     virtual bool search(idx_t n, const float *data, idx_t k, float *distances, long *labels) const;
 
-//    virtual bool remove_ids(const faiss::IDSelector &sel, long &nremove, long &location);
+    //virtual bool search(idx_t n, const std::vector<float> &data, idx_t k,
+    //                    std::vector<float> &distances, std::vector<float> &labels) const;
 
-//    virtual bool remove_ids_range(const faiss::IDSelector &sel, long &nremove);
+    //virtual bool remove_ids(const faiss::IDSelector &sel, long &nremove, long &location);
+    //virtual bool remove_ids_range(const faiss::IDSelector &sel, long &nremove);
+    //virtual bool index_display();
 
-//    virtual bool index_display();
-//
     virtual std::shared_ptr<faiss::Index> data() { return index_; }
+
     virtual const std::shared_ptr<faiss::Index>& data() const { return index_; }
 
 private:
     friend void write_index(const Index_ptr &index, const std::string &file_name);
     std::shared_ptr<faiss::Index> index_ = nullptr;
-//    std::vector<faiss::gpu::GpuResources *> res_;
-//    std::vector<int> devs_;
-//    bool usegpu = true;
-//    int ngpus = 0;
-//    faiss::gpu::GpuMultipleClonerOptions *options = new faiss::gpu::GpuMultipleClonerOptions();
 };
 
 

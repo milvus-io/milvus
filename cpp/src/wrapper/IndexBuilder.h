@@ -43,7 +43,6 @@ public:
 
 private:
     Operand_ptr opd_ = nullptr;
-//    std::shared_ptr<faiss::Index> index_ = nullptr;
 };
 
 using IndexBuilderPtr = std::shared_ptr<IndexBuilder>;
