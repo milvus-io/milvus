@@ -23,6 +23,7 @@ template <typename EngineT>
 class MemVectors {
 public:
     typedef typename EngineT::Ptr EnginePtr;
+    typedef typename meta::Meta::Ptr MetaPtr;
 
     explicit MemVectors(const std::shared_ptr<meta::Meta>&,
             const meta::GroupFileSchema&, const Options&);
@@ -44,7 +45,7 @@ private:
     MemVectors(const MemVectors&) = delete;
     MemVectors& operator=(const MemVectors&) = delete;
 
-    std::shared_ptr<meta::Meta> pMeta_;
+    MetaPtr pMeta_;
     Options options_;
     meta::GroupFileSchema schema_;
     IDGenerator* _pIdGenerator;
@@ -59,6 +60,7 @@ class MemManager {
 public:
     typedef MemVectors<EngineT> ItemT;
     typedef std::shared_ptr<ItemT> VectorsPtr;
+    typedef typename meta::Meta::Ptr MetaPtr;
 
     MemManager(const std::shared_ptr<meta::Meta>& meta_, const Options& options)
         : _pMeta(meta_), options_(options) {}
@@ -79,7 +81,7 @@ private:
     typedef std::vector<VectorsPtr> ImmMemPool;
     MemMap _memMap;
     ImmMemPool _immMems;
-    std::shared_ptr<meta::Meta> _pMeta;
+    MetaPtr _pMeta;
     Options options_;
     std::mutex _mutex;
     std::mutex serialization_mtx_;
