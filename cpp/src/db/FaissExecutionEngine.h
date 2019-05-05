@@ -13,9 +13,12 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
+class FaissExecutionEngine;
 
 class FaissExecutionEngine : public ExecutionEngine<FaissExecutionEngine> {
 public:
+    typedef std::shared_ptr<FaissExecutionEngine> Ptr;
+
     FaissExecutionEngine(uint16_t dimension, const std::string& location);
     FaissExecutionEngine(std::shared_ptr<faiss::Index> index, const std::string& location);
 
@@ -42,7 +45,7 @@ public:
                   float *distances,
                   long *labels) const;
 
-    std::shared_ptr<FaissExecutionEngine> BuildIndex(const std::string&);
+    FaissExecutionEngine::Ptr BuildIndex(const std::string&);
 
     Status Cache();
 protected:
