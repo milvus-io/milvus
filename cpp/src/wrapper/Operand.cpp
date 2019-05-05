@@ -13,9 +13,9 @@ namespace engine {
 std::ostream &operator<<(std::ostream &os, const Operand &obj) {
     os << obj.d << " "
        << obj.index_type << " "
+       << obj.metric_type << " "
        << obj.preproc << " "
        << obj.postproc << " "
-       << obj.metric_type << " "
        << obj.ncent;
     return os;
 }
@@ -23,16 +23,16 @@ std::ostream &operator<<(std::ostream &os, const Operand &obj) {
 std::istream &operator>>(std::istream &is, Operand &obj) {
     is >> obj.d
        >> obj.index_type
+       >> obj.metric_type
        >> obj.preproc
        >> obj.postproc
-       >> obj.metric_type
        >> obj.ncent;
     return is;
 }
 
 std::string operand_to_str(const Operand_ptr &opd) {
     std::ostringstream ss;
-    ss << opd;
+    ss << *opd;
     return ss.str();
 }
 

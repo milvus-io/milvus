@@ -22,9 +22,9 @@ struct Operand {
 
     int d;
     std::string index_type = "IVF13864,Flat";
+    std::string metric_type = "L2"; //> L2 / Inner Product
     std::string preproc;
     std::string postproc;
-    std::string metric_type = "L2"; // L2 / Inner Product
     int ncent;
 };
 
