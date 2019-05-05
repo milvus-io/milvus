@@ -9,6 +9,7 @@
 #include <thread>
 #include <mutex>
 #include <queue>
+#include <atomic>
 
 namespace zilliz {
 namespace vecwise {
@@ -22,6 +23,8 @@ public:
     Env& operator=(const Env&) = delete;
 
     void schedule(void (*function_)(void* arg_), void* arg_);
+
+    virtual void Stop();
 
     virtual ~Env();
 
@@ -45,6 +48,7 @@ protected:
     std::condition_variable _bg_work_cv;
     std::queue<BGWork> _bg_work_queue;
     bool _bg_work_started;
+    std::atomic<bool> _shutting_down;
 
 }; // Env
 
