@@ -400,6 +400,7 @@ DBImpl<EngineT>::~DBImpl() {
     }
     std::vector<std::string> ids;
     _pMemMgr->serialize(ids);
+    _env->Stop();
 }
 
 /*

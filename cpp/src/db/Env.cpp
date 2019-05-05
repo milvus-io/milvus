@@ -3,18 +3,23 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#include <easylogging++.h>
 #include <assert.h>
+#include <atomic>
 #include "Env.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-Env::Env() : _bg_work_started(false) {
+Env::Env()
+    : _bg_work_started(false),
+      _shutting_down(false) {
 }
 
 void Env::schedule(void (*function_)(void* arg_), void* arg_) {
     std::unique_lock<std::mutex> lock(_bg_work_mutex);
+    if (_shutting_down) return;
 
     if (!_bg_work_started) {
         _bg_work_started = true;
@@ -30,11 +35,13 @@ void Env::schedule(void (*function_)(void* arg_), void* arg_) {
 }
 
 void Env::backgroud_thread_main() {
-    while (true) {
+    while (!_shutting_down) {
         std::unique_lock<std::mutex> lock(_bg_work_mutex);
-        while (_bg_work_queue.empty()) {
+        while (_bg_work_queue.empty() && !_shutting_down) {
             _bg_work_cv.wait(lock);
         }
+
+        if (_shutting_down) break;
 
         assert(!_bg_work_queue.empty());
         auto bg_function = _bg_work_queue.front()._function;
@@ -44,6 +51,28 @@ void Env::backgroud_thread_main() {
         lock.unlock();
         bg_function(bg_arg);
     }
+
+    std::unique_lock<std::mutex> lock(_bg_work_mutex);
+    _bg_work_started = false;
+    _bg_work_cv.notify_all();
+}
+
+void Env::Stop() {
+    {
+        std::unique_lock<std::mutex> lock(_bg_work_mutex);
+        if (_shutting_down || !_bg_work_started) return;
+    }
+    _shutting_down = true;
+    {
+        std::unique_lock<std::mutex> lock(_bg_work_mutex);
+        if (_bg_work_queue.empty()) {
+            _bg_work_cv.notify_one();
+        }
+        while (_bg_work_started) {
+            _bg_work_cv.wait(lock);
+        }
+    }
+    _shutting_down = false;
 }
 
 Env::~Env() {}
