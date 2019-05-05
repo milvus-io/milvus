@@ -59,6 +59,9 @@ Status MemVectors<EngineT>::serialize(std::string& group_id) {
 
     auto status = pMeta_->update_group_file(schema_);
 
+    LOG(DEBUG) << "New " << ((schema_.file_type == meta::GroupFileSchema::RAW) ? "raw" : "to_index")
+        << " file " << schema_.file_id << " of size " << pEE_->PhysicalSize() / (1024*1024) << " M";
+
     pEE_->Cache();
 
     return status;

@@ -243,8 +243,7 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
         auto file_schema = file;
         file_schema.file_type = meta::GroupFileSchema::TO_DELETE;
         updated.push_back(file_schema);
-        /* LOG(DEBUG) << "About to merge file " << file_schema.file_id << */
-        /*     " of size=" << file_schema.rows; */
+        LOG(DEBUG) << "Merging file " << file_schema.file_id;
         index_size = index.Size();
 
         if (index_size >= _options.index_trigger_size) break;
@@ -260,8 +259,8 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
     group_file.rows = index_size;
     updated.push_back(group_file);
     status = _pMeta->update_files(updated);
-    /* LOG(DEBUG) << "New merged file " << group_file.file_id << */
-    /*     " of size=" << group_file.rows; */
+    LOG(DEBUG) << "New merged file " << group_file.file_id <<
+        " of size=" << index.PhysicalSize()/(1024*1024) << " M";
 
     index.Cache();
 
@@ -321,6 +320,10 @@ Status DBImpl<EngineT>::build_index(const meta::GroupFileSchema& file) {
 
     meta::GroupFilesSchema update_files = {to_remove, group_file};
     _pMeta->update_files(update_files);
+
+    LOG(DEBUG) << "New index file " << group_file.file_id << " of size "
+        << index->PhysicalSize()/(1024*1024) << " M"
+        << " from file " << to_remove.file_id;
 
     index->Cache();
 
