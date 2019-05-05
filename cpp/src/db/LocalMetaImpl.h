@@ -1,5 +1,9 @@
-#ifndef VECENGINE_DB_META_IMPL_H_
-#define VECENGINE_DB_META_IMPL_H_
+////////////////////////////////////////////////////////////////////////////////
+// Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+// Unauthorized copying of this file, via any medium is strictly prohibited.
+// Proprietary and confidential.
+////////////////////////////////////////////////////////////////////////////////
+#pragma once
 
 #include "Meta.h"
 #include "Options.h"
@@ -71,5 +75,3 @@ private:
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#endif // VECENGINE_DB_META_IMPL_H_
