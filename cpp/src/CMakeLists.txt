@@ -60,6 +60,7 @@ set(server_libs
         snappy
         bz2
         z
+        zstd
         )
 
 target_link_libraries(vecwise_server ${server_libs})
