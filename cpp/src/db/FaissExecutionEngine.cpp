@@ -19,7 +19,7 @@ namespace vecwise {
 namespace engine {
 
 const std::string RawIndexType = "IDMap,Flat";
-const std::string BuildIndexType = "IDMap,Flat";
+const std::string BuildIndexType = "IVF"; // IDMap / IVF
 
 
 FaissExecutionEngine::FaissExecutionEngine(uint16_t dimension, const std::string& location)
