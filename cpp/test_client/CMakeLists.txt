@@ -19,14 +19,7 @@ set(service_files
     ../src/thrift/gen-cpp/VectorService_constants.cpp
     ../src/thrift/gen-cpp/VectorService_types.cpp)
 
-add_executable(test_client
-    ./main.cpp
-    ../src/server/ServerConfig.cpp
-    ${client_src}
-    ${service_files}
-    ${config_files}
-    ${util_files}
-    ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc)
+
 
 link_directories(
     "${CMAKE_BINARY_DIR}/lib"
@@ -48,6 +41,15 @@ set(client_libs
 
 include_directories(/usr/local/cuda/include)
 find_library(cuda_library cudart cublas HINTS /usr/local/cuda/lib64)
+
+add_executable(test_client
+        ./main.cpp
+        ../src/server/ServerConfig.cpp
+        ${client_src}
+        ${service_files}
+        ${config_files}
+        ${util_files}
+        ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc)
 
 target_link_libraries(test_client ${unittest_libs} ${client_libs} ${cuda_library})
 

@@ -40,6 +40,7 @@ set(require_libs
         snappy
         bz2
         z
+        zstd
         rocksdb
         faiss
         cudart
