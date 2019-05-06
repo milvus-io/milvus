@@ -11,25 +11,26 @@
 #include "Operand.h"
 #include "Index.h"
 
+
 namespace zilliz {
 namespace vecwise {
 namespace engine {
 
 class IndexBuilder {
-public:
+ public:
     explicit IndexBuilder(const Operand_ptr &opd);
 
-    Index_ptr build_all(const long &nb,
-                        const float* xb,
-                        const long* ids,
-                        const long &nt = 0,
-                        const float* xt = nullptr);
+    virtual Index_ptr build_all(const long &nb,
+                                const float *xb,
+                                const long *ids,
+                                const long &nt = 0,
+                                const float *xt = nullptr);
 
-    Index_ptr build_all(const long &nb,
-                        const std::vector<float> &xb,
-                        const std::vector<long> &ids,
-                        const long &nt = 0,
-                        const std::vector<float> &xt = std::vector<float>());
+    virtual Index_ptr build_all(const long &nb,
+                                const std::vector<float> &xb,
+                                const std::vector<long> &ids,
+                                const long &nt = 0,
+                                const std::vector<float> &xt = std::vector<float>());
 
     void train(const long &nt,
                const std::vector<float> &xt);
@@ -41,9 +42,19 @@ public:
     void set_build_option(const Operand_ptr &opd);
 
 
-private:
+ protected:
     Operand_ptr opd_ = nullptr;
-//    std::shared_ptr<faiss::Index> index_ = nullptr;
+};
+
+class BgCpuBuilder : public IndexBuilder {
+ public:
+    BgCpuBuilder(const Operand_ptr &opd);
+
+    virtual Index_ptr build_all(const long &nb,
+                                const float *xb,
+                                const long *ids,
+                                const long &nt = 0,
+                                const float *xt = nullptr) override;
 };
 
 using IndexBuilderPtr = std::shared_ptr<IndexBuilder>;
