@@ -41,6 +41,7 @@ set(wrapper_libs
         snappy
         bz2
         z
+        zstd
         )
 target_link_libraries(wrapper_test ${unittest_libs} ${wrapper_libs})
 
