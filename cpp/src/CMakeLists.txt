@@ -32,10 +32,14 @@ cuda_add_library(vecwise_engine STATIC ${vecwise_engine_src})
 
 set(engine_libs
         pthread
-        faiss
+        libfaiss.a
+        libgomp.a
+        libopenblas.a
+        libgfortran.a
+        libquadmath.a
         cudart
         cublas
-        sqlite3
+        libsqlite3.a
         )
 
 target_link_libraries(vecwise_engine ${engine_libs} ${cuda_library})
@@ -50,17 +54,17 @@ add_executable(vecwise_server
 
 set(server_libs
         vecwise_engine
-        rocksdb
-        thrift
+        librocksdb.a
+        libthrift.a
         pthread
-        yaml-cpp
-        boost_system
-        boost_filesystem
+        libyaml-cpp.a
+        libboost_system.a
+        libboost_filesystem.a
         pthread
-        snappy
-        bz2
-        z
-        zstd
+        libsnappy.a
+        libbz2.a
+        libz.a
+        libzstd.a
         )
 
 target_link_libraries(vecwise_server ${server_libs})
