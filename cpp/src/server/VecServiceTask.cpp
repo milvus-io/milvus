@@ -425,6 +425,11 @@ ServerError AddBatchVectorTask::OnExecute() {
     try {
         TimeRecorder rc("AddBatchVectorTask");
 
+        uint64_t vec_count = GetVecListCount();
+        if(vec_count == 0) {
+            return SERVER_SUCCESS;
+        }
+
         engine::meta::GroupSchema group_info;
         group_info.group_id = group_id_;
         engine::Status stat = DB()->get_group(group_info);
@@ -436,7 +441,6 @@ ServerError AddBatchVectorTask::OnExecute() {
         rc.Record("check group dimension");
 
         uint64_t group_dim = group_info.dimension;
-        uint64_t vec_count = GetVecListCount();
         std::vector<float> vec_f;
         vec_f.resize(vec_count*group_dim);//allocate enough memory
         for(uint64_t i = 0; i < vec_count; i ++) {
