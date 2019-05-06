@@ -65,6 +65,7 @@ set(server_libs
         libbz2.a
         libz.a
         libzstd.a
+        liblz4.a
         )
 
 target_link_libraries(vecwise_server ${server_libs})
