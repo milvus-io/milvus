@@ -81,7 +81,7 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
     auto status = _pMeta->files_to_search(group_id, dates, files);
     if (!status.ok()) { return status; }
 
-    /* LOG(DEBUG) << "Search DateT Size=" << files.size(); */
+    LOG(DEBUG) << "Search DateT Size=" << files.size();
 
     meta::GroupFilesSchema index_files;
     meta::GroupFilesSchema raw_files;
@@ -98,6 +98,7 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
     } else if (!raw_files.empty()) {
         dim = raw_files[0].dimension;
     } else {
+        LOG(DEBUG) << "no files to search";
         return Status::OK();
     }
 
