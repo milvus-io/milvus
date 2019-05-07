@@ -26,7 +26,7 @@ usage:
                 exit 0
                 ;;
              ?)
-                echo "unkonw argument"
+                echo "unknown argument"
         exit 1
         ;;
         esac
@@ -51,4 +51,8 @@ echo ${CMAKE_CMD}
 ${CMAKE_CMD}
 
 make clean && make -j || exit 1
+
+if [[ ${BUILD_TYPE} != "Debug" ]]; then
+    strip src/vecwise_server
+fi
 
