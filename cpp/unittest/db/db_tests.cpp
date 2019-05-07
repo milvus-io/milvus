@@ -39,7 +39,7 @@ TEST_F(DBTest, DB_TEST) {
         xb[d * i] += i / 2000.;
     }
 
-    int qb = 1;
+    int qb = 5;
     float *qxb = new float[d * qb];
     for(int i = 0; i < qb; i++) {
         for(int j = 0; j < d; j++) qxb[d * i + j] = drand48();
@@ -67,7 +67,15 @@ TEST_F(DBTest, DB_TEST) {
             STOP_TIMER(ss.str());
 
             ASSERT_STATS(stat);
-            ASSERT_EQ(results[0][0], target_ids[0]);
+            for (auto k=0; k<qb; ++k) {
+                ASSERT_EQ(results[k][0], target_ids[k]);
+                ss.str("");
+                ss << "Result [" << k << "]:";
+                for (auto result : results[k]) {
+                    ss << result << " ";
+                }
+                LOG(DEBUG) << ss.str();
+            }
             ASSERT_TRUE(count >= prev_count);
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
