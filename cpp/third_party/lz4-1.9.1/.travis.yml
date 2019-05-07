@@ -1,0 +1,195 @@
+language: c
+
+matrix:
+  fast_finish: true
+  include:
+    # OS X Mavericks
+    - name: (macOS) General Test
+      os: osx
+      compiler: clang
+      script:
+        - make -C tests test-lz4 MOREFLAGS='-Werror -Wconversion -Wno-sign-conversion' | tee # test scenario where `stdout` is not the console
+        - CFLAGS=-m32 make -C tests clean test-lz4-contentSize
+
+    # Container-based 12.04 LTS Server Edition 64 bit (doesn't support 32-bit includes)
+    - name: (Precise) benchmark test
+      dist: precise
+      script:
+        - make -C tests test-lz4 test-lz4c test-fullbench
+
+    - name: (Precise) frame and fuzzer test
+      dist: precise
+      install:
+        - sudo sysctl -w vm.mmap_min_addr=4096
+      script:
+        - make -C tests test-frametest test-fuzzer
+
+    - name: (Precise) g++ and clang CMake test
+      dist: precise
+      script:
+        - make gpptest
+        - make clean
+        - make examples
+        - make clean cmake
+        - make clean travis-install
+        - make clean clangtest
+
+
+    # 14.04 LTS Server Edition 64 bit
+    - name: (Trusty) i386 gcc test
+      dist: trusty
+      addons:
+        apt:
+          packages:
+            - libc6-dev-i386
+            - gcc-multilib
+      script:
+        - make -C tests test MOREFLAGS=-mx32
+
+    # presume clang >= v3.9.0
+    - name: (Trusty) USan test
+      dist: trusty
+      compiler: clang
+      script:
+        - make usan MOREFLAGS=-Wcomma -Werror
+
+    - name: (Trusty) valgrind test
+      dist: trusty
+      install:
+        - sudo apt-get install -qq valgrind
+      script:
+        - make c_standards
+        - make -C tests test-lz4 test-mem
+
+    - name: (Trusty) c-to-c++ test
+      dist: trusty
+      script:
+        - make ctocpptest
+
+    - name: (Trusty) i386 benchmark + version test
+      dist: trusty
+      install:
+        - sudo apt-get install -qq python3 libc6-dev-i386 gcc-multilib
+      script:
+        - make -C tests test-lz4c32 test-fullbench32 versionsTest
+
+    - name: (Trusty) i386 frame + fuzzer test
+      dist: trusty
+      install:
+        - sudo apt-get install -qq libc6-dev-i386 gcc-multilib
+        - sudo sysctl -w vm.mmap_min_addr=4096
+      script:
+        - make -C tests test-frametest32 test-fuzzer32
+
+    - name: (Trusty) gcc-6 standard C compilation
+      dist: trusty
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - gcc-6
+      env:
+        - CC=gcc-6
+      script:
+        - make c_standards
+        - make -C tests test-lz4 MOREFLAGS=-Werror
+
+    - name: (Trusty) arm + aarch64 compilation
+      dist: trusty
+      install:
+        - sudo apt-get install -qq
+            qemu-system-arm
+            qemu-user-static
+            gcc-arm-linux-gnueabi
+            libc6-dev-armel-cross
+            gcc-aarch64-linux-gnu
+            libc6-dev-arm64-cross
+      script:
+        - make platformTest CC=arm-linux-gnueabi-gcc QEMU_SYS=qemu-arm-static
+        - make platformTest CC=aarch64-linux-gnu-gcc QEMU_SYS=qemu-aarch64-static
+
+    - name: (Xenial) gcc-5 compilation
+      dist: xenial
+      install:
+        - sudo apt-get install -qq libc6-dev-i386 gcc-multilib
+      script:
+        - make -C tests test-lz4 clean test-lz4c32 MOREFLAGS=-Werror
+
+    - name: (Trusty) clang-3.8 compilation
+      dist: trusty
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+            - llvm-toolchain-precise-3.8
+          packages:
+            - clang-3.8
+      script:
+        - make -C tests test-lz4 CC=clang-3.8
+
+    - name: (Trusty) PowerPC + PPC64 compilation
+      dist: trusty
+      install:
+        - sudo apt-get install -qq qemu-system-ppc qemu-user-static gcc-powerpc-linux-gnu
+      script:
+        - make platformTest CC=powerpc-linux-gnu-gcc QEMU_SYS=qemu-ppc-static
+        - make platformTest CC=powerpc-linux-gnu-gcc QEMU_SYS=qemu-ppc64-static MOREFLAGS=-m64
+
+    - name: (Trusty) scan-build + cppcheck
+      dist: trusty
+      compiler: clang
+      install:
+        - sudo apt-get install -qq cppcheck
+      script:
+        - make staticAnalyze
+        - make cppcheck
+
+    - name: (Trusty) gcc-4.4 compilation
+      dist: trusty
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - libc6-dev-i386
+            - gcc-multilib
+            - gcc-4.4
+      script:
+        - make clean all CC=gcc-4.4 MOREFLAGS=-Werror
+        - make clean
+        - CFLAGS=-fPIC LDFLAGS='-pie -fPIE -D_FORTIFY_SOURCE=2' make -C programs
+
+    # tag-specific test
+    - name: tag build
+      if: tag =~ ^v[0-9]\.[0-9]
+      os: linux
+      script:
+        - make -C tests checkTag
+        - tests/checkTag "$TRAVIS_BRANCH"
+
+    - name: (Xenial) Meson + clang build
+      env: ALLOW_FAILURES=true
+      dist: xenial
+      language: cpp
+      compiler: clang
+      install:
+        - sudo apt-get install -qq python3 tree
+        - curl -o ~/ninja.zip -L 'https://github.com/ninja-build/ninja/releases/download/v1.8.2/ninja-linux.zip'
+            && unzip ~/ninja.zip -d ~/.local/bin
+        - curl -o ~/get-pip.py 'https://bootstrap.pypa.io/get-pip.py'
+            && python3 ~/get-pip.py --user
+            && pip3 install --user meson
+      script:
+        - meson setup
+            --buildtype=debug
+            -Db_lundef=false
+            -Dauto_features=enabled
+            -Ddefault_library=both
+            -Dbuild_{programs,contrib,tests,examples}=true
+            contrib/meson build
+        - cd build
+        - DESTDIR=./staging ninja install
+        - tree ./staging
+  allow_failures:
+    - env: ALLOW_FAILURES=true

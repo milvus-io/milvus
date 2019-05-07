@@ -1,0 +1,38 @@
+# Object files
+*.o
+*.ko
+
+# Libraries
+*.lib
+*.a
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+*.dSYM   # apple
+
+# Executables
+*.exe
+*.out
+*.app
+lz4
+
+# IDE / editors files
+.clang_complete
+_codelite/
+_codelite_lz4/
+bin/
+*.zip
+
+# Mac
+.DS_Store
+*.dSYM
+
+# Windows / Msys
+nul
+ld.exe*
+
+# test files
+*.lz4

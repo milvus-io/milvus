@@ -1,0 +1,31 @@
+name: lz4
+version: 1.8.4
+summary: Extremely Fast Compression algorithm 
+description: >
+    LZ4 is lossless compression algorithm, providing compression
+    speed > 500 MB/s per core, scalable with multi-cores CPU. It features an
+    extremely fast decoder, with speed in multiple GB/s per core, typically
+    reaching RAM speed limits on multi-core systems.
+    .
+    Speed can be tuned dynamically, selecting an "acceleration" factor which
+    trades compression ratio for faster speed. On the other end, a high
+    compression derivative, LZ4_HC, is also provided, trading CPU time for
+    improved compression ratio. All versions feature the same decompression
+    speed.
+    .
+    LZ4 is also compatible with dictionary compression, and can ingest any
+    input file as dictionary, including those created by Zstandard Dictionary
+    Builder. (note: only the final 64KB are used).
+    .
+    LZ4 library is provided as open-source software using BSD 2-Clause license.
+confinement: strict
+grade: stable
+
+apps:
+  lz4:
+    command: usr/local/bin/lz4
+    plugs: [home]
+parts:
+  lz4:
+    source: ../
+    plugin: make

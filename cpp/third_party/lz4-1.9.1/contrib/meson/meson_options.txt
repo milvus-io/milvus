@@ -1,0 +1,24 @@
+# #############################################################################
+# Copyright (c) 2018-present        lzutao <taolzu(at)gmail.com>
+# All rights reserved.
+#
+# This source code is licensed under both the BSD-style license (found in the
+# LICENSE file in the root directory of this source tree) and the GPLv2 (found
+# in the COPYING file in the root directory of this source tree).
+# #############################################################################
+
+# Read guidelines from https://wiki.gnome.org/Initiatives/GnomeGoals/MesonPorting
+
+option('debug_level', type: 'integer', min: 0, max: 7, value: 1,
+  description: 'Enable run-time debug. See lib/lz4hc.c')
+option('backtrace', type: 'boolean', value: false,
+  description: 'Display a stack backtrace when execution generates a runtime exception')
+
+option('build_programs', type: 'boolean', value: false,
+  description: 'Enable programs build')
+option('build_tests', type: 'boolean', value: false,
+  description: 'Enable tests build')
+option('build_contrib', type: 'boolean', value: false,
+  description: 'Enable contrib build')
+option('build_examples', type: 'boolean', value: false,
+  description: 'Enable examples build')
