@@ -5,7 +5,7 @@
         yum install gfortran libsqlite3-dev libsnappy-dev libzstd-dev bzip2
         
     ubuntu16.04 : 
-        sudo apt-get install gfortran libsqlite3-dev libsnappy-dev libzstd-dev bzip2
+        sudo apt-get install gfortran libsqlite3-dev libsnappy-dev libzstd-dev bzip2 liblz4-dev
 
 #### Step 2: build third-parties
 Note: If you want to debug into third-parties, you can build debug with CXXFLAGS='-g -O0' with option 
