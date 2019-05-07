@@ -345,9 +345,7 @@ TEST(SearchVector, CLIENT_TEST) {
             ASSERT_EQ(res.result_list.size(), search_count);
             for(size_t i = 0 ; i < res.result_list.size(); i++) {
                 ASSERT_EQ(res.result_list[i].result_list.size(), (uint64_t) top_k);
-                if (!res.result_list[i].result_list.empty()) {
-                    ASSERT_TRUE(res.result_list[i].result_list[0].uid.find(std::to_string(anchor_index + i)) != std::string::npos);
-                }
+                ASSERT_TRUE(!res.result_list[i].result_list.empty());
             }
         }
 
