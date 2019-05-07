@@ -3,6 +3,9 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#ifndef FAISSEXECUTIONENGINE_CPP__
+#define FAISSEXECUTIONENGINE_CPP__
+
 #include <easylogging++.h>
 #include <faiss/AutoTune.h>
 #include <faiss/MetaIndexes.h>
@@ -22,39 +25,47 @@ const std::string RawIndexType = "IDMap,Flat";
 const std::string BuildIndexType = "IVF"; // IDMap / IVF
 
 
-FaissExecutionEngine::FaissExecutionEngine(uint16_t dimension, const std::string& location)
+template<class IndexTrait>
+FaissExecutionEngine<IndexTrait>::FaissExecutionEngine(uint16_t dimension, const std::string& location)
     : pIndex_(faiss::index_factory(dimension, RawIndexType.c_str())),
       location_(location) {
 }
 
-FaissExecutionEngine::FaissExecutionEngine(std::shared_ptr<faiss::Index> index, const std::string& location)
+template<class IndexTrait>
+FaissExecutionEngine<IndexTrait>::FaissExecutionEngine(std::shared_ptr<faiss::Index> index, const std::string& location)
     : pIndex_(index),
       location_(location) {
 }
 
-Status FaissExecutionEngine::AddWithIds(long n, const float *xdata, const long *xids) {
+template<class IndexTrait>
+Status FaissExecutionEngine<IndexTrait>::AddWithIds(long n, const float *xdata, const long *xids) {
     pIndex_->add_with_ids(n, xdata, xids);
     return Status::OK();
 }
 
-size_t FaissExecutionEngine::Count() const {
+template<class IndexTrait>
+size_t FaissExecutionEngine<IndexTrait>::Count() const {
     return (size_t)(pIndex_->ntotal);
 }
 
-size_t FaissExecutionEngine::Size() const {
+template<class IndexTrait>
+size_t FaissExecutionEngine<IndexTrait>::Size() const {
     return (size_t)(Count() * pIndex_->d);
 }
 
-size_t FaissExecutionEngine::PhysicalSize() const {
+template<class IndexTrait>
+size_t FaissExecutionEngine<IndexTrait>::PhysicalSize() const {
     return (size_t)(Size()*sizeof(float));
 }
 
-Status FaissExecutionEngine::Serialize() {
+template<class IndexTrait>
+Status FaissExecutionEngine<IndexTrait>::Serialize() {
     write_index(pIndex_.get(), location_.c_str());
     return Status::OK();
 }
 
-Status FaissExecutionEngine::Load() {
+template<class IndexTrait>
+Status FaissExecutionEngine<IndexTrait>::Load() {
     auto index  = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     if (!index) {
         index = read_index(location_);
@@ -66,7 +77,8 @@ Status FaissExecutionEngine::Load() {
     return Status::OK();
 }
 
-Status FaissExecutionEngine::Merge(const std::string& location) {
+template<class IndexTrait>
+Status FaissExecutionEngine<IndexTrait>::Merge(const std::string& location) {
     if (location == location_) {
         return Status::Error("Cannot Merge Self");
     }
@@ -80,7 +92,9 @@ Status FaissExecutionEngine::Merge(const std::string& location) {
     return Status::OK();
 }
 
-FaissExecutionEngine::Ptr FaissExecutionEngine::BuildIndex(const std::string& location) {
+template<class IndexTrait>
+typename FaissExecutionEngine<IndexTrait>::Ptr
+FaissExecutionEngine<IndexTrait>::BuildIndex(const std::string& location) {
     auto opd = std::make_shared<Operand>();
     opd->d = pIndex_->d;
     opd->index_type = BuildIndexType;
@@ -92,12 +106,13 @@ FaissExecutionEngine::Ptr FaissExecutionEngine::BuildIndex(const std::string& lo
             dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
             from_index->id_map.data());
 
-    Ptr new_ee(new FaissExecutionEngine(index->data(), location));
+    Ptr new_ee(new FaissExecutionEngine<IndexTrait>(index->data(), location));
     new_ee->Serialize();
     return new_ee;
 }
 
-Status FaissExecutionEngine::Search(long n,
+template<class IndexTrait>
+Status FaissExecutionEngine<IndexTrait>::Search(long n,
                                     const float *data,
                                     long k,
                                     float *distances,
@@ -107,7 +122,8 @@ Status FaissExecutionEngine::Search(long n,
     return Status::OK();
 }
 
-Status FaissExecutionEngine::Cache() {
+template<class IndexTrait>
+Status FaissExecutionEngine<IndexTrait>::Cache() {
     zilliz::vecwise::cache::CpuCacheMgr::GetInstance(
             )->InsertItem(location_, std::make_shared<Index>(pIndex_));
 
@@ -118,3 +134,5 @@ Status FaissExecutionEngine::Cache() {
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
+
+#endif

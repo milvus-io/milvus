@@ -17,6 +17,7 @@
 #include "DBMetaImpl.h"
 #include "Env.h"
 #include "FaissExecutionEngine.h"
+#include "Traits.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -415,7 +416,7 @@ DB::~DB() {}
 
 void DB::Open(const Options& options, DB** dbptr) {
     *dbptr = nullptr;
-    *dbptr = new DBImpl<FaissExecutionEngine>(options);
+    *dbptr = new DBImpl<FaissExecutionEngine<IVFIndexTrait>>(options);
     return;
 }
 
