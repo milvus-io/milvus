@@ -33,12 +33,11 @@ void DBTest::SetUp() {
     InitLog();
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/vecwise_test";
-    engine::DB::Open(options, &db_);
+    db_ = engine::DBFactory::Build(options, "Faiss,IDMap");
 }
 
 void DBTest::TearDown() {
     delete db_;
-    db_ = nullptr;
     auto options = engine::OptionsFactory::Build();
     boost::filesystem::remove_all("/tmp/vecwise_test");
 }
