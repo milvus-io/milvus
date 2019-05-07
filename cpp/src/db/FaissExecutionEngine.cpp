@@ -21,13 +21,10 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-const std::string RawIndexType = "IDMap,Flat";
-const std::string BuildIndexType = "IVF"; // IDMap / IVF
-
 
 template<class IndexTrait>
 FaissExecutionEngine<IndexTrait>::FaissExecutionEngine(uint16_t dimension, const std::string& location)
-    : pIndex_(faiss::index_factory(dimension, RawIndexType.c_str())),
+    : pIndex_(faiss::index_factory(dimension, IndexTrait::RawIndexType)),
       location_(location) {
 }
 
@@ -97,7 +94,7 @@ typename FaissExecutionEngine<IndexTrait>::Ptr
 FaissExecutionEngine<IndexTrait>::BuildIndex(const std::string& location) {
     auto opd = std::make_shared<Operand>();
     opd->d = pIndex_->d;
-    opd->index_type = BuildIndexType;
+    opd->index_type = IndexTrait::BuildIndexType;
     IndexBuilderPtr pBuilder = GetIndexBuilder(opd);
 
     auto from_index = dynamic_cast<faiss::IndexIDMap*>(pIndex_.get());
