@@ -8,8 +8,9 @@
 
 #include <string>
 #include <memory>
-#include "db/DB.h"
+#include "DB.h"
 #include "DBMetaImpl.h"
+#include "Options.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -25,6 +26,11 @@ struct OptionsFactory {
 
 struct DBMetaImplFactory {
     static std::shared_ptr<meta::DBMetaImpl> Build();
+};
+
+struct DBFactory {
+    static std::shared_ptr<DB> Build(const std::string& db_type = "Faiss,IVF");
+    static DB* Build(const Options&, const std::string& db_type = "Faiss,IVF");
 };
 
 } // namespace engine

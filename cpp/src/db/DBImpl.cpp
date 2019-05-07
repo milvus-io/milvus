@@ -3,6 +3,8 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#ifndef DBIMPL_CPP__
+#define DBIMPL_CPP__
 
 #include <assert.h>
 #include <chrono>
@@ -16,8 +18,6 @@
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
-#include "FaissExecutionEngine.h"
-#include "Traits.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -408,18 +408,8 @@ DBImpl<EngineT>::~DBImpl() {
     _env->Stop();
 }
 
-/*
- *  DB
- */
-
-DB::~DB() {}
-
-void DB::Open(const Options& options, DB** dbptr) {
-    *dbptr = nullptr;
-    *dbptr = new DBImpl<FaissExecutionEngine<IVFIndexTrait>>(options);
-    return;
-}
-
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
+
+#endif

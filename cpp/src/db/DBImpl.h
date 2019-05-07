@@ -12,6 +12,8 @@
 #include "DB.h"
 #include "MemManager.h"
 #include "Types.h"
+#include "FaissExecutionEngine.h"
+#include "Traits.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -90,6 +92,9 @@ private:
 
 }; // DBImpl
 
+
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
+
+#include "DBImpl.cpp"
