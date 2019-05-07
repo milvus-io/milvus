@@ -1,0 +1,190 @@
+version: 2
+
+references:
+  # Install the dependencies required for tests.
+  # Add the step "- *install-dependencies" to the beginning of your job to run
+  # this command.
+  install-dependencies: &install-dependencies
+    run:
+      name: Install dependencies
+      # TODO: We can split these dependencies up by job to reduce installation
+      # time.
+      command: |
+        sudo dpkg --add-architecture i386
+        sudo apt-get -y -qq update
+        sudo apt-get -y install \
+            gcc-multilib-powerpc-linux-gnu gcc-arm-linux-gnueabi \
+            libc6-dev-armel-cross gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
+            libc6-dev-ppc64-powerpc-cross zstd gzip coreutils \
+            libcurl4-openssl-dev
+
+jobs:
+  # the first half of the jobs are in this test
+  short-tests-0:
+    # TODO: Create a small custom docker image with all the dependencies we need
+    #       preinstalled to reduce installation time.
+    docker:
+      - image: circleci/buildpack-deps:bionic
+    steps:
+      - checkout
+      - *install-dependencies
+      - run:
+          name: Test
+          command: |
+            cc -v; CFLAGS="-O0 -Werror" make all && make clean
+            make c99build         ; make clean
+            make c11build         ; make clean
+            make aarch64build     ; make clean
+            make -j regressiontest; make clean
+            make shortest         ; make clean
+            make cxxtest          ; make clean
+  # the second half of the jobs are in this test
+  short-tests-1:
+    docker:
+      - image: circleci/buildpack-deps:bionic
+    steps:
+      - checkout
+      - *install-dependencies
+      - run:
+          name: Test
+          command: |
+            make gnu90build; make clean
+            make gnu99build; make clean
+            make ppc64build; make clean
+            make ppcbuild  ; make clean
+            make armbuild  ; make clean
+            make -C tests test-legacy test-longmatch test-symbols; make clean
+            make -C lib libzstd-nomt; make clean
+  # This step is only run on release tags.
+  # It publishes the source tarball as artifacts and if the GITHUB_TOKEN
+  # environment variable is set it will publish the source tarball to the
+  # tagged release.
+  publish-github-release:
+    docker:
+      - image: circleci/buildpack-deps:bionic
+    environment:
+      CIRCLE_ARTIFACTS: /tmp/circleci-artifacts
+    steps:
+      - checkout
+      - *install-dependencies
+      - run:
+          name: Publish
+          command: |
+            export VERSION=$(echo $CIRCLE_TAG | tail -c +2)
+            export ZSTD_VERSION=zstd-$VERSION
+            git archive $CIRCLE_TAG --prefix $ZSTD_VERSION/ --format tar \
+                        -o $ZSTD_VERSION.tar
+            sha256sum $ZSTD_VERSION.tar > $ZSTD_VERSION.tar.sha256
+            zstd -19 $ZSTD_VERSION.tar
+            sha256sum $ZSTD_VERSION.tar.zst > $ZSTD_VERSION.tar.zst.sha256
+            gzip -k -9 $ZSTD_VERSION.tar
+            sha256sum $ZSTD_VERSION.tar.gz > $ZSTD_VERSION.tar.gz.sha256
+            mkdir -p $CIRCLE_ARTIFACTS
+            cp $ZSTD_VERSION.tar* $CIRCLE_ARTIFACTS
+      - store_artifacts:
+          path: /tmp/circleci-artifacts
+  # This step should only be run in a cron job
+  regression-test:
+    docker:
+      - image: circleci/buildpack-deps:bionic
+    environment:
+      CIRCLE_ARTIFACTS: /tmp/circleci-artifacts
+    steps:
+      - checkout
+      - *install-dependencies
+      # Restore the cached resources.
+      - restore_cache:
+          # We try our best to bust the cache when the data changes by hashing
+          # data.c. If that doesn't work, simply update the version number here
+          # and below. If we fail to bust the cache, the regression testing will
+          # still work, since it has its own stamp, but will need to redownload
+          # everything.
+          keys:
+            - regression-cache-{{ checksum "tests/regression/data.c" }}-v0
+      - run:
+          name: Regression Test
+          command: |
+            make -C programs zstd
+            make -C tests/regression test
+            mkdir -p $CIRCLE_ARTIFACTS
+            ./tests/regression/test                     \
+                --cache  tests/regression/cache         \
+                --output $CIRCLE_ARTIFACTS/results.csv  \
+                --zstd   programs/zstd
+            echo "NOTE: The new results.csv is uploaded as an artifact to this job"
+            echo "      If this fails, go to the Artifacts pane in CircleCI, "
+            echo "      download /tmp/circleci-artifacts/results.csv, and if they "
+            echo "      are still good, copy it into the repo and commit it."
+            echo "> diff tests/regression/results.csv $CIRCLE_ARTIFACTS/results.csv"
+            diff tests/regression/results.csv $CIRCLE_ARTIFACTS/results.csv
+      # Only save the cache on success (default), since if the failure happened
+      # before we stamp the data cache, we will have a bad cache for this key.
+      - save_cache:
+          key: regression-cache-{{ checksum "tests/regression/data.c" }}-v0
+          paths:
+            - tests/regression/cache
+      - store_artifacts:
+          path: /tmp/circleci-artifacts
+
+
+workflows:
+  version: 2
+  commit:
+    jobs:
+      # Run the tests in parallel
+      - short-tests-0:
+          filters:
+            tags:
+              only: /.*/
+      - short-tests-1:
+          filters:
+            tags:
+              only: /.*/
+      # Create a branch called regression and set it to dev to force a
+      # regression test run
+      - regression-test:
+          filters:
+            branches:
+              only:
+                - regression
+      # Only run on release tags.
+      - publish-github-release:
+          requires:
+            - short-tests-0
+            - short-tests-1
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v\d+\.\d+\.\d+$/
+  nightly:
+    triggers:
+      - schedule:
+          cron: "0 0 * * *"
+          filters:
+            branches:
+              only:
+                - master
+                - dev
+    jobs:
+      # Run daily long regression tests
+      - regression-test
+
+
+
+  # Longer tests
+    #- make -C tests test-zstd-nolegacy && make clean
+    #- pyenv global 3.4.4; make -C tests versionsTest && make clean
+    #- make zlibwrapper         && make clean
+    #- gcc -v; make -C tests test32 MOREFLAGS="-I/usr/include/x86_64-linux-gnu" && make clean
+    #- make uasan               && make clean
+    #- make asan32              && make clean
+    #- make -C tests test32 CC=clang MOREFLAGS="-g -fsanitize=address -I/usr/include/x86_64-linux-gnu"
+  # Valgrind tests
+    #- CFLAGS="-O1 -g" make -C zlibWrapper valgrindTest && make clean
+    #- make -C tests valgrindTest && make clean
+  # ARM, AArch64, PowerPC, PowerPC64 tests
+    #- make ppctest             && make clean
+    #- make ppc64test           && make clean
+    #- make armtest             && make clean
+    #- make aarch64test         && make clean

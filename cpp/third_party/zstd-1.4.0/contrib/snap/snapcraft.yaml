@@ -1,0 +1,28 @@
+name: zstd
+version: git
+summary: Zstandard - Fast real-time compression algorithm
+description: |
+  Zstandard, or zstd as short version, is a fast lossless compression
+  algorithm, targeting real-time compression scenarios at zlib-level and better
+  compression ratios. It's backed by a very fast entropy stage, provided by
+  Huff0 and FSE library
+
+grade: devel # must be 'stable' to release into candidate/stable channels
+confinement: devmode # use 'strict' once you have the right plugs and slots
+
+apps:
+  zstd:
+    command: usr/local/bin/zstd
+    plugs: [home, removable-media]
+  zstdgrep:
+    command: usr/local/bin/zstdgrep
+    plugs: [home, removable-media]
+  zstdless:
+    command: usr/local/bin/zstdless
+    plugs: [home, removable-media]
+
+parts:
+  zstd:
+    source: .
+    plugin: make
+    build-packages: [g++]
