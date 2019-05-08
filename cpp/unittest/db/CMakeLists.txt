@@ -39,6 +39,7 @@ set(db_libs
         sqlite3
         boost_system
         boost_filesystem
+        lz4
         )
 
 target_link_libraries(db_test ${unittest_libs} ${db_libs})

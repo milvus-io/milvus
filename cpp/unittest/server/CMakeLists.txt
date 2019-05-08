@@ -46,6 +46,7 @@ set(require_libs
         cudart
         cublas
         sqlite3
+        lz4
         )
 
 target_link_libraries(server_test
