@@ -176,8 +176,7 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
 
 template<typename EngineT>
 void DBImpl<EngineT>::start_timer_task(int interval_) {
-    std::thread bg_task(&DBImpl<EngineT>::background_timer_task, this, interval_);
-    bg_task.detach();
+    bg_timer_thread_ = std::thread(&DBImpl<EngineT>::background_timer_task, this, interval_);
 }
 
 template<typename EngineT>
@@ -403,6 +402,7 @@ DBImpl<EngineT>::~DBImpl() {
             bg_build_index_finish_signal_.wait(lock);
         }
     }
+    bg_timer_thread_.join();
     std::vector<std::string> ids;
     _pMemMgr->serialize(ids);
     _env->Stop();

@@ -87,6 +87,8 @@ private:
     bool bg_build_index_started_;
     std::condition_variable bg_build_index_finish_signal_;
 
+    std::thread bg_timer_thread_;
+
     MetaPtr _pMeta;
     MemManagerPtr _pMemMgr;
 
