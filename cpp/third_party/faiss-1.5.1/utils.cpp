@@ -627,12 +627,12 @@ void knn_inner_product (const float * x,
         size_t d, size_t nx, size_t ny,
         float_minheap_array_t * res)
 {
-    //if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
-    //    knn_inner_product_sse (x, y, d, nx, ny, res);
-    //} else {
-    //    knn_inner_product_blas (x, y, d, nx, ny, res);
-    //}
-    knn_inner_product_blas (x, y, d, nx, ny, res);
+    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+       knn_inner_product_sse (x, y, d, nx, ny, res);
+    } else {
+       knn_inner_product_blas (x, y, d, nx, ny, res);
+    }
+    // knn_inner_product_blas (x, y, d, nx, ny, res);
 }
 
 
@@ -648,14 +648,14 @@ void knn_L2sqr (const float * x,
                 size_t d, size_t nx, size_t ny,
                 float_maxheap_array_t * res)
 {
-    //if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
-    //    knn_L2sqr_sse (x, y, d, nx, ny, res);
-    //} else {
-    //    NopDistanceCorrection nop;
-    //    knn_L2sqr_blas (x, y, d, nx, ny, res, nop);
-    //}
-    NopDistanceCorrection nop;
-    knn_L2sqr_blas (x, y, d, nx, ny, res, nop);
+    if (d % 4 == 0 && nx < distance_compute_blas_threshold) {
+       knn_L2sqr_sse (x, y, d, nx, ny, res);
+    } else {
+       NopDistanceCorrection nop;
+       knn_L2sqr_blas (x, y, d, nx, ny, res, nop);
+    }
+    // NopDistanceCorrection nop;
+    // knn_L2sqr_blas (x, y, d, nx, ny, res, nop);
 }
 
 struct BaseShiftDistanceCorrection {
