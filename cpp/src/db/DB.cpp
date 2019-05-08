@@ -19,7 +19,6 @@ DB::~DB() {}
 
 void DB::Open(const Options& options, DB** dbptr) {
     *dbptr = nullptr;
-    /* *dbptr = new DBImpl<FaissExecutionEngine<IVFIndexTrait>>(options); */
     *dbptr = DBFactory::Build(options);
     return;
 }
