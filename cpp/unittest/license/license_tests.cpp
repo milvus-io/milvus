@@ -5,11 +5,12 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
 #include "license/License.h"
+#include "utils/Error.h"
 
-using namespace zilliz::vecwise::server;
+using namespace zilliz::vecwise;
 
 TEST(LicenseTest, LICENSE_TEST) {
     std::string path1 = "/tmp/vecwise_engine.license";
-    ServerError err = LicenseValidate(path1);
+    server::ServerError err = server::LicenseValidate(path1);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 }

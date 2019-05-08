@@ -4,50 +4,41 @@
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
 include_directories(../../src)
-include_directories(/usr/include)
-
-include_directories(/usr/local/cuda/include)
 
 aux_source_directory(../../src/db db_srcs)
 aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(../../src/wrapper wrapper_src)
 
+include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
 
 set(require_files
+        ../../src/server/ServerConfig.cpp
+        ../../src/utils/CommonUtil.cpp
+        ../../src/utils/TimeRecorder.cpp
         ../../src/license/License.cpp
         )
 
-cuda_add_executable(license_test
-        ${unittest_srcs}
-        ${config_files}
-        ${cache_srcs}
-        ${db_srcs}
-        ${require_files}
-        )
+set(db_test_src
+    ${unittest_srcs}
+    ${config_files}
+    ${cache_srcs}
+    ${db_srcs}
+    ${wrapper_src}
+    ${require_files}
+    license_tests.cpp)
 
-set(require_libs
-        libvecwise_engine.a
-        stdc++
-        boost_system
-        boost_filesystem
-        pthread
-        snappy
-        bz2
-        z
-        zstd
-        rocksdb
+cuda_add_executable(license_test ${db_test_src})
+
+set(db_libs
         faiss
         cudart
         cublas
         sqlite3
+        boost_system
+        boost_filesystem
         lz4
-        crypto
         )
 
-target_link_libraries(license_test
-        ${unittest_libs}
-        ${require_libs}
-        ${cuda_library}
-        )
+target_link_libraries(license_test ${unittest_libs} ${db_libs})
