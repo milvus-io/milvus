@@ -9,7 +9,7 @@
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
-
+#include "license/License.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -133,6 +133,12 @@ Server::Daemonize() {
 
 int
 Server::Start() {
+    std::string license_file_path = "/tmp/vecwise.license";
+    if(LicenseValidate(license_file_path) != SERVER_SUCCESS) {
+        SERVER_LOG_ERROR << "License check failed";
+        return 1;
+    }
+
     if (daemonized_) {
         Daemonize();
     }

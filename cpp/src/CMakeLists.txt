@@ -11,6 +11,10 @@ aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
 
+set(license_check_files
+        ${CMAKE_CURRENT_SOURCE_DIR}/license/License.cpp
+        )
+
 set(service_files
         thrift/gen-cpp/VecService.cpp
         thrift/gen-cpp/VectorService_constants.cpp
@@ -49,6 +53,7 @@ add_executable(vecwise_server
         ${server_files}
         ${utils_files}
         ${service_files}
+        ${license_check_files}
         ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc
         )
 
@@ -69,3 +74,8 @@ set(server_libs
         )
 
 target_link_libraries(vecwise_server ${server_libs})
+
+set(license_generator_src
+        ${CMAKE_CURRENT_SOURCE_DIR}/license/LicenseGenerator.cpp)
+
+add_executable(license_generator ${license_generator_src})
