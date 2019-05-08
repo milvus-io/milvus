@@ -42,6 +42,7 @@ set(wrapper_libs
         bz2
         z
         zstd
+        lz4
         )
 target_link_libraries(wrapper_test ${unittest_libs} ${wrapper_libs})
 
