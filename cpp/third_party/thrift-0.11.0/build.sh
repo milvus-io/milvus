@@ -26,6 +26,8 @@ CXXFLAGS='-g -O0'
 CFLAGS='-g -O0'
 fi
 
+./bootstrap.sh
+
 mkdir -p INSTALL_PREFIX
 ./configure --prefix=${INSTALL_PREFIX} CXXFLAGS="$CXXFLAGS" CFLAGS="$CFLAGS" --without-java --without-python --without-php --without-go --without-nodejs
 
