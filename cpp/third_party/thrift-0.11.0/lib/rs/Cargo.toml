@@ -1,0 +1,19 @@
+[package]
+name = "thrift"
+description = "Rust bindings for the Apache Thrift RPC system"
+version = "0.11.0"
+license = "Apache-2.0"
+authors = ["Apache Thrift Developers <dev@thrift.apache.org>"]
+homepage = "http://thrift.apache.org"
+documentation = "https://thrift.apache.org"
+readme = "README.md"
+exclude = ["Makefile*", "test/**"]
+keywords = ["thrift"]
+
+[dependencies]
+byteorder = "~1.1.0"
+integer-encoding = "~1.0.4"
+log = "~0.3.8"
+threadpool = "~1.7.1"
+try_from = "~0.2.2"
+

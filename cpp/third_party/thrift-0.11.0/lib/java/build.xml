@@ -1,0 +1,421 @@
+<?xml version="1.0"?>
+<!--
+ Licensed to the Apache Software Foundation (ASF) under one
+ or more contributor license agreements. See the NOTICE file
+ distributed with this work for additional information
+ regarding copyright ownership. The ASF licenses this file
+ to you under the Apache License, Version 2.0 (the
+ "License"); you may not use this file except in compliance
+ with the License. You may obtain a copy of the License at
+
+ http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing,
+ software distributed under the License is distributed on an
+ "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ KIND, either express or implied. See the License for the
+ specific language governing permissions and limitations
+ under the License.
+ -->
+<project name="libthrift" default="dist" basedir="."
+  xmlns:artifact="antlib:org.apache.maven.artifact.ant">
+
+  <description>Thrift Build File</description>
+  <property name="thrift.root" location="../../"/>
+  <property name="thrift.artifactid" value="libthrift"/>
+
+  <!-- Include the base properties file -->
+  <property file="${basedir}/build.properties" />
+
+  <property environment="env"/>
+
+  <condition property="version" value="${thrift.version}">
+    <isset property="release"/>
+  </condition>
+  <property name="version" value="${thrift.version}-snapshot"/>
+
+  <property name="final.name" value="${thrift.artifactid}-${version}"/>
+
+  <property name="thrift.compiler" location="../../compiler/cpp/thrift"/>
+  <property name="src" location="${basedir}/src"/>
+  <property name="build.dir" location="${basedir}/build"/>
+  <property name="build.lib.dir" location="${build.dir}/lib"/>
+  <property name="build.tools.dir" location="${build.dir}/tools"/>
+  <property name="src.test" location="test"/>
+  <property name="javadoc.dir" location="${build.dir}/javadoc"/>
+  <property name="build.test.dir" location="${build.dir}/test"/>
+  <property name="test.thrift.home" location="${thrift.root}/test"/>
+
+  <property name="gen" location="gen-java"/>
+  <property name="genbean" location="gen-javabean"/>
+  <property name="genreuse" location="gen-javareuse"/>
+  <property name="genfullcamel" location="gen-fullcamel"/>
+
+  <property name="jar.file" location="${build.dir}/${final.name}.jar"/>
+  <property name="test.jar.file" location="${build.dir}/${final.name}-test.jar"/>
+  <property name="javadoc.jar.file" location="${build.dir}/${final.name}-javadoc.jar"/>
+  <property name="source.jar.file" location="${build.dir}/${final.name}-sources.jar"/>
+
+  <!-- Junit properties -->
+  <property name="test.junit.output.format" value="plain"/>
+  <property name="test.timeout" value="2000000"/>
+  <property name="test.src.dir" location="${basedir}/test"/>
+  <property name="test.log.dir" value="${build.test.dir}/log"/>
+  <property name="test.port" value="9090"/>
+
+  <!-- maven properties -->
+  <property name="pom.xml" location="${build.dir}/${final.name}.pom"/>
+
+  <path id="compile.classpath">
+    <fileset dir="${build.lib.dir}">
+      <include name="**/*.jar"/>
+    </fileset>
+  </path>
+
+  <path id="test.classpath">
+    <path refid="compile.classpath"/>
+    <pathelement path="${env.CLASSPATH}"/>
+    <pathelement location="${build.test.dir}"/>
+    <pathelement location="${jar.file}"/>
+    <pathelement location="${test.jar.file}"/>
+
+  </path>
+
+  <!-- Tasks -->
+  <target name="init" depends="setup.init,mvn.init" unless="init.finished">
+    <property name="init.finished" value="true"/>
+  </target>
+
+  <target name="setup.init">
+    <tstamp/>
+    <mkdir dir="${build.dir}"/>
+    <mkdir dir="${build.lib.dir}"/>
+    <mkdir dir="${build.tools.dir}"/>
+    <mkdir dir="${build.test.dir}"/>
+  </target>
+
+  <target name="compile" depends="init">
+    <javac compiler="modern" srcdir="${src}" destdir="${build.dir}" source="1.5" target="1.5"
+    debug="true" classpathref="compile.classpath" includeantruntime="false" encoding="UTF-8">
+      <compilerarg value="-Xlint:unchecked"/>
+    </javac>
+  </target>
+
+  <target name="javadoc" depends="init">
+    <javadoc sourcepath="${src}" destdir="${javadoc.dir}"
+      version="true" windowtitle="Thrift Java API" doctitle="Thrift Java API"
+      classpathref="test.classpath">
+    </javadoc>
+    <jar jarfile="${javadoc.jar.file}" basedir="${javadoc.dir}">
+      <manifest>
+        <attribute name="Implementation-Version" value="${version}"/>
+      </manifest>
+    </jar>
+  </target>
+
+  <target name="dist" depends="compile">
+    <mkdir dir="${build.dir}/META-INF"/>
+    <copy file="${thrift.root}/LICENSE" tofile="${build.dir}/META-INF/LICENSE.txt"/>
+    <copy file="${thrift.root}/NOTICE" tofile="${build.dir}/META-INF/NOTICE.txt"/>
+    <jar jarfile="${jar.file}">
+      <manifest>
+        <attribute name="Implementation-Version" value="${version}"/>
+        <attribute name="Bundle-ManifestVersion" value="2"/>
+        <attribute name="Bundle-SymbolicName" value="${thrift.groupid}"/>
+        <attribute name="Bundle-Name" value="Apache Thrift"/>
+        <attribute name="Bundle-Version" value="${version}"/>
+        <attribute name="Bundle-Description" value="Apache Thrift library"/>
+        <attribute name="Bundle-License" value="${license}"/>
+        <attribute name="Bundle-ActivationPolicy" value="lazy"/>
+        <attribute name="Export-Package" value="${thrift.groupid}.async;uses:=&quot;${thrift.groupid}.protocol,${thrift.groupid}.transport,org.slf4j,${thrift.groupid}&quot;;version=&quot;${version}&quot;,${thrift.groupid}.protocol;uses:=&quot;${thrift.groupid}.transport,${thrift.groupid},${thrift.groupid}.scheme&quot;;version=&quot;${version}&quot;,${thrift.groupid}.server;uses:=&quot;${thrift.groupid}.transport,${thrift.groupid}.protocol,${thrift.groupid},org.slf4j,javax.servlet,javax.servlet.http&quot;;version=&quot;${version}&quot;,${thrift.groupid}.transport;uses:=&quot;${thrift.groupid}.protocol,${thrift.groupid},org.apache.http.client,org.apache.http.params,org.apache.http.entity,org.apache.http.client.methods,org.apache.http,org.slf4j,javax.net.ssl,javax.net,javax.security.sasl,javax.security.auth.callback&quot;;version=&quot;${version}&quot;,${thrift.groupid};uses:=&quot;${thrift.groupid}.protocol,${thrift.groupid}.async,${thrift.groupid}.server,${thrift.groupid}.transport,org.slf4j,org.apache.log4j,${thrift.groupid}.scheme&quot;;version=&quot;${version}&quot;,${thrift.groupid}.meta_data;uses:=&quot;${thrift.groupid}&quot;;version=&quot;${version}&quot;,${thrift.groupid}.scheme;uses:=&quot;${thrift.groupid}.protocol,${thrift.groupid}&quot;;version=&quot;${version}&quot;"/>
+       <attribute name="Import-Package" value="javax.net,javax.net.ssl,javax.security.auth.callback,javax.security.sasl,javax.servlet;resolution:=optional,javax.servlet.http;resolution:=optional,org.slf4j;resolution:=optional;version=&quot;[1.4,2)&quot;,org.apache.http.client;resolution:=optional,org.apache.http.params;resolution:=optional,org.apache.http.entity;resolution:=optional,org.apache.http.client.methods;resolution:=optional,org.apache.http;resolution:=optional"/>
+      </manifest>
+      <fileset dir="${build.dir}">
+        <include name="org/apache/thrift/**/*.class"/>
+        <include name="META-INF/*.txt"/>
+      </fileset>
+    </jar>
+  </target>
+
+  <target name="pack.src">
+    <jar jarfile="${source.jar.file}">
+      <fileset dir="${src}">
+        <include name="**/*.java"/>
+      </fileset>
+    </jar>
+  </target>
+
+  <target name="install" depends="dist,javadoc">
+    <copy todir="${install.path}">
+      <fileset dir="${build.dir}" includes="*.jar"/>
+      <fileset dir="${build.lib.dir}" includes="*.jar"/>
+    </copy>
+    <copy todir="${install.javadoc.path}">
+      <fileset dir="${javadoc.dir}" includes="**/*"/>
+    </copy>
+  </target>
+
+  <target name="clean">
+    <delete dir="${build.dir}"/>
+    <delete dir="${gen}"/>
+    <delete dir="${genbean}"/>
+    <delete dir="${genreuse}"/>
+    <delete dir="${genfullcamel}"/>
+  </target>
+
+  <target name="optional-generate" unless="no-gen-thrift">
+    <antcall target="generate">
+    </antcall>
+  </target>
+
+  <target name="compile-test" description="Build the test suite classes" depends="optional-generate,dist">
+    <javac compiler="modern" debug="true" srcdir="${gen}" destdir="${build.test.dir}" classpathref="test.classpath" includeantruntime="false" encoding="UTF-8">
+      <compilerarg value="-Xlint:deprecation"/>
+      <!--<compilerarg value="-Xlint:unchecked"/>-->
+    </javac>
+    <javac compiler="modern" debug="true" srcdir="${genbean}" destdir="${build.test.dir}" classpathref="test.classpath" includeantruntime="false" encoding="UTF-8">
+      <compilerarg value="-Xlint:deprecation"/>
+      <!--<compilerarg value="-Xlint:unchecked"/>-->
+    </javac>
+    <javac compiler="modern" debug="true" srcdir="${genreuse}" destdir="${build.test.dir}" classpathref="test.classpath" includeantruntime="false" encoding="UTF-8">
+      <compilerarg value="-Xlint:deprecation"/>
+      <!--<compilerarg value="-Xlint:unchecked"/>-->
+    </javac>
+    <javac compiler="modern" debug="true" srcdir="${genfullcamel}" destdir="${build.test.dir}" classpathref="test.classpath" includeantruntime="false" encoding="UTF-8">
+      <compilerarg value="-Xlint:deprecation"/>
+      <!--<compilerarg value="-Xlint:unchecked"/>-->
+    </javac>
+    <javac compiler="modern" debug="true" srcdir="${src.test}" destdir="${build.test.dir}" classpathref="test.classpath" includeantruntime="false" encoding="UTF-8">
+      <compilerarg value="-Xlint:deprecation"/>
+      <!--<compilerarg value="-Xlint:unchecked"/>-->
+    </javac>
+    <copy todir="${build.test.dir}">
+      <fileset dir="${src.test}" includes="log4j.properties"/>
+    </copy>
+    <jar jarfile="${test.jar.file}" basedir="${build.test.dir}"/>
+  </target>
+
+  <target name="junit-test" description="Run the JUnit test suite" depends="compile-test">
+    <mkdir dir="${test.log.dir}"/>
+    <junit printsummary="true" showoutput="${test.output}" timeout="${test.timeout}"
+      haltonfailure="true" errorProperty="tests.failed" failureProperty="tests.failed"
+      fork="true" forkmode="perTest" maxmemory="512m"
+    >
+      <sysproperty key="build.test" value="${build.test.dir}"/>
+      <sysproperty key="test.port" value="${test.port}"/>
+      <sysproperty key="javax.net.ssl.trustStore" value="${src.test}/.truststore"/>
+      <sysproperty key="javax.net.ssl.trustStorePassword" value="thrift"/>
+      <sysproperty key="javax.net.ssl.keyStore" value="${src.test}/.keystore"/>
+      <sysproperty key="javax.net.ssl.keyStorePassword" value="thrift"/>
+      <classpath refid="test.classpath"/>
+      <formatter type="${test.junit.output.format}"/>
+      <batchtest todir="${test.log.dir}" unless="testcase">
+        <fileset dir="${test.src.dir}">
+          <include name="**/Test*.java"/>
+          <exclude name="**/TestClient.java"/>
+          <exclude name="**/TestServer.java"/>
+          <exclude name="**/TestNonblockingServer.java"/>
+        </fileset>
+      </batchtest>
+      <batchtest todir="${test.log.dir}" if="testcase">
+        <fileset dir="${test.src.dir}" includes="**/${testcase}.java"/>
+      </batchtest>
+    </junit>
+    <fail if="tests.failed">Tests failed!</fail>
+  </target>
+
+  <target name="deprecated-test" description="Run the non-JUnit test suite" depends="compile-test">
+    <java classname="org.apache.thrift.test.EqualityTest" classpathref="test.classpath" failonerror="true"/>
+    <java classname="org.apache.thrift.test.JavaBeansTest" classpathref="test.classpath" failonerror="true"/>
+  </target>
+
+  <target name="test" description="Run the full test suite" depends="junit-test,deprecated-test"/>
+
+  <target name="testclient" description="Run a test client" depends="compile-test, run-testclient"/>
+  <target name="run-testclient" description="Run a test client">
+    <java classname="org.apache.thrift.test.TestClient"
+      classpathref="test.classpath" failonerror="true" fork="true">
+      <sysproperty key="javax.net.ssl.trustStore" value="${src.test}/.truststore"/>
+      <sysproperty key="javax.net.ssl.trustStorePassword" value="thrift"/>
+      <arg line="${testargs}"/>
+    </java>
+  </target>
+
+  <target name="testserver" description="Run a test server" depends="compile-test, run-testserver"/>
+  <target name="run-testserver" description="Run a test server">
+    <java classname="org.apache.thrift.test.TestServer"
+      classpathref="test.classpath" failonerror="true" fork="true">
+      <sysproperty key="javax.net.ssl.keyStore" value="${src.test}/.keystore"/>
+      <sysproperty key="javax.net.ssl.keyStorePassword" value="thrift"/>
+      <arg line="${testargs}"/>
+    </java>
+  </target>
+
+  <target name="testnonblockingserver" description="Run a test nonblocking server" depends="compile-test, run-testnonblockingserver"/>
+  <target name="run-testnonblockingserver" description="Run a test nonblocking server">
+    <java classname="org.apache.thrift.test.TestNonblockingServer"
+      classpathref="test.classpath" failonerror="true">
+      <arg line="${testargs}"/>
+    </java>
+  </target>
+
+  <target name="generate">
+    <!-- Generate the thrift gen-java source -->
+    <exec executable="${thrift.compiler}" failonerror="true">
+      <arg line="--gen java ${test.thrift.home}/ThriftTest.thrift"/>
+    </exec>
+    <exec executable="${thrift.compiler}" failonerror="true">
+      <arg line="--gen java ${test.thrift.home}/JavaTypes.thrift"/>
+    </exec>
+    <exec executable="${thrift.compiler}" failonerror="true">
+      <arg line="--gen java ${test.thrift.home}/DebugProtoTest.thrift"/>
+    </exec>
+    <exec executable="${thrift.compiler}" failonerror="true">
+      <arg line="--gen java ${test.thrift.home}/OptionalRequiredTest.thrift"/>
+    </exec>
+    <exec executable="${thrift.compiler}" failonerror="true">
+      <arg line="--gen java:beans,nocamel ${test.thrift.home}/JavaBeansTest.thrift"/>
+    </exec>
+    <exec executable="${thrift.compiler}" failonerror="true">
+      <arg line="--gen java ${test.thrift.home}/ManyOptionals.thrift"/>
+    </exec>
+  	<mkdir dir="${genfullcamel}"/>
+    <exec executable="${thrift.compiler}" failonerror="true">
+      <arg line="--gen java:fullcamel -out ${genfullcamel} ${test.thrift.home}/FullCamelTest.thrift"/>
+    </exec>
+  	<mkdir dir="${genreuse}"/>
+    <exec executable="${thrift.compiler}" failonerror="true">
+      <arg line="--gen java:reuse-objects -out ${genreuse} ${test.thrift.home}/ReuseObjects.thrift"/>
+    </exec>
+    <exec executable="${thrift.compiler}" failonerror="true">
+      <arg line="--gen java ${test.thrift.home}/JavaDeepCopyTest.thrift"/>
+    </exec>
+    <exec executable="${thrift.compiler}" failonerror="true">
+      <arg line="--gen java ${test.thrift.home}/EnumContainersTest.thrift"/>
+    </exec>
+  </target>
+
+  <target name="proxy" if="proxy.enabled">
+    <setproxy proxyhost="${proxy.host}" proxyport="${proxy.port}"
+      proxyuser="${proxy.user}" proxypassword="${proxy.pass}"/>
+  </target>
+
+  <target name="mvn.ant.tasks.download" depends="setup.init,mvn.ant.tasks.check,proxy" unless="mvn.ant.tasks.found">
+    <get src="${mvn.ant.task.url}/${mvn.ant.task.jar}" dest="${build.tools.dir}/${mvn.ant.task.jar}" usetimestamp="true"/>
+  </target>
+
+  <target name="mvn.ant.tasks.check">
+    <condition property="mvn.ant.tasks.found">
+      <typefound uri="antlib:org.apache.maven.artifact.ant" name="artifact"/>
+    </condition>
+  </target>
+
+  <target name="mvn.init" depends="mvn.ant.tasks.download" unless="mvn.finished">
+    <!-- Download mvn ant tasks, download dependencies, and setup pom file -->
+    <typedef uri="antlib:org.apache.maven.artifact.ant" classpath="${build.tools.dir}/${mvn.ant.task.jar}"/>
+
+    <!-- remote repositories used to download dependencies from -->
+    <artifact:remoteRepository id="central" url="${mvn.repo}"/>
+    <artifact:remoteRepository id="apache" url="${apache.repo}"/>
+
+    <!-- Pom file information -->
+    <artifact:pom id="pom"
+      groupId="${thrift.groupid}"
+      artifactId="${thrift.artifactid}"
+      version="${version}"
+      url="http://thrift.apache.org"
+      name="Apache Thrift"
+      description="Thrift is a software framework for scalable cross-language services development."
+      packaging="pom"
+    >
+      <remoteRepository refid="central"/>
+      <remoteRepository refid="apache"/>
+      <license name="The Apache Software License, Version 2.0" url="${license}"/>
+      <scm connection="scm:git:https://git-wip-us.apache.org/repos/asf/thrift.git"
+      developerConnection="scm:git:https://git-wip-us.apache.org/repos/asf/thrift.git"
+      url="https://git-wip-us.apache.org/repos/asf?p=thrift.git"
+      />
+      <!-- Thrift Developers -->
+      <developer id="mcslee" name="Mark Slee"/>
+      <developer id="dreiss" name="David Reiss"/>
+      <developer id="aditya" name="Aditya Agarwal"/>
+      <developer id="marck" name="Marc Kwiatkowski"/>
+      <developer id="jwang" name="James Wang"/>
+      <developer id="cpiro" name="Chris Piro"/>
+      <developer id="bmaurer" name="Ben Maurer"/>
+      <developer id="kclark" name="Kevin Clark"/>
+      <developer id="jake" name="Jake Luciani"/>
+      <developer id="bryanduxbury" name="Bryan Duxbury"/>
+      <developer id="esteve" name="Esteve Fernandez"/>
+      <developer id="todd" name="Todd Lipcon"/>
+      <developer id="geechorama" name="Andrew McGeachie"/>
+      <developer id="molinaro" name="Anthony Molinaro"/>
+      <developer id="roger" name="Roger Meier"/>
+      <developer id="jfarrell" name="Jake Farrell"/>
+      <developer id="jensg" name="Jens Geyer"/>
+      <developer id="carl" name="Carl Yeksigian"/>
+
+      <!-- Thrift dependencies list -->
+      <dependency groupId="org.slf4j" artifactId="slf4j-api" version="${slf4j.version}"/>
+      <dependency groupId="javax.servlet" artifactId="servlet-api" version="${servlet.version}" scope="provided"/>
+      <dependency groupId="org.apache.httpcomponents" artifactId="httpclient" version="${httpclient.version}"/>
+      <dependency groupId="org.apache.httpcomponents" artifactId="httpcore" version="${httpcore.version}"/>
+    </artifact:pom>
+
+    <!-- Generate the pom file -->
+    <artifact:writepom pomRefId="pom" file="${pom.xml}"/>
+
+    <!-- Download the dependencies -->
+    <artifact:dependencies filesetId="build-dependency-jars" pomRefId="pom"/>
+
+    <!-- Copy the dependencies to the build/lib dir -->
+    <copy todir="${build.dir}/lib">
+      <fileset refid="build-dependency-jars"/>
+      <mapper type="flatten"/>
+    </copy>
+
+    <!-- Dependencies needed for testing -->
+    <artifact:dependencies filesetId="test-dependency-jars" useScope="runtime">
+      <dependency groupId="org.slf4j" artifactId="slf4j-log4j12" version="${slf4j.version}"/>
+      <dependency groupId="junit" artifactId="junit" version="4.4"/>
+      <dependency groupId="org.mockito" artifactId="mockito-all" version="1.9.5"/>
+    </artifact:dependencies>
+
+    <!-- Copy the test dependencies to the build/lib dir -->
+    <copy todir="${build.dir}/lib">
+      <fileset refid="test-dependency-jars"/>
+      <mapper type="flatten"/>
+    </copy>
+
+    <property name="mvn.finished" value="true"/>
+  </target>
+
+  <macrodef name="signAndDeploy">
+    <!-- Sign and deploy jars to apache repo -->
+    <attribute name="file"/>
+    <attribute name="classifier" default=""/>
+    <attribute name="packaging" default="jar"/>
+    <attribute name="pom" default=""/>
+    <sequential>
+      <artifact:mvn fork="true">
+        <arg value="org.apache.maven.plugins:maven-gpg-plugin:1.6:sign-and-deploy-file"/>
+        <arg value="-DrepositoryId=${maven-repository-id}"/>
+        <arg value="-Durl=${maven-repository-url}"/>
+        <arg value="-DpomFile=@{pom}"/>
+        <arg value="-Dfile=@{file}"/>
+        <arg value="-Dclassifier=@{classifier}"/>
+        <arg value="-Dpackaging=@{packaging}"/>
+        <arg value="-Pgpg"/>
+      </artifact:mvn>
+    </sequential>
+  </macrodef>
+
+  <target name="publish" depends="clean,init,test,dist,javadoc,pack.src">
+    <!-- Compile, package, test and then send release to apache maven repo -->
+    <!-- run with: ant -Drelease=true publish-->
+    <signAndDeploy file="${pom.xml}" packaging="pom" classifier="" pom="${pom.xml}"/>
+    <signAndDeploy file="${jar.file}" classifier="" pom="${pom.xml}"/>
+    <signAndDeploy file="${javadoc.jar.file}" classifier="javadoc" pom="${pom.xml}"/>
+    <signAndDeploy file="${source.jar.file}" classifier="sources" pom="${pom.xml}"/>
+  </target>
+</project>

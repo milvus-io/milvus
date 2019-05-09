@@ -1,0 +1,196 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# build Apache Thrift on Travis CI - https://travis-ci.org/
+
+#
+# Docker Integration
+# see: build/docker/README.md
+# 
+
+sudo: required
+dist: trusty
+language: cpp
+
+services:
+  - docker
+
+install:
+  - if [[ `uname` == "Linux" ]]; then build/docker/refresh.sh; fi
+
+stages:
+# - osx       # up front for now (for testing)
+  - docker    # docker images
+  - thrift    # thrift build jobs
+
+env:
+  global:
+    - SCRIPT="cmake.sh"
+    - BUILD_ARG=""
+    - BUILD_ENV="-e CC=clang -e CXX=clang++"
+    - DISTRO=ubuntu-xenial
+    - BUILD_LIBS="CPP C_GLIB HASKELL JAVA PYTHON TESTING TUTORIALS"  # only meaningful for CMake builds
+    - TRAVIS_BUILD_STAGE=test
+    # DOCKER_REPO (this works for all builds as a source for docker images - you can override for fork builds in your Travis settings)
+    - DOCKER_REPO="thrift/thrift-build"
+    # DOCKER_USER (provide in your Travis settings if you want to build and update docker images once, instead of on every job)
+    # DOCKER_PASS (same)
+
+jobs:
+  include:
+    # ------------------------- phase: osx --------------------------
+    # - stage: osx
+    #   os: osx
+    #   osx_image: xcode9
+    #   script: build/docker/scripts/autotools.sh
+
+    # ========================= stage: docker =========================
+    - stage: docker
+      script: true
+      env:
+        - JOB="Docker Build ubuntu-trusty 14.04"
+        - DISTRO=ubuntu-trusty
+        - TRAVIS_BUILD_STAGE=docker
+    - script: true
+      env:
+        - JOB="Docker Build ubuntu-xenial 16.04"
+        - DISTRO=ubuntu-xenial
+        - TRAVIS_BUILD_STAGE=docker
+    - script: true
+      env:
+        - JOB="Docker Build ubuntu-artful 17.10"
+        - DISTRO=ubuntu-artful
+        - TRAVIS_BUILD_STAGE=docker
+
+    # ========================= stage: thrift =======================
+    # ------------------------- phase: cross ------------------------
+    # apache/thrift official PR builds can exceed 50 minutes per job so combine all cross tests
+    - stage: thrift
+      script: build/docker/run.sh
+      if: repo = apache/thrift
+      env:
+        - JOB="Cross Language Tests"
+        - SCRIPT="cross-test.sh"
+        - BUILD_ARG=""
+        - BUILD_ENV="-e CC=clang -e CXX=clang++ -e THRIFT_CROSSTEST_CONCURRENCY=4"
+
+    # fork based PR builds cannot exceed 50 minutes per job
+    - stage: thrift
+      script: build/docker/run.sh
+      if: repo != apache/thrift
+      env:
+        - JOB="Cross Language Tests (Binary Protocol)"
+        - SCRIPT="cross-test.sh"
+        - BUILD_ARG="-'(binary)'"
+        - BUILD_ENV="-e CC=clang -e CXX=clang++ -e THRIFT_CROSSTEST_CONCURRENCY=4"
+
+    - stage: thrift
+      script: build/docker/run.sh
+      if: repo != apache/thrift
+      env:
+        - JOB="Cross Language Tests (Header, JSON Protocols)"
+        - SCRIPT="cross-test.sh"
+        - BUILD_ARG="-'(header|json)'"
+        - BUILD_ENV="-e CC=clang -e CXX=clang++ -e THRIFT_CROSSTEST_CONCURRENCY=4"
+
+    - stage: thrift
+      script: build/docker/run.sh
+      if: repo != apache/thrift
+      env:
+        - JOB="Cross Language Tests (Compact and Multiplexed Protocols)"
+        - SCRIPT="cross-test.sh"
+        - BUILD_ARG="-'(compact|multiplexed)'"
+        - BUILD_ENV="-e CC=clang -e CXX=clang++ -e THRIFT_CROSSTEST_CONCURRENCY=4"
+
+    # ------------------------- phase: sca --------------------------
+    # QA jobs for code analytics and metrics
+    - stage: thrift
+      script: build/docker/run.sh
+      env:
+        - JOB="Static Code Analysis"
+        - SCRIPT="sca.sh"
+        - DISTRO=ubuntu-artful
+
+    # C and C++ undefined behavior.
+    # A binary crashes if undefined behavior occurs and produces a stack trace.
+    # python is disabled, see: THRIFT-4360
+    - script: build/docker/run.sh
+      env:
+        - JOB="UBSan"
+        - SCRIPT="ubsan.sh"
+        - DISTRO=ubuntu-artful
+        - BUILD_ARG="--without-python --without-py3"
+
+    # ------------------------- phase: cmake ------------------------
+    - script: build/docker/run.sh
+      env:
+        - JOB="CMake (Ubuntu Xenial)"
+
+    # C++ specific options: compiler plug-in, threading model
+    - script: build/docker/run.sh
+      env:
+        - JOB="C++98 (Boost Thread)"
+        - SCRIPT="cmake.sh"
+        - BUILD_LIBS="CPP TESTING TUTORIALS"
+        - BUILD_ARG="-DCMAKE_CXX_STANDARD=98 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DCMAKE_CXX_EXTENSIONS=OFF --DWITH_BOOSTTHREADS=ON -DWITH_PYTHON=OFF -DWITH_C_GLIB=OFF -DWITH_JAVA=OFF -DWITH_HASKELL=OFF"
+        - BUILD_ENV=""
+
+    - script: build/docker/run.sh
+      env:
+        - JOB="C++ (Std Thread) and Plugin"
+        - SCRIPT="cmake.sh"
+        - BUILD_LIBS="CPP TESTING TUTORIALS"
+        - BUILD_ARG="-DWITH_PLUGIN=ON -DWITH_STDTHREADS=ON -DWITH_PYTHON=OFF -DWITH_C_GLIB=OFF -DWITH_JAVA=OFF -DWITH_HASKELL=OFF"
+        - BUILD_ENV="-e CC=clang -e CXX=clang++"
+
+    # ------------------------- phase: autotools --------------------
+    # TODO: Remove them once migrated to CMake
+    - script: build/docker/run.sh
+      env:
+        - JOB="Autotools (Ubuntu Artful)"
+        - DISTRO=ubuntu-artful
+        - SCRIPT="autotools.sh"
+        - BUILD_ENV="-e CC=gcc -e CXX=g++"
+
+    - script: build/docker/run.sh
+      env:
+        - JOB="Autotools (Ubuntu Xenial)"
+        - DISTRO=ubuntu-xenial
+        - SCRIPT="autotools.sh"
+        - BUILD_ENV="-e CC=gcc -e CXX=g++"
+
+    - script: build/docker/run.sh
+      env:
+        - JOB="Autotools (Ubuntu Trusty)"
+        - DISTRO=ubuntu-trusty
+        - SCRIPT="autotools.sh"
+        - BUILD_ENV="-e CC=gcc -e CXX=g++"
+
+    # ------------------------- phase: dist -------------------------
+    - script: build/docker/run.sh
+      env:
+        - JOB="make dist"
+        - SCRIPT="make-dist.sh"
+        - BUILD_ENV="-e CC=gcc -e CXX=g++"
+
+    - script: build/docker/run.sh
+      env:
+        - JOB="Debian Packages"
+        - SCRIPT="dpkg.sh"
+        - BUILD_ENV="-e CC=gcc -e CXX=g++"

@@ -1,0 +1,101 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# build Apache Thrift on AppVeyor - https://ci.appveyor.com
+
+version: '0.11.0.{build}'
+
+shallow_clone: true
+
+os:
+  - Visual Studio 2015
+
+cache:
+  - C:\projects\thrift\buildcache -> build\appveyor\MSVC-appveyor-install.bat
+  - C:\ProgramData\chocolatey\lib -> build\appveyor\MSVC-appveyor-install.bat
+  - C:\msys64\var\cache\pacman    -> build\appveyor\MSYS-appveyor-install.bat
+
+environment:
+  matrix:
+   - PROFILE: MSVC2010
+     PLATFORM: x86
+     CONFIGURATION: Debug
+     BOOST_VERSION: 1.54.0
+     LIBEVENT_VERSION: 2.0.22
+     QT_VERSION: 5.6
+     ZLIB_VERSION: 1.2.8
+     DISABLED_TESTS: StressTestNonBlocking
+
+   - PROFILE: MSVC2015
+     PLATFORM: x64
+     CONFIGURATION: Release
+     BOOST_VERSION: 1.64.0
+     LIBEVENT_VERSION: 2.0.22
+     PYTHON_VERSION: 3.6
+     QT_VERSION: 5.8
+     ZLIB_VERSION: 1.2.11
+     DISABLED_TESTS: StressTestNonBlocking
+
+   - PROFILE: MINGW
+     PLATFORM: x64
+     CONFIGURATION: Release
+
+matrix:
+  fast_finish: true
+
+install:
+  - cd %APPVEYOR_BUILD_FOLDER%
+  - call build\appveyor\%PROFILE:~0,4%-appveyor-install.bat
+  - refreshenv
+
+build_script:
+  - cd %APPVEYOR_BUILD_FOLDER%
+  - call build\appveyor\%PROFILE:~0,4%-appveyor-build.bat
+
+test_script:
+  - cd %APPVEYOR_BUILD_FOLDER%
+  - call build\appveyor\%PROFILE:~0,4%-appveyor-test.bat
+
+
+# artifact capture disabled as it might increase service cost for little gain:
+#
+# artifacts:
+#  - path: local-thrift-inst
+#    name: cmake installed content
+#    type: zip
+#
+#  - path: local-thrift-build\Testing
+#    name: ctest output
+#    type: zip
+
+# RDP support: use one or the other...
+#
+# enables RDP for each build job so you can inspect the environment at the beginning of the job:
+# init:
+#  - ps: iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
+#
+# enables RDP at the end of the build job so you can login and re-run
+# commands to see why something failed...
+#on_finish:
+#  - ps: $blockRdp = $true; iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
+#
+# also need:
+# environment:
+#   APPVEYOR_RDP_PASSWORD: thr1FT2345$xyzZ
+
