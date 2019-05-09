@@ -72,3 +72,15 @@ if (BUILD_UNIT_TEST)
 endif(BUILD_UNIT_TEST)
 
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
+
+#install
+install(FILES
+        start_server.sh
+        stop_server.sh
+        DESTINATION
+        scripts)
+install(FILES
+        conf/server_config.yaml
+        conf/vecwise_engine_log.conf
+        DESTINATION
+        conf)

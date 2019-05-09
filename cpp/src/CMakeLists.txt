@@ -79,3 +79,5 @@ set(license_generator_src
         ${CMAKE_CURRENT_SOURCE_DIR}/license/LicenseGenerator.cpp)
 
 add_executable(license_generator ${license_generator_src})
+
+install(TARGETS vecwise_server DESTINATION bin)
