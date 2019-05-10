@@ -30,23 +30,35 @@ set(vecwise_engine_src
 
 include_directories(/usr/include)
 include_directories(/usr/local/cuda/include)
-find_library(cuda_library cudart cublas HINTS /usr/local/cuda/lib64)
+
+if (GPU_VERSION STREQUAL "ON")
+    link_directories(/usr/local/cuda/lib64)
+    set(engine_libs
+            pthread
+            libfaiss.a
+            libgomp.a
+            libopenblas.a
+            libgfortran.a
+            libquadmath.a
+            cudart
+            cublas
+            libsqlite3.a
+            )
+else()
+    set(engine_libs
+            pthread
+            libfaiss.a
+            libgomp.a
+            libopenblas.a
+            libgfortran.a
+            libquadmath.a
+            libsqlite3.a
+        )
+endif ()
 
 cuda_add_library(vecwise_engine STATIC ${vecwise_engine_src})
 
-set(engine_libs
-        pthread
-        libfaiss.a
-        libgomp.a
-        libopenblas.a
-        libgfortran.a
-        libquadmath.a
-        cudart
-        cublas
-        libsqlite3.a
-        )
-
-target_link_libraries(vecwise_engine ${engine_libs} ${cuda_library})
+target_link_libraries(vecwise_engine ${engine_libs})
 
 add_executable(vecwise_server
         ${config_files}
@@ -71,6 +83,7 @@ set(server_libs
         libz.a
         libzstd.a
         liblz4.a
+        dl
         )
 
 target_link_libraries(vecwise_server ${server_libs})
