@@ -873,6 +873,11 @@ class VecDateTime(object):
 
 class VecTimeRange(object):
     """
+    time_begin;          time range begin
+    begine_closed;	    true means '[', false means '('
+    time_end;            set to true to return tensor double array
+    end_closed;          time range end
+
     Attributes:
      - time_begin
      - begine_closed
@@ -972,15 +977,21 @@ class VecTimeRange(object):
 
 class VecSearchFilter(object):
     """
+    attrib_filter;   search condition, for example: "color=red"
+    time_ranges;	    search condition, for example: "date between 1999-02-12 and 2008-10-14"
+    return_attribs;  specify required attribute names
+
     Attributes:
      - attrib_filter
      - time_ranges
+     - return_attribs
     """
 
 
-    def __init__(self, attrib_filter=None, time_ranges=None,):
+    def __init__(self, attrib_filter=None, time_ranges=None, return_attribs=None,):
         self.attrib_filter = attrib_filter
         self.time_ranges = time_ranges
+        self.return_attribs = return_attribs
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -1013,6 +1024,16 @@ class VecSearchFilter(object):
                     iprot.readListEnd()
                 else:
                     iprot.skip(ftype)
+            elif fid == 3:
+                if ftype == TType.LIST:
+                    self.return_attribs = []
+                    (_etype78, _size75) = iprot.readListBegin()
+                    for _i79 in range(_size75):
+                        _elem80 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                        self.return_attribs.append(_elem80)
+                    iprot.readListEnd()
+                else:
+                    iprot.skip(ftype)
             else:
                 iprot.skip(ftype)
             iprot.readFieldEnd()
@@ -1026,16 +1047,23 @@ class VecSearchFilter(object):
         if self.attrib_filter is not None:
             oprot.writeFieldBegin('attrib_filter', TType.MAP, 1)
             oprot.writeMapBegin(TType.STRING, TType.STRING, len(self.attrib_filter))
-            for kiter75, viter76 in self.attrib_filter.items():
-                oprot.writeString(kiter75.encode('utf-8') if sys.version_info[0] == 2 else kiter75)
-                oprot.writeString(viter76.encode('utf-8') if sys.version_info[0] == 2 else viter76)
+            for kiter81, viter82 in self.attrib_filter.items():
+                oprot.writeString(kiter81.encode('utf-8') if sys.version_info[0] == 2 else kiter81)
+                oprot.writeString(viter82.encode('utf-8') if sys.version_info[0] == 2 else viter82)
             oprot.writeMapEnd()
             oprot.writeFieldEnd()
         if self.time_ranges is not None:
             oprot.writeFieldBegin('time_ranges', TType.LIST, 2)
             oprot.writeListBegin(TType.STRUCT, len(self.time_ranges))
-            for iter77 in self.time_ranges:
-                iter77.write(oprot)
+            for iter83 in self.time_ranges:
+                iter83.write(oprot)
+            oprot.writeListEnd()
+            oprot.writeFieldEnd()
+        if self.return_attribs is not None:
+            oprot.writeFieldBegin('return_attribs', TType.LIST, 3)
+            oprot.writeListBegin(TType.STRING, len(self.return_attribs))
+            for iter84 in self.return_attribs:
+                oprot.writeString(iter84.encode('utf-8') if sys.version_info[0] == 2 else iter84)
             oprot.writeListEnd()
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
@@ -1131,6 +1159,7 @@ VecSearchFilter.thrift_spec = (
     None,  # 0
     (1, TType.MAP, 'attrib_filter', (TType.STRING, 'UTF8', TType.STRING, 'UTF8', False), None, ),  # 1
     (2, TType.LIST, 'time_ranges', (TType.STRUCT, [VecTimeRange, None], False), None, ),  # 2
+    (3, TType.LIST, 'return_attribs', (TType.STRING, 'UTF8', False), None, ),  # 3
 )
 fix_spec(all_structs)
 del all_structs
