@@ -1,7 +1,7 @@
 import time
 import struct
 
-from test_proj_env.zilliz import VecService
+from zilliz import VecService
 
 from thrift import Thrift
 from thrift.transport import TSocket
