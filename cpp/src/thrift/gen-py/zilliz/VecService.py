@@ -1488,10 +1488,10 @@ class add_vector_batch_result(object):
             if fid == 0:
                 if ftype == TType.LIST:
                     self.success = []
-                    (_etype81, _size78) = iprot.readListBegin()
-                    for _i82 in range(_size78):
-                        _elem83 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        self.success.append(_elem83)
+                    (_etype88, _size85) = iprot.readListBegin()
+                    for _i89 in range(_size85):
+                        _elem90 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                        self.success.append(_elem90)
                     iprot.readListEnd()
                 else:
                     iprot.skip(ftype)
@@ -1514,8 +1514,8 @@ class add_vector_batch_result(object):
         if self.success is not None:
             oprot.writeFieldBegin('success', TType.LIST, 0)
             oprot.writeListBegin(TType.STRING, len(self.success))
-            for iter84 in self.success:
-                oprot.writeString(iter84.encode('utf-8') if sys.version_info[0] == 2 else iter84)
+            for iter91 in self.success:
+                oprot.writeString(iter91.encode('utf-8') if sys.version_info[0] == 2 else iter91)
             oprot.writeListEnd()
             oprot.writeFieldEnd()
         if self.e is not None:
@@ -1792,10 +1792,10 @@ class add_binary_vector_batch_result(object):
             if fid == 0:
                 if ftype == TType.LIST:
                     self.success = []
-                    (_etype88, _size85) = iprot.readListBegin()
-                    for _i89 in range(_size85):
-                        _elem90 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        self.success.append(_elem90)
+                    (_etype95, _size92) = iprot.readListBegin()
+                    for _i96 in range(_size92):
+                        _elem97 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                        self.success.append(_elem97)
                     iprot.readListEnd()
                 else:
                     iprot.skip(ftype)
@@ -1818,8 +1818,8 @@ class add_binary_vector_batch_result(object):
         if self.success is not None:
             oprot.writeFieldBegin('success', TType.LIST, 0)
             oprot.writeListBegin(TType.STRING, len(self.success))
-            for iter91 in self.success:
-                oprot.writeString(iter91.encode('utf-8') if sys.version_info[0] == 2 else iter91)
+            for iter98 in self.success:
+                oprot.writeString(iter98.encode('utf-8') if sys.version_info[0] == 2 else iter98)
             oprot.writeListEnd()
             oprot.writeFieldEnd()
         if self.e is not None:
