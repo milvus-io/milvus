@@ -14,6 +14,10 @@ set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
 message("CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}")
 message("CUDA_NVCC_FLAGS=${CUDA_NVCC_FLAGS}")
 
+if (GPU_VERSION STREQUAL "ON")
+    add_definitions("-DGPU_VERSION")
+endif ()
+
 set(CMAKE_CXX_STANDARD 14)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
@@ -65,7 +69,7 @@ link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib)
 #                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 add_subdirectory(src)
-add_subdirectory(test_client)
+#add_subdirectory(test_client)
 
 if (BUILD_UNIT_TEST)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
