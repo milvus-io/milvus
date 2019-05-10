@@ -325,7 +325,6 @@ AddBatchVectorTask::AddBatchVectorTask(const std::string& group_id,
       bin_tensor_list_(tensor_list),
       tensor_ids_(ids) {
     tensor_ids_.clear();
-    tensor_ids_.resize(tensor_list->tensor_list.size());
 }
 
 BaseTaskPtr AddBatchVectorTask::Create(const std::string& group_id,
@@ -469,6 +468,7 @@ ServerError AddBatchVectorTask::OnExecute() {
                 SERVER_LOG_ERROR << "Vector ID not returned";
                 return SERVER_UNEXPECTED_ERROR;
             } else {
+                tensor_ids_.resize(vector_ids.size());
                 if(vec_count < USE_MT) {
                     ProcessIdMapping(vector_ids, 0, vec_count, tensor_ids_);
                     rc.Record("built id mapping");
