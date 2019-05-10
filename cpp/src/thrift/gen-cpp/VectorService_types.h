@@ -597,9 +597,10 @@ void swap(VecTimeRange &a, VecTimeRange &b);
 std::ostream& operator<<(std::ostream& out, const VecTimeRange& obj);
 
 typedef struct _VecSearchFilter__isset {
-  _VecSearchFilter__isset() : attrib_filter(false), time_ranges(false) {}
+  _VecSearchFilter__isset() : attrib_filter(false), time_ranges(false), return_attribs(false) {}
   bool attrib_filter :1;
   bool time_ranges :1;
+  bool return_attribs :1;
 } _VecSearchFilter__isset;
 
 class VecSearchFilter : public virtual ::apache::thrift::TBase {
@@ -613,12 +614,15 @@ class VecSearchFilter : public virtual ::apache::thrift::TBase {
   virtual ~VecSearchFilter() throw();
   std::map<std::string, std::string>  attrib_filter;
   std::vector<VecTimeRange>  time_ranges;
+  std::vector<std::string>  return_attribs;
 
   _VecSearchFilter__isset __isset;
 
   void __set_attrib_filter(const std::map<std::string, std::string> & val);
 
   void __set_time_ranges(const std::vector<VecTimeRange> & val);
+
+  void __set_return_attribs(const std::vector<std::string> & val);
 
   bool operator == (const VecSearchFilter & rhs) const
   {
@@ -629,6 +633,10 @@ class VecSearchFilter : public virtual ::apache::thrift::TBase {
     if (__isset.time_ranges != rhs.__isset.time_ranges)
       return false;
     else if (__isset.time_ranges && !(time_ranges == rhs.time_ranges))
+      return false;
+    if (__isset.return_attribs != rhs.__isset.return_attribs)
+      return false;
+    else if (__isset.return_attribs && !(return_attribs == rhs.return_attribs))
       return false;
     return true;
   }

@@ -937,14 +937,14 @@ uint32_t VecService_add_vector_batch_result::read(::apache::thrift::protocol::TP
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->success.clear();
-            uint32_t _size93;
-            ::apache::thrift::protocol::TType _etype96;
-            xfer += iprot->readListBegin(_etype96, _size93);
-            this->success.resize(_size93);
-            uint32_t _i97;
-            for (_i97 = 0; _i97 < _size93; ++_i97)
+            uint32_t _size99;
+            ::apache::thrift::protocol::TType _etype102;
+            xfer += iprot->readListBegin(_etype102, _size99);
+            this->success.resize(_size99);
+            uint32_t _i103;
+            for (_i103 = 0; _i103 < _size99; ++_i103)
             {
-              xfer += iprot->readString(this->success[_i97]);
+              xfer += iprot->readString(this->success[_i103]);
             }
             xfer += iprot->readListEnd();
           }
@@ -983,10 +983,10 @@ uint32_t VecService_add_vector_batch_result::write(::apache::thrift::protocol::T
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_LIST, 0);
     {
       xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->success.size()));
-      std::vector<std::string> ::const_iterator _iter98;
-      for (_iter98 = this->success.begin(); _iter98 != this->success.end(); ++_iter98)
+      std::vector<std::string> ::const_iterator _iter104;
+      for (_iter104 = this->success.begin(); _iter104 != this->success.end(); ++_iter104)
       {
-        xfer += oprot->writeString((*_iter98));
+        xfer += oprot->writeString((*_iter104));
       }
       xfer += oprot->writeListEnd();
     }
@@ -1031,14 +1031,14 @@ uint32_t VecService_add_vector_batch_presult::read(::apache::thrift::protocol::T
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             (*(this->success)).clear();
-            uint32_t _size99;
-            ::apache::thrift::protocol::TType _etype102;
-            xfer += iprot->readListBegin(_etype102, _size99);
-            (*(this->success)).resize(_size99);
-            uint32_t _i103;
-            for (_i103 = 0; _i103 < _size99; ++_i103)
+            uint32_t _size105;
+            ::apache::thrift::protocol::TType _etype108;
+            xfer += iprot->readListBegin(_etype108, _size105);
+            (*(this->success)).resize(_size105);
+            uint32_t _i109;
+            for (_i109 = 0; _i109 < _size105; ++_i109)
             {
-              xfer += iprot->readString((*(this->success))[_i103]);
+              xfer += iprot->readString((*(this->success))[_i109]);
             }
             xfer += iprot->readListEnd();
           }
@@ -1415,14 +1415,14 @@ uint32_t VecService_add_binary_vector_batch_result::read(::apache::thrift::proto
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->success.clear();
-            uint32_t _size104;
-            ::apache::thrift::protocol::TType _etype107;
-            xfer += iprot->readListBegin(_etype107, _size104);
-            this->success.resize(_size104);
-            uint32_t _i108;
-            for (_i108 = 0; _i108 < _size104; ++_i108)
+            uint32_t _size110;
+            ::apache::thrift::protocol::TType _etype113;
+            xfer += iprot->readListBegin(_etype113, _size110);
+            this->success.resize(_size110);
+            uint32_t _i114;
+            for (_i114 = 0; _i114 < _size110; ++_i114)
             {
-              xfer += iprot->readString(this->success[_i108]);
+              xfer += iprot->readString(this->success[_i114]);
             }
             xfer += iprot->readListEnd();
           }
@@ -1461,10 +1461,10 @@ uint32_t VecService_add_binary_vector_batch_result::write(::apache::thrift::prot
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_LIST, 0);
     {
       xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->success.size()));
-      std::vector<std::string> ::const_iterator _iter109;
-      for (_iter109 = this->success.begin(); _iter109 != this->success.end(); ++_iter109)
+      std::vector<std::string> ::const_iterator _iter115;
+      for (_iter115 = this->success.begin(); _iter115 != this->success.end(); ++_iter115)
       {
-        xfer += oprot->writeString((*_iter109));
+        xfer += oprot->writeString((*_iter115));
       }
       xfer += oprot->writeListEnd();
     }
@@ -1509,14 +1509,14 @@ uint32_t VecService_add_binary_vector_batch_presult::read(::apache::thrift::prot
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             (*(this->success)).clear();
-            uint32_t _size110;
-            ::apache::thrift::protocol::TType _etype113;
-            xfer += iprot->readListBegin(_etype113, _size110);
-            (*(this->success)).resize(_size110);
-            uint32_t _i114;
-            for (_i114 = 0; _i114 < _size110; ++_i114)
+            uint32_t _size116;
+            ::apache::thrift::protocol::TType _etype119;
+            xfer += iprot->readListBegin(_etype119, _size116);
+            (*(this->success)).resize(_size116);
+            uint32_t _i120;
+            for (_i120 = 0; _i120 < _size116; ++_i120)
             {
-              xfer += iprot->readString((*(this->success))[_i114]);
+              xfer += iprot->readString((*(this->success))[_i120]);
             }
             xfer += iprot->readListEnd();
           }
