@@ -188,6 +188,7 @@ TEST(AddVector, CLIENT_TEST) {
                 server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors in one batch");
                 std::vector<std::string> ids;
                 session.interface()->add_binary_vector_batch(ids, group.id, bin_tensor_list_2);
+                ASSERT_TRUE(!ids.empty());
                 rc.Elapse("done!");
             }
 #endif
