@@ -85,6 +85,12 @@ struct VecDateTime {
     6: required i32 second;
 }
 
+/**
+ * time_begin;          time range begin
+ * begine_closed;	    true means '[', false means '('
+ * time_end;            set to true to return tensor double array
+ * end_closed;          time range end
+ */
 struct VecTimeRange {
     1: required VecDateTime time_begin;
     2: required bool begine_closed;
@@ -92,9 +98,15 @@ struct VecTimeRange {
     4: required bool end_closed;
 }
 
+/**
+ * attrib_filter;   search condition, for example: "color=red"
+ * time_ranges;	    search condition, for example: "date between 1999-02-12 and 2008-10-14"
+ * return_attribs;  specify required attribute names
+ */
 struct VecSearchFilter {
     1: optional map<string, string> attrib_filter;
     2: optional list<VecTimeRange> time_ranges;
+    3: optional list<string> return_attribs;
 }
 
 service VecService {

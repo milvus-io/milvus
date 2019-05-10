@@ -1647,6 +1647,11 @@ void VecSearchFilter::__set_time_ranges(const std::vector<VecTimeRange> & val) {
   this->time_ranges = val;
 __isset.time_ranges = true;
 }
+
+void VecSearchFilter::__set_return_attribs(const std::vector<std::string> & val) {
+  this->return_attribs = val;
+__isset.return_attribs = true;
+}
 std::ostream& operator<<(std::ostream& out, const VecSearchFilter& obj)
 {
   obj.printTo(out);
@@ -1718,6 +1723,26 @@ uint32_t VecSearchFilter::read(::apache::thrift::protocol::TProtocol* iprot) {
           xfer += iprot->skip(ftype);
         }
         break;
+      case 3:
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          {
+            this->return_attribs.clear();
+            uint32_t _size89;
+            ::apache::thrift::protocol::TType _etype92;
+            xfer += iprot->readListBegin(_etype92, _size89);
+            this->return_attribs.resize(_size89);
+            uint32_t _i93;
+            for (_i93 = 0; _i93 < _size89; ++_i93)
+            {
+              xfer += iprot->readString(this->return_attribs[_i93]);
+            }
+            xfer += iprot->readListEnd();
+          }
+          this->__isset.return_attribs = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
       default:
         xfer += iprot->skip(ftype);
         break;
@@ -1739,11 +1764,11 @@ uint32_t VecSearchFilter::write(::apache::thrift::protocol::TProtocol* oprot) co
     xfer += oprot->writeFieldBegin("attrib_filter", ::apache::thrift::protocol::T_MAP, 1);
     {
       xfer += oprot->writeMapBegin(::apache::thrift::protocol::T_STRING, ::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->attrib_filter.size()));
-      std::map<std::string, std::string> ::const_iterator _iter89;
-      for (_iter89 = this->attrib_filter.begin(); _iter89 != this->attrib_filter.end(); ++_iter89)
+      std::map<std::string, std::string> ::const_iterator _iter94;
+      for (_iter94 = this->attrib_filter.begin(); _iter94 != this->attrib_filter.end(); ++_iter94)
       {
-        xfer += oprot->writeString(_iter89->first);
-        xfer += oprot->writeString(_iter89->second);
+        xfer += oprot->writeString(_iter94->first);
+        xfer += oprot->writeString(_iter94->second);
       }
       xfer += oprot->writeMapEnd();
     }
@@ -1753,10 +1778,23 @@ uint32_t VecSearchFilter::write(::apache::thrift::protocol::TProtocol* oprot) co
     xfer += oprot->writeFieldBegin("time_ranges", ::apache::thrift::protocol::T_LIST, 2);
     {
       xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->time_ranges.size()));
-      std::vector<VecTimeRange> ::const_iterator _iter90;
-      for (_iter90 = this->time_ranges.begin(); _iter90 != this->time_ranges.end(); ++_iter90)
+      std::vector<VecTimeRange> ::const_iterator _iter95;
+      for (_iter95 = this->time_ranges.begin(); _iter95 != this->time_ranges.end(); ++_iter95)
       {
-        xfer += (*_iter90).write(oprot);
+        xfer += (*_iter95).write(oprot);
+      }
+      xfer += oprot->writeListEnd();
+    }
+    xfer += oprot->writeFieldEnd();
+  }
+  if (this->__isset.return_attribs) {
+    xfer += oprot->writeFieldBegin("return_attribs", ::apache::thrift::protocol::T_LIST, 3);
+    {
+      xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->return_attribs.size()));
+      std::vector<std::string> ::const_iterator _iter96;
+      for (_iter96 = this->return_attribs.begin(); _iter96 != this->return_attribs.end(); ++_iter96)
+      {
+        xfer += oprot->writeString((*_iter96));
       }
       xfer += oprot->writeListEnd();
     }
@@ -1771,18 +1809,21 @@ void swap(VecSearchFilter &a, VecSearchFilter &b) {
   using ::std::swap;
   swap(a.attrib_filter, b.attrib_filter);
   swap(a.time_ranges, b.time_ranges);
+  swap(a.return_attribs, b.return_attribs);
   swap(a.__isset, b.__isset);
 }
 
-VecSearchFilter::VecSearchFilter(const VecSearchFilter& other91) {
-  attrib_filter = other91.attrib_filter;
-  time_ranges = other91.time_ranges;
-  __isset = other91.__isset;
+VecSearchFilter::VecSearchFilter(const VecSearchFilter& other97) {
+  attrib_filter = other97.attrib_filter;
+  time_ranges = other97.time_ranges;
+  return_attribs = other97.return_attribs;
+  __isset = other97.__isset;
 }
-VecSearchFilter& VecSearchFilter::operator=(const VecSearchFilter& other92) {
-  attrib_filter = other92.attrib_filter;
-  time_ranges = other92.time_ranges;
-  __isset = other92.__isset;
+VecSearchFilter& VecSearchFilter::operator=(const VecSearchFilter& other98) {
+  attrib_filter = other98.attrib_filter;
+  time_ranges = other98.time_ranges;
+  return_attribs = other98.return_attribs;
+  __isset = other98.__isset;
   return *this;
 }
 void VecSearchFilter::printTo(std::ostream& out) const {
@@ -1790,6 +1831,7 @@ void VecSearchFilter::printTo(std::ostream& out) const {
   out << "VecSearchFilter(";
   out << "attrib_filter="; (__isset.attrib_filter ? (out << to_string(attrib_filter)) : (out << "<null>"));
   out << ", " << "time_ranges="; (__isset.time_ranges ? (out << to_string(time_ranges)) : (out << "<null>"));
+  out << ", " << "return_attribs="; (__isset.return_attribs ? (out << to_string(return_attribs)) : (out << "<null>"));
   out << ")";
 }
 

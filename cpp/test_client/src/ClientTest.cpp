@@ -119,57 +119,6 @@ namespace {
     }
 }
 
-//void ClientTest::LoopTest() {
-//    server::TimeRecorder rc("LoopTest");
-//
-//    std::string address, protocol;
-//    int32_t port = 0;
-//    GetServerAddress(address, port, protocol);
-//    client::ClientSession session(address, port, protocol);
-//
-//    rc.Record("connection");
-//
-//    //add group
-//    VecGroup group;
-//    group.id = "loop_group";
-//    group.dimension = VEC_DIMENSION;
-//    group.index_type = 0;
-//    session.interface()->add_group(group);
-//    rc.Record("add group");
-//
-//    const int64_t batch = 10000;
-//    for(int64_t i = 0; i < 1000; i++) {
-//        {
-//            VecBinaryTensorList bin_tensor_list;
-//            BuildVectors(i * batch, (i + 1) * batch, nullptr, &bin_tensor_list);
-//            rc.Record("build batch no." + std::to_string(i));
-//
-//            std::vector<std::string> ids;
-//            session.interface()->add_binary_vector_batch(ids, group.id, bin_tensor_list);
-//            rc.Record("add batch no." + std::to_string(i));
-//        }
-//
-//        sleep(1);
-//        rc.Record("sleep 1 second");
-//
-//        VecTensor tensor;
-//        for (int32_t k = 0; k < VEC_DIMENSION; k++) {
-//            tensor.tensor.push_back((double) (k + i*666));
-//        }
-//
-//        //do search
-//        VecSearchResult res;
-//        VecSearchFilter filter;
-//        session.interface()->search_vector(res, group.id, 10, tensor, filter);
-//        rc.Record("search finish");
-//
-//        std::cout << "Search result: " << std::endl;
-//        for(VecSearchResultItem& item : res.result_list) {
-//            std::cout << "\t" << item.uid << std::endl;
-//        }
-//    }
-//}
-
 TEST(AddVector, CLIENT_TEST) {
     try {
         std::string address, protocol;
@@ -301,23 +250,22 @@ TEST(SearchVector, CLIENT_TEST) {
                 ASSERT_TRUE(!res.result_list[0].uid.empty());
             }
 
-//            //empty search
-//            date.day > 0 ? date.day -= 1 : date.day += 1;
-//            range.time_begin = date;
-//            range.time_end = date;
-//            time_ranges.clear();
-//            time_ranges.emplace_back(range);
-//            filter.__set_time_ranges(time_ranges);
-//            session.interface()->search_vector(res, GetGroupID(), top_k, tensor, filter);
-//
-//            ASSERT_EQ(res.result_list.size(), 0);
+            //empty search
+            date.day > 0 ? date.day -= 1 : date.day += 1;
+            range.time_begin = date;
+            range.time_end = date;
+            time_ranges.clear();
+            time_ranges.emplace_back(range);
+            filter.__set_time_ranges(time_ranges);
+            session.interface()->search_vector(res, GetGroupID(), TOP_K, tensor, filter);
+
+            ASSERT_EQ(res.result_list.size(), 0);
         }
 
         //search binary vector
         {
             const int32_t anchor_index = BATCH_COUNT + 200;
             const int32_t search_count = 10;
-            const int64_t top_k = 5;
             server::TimeRecorder rc("Search binary batch top_k");
             VecBinaryTensorList tensor_list;
             for(int32_t k = anchor_index; k < anchor_index + search_count; k++) {
@@ -333,7 +281,7 @@ TEST(SearchVector, CLIENT_TEST) {
 
             VecSearchResultList res;
             VecSearchFilter filter;
-            session.interface()->search_binary_vector_batch(res, GetGroupID(), top_k, tensor_list, filter);
+            session.interface()->search_binary_vector_batch(res, GetGroupID(), TOP_K, tensor_list, filter);
 
             std::cout << "Search binary batch result: " << std::endl;
             for(size_t i = 0 ; i < res.result_list.size(); i++) {
@@ -350,7 +298,7 @@ TEST(SearchVector, CLIENT_TEST) {
 
             ASSERT_EQ(res.result_list.size(), search_count);
             for(size_t i = 0 ; i < res.result_list.size(); i++) {
-                ASSERT_EQ(res.result_list[i].result_list.size(), (uint64_t) top_k);
+                ASSERT_EQ(res.result_list[i].result_list.size(), (uint64_t) TOP_K);
                 ASSERT_TRUE(!res.result_list[i].result_list.empty());
             }
         }
