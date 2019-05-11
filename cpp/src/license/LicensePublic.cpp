@@ -223,6 +223,78 @@ LifileLoad(const string& path,time_t& update_time,off_t& file_size,string& filem
         return  SERVER_SUCCESS;
     }
 
+ServerError
+LicenseLegality_check(const std::string& path)
+{
+    int deviceCount;
+    std::vector<std::string> uuids;
+    LicenseGetuuid(deviceCount,uuids);
+
+    std::vector<std::string> shas;
+    LicenseGetuuidsha(deviceCount,uuids,shas);
+
+
+    int deviceCountcheck;
+    std::map<int,std::string> uuidEncryption;
+    int64_t RemainingTime;
+    LiLoad(path,deviceCountcheck,uuidEncryption,RemainingTime);
+
+    if(deviceCount!=deviceCountcheck)
+    {
+        printf("deviceCount is wrong\n");
+        return  SERVER_UNEXPECTED_ERROR;
+    }
+    for(int i=0;i<deviceCount;i++)
+    {
+        if(uuidEncryption[i]!=shas[i])
+        {
+            printf("uuidsha %d is wrong\n",i);
+            return  SERVER_UNEXPECTED_ERROR;
+        }
+    }
+    if(RemainingTime <=0 )
+    {
+        printf("License expired\n");
+        return  SERVER_UNEXPECTED_ERROR;
+    }
+    return SERVER_SUCCESS;
+}
+
+ServerError
+LicenseIntegrity_check(const std::string& path,const std::string& path2)
+{
+    std::string filemd5;
+    LicenseGetfilemd5(path,filemd5);
+    time_t  update_time;
+    LicenseGetfiletime(path,update_time);
+    off_t file_size;
+    LicenseGetfilesize(path,file_size);
+
+    time_t update_timecheck;
+    std::string filemd5check;
+    off_t file_sizecheck;
+    LifileLoad(path2,update_timecheck,file_sizecheck,filemd5check);
+
+    if(filemd5!=filemd5check)
+    {
+        printf("This file has been modified\n");
+        return SERVER_UNEXPECTED_ERROR;
+    }
+    if(update_time!=update_timecheck)
+    {
+        printf("update_time is wrong\n");
+        return  SERVER_UNEXPECTED_ERROR;
+    }
+    if(file_size!=file_sizecheck)
+    {
+        printf("file_size is wrong\n");
+        return  SERVER_UNEXPECTED_ERROR;
+    }
+
+    return SERVER_SUCCESS;
+}
+
+
 
 void Alterfile(const string &path1, const string &path2 ,const boost::system::error_code &ec, boost::asio::deadline_timer* pt)
 {
@@ -233,8 +305,9 @@ void Alterfile(const string &path1, const string &path2 ,const boost::system::er
 
     std::cout<< "RemainingTime: " << RemainingTime <<std::endl;
 
-    if(RemainingTime==0)
+    if(RemainingTime<=0)
     {
+        std::cout<< "License expired" <<std::endl;
         exit(1);
     }
     RemainingTime--;

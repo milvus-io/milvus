@@ -34,12 +34,18 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-class BoostArchive;
-class Licensedata1;
+class
+BoostArchive;
+
+class
+Licensedata1;
 
 
-class Licensefiledata;
-class STLlicensefiledata;
+class
+Licensefiledata;
+
+class
+STLlicensefiledata;
 
 
 ServerError
@@ -57,11 +63,21 @@ LifileLoad(const std::string& path,time_t& update_time,off_t& file_size,std::str
 ServerError
 LiSave(const std::string& path,const int& deviceCount,const std::map<int,std::string>& uuidEncryption, const int64_t& RemainingTime);
 
-void Alterfile(const std::string &path1, const std::string &path2 ,const boost::system::error_code &ec, boost::asio::deadline_timer* pt);
-void Runtime(const std::string &path1, const std::string &path2 );
+ServerError
+LicenseIntegrity_check(const std::string& path,const std::string& path2);
 
-//    void Print(const boost::system::error_code &ec,boost::asio::deadline_timer* pt, int * pcount );
-//    void Run();
+ServerError
+LicenseLegality_check(const std::string& path);
+
+void
+Alterfile(const std::string &path1, const std::string &path2 ,const boost::system::error_code &ec, boost::asio::deadline_timer* pt);
+
+void
+Runtime(const std::string &path1, const std::string &path2 );
+
+
+
+
 
 }
 }
