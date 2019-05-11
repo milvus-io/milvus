@@ -7,7 +7,7 @@ include_directories(../../src)
 include_directories(/usr/include)
 
 include_directories(/usr/local/cuda/include)
-find_library(cuda_library cudart cublas HINTS /usr/local/cuda/lib64)
+link_directories(/usr/local/cuda/lib64)
 
 aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
