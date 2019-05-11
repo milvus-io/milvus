@@ -6,9 +6,12 @@
 
 #include "mutex"
 
+#ifdef GPU_VERSION
 #include <faiss/gpu/StandardGpuResources.h>
 #include "faiss/gpu/GpuIndexIVFFlat.h"
 #include "faiss/gpu/GpuAutoTune.h"
+#endif
+
 #include "faiss/IndexFlat.h"
 
 #include "IndexBuilder.h"
@@ -34,6 +37,7 @@ Index_ptr IndexBuilder::build_all(const long &nb,
                                   const long &nt,
                                   const float *xt) {
     std::shared_ptr<faiss::Index> host_index = nullptr;
+#ifdef GPU_VERSION
     {
         // TODO: list support index-type.
         faiss::Index *ori_index = faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str());
@@ -52,6 +56,17 @@ Index_ptr IndexBuilder::build_all(const long &nb,
         delete device_index;
         delete ori_index;
     }
+#else
+    {
+        faiss::Index *index = faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str());
+        if (!index->is_trained) {
+            nt == 0 || xt == nullptr ? index->train(nb, xb)
+                                     : index->train(nt, xt);
+        }
+        index->add_with_ids(nb, xb, ids);
+        host_index.reset(index);
+    }
+#endif
 
     return std::make_shared<Index>(host_index);
 }

@@ -13,8 +13,6 @@
 #include <fstream>
 
 #include "faiss/AutoTune.h"
-#include "faiss/AuxIndexStructures.h"
-#include "faiss/gpu/GpuAutoTune.h"
 #include "faiss/index_io.h"
 
 #include "Operand.h"
