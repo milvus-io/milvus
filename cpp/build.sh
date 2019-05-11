@@ -2,9 +2,10 @@
 
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="off"
+BUILD_GPU="OFF"
 INSTALL_PREFIX=$(pwd)/megasearch
 
-while getopts "p:t:uh" arg
+while getopts "p:t:uhg" arg
 do
         case $arg in
              t)
@@ -16,6 +17,9 @@ do
                 ;;
              p)
                 INSTALL_PREFIX=$OPTARG
+                ;;
+             g)
+                BUILD_GPU="ON"
                 ;;
              h) # help
                 echo "
@@ -51,6 +55,7 @@ CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
+-DGPU_VERSION=${BUILD_GPU} \
 $@ ../"
 echo ${CMAKE_CMD}
 

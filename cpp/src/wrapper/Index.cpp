@@ -4,7 +4,8 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifdef CUDA_VERSION
+// TODO: maybe support static search
+#ifdef GPU_VERSION
 #include "faiss/gpu/GpuAutoTune.h"
 #include "faiss/gpu/StandardGpuResources.h"
 #include "faiss/gpu/utils/DeviceUtils.h"
