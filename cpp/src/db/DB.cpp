@@ -19,7 +19,14 @@ DB::~DB() {}
 
 void DB::Open(const Options& options, DB** dbptr) {
     *dbptr = nullptr;
-    *dbptr = DBFactory::Build(options);
+
+#ifdef GPU_VERSION
+    std::string default_index_type{"Faiss,IVF"};
+#else
+    std::string default_index_type{"Faiss,IDMap"};
+#endif
+
+    *dbptr = DBFactory::Build(options, default_index_type);
     return;
 }
 
