@@ -33,9 +33,6 @@ template<typename EngineT>
 void MemVectors<EngineT>::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
     _pIdGenerator->getNextIDNumbers(n_, vector_ids_);
     pEE_->AddWithIds(n_, vectors_, vector_ids_.data());
-    for(auto i=0 ; i<n_; i++) {
-        vector_ids_.push_back(i);
-    }
 }
 
 template<typename EngineT>
