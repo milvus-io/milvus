@@ -147,15 +147,25 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
                            const int &k,
                            float *output_distence,
                            long *output_ids) -> void {
-            std::map<float, int> inverted_table;
+            std::map<float, std::vector<int>> inverted_table;
             for (int i = 0; i < input_data.size(); ++i) {
-                inverted_table[input_data[i]] = i;
+                if (inverted_table.count(input_data[i]) == 1) {
+                    auto& ori_vec = inverted_table[input_data[i]];
+                    ori_vec.push_back(i);
+                }
+                else {
+                    inverted_table[input_data[i]] = std::vector<int>{i};
+                }
             }
 
             int count = 0;
-            for (auto it = inverted_table.begin(); it != inverted_table.end() && count < k; ++it, ++count) {
-                output_distence[count] = it->first;
-                output_ids[count] = it->second;
+            for (auto &item : inverted_table){
+                if (count == k) break;
+                for (auto &id : item.second){
+                    if (++count == k) break;
+                    output_distence[count] = item.first;
+                    output_ids[count] = id;
+                }
             }
         };
         auto cluster_topk = [&]() -> void {
