@@ -24,21 +24,25 @@ TEST(LicenseTest, LICENSE_TEST) {
     {
         exit(1);
     }
-
-    int deviceCount=0;
-    std::vector<std::string> uuids;
-
-    err = server::LicenseGetuuid(deviceCount,uuids);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
-
-    std::vector<std::string> shas;
-    err = server::LicenseGetuuidsha(deviceCount,uuids,shas);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
-
-    err = server::LicenseSave(path1,deviceCount,shas);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
-
+    err = server::LicenseIntegrity_check(path1,path2);
+    if(err!=server::SERVER_SUCCESS)
+    {
+        std::cout << "Integrity_check is wrong " << std::endl;
+        exit(1);
+    }
+    err = server::LicenseLegality_check(path1);
+    if(err!=server::SERVER_SUCCESS)
+    {
+        std::cout << "Legality_check is wrong " << std::endl;
+        exit(1);
+    }
+    std::cout << " runing " << std::endl;
+    server::Runtime(path1,path2);
 }
+
+
+
+
 
 //TEST(LicenseTest, LICENSE_TEST) {
 //    std::string path1 = "/tmp/vecwise_engine.license";

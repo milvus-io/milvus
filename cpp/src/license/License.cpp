@@ -43,7 +43,7 @@ Licensefileread(const std::string& path)
     fileread.open(path,std::ios::in);
     if(!fileread)
     {
-        printf("Can't open file\n");
+        printf("NO License\n");
         return  SERVER_UNEXPECTED_ERROR;
     }
     fileread.close();

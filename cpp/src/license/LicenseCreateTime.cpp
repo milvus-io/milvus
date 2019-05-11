@@ -12,10 +12,14 @@
 
 using namespace zilliz::vecwise;
 
+
+
 //TEST(LicenseTest, LICENSE_TEST) {
 //
 //    std::string path1 = "/tmp/vecwise_engine.sha";
 //    std::string path2 = "/tmp/vecwise_engine.license";
+//    std::string path3 = "/tmp/vecwise_engine2.license";
+//
 //    std::cout << "This is create  licenseTime " << std::endl;
 //
 //    server::ServerError err;
@@ -39,13 +43,29 @@ using namespace zilliz::vecwise;
 //    err = server::LiSave(path2,deviceCount,uuidEncryption,RemainingTime);
 //    ASSERT_EQ(err, server::SERVER_SUCCESS);
 //
-//    int64_t  RemainingTimecheck;
-//    std::map<int,std::string> uuidEncryptioncheck;
-//    int deviceCountcheck;
-//    err = server::LiLoad(path2,deviceCountcheck,uuidEncryptioncheck,RemainingTimecheck);
+////    int64_t  RemainingTimecheck;
+////    std::map<int,std::string> uuidEncryptioncheck;
+////    int deviceCountcheck;
+////    err = server::LiLoad(path2,deviceCountcheck,uuidEncryptioncheck,RemainingTimecheck);
+////
+////    printf("\n  deviceCountcheck  = %d\n",deviceCountcheck);
+////    std::cout<< "RemainingTimecheck: "  << RemainingTimecheck<< std::endl;
 //
-//    printf("\n  deviceCountcheck  = %d\n",deviceCountcheck);
-//    std::cout<< "RemainingTimecheck: "  << RemainingTimecheck<< std::endl;
+//    time_t update_time;
+//    off_t file_size;
+//    std::string filemd5;
+//
+//    server::LicenseGetfiletime(path2,update_time);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//    server::LicenseGetfilesize(path2,file_size);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//    server::LicenseGetfilemd5(path2,filemd5);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//
+//
+//    err = server::LifileSave(path3,update_time,file_size,filemd5);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//
 //    std::cout<< "success"  << std::endl;
 //
 //}
