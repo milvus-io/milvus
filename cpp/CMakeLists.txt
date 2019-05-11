@@ -69,7 +69,7 @@ link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib)
 #                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 add_subdirectory(src)
-#add_subdirectory(test_client)
+add_subdirectory(test_client)
 
 if (BUILD_UNIT_TEST)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
