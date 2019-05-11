@@ -65,7 +65,6 @@ set(server_libs
         libyaml-cpp.a
         libboost_system.a
         libboost_filesystem.a
-        pthread
         libsnappy.a
         libbz2.a
         libz.a
