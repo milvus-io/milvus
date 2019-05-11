@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include "wrapper/Topk.h"
+#include "wrapper/gpu/Topk.h"
 
 
 using namespace zilliz::vecwise::engine;

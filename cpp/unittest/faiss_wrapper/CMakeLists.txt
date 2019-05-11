@@ -48,7 +48,7 @@ target_link_libraries(wrapper_test ${unittest_libs} ${wrapper_libs})
 
 set(topk_test_src
         topk_test.cpp
-        ${CMAKE_SOURCE_DIR}/src/wrapper/Topk.cu)
+        ${CMAKE_SOURCE_DIR}/src/wrapper/gpu/Topk.cu)
 
-cuda_add_executable(topk_test ${topk_test_src})
-target_link_libraries(topk_test ${unittest_libs} ${faiss_libs})
+#cuda_add_executable(topk_test ${topk_test_src})
+#target_link_libraries(topk_test ${unittest_libs} ${faiss_libs})

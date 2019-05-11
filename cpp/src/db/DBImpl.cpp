@@ -11,7 +11,6 @@
 #include <thread>
 #include <iostream>
 #include <cstring>
-#include <wrapper/Topk.h>
 #include <easylogging++.h>
 #include <cache/CpuCacheMgr.h>
 
@@ -142,12 +141,27 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
             }
         };
 
+        auto topk_cpu = [](const std::vector<float> &input_data,
+                           const int &k,
+                           float *output_distence,
+                           long *output_ids) -> void {
+            std::map<float, int> inverted_table;
+            for (int i = 0; i < input_data.size(); ++i) {
+                inverted_table[input_data[i]] = i;
+            }
+
+            int count = 0;
+            for (auto it = inverted_table.begin(); it != inverted_table.end() && count < k; ++it, ++count) {
+                output_distence[count] = it->first;
+                output_ids[count] = it->second;
+            }
+        };
         auto cluster_topk = [&]() -> void {
             QueryResult res;
             for (auto &result_pair : batchresult) {
                 auto &dis = result_pair.second;
                 auto &nns = result_pair.first;
-                TopK(dis.data(), dis.size(), k, output_distence, output_ids);
+                topk_cpu(dis, k, output_distence, output_ids);
                 for (int i = 0; i < k; ++i) {
                     res.emplace_back(nns[output_ids[i]]); // mapping
                 }

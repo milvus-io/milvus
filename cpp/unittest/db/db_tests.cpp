@@ -74,7 +74,7 @@ TEST_F(DBTest, DB_TEST) {
                 for (auto result : results[k]) {
                     ss << result << " ";
                 }
-                LOG(DEBUG) << ss.str();
+                /* LOG(DEBUG) << ss.str(); */
             }
             ASSERT_TRUE(count >= prev_count);
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -86,6 +86,7 @@ TEST_F(DBTest, DB_TEST) {
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
             db_->add_vectors(group_name, qb, qxb, target_ids);
+            ASSERT_EQ(target_ids.size(), qb);
         } else {
             db_->add_vectors(group_name, nb, xb, vector_ids);
         }
