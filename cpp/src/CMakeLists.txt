@@ -12,7 +12,8 @@ aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
 
 set(license_check_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/license/License.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/license/LicenseLibrary.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/license/LicenseLibrary.h
         )
 
 set(service_files
@@ -27,6 +28,12 @@ set(vecwise_engine_src
         ${db_files}
         ${wrapper_files}
         )
+
+set(license_generator_src
+        ${CMAKE_CURRENT_SOURCE_DIR}/license/LicenseGenerator.cpp)
+
+set(get_sys_info_src
+        ${CMAKE_CURRENT_SOURCE_DIR}/license/GetSysInfo.cpp)
 
 include_directories(/usr/include)
 include_directories(/usr/local/cuda/include)
@@ -65,7 +72,6 @@ add_executable(vecwise_server
         ${server_files}
         ${utils_files}
         ${service_files}
-        ${license_check_files}
         ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc
         )
 
@@ -87,9 +93,10 @@ set(server_libs
 
 target_link_libraries(vecwise_server ${server_libs})
 
-set(license_generator_src
-        ${CMAKE_CURRENT_SOURCE_DIR}/license/LicenseGenerator.cpp)
-
 add_executable(license_generator ${license_generator_src})
+<<<<<<< b84d32553f910adf71e4ee069889e1d9fdd8a09f
 
 install(TARGETS vecwise_server DESTINATION bin)
+=======
+add_executable(get_sys_info ${get_sys_info_src})
+>>>>>>> Refactor code
