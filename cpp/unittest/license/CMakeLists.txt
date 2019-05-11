@@ -15,16 +15,20 @@ link_directories(/usr/local/cuda)
 link_directories(/usr/local/cuda/lib64)
 link_directories(/usr/lib/x86_64-linux-gnu)
 link_directories(/usr/lib/nvidia-415)
+link_directories(/usr/local/cuda/targets/x86_64-linux/lib/stubs/)
 
 set(require_files
-        ../../src/license/License.cpp
-        ../../src/license/LicensePublic.cpp
-        ../../src/license/LicenseCreateuuidshafile.cpp
+        ../../src/license/LicenseLibrary.cpp
+#        ../../src/license/License.cpp
+#        ../../src/license/LicensePublic.cpp
+#        ../../src/license/LicenseCreateuuidshafile.cpp
     )
 
 set(db_test_src
-    ${require_files}
-    license_tests.cpp)
+
+#    license_tests.cpp
+    license_library_tests.cpp
+        ${require_files})
 
 cuda_add_executable(license_test ${db_test_src})
 
