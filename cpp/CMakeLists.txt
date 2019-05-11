@@ -79,8 +79,8 @@ add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 
 #install
 install(FILES
-        start_server.sh
-        stop_server.sh
+        scripts/start_server.sh
+        scripts/stop_server.sh
         DESTINATION
         scripts)
 install(FILES
