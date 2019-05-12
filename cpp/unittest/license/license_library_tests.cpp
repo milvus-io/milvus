@@ -10,7 +10,7 @@
 #include "utils/Error.h"
 
 #include <gtest/gtest.h>
-
+#include <iostream>
 
 using namespace zilliz::vecwise;
 
@@ -251,7 +251,7 @@ TEST(LicenseLibraryTest, GET_LICENSE_FILE) {
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
     // 5. Enter time
-    int64_t remaining_hour = 5;
+    int64_t remaining_hour = 24*7 ;
     std::cout << "Please enter the authorization time (hours)" << std::endl;
 //    std::cin >> remaining_hour;
     err = server::LicenseLibrary::LicenseFileSerialization(license_file_path,
@@ -285,10 +285,4 @@ TEST(LicenseLibraryTest, GET_SECRET_FILE) {
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
     std::cout << "Generate Secret File Success" << std::endl;
-}
-
-TEST(LicenseLibraryTest, CIN_TEST) {
-    int a;
-    std::cin >> a;
-    std::cout << 2 * a << std::endl;
 }
