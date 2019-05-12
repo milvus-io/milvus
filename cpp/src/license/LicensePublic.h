@@ -30,53 +30,57 @@
 #include <openssl/md5.h>
 #include <openssl/sha.h>
 
+
 namespace zilliz {
 namespace vecwise {
 namespace server {
 
 class
-BoostArchive;
+    BoostArchive;
 
 class
-Licensedata1;
+    Licensedata1;
 
 
 class
-Licensefiledata;
+    Licensefiledata;
 
 class
-STLlicensefiledata;
+    STLlicensefiledata;
 
 
 ServerError
-LiSave(const std::string& path,const int& deviceCount,const std::map<int,std::string>& uuidEncryption);
+LiSave(const std::string &path, const int &deviceCount, const std::map<int, std::string> &uuidEncryption);
 
 ServerError
-LiLoad(const std::string& path,int& deviceCount,std::map<int,std::string>& uuidEncryption,int64_t& RemainingTime);
+LiLoad(const std::string &path, int &deviceCount, std::map<int, std::string> &uuidEncryption, int64_t &RemainingTime);
 
 ServerError
-LifileSave(const std::string& path,const time_t& update_time,const off_t& file_size,const std::string& filemd5);
+LifileSave(const std::string &path, const time_t &update_time, const off_t &file_size, const std::string &filemd5);
 
 ServerError
-LifileLoad(const std::string& path,time_t& update_time,off_t& file_size,std::string& filemd5);
+LifileLoad(const std::string &path, time_t &update_time, off_t &file_size, std::string &filemd5);
 
 ServerError
-LiSave(const std::string& path,const int& deviceCount,const std::map<int,std::string>& uuidEncryption, const int64_t& RemainingTime);
+LiSave(const std::string &path,
+       const int &deviceCount,
+       const std::map<int, std::string> &uuidEncryption,
+       const int64_t &RemainingTime);
 
 ServerError
-LicenseIntegrity_check(const std::string& path,const std::string& path2);
+LicenseIntegrity_check(const std::string &path, const std::string &path2);
 
 ServerError
-LicenseLegality_check(const std::string& path);
+LicenseLegality_check(const std::string &path);
 
 void
-Alterfile(const std::string &path1, const std::string &path2 ,const boost::system::error_code &ec, boost::asio::deadline_timer* pt);
+Alterfile(const std::string &path1,
+          const std::string &path2,
+          const boost::system::error_code &ec,
+          boost::asio::deadline_timer *pt);
 
 void
-Runtime(const std::string &path1, const std::string &path2 );
-
-
-
+Runtime(const std::string &path1, const std::string &path2);
 
 
 }

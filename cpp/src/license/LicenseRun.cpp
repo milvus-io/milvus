@@ -8,6 +8,8 @@
 #include "utils/Error.h"
 #include "license/License.h"
 #include "license/LicensePublic.h"
+
+
 using namespace zilliz::vecwise;
 
 //TEST(LicenseTest, LICENSE_TEST) {
