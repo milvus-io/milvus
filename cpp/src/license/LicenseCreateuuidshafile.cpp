@@ -6,6 +6,8 @@
 
 #include "utils/Error.h"
 #include "license/License.h"
+
+
 using namespace zilliz::vecwise;
 
 //

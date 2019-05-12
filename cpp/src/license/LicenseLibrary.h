@@ -2,8 +2,13 @@
 
 #include "LicenseFile.h"
 #include "SecretFile.h"
+#include "GPUInfoFile.h"
 
 #include "utils/Error.h"
+
+#include <boost/asio.hpp>
+#include <boost/thread.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 #include <vector>
 #include <map>
@@ -15,6 +20,8 @@ namespace server {
 
 class LicenseLibrary {
  public:
+    static ServerError
+    OpenFile(const std::string &path);
     // Part 1: Get GPU Info
     static ServerError
     GetDeviceCount(int &device_count);
@@ -60,6 +67,32 @@ class LicenseLibrary {
     GetFileMD5(const std::string &path, std::string &filemd5);
 
     // Part 4: GPU Info File Serialization/Deserialization
+    static ServerError
+    GPUinfoFileSerialization(const std::string &path,
+                             int device_count,
+                             const std::map<int, std::string> &uuid_encrption_map);
+    static ServerError
+    GPUinfoFileDeserialization(const std::string &path,
+                               int &device_count,
+                               std::map<int, std::string> &uuid_encrption_map);
+
+    // Part 5: Integrity check and Legality check
+    static ServerError
+    IntegrityCheck(const std::string &license_file_path, const std::string &secret_file_path);
+
+    static ServerError
+    LegalityCheck(const std::string &license_file_path);
+
+    // Part 6: Timer
+    static ServerError
+    AlterFile(const std::string &license_file_path,
+              const std::string &secret_file_path,
+              const boost::system::error_code &ec,
+              boost::asio::deadline_timer *pt);
+
+    static ServerError
+    StartCountingDown(const std::string &license_file_path, const std::string &secret_file_path);
+
 
  private:
     static constexpr int sha256_length_ = 32;
