@@ -5,6 +5,7 @@ INSTALL_PREFIX=$(pwd)/build
 cd -
 
 mkdir -p INSTALL_PREFIX
+autoreconf -f -i
 ./configure --prefix=${INSTALL_PREFIX} CFLAGS="-g -O0" CXXFLAGS="-g -O0"
  
 make -j
