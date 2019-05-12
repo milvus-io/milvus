@@ -20,8 +20,10 @@ namespace server {
 
 class LicenseLibrary {
  public:
-    static ServerError
-    OpenFile(const std::string &path);
+    // Part 0: File check
+    static bool
+    IsFileExistent(const std::string& path);
+
     // Part 1: Get GPU Info
     static ServerError
     GetDeviceCount(int &device_count);

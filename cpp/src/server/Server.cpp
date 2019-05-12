@@ -9,7 +9,7 @@
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
-#include "license/License.h"
+#include "license/LicenseCheck.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>

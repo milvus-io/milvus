@@ -5,7 +5,7 @@
 #include <iostream>
 
 #include "utils/Error.h"
-#include "license/License.h"
+#include "license/LicenseCheck.h"
 
 
 using namespace zilliz::vecwise;

@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
 #include <license/LicenseLibrary.h>
-#include "license/License.h"
+#include "license/LicenseCheck.h"
 #include "license/LicensePublic.h"
 #include "utils/Error.h"
 

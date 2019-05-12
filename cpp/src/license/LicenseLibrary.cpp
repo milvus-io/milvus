@@ -15,7 +15,9 @@
 #include <boost/archive/binary_iarchive.hpp>
 //#include <boost/foreach.hpp>
 //#include <boost/serialization/vector.hpp>
+#include <boost/filesystem/path.hpp>
 #include <boost/serialization/map.hpp>
+#include <boost/filesystem/operations.hpp>
 
 
 namespace zilliz {
@@ -24,17 +26,22 @@ namespace server {
 
 constexpr int LicenseLibrary::sha256_length_;
 
-ServerError
-LicenseLibrary::OpenFile(const std::string &path) {
-    std::ifstream fileread;
-    fileread.open(path, std::ios::in);
-    if (!fileread) {
-        std::cout << path << "  does not exist" << std::endl;
-        return SERVER_UNEXPECTED_ERROR;
+bool
+LicenseLibrary::IsFileExistent(const std::string& path) {
+
+    boost::system::error_code error;
+    auto file_status = boost::filesystem::status(path, error);
+    if (error) {
+        return false;
     }
-    fileread.close();
-    return SERVER_SUCCESS;
+
+    if (!boost::filesystem::exists(file_status)) {
+        return false;
+    }
+
+    return !boost::filesystem::is_directory(file_status);
 }
+
 
 ServerError
 LicenseLibrary::GetDeviceCount(int &device_count) {
@@ -151,7 +158,8 @@ LicenseLibrary::LicenseFileDeserialization(const std::string &path,
                                            int &device_count,
                                            std::map<int, std::string> &uuid_encrption_map,
                                            int64_t &remaining_hour) {
-    OpenFile(path);
+    if(!IsFileExistent(path)) return SERVER_LICENSE_FILE_NOT_EXIST;
+
     std::ifstream file(path);
     boost::archive::binary_iarchive ia(file);
     ia.register_type<LicenseFile>();
@@ -190,7 +198,8 @@ LicenseLibrary::SecretFileDeserialization(const std::string &path,
                                           time_t &update_time,
                                           off_t &file_size,
                                           std::string &file_md5) {
-    OpenFile(path);
+    if(!IsFileExistent(path)) return SERVER_LICENSE_FILE_NOT_EXIST;
+
     std::ifstream file(path);
     boost::archive::binary_iarchive ia(file);
     ia.register_type<SecretFile>();
@@ -208,7 +217,8 @@ LicenseLibrary::SecretFileDeserialization(const std::string &path,
 ServerError
 LicenseLibrary::GetFileUpdateTimeAndSize(const std::string &path, time_t &update_time, off_t &file_size) {
 
-    OpenFile(path);
+    if(!IsFileExistent(path)) return SERVER_LICENSE_FILE_NOT_EXIST;
+
     struct stat buf;
     int err_no = stat(path.c_str(), &buf);
     if (err_no != 0) {
@@ -225,7 +235,8 @@ LicenseLibrary::GetFileUpdateTimeAndSize(const std::string &path, time_t &update
 ServerError
 LicenseLibrary::GetFileMD5(const std::string &path, std::string &filemd5) {
 
-    OpenFile(path);
+    if(!IsFileExistent(path)) return SERVER_LICENSE_FILE_NOT_EXIST;
+
     filemd5.clear();
 
     std::ifstream file(path.c_str(), std::ifstream::binary);
@@ -276,7 +287,8 @@ ServerError
 LicenseLibrary::GPUinfoFileDeserialization(const std::string &path,
                                            int &device_count,
                                            std::map<int, std::string> &uuid_encrption_map) {
-    OpenFile(path);
+    if(!IsFileExistent(path)) return SERVER_LICENSE_FILE_NOT_EXIST;
+
     std::ifstream file(path);
     boost::archive::binary_iarchive ia(file);
     ia.register_type<GPUInfoFile>();
@@ -317,7 +329,7 @@ LicenseLibrary::IntegrityCheck(const std::string &license_file_path, const std::
         printf("file_size is wrong\n");
         return SERVER_UNEXPECTED_ERROR;
     }
-    std::cout << "Integrity Check Success" << std::endl;
+
     return SERVER_SUCCESS;
 }
 
@@ -390,8 +402,9 @@ LicenseLibrary::AlterFile(const std::string &license_file_path,
 ServerError
 LicenseLibrary::StartCountingDown(const std::string &license_file_path, const std::string &secret_file_path) {
 
-    OpenFile(license_file_path);
-    OpenFile(secret_file_path);
+    if(!IsFileExistent(license_file_path)) return SERVER_LICENSE_FILE_NOT_EXIST;
+    if(!IsFileExistent(secret_file_path)) return SERVER_LICENSE_FILE_NOT_EXIST;
+
     boost::asio::io_service io;
     boost::asio::deadline_timer t(io, boost::posix_time::hours(1));
     t.async_wait(boost::bind(AlterFile, license_file_path, secret_file_path, boost::asio::placeholders::error, &t));
