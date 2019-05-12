@@ -3,7 +3,7 @@
 //
 
 #include "LicensePublic.h"
-#include "license/License.h"
+#include "license/LicenseCheck.h"
 //#include "BoostArchive.h"
 #define  RTime 100
 

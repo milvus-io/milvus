@@ -14,6 +14,18 @@
 
 using namespace zilliz::vecwise;
 
+TEST(LicenseLibraryTest, FILE_EXISTENT_TEST) {
+
+    std::string hosts_file = "/etc/hosts";
+    ASSERT_EQ(server::LicenseLibrary::IsFileExistent(hosts_file), true);
+
+    std::string no_exist_file = "/temp/asdaasd";
+    ASSERT_EQ(server::LicenseLibrary::IsFileExistent(no_exist_file), false);
+
+    std::string directory = "/tmp";
+    ASSERT_EQ(server::LicenseLibrary::IsFileExistent(directory), false);
+}
+
 TEST(LicenseLibraryTest, GPU_INFO_TEST) {
 
     int device_count = 0;

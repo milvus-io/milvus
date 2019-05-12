@@ -7,7 +7,7 @@
 #include <map>
 
 #include "utils/Error.h"
-#include "license/License.h"
+#include "license/LicenseCheck.h"
 #include "license/LicensePublic.h"
 
 using namespace zilliz::vecwise;
