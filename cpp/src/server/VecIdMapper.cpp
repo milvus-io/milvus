@@ -13,6 +13,8 @@
 #include "rocksdb/slice.h"
 #include "rocksdb/options.h"
 
+#include <exception>
+
 namespace zilliz {
 namespace vecwise {
 namespace server {
@@ -36,26 +38,33 @@ SimpleIdMapper::~SimpleIdMapper() {
 
 }
 
-ServerError SimpleIdMapper::Put(const std::string& nid, const std::string& sid) {
-    ids_[nid] = sid;
+//not thread-safe
+ServerError SimpleIdMapper::Put(const std::string& nid, const std::string& sid, const std::string& group) {
+    ID_MAPPING& mapping = id_groups_[group];
+    mapping[nid] = sid;
     return SERVER_SUCCESS;
 }
 
-ServerError SimpleIdMapper::Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid) {
+//not thread-safe
+ServerError SimpleIdMapper::Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group) {
     if(nid.size() != sid.size()) {
         return SERVER_INVALID_ARGUMENT;
     }
 
+    ID_MAPPING& mapping = id_groups_[group];
     for(size_t i = 0; i < nid.size(); i++) {
-        ids_[nid[i]] = sid[i];
+        mapping[nid[i]] = sid[i];
     }
 
     return SERVER_SUCCESS;
 }
 
-ServerError SimpleIdMapper::Get(const std::string& nid, std::string& sid) const {
-    auto iter = ids_.find(nid);
-    if(iter == ids_.end()) {
+//not thread-safe
+ServerError SimpleIdMapper::Get(const std::string& nid, std::string& sid, const std::string& group) const {
+    ID_MAPPING& mapping = id_groups_[group];
+
+    auto iter = mapping.find(nid);
+    if(iter == mapping.end()) {
         return SERVER_INVALID_ARGUMENT;
     }
 
@@ -64,13 +73,16 @@ ServerError SimpleIdMapper::Get(const std::string& nid, std::string& sid) const 
     return SERVER_SUCCESS;
 }
 
-ServerError SimpleIdMapper::Get(const std::vector<std::string>& nid, std::vector<std::string>& sid) const {
+//not thread-safe
+ServerError SimpleIdMapper::Get(const std::vector<std::string>& nid, std::vector<std::string>& sid, const std::string& group) const {
     sid.clear();
+
+    ID_MAPPING& mapping = id_groups_[group];
 
     ServerError err = SERVER_SUCCESS;
     for(size_t i = 0; i < nid.size(); i++) {
-        auto iter = ids_.find(nid[i]);
-        if(iter == ids_.end()) {
+        auto iter = mapping.find(nid[i]);
+        if(iter == mapping.end()) {
             sid.push_back("");
             SERVER_LOG_ERROR << "ID mapper failed to find id: " << nid[i];
             err = SERVER_INVALID_ARGUMENT;
@@ -83,8 +95,10 @@ ServerError SimpleIdMapper::Get(const std::vector<std::string>& nid, std::vector
     return err;
 }
 
-ServerError SimpleIdMapper::Delete(const std::string& nid) {
-    ids_.erase(nid);
+//not thread-safe
+ServerError SimpleIdMapper::Delete(const std::string& nid, const std::string& group) {
+    ID_MAPPING& mapping = id_groups_[group];
+    mapping.erase(nid);
     return SERVER_SUCCESS;
 }
 
@@ -104,11 +118,42 @@ RocksIdMapper::RocksIdMapper() {
     options.create_if_missing = true;
     options.max_open_files = config.GetInt32Value(CONFIG_DB_IDMAPPER_MAX_FILE, 128);
 
+    //load column families
+    std::vector<std::string> column_names;
+    rocksdb::Status s = rocksdb::DB::ListColumnFamilies(options, db_path, &column_names);
+    if (!s.ok()) {
+        SERVER_LOG_ERROR << "ID mapper failed to initialize:" << s.ToString();
+    }
+
+    std::vector<rocksdb::ColumnFamilyDescriptor> column_families;
+    for(auto& column_name : column_names) {
+        rocksdb::ColumnFamilyDescriptor desc;
+        desc.name = column_name;
+        column_families.emplace_back(desc);
+    }
+
     // open DB
-    rocksdb::Status s = rocksdb::DB::Open(options, db_path, &db_);
+    std::vector<rocksdb::ColumnFamilyHandle*> column_handles;
+    s = rocksdb::DB::Open(options, db_path, column_families, &column_handles, &db_);
     if(!s.ok()) {
         SERVER_LOG_ERROR << "ID mapper failed to initialize:" << s.ToString();
         db_ = nullptr;
+    }
+
+    try {
+        rocksdb::ColumnFamilyHandle *cf;
+        s = db_->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), "222", &cf);
+        if (!s.ok()) {
+            SERVER_LOG_ERROR << "ID mapper failed to initialize:" << s.ToString();
+        }
+
+        std::vector<std::string> column_families;
+        s = db_->ListColumnFamilies(options, db_path, &column_families);
+        if (!s.ok()) {
+            SERVER_LOG_ERROR << "ID mapper failed to initialize:" << s.ToString();
+        }
+    } catch(std::exception& ex) {
+        std::cout << ex.what() << std::endl;
     }
 }
 RocksIdMapper::~RocksIdMapper() {
@@ -118,7 +163,7 @@ RocksIdMapper::~RocksIdMapper() {
     }
 }
 
-ServerError RocksIdMapper::Put(const std::string& nid, const std::string& sid) {
+ServerError RocksIdMapper::Put(const std::string& nid, const std::string& sid, const std::string& group) {
     if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }
@@ -134,7 +179,7 @@ ServerError RocksIdMapper::Put(const std::string& nid, const std::string& sid) {
     return SERVER_SUCCESS;
 }
 
-ServerError RocksIdMapper::Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid) {
+ServerError RocksIdMapper::Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group) {
     if(nid.size() != sid.size()) {
         return SERVER_INVALID_ARGUMENT;
     }
@@ -150,7 +195,7 @@ ServerError RocksIdMapper::Put(const std::vector<std::string>& nid, const std::v
     return err;
 }
 
-ServerError RocksIdMapper::Get(const std::string& nid, std::string& sid) const {
+ServerError RocksIdMapper::Get(const std::string& nid, std::string& sid, const std::string& group) const {
     if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }
@@ -165,7 +210,7 @@ ServerError RocksIdMapper::Get(const std::string& nid, std::string& sid) const {
     return SERVER_SUCCESS;
 }
 
-ServerError RocksIdMapper::Get(const std::vector<std::string>& nid, std::vector<std::string>& sid) const {
+ServerError RocksIdMapper::Get(const std::vector<std::string>& nid, std::vector<std::string>& sid, const std::string& group) const {
     sid.clear();
 
     ServerError err = SERVER_SUCCESS;
@@ -185,7 +230,7 @@ ServerError RocksIdMapper::Get(const std::vector<std::string>& nid, std::vector<
     return err;
 }
 
-ServerError RocksIdMapper::Delete(const std::string& nid) {
+ServerError RocksIdMapper::Delete(const std::string& nid, const std::string& group) {
     if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }

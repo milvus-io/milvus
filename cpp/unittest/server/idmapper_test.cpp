@@ -44,9 +44,13 @@ TEST(IdMapperTest, IDMAPPER_TEST) {
     nid.clear();
     sid.clear();
     const int64_t count = 1000000;
-    for(int64_t i = 0; i < count; i++) {
-        nid.push_back(std::to_string(i+100000));
-        sid.push_back("val_" + std::to_string(i));
+    {
+        server::TimeRecorder rc("prepare id data");
+        for (int64_t i = 0; i < count; i++) {
+            nid.push_back(std::to_string(i + 100000));
+            sid.push_back("val_" + std::to_string(i));
+        }
+        rc.Record("done!");
     }
 
     {
