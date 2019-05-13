@@ -126,6 +126,23 @@ TEST(AddVector, CLIENT_TEST) {
         GetServerAddress(address, port, protocol);
         client::ClientSession session(address, port, protocol);
 
+        //verify get invalid group
+        try {
+            std::string id;
+            zilliz::VecTensor tensor;
+            session.interface()->add_vector(id, GetGroupID(), tensor);
+        } catch (zilliz::VecException& ex) {
+            ASSERT_EQ(ex.code, zilliz::VecErrCode::GROUP_NOT_EXISTS);
+        }
+
+        try {
+            VecGroup temp_group;
+            session.interface()->get_group(temp_group, GetGroupID());
+            ASSERT_TRUE(temp_group.id.empty());
+        } catch (zilliz::VecException& ex) {
+            ASSERT_EQ(ex.code, zilliz::VecErrCode::GROUP_NOT_EXISTS);
+        }
+
         //add group
         VecGroup group;
         group.id = GetGroupID();
