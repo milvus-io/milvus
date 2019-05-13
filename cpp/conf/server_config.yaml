@@ -1,11 +1,11 @@
 server_config:
-  address: 0.0.0.0
+  address: 127.0.0.1
   port: 33001
   transfer_protocol: json   #optional: binary, compact, json, debug
   server_mode: thread_pool    #optional: simple, thread_pool
 
 db_config:
-  db_path: /var/vecwise
+  db_path: /tmp/vecwise
   db_backend_url: http://127.0.0.1
   db_flush_interval: 5   #unit: second
   idmapper_max_open_file: 128
@@ -13,7 +13,7 @@ db_config:
 log_config:
   global:
     format: "%datetime | %level | %logger | %msg"
-    filename: "/var/vecwise/logs/vecwise_engine-%datetime{%h:%m}-global.log"
+    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-global.log"
     enabled: true
     to_file: true
     to_standard_output: true
@@ -21,22 +21,22 @@ log_config:
     performance_tracking: false
     max_log_file_size: 2097152  # throw log files away after 2mb
   debug:
-    filename: "/var/vecwise/logs/vecwise_engine-%datetime{%h:%m}-debug.log"
+    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-debug.log"
     enabled: true
   warning:
-    filename: "/var/vecwise/logs/vecwise_engine-%datetime{%h:%m}-warning.log"
+    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-warning.log"
   trace:
-    filename: "/var/vecwise/logs/vecwise_engine-%datetime{%h:%m}-trace.log"
+    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-trace.log"
   verbose:
     format: "%datetime{%d/%m/%y} | %level-%vlevel | %msg"
     to_file: false
     to_standard_output: true
   error:
     enabled: false
-    filename: "/var/vecwise/logs/vecwise_engine-%datetime{%h:%m}-error.log"
+    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-error.log"
   fatal:
     enabled: false
-    filename: "/var/vecwise/logs/vecwise_engine-%datetime{%h:%m}-fatal.log"
+    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-fatal.log"
 
 cache_config:
     cpu_cache_capacity: 16   # unit: GB
