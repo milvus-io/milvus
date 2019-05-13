@@ -38,6 +38,62 @@ namespace {
     void TimeRecord(const std::string& func_name) {
 
     }
+
+    const std::map<ServerError, zilliz::VecErrCode::type>& ErrorMap() {
+        static const std::map<ServerError, zilliz::VecErrCode::type> code_map = {
+            {SERVER_UNEXPECTED_ERROR, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_NULL_POINTER, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_INVALID_ARGUMENT, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_FILE_NOT_FOUND, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_NOT_IMPLEMENT, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_BLOCKING_QUEUE_EMPTY, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_GROUP_NOT_EXIST, zilliz::VecErrCode::GROUP_NOT_EXISTS},
+            {SERVER_INVALID_TIME_RANGE, zilliz::VecErrCode::ILLEGAL_TIME_RANGE},
+            {SERVER_INVALID_VECTOR_DIMENSION, zilliz::VecErrCode::ILLEGAL_VECTOR_DIMENSION},
+        };
+
+        return code_map;
+    }
+
+    const std::map<ServerError, std::string>& ErrorMessage() {
+        static const std::map<ServerError, std::string> msg_map = {
+            {SERVER_UNEXPECTED_ERROR, "unexpected error occurs"},
+            {SERVER_NULL_POINTER, "null pointer error"},
+            {SERVER_INVALID_ARGUMENT, "invalid argument"},
+            {SERVER_FILE_NOT_FOUND, "file not found"},
+            {SERVER_NOT_IMPLEMENT, "not implemented"},
+            {SERVER_BLOCKING_QUEUE_EMPTY, "queue empty"},
+            {SERVER_GROUP_NOT_EXIST, "group not exist"},
+            {SERVER_INVALID_TIME_RANGE, "invalid time range"},
+            {SERVER_INVALID_VECTOR_DIMENSION, "invalid vector dimension"},
+        };
+
+        return msg_map;
+    }
+
+    void ExecTask(BaseTaskPtr& task_ptr) {
+        if(task_ptr == nullptr) {
+            return;
+        }
+
+        VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
+        scheduler.ExecuteTask(task_ptr);
+
+        if(!task_ptr->IsAsync()) {
+            task_ptr->WaitToFinish();
+            ServerError err = task_ptr->ErrorCode();
+            if (err != SERVER_SUCCESS) {
+                zilliz::VecException ex;
+                ex.__set_code(ErrorMap().at(err));
+                std::string msg = task_ptr->ErrorMsg();
+                if(msg.empty()){
+                    msg = ErrorMessage().at(err);
+                }
+                ex.__set_reason(msg);
+                throw ex;
+            }
+        }
+    }
 }
 
 void
@@ -47,8 +103,7 @@ VecServiceHandler::add_group(const VecGroup &group) {
                         << ", group.index_type = " << group.index_type;
 
     BaseTaskPtr task_ptr = AddGroupTask::Create(group.dimension, group.id);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 }
 
 void
@@ -58,8 +113,7 @@ VecServiceHandler::get_group(VecGroup &_return, const std::string &group_id) {
 
     _return.id = group_id;
     BaseTaskPtr task_ptr = GetGroupTask::Create(group_id, _return.dimension);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 }
 
 void
@@ -68,8 +122,7 @@ VecServiceHandler::del_group(const std::string &group_id) {
     SERVER_LOG_TRACE << "group_id = " << group_id;
 
     BaseTaskPtr task_ptr = DeleteGroupTask::Create(group_id);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 }
 
 
@@ -79,8 +132,7 @@ VecServiceHandler::add_vector(std::string& _return, const std::string &group_id,
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size();
 
     BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor, _return);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 }
 
 void
@@ -92,8 +144,7 @@ VecServiceHandler::add_vector_batch(std::vector<std::string> & _return,
                      << tensor_list.tensor_list.size();
 
     BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list, _return);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 }
 
 void
@@ -104,8 +155,7 @@ VecServiceHandler::add_binary_vector(std::string& _return,
     SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size()/4;
 
     BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor, _return);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 }
 
 void
@@ -117,8 +167,7 @@ VecServiceHandler::add_binary_vector_batch(std::vector<std::string> & _return,
                      << tensor_list.tensor_list.size();
 
     BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list, _return);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 }
 
 void
@@ -135,8 +184,7 @@ VecServiceHandler::search_vector(VecSearchResult &_return,
     tensor_list.tensor_list.push_back(tensor);
     VecSearchResultList result;
     BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, filter, result);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 
     if(!result.result_list.empty()) {
         _return = result.result_list[0];
@@ -156,8 +204,7 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
                      << ", vector list size = " << tensor_list.tensor_list.size();
 
     BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, filter, _return);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 }
 
 void
@@ -174,8 +221,7 @@ VecServiceHandler::search_binary_vector(VecSearchResult& _return,
     tensor_list.tensor_list.push_back(tensor);
     VecSearchResultList result;
     BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, filter, result);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 
     if(!result.result_list.empty()) {
         _return = result.result_list[0];
@@ -195,8 +241,7 @@ VecServiceHandler::search_binary_vector_batch(VecSearchResultList& _return,
                      << ", vector list size = " << tensor_list.tensor_list.size();
 
     BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, filter, _return);
-    VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-    scheduler.ExecuteTask(task_ptr);
+    ExecTask(task_ptr);
 }
 
 
