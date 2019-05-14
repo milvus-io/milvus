@@ -18,7 +18,7 @@
 #include <thrift/stdcxx.h>
 
 
-namespace zilliz {
+namespace megasearch {
 
 struct VecErrCode {
   enum type {

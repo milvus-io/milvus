@@ -15,6 +15,7 @@
 
 #include <time.h>
 
+using namespace megasearch;
 using namespace zilliz;
 using namespace zilliz::vecwise;
 using namespace zilliz::vecwise::client;
@@ -129,23 +130,23 @@ TEST(AddVector, CLIENT_TEST) {
         //verify get invalid group
         try {
             std::string id;
-            zilliz::VecTensor tensor;
+            VecTensor tensor;
             for(int32_t i = 0; i < VEC_DIMENSION; i++) {
                 tensor.tensor.push_back(0.5);
             }
             session.interface()->add_vector(id, GetGroupID(), tensor);
-        } catch (zilliz::VecException& ex) {
+        } catch (VecException& ex) {
             CLIENT_LOG_ERROR << "request encounter exception: " << ex.what();
-            ASSERT_EQ(ex.code, zilliz::VecErrCode::ILLEGAL_ARGUMENT);
+            ASSERT_EQ(ex.code, VecErrCode::ILLEGAL_ARGUMENT);
         }
 
         try {
             VecGroup temp_group;
             session.interface()->get_group(temp_group, GetGroupID());
             //ASSERT_TRUE(temp_group.id.empty());
-        } catch (zilliz::VecException& ex) {
+        } catch (VecException& ex) {
             CLIENT_LOG_ERROR << "request encounter exception: " << ex.what();
-            ASSERT_EQ(ex.code, zilliz::VecErrCode::GROUP_NOT_EXISTS);
+            ASSERT_EQ(ex.code, VecErrCode::GROUP_NOT_EXISTS);
         }
 
         //add group
