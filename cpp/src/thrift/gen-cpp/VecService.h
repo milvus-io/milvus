@@ -9,7 +9,7 @@
 
 #include <thrift/TDispatchProcessor.h>
 #include <thrift/async/TConcurrentClientSyncInfo.h>
-#include "VectorService_types.h"
+#include "megasearch_types.h"
 
 namespace zilliz {
 
