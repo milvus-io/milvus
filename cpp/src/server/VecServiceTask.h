@@ -10,7 +10,7 @@
 #include "utils/AttributeSerializer.h"
 #include "db/Types.h"
 
-#include "thrift/gen-cpp/VectorService_types.h"
+#include "thrift/gen-cpp/megasearch_types.h"
 
 #include <condition_variable>
 #include <memory>

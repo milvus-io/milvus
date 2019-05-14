@@ -16,6 +16,7 @@ aux_source_directory(./ test_srcs)
 
 set(require_files
         ../../src/server/VecIdMapper.cpp
+        ../../src/server/RocksIdMapper.cpp
         ../../src/server/ServerConfig.cpp
         ../../src/utils/CommonUtil.cpp
         ../../src/utils/TimeRecorder.cpp

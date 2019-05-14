@@ -6,7 +6,6 @@
 #include "VecServiceHandler.h"
 #include "VecServiceTask.h"
 #include "ServerConfig.h"
-#include "VecIdMapper.h"
 #include "utils/Log.h"
 #include "utils/CommonUtil.h"
 #include "utils/TimeRecorder.h"
@@ -23,12 +22,12 @@ namespace {
     public:
         TimeRecordWrapper(const std::string& func_name)
         : recorder_(func_name), func_name_(func_name) {
-            SERVER_LOG_TRACE << func_name << " called";
+            //SERVER_LOG_TRACE << func_name << " called";
         }
 
         ~TimeRecordWrapper() {
             recorder_.Elapse("cost");
-            SERVER_LOG_TRACE << func_name_ << " finished";
+            //SERVER_LOG_TRACE << func_name_ << " finished";
         }
 
     private:
@@ -98,9 +97,9 @@ namespace {
 
 void
 VecServiceHandler::add_group(const VecGroup &group) {
-    TimeRecordWrapper rc("add_group()");
-    SERVER_LOG_TRACE << "group.id = " << group.id << ", group.dimension = " << group.dimension
-                        << ", group.index_type = " << group.index_type;
+    std::string info = "add_group() " + group.id + " dimension = " + std::to_string(group.dimension)
+            + " index_type = " + std::to_string(group.index_type);
+    TimeRecordWrapper rc(info);
 
     BaseTaskPtr task_ptr = AddGroupTask::Create(group.dimension, group.id);
     ExecTask(task_ptr);
@@ -108,8 +107,7 @@ VecServiceHandler::add_group(const VecGroup &group) {
 
 void
 VecServiceHandler::get_group(VecGroup &_return, const std::string &group_id) {
-    TimeRecordWrapper rc("get_group()");
-    SERVER_LOG_TRACE << "group_id = " << group_id;
+    TimeRecordWrapper rc("get_group() " + group_id);
 
     _return.id = group_id;
     BaseTaskPtr task_ptr = GetGroupTask::Create(group_id, _return.dimension);
@@ -118,8 +116,7 @@ VecServiceHandler::get_group(VecGroup &_return, const std::string &group_id) {
 
 void
 VecServiceHandler::del_group(const std::string &group_id) {
-    TimeRecordWrapper rc("del_group()");
-    SERVER_LOG_TRACE << "group_id = " << group_id;
+    TimeRecordWrapper rc("del_group() " + group_id);
 
     BaseTaskPtr task_ptr = DeleteGroupTask::Create(group_id);
     ExecTask(task_ptr);
@@ -128,8 +125,7 @@ VecServiceHandler::del_group(const std::string &group_id) {
 
 void
 VecServiceHandler::add_vector(std::string& _return, const std::string &group_id, const VecTensor &tensor) {
-    TimeRecordWrapper rc("add_vector()");
-    SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size();
+    TimeRecordWrapper rc("add_vector() to " + group_id);
 
     BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor, _return);
     ExecTask(task_ptr);
@@ -139,9 +135,7 @@ void
 VecServiceHandler::add_vector_batch(std::vector<std::string> & _return,
                                     const std::string &group_id,
                                     const VecTensorList &tensor_list) {
-    TimeRecordWrapper rc("add_vector_batch()");
-    SERVER_LOG_TRACE << "group_id = " << group_id << ", vector list size = "
-                     << tensor_list.tensor_list.size();
+    TimeRecordWrapper rc("add_vector_batch() to " + group_id);
 
     BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list, _return);
     ExecTask(task_ptr);
@@ -151,8 +145,7 @@ void
 VecServiceHandler::add_binary_vector(std::string& _return,
                                      const std::string& group_id,
                                      const VecBinaryTensor& tensor) {
-    TimeRecordWrapper rc("add_binary_vector()");
-    SERVER_LOG_TRACE << "group_id = " << group_id << ", vector size = " << tensor.tensor.size()/4;
+    TimeRecordWrapper rc("add_binary_vector() to " + group_id);
 
     BaseTaskPtr task_ptr = AddVectorTask::Create(group_id, &tensor, _return);
     ExecTask(task_ptr);
@@ -162,9 +155,7 @@ void
 VecServiceHandler::add_binary_vector_batch(std::vector<std::string> & _return,
                                            const std::string& group_id,
                                            const VecBinaryTensorList& tensor_list) {
-    TimeRecordWrapper rc("add_binary_vector_batch()");
-    SERVER_LOG_TRACE << "group_id = " << group_id << ", vector list size = "
-                     << tensor_list.tensor_list.size();
+    TimeRecordWrapper rc("add_binary_vector_batch() to " + group_id);
 
     BaseTaskPtr task_ptr = AddBatchVectorTask::Create(group_id, &tensor_list, _return);
     ExecTask(task_ptr);
@@ -176,9 +167,7 @@ VecServiceHandler::search_vector(VecSearchResult &_return,
                                  const int64_t top_k,
                                  const VecTensor &tensor,
                                  const VecSearchFilter& filter) {
-    TimeRecordWrapper rc("search_vector()");
-    SERVER_LOG_TRACE << "group_id = " << group_id << ", top_k = " << top_k
-                        << ", vector dimension = " << tensor.tensor.size();
+    TimeRecordWrapper rc("search_vector() in " + group_id);
 
     VecTensorList tensor_list;
     tensor_list.tensor_list.push_back(tensor);
@@ -199,9 +188,7 @@ VecServiceHandler::search_vector_batch(VecSearchResultList &_return,
                                        const int64_t top_k,
                                        const VecTensorList &tensor_list,
                                        const VecSearchFilter& filter) {
-    TimeRecordWrapper rc("search_vector_batch()");
-    SERVER_LOG_TRACE << "group_id = " << group_id << ", top_k = " << top_k
-                     << ", vector list size = " << tensor_list.tensor_list.size();
+    TimeRecordWrapper rc("search_vector_batch() in " + group_id);
 
     BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, filter, _return);
     ExecTask(task_ptr);
@@ -213,9 +200,7 @@ VecServiceHandler::search_binary_vector(VecSearchResult& _return,
                                         const int64_t top_k,
                                         const VecBinaryTensor& tensor,
                                         const VecSearchFilter& filter) {
-    TimeRecordWrapper rc("search_binary_vector()");
-    SERVER_LOG_TRACE << "group_id = " << group_id << ", top_k = " << top_k
-                     << ", vector dimension = " << tensor.tensor.size();
+    TimeRecordWrapper rc("search_binary_vector() in " + group_id);
 
     VecBinaryTensorList tensor_list;
     tensor_list.tensor_list.push_back(tensor);
@@ -236,9 +221,7 @@ VecServiceHandler::search_binary_vector_batch(VecSearchResultList& _return,
                                               const int64_t top_k,
                                               const VecBinaryTensorList& tensor_list,
                                               const VecSearchFilter& filter) {
-    TimeRecordWrapper rc("search_binary_vector_batch()");
-    SERVER_LOG_TRACE << "group_id = " << group_id << ", top_k = " << top_k
-                     << ", vector list size = " << tensor_list.tensor_list.size();
+    TimeRecordWrapper rc("search_binary_vector_batch() in " + group_id);
 
     BaseTaskPtr task_ptr = SearchVectorTask::Create(group_id, top_k, &tensor_list, filter, _return);
     ExecTask(task_ptr);

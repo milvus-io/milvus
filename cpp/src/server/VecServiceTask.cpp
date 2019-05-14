@@ -91,11 +91,10 @@ ServerError AddGroupTask::OnExecute() {
         group_info.dimension = (size_t)dimension_;
         group_info.group_id = group_id_;
         engine::Status stat = DB()->add_group(group_info);
-        if(!stat.ok()) {
-            error_code_ = SERVER_UNEXPECTED_ERROR;
-            error_msg_ = "Engine failed: " + stat.ToString();
+        if(!stat.ok()) {//could exist
+            SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
-            return error_code_;
+            return SERVER_SUCCESS;
         }
 
     } catch (std::exception& ex) {
@@ -161,6 +160,9 @@ ServerError DeleteGroupTask::OnExecute() {
     error_code_ = SERVER_NOT_IMPLEMENT;
     error_msg_ = "delete group not implemented";
     SERVER_LOG_ERROR << error_msg_;
+
+    //IVecIdMapper::GetInstance()->DeleteGroup(group_id_);
+
     return SERVER_NOT_IMPLEMENT;
 }
 
@@ -241,27 +243,7 @@ const AttribMap& AddVectorTask::GetVecAttrib() const {
 
 ServerError AddVectorTask::OnExecute() {
     try {
-        engine::meta::GroupSchema group_info;
-        group_info.group_id = group_id_;
-        engine::Status stat = DB()->get_group(group_info);
-        if(!stat.ok()) {
-            error_code_ = SERVER_GROUP_NOT_EXIST;
-            error_msg_ = "Engine failed: " + stat.ToString();
-            SERVER_LOG_ERROR << error_msg_;
-            return error_code_;
-        }
-
-        uint64_t group_dim = group_info.dimension;
         uint64_t vec_dim = GetVecDimension();
-        if(group_dim != vec_dim) {
-            SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
-                             << " vs. group dimension:" << group_dim;
-            error_code_ = SERVER_INVALID_VECTOR_DIMENSION;
-            error_msg_ = "Engine failed: " + stat.ToString();
-            SERVER_LOG_ERROR << error_msg_;
-            return error_code_;
-        }
-
         std::vector<float> vec_f;
         vec_f.resize(vec_dim);
         const double* d_p = GetVecData();
@@ -270,7 +252,7 @@ ServerError AddVectorTask::OnExecute() {
         }
 
         engine::IDNumbers vector_ids;
-        stat = DB()->add_vectors(group_id_, 1, vec_f.data(), vector_ids);
+        engine::Status stat = DB()->add_vectors(group_id_, 1, vec_f.data(), vector_ids);
         if(!stat.ok()) {
             error_code_ = SERVER_UNEXPECTED_ERROR;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -278,7 +260,8 @@ ServerError AddVectorTask::OnExecute() {
             return error_code_;
         } else {
             if(vector_ids.empty()) {
-                SERVER_LOG_ERROR << "Vector ID not returned";
+                error_msg_ = "Engine failed: " + stat.ToString();
+                SERVER_LOG_ERROR << error_msg_;
                 return SERVER_UNEXPECTED_ERROR;
             } else {
                 std::string uid = GetVecID();
@@ -294,8 +277,8 @@ ServerError AddVectorTask::OnExecute() {
                 attrib[VECTOR_UID] = tensor_id_;
                 std::string attrib_str;
                 AttributeSerializer::Encode(attrib, attrib_str);
-                IVecIdMapper::GetInstance()->Put(nid, attrib_str);
-                SERVER_LOG_TRACE << "nid = " << vector_ids[0] << ", uid = " << uid;
+                IVecIdMapper::GetInstance()->Put(nid, attrib_str, group_id_);
+                //SERVER_LOG_TRACE << "nid = " << vector_ids[0] << ", uid = " << uid;
             }
         }
 
@@ -429,7 +412,7 @@ void AddBatchVectorTask::ProcessIdMapping(engine::IDNumbers& vector_ids,
         attrib[VECTOR_UID] = uid;
         std::string attrib_str;
         AttributeSerializer::Encode(attrib, attrib_str);
-        IVecIdMapper::GetInstance()->Put(nid, attrib_str);
+        IVecIdMapper::GetInstance()->Put(nid, attrib_str, group_id_);
     }
 }
 
@@ -464,7 +447,6 @@ ServerError AddBatchVectorTask::OnExecute() {
                                  << " vs. group dimension:" << group_dim;
                 error_code_ = SERVER_INVALID_VECTOR_DIMENSION;
                 error_msg_ = "Engine failed: " + stat.ToString();
-                SERVER_LOG_ERROR << error_msg_;
                 return error_code_;
             }
 
@@ -645,7 +627,9 @@ ServerError SearchVectorTask::OnExecute() {
         if(vec_dim != group_info.dimension) {
             SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
                              << " vs. group dimension:" << group_info.dimension;
-            return SERVER_INVALID_ARGUMENT;
+            error_code_ = SERVER_INVALID_VECTOR_DIMENSION;
+            error_msg_ = "Engine failed: " + stat.ToString();
+            return error_code_;
         }
 
         rc.Record("check group dimension");
@@ -679,18 +663,30 @@ ServerError SearchVectorTask::OnExecute() {
                 for(auto id : res) {
                     std::string attrib_str;
                     std::string nid = nid_prefix + std::to_string(id);
-                    IVecIdMapper::GetInstance()->Get(nid, attrib_str);
+                    IVecIdMapper::GetInstance()->Get(nid, attrib_str, group_id_);
 
                     AttribMap attrib_map;
                     AttributeSerializer::Decode(attrib_str, attrib_map);
 
+                    AttribMap attrib_return;
                     VecSearchResultItem item;
-                    item.__set_attrib(attrib_map);
-                    item.uid = item.attrib[VECTOR_UID];
+                    item.uid = attrib_map[VECTOR_UID];
+
+                    if(filter_.return_attribs.empty()) {//return all attributes
+                        attrib_return.swap(attrib_map);
+                    } else {//filter attributes
+                        for(auto& name : filter_.return_attribs) {
+                            if(attrib_map.count(name) == 0)
+                                continue;
+
+                            attrib_return[name] = attrib_map[name];
+                        }
+                    }
+                    item.__set_attrib(attrib_return);
                     item.distance = 0.0;////TODO: return distance
                     v_res.result_list.emplace_back(item);
 
-                    SERVER_LOG_TRACE << "nid = " << nid << ", uid = " << item.uid;
+                    //SERVER_LOG_TRACE << "nid = " << nid << ", uid = " << item.uid;
                 }
 
                 result_.result_list.push_back(v_res);
