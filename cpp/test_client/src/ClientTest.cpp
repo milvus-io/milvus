@@ -135,6 +135,7 @@ TEST(AddVector, CLIENT_TEST) {
             }
             session.interface()->add_vector(id, GetGroupID(), tensor);
         } catch (zilliz::VecException& ex) {
+            CLIENT_LOG_ERROR << "request encounter exception: " << ex.what();
             ASSERT_EQ(ex.code, zilliz::VecErrCode::ILLEGAL_ARGUMENT);
         }
 
@@ -143,6 +144,7 @@ TEST(AddVector, CLIENT_TEST) {
             session.interface()->get_group(temp_group, GetGroupID());
             //ASSERT_TRUE(temp_group.id.empty());
         } catch (zilliz::VecException& ex) {
+            CLIENT_LOG_ERROR << "request encounter exception: " << ex.what();
             ASSERT_EQ(ex.code, zilliz::VecErrCode::GROUP_NOT_EXISTS);
         }
 
