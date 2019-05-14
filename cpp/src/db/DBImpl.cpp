@@ -162,9 +162,9 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
             for (auto &item : inverted_table){
                 if (count == k) break;
                 for (auto &id : item.second){
-                    if (++count == k) break;
                     output_distence[count] = item.first;
                     output_ids[count] = id;
+                    if (++count == k) break;
                 }
             }
         };
