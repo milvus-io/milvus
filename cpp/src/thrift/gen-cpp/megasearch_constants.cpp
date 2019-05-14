@@ -6,7 +6,7 @@
  */
 #include "megasearch_constants.h"
 
-namespace zilliz {
+namespace megasearch {
 
 const megasearchConstants g_megasearch_constants;
 

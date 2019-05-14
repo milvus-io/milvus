@@ -9,7 +9,7 @@
 
 #include "megasearch_types.h"
 
-namespace zilliz {
+namespace megasearch {
 
 class megasearchConstants {
  public:
