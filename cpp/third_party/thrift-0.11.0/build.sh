@@ -29,7 +29,8 @@ fi
 ./bootstrap.sh
 
 mkdir -p INSTALL_PREFIX
-./configure --prefix=${INSTALL_PREFIX} CXXFLAGS="$CXXFLAGS" CFLAGS="$CFLAGS" --without-java --without-python --without-php --without-go --without-nodejs
+./configure --prefix=${INSTALL_PREFIX} CXXFLAGS="$CXXFLAGS" CFLAGS="$CFLAGS" --without-java --without-python --without-php --without-go --without-nodejs --without-lua
+
 
 make -j
 make install
