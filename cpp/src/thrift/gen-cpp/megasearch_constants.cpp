@@ -4,13 +4,13 @@
  * DO NOT EDIT UNLESS YOU ARE SURE THAT YOU KNOW WHAT YOU ARE DOING
  *  @generated
  */
-#include "VectorService_constants.h"
+#include "megasearch_constants.h"
 
 namespace zilliz {
 
-const VectorServiceConstants g_VectorService_constants;
+const megasearchConstants g_megasearch_constants;
 
-VectorServiceConstants::VectorServiceConstants() {
+megasearchConstants::megasearchConstants() {
 }
 
 } // namespace

@@ -9,36 +9,81 @@
 #include "utils/TimeRecorder.h"
 #include "utils/CommonUtil.h"
 
+#include <time.h>
+
 using namespace zilliz::vecwise;
 
+namespace {
+    std::string CurrentTime() {
+        time_t tt;
+        time(&tt);
+        tt = tt + 8 * 3600;
+        tm *t = gmtime(&tt);
+
+        std::string str = std::to_string(t->tm_year + 1900) + "_" + std::to_string(t->tm_mon + 1)
+                          + "_" + std::to_string(t->tm_mday) + "_" + std::to_string(t->tm_hour)
+                          + "_" + std::to_string(t->tm_min) + "_" + std::to_string(t->tm_sec);
+
+        return str;
+    }
+
+    std::string GetGroupID() {
+        static std::string s_id(CurrentTime());
+        return s_id;
+    }
+}
 
 TEST(IdMapperTest, IDMAPPER_TEST) {
     server::IVecIdMapper* mapper = server::IVecIdMapper::GetInstance();
 
+    std::string group_id = GetGroupID();
+
     std::vector<std::string> nid = {"1", "50", "900", "10000"};
     std::vector<std::string> sid = {"one", "fifty", "nine zero zero", "many"};
-    server::ServerError err = mapper->Put(nid, sid);
+    server::ServerError err = mapper->Put(nid, sid, group_id);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
-    err = mapper->Put(nid, std::vector<std::string>());
+    err = mapper->Put(nid, std::vector<std::string>(), group_id);
     ASSERT_NE(err, server::SERVER_SUCCESS);
 
     std::vector<std::string> res;
-    err = mapper->Get(nid, res);
+    err = mapper->Get(nid, res, group_id);
     ASSERT_EQ(res.size(), nid.size());
     for(size_t i = 0; i < res.size(); i++) {
         ASSERT_EQ(res[i], sid[i]);
     }
 
     std::string str_id;
-    err = mapper->Get(nid[1], str_id);
+    err = mapper->Get(nid[1], str_id, group_id);
     ASSERT_EQ(str_id, "fifty");
 
-    err = mapper->Delete(nid[2]);
+    err = mapper->Get(nid[1], str_id);
+    ASSERT_EQ(str_id, "");
+
+    err = mapper->Get(nid[2], str_id, group_id);
+    ASSERT_EQ(str_id, "nine zero zero");
+
+    err = mapper->Delete(nid[2], group_id);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
-    err = mapper->Get(nid[2], str_id);
-    ASSERT_NE(err, server::SERVER_SUCCESS);
+    err = mapper->Get(nid[2], str_id, group_id);
+    ASSERT_EQ(str_id, "");
+
+    err = mapper->Get(nid[3], str_id, group_id);
+    ASSERT_EQ(str_id, "many");
+
+    err = mapper->DeleteGroup(group_id);
+    ASSERT_EQ(err, server::SERVER_SUCCESS);
+
+    err = mapper->Get(nid[3], str_id, group_id);
+    ASSERT_EQ(str_id, "");
+
+    std::string ct = CurrentTime();
+    err = mapper->Put("current_time", ct, "time");
+    ASSERT_EQ(err, server::SERVER_SUCCESS);
+
+    err = mapper->Get("current_time", str_id, "time");
+    ASSERT_EQ(str_id, ct);
 
     //test performance
     nid.clear();
