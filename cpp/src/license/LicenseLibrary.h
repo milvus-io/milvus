@@ -1,7 +1,6 @@
 #pragma once
 
 #include "LicenseFile.h"
-#include "SecretFile.h"
 #include "GPUInfoFile.h"
 
 #include "utils/Error.h"
@@ -12,6 +11,7 @@
 
 #include <vector>
 #include <map>
+#include <time.h>
 
 
 namespace zilliz {
@@ -22,7 +22,7 @@ class LicenseLibrary {
  public:
     // Part 0: File check
     static bool
-    IsFileExistent(const std::string& path);
+    IsFileExistent(const std::string &path);
 
     // Part 1: Get GPU Info
     static ServerError
@@ -40,26 +40,39 @@ class LicenseLibrary {
                   std::vector<std::string> &uuid_array,
                   std::vector<std::string> &sha_array);
 
+    static ServerError
+    GetSystemTime(time_t &system_time);
+
     // Part 2: Handle License File
     static ServerError
     LicenseFileSerialization(const std::string &path,
                              int device_count,
-                             const std::map<int, std::string> &uuid_encrption_map, int64_t remaining_hour);
+                             const std::map<int, std::string> &uuid_encrption_map,
+                             time_t starting_time,
+                             time_t end_time);
 
     static ServerError
     LicenseFileDeserialization(const std::string &path,
                                int &device_count,
                                std::map<int, std::string> &uuid_encrption_map,
-                               int64_t &remaining_hour);
+                               time_t &starting_time,
+                               time_t &end_time);
 
-    static ServerError
-    SecretFileSerialization(const std::string &path,
-                            const time_t &update_time,
-                            const off_t &file_size,
-                            const std::string &file_md5);
-
-    static ServerError
-    SecretFileDeserialization(const std::string &path, time_t &update_time, off_t &file_size, std::string &file_md5);
+//    static ServerError
+//    SecretFileSerialization(const std::string &path,
+//                            const time_t &update_time,
+//                            const off_t &file_size,
+//                            const time_t &starting_time,
+//                            const time_t &end_time,
+//                            const std::string &file_md5);
+//
+//    static ServerError
+//    SecretFileDeserialization(const std::string &path,
+//                              time_t &update_time,
+//                              off_t &file_size,
+//                              time_t &starting_time,
+//                              time_t &end_time,
+//                              std::string &file_md5);
 
     // Part 3: File attribute: UpdateTime Time/ Size/ MD5
     static ServerError
@@ -78,22 +91,25 @@ class LicenseLibrary {
                                int &device_count,
                                std::map<int, std::string> &uuid_encrption_map);
 
-    // Part 5: Integrity check and Legality check
     static ServerError
-    IntegrityCheck(const std::string &license_file_path, const std::string &secret_file_path);
+    GetDateTime(char *cha, time_t &data_time);
 
-    static ServerError
-    LegalityCheck(const std::string &license_file_path);
+    // Part 5: Integrity check and Legality check
+//    static ServerError
+//    IntegrityCheck(const std::string &license_file_path, const std::string &secret_file_path);
+//
+//    static ServerError
+//    LegalityCheck(const std::string &license_file_path);
 
     // Part 6: Timer
-    static ServerError
-    AlterFile(const std::string &license_file_path,
-              const std::string &secret_file_path,
-              const boost::system::error_code &ec,
-              boost::asio::deadline_timer *pt);
-
-    static ServerError
-    StartCountingDown(const std::string &license_file_path, const std::string &secret_file_path);
+//    static ServerError
+//    AlterFile(const std::string &license_file_path,
+//              const std::string &secret_file_path,
+//              const boost::system::error_code &ec,
+//              boost::asio::deadline_timer *pt);
+//
+//    static ServerError
+//    StartCountingDown(const std::string &license_file_path, const std::string &secret_file_path);
 
 
  private:

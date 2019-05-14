@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <iostream>
 
+
 using namespace zilliz::vecwise;
 
 TEST(LicenseLibraryTest, FILE_EXISTENT_TEST) {
@@ -55,6 +56,12 @@ TEST(LicenseLibraryTest, GPU_INFO_TEST) {
         std::cout << "Device Id: " << i << ", UUID: " << uuid_array[i] << ", UUID_SHA256: "
                   << uuid_sha256_array[i] << std::endl;
     }
+
+    time_t systemtime;
+    err = server::LicenseLibrary::GetSystemTime(systemtime);
+    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    std::cout << "System Time: " << systemtime << std::endl;
+
 }
 
 TEST(LicenseLibraryTest, LICENSE_FILE_TEST) {
@@ -112,27 +119,40 @@ TEST(LicenseLibraryTest, LICENSE_FILE_TEST) {
         ASSERT_EQ(uuid_encrption_map[i], output_info_uuid_encrption_map[i]);
     }
 
+
+    // 16. Get System Time/starting_time ans End Time
+    time_t starting_time;
+    err = server::LicenseLibrary::GetSystemTime(starting_time);
+    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    time_t end_time;
+    end_time = starting_time + (long) (60 * 60 * 24 * 7);
+
     // 11. Generate License File
     err = server::LicenseLibrary::LicenseFileSerialization(license_file_path,
                                                            device_count,
                                                            uuid_encrption_map,
-                                                           remaining_hour);
+                                                           starting_time,
+                                                           end_time);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
     // 12. Define output var
     int output_device_count = 0;
     std::map<int, std::string> output_uuid_encrption_map;
-    int64_t output_remaining_hour;
+    time_t output_starting_time;
+    time_t output_end_time;
 
     // 13. Read License File
     err = server::LicenseLibrary::LicenseFileDeserialization(license_file_path,
                                                              output_device_count,
                                                              output_uuid_encrption_map,
-                                                             output_remaining_hour);
+                                                             output_starting_time,
+                                                             output_end_time);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
     ASSERT_EQ(device_count, output_device_count);
-    ASSERT_EQ(remaining_hour, output_remaining_hour);
+    ASSERT_EQ(starting_time, output_starting_time);
+    ASSERT_EQ(end_time, output_end_time);
+
     for (int i = 0; i < device_count; ++i) {
         ASSERT_EQ(uuid_encrption_map[i], output_uuid_encrption_map[i]);
     }
@@ -148,53 +168,49 @@ TEST(LicenseLibraryTest, LICENSE_FILE_TEST) {
     err = server::LicenseLibrary::GetFileMD5(license_file_path, file_md5);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
+
+
     // 16. Generate Secret File
-    std::string secret_file_path("/tmp/megasearch.secret");
-    err = server::LicenseLibrary::SecretFileSerialization(secret_file_path, update_time, file_size, file_md5);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//    std::string secret_file_path("/tmp/megasearch.secret");
+//    err = server::LicenseLibrary::SecretFileSerialization(secret_file_path,
+//                                                          update_time,
+//                                                          file_size,
+//                                                          starting_time,
+//                                                          end_time,
+//                                                          file_md5);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
 
     // 17. Define output var
-    time_t output_update_time;
-    off_t output_file_size;
-    std::string output_file_md5;
+//    time_t output_update_time;
+//    off_t output_file_size;
+//    time_t output_starting_time;
+//    time_t output_end_time;
+//    std::string output_file_md5;
 
     // 18. Read License File
-    err = server::LicenseLibrary::SecretFileDeserialization(secret_file_path,
-                                                            output_update_time,
-                                                            output_file_size,
-                                                            output_file_md5);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
-
-    ASSERT_EQ(update_time, output_update_time);
-    ASSERT_EQ(file_size, output_file_size);
-    ASSERT_EQ(file_md5, output_file_md5);
+//    err = server::LicenseLibrary::SecretFileDeserialization(secret_file_path,
+//                                                            output_update_time,
+//                                                            output_file_size,
+//                                                            output_starting_time,
+//                                                            output_end_time,
+//                                                            output_file_md5);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//
+//    ASSERT_EQ(update_time, output_update_time);
+//    ASSERT_EQ(file_size, output_file_size);
+//    ASSERT_EQ(starting_time, output_starting_time);
+//    ASSERT_EQ(end_time, output_end_time);
+//    ASSERT_EQ(file_md5, output_file_md5);
 
     // 19. Integrity check and Legality check
-    err = server::LicenseLibrary::IntegrityCheck(license_file_path, secret_file_path);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
-
-    err = server::LicenseLibrary::LegalityCheck(license_file_path);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//    err = server::LicenseLibrary::IntegrityCheck(license_file_path, secret_file_path);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//
+//    err = server::LicenseLibrary::LegalityCheck(license_file_path);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
 
 }
 
-TEST(LicenseLibraryTest, Timer_TEST) {
-
-    server::ServerError err;
-    std::string license_file_path("/tmp/megasearch.license");
-    std::string secret_file_path("/tmp/megasearch.secret");
-
-    // 19. Integrity check and Legality check
-    err = server::LicenseLibrary::IntegrityCheck(license_file_path, secret_file_path);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
-
-    err = server::LicenseLibrary::LegalityCheck(license_file_path);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
-
-    // 20. Start counting down
-    err = server::LicenseLibrary::StartCountingDown(license_file_path, secret_file_path);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
-}
 
 TEST(LicenseLibraryTest, GET_GPU_INFO_FILE) {
 
@@ -250,39 +266,64 @@ TEST(LicenseLibraryTest, GET_LICENSE_FILE) {
                                                              output_info_uuid_encrption_map);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
-    // 5. Enter time
-    int64_t remaining_hour = 24*7 ;
-    std::cout << "Please enter the authorization time (hours)" << std::endl;
-//    std::cin >> remaining_hour;
+    time_t system_time;
+    err = server::LicenseLibrary::GetSystemTime(system_time);
+    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    time_t starting_time = system_time;
+    time_t end_time = system_time + (long) (60 * 60 * 24 * 7);
+
     err = server::LicenseLibrary::LicenseFileSerialization(license_file_path,
                                                            output_info_device_count,
                                                            output_info_uuid_encrption_map,
-                                                           remaining_hour);
+                                                           starting_time,
+                                                           end_time);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
     std::cout << "Generate License File Success" << std::endl;
 
 }
 
-TEST(LicenseLibraryTest, GET_SECRET_FILE) {
-
+TEST(LicenseLibraryTest, GET_DATA_TIME) {
     server::ServerError err;
-    std::string license_file_path("/tmp/megasearch.license");
-    std::string secret_file_path("/tmp/megasearch.secret");
-
-    // 14. Get License File Attribute
-    time_t update_time;
-    off_t file_size;
-    err = server::LicenseLibrary::GetFileUpdateTimeAndSize(license_file_path, update_time, file_size);
+    char * a ="2018-03-06";
+    time_t pp;
+    err = server::LicenseLibrary::GetDateTime(a,pp);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
+    std::cout << pp <<std::endl;
 
-    // 15. Get License File MD5
-    std::string file_md5;
-    err = server::LicenseLibrary::GetFileMD5(license_file_path, file_md5);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
-
-    // 16. Generate Secret File
-    err = server::LicenseLibrary::SecretFileSerialization(secret_file_path, update_time, file_size, file_md5);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
-
-    std::cout << "Generate Secret File Success" << std::endl;
 }
+
+//TEST(LicenseLibraryTest, GET_SECRET_FILE) {
+//
+//    server::ServerError err;
+//    std::string license_file_path("/tmp/megasearch.license");
+//    std::string secret_file_path("/tmp/megasearch.secret");
+//
+//    // 14. Get License File Attribute
+//    time_t update_time;
+//    off_t file_size;
+//    err = server::LicenseLibrary::GetFileUpdateTimeAndSize(license_file_path, update_time, file_size);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//
+//    // 15. Get License File MD5
+//    std::string file_md5;
+//    err = server::LicenseLibrary::GetFileMD5(license_file_path, file_md5);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//
+//    // 16. Get System Time/starting_time ans End Time
+//    time_t starting_time;
+//    err = server::LicenseLibrary::GetSystemTime(starting_time);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//    time_t end_time;
+//    end_time = starting_time + (long) (60 * 60 * 24 * 7);
+//
+//    // 16. Generate Secret File
+//    err = server::LicenseLibrary::SecretFileSerialization(secret_file_path,
+//                                                          update_time,
+//                                                          file_size,
+//                                                          starting_time,
+//                                                          end_time,
+//                                                          file_md5);
+//    ASSERT_EQ(err, server::SERVER_SUCCESS);
+//
+//    std::cout << "Generate Secret File Success" << std::endl;
+//}
