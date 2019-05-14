@@ -11,12 +11,13 @@ using namespace zilliz::vecwise;
 
 
 TEST(CommonTest, COMMON_TEST) {
-    std::string path1 = "/tmp/vecwise_test/common_test_12345/";
-    std::string path2 = path1 + "abcdef";
-    server::ServerError err = server::CommonUtil::CreateDirectory(path2);
+    std::string path1 = "/tmp/vecwise_test/";
+    std::string path2 = path1 + "common_test_12345/";
+    std::string path3 = path2 + "abcdef";
+    server::ServerError err = server::CommonUtil::CreateDirectory(path3);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
-    ASSERT_TRUE(server::CommonUtil::IsDirectoryExit(path2));
+    ASSERT_TRUE(server::CommonUtil::IsDirectoryExit(path3));
 
     err = server::CommonUtil::DeleteDirectory(path1);
     ASSERT_EQ(err, server::SERVER_SUCCESS);

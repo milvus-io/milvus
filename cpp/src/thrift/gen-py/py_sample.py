@@ -82,8 +82,8 @@ def test_vecwise():
         transport.close()
         time_start = print_time_cost('close connection', time_start)
 
-    except Thrift.TException as ex:
-        print(ex.message)
+    except VecService.VecException as ex:
+        print(ex.reason)
 
 
 test_vecwise()
