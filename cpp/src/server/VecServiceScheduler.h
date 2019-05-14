@@ -27,6 +27,7 @@ public:
     std::string TaskGroup() const { return task_group_; }
 
     ServerError ErrorCode() const { return error_code_; }
+    std::string ErrorMsg() const { return error_msg_; }
 
     bool IsAsync() const { return async_; }
 
@@ -41,6 +42,7 @@ protected:
     bool async_;
     bool done_;
     ServerError error_code_;
+    std::string error_msg_;
 };
 
 using BaseTaskPtr = std::shared_ptr<BaseTask>;

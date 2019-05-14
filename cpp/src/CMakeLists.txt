@@ -17,8 +17,8 @@ set(license_check_files
 
 set(service_files
         thrift/gen-cpp/VecService.cpp
-        thrift/gen-cpp/VectorService_constants.cpp
-        thrift/gen-cpp/VectorService_types.cpp
+        thrift/gen-cpp/megasearch_constants.cpp
+        thrift/gen-cpp/megasearch_types.cpp
         )
 
 set(vecwise_engine_src
