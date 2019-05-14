@@ -11,7 +11,7 @@
 
 #include <thrift/TToString.h>
 
-namespace zilliz {
+namespace megasearch {
 
 int _kVecErrCodeValues[] = {
   VecErrCode::SUCCESS,

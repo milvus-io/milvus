@@ -17,6 +17,8 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
+using namespace megasearch;
+
 namespace {
     class TimeRecordWrapper {
     public:
@@ -38,17 +40,17 @@ namespace {
 
     }
 
-    const std::map<ServerError, zilliz::VecErrCode::type>& ErrorMap() {
-        static const std::map<ServerError, zilliz::VecErrCode::type> code_map = {
-            {SERVER_UNEXPECTED_ERROR, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
-            {SERVER_NULL_POINTER, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
-            {SERVER_INVALID_ARGUMENT, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
-            {SERVER_FILE_NOT_FOUND, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
-            {SERVER_NOT_IMPLEMENT, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
-            {SERVER_BLOCKING_QUEUE_EMPTY, zilliz::VecErrCode::ILLEGAL_ARGUMENT},
-            {SERVER_GROUP_NOT_EXIST, zilliz::VecErrCode::GROUP_NOT_EXISTS},
-            {SERVER_INVALID_TIME_RANGE, zilliz::VecErrCode::ILLEGAL_TIME_RANGE},
-            {SERVER_INVALID_VECTOR_DIMENSION, zilliz::VecErrCode::ILLEGAL_VECTOR_DIMENSION},
+    const std::map<ServerError, VecErrCode::type>& ErrorMap() {
+        static const std::map<ServerError, VecErrCode::type> code_map = {
+            {SERVER_UNEXPECTED_ERROR, VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_NULL_POINTER, VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_INVALID_ARGUMENT, VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_FILE_NOT_FOUND, VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_NOT_IMPLEMENT, VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_BLOCKING_QUEUE_EMPTY, VecErrCode::ILLEGAL_ARGUMENT},
+            {SERVER_GROUP_NOT_EXIST, VecErrCode::GROUP_NOT_EXISTS},
+            {SERVER_INVALID_TIME_RANGE, VecErrCode::ILLEGAL_TIME_RANGE},
+            {SERVER_INVALID_VECTOR_DIMENSION, VecErrCode::ILLEGAL_VECTOR_DIMENSION},
         };
 
         return code_map;
@@ -82,7 +84,7 @@ namespace {
             task_ptr->WaitToFinish();
             ServerError err = task_ptr->ErrorCode();
             if (err != SERVER_SUCCESS) {
-                zilliz::VecException ex;
+                VecException ex;
                 ex.__set_code(ErrorMap().at(err));
                 std::string msg = task_ptr->ErrorMsg();
                 if(msg.empty()){

@@ -11,7 +11,7 @@
 #include <thrift/async/TConcurrentClientSyncInfo.h>
 #include "megasearch_types.h"
 
-namespace zilliz {
+namespace megasearch {
 
 #ifdef _MSC_VER
   #pragma warning( push )
