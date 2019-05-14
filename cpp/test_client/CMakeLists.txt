@@ -16,8 +16,8 @@ set(util_files
 
 set(service_files
     ../src/thrift/gen-cpp/VecService.cpp
-    ../src/thrift/gen-cpp/VectorService_constants.cpp
-    ../src/thrift/gen-cpp/VectorService_types.cpp)
+    ../src/thrift/gen-cpp/megasearch_constants.cpp
+    ../src/thrift/gen-cpp/megasearch_types.cpp)
 
 
 

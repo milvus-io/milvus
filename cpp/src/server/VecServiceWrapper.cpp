@@ -10,8 +10,8 @@
 
 #include "utils/Log.h"
 
-#include "thrift/gen-cpp/VectorService_types.h"
-#include "thrift/gen-cpp/VectorService_constants.h"
+#include "thrift/gen-cpp/megasearch_types.h"
+#include "thrift/gen-cpp/megasearch_constants.h"
 
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/protocol/TJSONProtocol.h>
