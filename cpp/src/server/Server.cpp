@@ -160,10 +160,8 @@ Server::Start() {
                 exit(1);
             }
 
-            if(server::LicenseCheck::StartCountingDown(license_file_path) != SERVER_SUCCESS) {
-                SERVER_LOG_ERROR << "License counter start error";
-                exit(1);
-            }
+            std::thread counting_down(&server::LicenseCheck::StartCountingDown, license_file_path);
+            counting_down.detach();
 #endif
 
             // Handle Signal
