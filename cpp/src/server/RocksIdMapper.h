@@ -23,6 +23,9 @@ public:
     RocksIdMapper();
     ~RocksIdMapper();
 
+    ServerError AddGroup(const std::string& group) override;
+    bool IsGroupExist(const std::string& group) const override;
+
     ServerError Put(const std::string& nid, const std::string& sid, const std::string& group = "") override;
     ServerError Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group = "") override;
 
@@ -38,7 +41,7 @@ private:
 
 private:
     rocksdb::DB* db_;
-    std::unordered_map<std::string, rocksdb::ColumnFamilyHandle*> column_handles_;
+    mutable std::unordered_map<std::string, rocksdb::ColumnFamilyHandle*> column_handles_;
 };
 
 }
