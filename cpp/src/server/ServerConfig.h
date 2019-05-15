@@ -32,6 +32,9 @@ static const std::string CONFIG_CACHE = "cache_config";
 static const std::string CONFIG_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
 static const std::string CONFIG_GPU_CACHE_CAPACITY = "gpu_cache_capacity";
 
+static const std::string CONFIG_LICENSE = "license_config";
+static const std::string CONFIG_LICENSE_PATH = "license_path";
+
 class ServerConfig {
  public:
     static ServerConfig &GetInstance();
