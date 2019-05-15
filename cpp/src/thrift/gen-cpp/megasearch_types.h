@@ -4,8 +4,8 @@
  * DO NOT EDIT UNLESS YOU ARE SURE THAT YOU KNOW WHAT YOU ARE DOING
  *  @generated
  */
-#ifndef VectorService_TYPES_H
-#define VectorService_TYPES_H
+#ifndef megasearch_TYPES_H
+#define megasearch_TYPES_H
 
 #include <iosfwd>
 
@@ -18,7 +18,7 @@
 #include <thrift/stdcxx.h>
 
 
-namespace zilliz {
+namespace megasearch {
 
 struct VecErrCode {
   enum type {

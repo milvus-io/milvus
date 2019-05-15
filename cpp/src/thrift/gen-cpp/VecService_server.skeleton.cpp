@@ -12,7 +12,7 @@ using namespace ::apache::thrift::protocol;
 using namespace ::apache::thrift::transport;
 using namespace ::apache::thrift::server;
 
-using namespace  ::zilliz;
+using namespace  ::megasearch;
 
 class VecServiceHandler : virtual public VecServiceIf {
  public:

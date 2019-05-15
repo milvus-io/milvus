@@ -107,7 +107,7 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
         using SearchResult = std::pair<std::vector<long>, std::vector<float>>;
         std::vector<SearchResult> batchresult(nq); // allocate nq cells.
 
-        auto cluster = [&](long *nns, float *dis) -> void {
+        auto cluster = [&](long *nns, float *dis, const int& k) -> void {
             for (int i = 0; i < nq; ++i) {
                 auto f_begin = batchresult[i].first.cbegin();
                 auto s_begin = batchresult[i].second.cbegin();
@@ -134,8 +134,10 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
                 search_set_size += file_size;
                 LOG(DEBUG) << "Search file_type " << file.file_type << " Of Size: "
                     << file_size << " M";
-                index.Search(nq, vectors, k, output_distence, output_ids);
-                cluster(output_ids, output_distence); // cluster to each query
+
+                int inner_k = index.Count() < k ? index.Count() : k;
+                index.Search(nq, vectors, inner_k, output_distence, output_ids);
+                cluster(output_ids, output_distence, inner_k); // cluster to each query
                 memset(output_distence, 0, k * nq * sizeof(float));
                 memset(output_ids, 0, k * nq * sizeof(long));
             }
@@ -145,15 +147,25 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
                            const int &k,
                            float *output_distence,
                            long *output_ids) -> void {
-            std::map<float, int> inverted_table;
+            std::map<float, std::vector<int>> inverted_table;
             for (int i = 0; i < input_data.size(); ++i) {
-                inverted_table[input_data[i]] = i;
+                if (inverted_table.count(input_data[i]) == 1) {
+                    auto& ori_vec = inverted_table[input_data[i]];
+                    ori_vec.push_back(i);
+                }
+                else {
+                    inverted_table[input_data[i]] = std::vector<int>{i};
+                }
             }
 
             int count = 0;
-            for (auto it = inverted_table.begin(); it != inverted_table.end() && count < k; ++it, ++count) {
-                output_distence[count] = it->first;
-                output_ids[count] = it->second;
+            for (auto &item : inverted_table){
+                if (count == k) break;
+                for (auto &id : item.second){
+                    output_distence[count] = item.first;
+                    output_ids[count] = id;
+                    if (++count == k) break;
+                }
             }
         };
         auto cluster_topk = [&]() -> void {
@@ -161,8 +173,11 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
             for (auto &result_pair : batchresult) {
                 auto &dis = result_pair.second;
                 auto &nns = result_pair.first;
+
                 topk_cpu(dis, k, output_distence, output_ids);
-                for (int i = 0; i < k; ++i) {
+
+                int inner_k = dis.size() < k ? dis.size() : k;
+                for (int i = 0; i < inner_k; ++i) {
                     res.emplace_back(nns[output_ids[i]]); // mapping
                 }
                 results.push_back(res); // append to result list

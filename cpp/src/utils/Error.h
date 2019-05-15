@@ -21,7 +21,7 @@ constexpr ServerError SERVER_ERROR_CODE_BASE = 0x30000;
 
 constexpr ServerError
 ToGlobalServerErrorCode(const ServerError error_code) {
-    return SERVER_ERROR_CODE_BASE + SERVER_ERROR_CODE_BASE;
+    return SERVER_ERROR_CODE_BASE + error_code;
 }
 
 constexpr ServerError SERVER_UNEXPECTED_ERROR = ToGlobalServerErrorCode(0x001);
@@ -31,8 +31,11 @@ constexpr ServerError SERVER_INVALID_ARGUMENT = ToGlobalServerErrorCode(0x004);
 constexpr ServerError SERVER_FILE_NOT_FOUND = ToGlobalServerErrorCode(0x005);
 constexpr ServerError SERVER_NOT_IMPLEMENT = ToGlobalServerErrorCode(0x006);
 constexpr ServerError SERVER_BLOCKING_QUEUE_EMPTY = ToGlobalServerErrorCode(0x007);
-constexpr ServerError SERVER_LICENSE_VALIDATION_FAIL = ToGlobalServerErrorCode(0x008);
-constexpr ServerError SERVER_LICENSE_FILE_NOT_EXIST = ToGlobalServerErrorCode(0x009);
+constexpr ServerError SERVER_GROUP_NOT_EXIST = ToGlobalServerErrorCode(0x008);
+constexpr ServerError SERVER_INVALID_TIME_RANGE = ToGlobalServerErrorCode(0x009);
+constexpr ServerError SERVER_INVALID_VECTOR_DIMENSION = ToGlobalServerErrorCode(0x00a);
+constexpr ServerError SERVER_LICENSE_VALIDATION_FAIL = ToGlobalServerErrorCode(0x00b);
+constexpr ServerError SERVER_LICENSE_FILE_NOT_EXIST = ToGlobalServerErrorCode(0x00c);
 
 class ServerException : public std::exception {
 public:
