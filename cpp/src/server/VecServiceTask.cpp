@@ -87,6 +87,7 @@ BaseTaskPtr AddGroupTask::Create(int32_t dimension,
 
 ServerError AddGroupTask::OnExecute() {
     try {
+        IVecIdMapper::GetInstance()->AddGroup(group_id_);
         engine::meta::GroupSchema group_info;
         group_info.dimension = (size_t)dimension_;
         group_info.group_id = group_id_;
@@ -243,6 +244,13 @@ const AttribMap& AddVectorTask::GetVecAttrib() const {
 
 ServerError AddVectorTask::OnExecute() {
     try {
+        if(!IVecIdMapper::GetInstance()->IsGroupExist(group_id_)) {
+            error_code_ = SERVER_UNEXPECTED_ERROR;
+            error_msg_ = "group not exist";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
         uint64_t vec_dim = GetVecDimension();
         std::vector<float> vec_f;
         vec_f.resize(vec_dim);
