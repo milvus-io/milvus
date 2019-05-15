@@ -64,13 +64,16 @@ Status FaissExecutionEngine<IndexTrait>::Serialize() {
 template<class IndexTrait>
 Status FaissExecutionEngine<IndexTrait>::Load() {
     auto index  = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    bool to_cache;
     if (!index) {
         index = read_index(location_);
-        Cache();
         LOG(DEBUG) << "Disk io from: " << location_;
     }
 
     pIndex_ = index->data();
+    if (to_cache) {
+        Cache();
+    }
     return Status::OK();
 }
 
