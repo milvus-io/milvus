@@ -14,47 +14,6 @@ namespace vecwise {
 namespace server {
 
 
-//ServerError
-//LicenseCheck::IntegrityCheck(const std::string &license_file_path, const std::string &secret_file_path) {
-//
-//    std::string file_md5;
-//    LicenseLibrary::GetFileMD5(license_file_path, file_md5);
-//    time_t update_time;
-//    off_t file_size;
-//    LicenseLibrary::GetFileUpdateTimeAndSize(license_file_path, update_time, file_size);
-//    time_t system_time;
-//    LicenseLibrary::GetSystemTime(system_time);
-//
-//    std::string output_file_md5;
-//    time_t output_update_time;
-//    off_t output_file_size;
-//    time_t output_starting_time;
-//    time_t output_end_time;
-//    LicenseLibrary::SecretFileDeserialization(secret_file_path,
-//                                              output_update_time,
-//                                              output_file_size,
-//                                              output_starting_time,
-//                                              output_end_time,
-//                                              output_file_md5);
-//    if (file_md5 != output_file_md5) {
-//        printf("License file has been modified\n");
-//        return SERVER_UNEXPECTED_ERROR;
-//    }
-//    if (update_time != output_update_time) {
-//        printf("update_time is wrong\n");
-//        return SERVER_UNEXPECTED_ERROR;
-//    }
-//    if (file_size != output_file_size) {
-//        printf("file_size is wrong\n");
-//        return SERVER_UNEXPECTED_ERROR;
-//    }
-//    if (system_time < output_starting_time || system_time > output_end_time) {
-//        printf("License expired\n");
-//        return SERVER_UNEXPECTED_ERROR;
-//    }
-//    return SERVER_SUCCESS;
-//}
-
 // Part 1:  Legality check
 
 ServerError
