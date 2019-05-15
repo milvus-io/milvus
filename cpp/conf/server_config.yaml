@@ -10,6 +10,9 @@ db_config:
   db_flush_interval: 5   #unit: second
   idmapper_max_open_file: 128
 
+license_config:
+  license_path: "/tmp/megasearch/abc.license"
+
 log_config:
   global:
     format: "%datetime | %level | %logger | %msg"

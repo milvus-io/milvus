@@ -45,6 +45,10 @@ endif ()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE")
+    if (GPU_VERSION STREQUAL "ON")
+        set(ENABLE_LICENSE "ON")
+        add_definitions("-DENABLE_LICENSE")
+    endif ()
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE")
 endif()
@@ -64,12 +68,12 @@ include_directories(${VECWISE_THIRD_PARTY_BUILD}/include)
 
 link_directories(${CMAKE_CURRRENT_BINARY_DIR})
 link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib)
-
+link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib64)
 #execute_process(COMMAND bash build.sh
 #                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 add_subdirectory(src)
-add_subdirectory(test_client)
+#add_subdirectory(test_client)
 
 if (BUILD_UNIT_TEST)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
