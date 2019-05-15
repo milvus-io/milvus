@@ -11,7 +11,7 @@ db_config:
   idmapper_max_open_file: 128
 
 license_config:
-  license_path: "/tmp/megasearch/abc.license"
+  license_path: "/home/jinhai/Documents/development/vecwise_engine/license/system.license"
 
 log_config:
   global:

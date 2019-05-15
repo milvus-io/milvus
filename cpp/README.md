@@ -32,19 +32,29 @@ cmake_build/src/libvecwise_engine.a is the static library
     ./build.sh --unittest
     
     
-### Luanch server
+### Launch server
 Set config in cpp/conf/server_config.yaml
 
-Then luanch server with config:
+Then launch server with config:
     
     cd [build output path]
     start_server.sh
     stop_server.sh
 
-### Luanch test_client(only for debug)
+### Launch test_client(only for debug)
 If you want to test remote api, you can build test_client.
 test_client use same config file with server:
     
     cd [build output path]/test_client
     test_client -c [sourcecode path]/cpp/conf/server_config.yaml
 
+### License Generate
+Use get_sys_info to get system info file.
+
+    ./get_sys_info                  # system.info will be generated
+
+Use license_generator to generate license file.
+
+    ./license_generator -s system.info -l system.license -b 2019-05-15 -e 2019-08-14                 
+
+Copy the license file to path assigned by license_path in server config file.
