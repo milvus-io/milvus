@@ -20,8 +20,6 @@ class LicenseCheck {
         return instance;
     };
 
-//    static ServerError
-//    IntegrityCheck(const std::string &license_file_path, const std::string &secret_file_path);
 
     // Part 1:  Legality check
     static ServerError

@@ -20,13 +20,11 @@ link_directories(/usr/local/cuda/targets/x86_64-linux/lib/stubs/)
 set(require_files
         ../../src/license/LicenseLibrary.cpp
         ../../src/license/LicenseCheck.cpp
-#        ../../src/license/License.cpp
     )
 
 
 set(db_test_src
 
-#    license_tests.cpp
     license_library_tests.cpp
     license_check_test.cpp
 

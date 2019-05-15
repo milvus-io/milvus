@@ -53,24 +53,24 @@ int main(int argc, char *argv[]) {
     server::ServerError err = server::LicenseLibrary::GetDeviceCount(device_count);
     if (err != server::SERVER_SUCCESS) return -1;
 
-    // 2. Get All GPU UUID
+    // 1. Get All GPU UUID
     std::vector<std::string> uuid_array;
     err = server::LicenseLibrary::GetUUID(device_count, uuid_array);
     if (err != server::SERVER_SUCCESS) return -1;
 
-    // 3. Get UUID SHA256
+    // 2. Get UUID SHA256
     std::vector<std::string> uuid_sha256_array;
     err = server::LicenseLibrary::GetUUIDSHA256(device_count, uuid_array, uuid_sha256_array);
     if (err != server::SERVER_SUCCESS) return -1;
 
-    // 4. Generate GPU ID map with GPU UUID
+    // 3. Generate GPU ID map with GPU UUID
     std::map<int, std::string> uuid_encrption_map;
     for (int i = 0; i < device_count; ++i) {
         uuid_encrption_map[i] = uuid_sha256_array[i];
     }
 
 
-    // 6. Generate GPU_info File
+    // 4. Generate GPU_info File
     err = server::LicenseLibrary::GPUinfoFileSerialization(system_info_filename,
                                                            device_count,
                                                            uuid_encrption_map);

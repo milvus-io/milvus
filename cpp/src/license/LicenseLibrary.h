@@ -94,23 +94,6 @@ class LicenseLibrary {
     static ServerError
     GetDateTime(char *cha, time_t &data_time);
 
-    // Part 5: Integrity check and Legality check
-//    static ServerError
-//    IntegrityCheck(const std::string &license_file_path, const std::string &secret_file_path);
-//
-//    static ServerError
-//    LegalityCheck(const std::string &license_file_path);
-
-    // Part 6: Timer
-//    static ServerError
-//    AlterFile(const std::string &license_file_path,
-//              const std::string &secret_file_path,
-//              const boost::system::error_code &ec,
-//              boost::asio::deadline_timer *pt);
-//
-//    static ServerError
-//    StartCountingDown(const std::string &license_file_path, const std::string &secret_file_path);
-
 
  private:
     static constexpr int sha256_length_ = 32;
