@@ -15,13 +15,14 @@
 
 #include <time.h>
 
+using namespace megasearch;
 using namespace zilliz;
 using namespace zilliz::vecwise;
 using namespace zilliz::vecwise::client;
 
 namespace {
     static const int32_t VEC_DIMENSION = 256;
-    static const int64_t BATCH_COUNT = 1000;
+    static const int64_t BATCH_COUNT = 10000;
     static const int64_t REPEAT_COUNT = 1;
     static const int64_t TOP_K = 10;
 
@@ -126,6 +127,28 @@ TEST(AddVector, CLIENT_TEST) {
         GetServerAddress(address, port, protocol);
         client::ClientSession session(address, port, protocol);
 
+        //verify get invalid group
+        try {
+            std::string id;
+            VecTensor tensor;
+            for(int32_t i = 0; i < VEC_DIMENSION; i++) {
+                tensor.tensor.push_back(0.5);
+            }
+            session.interface()->add_vector(id, GetGroupID(), tensor);
+        } catch (VecException& ex) {
+            CLIENT_LOG_ERROR << "request encounter exception: " << ex.what();
+            ASSERT_EQ(ex.code, VecErrCode::ILLEGAL_ARGUMENT);
+        }
+
+        try {
+            VecGroup temp_group;
+            session.interface()->get_group(temp_group, GetGroupID());
+            //ASSERT_TRUE(temp_group.id.empty());
+        } catch (VecException& ex) {
+            CLIENT_LOG_ERROR << "request encounter exception: " << ex.what();
+            ASSERT_EQ(ex.code, VecErrCode::GROUP_NOT_EXISTS);
+        }
+
         //add group
         VecGroup group;
         group.id = GetGroupID();
@@ -214,7 +237,6 @@ TEST(SearchVector, CLIENT_TEST) {
         //search vector
         {
             const int32_t anchor_index = 100;
-            server::TimeRecorder rc("Search top_k");
             VecTensor tensor;
             for (int32_t i = 0; i < VEC_DIMENSION; i++) {
                 tensor.tensor.push_back((double) (i + anchor_index));
@@ -232,35 +254,60 @@ TEST(SearchVector, CLIENT_TEST) {
             time_ranges.emplace_back(range);
             filter.__set_time_ranges(time_ranges);
 
-            //do search
-            session.interface()->search_vector(res, GetGroupID(), TOP_K, tensor, filter);
+            //normal search
+            {
+                server::TimeRecorder rc("Search top_k");
+                session.interface()->search_vector(res, GetGroupID(), TOP_K, tensor, filter);
+                rc.Elapse("done!");
 
-            //build result
-            std::cout << "Search result: " << std::endl;
-            for(VecSearchResultItem& item : res.result_list) {
-                std::cout << "\t" << item.uid << std::endl;
+                //build result
+                std::cout << "Search result: " << std::endl;
+                for (VecSearchResultItem &item : res.result_list) {
+                    std::cout << "\t" << item.uid << std::endl;
 
-                ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_NUM) != 0);
-                ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_COMMENT) != 0);
-                ASSERT_TRUE(!item.attrib[TEST_ATTRIB_COMMENT].empty());
+                    ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_NUM) != 0);
+                    ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_COMMENT) != 0);
+                    ASSERT_TRUE(!item.attrib[TEST_ATTRIB_COMMENT].empty());
+                }
+
+                ASSERT_EQ(res.result_list.size(), (uint64_t) TOP_K);
+                if (!res.result_list.empty()) {
+                    ASSERT_TRUE(!res.result_list[0].uid.empty());
+                }
             }
-            rc.Elapse("done!");
 
-            ASSERT_EQ(res.result_list.size(), (uint64_t)TOP_K);
-            if(!res.result_list.empty()) {
-                ASSERT_TRUE(!res.result_list[0].uid.empty());
+            //filter attribute search
+            {
+                std::vector<std::string> require_attributes = {TEST_ATTRIB_COMMENT};
+                filter.__set_return_attribs(require_attributes);
+                server::TimeRecorder rc("Search top_k with attribute filter");
+                session.interface()->search_vector(res, GetGroupID(), TOP_K, tensor, filter);
+                rc.Elapse("done!");
+
+                //build result
+                std::cout << "Search result attributes: " << std::endl;
+                for (VecSearchResultItem &item : res.result_list) {
+                    ASSERT_EQ(item.attrib.size(), 1UL);
+                    ASSERT_TRUE(item.attrib.count(TEST_ATTRIB_COMMENT) != 0);
+                    ASSERT_TRUE(!item.attrib[TEST_ATTRIB_COMMENT].empty());
+                    std::cout << "\t" << item.uid << ":" << item.attrib[TEST_ATTRIB_COMMENT] << std::endl;
+                }
+
+                ASSERT_EQ(res.result_list.size(), (uint64_t) TOP_K);
             }
 
             //empty search
-            date.day > 0 ? date.day -= 1 : date.day += 1;
-            range.time_begin = date;
-            range.time_end = date;
-            time_ranges.clear();
-            time_ranges.emplace_back(range);
-            filter.__set_time_ranges(time_ranges);
-            session.interface()->search_vector(res, GetGroupID(), TOP_K, tensor, filter);
+            {
+                date.day > 0 ? date.day -= 1 : date.day += 1;
+                range.time_begin = date;
+                range.time_end = date;
+                time_ranges.clear();
+                time_ranges.emplace_back(range);
+                filter.__set_time_ranges(time_ranges);
+                session.interface()->search_vector(res, GetGroupID(), TOP_K, tensor, filter);
 
-            ASSERT_EQ(res.result_list.size(), 0);
+                ASSERT_EQ(res.result_list.size(), 0);
+            }
         }
 
         //search binary vector

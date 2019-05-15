@@ -13,7 +13,7 @@ namespace zilliz {
 namespace vecwise {
 namespace client {
 
-using VecServiceClientPtr = std::shared_ptr<VecServiceClient>;
+using VecServiceClientPtr = std::shared_ptr<megasearch::VecServiceClient>;
 
 class ClientSession {
 public:

@@ -8,7 +8,7 @@ CUDA_PATH="--with-cuda=/usr/local/cuda"
 CUDA_CONFIG=--with-cuda-arch="-gencode=arch=compute_61,code=sm_61"
 
 BUILD_TYPE=Release
-GPU_VERSION=OFF
+GPU_VERSION=ON
 
 while getopts "p:t:uhg" arg
 do
@@ -17,7 +17,7 @@ do
                 BUILD_TYPE=$OPTARG # BUILD_TYPE
                 ;;
              g)
-                GPU_VERSION=ON
+                GPU_VERSION=OFF
                 ;;
              ?)
                 echo "unkonw argument"

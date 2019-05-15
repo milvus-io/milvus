@@ -3,16 +3,16 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-namespace cl zilliz
-namespace cpp zilliz
-namespace py zilliz
-namespace d zilliz
-namespace dart zilliz
-namespace java zilliz
-namespace perl zilliz
-namespace php zilliz
-namespace haxe zilliz
-namespace netcore zilliz
+namespace cl megasearch
+namespace cpp megasearch
+namespace py megasearch
+namespace d megasearch
+namespace dart megasearch
+namespace java megasearch
+namespace perl megasearch
+namespace php megasearch
+namespace haxe megasearch
+namespace netcore megasearch
 
 enum VecErrCode {
     SUCCESS = 0,
@@ -69,9 +69,9 @@ struct VecSearchResultList {
 }
 
 /**
- * second;			Seconds.	[0-60] (1 leap second)
- * minute;			Minutes.	[0-59]
- * hour;			Hours.	    [0-23]
+ * second;			Seconds.	[0-59]      reserved
+ * minute;			Minutes.	[0-59]      reserved
+ * hour;			Hours.	    [0-23]      reserved
  * day;			    Day.		[1-31]
  * month;			Month.	    [0-11]
  * year;			Year - 1900.
@@ -87,9 +87,9 @@ struct VecDateTime {
 
 /**
  * time_begin;          time range begin
- * begine_closed;	    true means '[', false means '('
+ * begine_closed;	    true means '[', false means '('             reserved
  * time_end;            set to true to return tensor double array
- * end_closed;          time range end
+ * end_closed;          time range end                              reserved
  */
 struct VecTimeRange {
     1: required VecDateTime time_begin;
@@ -99,7 +99,7 @@ struct VecTimeRange {
 }
 
 /**
- * attrib_filter;   search condition, for example: "color=red"
+ * attrib_filter;   reserved
  * time_ranges;	    search condition, for example: "date between 1999-02-12 and 2008-10-14"
  * return_attribs;  specify required attribute names
  */

@@ -6,7 +6,7 @@
  */
 #include "VecService.h"
 
-namespace zilliz {
+namespace megasearch {
 
 
 VecService_add_group_args::~VecService_add_group_args() throw() {

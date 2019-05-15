@@ -23,6 +23,7 @@ cmake_build/src/libvecwise_engine.a is the static library
     cd [sourcecode path]/cpp
     ./build.sh -t Debug
     ./build.sh -t Release
+    ./build.sh -g # Build GPU version
     
 #### To build unittest:
     

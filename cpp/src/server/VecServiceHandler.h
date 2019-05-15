@@ -22,6 +22,8 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
+using namespace megasearch;
+
 class VecServiceHandler : virtual public VecServiceIf {
 public:
     VecServiceHandler() {
