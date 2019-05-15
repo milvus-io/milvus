@@ -12,7 +12,13 @@ aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
 
 set(license_check_files
-        ${CMAKE_CURRENT_SOURCE_DIR}/license/License.cpp
+        license/LicenseLibrary.cpp
+        license/LicenseCheck.cpp
+        )
+
+set(license_generator_src
+        license/LicenseGenerator.cpp
+        license/LicenseLibrary.cpp
         )
 
 set(service_files
@@ -27,6 +33,9 @@ set(vecwise_engine_src
         ${db_files}
         ${wrapper_files}
         )
+
+set(get_sys_info_src
+        license/GetSysInfo.cpp)
 
 include_directories(/usr/include)
 include_directories(/usr/local/cuda/include)
@@ -53,19 +62,37 @@ else()
             libgfortran.a
             libquadmath.a
             libsqlite3.a
-        )
+            )
 endif ()
 
-cuda_add_library(vecwise_engine STATIC ${vecwise_engine_src})
+if (ENABLE_LICENSE STREQUAL "ON")
+    link_directories(/usr/local/cuda/lib64/stubs)
+    link_directories(/usr/local/cuda/lib64)
+    set(license_libs
+            nvidia-ml
+            libboost_system.a
+            libboost_filesystem.a
+            libboost_serialization.a
+            crypto
+            cudart
+            cublas
+            )
+endif ()
 
+
+cuda_add_library(vecwise_engine STATIC ${vecwise_engine_src})
 target_link_libraries(vecwise_engine ${engine_libs})
+
+if (ENABLE_LICENSE STREQUAL "ON")
+        add_library(vecwise_license STATIC ${license_check_files})
+        target_link_libraries(vecwise_license ${license_libs})
+endif ()
 
 add_executable(vecwise_server
         ${config_files}
         ${server_files}
         ${utils_files}
         ${service_files}
-        ${license_check_files}
         ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc
         )
 
@@ -85,11 +112,17 @@ set(server_libs
         dl
         )
 
-target_link_libraries(vecwise_server ${server_libs})
+if (ENABLE_LICENSE STREQUAL "ON")
+        target_link_libraries(vecwise_server ${server_libs} vecwise_license)
+else ()
+        target_link_libraries(vecwise_server ${server_libs})
+endif()
 
-set(license_generator_src
-        ${CMAKE_CURRENT_SOURCE_DIR}/license/LicenseGenerator.cpp)
-
-add_executable(license_generator ${license_generator_src})
+if (ENABLE_LICENSE STREQUAL "ON")
+        add_executable(license_generator ${license_generator_src})
+        add_executable(get_sys_info ${get_sys_info_src})
+        target_link_libraries(get_sys_info ${license_libs} vecwise_license)
+        target_link_libraries(license_generator ${license_libs})
+endif ()
 
 install(TARGETS vecwise_server DESTINATION bin)

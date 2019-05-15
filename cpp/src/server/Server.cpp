@@ -9,7 +9,7 @@
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
-#include "license/License.h"
+#include "license/LicenseCheck.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -133,12 +133,6 @@ Server::Daemonize() {
 
 int
 Server::Start() {
-    std::string license_file_path = "/tmp/vecwise.license";
-    if(LicenseValidate(license_file_path) != SERVER_SUCCESS) {
-        SERVER_LOG_ERROR << "License check failed";
-        return 1;
-    }
-
     if (daemonized_) {
         Daemonize();
     }
@@ -156,6 +150,21 @@ Server::Start() {
 
             //print config into console and log
             config.PrintAll();
+
+#ifdef ENABLE_LICENSE
+            ConfigNode license_config = config.GetConfig(CONFIG_LICENSE);
+            std::string license_file_path = license_config.GetValue(CONFIG_LICENSE_PATH);
+            SERVER_LOG_INFO << "License path: " << license_file_path;
+            if(server::LicenseCheck::LegalityCheck(license_file_path) != SERVER_SUCCESS) {
+                SERVER_LOG_ERROR << "License check failed";
+                exit(1);
+            }
+
+            if(server::LicenseCheck::StartCountingDown(license_file_path) != SERVER_SUCCESS) {
+                SERVER_LOG_ERROR << "License counter start error";
+                exit(1);
+            }
+#endif
 
             // Handle Signal
             signal(SIGINT, SignalUtil::HandleSignal);
