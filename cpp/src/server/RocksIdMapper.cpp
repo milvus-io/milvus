@@ -18,6 +18,8 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
+static const std::string ROCKSDB_DEFAULT_GROUP = "default";
+
 RocksIdMapper::RocksIdMapper()
 : db_(nullptr) {
     OpenDb();
@@ -90,6 +92,40 @@ void RocksIdMapper::CloseDb() {
     }
 }
 
+//not thread-safe
+ServerError RocksIdMapper::AddGroup(const std::string& group) {
+    if(!IsGroupExist(group)) {
+        if(db_ == nullptr) {
+            return SERVER_NULL_POINTER;
+        }
+
+        try {//add group
+            rocksdb::ColumnFamilyHandle *cfh = nullptr;
+            rocksdb::Status s = db_->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), group, &cfh);
+            if (!s.ok()) {
+                SERVER_LOG_ERROR << "ID mapper failed to create group:" << s.ToString();
+                return SERVER_UNEXPECTED_ERROR;
+            } else {
+                column_handles_.insert(std::make_pair(group, cfh));
+            }
+        } catch(std::exception& ex) {
+            SERVER_LOG_ERROR << "ID mapper failed to create group: " << ex.what();
+            return SERVER_UNEXPECTED_ERROR;
+        }
+    }
+
+    return SERVER_SUCCESS;
+}
+
+//not thread-safe
+bool RocksIdMapper::IsGroupExist(const std::string& group) const {
+    std::string group_name = group;
+    if(group_name.empty()){
+        group_name = ROCKSDB_DEFAULT_GROUP;
+    }
+    return (column_handles_.count(group_name) > 0 && column_handles_[group_name] != nullptr);
+}
+
 ServerError RocksIdMapper::Put(const std::string& nid, const std::string& sid, const std::string& group) {
     if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
@@ -104,22 +140,12 @@ ServerError RocksIdMapper::Put(const std::string& nid, const std::string& sid, c
             return SERVER_UNEXPECTED_ERROR;
         }
     } else {
-        rocksdb::ColumnFamilyHandle *cfh = nullptr;
-        if(column_handles_.count(group) == 0) {
-            try {//add group
-                rocksdb::Status s = db_->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), group, &cfh);
-                if (!s.ok()) {
-                    SERVER_LOG_ERROR << "ID mapper failed to create group:" << s.ToString();
-                } else {
-                    column_handles_.insert(std::make_pair(group, cfh));
-                }
-            } catch(std::exception& ex) {
-                std::cout << ex.what() << std::endl;
-            }
-        } else {
-            cfh = column_handles_[group];
+        //try create group
+        if(AddGroup(group) != SERVER_SUCCESS){
+            return SERVER_UNEXPECTED_ERROR;
         }
 
+        rocksdb::ColumnFamilyHandle *cfh = column_handles_[group];
         rocksdb::Status s = db_->Put(rocksdb::WriteOptions(), cfh, key, value);
         if (!s.ok()) {
             SERVER_LOG_ERROR << "ID mapper failed to put:" << s.ToString();
