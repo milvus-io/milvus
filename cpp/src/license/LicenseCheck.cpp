@@ -74,7 +74,7 @@ LicenseCheck::AlterFile(const std::string &license_file_path,
     {
         exit(1);
     }
-    printf("---runing---\n");
+//    printf("---runing---\n");
     pt->expires_at(pt->expires_at() + boost::posix_time::hours(1));
     pt->async_wait(boost::bind(AlterFile, license_file_path, boost::asio::placeholders::error, pt));
     return SERVER_SUCCESS;
@@ -83,8 +83,7 @@ LicenseCheck::AlterFile(const std::string &license_file_path,
 
 ServerError
 LicenseCheck::StartCountingDown(const std::string &license_file_path) {
-
-    if (!LicenseLibrary::IsFileExistent(license_file_path)) return SERVER_LICENSE_FILE_NOT_EXIST;
+    if (!LicenseLibrary::IsFileExistent(license_file_path)) exit(1);
     boost::asio::io_service io;
     boost::asio::deadline_timer t(io, boost::posix_time::hours(1));
     t.async_wait(boost::bind(AlterFile, license_file_path, boost::asio::placeholders::error, &t));
