@@ -86,7 +86,11 @@ DBMetaImpl::DBMetaImpl(const DBMetaOptions& options_)
 
 Status DBMetaImpl::initialize() {
     if (!boost::filesystem::is_directory(_options.path)) {
-        assert(boost::filesystem::create_directory(_options.path));
+        auto ret = boost::filesystem::create_directory(_options.path);
+        if (!ret) {
+            LOG(ERROR) << "Create directory " << _options.path << " Error";
+        }
+        assert(ret);
     }
 
     ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(_options.path+"/meta.sqlite"));
@@ -123,7 +127,11 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
     auto group_path = GetGroupPath(group_info.group_id);
 
     if (!boost::filesystem::is_directory(group_path)) {
-        assert(boost::filesystem::create_directory(group_path));
+        auto ret = boost::filesystem::create_directory(group_path);
+        if (!ret) {
+            LOG(ERROR) << "Create directory " << group_path << " Error";
+        }
+        assert(ret);
     }
 
     return Status::OK();
@@ -207,7 +215,11 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
     auto partition_path = GetGroupDatePartitionPath(group_file.group_id, group_file.date);
 
     if (!boost::filesystem::is_directory(partition_path)) {
-        assert(boost::filesystem::create_directory(partition_path));
+        auto ret = boost::filesystem::create_directory(partition_path);
+        if (!ret) {
+            LOG(ERROR) << "Create directory " << partition_path << " Error";
+        }
+        assert(ret);
     }
 
     return Status::OK();
