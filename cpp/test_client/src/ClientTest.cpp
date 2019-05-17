@@ -211,7 +211,10 @@ TEST(AddVector, CLIENT_TEST) {
                 server::TimeRecorder rc("Add " + std::to_string(count) + " binary vectors in one batch");
                 std::vector<std::string> ids;
                 session.interface()->add_binary_vector_batch(ids, group.id, bin_tensor_list_2);
-                ASSERT_TRUE(!ids.empty());
+                ASSERT_EQ(ids.size(), bin_tensor_list_2.tensor_list.size());
+                for(size_t i = 0; i < ids.size(); i++) {
+                    ASSERT_TRUE(!ids[i].empty());
+                }
                 rc.Elapse("done!");
             }
 #endif

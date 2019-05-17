@@ -488,10 +488,14 @@ ServerError AddBatchVectorTask::OnExecute() {
                 std::list<std::future<void>> threads_list;
 
                 uint64_t begin_index = 0, end_index = USE_MT;
-                while(end_index < vec_count) {
+                while(true) {
                     threads_list.push_back(
                             GetThreadPool().enqueue(&AddBatchVectorTask::ProcessIdMapping,
                                                this, vector_ids, begin_index, end_index, tensor_ids_));
+                    if(end_index >= vec_count) {
+                        break;
+                    }
+
                     begin_index = end_index;
                     end_index += USE_MT;
                     if(end_index > vec_count) {
