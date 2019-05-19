@@ -24,6 +24,8 @@ public:
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
     virtual Status add_group_file(GroupFileSchema& group_file_info) override;
+    virtual Status delete_group_partitions(const std::string& group_id,
+            const meta::DatesT& dates) override;
 
     virtual Status has_group_file(const std::string& group_id_,
                                   const std::string& file_id_,

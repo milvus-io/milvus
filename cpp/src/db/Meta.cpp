@@ -11,13 +11,28 @@ namespace vecwise {
 namespace engine {
 namespace meta {
 
-DateT Meta::GetDate(const std::time_t& t) {
+DateT Meta::GetDate(const std::time_t& t, int day_delta) {
     tm *ltm = std::localtime(&t);
+    if (day_delta > 0) {
+        do {
+            ++ltm->tm_mday;
+            --day_delta;
+        } while(day_delta > 0);
+        mktime(ltm);
+    } else if (day_delta < 0) {
+        do {
+            --ltm->tm_mday;
+            ++day_delta;
+        } while(day_delta < 0);
+        mktime(ltm);
+    } else {
+        ltm->tm_mday;
+    }
     return ltm->tm_year*10000 + ltm->tm_mon*100 + ltm->tm_mday;
 }
 
-DateT Meta::GetDate() {
-    return GetDate(std::time(nullptr));
+DateT Meta::GetDate(int day_delta) {
+    return GetDate(std::time(nullptr), day_delta);
 }
 
 } // namespace meta

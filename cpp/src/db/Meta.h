@@ -67,6 +67,8 @@ public:
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
 
     virtual Status add_group_file(GroupFileSchema& group_file_info) = 0;
+    virtual Status delete_group_partitions(const std::string& group_id,
+            const meta::DatesT& dates) = 0;
 
     virtual Status has_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
@@ -98,8 +100,8 @@ public:
 
     virtual Status count(const std::string& group_id, long& result) = 0;
 
-    static DateT GetDate(const std::time_t& t);
-    static DateT GetDate();
+    static DateT GetDate(const std::time_t& t, int day_delta);
+    static DateT GetDate(int day_delta = 0);
 
 }; // MetaData
 
