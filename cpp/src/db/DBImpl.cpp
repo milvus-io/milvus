@@ -45,6 +45,12 @@ Status DBImpl<EngineT>::get_group(meta::GroupSchema& group_info) {
 }
 
 template<typename EngineT>
+Status DBImpl<EngineT>::delete_vectors(const std::string& group_id,
+        const meta::DatesT& dates) {
+    return _pMeta->delete_group_partitions(group_id, dates);
+}
+
+template<typename EngineT>
 Status DBImpl<EngineT>::has_group(const std::string& group_id_, bool& has_or_not_) {
     return _pMeta->has_group(group_id_, has_or_not_);
 }
