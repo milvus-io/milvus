@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <mutex>
 
 namespace zilliz {
 namespace vecwise {
@@ -39,9 +40,22 @@ private:
     void OpenDb();
     void CloseDb();
 
+    ServerError AddGroupInternal(const std::string& group);
+
+    bool IsGroupExistInternal(const std::string& group) const;
+
+    ServerError PutInternal(const std::string& nid, const std::string& sid, const std::string& group);
+
+    ServerError GetInternal(const std::string& nid, std::string& sid, const std::string& group) const;
+
+    ServerError DeleteInternal(const std::string& nid, const std::string& group);
+
+    ServerError DeleteGroupInternal(const std::string& group);
+
 private:
     rocksdb::DB* db_;
     mutable std::unordered_map<std::string, rocksdb::ColumnFamilyHandle*> column_handles_;
+    mutable std::mutex db_mutex_;
 };
 
 }
