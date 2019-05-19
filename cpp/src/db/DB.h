@@ -23,6 +23,8 @@ public:
 
     virtual Status add_group(meta::GroupSchema& group_info_) = 0;
     virtual Status get_group(meta::GroupSchema& group_info_) = 0;
+    virtual Status delete_vectors(const std::string& group_id,
+            const meta::DatesT& dates) = 0;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
     virtual Status get_group_files(const std::string& group_id_,
                                    const int date_delta_,

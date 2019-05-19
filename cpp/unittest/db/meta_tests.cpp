@@ -59,6 +59,11 @@ TEST_F(MetaTest, GROUP_FILE_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(group_file.file_type, new_file_type);
 
+    meta::DatesT dates;
+    dates.push_back(meta::Meta::GetDate());
+    status = impl_->delete_group_partitions(group_file.group_id, dates);
+    ASSERT_FALSE(status.ok());
+
     /* group_file.file_type = meta::GroupFileSchema::NEW; */
     /* status = impl_->get_group_file(group_file.group_id, group_file.file_id, group_file); */
     /* ASSERT_TRUE(status.ok()); */

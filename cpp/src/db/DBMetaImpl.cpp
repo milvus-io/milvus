@@ -104,6 +104,44 @@ Status DBMetaImpl::initialize() {
     return Status::OK();
 }
 
+// PXU TODO: Temp solution. Will fix later
+Status DBMetaImpl::delete_group_partitions(const std::string& group_id,
+            const meta::DatesT& dates) {
+    if (dates.size() == 0) {
+        return Status::OK();
+    }
+
+    GroupSchema group_info;
+    group_info.group_id = group_id;
+    auto status = get_group(group_info);
+    if (!status.ok()) {
+        return status;
+    }
+
+    auto yesterday = GetDate(-2);
+
+    for (auto& date : dates) {
+        if (date >= yesterday) {
+            return Status::Error("Could not delete partitions with 2 days");
+        }
+    }
+
+    try {
+        ConnectorPtr->update_all(
+                    set(
+                        c(&GroupFileSchema::file_type) = (int)GroupFileSchema::TO_DELETE
+                    ),
+                    where(
+                        c(&GroupFileSchema::group_id) == group_id and
+                        in(&GroupFileSchema::date, dates)
+                    ));
+    } catch (std::exception & e) {
+        LOG(DEBUG) << e.what();
+        throw e;
+    }
+    return Status::OK();
+}
+
 Status DBMetaImpl::add_group(GroupSchema& group_info) {
     if (group_info.group_id == "") {
         std::stringstream ss;
