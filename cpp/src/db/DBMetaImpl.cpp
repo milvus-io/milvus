@@ -118,7 +118,7 @@ Status DBMetaImpl::delete_group_partitions(const std::string& group_id,
         return status;
     }
 
-    auto yesterday = GetDate(-2);
+    auto yesterday = GetDateWithDelta(-2);
 
     for (auto& date : dates) {
         if (date >= yesterday) {
