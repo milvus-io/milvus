@@ -118,7 +118,7 @@ Status DBMetaImpl::delete_group_partitions(const std::string& group_id,
         return status;
     }
 
-    auto yesterday = GetDateWithDelta(-2);
+    auto yesterday = GetDateWithDelta(-1);
 
     for (auto& date : dates) {
         if (date >= yesterday) {
@@ -413,7 +413,32 @@ Status DBMetaImpl::has_group_file(const std::string& group_id_,
 Status DBMetaImpl::get_group_file(const std::string& group_id_,
                               const std::string& file_id_,
                               GroupFileSchema& group_file_info_) {
-    //PXU TODO
+    try {
+        auto files = ConnectorPtr->select(columns(&GroupFileSchema::id,
+                                                   &GroupFileSchema::group_id,
+                                                   &GroupFileSchema::file_id,
+                                                   &GroupFileSchema::file_type,
+                                                   &GroupFileSchema::rows,
+                                                   &GroupFileSchema::date),
+                                          where(c(&GroupFileSchema::file_id) == file_id_ and
+                                                c(&GroupFileSchema::group_id) == group_id_
+                                          ));
+        assert(files.size() <= 1);
+        if (files.size() == 1) {
+            group_file_info_.id = std::get<0>(files[0]);
+            group_file_info_.group_id = std::get<1>(files[0]);
+            group_file_info_.file_id = std::get<2>(files[0]);
+            group_file_info_.file_type = std::get<3>(files[0]);
+            group_file_info_.rows = std::get<4>(files[0]);
+            group_file_info_.date = std::get<5>(files[0]);
+        } else {
+            return Status::NotFound("GroupFile " + file_id_ + " not found");
+        }
+    } catch (std::exception &e) {
+        LOG(DEBUG) << e.what();
+        throw e;
+    }
+
     return Status::OK();
 }
 
