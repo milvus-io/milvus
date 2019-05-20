@@ -64,10 +64,26 @@ TEST_F(MetaTest, GROUP_FILE_TEST) {
     status = impl_->delete_group_partitions(group_file.group_id, dates);
     ASSERT_FALSE(status.ok());
 
-    /* group_file.file_type = meta::GroupFileSchema::NEW; */
-    /* status = impl_->get_group_file(group_file.group_id, group_file.file_id, group_file); */
-    /* ASSERT_TRUE(status.ok()); */
-    /* ASSERT_EQ(group_file.file_type, new_file_type); */
+    dates.clear();
+    for (auto i=2; i < 10; ++i) {
+        dates.push_back(meta::Meta::GetDateWithDelta(-1*i));
+    }
+    status = impl_->delete_group_partitions(group_file.group_id, dates);
+    ASSERT_TRUE(status.ok());
+
+    group_file.date = meta::Meta::GetDateWithDelta(-2);
+    status = impl_->update_group_file(group_file);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(group_file.date, meta::Meta::GetDateWithDelta(-2));
+    ASSERT_FALSE(group_file.file_type == meta::GroupFileSchema::TO_DELETE);
+
+    dates.clear();
+    dates.push_back(group_file.date);
+    status = impl_->delete_group_partitions(group_file.group_id, dates);
+    ASSERT_TRUE(status.ok());
+    status = impl_->get_group_file(group_file.group_id, group_file.file_id, group_file);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(group_file.file_type == meta::GroupFileSchema::TO_DELETE);
 }
 
 TEST_F(MetaTest, GROUP_FILES_TEST) {
