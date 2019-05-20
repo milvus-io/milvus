@@ -100,8 +100,9 @@ public:
 
     virtual Status count(const std::string& group_id, long& result) = 0;
 
-    static DateT GetDate(const std::time_t& t, int day_delta);
-    static DateT GetDate(int day_delta = 0);
+    static DateT GetDate(const std::time_t& t, int day_delta = 0);
+    static DateT GetDate();
+    static DateT GetDateWithDelta(int day_delta);
 
 }; // MetaData
 

@@ -31,8 +31,12 @@ DateT Meta::GetDate(const std::time_t& t, int day_delta) {
     return ltm->tm_year*10000 + ltm->tm_mon*100 + ltm->tm_mday;
 }
 
-DateT Meta::GetDate(int day_delta) {
+DateT Meta::GetDateWithDelta(int day_delta) {
     return GetDate(std::time(nullptr), day_delta);
+}
+
+DateT Meta::GetDate() {
+    return GetDate(std::time(nullptr), 0);
 }
 
 } // namespace meta
