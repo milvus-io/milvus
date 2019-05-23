@@ -50,6 +50,8 @@ public:
 
     virtual Status files_to_index(GroupFilesSchema&) override;
 
+    virtual Status archive_files() override;
+
     virtual Status cleanup() override;
 
     virtual Status cleanup_ttl_files(uint16_t seconds) override;
@@ -62,6 +64,7 @@ public:
 
 private:
 
+    Status discard_files_of_size(long to_discard_size);
     long GetMicroSecTimeStamp();
     Status get_group_no_lock(GroupSchema& group_info);
     std::string GetGroupPath(const std::string& group_id);
