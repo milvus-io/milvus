@@ -508,43 +508,40 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
     }
     try {
         auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
-                                                   &GroupFileSchema::file_type,
                                                    &GroupFileSchema::rows),
                                           where(c(&GroupFileSchema::file_type) != (int)GroupFileSchema::TO_DELETE),
                                           order_by(&GroupFileSchema::id),
                                           limit(10));
+        std::vector<int> ids;
 
-        /* std::map<std::string, GroupSchema> groups; */
+        for (auto& file : selected) {
+            if (to_discard_size <= 0) break;
+            GroupFileSchema group_file;
+            group_file.id = std::get<0>(file);
+            group_file.rows = std::get<1>(file);
+            ids.push_back(group_file.id);
+            to_discard_size -= group_file.rows;
+        }
 
-        /* for (auto& file : selected) { */
-        /*     GroupFileSchema group_file; */
-        /*     group_file.id = std::get<0>(file); */
-        /*     group_file.group_id = std::get<1>(file); */
-        /*     group_file.file_id = std::get<2>(file); */
-        /*     group_file.file_type = std::get<3>(file); */
-        /*     group_file.rows = std::get<4>(file); */
-        /*     group_file.date = std::get<5>(file); */
-        /*     GetGroupFilePath(group_file); */
-        /*     auto groupItr = groups.find(group_file.group_id); */
-        /*     if (groupItr == groups.end()) { */
-        /*         GroupSchema group_info; */
-        /*         group_info.group_id = group_file.group_id; */
-        /*         auto status = get_group_no_lock(group_info); */
-        /*         if (!status.ok()) { */
-        /*             return status; */
-        /*         } */
-        /*         groups[group_file.group_id] = group_info; */
-        /*     } */
-        /*     group_file.dimension = groups[group_file.group_id].dimension; */
-        /*     files.push_back(group_file); */
-        /* } */
+        if (ids.size() == 0) {
+            return Status::OK();
+        }
+
+        ConnectorPtr->update_all(
+                    set(
+                        c(&GroupFileSchema::file_type) = (int)GroupFileSchema::TO_DELETE
+                    ),
+                    where(
+                        in(&GroupFileSchema::id, ids)
+                    ));
+
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
         throw e;
     }
 
-    return Status::OK();
 
+    return discard_files_of_size(to_discard_size);
 }
 
 Status DBMetaImpl::update_group_file(GroupFileSchema& group_file) {
