@@ -47,6 +47,8 @@ public:
 
     virtual Status files_to_index(GroupFilesSchema&) override;
 
+    virtual Status archive_files() override;
+
     virtual Status cleanup_ttl_files(uint16_t seconds) override;
 
     virtual Status count(const std::string& group_id, long& result) override;
