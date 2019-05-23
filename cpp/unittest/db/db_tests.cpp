@@ -12,6 +12,51 @@
 
 using namespace zilliz::vecwise;
 
+TEST_F(DBTest, CONFIG_TEST) {
+    {
+        EXPECT_DEATH(engine::ArchiveConf conf("wrong"), "");
+    }
+    {
+        engine::ArchiveConf conf("delete");
+        ASSERT_EQ(conf.GetType(), "delete");
+        auto criterias = conf.GetCriterias();
+        ASSERT_TRUE(criterias.size() == 1);
+        ASSERT_TRUE(criterias["disk"] == 512);
+    }
+    {
+        engine::ArchiveConf conf("swap");
+        ASSERT_EQ(conf.GetType(), "swap");
+        auto criterias = conf.GetCriterias();
+        ASSERT_TRUE(criterias.size() == 1);
+        ASSERT_TRUE(criterias["disk"] == 512);
+    }
+    {
+        ASSERT_ANY_THROW(engine::ArchiveConf conf1("swap", "disk:"));
+        ASSERT_ANY_THROW(engine::ArchiveConf conf2("swap", "disk:a"));
+        engine::ArchiveConf conf("swap", "disk:1024");
+        auto criterias = conf.GetCriterias();
+        ASSERT_TRUE(criterias.size() == 1);
+        ASSERT_TRUE(criterias["disk"] == 1024);
+    }
+    {
+        ASSERT_ANY_THROW(engine::ArchiveConf conf1("swap", "days:"));
+        ASSERT_ANY_THROW(engine::ArchiveConf conf2("swap", "days:a"));
+        engine::ArchiveConf conf("swap", "days:100");
+        auto criterias = conf.GetCriterias();
+        ASSERT_TRUE(criterias.size() == 1);
+        ASSERT_TRUE(criterias["days"] == 100);
+    }
+    {
+        ASSERT_ANY_THROW(engine::ArchiveConf conf1("swap", "days:"));
+        ASSERT_ANY_THROW(engine::ArchiveConf conf2("swap", "days:a"));
+        engine::ArchiveConf conf("swap", "days:100;disk:200");
+        auto criterias = conf.GetCriterias();
+        ASSERT_TRUE(criterias.size() == 2);
+        ASSERT_TRUE(criterias["days"] == 100);
+        ASSERT_TRUE(criterias["disk"] == 200);
+    }
+}
+
 TEST_F(DBTest, DB_TEST) {
 
     static const std::string group_name = "test_group";
