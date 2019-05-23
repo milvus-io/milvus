@@ -1,45 +1,18 @@
 server_config:
   address: 0.0.0.0
   port: 33001
-  transfer_protocol: json   #optional: binary, compact, json, debug
+  transfer_protocol: json     #optional: binary, compact, json, debug
   server_mode: thread_pool    #optional: simple, thread_pool
+  gpu_index: 0                #which gpu to be used
 
 db_config:
   db_path: /tmp/vecwise
   db_backend_url: http://127.0.0.1
-  db_flush_interval: 5   #unit: second
+  db_flush_interval: 5              #unit: second
   idmapper_max_open_file: 128
 
 license_config:
-  license_path: "/home/jinhai/Documents/development/vecwise_engine/license/system.license"
-
-log_config:
-  global:
-    format: "%datetime | %level | %logger | %msg"
-    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-global.log"
-    enabled: true
-    to_file: true
-    to_standard_output: true
-    subsecond_precision: 3
-    performance_tracking: false
-    max_log_file_size: 2097152  # throw log files away after 2mb
-  debug:
-    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-debug.log"
-    enabled: true
-  warning:
-    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-warning.log"
-  trace:
-    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-trace.log"
-  verbose:
-    format: "%datetime{%d/%m/%y} | %level-%vlevel | %msg"
-    to_file: false
-    to_standard_output: true
-  error:
-    enabled: false
-    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-error.log"
-  fatal:
-    enabled: false
-    filename: "/tmp/vecwise/logs/vecwise_engine-%datetime{%h:%m}-fatal.log"
+  license_path: "/tmp/system.license"
 
 cache_config:
     cpu_cache_capacity: 16   # unit: GB
