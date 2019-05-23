@@ -123,6 +123,7 @@ if (ENABLE_LICENSE STREQUAL "ON")
         add_executable(get_sys_info ${get_sys_info_src})
         target_link_libraries(get_sys_info ${license_libs} vecwise_license)
         target_link_libraries(license_generator ${license_libs})
+        install(TARGETS get_sys_info DESTINATION bin)
 endif ()
 
 install(TARGETS vecwise_server DESTINATION bin)
