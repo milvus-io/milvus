@@ -7,12 +7,29 @@
 
 #include <string>
 #include <memory>
+#include <map>
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
 
 class Env;
+
+struct ArchiveConf {
+    using CriteriaT = std::map<std::string, int>;
+
+    ArchiveConf(const std::string& type, const std::string& criterias = "disk:512");
+
+    const std::string& GetType() const { return type_; }
+    const CriteriaT GetCriterias() const { return criterias_; }
+
+private:
+    void ParseCritirias(const std::string& type);
+    void ParseType(const std::string& criterias);
+
+    std::string type_;
+    CriteriaT criterias_;
+};
 
 struct DBMetaOptions {
     /* DBMetaOptions(const std::string&, const std::string&); */
