@@ -32,9 +32,9 @@ private:
 };
 
 struct DBMetaOptions {
-    /* DBMetaOptions(const std::string&, const std::string&); */
     std::string path;
     std::string backend_uri;
+    ArchiveConf archive_conf = ArchiveConf("delete");
 }; // DBMetaOptions
 
 

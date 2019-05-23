@@ -30,6 +30,7 @@ struct GroupSchema {
     size_t files_cnt = 0;
     uint16_t dimension;
     std::string location = "";
+    long created_on;
 }; // GroupSchema
 
 
@@ -51,6 +52,7 @@ struct GroupFileSchema {
     uint16_t dimension;
     std::string location = "";
     long updated_time;
+    long created_on;
 }; // GroupFileSchema
 
 typedef std::vector<GroupFileSchema> GroupFilesSchema;
@@ -90,6 +92,8 @@ public:
 
     virtual Status files_to_merge(const std::string& group_id,
             DatePartionedGroupFilesSchema& files) = 0;
+
+    virtual Status archive_files() = 0;
 
     virtual Status files_to_index(GroupFilesSchema&) = 0;
 
