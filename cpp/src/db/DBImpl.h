@@ -55,6 +55,8 @@ public:
 
     virtual Status count(const std::string& group_id, long& result) override;
 
+    virtual Status size(long& result) override;
+
     virtual ~DBImpl();
 
 private:
