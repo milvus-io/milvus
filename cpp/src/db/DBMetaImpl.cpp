@@ -459,7 +459,6 @@ Status DBMetaImpl::archive_files() {
         if (criteria == "days") {
             long usecs = 3600*24*limit*1000000UL;
             long now = utils::GetMicroSecTimeStamp();
-            LOG(DEBUG) << "Limit " << limit << " TimeLimit "  << now - usecs;
             try
             {
                 ConnectorPtr->update_all(
