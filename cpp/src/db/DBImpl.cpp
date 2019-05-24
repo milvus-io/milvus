@@ -326,6 +326,10 @@ Status DBImpl<EngineT>::background_merge_files(const std::string& group_id) {
         merge_files(group_id, kv.first, kv.second);
     }
 
+    if (has_merge) {
+        _pMeta->archive_files();
+    }
+
     try_build_index();
 
     _pMeta->cleanup_ttl_files(1);
@@ -362,6 +366,7 @@ Status DBImpl<EngineT>::build_index(const meta::GroupFileSchema& file) {
         << " from file " << to_remove.file_id;
 
     index->Cache();
+    _pMeta->archive_files();
 
     return Status::OK();
 }
