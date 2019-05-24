@@ -476,22 +476,29 @@ Status DBMetaImpl::archive_files() {
         }
         if (criteria == "disk") {
             size_t G = 1024*1024*1024UL;
-            long unsigned int sum = 0;
-            try {
-                auto sum_c = ConnectorPtr->sum(
-                        &GroupFileSchema::rows,
-                        where(
-                            c(&GroupFileSchema::file_type) != (int)GroupFileSchema::TO_DELETE
-                        ));
-                sum = *sum_c;
-            } catch (std::exception & e) {
-                LOG(DEBUG) << e.what();
-                throw e;
-            }
+            long sum = 0;
+            size(sum);
+
             // PXU TODO: refactor rows
-            auto to_delete = sum - limit*G/sizeof(float);
+            auto to_delete = (sum - limit*G)/sizeof(float);
             discard_files_of_size(to_delete);
         }
+    }
+
+    return Status::OK();
+}
+
+Status DBMetaImpl::size(long& result) {
+    try {
+        auto sum_c = ConnectorPtr->sum(
+                &GroupFileSchema::rows,
+                where(
+                    c(&GroupFileSchema::file_type) != (int)GroupFileSchema::TO_DELETE
+                    ));
+        result = *sum_c*sizeof(float);
+    } catch (std::exception & e) {
+        LOG(DEBUG) << e.what();
+        throw e;
     }
 
     return Status::OK();
