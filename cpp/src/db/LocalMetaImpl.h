@@ -55,6 +55,8 @@ public:
 
     virtual Status drop_all() override;
 
+    virtual Status size(long& result) override;
+
 private:
 
     Status GetGroupMetaInfoByPath(const std::string& path, GroupSchema& group_info);

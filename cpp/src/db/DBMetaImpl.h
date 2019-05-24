@@ -52,6 +52,8 @@ public:
 
     virtual Status archive_files() override;
 
+    virtual Status size(long& result) override;
+
     virtual Status cleanup() override;
 
     virtual Status cleanup_ttl_files(uint16_t seconds) override;
