@@ -1,4 +1,5 @@
 /*******************************************************************************
+ * long rows = 3*1024*1024*1024;
  * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
@@ -480,7 +481,7 @@ Status DBMetaImpl::archive_files() {
             }
         }
         if (criteria == "disk") {
-            int G = 1024*1024*1024;
+            size_t G = 1024*1024*1024;
             long unsigned int sum = 0;
             try {
                 auto sum_c = ConnectorPtr->sum(
