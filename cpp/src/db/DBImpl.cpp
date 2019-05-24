@@ -428,6 +428,11 @@ Status DBImpl<EngineT>::count(const std::string& group_id, long& result) {
 }
 
 template<typename EngineT>
+Status DBImpl<EngineT>::size(long& result) {
+    return  _pMeta->size(result);
+}
+
+template<typename EngineT>
 DBImpl<EngineT>::~DBImpl() {
     {
         std::unique_lock<std::mutex> lock(_mutex);
