@@ -1,5 +1,4 @@
 /*******************************************************************************
- * long rows = 3*1024*1024*1024;
  * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
@@ -15,6 +14,7 @@
 #include <easylogging++.h>
 #include "DBMetaImpl.h"
 #include "IDGenerator.h"
+#include "Utils.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -54,14 +54,6 @@ long GetFileSize(const std::string& filename)
 
 std::string DBMetaImpl::GetGroupPath(const std::string& group_id) {
     return _options.path + "/" + group_id;
-}
-
-long DBMetaImpl::GetMicroSecTimeStamp() {
-    auto now = std::chrono::system_clock::now();
-    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
-            now.time_since_epoch()).count();
-
-    return micros;
 }
 
 std::string DBMetaImpl::GetGroupDatePartitionPath(const std::string& group_id, DateT& date) {
@@ -152,7 +144,7 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
     }
     group_info.files_cnt = 0;
     group_info.id = -1;
-    group_info.created_on = GetMicroSecTimeStamp();
+    group_info.created_on = utils::GetMicroSecTimeStamp();
 
     {
         try {
@@ -239,7 +231,7 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
     group_file.file_id = ss.str();
     group_file.dimension = group_info.dimension;
     group_file.rows = 0;
-    group_file.created_on = GetMicroSecTimeStamp();
+    group_file.created_on = utils::GetMicroSecTimeStamp();
     group_file.updated_time = group_file.created_on;
     GetGroupFilePath(group_file);
 
@@ -464,7 +456,7 @@ Status DBMetaImpl::archive_files() {
         auto& limit = kv.second;
         if (criteria == "days") {
             auto usecs = 3600*24*limit*1000000;
-            auto now = GetMicroSecTimeStamp();
+            auto now = utils::GetMicroSecTimeStamp();
             try
             {
                 ConnectorPtr->update_all(
@@ -546,7 +538,7 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
 }
 
 Status DBMetaImpl::update_group_file(GroupFileSchema& group_file) {
-    group_file.updated_time = GetMicroSecTimeStamp();
+    group_file.updated_time = utils::GetMicroSecTimeStamp();
     try {
         ConnectorPtr->update(group_file);
     } catch (std::exception & e) {
@@ -561,7 +553,7 @@ Status DBMetaImpl::update_files(GroupFilesSchema& files) {
     try {
         auto commited = ConnectorPtr->transaction([&] () mutable {
             for (auto& file : files) {
-                file.updated_time = GetMicroSecTimeStamp();
+                file.updated_time = utils::GetMicroSecTimeStamp();
                 ConnectorPtr->update(file);
             }
             return true;
@@ -577,7 +569,7 @@ Status DBMetaImpl::update_files(GroupFilesSchema& files) {
 }
 
 Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
-    auto now = GetMicroSecTimeStamp();
+    auto now = utils::GetMicroSecTimeStamp();
     try {
         auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
                                                    &GroupFileSchema::group_id,
