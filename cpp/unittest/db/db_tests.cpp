@@ -9,6 +9,7 @@
 
 #include "utils.h"
 #include "db/DB.h"
+#include "db/DBImpl.h"
 
 using namespace zilliz::vecwise;
 
@@ -56,6 +57,51 @@ TEST_F(DBTest, CONFIG_TEST) {
         ASSERT_TRUE(criterias["disk"] == 200);
     }
 }
+
+TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
+
+    static const std::string group_name = "test_group";
+    static const int group_dim = 256;
+
+    engine::meta::GroupSchema group_info;
+    group_info.dimension = group_dim;
+    group_info.group_id = group_name;
+    engine::Status stat = db_->add_group(group_info);
+
+    engine::meta::GroupSchema group_info_get;
+    group_info_get.group_id = group_name;
+    stat = db_->get_group(group_info_get);
+    ASSERT_STATS(stat);
+    ASSERT_EQ(group_info_get.dimension, group_dim);
+
+    engine::IDNumbers vector_ids;
+    engine::IDNumbers target_ids;
+
+    int d = 256;
+    int nb = 30;
+    float *xb = new float[d * nb];
+    for(int i = 0; i < nb; i++) {
+        for(int j = 0; j < d; j++) xb[d * i + j] = drand48();
+        xb[d * i] += i / 2000.;
+    }
+
+    int loop = 100000;
+
+    for (auto i=0; i<loop; ++i) {
+        db_->add_vectors(group_name, nb, xb, vector_ids);
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    long size;
+    db_->size(size);
+    /* LOG(DEBUG) << "size=" << size; */
+    ASSERT_TRUE(size < 2UL*1024*1024*1024);
+
+    delete [] xb;
+};
+
 
 TEST_F(DBTest, DB_TEST) {
 
