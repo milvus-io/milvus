@@ -498,6 +498,7 @@ Status DBMetaImpl::archive_files() {
 }
 
 Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
+    LOG(DEBUG) << "Abort to discard size=" << to_discard_size;
     if (to_discard_size <= 0) {
         return Status::OK();
     }
@@ -515,6 +516,7 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
             group_file.id = std::get<0>(file);
             group_file.rows = std::get<1>(file);
             ids.push_back(group_file.id);
+            LOG(DEBUG) << "Discard group_file.id=" << group_file.id << " group_file.rows=" << group_file.rows;
             to_discard_size -= group_file.rows;
         }
 
