@@ -6,10 +6,13 @@
 #include <gtest/gtest.h>
 #include <thread>
 #include <easylogging++.h>
+#include <stdlib.h>
+#include <time.h>
 
 #include "utils.h"
 #include "db/DBMetaImpl.h"
 #include "db/Factories.h"
+#include "db/Utils.h"
 
 using namespace zilliz::vecwise::engine;
 
@@ -86,7 +89,57 @@ TEST_F(MetaTest, GROUP_FILE_TEST) {
     ASSERT_TRUE(group_file.file_type == meta::GroupFileSchema::TO_DELETE);
 }
 
-TEST_F(MetaTest, ARCHIVE_TEST) {
+TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
+    srand(time(0));
+    DBMetaOptions options;
+    options.path = "/tmp/vecwise_test";
+    int days_num = rand() % 100;
+    std::stringstream ss;
+    ss << "days:" << days_num;
+    options.archive_conf = ArchiveConf("delete", ss.str());
+
+    auto impl = meta::DBMetaImpl(options);
+    auto group_id = "meta_test_group";
+
+    meta::GroupSchema group;
+    group.group_id = group_id;
+    auto status = impl.add_group(group);
+
+    meta::GroupFilesSchema files;
+    meta::GroupFileSchema group_file;
+    group_file.group_id = group.group_id;
+
+    auto cnt = 100;
+    long ts = utils::GetMicroSecTimeStamp();
+    std::vector<int> days;
+    for (auto i=0; i<cnt; ++i) {
+        status = impl.add_group_file(group_file);
+        group_file.file_type = meta::GroupFileSchema::NEW;
+        int day = rand() % (days_num*2);
+        group_file.created_on = ts - day*24*3600*1000000UL - 10000;
+        status = impl.update_group_file(group_file);
+        files.push_back(group_file);
+        days.push_back(day);
+    }
+
+    impl.archive_files();
+    int i = 0;
+
+    for (auto file : files) {
+        status = impl.get_group_file(file.group_id, file.file_id, file);
+        ASSERT_TRUE(status.ok());
+        if (days[i] < days_num) {
+            ASSERT_EQ(file.file_type, meta::GroupFileSchema::NEW);
+        } else {
+            ASSERT_EQ(file.file_type, meta::GroupFileSchema::TO_DELETE);
+        }
+        i++;
+    }
+
+    impl.drop_all();
+}
+
+TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     DBMetaOptions options;
     options.path = "/tmp/vecwise_test";
     options.archive_conf = ArchiveConf("delete", "disk:41");
