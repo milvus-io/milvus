@@ -86,6 +86,49 @@ TEST_F(MetaTest, GROUP_FILE_TEST) {
     ASSERT_TRUE(group_file.file_type == meta::GroupFileSchema::TO_DELETE);
 }
 
+TEST_F(MetaTest, ARCHIVE_TEST) {
+    DBMetaOptions options;
+    options.path = "/tmp/vecwise_test";
+    options.archive_conf = ArchiveConf("delete", "disk:41");
+
+    auto impl = meta::DBMetaImpl(options);
+    auto group_id = "meta_test_group";
+
+    meta::GroupSchema group;
+    group.group_id = group_id;
+    auto status = impl.add_group(group);
+
+    meta::GroupFilesSchema files;
+    meta::GroupFileSchema group_file;
+    group_file.group_id = group.group_id;
+
+    auto cnt = 10;
+    auto each_size = 2UL;
+    for (auto i=0; i<cnt; ++i) {
+        status = impl.add_group_file(group_file);
+        group_file.file_type = meta::GroupFileSchema::NEW;
+        group_file.rows = 1024*1024*1024*each_size;
+        status = impl.update_group_file(group_file);
+        files.push_back(group_file);
+    }
+
+    impl.archive_files();
+    int i = 0;
+
+    for (auto file : files) {
+        status = impl.get_group_file(file.group_id, file.file_id, file);
+        ASSERT_TRUE(status.ok());
+        if (i < 5) {
+            ASSERT_TRUE(file.file_type == meta::GroupFileSchema::TO_DELETE);
+        } else {
+            ASSERT_EQ(file.file_type, meta::GroupFileSchema::NEW);
+        }
+        ++i;
+    }
+
+    impl.drop_all();
+}
+
 TEST_F(MetaTest, GROUP_FILES_TEST) {
     auto group_id = "meta_test_group";
 
