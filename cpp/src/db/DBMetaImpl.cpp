@@ -29,6 +29,7 @@ inline auto StoragePrototype(const std::string& path) {
                       make_column("id", &GroupSchema::id, primary_key()),
                       make_column("group_id", &GroupSchema::group_id, unique()),
                       make_column("dimension", &GroupSchema::dimension),
+                      make_column("created_on", &GroupSchema::created_on),
                       make_column("files_cnt", &GroupSchema::files_cnt, default_value(0))),
             make_table("GroupFile",
                       make_column("id", &GroupFileSchema::id, primary_key()),
@@ -37,6 +38,7 @@ inline auto StoragePrototype(const std::string& path) {
                       make_column("file_type", &GroupFileSchema::file_type),
                       make_column("rows", &GroupFileSchema::rows, default_value(0)),
                       make_column("updated_time", &GroupFileSchema::updated_time),
+                      make_column("created_on", &GroupFileSchema::created_on),
                       make_column("date", &GroupFileSchema::date))
             );
 
@@ -455,8 +457,9 @@ Status DBMetaImpl::archive_files() {
         auto& criteria = kv.first;
         auto& limit = kv.second;
         if (criteria == "days") {
-            auto usecs = 3600*24*limit*1000000;
-            auto now = utils::GetMicroSecTimeStamp();
+            long usecs = 3600*24*limit*1000000UL;
+            long now = utils::GetMicroSecTimeStamp();
+            LOG(DEBUG) << "Limit " << limit << " TimeLimit "  << now - usecs;
             try
             {
                 ConnectorPtr->update_all(
@@ -464,7 +467,7 @@ Status DBMetaImpl::archive_files() {
                             c(&GroupFileSchema::file_type) = (int)GroupFileSchema::TO_DELETE
                            ),
                         where(
-                            c(&GroupFileSchema::created_on) < now - usecs and
+                            c(&GroupFileSchema::created_on) < (long)(now - usecs) and
                             c(&GroupFileSchema::file_type) != (int)GroupFileSchema::TO_DELETE
                             ));
             } catch (std::exception & e) {
@@ -473,7 +476,7 @@ Status DBMetaImpl::archive_files() {
             }
         }
         if (criteria == "disk") {
-            size_t G = 1024*1024*1024;
+            size_t G = 1024*1024*1024UL;
             long unsigned int sum = 0;
             try {
                 auto sum_c = ConnectorPtr->sum(
