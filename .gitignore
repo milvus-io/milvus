@@ -1,12 +1,26 @@
+# CLion generated files
+cpp/cmake-build-debug/
+cpp/cmake-build-release/
+cpp/cmake_build
+cpp/.idea/
+
 .idea/
 .ycm_extra_conf.py
 __pycache__
+
+# vscode generated files
+.vscode
 
 .env
 build
 cmake-build-debug
 cmake-build-release
 cmake_build
+
+# Compiled source
+*.a
+*.so
+*.so.*
 *.o
 *.lo
 *.tar.gz

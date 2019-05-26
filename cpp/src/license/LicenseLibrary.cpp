@@ -324,7 +324,7 @@ LicenseLibrary::GPUinfoFileDeserialization(const std::string &path,
 }
 
 ServerError
-LicenseLibrary::GetDateTime(char *cha, time_t &data_time) {
+LicenseLibrary::GetDateTime(const char *cha, time_t &data_time) {
     tm tm_;
     int year, month, day;
     sscanf(cha, "%d-%d-%d", &year, &month, &day);
