@@ -13,6 +13,7 @@
 #include "db/DBMetaImpl.h"
 #include "db/Factories.h"
 #include "db/Utils.h"
+#include "db/MetaConsts.h"
 
 using namespace zilliz::vecwise::engine;
 
@@ -116,7 +117,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
         status = impl.add_group_file(group_file);
         group_file.file_type = meta::GroupFileSchema::NEW;
         int day = rand() % (days_num*2);
-        group_file.created_on = ts - day*24*3600*1000000UL - 10000;
+        group_file.created_on = ts - day*meta::D_SEC*meta::US_PS - 10000;
         status = impl.update_group_file(group_file);
         files.push_back(group_file);
         days.push_back(day);
@@ -160,7 +161,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     for (auto i=0; i<cnt; ++i) {
         status = impl.add_group_file(group_file);
         group_file.file_type = meta::GroupFileSchema::NEW;
-        group_file.rows = 1024*1024*1024*each_size;
+        group_file.rows = each_size * meta::G;
         status = impl.update_group_file(group_file);
         files.push_back(group_file);
     }

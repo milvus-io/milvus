@@ -10,6 +10,7 @@
 #include "utils.h"
 #include "db/DB.h"
 #include "db/DBImpl.h"
+#include "db/MetaConsts.h"
 
 using namespace zilliz::vecwise;
 
@@ -98,7 +99,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     db_->size(size);
     /* LOG(DEBUG) << "size=" << size; */
-    ASSERT_TRUE(size < 2UL*1024*1024*1024);
+    ASSERT_TRUE(size < 2 * engine::meta::G);
 
     delete [] xb;
 };
@@ -155,7 +156,7 @@ TEST_F(DBTest, DB_TEST) {
 
             START_TIMER;
             stat = db_->search(group_name, k, qb, qxb, results);
-            ss << "Search " << j << " With Size " << (float)(count*group_dim*sizeof(float))/(1024*1024) << " M";
+            ss << "Search " << j << " With Size " << (float)(count*group_dim*sizeof(float))/engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_STATS(stat);
