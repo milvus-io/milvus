@@ -50,7 +50,7 @@ using ConnectorT = decltype(StoragePrototype(""));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
 
 std::string DBMetaImpl::GetGroupPath(const std::string& group_id) {
-    return _options.path + "/" + group_id;
+    return _options.path + "/tables/" + group_id;
 }
 
 std::string DBMetaImpl::GetGroupDatePartitionPath(const std::string& group_id, DateT& date) {
@@ -156,7 +156,7 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
     auto group_path = GetGroupPath(group_info.group_id);
 
     if (!boost::filesystem::is_directory(group_path)) {
-        auto ret = boost::filesystem::create_directory(group_path);
+        auto ret = boost::filesystem::create_directories(group_path);
         if (!ret) {
             LOG(ERROR) << "Create directory " << group_path << " Error";
         }
