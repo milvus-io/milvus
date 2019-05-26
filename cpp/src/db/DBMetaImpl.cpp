@@ -38,7 +38,7 @@ inline auto StoragePrototype(const std::string& path) {
                       make_column("group_id", &GroupFileSchema::group_id),
                       make_column("file_id", &GroupFileSchema::file_id),
                       make_column("file_type", &GroupFileSchema::file_type),
-                      make_column("rows", &GroupFileSchema::rows, default_value(0)),
+                      make_column("size", &GroupFileSchema::size, default_value(0)),
                       make_column("updated_time", &GroupFileSchema::updated_time),
                       make_column("created_on", &GroupFileSchema::created_on),
                       make_column("date", &GroupFileSchema::date))
@@ -227,7 +227,7 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
     group_file.file_type = GroupFileSchema::NEW;
     group_file.file_id = ss.str();
     group_file.dimension = group_info.dimension;
-    group_file.rows = 0;
+    group_file.size = 0;
     group_file.created_on = utils::GetMicroSecTimeStamp();
     group_file.updated_time = group_file.created_on;
     GetGroupFilePath(group_file);
@@ -263,7 +263,7 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
                                                    &GroupFileSchema::group_id,
                                                    &GroupFileSchema::file_id,
                                                    &GroupFileSchema::file_type,
-                                                   &GroupFileSchema::rows,
+                                                   &GroupFileSchema::size,
                                                    &GroupFileSchema::date),
                                           where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_INDEX));
 
@@ -275,7 +275,7 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
             group_file.group_id = std::get<1>(file);
             group_file.file_id = std::get<2>(file);
             group_file.file_type = std::get<3>(file);
-            group_file.rows = std::get<4>(file);
+            group_file.size = std::get<4>(file);
             group_file.date = std::get<5>(file);
             GetGroupFilePath(group_file);
             auto groupItr = groups.find(group_file.group_id);
@@ -311,7 +311,7 @@ Status DBMetaImpl::files_to_search(const std::string &group_id,
                                                      &GroupFileSchema::group_id,
                                                      &GroupFileSchema::file_id,
                                                      &GroupFileSchema::file_type,
-                                                     &GroupFileSchema::rows,
+                                                     &GroupFileSchema::size,
                                                      &GroupFileSchema::date),
                                              where(c(&GroupFileSchema::group_id) == group_id and
                                                  in(&GroupFileSchema::date, dates) and
@@ -332,7 +332,7 @@ Status DBMetaImpl::files_to_search(const std::string &group_id,
             group_file.group_id = std::get<1>(file);
             group_file.file_id = std::get<2>(file);
             group_file.file_type = std::get<3>(file);
-            group_file.rows = std::get<4>(file);
+            group_file.size = std::get<4>(file);
             group_file.date = std::get<5>(file);
             group_file.dimension = group_info.dimension;
             GetGroupFilePath(group_file);
@@ -359,7 +359,7 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
                                                    &GroupFileSchema::group_id,
                                                    &GroupFileSchema::file_id,
                                                    &GroupFileSchema::file_type,
-                                                   &GroupFileSchema::rows,
+                                                   &GroupFileSchema::size,
                                                    &GroupFileSchema::date),
                                           where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::RAW and
                                                 c(&GroupFileSchema::group_id) == group_id));
@@ -377,7 +377,7 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
             group_file.group_id = std::get<1>(file);
             group_file.file_id = std::get<2>(file);
             group_file.file_type = std::get<3>(file);
-            group_file.rows = std::get<4>(file);
+            group_file.size = std::get<4>(file);
             group_file.date = std::get<5>(file);
             group_file.dimension = group_info.dimension;
             GetGroupFilePath(group_file);
@@ -410,7 +410,7 @@ Status DBMetaImpl::get_group_file(const std::string& group_id_,
                                                    &GroupFileSchema::group_id,
                                                    &GroupFileSchema::file_id,
                                                    &GroupFileSchema::file_type,
-                                                   &GroupFileSchema::rows,
+                                                   &GroupFileSchema::size,
                                                    &GroupFileSchema::date),
                                           where(c(&GroupFileSchema::file_id) == file_id_ and
                                                 c(&GroupFileSchema::group_id) == group_id_
@@ -421,7 +421,7 @@ Status DBMetaImpl::get_group_file(const std::string& group_id_,
             group_file_info_.group_id = std::get<1>(files[0]);
             group_file_info_.file_id = std::get<2>(files[0]);
             group_file_info_.file_type = std::get<3>(files[0]);
-            group_file_info_.rows = std::get<4>(files[0]);
+            group_file_info_.size = std::get<4>(files[0]);
             group_file_info_.date = std::get<5>(files[0]);
         } else {
             return Status::NotFound("GroupFile " + file_id_ + " not found");
@@ -473,8 +473,8 @@ Status DBMetaImpl::archive_files() {
             long sum = 0;
             size(sum);
 
-            // PXU TODO: refactor rows
-            auto to_delete = (sum - limit*G)/sizeof(float);
+            // PXU TODO: refactor size
+            auto to_delete = (sum - limit*G);
             discard_files_of_size(to_delete);
         }
     }
@@ -485,7 +485,7 @@ Status DBMetaImpl::archive_files() {
 Status DBMetaImpl::size(long& result) {
     result = 0;
     try {
-        auto selected = ConnectorPtr->select(columns(sum(&GroupFileSchema::rows)),
+        auto selected = ConnectorPtr->select(columns(sum(&GroupFileSchema::size)),
                 where(
                     c(&GroupFileSchema::file_type) != (int)GroupFileSchema::TO_DELETE
                     ));
@@ -494,7 +494,7 @@ Status DBMetaImpl::size(long& result) {
             if(!std::get<0>(sub_query)) {
                 continue;
             }
-            result += (long)(*std::get<0>(sub_query))*sizeof(float);
+            result += (long)(*std::get<0>(sub_query));
         }
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
@@ -511,7 +511,7 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
     }
     try {
         auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
-                                                   &GroupFileSchema::rows),
+                                                   &GroupFileSchema::size),
                                           where(c(&GroupFileSchema::file_type) != (int)GroupFileSchema::TO_DELETE),
                                           order_by(&GroupFileSchema::id),
                                           limit(10));
@@ -521,10 +521,10 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
             if (to_discard_size <= 0) break;
             GroupFileSchema group_file;
             group_file.id = std::get<0>(file);
-            group_file.rows = std::get<1>(file);
+            group_file.size = std::get<1>(file);
             ids.push_back(group_file.id);
-            LOG(DEBUG) << "Discard group_file.id=" << group_file.id << " group_file.rows=" << group_file.rows;
-            to_discard_size -= group_file.rows;
+            LOG(DEBUG) << "Discard group_file.id=" << group_file.id << " group_file.size=" << group_file.size;
+            to_discard_size -= group_file.size;
         }
 
         if (ids.size() == 0) {
@@ -586,7 +586,7 @@ Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
                                                    &GroupFileSchema::group_id,
                                                    &GroupFileSchema::file_id,
                                                    &GroupFileSchema::file_type,
-                                                   &GroupFileSchema::rows,
+                                                   &GroupFileSchema::size,
                                                    &GroupFileSchema::date),
                                           where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_DELETE and
                                                 c(&GroupFileSchema::updated_time) > now - seconds*US_PS));
@@ -599,7 +599,7 @@ Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
             group_file.group_id = std::get<1>(file);
             group_file.file_id = std::get<2>(file);
             group_file.file_type = std::get<3>(file);
-            group_file.rows = std::get<4>(file);
+            group_file.size = std::get<4>(file);
             group_file.date = std::get<5>(file);
             GetGroupFilePath(group_file);
             if (group_file.file_type == GroupFileSchema::TO_DELETE) {
@@ -622,7 +622,7 @@ Status DBMetaImpl::cleanup() {
                                                    &GroupFileSchema::group_id,
                                                    &GroupFileSchema::file_id,
                                                    &GroupFileSchema::file_type,
-                                                   &GroupFileSchema::rows,
+                                                   &GroupFileSchema::size,
                                                    &GroupFileSchema::date),
                                           where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_DELETE or
                                                 c(&GroupFileSchema::file_type) == (int)GroupFileSchema::NEW));
@@ -635,7 +635,7 @@ Status DBMetaImpl::cleanup() {
             group_file.group_id = std::get<1>(file);
             group_file.file_id = std::get<2>(file);
             group_file.file_type = std::get<3>(file);
-            group_file.rows = std::get<4>(file);
+            group_file.size = std::get<4>(file);
             group_file.date = std::get<5>(file);
             GetGroupFilePath(group_file);
             if (group_file.file_type == GroupFileSchema::TO_DELETE) {
@@ -655,7 +655,7 @@ Status DBMetaImpl::cleanup() {
 Status DBMetaImpl::count(const std::string& group_id, long& result) {
 
     try {
-        auto selected = ConnectorPtr->select(columns(&GroupFileSchema::rows,
+        auto selected = ConnectorPtr->select(columns(&GroupFileSchema::size,
                                                    &GroupFileSchema::date),
                                           where((c(&GroupFileSchema::file_type) == (int)GroupFileSchema::RAW or
                                                  c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_INDEX or

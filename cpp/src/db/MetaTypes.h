@@ -40,7 +40,7 @@ struct GroupFileSchema {
     std::string group_id;
     std::string file_id;
     int file_type = NEW;
-    size_t rows;
+    size_t size;
     DateT date = EmptyDate;
     uint16_t dimension;
     std::string location = "";

@@ -292,7 +292,7 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
     } else {
         group_file.file_type = meta::GroupFileSchema::RAW;
     }
-    group_file.rows = index_size;
+    group_file.size = index_size;
     updated.push_back(group_file);
     status = _pMeta->update_files(updated);
     LOG(DEBUG) << "New merged file " << group_file.file_id <<
@@ -353,7 +353,7 @@ Status DBImpl<EngineT>::build_index(const meta::GroupFileSchema& file) {
     auto index = to_index.BuildIndex(group_file.location);
 
     group_file.file_type = meta::GroupFileSchema::INDEX;
-    group_file.rows = index->Size();
+    group_file.size = index->Size();
 
     auto to_remove = file;
     to_remove.file_type = meta::GroupFileSchema::TO_DELETE;
