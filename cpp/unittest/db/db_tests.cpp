@@ -62,6 +62,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
+    long size;
 
     engine::meta::GroupSchema group_info;
     group_info.dimension = group_dim;
@@ -77,6 +78,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     engine::IDNumbers vector_ids;
     engine::IDNumbers target_ids;
 
+    db_->size(size);
     int d = 256;
     int nb = 30;
     float *xb = new float[d * nb];
@@ -94,7 +96,6 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    long size;
     db_->size(size);
     /* LOG(DEBUG) << "size=" << size; */
     ASSERT_TRUE(size < 2UL*1024*1024*1024);
