@@ -489,13 +489,19 @@ Status DBMetaImpl::archive_files() {
 }
 
 Status DBMetaImpl::size(long& result) {
+    result = 0;
     try {
-        auto sum_c = ConnectorPtr->sum(
-                &GroupFileSchema::rows,
+        auto selected = ConnectorPtr->select(columns(sum(&GroupFileSchema::rows)),
                 where(
                     c(&GroupFileSchema::file_type) != (int)GroupFileSchema::TO_DELETE
                     ));
-        result = *sum_c*sizeof(float);
+
+        for (auto& sub_query : selected) {
+            if(!std::get<0>(sub_query)) {
+                continue;
+            }
+            result += (long)(*std::get<0>(sub_query))*sizeof(float);
+        }
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
         throw e;
