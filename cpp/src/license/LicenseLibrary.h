@@ -92,7 +92,7 @@ class LicenseLibrary {
                                std::map<int, std::string> &uuid_encrption_map);
 
     static ServerError
-    GetDateTime(char *cha, time_t &data_time);
+    GetDateTime(const char *cha, time_t &data_time);
 
 
  private:

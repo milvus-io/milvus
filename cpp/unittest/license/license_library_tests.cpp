@@ -128,8 +128,8 @@ TEST(LicenseLibraryTest, LICENSE_FILE_TEST) {
     // 11.GetDateTime
     time_t starting_time;
     time_t end_time;
-    char *string_starting_time = "2019-05-10";
-    char *string_end_time = "2022-05-10";
+    const char *string_starting_time = "2019-05-10";
+    const char *string_end_time = "2022-05-10";
     err = server::LicenseLibrary::GetDateTime(string_starting_time, starting_time);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
     err = server::LicenseLibrary::GetDateTime(string_end_time, end_time);
