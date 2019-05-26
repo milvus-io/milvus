@@ -4,10 +4,32 @@
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.14)
+message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
+set(MEGASEARCH_VERSION "0.1.0")
+
+string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" MEGASEARCH_BASE_VERSION "${MEGASEARCH_VERSION}")
+
+project(megasearch VERSION "${MEGASEARCH_BASE_VERSION}")
 project(vecwise_engine LANGUAGES CUDA CXX)
 
+set(MEGASEARCH_VERSION_MAJOR "${megasearch_VERSION_MAJOR}")
+set(MEGASEARCH_VERSION_MINOR "${megasearch_VERSION_MINOR}")
+set(MEGASEARCH_VERSION_PATCH "${megasearch_VERSION_PATCH}")
+
+if(MEGASEARCH_VERSION_MAJOR STREQUAL ""
+        OR MEGASEARCH_VERSION_MINOR STREQUAL ""
+        OR MEGASEARCH_VERSION_PATCH STREQUAL "")
+    message(FATAL_ERROR "Failed to determine MegaSearch version from '${MEGASEARCH_VERSION}'")
+endif()
+
+message(STATUS "MegaSearch version: "
+        "${MEGASEARCH_VERSION_MAJOR}.${MEGASEARCH_VERSION_MINOR}.${MEGASEARCH_VERSION_PATCH} "
+        "(full: '${MEGASEARCH_VERSION}')")
+
+set(MEGASEARCH_SOURCE_DIR ${PROJECT_SOURCE_DIR})
+set(MEGASEARCH_BINARY_DIR ${PROJECT_BINARY_DIR})
 find_package(CUDA)
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES -arch sm_60 --expt-extended-lambda")
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
@@ -32,16 +54,6 @@ else()
     set(VECWISE_BUILD_ARCH unknown)
 endif()
 
-if(DEFINED UNIX)
-    message("building vecwise on Unix")
-    set(VECWISE_BUILD_SYSTEM macos)
-elseif(DEFINED APPLE)
-    message("building vecwise on MacOS")
-    set(VECWISE_BUILD_SYSTEM unix)
-else()
-    message("unknown OS")
-    set(VECWISE_BUILD_SYSTEM unknown)
-endif ()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE")
@@ -54,7 +66,19 @@ if (GPU_VERSION STREQUAL "ON")
     add_definitions("-DENABLE_LICENSE")
 endif ()
 
-set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/" ${CMAKE_MODULE_PATH})
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+if (BUILD_UNIT_TEST)
+    option(MEGASEARCH_BUILD_TESTS "Build the megasearch test suite" ON)
+endif(BUILD_UNIT_TEST)
+
+include(ExternalProject)
+include(ThirdPartyPackages)
+
+include_directories(${MEGASEARCH_SOURCE_DIR})
+link_directories(${MEGASEARCH_BINARY_DIR})
+
+## Following should be check
 
 set(VECWISE_ENGINE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
 set(VECWISE_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
@@ -72,6 +96,7 @@ link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib)
 link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib64)
 #execute_process(COMMAND bash build.sh
 #                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+
 
 add_subdirectory(src)
 add_subdirectory(test_client)
