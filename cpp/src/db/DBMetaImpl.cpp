@@ -69,6 +69,14 @@ void DBMetaImpl::GetGroupFilePath(GroupFileSchema& group_file) {
     group_file.location = ss.str();
 }
 
+Status DBMetaImpl::NextGroupId(std::string& group_id) {
+    std::stringstream ss;
+    SimpleIDGenerator g;
+    ss << g.getNextIDNumber();
+    group_id = ss.str();
+    return Status::OK();
+}
+
 DBMetaImpl::DBMetaImpl(const DBMetaOptions& options_)
     : _options(options_) {
     initialize();
@@ -134,10 +142,7 @@ Status DBMetaImpl::delete_group_partitions(const std::string& group_id,
 
 Status DBMetaImpl::add_group(GroupSchema& group_info) {
     if (group_info.group_id == "") {
-        std::stringstream ss;
-        SimpleIDGenerator g;
-        ss << g.getNextIDNumber();
-        group_info.group_id = ss.str();
+        NextGroupId(group_info.group_id);
     }
     group_info.files_cnt = 0;
     group_info.id = -1;
@@ -147,7 +152,6 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
         try {
             auto id = ConnectorPtr->insert(group_info);
             group_info.id = id;
-            /* LOG(DEBUG) << "Add group " << id; */
         } catch (...) {
             return Status::DBTransactionError("Add Group Error");
         }
