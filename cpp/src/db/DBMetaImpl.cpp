@@ -77,6 +77,14 @@ Status DBMetaImpl::NextGroupId(std::string& group_id) {
     return Status::OK();
 }
 
+Status DBMetaImpl::NextFileId(std::string& file_id) {
+    std::stringstream ss;
+    SimpleIDGenerator g;
+    ss << g.getNextIDNumber();
+    file_id = ss.str();
+    return Status::OK();
+}
+
 DBMetaImpl::DBMetaImpl(const DBMetaOptions& options_)
     : _options(options_) {
     initialize();
@@ -225,11 +233,8 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
         return status;
     }
 
-    SimpleIDGenerator g;
-    std::stringstream ss;
-    ss << g.getNextIDNumber();
+    NextFileId(group_file.file_id);
     group_file.file_type = GroupFileSchema::NEW;
-    group_file.file_id = ss.str();
     group_file.dimension = group_info.dimension;
     group_file.size = 0;
     group_file.created_on = utils::GetMicroSecTimeStamp();
@@ -240,7 +245,6 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
         try {
             auto id = ConnectorPtr->insert(group_file);
             group_file.id = id;
-            /* LOG(DEBUG) << "Add group_file of file_id=" << group_file.file_id; */
         } catch (...) {
             return Status::DBTransactionError("Add file Error");
         }

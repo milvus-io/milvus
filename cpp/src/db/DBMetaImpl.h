@@ -65,6 +65,7 @@ public:
     virtual ~DBMetaImpl();
 
 private:
+    Status NextFileId(std::string& file_id);
     Status NextGroupId(std::string& group_id);
     Status discard_files_of_size(long to_discard_size);
     Status get_group_no_lock(GroupSchema& group_info);
