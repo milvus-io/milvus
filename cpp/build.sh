@@ -4,8 +4,9 @@ BUILD_TYPE="Debug"
 BUILD_UNITTEST="off"
 BUILD_GPU="OFF"
 INSTALL_PREFIX=$(pwd)/megasearch
+MAKE_CLEAN="OFF"
 
-while getopts "p:t:uhg" arg
+while getopts "p:t:uhgr" arg
 do
         case $arg in
              t)
@@ -21,6 +22,12 @@ do
              g)
                 BUILD_GPU="ON"
                 ;;
+             r)
+                if [[ -d cmake_build ]]; then
+                    rm ./cmake_build -r
+                    MAKE_CLEAN="ON"
+                fi
+                ;;
              h) # help
                 echo "
 
@@ -28,9 +35,11 @@ parameter:
 -t: build type
 -u: building unit test options
 -p: install prefix
+-g: build GPU version
+-r: remove previous build directory
 
 usage:
-./build.sh -t \${BUILD_TYPE} [-u] [-h]
+./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r]
                 "
                 exit 0
                 ;;
@@ -41,27 +50,29 @@ usage:
         esac
 done
 
-if [[ -d cmake_build ]]; then
-	rm cmake_build -r
+if [[ ! -d cmake_build ]]; then
+	mkdir cmake_build
+	MAKE_CLEAN="ON"
 fi
 
-rm -rf ./cmake_build
-mkdir cmake_build
 cd cmake_build
 
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
--DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
--DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
--DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
--DGPU_VERSION=${BUILD_GPU} \
-$@ ../"
-echo ${CMAKE_CMD}
+if [[ ${MAKE_CLEAN} = "ON" ]]; then
+    CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
+    -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
+    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+    -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
+    -DGPU_VERSION=${BUILD_GPU} \
+    $@ ../"
+    echo ${CMAKE_CMD}
 
-${CMAKE_CMD}
+    ${CMAKE_CMD}
+    make clean
+fi
 
-make clean && make -j || exit 1
+make -j || exit 1
 
 if [[ ${BUILD_TYPE} != "Debug" ]]; then
     strip src/vecwise_server
