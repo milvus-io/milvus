@@ -81,7 +81,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     db_->size(size);
     int d = 256;
-    int nb = 30;
+    int nb = 20;
     float *xb = new float[d * nb];
     for(int i = 0; i < nb; i++) {
         for(int j = 0; j < d; j++) xb[d * i + j] = drand48();
@@ -98,8 +98,8 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
     db_->size(size);
-    /* LOG(DEBUG) << "size=" << size; */
-    ASSERT_TRUE(size < 2 * engine::meta::G);
+    LOG(DEBUG) << "size=" << size;
+    ASSERT_TRUE(size < 1 * engine::meta::G);
 
     delete [] xb;
 };

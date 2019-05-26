@@ -49,7 +49,7 @@ void DBTest::TearDown() {
 engine::Options DBTest2::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/vecwise_test";
-    options.meta.archive_conf = engine::ArchiveConf("delete", "disk:2");
+    options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
     return options;
 }
 
