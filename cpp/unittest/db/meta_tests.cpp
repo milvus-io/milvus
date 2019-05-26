@@ -143,7 +143,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
 TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     DBMetaOptions options;
     options.path = "/tmp/vecwise_test";
-    options.archive_conf = ArchiveConf("delete", "disk:41");
+    options.archive_conf = ArchiveConf("delete", "disk:11");
 
     auto impl = meta::DBMetaImpl(options);
     auto group_id = "meta_test_group";
@@ -161,7 +161,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     for (auto i=0; i<cnt; ++i) {
         status = impl.add_group_file(group_file);
         group_file.file_type = meta::GroupFileSchema::NEW;
-        group_file.rows = each_size * meta::G;
+        group_file.size = each_size * meta::G;
         status = impl.update_group_file(group_file);
         files.push_back(group_file);
     }
