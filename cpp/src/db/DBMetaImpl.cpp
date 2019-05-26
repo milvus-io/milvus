@@ -12,9 +12,11 @@
 #include <fstream>
 #include <sqlite_orm.h>
 #include <easylogging++.h>
+
 #include "DBMetaImpl.h"
 #include "IDGenerator.h"
 #include "Utils.h"
+#include "MetaConsts.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -44,15 +46,8 @@ inline auto StoragePrototype(const std::string& path) {
 
 }
 
-using ConnectorT = decltype(StoragePrototype("/tmp/dummy.sqlite3"));
+using ConnectorT = decltype(StoragePrototype(""));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
-
-long GetFileSize(const std::string& filename)
-{
-    struct stat stat_buf;
-    int rc = stat(filename.c_str(), &stat_buf);
-    return rc == 0 ? stat_buf.st_size : -1;
-}
 
 std::string DBMetaImpl::GetGroupPath(const std::string& group_id) {
     return _options.path + "/" + group_id;
@@ -457,7 +452,7 @@ Status DBMetaImpl::archive_files() {
         auto& criteria = kv.first;
         auto& limit = kv.second;
         if (criteria == "days") {
-            long usecs = 3600*24*limit*1000000UL;
+            long usecs = limit * D_SEC * US_PS;
             long now = utils::GetMicroSecTimeStamp();
             try
             {
@@ -475,7 +470,6 @@ Status DBMetaImpl::archive_files() {
             }
         }
         if (criteria == "disk") {
-            size_t G = 1024*1024*1024UL;
             long sum = 0;
             size(sum);
 
@@ -595,7 +589,7 @@ Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
                                                    &GroupFileSchema::rows,
                                                    &GroupFileSchema::date),
                                           where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_DELETE and
-                                                c(&GroupFileSchema::updated_time) > now - 1000000*seconds));
+                                                c(&GroupFileSchema::updated_time) > now - seconds*US_PS));
 
         GroupFilesSchema updated;
 
