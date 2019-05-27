@@ -27,13 +27,13 @@ using namespace sqlite_orm;
 
 inline auto StoragePrototype(const std::string& path) {
     return make_storage(path,
-            make_table("Group",
+            make_table("Table",
                       make_column("id", &TableSchema::id, primary_key()),
                       make_column("table_id", &TableSchema::table_id, unique()),
                       make_column("dimension", &TableSchema::dimension),
                       make_column("created_on", &TableSchema::created_on),
                       make_column("files_cnt", &TableSchema::files_cnt, default_value(0))),
-            make_table("GroupFile",
+            make_table("TableFile",
                       make_column("id", &TableFileSchema::id, primary_key()),
                       make_column("table_id", &TableFileSchema::table_id),
                       make_column("file_id", &TableFileSchema::file_id),
@@ -49,27 +49,27 @@ inline auto StoragePrototype(const std::string& path) {
 using ConnectorT = decltype(StoragePrototype(""));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
 
-std::string DBMetaImpl::GetGroupPath(const std::string& table_id) {
-    return _options.path + "/tables/" + table_id;
+std::string DBMetaImpl::GetTablePath(const std::string& table_id) {
+    return options_.path + "/tables/" + table_id;
 }
 
-std::string DBMetaImpl::GetGroupDatePartitionPath(const std::string& table_id, DateT& date) {
+std::string DBMetaImpl::GetTableDatePartitionPath(const std::string& table_id, DateT& date) {
     std::stringstream ss;
-    ss << GetGroupPath(table_id) << "/" << date;
+    ss << GetTablePath(table_id) << "/" << date;
     return ss.str();
 }
 
-void DBMetaImpl::GetGroupFilePath(TableFileSchema& group_file) {
+void DBMetaImpl::GetTableFilePath(TableFileSchema& group_file) {
     if (group_file.date == EmptyDate) {
         group_file.date = Meta::GetDate();
     }
     std::stringstream ss;
-    ss << GetGroupDatePartitionPath(group_file.table_id, group_file.date)
+    ss << GetTableDatePartitionPath(group_file.table_id, group_file.date)
        << "/" << group_file.file_id;
     group_file.location = ss.str();
 }
 
-Status DBMetaImpl::NextGroupId(std::string& table_id) {
+Status DBMetaImpl::NextTableId(std::string& table_id) {
     std::stringstream ss;
     SimpleIDGenerator g;
     ss << g.getNextIDNumber();
@@ -86,20 +86,20 @@ Status DBMetaImpl::NextFileId(std::string& file_id) {
 }
 
 DBMetaImpl::DBMetaImpl(const DBMetaOptions& options_)
-    : _options(options_) {
-    initialize();
+    : options_(options_) {
+    Initialize();
 }
 
-Status DBMetaImpl::initialize() {
-    if (!boost::filesystem::is_directory(_options.path)) {
-        auto ret = boost::filesystem::create_directory(_options.path);
+Status DBMetaImpl::Initialize() {
+    if (!boost::filesystem::is_directory(options_.path)) {
+        auto ret = boost::filesystem::create_directory(options_.path);
         if (!ret) {
-            LOG(ERROR) << "Create directory " << _options.path << " Error";
+            LOG(ERROR) << "Create directory " << options_.path << " Error";
         }
         assert(ret);
     }
 
-    ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(_options.path+"/meta.sqlite"));
+    ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(options_.path+"/meta.sqlite"));
 
     ConnectorPtr->sync_schema();
     ConnectorPtr->open_forever(); // thread safe option
@@ -150,7 +150,7 @@ Status DBMetaImpl::DropPartitionsByDates(const std::string& table_id,
 
 Status DBMetaImpl::CreateTable(TableSchema& table_schema) {
     if (table_schema.table_id == "") {
-        NextGroupId(table_schema.table_id);
+        NextTableId(table_schema.table_id);
     }
     table_schema.files_cnt = 0;
     table_schema.id = -1;
@@ -161,11 +161,11 @@ Status DBMetaImpl::CreateTable(TableSchema& table_schema) {
             auto id = ConnectorPtr->insert(table_schema);
             table_schema.id = id;
         } catch (...) {
-            return Status::DBTransactionError("Add Group Error");
+            return Status::DBTransactionError("Add Table Error");
         }
     }
 
-    auto group_path = GetGroupPath(table_schema.table_id);
+    auto group_path = GetTablePath(table_schema.table_id);
 
     if (!boost::filesystem::is_directory(group_path)) {
         auto ret = boost::filesystem::create_directories(group_path);
@@ -191,7 +191,7 @@ Status DBMetaImpl::DescribeTable(TableSchema& table_schema) {
             table_schema.files_cnt = std::get<2>(groups[0]);
             table_schema.dimension = std::get<3>(groups[0]);
         } else {
-            return Status::NotFound("Group " + table_schema.table_id + " not found");
+            return Status::NotFound("Table " + table_schema.table_id + " not found");
         }
     } catch (std::exception &e) {
         LOG(DEBUG) << e.what();
@@ -235,7 +235,7 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
     file_schema.size = 0;
     file_schema.created_on = utils::GetMicroSecTimeStamp();
     file_schema.updated_time = file_schema.created_on;
-    GetGroupFilePath(file_schema);
+    GetTableFilePath(file_schema);
 
     {
         try {
@@ -246,7 +246,7 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
         }
     }
 
-    auto partition_path = GetGroupDatePartitionPath(file_schema.table_id, file_schema.date);
+    auto partition_path = GetTableDatePartitionPath(file_schema.table_id, file_schema.date);
 
     if (!boost::filesystem::is_directory(partition_path)) {
         auto ret = boost::filesystem::create_directory(partition_path);
@@ -281,7 +281,7 @@ Status DBMetaImpl::FilesToIndex(TableFilesSchema& files) {
             table_file.file_type = std::get<3>(file);
             table_file.size = std::get<4>(file);
             table_file.date = std::get<5>(file);
-            GetGroupFilePath(table_file);
+            GetTableFilePath(table_file);
             auto groupItr = groups.find(table_file.table_id);
             if (groupItr == groups.end()) {
                 TableSchema table_schema;
@@ -340,7 +340,7 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
             table_file.size = std::get<4>(file);
             table_file.date = std::get<5>(file);
             table_file.dimension = table_schema.dimension;
-            GetGroupFilePath(table_file);
+            GetTableFilePath(table_file);
             auto dateItr = files.find(table_file.date);
             if (dateItr == files.end()) {
                 files[table_file.date] = TableFilesSchema();
@@ -385,7 +385,7 @@ Status DBMetaImpl::FilesToMerge(const std::string& table_id,
             table_file.size = std::get<4>(file);
             table_file.date = std::get<5>(file);
             table_file.dimension = table_schema.dimension;
-            GetGroupFilePath(table_file);
+            GetTableFilePath(table_file);
             auto dateItr = files.find(table_file.date);
             if (dateItr == files.end()) {
                 files[table_file.date] = TableFilesSchema();
@@ -434,7 +434,7 @@ Status DBMetaImpl::GetTableFile(TableFileSchema& file_schema) {
 
 // PXU TODO: Support Swap
 Status DBMetaImpl::Archive() {
-    auto& criterias = _options.archive_conf.GetCriterias();
+    auto& criterias = options_.archive_conf.GetCriterias();
     if (criterias.size() == 0) {
         return Status::OK();
     }
@@ -464,9 +464,8 @@ Status DBMetaImpl::Archive() {
             long sum = 0;
             Size(sum);
 
-            // PXU TODO: refactor size
             auto to_delete = (sum - limit*G);
-            discard_files_of_size(to_delete);
+            DiscardFiles(to_delete);
         }
     }
 
@@ -495,17 +494,18 @@ Status DBMetaImpl::Size(long& result) {
     return Status::OK();
 }
 
-Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
+Status DBMetaImpl::DiscardFiles(long to_discard_size) {
     LOG(DEBUG) << "About to discard size=" << to_discard_size;
     if (to_discard_size <= 0) {
         return Status::OK();
     }
     try {
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
-                                                   &TableFileSchema::size),
-                                          where(c(&TableFileSchema::file_type) != (int)TableFileSchema::TO_DELETE),
-                                          order_by(&TableFileSchema::id),
-                                          limit(10));
+                    &TableFileSchema::size),
+                where(c(&TableFileSchema::file_type) != (int)TableFileSchema::TO_DELETE),
+                order_by(&TableFileSchema::id),
+                limit(10));
+
         std::vector<int> ids;
         TableFileSchema table_file;
 
@@ -536,7 +536,7 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
     }
 
 
-    return discard_files_of_size(to_discard_size);
+    return DiscardFiles(to_discard_size);
 }
 
 Status DBMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
@@ -592,7 +592,7 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
             table_file.file_type = std::get<3>(file);
             table_file.size = std::get<4>(file);
             table_file.date = std::get<5>(file);
-            GetGroupFilePath(table_file);
+            GetTableFilePath(table_file);
             if (table_file.file_type == TableFileSchema::TO_DELETE) {
                 boost::filesystem::remove(table_file.location);
             }
@@ -628,7 +628,7 @@ Status DBMetaImpl::CleanUp() {
             table_file.file_type = std::get<3>(file);
             table_file.size = std::get<4>(file);
             table_file.date = std::get<5>(file);
-            GetGroupFilePath(table_file);
+            GetTableFilePath(table_file);
             if (table_file.file_type == TableFileSchema::TO_DELETE) {
                 boost::filesystem::remove(table_file.location);
             }
@@ -675,8 +675,8 @@ Status DBMetaImpl::Count(const std::string& table_id, long& result) {
 }
 
 Status DBMetaImpl::DropAll() {
-    if (boost::filesystem::is_directory(_options.path)) {
-        boost::filesystem::remove_all(_options.path);
+    if (boost::filesystem::is_directory(options_.path)) {
+        boost::filesystem::remove_all(options_.path);
     }
     return Status::OK();
 }

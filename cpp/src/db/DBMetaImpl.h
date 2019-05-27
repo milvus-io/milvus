@@ -58,14 +58,14 @@ public:
 
 private:
     Status NextFileId(std::string& file_id);
-    Status NextGroupId(std::string& table_id);
-    Status discard_files_of_size(long to_discard_size);
-    std::string GetGroupPath(const std::string& table_id);
-    std::string GetGroupDatePartitionPath(const std::string& table_id, DateT& date);
-    void GetGroupFilePath(TableFileSchema& group_file);
-    Status initialize();
+    Status NextTableId(std::string& table_id);
+    Status DiscardFiles(long to_discard_size);
+    std::string GetTablePath(const std::string& table_id);
+    std::string GetTableDatePartitionPath(const std::string& table_id, DateT& date);
+    void GetTableFilePath(TableFileSchema& group_file);
+    Status Initialize();
 
-    const DBMetaOptions _options;
+    const DBMetaOptions options_;
 }; // DBMetaImpl
 
 } // namespace meta
