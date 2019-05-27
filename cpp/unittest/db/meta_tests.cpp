@@ -20,7 +20,7 @@ using namespace zilliz::vecwise::engine;
 TEST_F(MetaTest, GROUP_TEST) {
     auto group_id = "meta_test_group";
 
-    meta::GroupSchema group;
+    meta::TableSchema group;
     group.group_id = group_id;
     auto status = impl_->add_group(group);
     ASSERT_TRUE(status.ok());
@@ -44,19 +44,19 @@ TEST_F(MetaTest, GROUP_TEST) {
 TEST_F(MetaTest, GROUP_FILE_TEST) {
     auto group_id = "meta_test_group";
 
-    meta::GroupSchema group;
+    meta::TableSchema group;
     group.group_id = group_id;
     auto status = impl_->add_group(group);
 
-    meta::GroupFileSchema group_file;
+    meta::TableFileSchema group_file;
     group_file.group_id = group.group_id;
     status = impl_->add_group_file(group_file);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(group_file.file_type, meta::GroupFileSchema::NEW);
+    ASSERT_EQ(group_file.file_type, meta::TableFileSchema::NEW);
 
     auto file_id = group_file.file_id;
 
-    auto new_file_type = meta::GroupFileSchema::INDEX;
+    auto new_file_type = meta::TableFileSchema::INDEX;
     group_file.file_type = new_file_type;
 
     status = impl_->update_group_file(group_file);
@@ -79,7 +79,7 @@ TEST_F(MetaTest, GROUP_FILE_TEST) {
     status = impl_->update_group_file(group_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(group_file.date, meta::Meta::GetDateWithDelta(-2));
-    ASSERT_FALSE(group_file.file_type == meta::GroupFileSchema::TO_DELETE);
+    ASSERT_FALSE(group_file.file_type == meta::TableFileSchema::TO_DELETE);
 
     dates.clear();
     dates.push_back(group_file.date);
@@ -87,7 +87,7 @@ TEST_F(MetaTest, GROUP_FILE_TEST) {
     ASSERT_TRUE(status.ok());
     status = impl_->get_group_file(group_file.group_id, group_file.file_id, group_file);
     ASSERT_TRUE(status.ok());
-    ASSERT_TRUE(group_file.file_type == meta::GroupFileSchema::TO_DELETE);
+    ASSERT_TRUE(group_file.file_type == meta::TableFileSchema::TO_DELETE);
 }
 
 TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
@@ -102,12 +102,12 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     auto impl = meta::DBMetaImpl(options);
     auto group_id = "meta_test_group";
 
-    meta::GroupSchema group;
+    meta::TableSchema group;
     group.group_id = group_id;
     auto status = impl.add_group(group);
 
     meta::GroupFilesSchema files;
-    meta::GroupFileSchema group_file;
+    meta::TableFileSchema group_file;
     group_file.group_id = group.group_id;
 
     auto cnt = 100;
@@ -115,7 +115,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     std::vector<int> days;
     for (auto i=0; i<cnt; ++i) {
         status = impl.add_group_file(group_file);
-        group_file.file_type = meta::GroupFileSchema::NEW;
+        group_file.file_type = meta::TableFileSchema::NEW;
         int day = rand() % (days_num*2);
         group_file.created_on = ts - day*meta::D_SEC*meta::US_PS - 10000;
         status = impl.update_group_file(group_file);
@@ -130,9 +130,9 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
         status = impl.get_group_file(file.group_id, file.file_id, file);
         ASSERT_TRUE(status.ok());
         if (days[i] < days_num) {
-            ASSERT_EQ(file.file_type, meta::GroupFileSchema::NEW);
+            ASSERT_EQ(file.file_type, meta::TableFileSchema::NEW);
         } else {
-            ASSERT_EQ(file.file_type, meta::GroupFileSchema::TO_DELETE);
+            ASSERT_EQ(file.file_type, meta::TableFileSchema::TO_DELETE);
         }
         i++;
     }
@@ -148,19 +148,19 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     auto impl = meta::DBMetaImpl(options);
     auto group_id = "meta_test_group";
 
-    meta::GroupSchema group;
+    meta::TableSchema group;
     group.group_id = group_id;
     auto status = impl.add_group(group);
 
     meta::GroupFilesSchema files;
-    meta::GroupFileSchema group_file;
+    meta::TableFileSchema group_file;
     group_file.group_id = group.group_id;
 
     auto cnt = 10;
     auto each_size = 2UL;
     for (auto i=0; i<cnt; ++i) {
         status = impl.add_group_file(group_file);
-        group_file.file_type = meta::GroupFileSchema::NEW;
+        group_file.file_type = meta::TableFileSchema::NEW;
         group_file.size = each_size * meta::G;
         status = impl.update_group_file(group_file);
         files.push_back(group_file);
@@ -173,9 +173,9 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
         status = impl.get_group_file(file.group_id, file.file_id, file);
         ASSERT_TRUE(status.ok());
         if (i < 5) {
-            ASSERT_TRUE(file.file_type == meta::GroupFileSchema::TO_DELETE);
+            ASSERT_TRUE(file.file_type == meta::TableFileSchema::TO_DELETE);
         } else {
-            ASSERT_EQ(file.file_type, meta::GroupFileSchema::NEW);
+            ASSERT_EQ(file.file_type, meta::TableFileSchema::NEW);
         }
         ++i;
     }
@@ -186,7 +186,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
 TEST_F(MetaTest, GROUP_FILES_TEST) {
     auto group_id = "meta_test_group";
 
-    meta::GroupSchema group;
+    meta::TableSchema group;
     group.group_id = group_id;
     auto status = impl_->add_group(group);
 
@@ -195,30 +195,30 @@ TEST_F(MetaTest, GROUP_FILES_TEST) {
     int to_index_files_cnt = 6;
     int index_files_cnt = 7;
 
-    meta::GroupFileSchema group_file;
+    meta::TableFileSchema group_file;
     group_file.group_id = group.group_id;
 
     for (auto i=0; i<new_files_cnt; ++i) {
         status = impl_->add_group_file(group_file);
-        group_file.file_type = meta::GroupFileSchema::NEW;
+        group_file.file_type = meta::TableFileSchema::NEW;
         status = impl_->update_group_file(group_file);
     }
 
     for (auto i=0; i<raw_files_cnt; ++i) {
         status = impl_->add_group_file(group_file);
-        group_file.file_type = meta::GroupFileSchema::RAW;
+        group_file.file_type = meta::TableFileSchema::RAW;
         status = impl_->update_group_file(group_file);
     }
 
     for (auto i=0; i<to_index_files_cnt; ++i) {
         status = impl_->add_group_file(group_file);
-        group_file.file_type = meta::GroupFileSchema::TO_INDEX;
+        group_file.file_type = meta::TableFileSchema::TO_INDEX;
         status = impl_->update_group_file(group_file);
     }
 
     for (auto i=0; i<index_files_cnt; ++i) {
         status = impl_->add_group_file(group_file);
-        group_file.file_type = meta::GroupFileSchema::INDEX;
+        group_file.file_type = meta::TableFileSchema::INDEX;
         status = impl_->update_group_file(group_file);
     }
 

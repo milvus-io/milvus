@@ -19,11 +19,11 @@ class DBMetaImpl : public Meta {
 public:
     DBMetaImpl(const DBMetaOptions& options_);
 
-    virtual Status add_group(GroupSchema& group_info) override;
-    virtual Status get_group(GroupSchema& group_info_) override;
+    virtual Status add_group(TableSchema& group_info) override;
+    virtual Status get_group(TableSchema& group_info_) override;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
-    virtual Status add_group_file(GroupFileSchema& group_file_info) override;
+    virtual Status add_group_file(TableFileSchema& group_file_info) override;
     virtual Status delete_group_partitions(const std::string& group_id,
             const meta::DatesT& dates) override;
 
@@ -32,8 +32,8 @@ public:
                                   bool& has_or_not_) override;
     virtual Status get_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
-                                  GroupFileSchema& group_file_info_) override;
-    virtual Status update_group_file(GroupFileSchema& group_file_) override;
+                                  TableFileSchema& group_file_info_) override;
+    virtual Status update_group_file(TableFileSchema& group_file_) override;
 
     virtual Status get_group_files(const std::string& group_id_,
                                    const int date_delta_,
@@ -68,10 +68,10 @@ private:
     Status NextFileId(std::string& file_id);
     Status NextGroupId(std::string& group_id);
     Status discard_files_of_size(long to_discard_size);
-    Status get_group_no_lock(GroupSchema& group_info);
+    Status get_group_no_lock(TableSchema& group_info);
     std::string GetGroupPath(const std::string& group_id);
     std::string GetGroupDatePartitionPath(const std::string& group_id, DateT& date);
-    void GetGroupFilePath(GroupFileSchema& group_file);
+    void GetGroupFilePath(TableFileSchema& group_file);
     Status initialize();
 
     const DBMetaOptions _options;

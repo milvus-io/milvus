@@ -20,13 +20,13 @@ namespace meta {
 
 class Meta {
 public:
-    typedef std::shared_ptr<Meta> Ptr;
+    using Ptr = std::shared_ptr<Meta>;
 
-    virtual Status add_group(GroupSchema& group_info) = 0;
-    virtual Status get_group(GroupSchema& group_info) = 0;
+    virtual Status add_group(TableSchema& group_info) = 0;
+    virtual Status get_group(TableSchema& group_info) = 0;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) = 0;
 
-    virtual Status add_group_file(GroupFileSchema& group_file_info) = 0;
+    virtual Status add_group_file(TableFileSchema& group_file_info) = 0;
     virtual Status delete_group_partitions(const std::string& group_id,
             const meta::DatesT& dates) = 0;
 
@@ -35,8 +35,8 @@ public:
                                   bool& has_or_not_) = 0;
     virtual Status get_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
-                                  GroupFileSchema& group_file_info_) = 0;
-    virtual Status update_group_file(GroupFileSchema& group_file_) = 0;
+                                  TableFileSchema& group_file_info_) = 0;
+    virtual Status update_group_file(TableFileSchema& group_file_) = 0;
 
     virtual Status get_group_files(const std::string& group_id_,
                                    const int date_delta_,

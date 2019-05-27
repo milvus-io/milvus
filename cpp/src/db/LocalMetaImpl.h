@@ -18,11 +18,11 @@ public:
     const size_t INDEX_TRIGGER_SIZE = 1024*1024*500;
     LocalMetaImpl(const DBMetaOptions& options_);
 
-    virtual Status add_group(GroupSchema& group_info_) override;
-    virtual Status get_group(GroupSchema& group_info_) override;
+    virtual Status add_group(TableSchema& group_info_) override;
+    virtual Status get_group(TableSchema& group_info_) override;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
-    virtual Status add_group_file(GroupFileSchema& group_file_info) override;
+    virtual Status add_group_file(TableFileSchema& group_file_info) override;
     /* virtual Status delete_group_partitions(const std::string& group_id, */
     /*         const meta::DatesT& dates) override; */
 
@@ -31,8 +31,8 @@ public:
                                   bool& has_or_not_) override;
     virtual Status get_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
-                                  GroupFileSchema& group_file_info_) override;
-    virtual Status update_group_file(GroupFileSchema& group_file_) override;
+                                  TableFileSchema& group_file_info_) override;
+    virtual Status update_group_file(TableFileSchema& group_file_) override;
 
     virtual Status get_group_files(const std::string& group_id_,
                                    const int date_delta_,
@@ -59,16 +59,16 @@ public:
 
 private:
 
-    Status GetGroupMetaInfoByPath(const std::string& path, GroupSchema& group_info);
+    Status GetGroupMetaInfoByPath(const std::string& path, TableSchema& group_info);
     std::string GetGroupMetaPathByGroupPath(const std::string& group_path);
-    Status GetGroupMetaInfo(const std::string& group_id, GroupSchema& group_info);
+    Status GetGroupMetaInfo(const std::string& group_id, TableSchema& group_info);
     std::string GetNextGroupFileLocationByPartition(const std::string& group_id, DateT& date,
-        GroupFileSchema::FILE_TYPE file_type);
+        TableFileSchema::FILE_TYPE file_type);
     std::string GetGroupDatePartitionPath(const std::string& group_id, DateT& date);
     std::string GetGroupPath(const std::string& group_id);
     std::string GetGroupMetaPath(const std::string& group_id);
 
-    Status CreateGroupMeta(const GroupSchema& group_schema);
+    Status CreateGroupMeta(const TableSchema& group_schema);
     long GetFileSize(const std::string& filename);
 
     Status initialize();

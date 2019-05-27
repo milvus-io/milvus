@@ -28,20 +28,20 @@ using namespace sqlite_orm;
 inline auto StoragePrototype(const std::string& path) {
     return make_storage(path,
             make_table("Group",
-                      make_column("id", &GroupSchema::id, primary_key()),
-                      make_column("group_id", &GroupSchema::group_id, unique()),
-                      make_column("dimension", &GroupSchema::dimension),
-                      make_column("created_on", &GroupSchema::created_on),
-                      make_column("files_cnt", &GroupSchema::files_cnt, default_value(0))),
+                      make_column("id", &TableSchema::id, primary_key()),
+                      make_column("group_id", &TableSchema::group_id, unique()),
+                      make_column("dimension", &TableSchema::dimension),
+                      make_column("created_on", &TableSchema::created_on),
+                      make_column("files_cnt", &TableSchema::files_cnt, default_value(0))),
             make_table("GroupFile",
-                      make_column("id", &GroupFileSchema::id, primary_key()),
-                      make_column("group_id", &GroupFileSchema::group_id),
-                      make_column("file_id", &GroupFileSchema::file_id),
-                      make_column("file_type", &GroupFileSchema::file_type),
-                      make_column("size", &GroupFileSchema::size, default_value(0)),
-                      make_column("updated_time", &GroupFileSchema::updated_time),
-                      make_column("created_on", &GroupFileSchema::created_on),
-                      make_column("date", &GroupFileSchema::date))
+                      make_column("id", &TableFileSchema::id, primary_key()),
+                      make_column("group_id", &TableFileSchema::group_id),
+                      make_column("file_id", &TableFileSchema::file_id),
+                      make_column("file_type", &TableFileSchema::file_type),
+                      make_column("size", &TableFileSchema::size, default_value(0)),
+                      make_column("updated_time", &TableFileSchema::updated_time),
+                      make_column("created_on", &TableFileSchema::created_on),
+                      make_column("date", &TableFileSchema::date))
             );
 
 }
@@ -59,7 +59,7 @@ std::string DBMetaImpl::GetGroupDatePartitionPath(const std::string& group_id, D
     return ss.str();
 }
 
-void DBMetaImpl::GetGroupFilePath(GroupFileSchema& group_file) {
+void DBMetaImpl::GetGroupFilePath(TableFileSchema& group_file) {
     if (group_file.date == EmptyDate) {
         group_file.date = Meta::GetDate();
     }
@@ -117,7 +117,7 @@ Status DBMetaImpl::delete_group_partitions(const std::string& group_id,
         return Status::OK();
     }
 
-    GroupSchema group_info;
+    TableSchema group_info;
     group_info.group_id = group_id;
     auto status = get_group(group_info);
     if (!status.ok()) {
@@ -135,11 +135,11 @@ Status DBMetaImpl::delete_group_partitions(const std::string& group_id,
     try {
         ConnectorPtr->update_all(
                     set(
-                        c(&GroupFileSchema::file_type) = (int)GroupFileSchema::TO_DELETE
+                        c(&TableFileSchema::file_type) = (int)TableFileSchema::TO_DELETE
                     ),
                     where(
-                        c(&GroupFileSchema::group_id) == group_id and
-                        in(&GroupFileSchema::date, dates)
+                        c(&TableFileSchema::group_id) == group_id and
+                        in(&TableFileSchema::date, dates)
                     ));
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
@@ -148,7 +148,7 @@ Status DBMetaImpl::delete_group_partitions(const std::string& group_id,
     return Status::OK();
 }
 
-Status DBMetaImpl::add_group(GroupSchema& group_info) {
+Status DBMetaImpl::add_group(TableSchema& group_info) {
     if (group_info.group_id == "") {
         NextGroupId(group_info.group_id);
     }
@@ -178,17 +178,17 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
     return Status::OK();
 }
 
-Status DBMetaImpl::get_group(GroupSchema& group_info) {
+Status DBMetaImpl::get_group(TableSchema& group_info) {
     return get_group_no_lock(group_info);
 }
 
-Status DBMetaImpl::get_group_no_lock(GroupSchema& group_info) {
+Status DBMetaImpl::get_group_no_lock(TableSchema& group_info) {
     try {
-        auto groups = ConnectorPtr->select(columns(&GroupSchema::id,
-                                                  &GroupSchema::group_id,
-                                                  &GroupSchema::files_cnt,
-                                                  &GroupSchema::dimension),
-                                          where(c(&GroupSchema::group_id) == group_info.group_id));
+        auto groups = ConnectorPtr->select(columns(&TableSchema::id,
+                                                  &TableSchema::group_id,
+                                                  &TableSchema::files_cnt,
+                                                  &TableSchema::dimension),
+                                          where(c(&TableSchema::group_id) == group_info.group_id));
         assert(groups.size() <= 1);
         if (groups.size() == 1) {
             group_info.id = std::get<0>(groups[0]);
@@ -207,8 +207,8 @@ Status DBMetaImpl::get_group_no_lock(GroupSchema& group_info) {
 
 Status DBMetaImpl::has_group(const std::string& group_id, bool& has_or_not) {
     try {
-        auto groups = ConnectorPtr->select(columns(&GroupSchema::id),
-                                          where(c(&GroupSchema::group_id) == group_id));
+        auto groups = ConnectorPtr->select(columns(&TableSchema::id),
+                                          where(c(&TableSchema::group_id) == group_id));
         assert(groups.size() <= 1);
         if (groups.size() == 1) {
             has_or_not = true;
@@ -222,11 +222,11 @@ Status DBMetaImpl::has_group(const std::string& group_id, bool& has_or_not) {
     return Status::OK();
 }
 
-Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
+Status DBMetaImpl::add_group_file(TableFileSchema& group_file) {
     if (group_file.date == EmptyDate) {
         group_file.date = Meta::GetDate();
     }
-    GroupSchema group_info;
+    TableSchema group_info;
     group_info.group_id = group_file.group_id;
     auto status = get_group(group_info);
     if (!status.ok()) {
@@ -234,7 +234,7 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
     }
 
     NextFileId(group_file.file_id);
-    group_file.file_type = GroupFileSchema::NEW;
+    group_file.file_type = TableFileSchema::NEW;
     group_file.dimension = group_info.dimension;
     group_file.size = 0;
     group_file.created_on = utils::GetMicroSecTimeStamp();
@@ -267,18 +267,18 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
     files.clear();
 
     try {
-        auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
-                                                   &GroupFileSchema::group_id,
-                                                   &GroupFileSchema::file_id,
-                                                   &GroupFileSchema::file_type,
-                                                   &GroupFileSchema::size,
-                                                   &GroupFileSchema::date),
-                                          where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_INDEX));
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
+                                                   &TableFileSchema::group_id,
+                                                   &TableFileSchema::file_id,
+                                                   &TableFileSchema::file_type,
+                                                   &TableFileSchema::size,
+                                                   &TableFileSchema::date),
+                                          where(c(&TableFileSchema::file_type) == (int)TableFileSchema::TO_INDEX));
 
-        std::map<std::string, GroupSchema> groups;
+        std::map<std::string, TableSchema> groups;
 
         for (auto& file : selected) {
-            GroupFileSchema group_file;
+            TableFileSchema group_file;
             group_file.id = std::get<0>(file);
             group_file.group_id = std::get<1>(file);
             group_file.file_id = std::get<2>(file);
@@ -288,7 +288,7 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
             GetGroupFilePath(group_file);
             auto groupItr = groups.find(group_file.group_id);
             if (groupItr == groups.end()) {
-                GroupSchema group_info;
+                TableSchema group_info;
                 group_info.group_id = group_file.group_id;
                 auto status = get_group_no_lock(group_info);
                 if (!status.ok()) {
@@ -315,19 +315,19 @@ Status DBMetaImpl::files_to_search(const std::string &group_id,
     const DatesT& dates = (partition.empty() == true) ? today : partition;
 
     try {
-        auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
-                                                     &GroupFileSchema::group_id,
-                                                     &GroupFileSchema::file_id,
-                                                     &GroupFileSchema::file_type,
-                                                     &GroupFileSchema::size,
-                                                     &GroupFileSchema::date),
-                                             where(c(&GroupFileSchema::group_id) == group_id and
-                                                 in(&GroupFileSchema::date, dates) and
-                                                 (c(&GroupFileSchema::file_type) == (int) GroupFileSchema::RAW or
-                                                     c(&GroupFileSchema::file_type) == (int) GroupFileSchema::TO_INDEX or
-                                                     c(&GroupFileSchema::file_type) == (int) GroupFileSchema::INDEX)));
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
+                                                     &TableFileSchema::group_id,
+                                                     &TableFileSchema::file_id,
+                                                     &TableFileSchema::file_type,
+                                                     &TableFileSchema::size,
+                                                     &TableFileSchema::date),
+                                             where(c(&TableFileSchema::group_id) == group_id and
+                                                 in(&TableFileSchema::date, dates) and
+                                                 (c(&TableFileSchema::file_type) == (int) TableFileSchema::RAW or
+                                                     c(&TableFileSchema::file_type) == (int) TableFileSchema::TO_INDEX or
+                                                     c(&TableFileSchema::file_type) == (int) TableFileSchema::INDEX)));
 
-        GroupSchema group_info;
+        TableSchema group_info;
         group_info.group_id = group_id;
         auto status = get_group_no_lock(group_info);
         if (!status.ok()) {
@@ -335,7 +335,7 @@ Status DBMetaImpl::files_to_search(const std::string &group_id,
         }
 
         for (auto& file : selected) {
-            GroupFileSchema group_file;
+            TableFileSchema group_file;
             group_file.id = std::get<0>(file);
             group_file.group_id = std::get<1>(file);
             group_file.file_id = std::get<2>(file);
@@ -363,16 +363,16 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
     files.clear();
 
     try {
-        auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
-                                                   &GroupFileSchema::group_id,
-                                                   &GroupFileSchema::file_id,
-                                                   &GroupFileSchema::file_type,
-                                                   &GroupFileSchema::size,
-                                                   &GroupFileSchema::date),
-                                          where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::RAW and
-                                                c(&GroupFileSchema::group_id) == group_id));
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
+                                                   &TableFileSchema::group_id,
+                                                   &TableFileSchema::file_id,
+                                                   &TableFileSchema::file_type,
+                                                   &TableFileSchema::size,
+                                                   &TableFileSchema::date),
+                                          where(c(&TableFileSchema::file_type) == (int)TableFileSchema::RAW and
+                                                c(&TableFileSchema::group_id) == group_id));
 
-        GroupSchema group_info;
+        TableSchema group_info;
         group_info.group_id = group_id;
         auto status = get_group_no_lock(group_info);
         if (!status.ok()) {
@@ -380,7 +380,7 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
         }
 
         for (auto& file : selected) {
-            GroupFileSchema group_file;
+            TableFileSchema group_file;
             group_file.id = std::get<0>(file);
             group_file.group_id = std::get<1>(file);
             group_file.file_id = std::get<2>(file);
@@ -412,16 +412,16 @@ Status DBMetaImpl::has_group_file(const std::string& group_id_,
 
 Status DBMetaImpl::get_group_file(const std::string& group_id_,
                               const std::string& file_id_,
-                              GroupFileSchema& group_file_info_) {
+                              TableFileSchema& group_file_info_) {
     try {
-        auto files = ConnectorPtr->select(columns(&GroupFileSchema::id,
-                                                   &GroupFileSchema::group_id,
-                                                   &GroupFileSchema::file_id,
-                                                   &GroupFileSchema::file_type,
-                                                   &GroupFileSchema::size,
-                                                   &GroupFileSchema::date),
-                                          where(c(&GroupFileSchema::file_id) == file_id_ and
-                                                c(&GroupFileSchema::group_id) == group_id_
+        auto files = ConnectorPtr->select(columns(&TableFileSchema::id,
+                                                   &TableFileSchema::group_id,
+                                                   &TableFileSchema::file_id,
+                                                   &TableFileSchema::file_type,
+                                                   &TableFileSchema::size,
+                                                   &TableFileSchema::date),
+                                          where(c(&TableFileSchema::file_id) == file_id_ and
+                                                c(&TableFileSchema::group_id) == group_id_
                                           ));
         assert(files.size() <= 1);
         if (files.size() == 1) {
@@ -466,11 +466,11 @@ Status DBMetaImpl::archive_files() {
             {
                 ConnectorPtr->update_all(
                         set(
-                            c(&GroupFileSchema::file_type) = (int)GroupFileSchema::TO_DELETE
+                            c(&TableFileSchema::file_type) = (int)TableFileSchema::TO_DELETE
                            ),
                         where(
-                            c(&GroupFileSchema::created_on) < (long)(now - usecs) and
-                            c(&GroupFileSchema::file_type) != (int)GroupFileSchema::TO_DELETE
+                            c(&TableFileSchema::created_on) < (long)(now - usecs) and
+                            c(&TableFileSchema::file_type) != (int)TableFileSchema::TO_DELETE
                             ));
             } catch (std::exception & e) {
                 LOG(DEBUG) << e.what();
@@ -493,9 +493,9 @@ Status DBMetaImpl::archive_files() {
 Status DBMetaImpl::size(long& result) {
     result = 0;
     try {
-        auto selected = ConnectorPtr->select(columns(sum(&GroupFileSchema::size)),
+        auto selected = ConnectorPtr->select(columns(sum(&TableFileSchema::size)),
                 where(
-                    c(&GroupFileSchema::file_type) != (int)GroupFileSchema::TO_DELETE
+                    c(&TableFileSchema::file_type) != (int)TableFileSchema::TO_DELETE
                     ));
 
         for (auto& sub_query : selected) {
@@ -518,16 +518,16 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
         return Status::OK();
     }
     try {
-        auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
-                                                   &GroupFileSchema::size),
-                                          where(c(&GroupFileSchema::file_type) != (int)GroupFileSchema::TO_DELETE),
-                                          order_by(&GroupFileSchema::id),
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
+                                                   &TableFileSchema::size),
+                                          where(c(&TableFileSchema::file_type) != (int)TableFileSchema::TO_DELETE),
+                                          order_by(&TableFileSchema::id),
                                           limit(10));
         std::vector<int> ids;
 
         for (auto& file : selected) {
             if (to_discard_size <= 0) break;
-            GroupFileSchema group_file;
+            TableFileSchema group_file;
             group_file.id = std::get<0>(file);
             group_file.size = std::get<1>(file);
             ids.push_back(group_file.id);
@@ -541,10 +541,10 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
 
         ConnectorPtr->update_all(
                     set(
-                        c(&GroupFileSchema::file_type) = (int)GroupFileSchema::TO_DELETE
+                        c(&TableFileSchema::file_type) = (int)TableFileSchema::TO_DELETE
                     ),
                     where(
-                        in(&GroupFileSchema::id, ids)
+                        in(&TableFileSchema::id, ids)
                     ));
 
     } catch (std::exception & e) {
@@ -556,7 +556,7 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
     return discard_files_of_size(to_discard_size);
 }
 
-Status DBMetaImpl::update_group_file(GroupFileSchema& group_file) {
+Status DBMetaImpl::update_group_file(TableFileSchema& group_file) {
     group_file.updated_time = utils::GetMicroSecTimeStamp();
     try {
         ConnectorPtr->update(group_file);
@@ -590,19 +590,19 @@ Status DBMetaImpl::update_files(GroupFilesSchema& files) {
 Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
     auto now = utils::GetMicroSecTimeStamp();
     try {
-        auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
-                                                   &GroupFileSchema::group_id,
-                                                   &GroupFileSchema::file_id,
-                                                   &GroupFileSchema::file_type,
-                                                   &GroupFileSchema::size,
-                                                   &GroupFileSchema::date),
-                                          where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_DELETE and
-                                                c(&GroupFileSchema::updated_time) > now - seconds*US_PS));
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
+                                                   &TableFileSchema::group_id,
+                                                   &TableFileSchema::file_id,
+                                                   &TableFileSchema::file_type,
+                                                   &TableFileSchema::size,
+                                                   &TableFileSchema::date),
+                                          where(c(&TableFileSchema::file_type) == (int)TableFileSchema::TO_DELETE and
+                                                c(&TableFileSchema::updated_time) > now - seconds*US_PS));
 
         GroupFilesSchema updated;
 
         for (auto& file : selected) {
-            GroupFileSchema group_file;
+            TableFileSchema group_file;
             group_file.id = std::get<0>(file);
             group_file.group_id = std::get<1>(file);
             group_file.file_id = std::get<2>(file);
@@ -610,10 +610,10 @@ Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
             group_file.size = std::get<4>(file);
             group_file.date = std::get<5>(file);
             GetGroupFilePath(group_file);
-            if (group_file.file_type == GroupFileSchema::TO_DELETE) {
+            if (group_file.file_type == TableFileSchema::TO_DELETE) {
                 boost::filesystem::remove(group_file.location);
             }
-            ConnectorPtr->remove<GroupFileSchema>(group_file.id);
+            ConnectorPtr->remove<TableFileSchema>(group_file.id);
             /* LOG(DEBUG) << "Removing deleted id=" << group_file.id << " location=" << group_file.location << std::endl; */
         }
     } catch (std::exception & e) {
@@ -626,19 +626,19 @@ Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
 
 Status DBMetaImpl::cleanup() {
     try {
-        auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
-                                                   &GroupFileSchema::group_id,
-                                                   &GroupFileSchema::file_id,
-                                                   &GroupFileSchema::file_type,
-                                                   &GroupFileSchema::size,
-                                                   &GroupFileSchema::date),
-                                          where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_DELETE or
-                                                c(&GroupFileSchema::file_type) == (int)GroupFileSchema::NEW));
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
+                                                   &TableFileSchema::group_id,
+                                                   &TableFileSchema::file_id,
+                                                   &TableFileSchema::file_type,
+                                                   &TableFileSchema::size,
+                                                   &TableFileSchema::date),
+                                          where(c(&TableFileSchema::file_type) == (int)TableFileSchema::TO_DELETE or
+                                                c(&TableFileSchema::file_type) == (int)TableFileSchema::NEW));
 
         GroupFilesSchema updated;
 
         for (auto& file : selected) {
-            GroupFileSchema group_file;
+            TableFileSchema group_file;
             group_file.id = std::get<0>(file);
             group_file.group_id = std::get<1>(file);
             group_file.file_id = std::get<2>(file);
@@ -646,10 +646,10 @@ Status DBMetaImpl::cleanup() {
             group_file.size = std::get<4>(file);
             group_file.date = std::get<5>(file);
             GetGroupFilePath(group_file);
-            if (group_file.file_type == GroupFileSchema::TO_DELETE) {
+            if (group_file.file_type == TableFileSchema::TO_DELETE) {
                 boost::filesystem::remove(group_file.location);
             }
-            ConnectorPtr->remove<GroupFileSchema>(group_file.id);
+            ConnectorPtr->remove<TableFileSchema>(group_file.id);
             /* LOG(DEBUG) << "Removing id=" << group_file.id << " location=" << group_file.location << std::endl; */
         }
     } catch (std::exception & e) {
@@ -663,14 +663,14 @@ Status DBMetaImpl::cleanup() {
 Status DBMetaImpl::count(const std::string& group_id, long& result) {
 
     try {
-        auto selected = ConnectorPtr->select(columns(&GroupFileSchema::size,
-                                                   &GroupFileSchema::date),
-                                          where((c(&GroupFileSchema::file_type) == (int)GroupFileSchema::RAW or
-                                                 c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_INDEX or
-                                                 c(&GroupFileSchema::file_type) == (int)GroupFileSchema::INDEX) and
-                                                c(&GroupFileSchema::group_id) == group_id));
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::size,
+                                                   &TableFileSchema::date),
+                                          where((c(&TableFileSchema::file_type) == (int)TableFileSchema::RAW or
+                                                 c(&TableFileSchema::file_type) == (int)TableFileSchema::TO_INDEX or
+                                                 c(&TableFileSchema::file_type) == (int)TableFileSchema::INDEX) and
+                                                c(&TableFileSchema::group_id) == group_id));
 
-        GroupSchema group_info;
+        TableSchema group_info;
         group_info.group_id = group_id;
         auto status = get_group_no_lock(group_info);
         if (!status.ok()) {

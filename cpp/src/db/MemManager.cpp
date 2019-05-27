@@ -22,7 +22,7 @@ namespace engine {
 
 template<typename EngineT>
 MemVectors<EngineT>::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
-        const meta::GroupFileSchema& schema, const Options& options)
+        const meta::TableFileSchema& schema, const Options& options)
   : pMeta_(meta_ptr),
     options_(options),
     schema_(schema),
@@ -53,11 +53,11 @@ Status MemVectors<EngineT>::serialize(std::string& group_id) {
     pEE_->Serialize();
     schema_.size = size;
     schema_.file_type = (size >= options_.index_trigger_size) ?
-        meta::GroupFileSchema::TO_INDEX : meta::GroupFileSchema::RAW;
+        meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
 
     auto status = pMeta_->update_group_file(schema_);
 
-    LOG(DEBUG) << "New " << ((schema_.file_type == meta::GroupFileSchema::RAW) ? "raw" : "to_index")
+    LOG(DEBUG) << "New " << ((schema_.file_type == meta::TableFileSchema::RAW) ? "raw" : "to_index")
         << " file " << schema_.file_id << " of size " << pEE_->Size() / meta::M << " M";
 
     pEE_->Cache();
@@ -85,7 +85,7 @@ typename MemManager<EngineT>::MemVectorsPtr MemManager<EngineT>::get_mem_by_grou
         return memIt->second;
     }
 
-    meta::GroupFileSchema group_file;
+    meta::TableFileSchema group_file;
     group_file.group_id = group_id;
     auto status = _pMeta->add_group_file(group_file);
     if (!status.ok()) {

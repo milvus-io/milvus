@@ -33,8 +33,8 @@ public:
 
     DBImpl(const Options& options);
 
-    virtual Status add_group(meta::GroupSchema& group_info) override;
-    virtual Status get_group(meta::GroupSchema& group_info) override;
+    virtual Status add_group(meta::TableSchema& group_info) override;
+    virtual Status get_group(meta::TableSchema& group_info) override;
     virtual Status delete_vectors(const std::string& group_id, const meta::DatesT& dates) override;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
@@ -62,7 +62,7 @@ public:
 private:
 
     void background_build_index();
-    Status build_index(const meta::GroupFileSchema&);
+    Status build_index(const meta::TableFileSchema&);
     Status try_build_index();
     Status merge_files(const std::string& group_id,
             const meta::DateT& date,
