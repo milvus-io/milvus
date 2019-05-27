@@ -33,12 +33,12 @@ public:
 
     virtual Status UpdateTableFiles(TableFilesSchema& files) override;
 
-    virtual Status files_to_merge(const std::string& table_id,
-            DatePartionedTableFilesSchema& files) override;
-
-    virtual Status files_to_search(const std::string& table_id,
+    virtual Status FilesToSearch(const std::string& table_id,
                                   const DatesT& partition,
                                   DatePartionedTableFilesSchema& files) override;
+
+    virtual Status files_to_merge(const std::string& table_id,
+            DatePartionedTableFilesSchema& files) override;
 
     virtual Status files_to_index(TableFilesSchema&) override;
 
