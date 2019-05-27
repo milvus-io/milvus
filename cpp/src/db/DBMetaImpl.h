@@ -27,9 +27,8 @@ public:
     virtual Status DropPartitionsByDates(const std::string& table_id,
             const DatesT& dates) override;
 
-    virtual Status get_group_file(const std::string& table_id_,
-                                  const std::string& file_id_,
-                                  TableFileSchema& group_file_info_) override;
+    virtual Status GetTableFile(TableFileSchema& file_schema) override;
+
     virtual Status update_group_file(TableFileSchema& group_file_) override;
 
     virtual Status get_group_files(const std::string& table_id_,
