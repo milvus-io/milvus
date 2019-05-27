@@ -46,7 +46,7 @@ public:
 
     virtual Status Archive() = 0;
 
-    virtual Status files_to_index(TableFilesSchema&) = 0;
+    virtual Status FilesToIndex(TableFilesSchema&) = 0;
 
     virtual Status cleanup() = 0;
     virtual Status cleanup_ttl_files(uint16_t) = 0;

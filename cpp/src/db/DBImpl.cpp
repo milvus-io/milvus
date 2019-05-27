@@ -360,7 +360,7 @@ void DBImpl<EngineT>::background_build_index() {
     std::lock_guard<std::mutex> lock(build_index_mutex_);
     assert(bg_build_index_started_);
     meta::TableFilesSchema to_index_files;
-    _pMeta->files_to_index(to_index_files);
+    _pMeta->FilesToIndex(to_index_files);
     Status status;
     for (auto& file : to_index_files) {
         /* LOG(DEBUG) << "Buiding index for " << file.location; */
