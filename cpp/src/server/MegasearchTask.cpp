@@ -163,7 +163,7 @@ ServerError DeleteTableTask::OnExecute() {
     error_msg_ = "delete table not implemented";
     SERVER_LOG_ERROR << error_msg_;
 
-    //IVecIdMapper::GetInstance()->DeleteGroup(table_name_);
+    IVecIdMapper::GetInstance()->DeleteGroup(table_name_);
 
     return SERVER_NOT_IMPLEMENT;
 }
@@ -349,7 +349,7 @@ ServerError SearchVectorTask::OnExecute() {
                     thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
                 }
 
-                result_array_.push_back(thrift_topk_result);
+                result_array_.emplace_back(thrift_topk_result);
             }
             rc.Record("construct result");
         }
