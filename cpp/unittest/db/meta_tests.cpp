@@ -229,7 +229,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     meta::DatePartionedTableFilesSchema dated_files;
-    status = impl_->files_to_merge(group.table_id, dated_files);
+    status = impl_->FilesToMerge(group.table_id, dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date].size(), raw_files_cnt);
 

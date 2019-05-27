@@ -292,7 +292,7 @@ Status DBImpl<EngineT>::merge_files(const std::string& table_id, const meta::Dat
 template<typename EngineT>
 Status DBImpl<EngineT>::background_merge_files(const std::string& table_id) {
     meta::DatePartionedTableFilesSchema raw_files;
-    auto status = _pMeta->files_to_merge(table_id, raw_files);
+    auto status = _pMeta->FilesToMerge(table_id, raw_files);
     if (!status.ok()) {
         return status;
     }
