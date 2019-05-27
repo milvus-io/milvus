@@ -47,8 +47,8 @@ size_t MemVectors<EngineT>::approximate_size() const {
 }
 
 template<typename EngineT>
-Status MemVectors<EngineT>::serialize(std::string& group_id) {
-    group_id = schema_.group_id;
+Status MemVectors<EngineT>::serialize(std::string& table_id) {
+    table_id = schema_.table_id;
     auto size = approximate_size();
     pEE_->Serialize();
     schema_.size = size;
@@ -79,40 +79,40 @@ MemVectors<EngineT>::~MemVectors() {
 
 template<typename EngineT>
 typename MemManager<EngineT>::MemVectorsPtr MemManager<EngineT>::get_mem_by_group(
-        const std::string& group_id) {
-    auto memIt = _memMap.find(group_id);
+        const std::string& table_id) {
+    auto memIt = _memMap.find(table_id);
     if (memIt != _memMap.end()) {
         return memIt->second;
     }
 
     meta::TableFileSchema group_file;
-    group_file.group_id = group_id;
+    group_file.table_id = table_id;
     auto status = _pMeta->add_group_file(group_file);
     if (!status.ok()) {
         return nullptr;
     }
 
-    _memMap[group_id] = MemVectorsPtr(new MemVectors<EngineT>(_pMeta, group_file, options_));
-    return _memMap[group_id];
+    _memMap[table_id] = MemVectorsPtr(new MemVectors<EngineT>(_pMeta, group_file, options_));
+    return _memMap[table_id];
 }
 
 template<typename EngineT>
-Status MemManager<EngineT>::add_vectors(const std::string& group_id_,
+Status MemManager<EngineT>::add_vectors(const std::string& table_id_,
         size_t n_,
         const float* vectors_,
         IDNumbers& vector_ids_) {
     std::unique_lock<std::mutex> lock(_mutex);
-    return add_vectors_no_lock(group_id_, n_, vectors_, vector_ids_);
+    return add_vectors_no_lock(table_id_, n_, vectors_, vector_ids_);
 }
 
 template<typename EngineT>
-Status MemManager<EngineT>::add_vectors_no_lock(const std::string& group_id,
+Status MemManager<EngineT>::add_vectors_no_lock(const std::string& table_id,
         size_t n,
         const float* vectors,
         IDNumbers& vector_ids) {
-    MemVectorsPtr mem = get_mem_by_group(group_id);
+    MemVectorsPtr mem = get_mem_by_group(table_id);
     if (mem == nullptr) {
-        return Status::NotFound("Group " + group_id + " not found!");
+        return Status::NotFound("Group " + table_id + " not found!");
     }
     mem->add(n, vectors, vector_ids);
 
@@ -131,14 +131,14 @@ Status MemManager<EngineT>::mark_memory_as_immutable() {
 }
 
 template<typename EngineT>
-Status MemManager<EngineT>::serialize(std::vector<std::string>& group_ids) {
+Status MemManager<EngineT>::serialize(std::vector<std::string>& table_ids) {
     mark_memory_as_immutable();
     std::unique_lock<std::mutex> lock(serialization_mtx_);
-    std::string group_id;
-    group_ids.clear();
+    std::string table_id;
+    table_ids.clear();
     for (auto& mem : _immMems) {
-        mem->serialize(group_id);
-        group_ids.push_back(group_id);
+        mem->serialize(table_id);
+        table_ids.push_back(table_id);
     }
     _immMems.clear();
     return Status::OK();

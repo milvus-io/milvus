@@ -20,21 +20,21 @@ public:
 
     virtual Status add_group(TableSchema& group_info_) override;
     virtual Status get_group(TableSchema& group_info_) override;
-    virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
+    virtual Status has_group(const std::string& table_id_, bool& has_or_not_) override;
 
     virtual Status add_group_file(TableFileSchema& group_file_info) override;
-    /* virtual Status delete_group_partitions(const std::string& group_id, */
+    /* virtual Status delete_group_partitions(const std::string& table_id, */
     /*         const meta::DatesT& dates) override; */
 
-    virtual Status has_group_file(const std::string& group_id_,
+    virtual Status has_group_file(const std::string& table_id_,
                                   const std::string& file_id_,
                                   bool& has_or_not_) override;
-    virtual Status get_group_file(const std::string& group_id_,
+    virtual Status get_group_file(const std::string& table_id_,
                                   const std::string& file_id_,
                                   TableFileSchema& group_file_info_) override;
     virtual Status update_group_file(TableFileSchema& group_file_) override;
 
-    virtual Status get_group_files(const std::string& group_id_,
+    virtual Status get_group_files(const std::string& table_id_,
                                    const int date_delta_,
                                    TableFilesSchema& group_files_info_) override;
 
@@ -42,7 +42,7 @@ public:
 
     virtual Status cleanup() override;
 
-    virtual Status files_to_merge(const std::string& group_id,
+    virtual Status files_to_merge(const std::string& table_id,
             DatePartionedTableFilesSchema& files) override;
 
     virtual Status files_to_index(TableFilesSchema&) override;
@@ -51,7 +51,7 @@ public:
 
     virtual Status cleanup_ttl_files(uint16_t seconds) override;
 
-    virtual Status count(const std::string& group_id, long& result) override;
+    virtual Status count(const std::string& table_id, long& result) override;
 
     virtual Status drop_all() override;
 
@@ -61,12 +61,12 @@ private:
 
     Status GetGroupMetaInfoByPath(const std::string& path, TableSchema& group_info);
     std::string GetGroupMetaPathByGroupPath(const std::string& group_path);
-    Status GetGroupMetaInfo(const std::string& group_id, TableSchema& group_info);
-    std::string GetNextGroupFileLocationByPartition(const std::string& group_id, DateT& date,
+    Status GetGroupMetaInfo(const std::string& table_id, TableSchema& group_info);
+    std::string GetNextGroupFileLocationByPartition(const std::string& table_id, DateT& date,
         TableFileSchema::FILE_TYPE file_type);
-    std::string GetGroupDatePartitionPath(const std::string& group_id, DateT& date);
-    std::string GetGroupPath(const std::string& group_id);
-    std::string GetGroupMetaPath(const std::string& group_id);
+    std::string GetGroupDatePartitionPath(const std::string& table_id, DateT& date);
+    std::string GetGroupPath(const std::string& table_id);
+    std::string GetGroupMetaPath(const std::string& table_id);
 
     Status CreateGroupMeta(const TableSchema& group_schema);
     long GetFileSize(const std::string& filename);
