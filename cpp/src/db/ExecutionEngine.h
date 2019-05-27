@@ -5,10 +5,10 @@
  ******************************************************************************/
 #pragma once
 
+#include "Status.h"
+
 #include <vector>
 #include <memory>
-
-#include "Status.h"
 
 namespace zilliz {
 namespace vecwise {
