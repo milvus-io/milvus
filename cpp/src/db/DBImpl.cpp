@@ -413,7 +413,7 @@ Status DBImpl<EngineT>::count(const std::string& table_id, long& result) {
 
 template<typename EngineT>
 Status DBImpl<EngineT>::size(long& result) {
-    return  _pMeta->size(result);
+    return  _pMeta->Size(result);
 }
 
 template<typename EngineT>

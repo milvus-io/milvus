@@ -44,7 +44,7 @@ public:
 
     virtual Status archive_files() override;
 
-    virtual Status size(long& result) override;
+    virtual Status Size(long& result) override;
 
     virtual Status cleanup() override;
 

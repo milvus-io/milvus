@@ -42,7 +42,7 @@ public:
     virtual Status FilesToMerge(const std::string& table_id,
             DatePartionedTableFilesSchema& files) = 0;
 
-    virtual Status size(long& result) = 0;
+    virtual Status Size(long& result) = 0;
 
     virtual Status archive_files() = 0;
 

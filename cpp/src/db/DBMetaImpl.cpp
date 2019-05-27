@@ -462,7 +462,7 @@ Status DBMetaImpl::archive_files() {
         }
         if (criteria == "disk") {
             long sum = 0;
-            size(sum);
+            Size(sum);
 
             // PXU TODO: refactor size
             auto to_delete = (sum - limit*G);
@@ -473,7 +473,7 @@ Status DBMetaImpl::archive_files() {
     return Status::OK();
 }
 
-Status DBMetaImpl::size(long& result) {
+Status DBMetaImpl::Size(long& result) {
     result = 0;
     try {
         auto selected = ConnectorPtr->select(columns(sum(&TableFileSchema::size)),
