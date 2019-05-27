@@ -24,6 +24,8 @@ public:
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
     virtual Status add_group_file(GroupFileSchema& group_file_info) override;
+    virtual Status delete_group_partitions(const std::string& group_id,
+            const meta::DatesT& dates) override;
 
     virtual Status has_group_file(const std::string& group_id_,
                                   const std::string& file_id_,
@@ -48,6 +50,10 @@ public:
 
     virtual Status files_to_index(GroupFilesSchema&) override;
 
+    virtual Status archive_files() override;
+
+    virtual Status size(long& result) override;
+
     virtual Status cleanup() override;
 
     virtual Status cleanup_ttl_files(uint16_t seconds) override;
@@ -59,8 +65,9 @@ public:
     virtual ~DBMetaImpl();
 
 private:
-
-    long GetMicroSecTimeStamp();
+    Status NextFileId(std::string& file_id);
+    Status NextGroupId(std::string& group_id);
+    Status discard_files_of_size(long to_discard_size);
     Status get_group_no_lock(GroupSchema& group_info);
     std::string GetGroupPath(const std::string& group_id);
     std::string GetGroupDatePartitionPath(const std::string& group_id, DateT& date);

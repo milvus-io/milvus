@@ -241,6 +241,11 @@ Status LocalMetaImpl::update_files(GroupFilesSchema& files) {
     return Status::OK();
 }
 
+Status LocalMetaImpl::archive_files() {
+    //PXU TODO
+    return Status::OK();
+}
+
 Status LocalMetaImpl::cleanup() {
     //PXU TODO
     return Status::OK();
@@ -252,6 +257,11 @@ Status LocalMetaImpl::cleanup_ttl_files(uint16_t seconds) {
 }
 
 Status LocalMetaImpl::drop_all() {
+    // PXU TODO
+    return Status::OK();
+}
+
+Status LocalMetaImpl::size(long& result) {
     // PXU TODO
     return Status::OK();
 }
