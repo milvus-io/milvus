@@ -152,7 +152,7 @@ Status LocalMetaImpl::add_group_file(TableFileSchema& group_file_info) {
     return Status::OK();
 }
 
-Status LocalMetaImpl::files_to_index(GroupFilesSchema& files) {
+Status LocalMetaImpl::files_to_index(TableFilesSchema& files) {
     files.clear();
 
     std::string suffix;
@@ -182,7 +182,7 @@ Status LocalMetaImpl::files_to_index(GroupFilesSchema& files) {
 }
 
 Status LocalMetaImpl::files_to_merge(const std::string& group_id,
-        DatePartionedGroupFilesSchema& files) {
+        DatePartionedTableFilesSchema& files) {
     files.clear();
     /* std::string suffix; */
     /* boost::filesystem::directory_iterator end_itr; */
@@ -226,7 +226,7 @@ Status LocalMetaImpl::get_group_file(const std::string& group_id_,
 
 Status LocalMetaImpl::get_group_files(const std::string& group_id_,
                                const int date_delta_,
-                               GroupFilesSchema& group_files_info_) {
+                               TableFilesSchema& group_files_info_) {
     // PXU TODO
     return Status::OK();
 }
@@ -236,7 +236,7 @@ Status LocalMetaImpl::update_group_file(TableFileSchema& group_file_) {
     return Status::OK();
 }
 
-Status LocalMetaImpl::update_files(GroupFilesSchema& files) {
+Status LocalMetaImpl::update_files(TableFilesSchema& files) {
     //PXU TODO
     return Status::OK();
 }

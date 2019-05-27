@@ -36,16 +36,16 @@ public:
 
     virtual Status get_group_files(const std::string& group_id_,
                                    const int date_delta_,
-                                   GroupFilesSchema& group_files_info_) override;
+                                   TableFilesSchema& group_files_info_) override;
 
-    virtual Status update_files(GroupFilesSchema& files) override;
+    virtual Status update_files(TableFilesSchema& files) override;
 
     virtual Status cleanup() override;
 
     virtual Status files_to_merge(const std::string& group_id,
-            DatePartionedGroupFilesSchema& files) override;
+            DatePartionedTableFilesSchema& files) override;
 
-    virtual Status files_to_index(GroupFilesSchema&) override;
+    virtual Status files_to_index(TableFilesSchema&) override;
 
     virtual Status archive_files() override;
 
