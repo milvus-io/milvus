@@ -22,7 +22,7 @@ set(license_generator_src
         )
 
 set(service_files
-        thrift/gen-cpp/VecService.cpp
+        thrift/gen-cpp/MegasearchService.cpp
         thrift/gen-cpp/megasearch_constants.cpp
         thrift/gen-cpp/megasearch_types.cpp
         )
@@ -39,6 +39,7 @@ set(get_sys_info_src
 
 include_directories(/usr/include)
 include_directories(/usr/local/cuda/include)
+include_directories(thrift/gen-cpp)
 
 if (GPU_VERSION STREQUAL "ON")
     link_directories(/usr/local/cuda/lib64)
@@ -127,3 +128,5 @@ if (ENABLE_LICENSE STREQUAL "ON")
 endif ()
 
 install(TARGETS vecwise_server DESTINATION bin)
+
+add_subdirectory(sdk)

@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include "Server.h"
 #include "ServerConfig.h"
-#include "VecServiceWrapper.h"
+#include "MegasearchServer.h"
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
@@ -225,12 +225,12 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
-    VecServiceWrapper::StartService();
+    MegasearchServer::StartService();
 }
 
 void
 Server::StopService() {
-    VecServiceWrapper::StopService();
+    MegasearchServer::StopService();
 }
 
 }
