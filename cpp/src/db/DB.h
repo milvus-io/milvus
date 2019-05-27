@@ -38,8 +38,6 @@ public:
 
     virtual Status drop_all() = 0;
 
-    virtual Status count(const std::string& table_id, long& result) = 0;
-
     DB() = default;
     DB(const DB&) = delete;
     DB& operator=(const DB&) = delete;

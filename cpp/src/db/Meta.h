@@ -48,12 +48,12 @@ public:
 
     virtual Status FilesToIndex(TableFilesSchema&) = 0;
 
-    virtual Status cleanup() = 0;
-    virtual Status cleanup_ttl_files(uint16_t) = 0;
+    virtual Status CleanUp() = 0;
+    virtual Status CleanUpFilesWithTTL(uint16_t) = 0;
 
-    virtual Status drop_all() = 0;
+    virtual Status DropAll() = 0;
 
-    virtual Status count(const std::string& table_id, long& result) = 0;
+    virtual Status Count(const std::string& table_id, long& result) = 0;
 
     static DateT GetDate(const std::time_t& t, int day_delta = 0);
     static DateT GetDate();

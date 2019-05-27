@@ -152,12 +152,12 @@ TEST_F(DBTest, DB_TEST) {
 
         for (auto j=0; j<10; ++j) {
             ss.str("");
-            db_->count(group_name, count);
+            db_->size(count);
             prev_count = count;
 
             START_TIMER;
             stat = db_->search(group_name, k, qb, qxb, results);
-            ss << "Search " << j << " With Size " << (float)(count*group_dim*sizeof(float))/engine::meta::M << " M";
+            ss << "Search " << j << " With Size " << count/engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_STATS(stat);
