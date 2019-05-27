@@ -18,8 +18,8 @@ public:
     const size_t INDEX_TRIGGER_SIZE = 1024*1024*500;
     LocalMetaImpl(const DBMetaOptions& options_);
 
-    virtual Status add_group(TableSchema& group_info_) override;
-    virtual Status get_group(TableSchema& group_info_) override;
+    virtual Status CreateTable(TableSchema& table_schema) override;
+    virtual Status get_group(TableSchema& table_schema_) override;
     virtual Status has_group(const std::string& table_id_, bool& has_or_not_) override;
 
     virtual Status add_group_file(TableFileSchema& group_file_info) override;
@@ -59,9 +59,9 @@ public:
 
 private:
 
-    Status GetGroupMetaInfoByPath(const std::string& path, TableSchema& group_info);
+    Status GetGroupMetaInfoByPath(const std::string& path, TableSchema& table_schema);
     std::string GetGroupMetaPathByGroupPath(const std::string& group_path);
-    Status GetGroupMetaInfo(const std::string& table_id, TableSchema& group_info);
+    Status GetGroupMetaInfo(const std::string& table_id, TableSchema& table_schema);
     std::string GetNextGroupFileLocationByPartition(const std::string& table_id, DateT& date,
         TableFileSchema::FILE_TYPE file_type);
     std::string GetGroupDatePartitionPath(const std::string& table_id, DateT& date);
