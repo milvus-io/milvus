@@ -50,10 +50,10 @@ using TaskQueue = BlockingQueue<BaseTaskPtr>;
 using TaskQueuePtr = std::shared_ptr<TaskQueue>;
 using ThreadPtr = std::shared_ptr<std::thread>;
 
-class VecServiceScheduler {
+class MegasearchScheduler {
 public:
-    static VecServiceScheduler& GetInstance() {
-        static VecServiceScheduler scheduler;
+    static MegasearchScheduler& GetInstance() {
+        static MegasearchScheduler scheduler;
         return scheduler;
     }
 
@@ -62,9 +62,11 @@ public:
 
     ServerError ExecuteTask(const BaseTaskPtr& task_ptr);
 
+    static void ExecTask(BaseTaskPtr& task_ptr);
+
 protected:
-    VecServiceScheduler();
-    virtual ~VecServiceScheduler();
+    MegasearchScheduler();
+    virtual ~MegasearchScheduler();
 
     ServerError PutTaskToQueue(const BaseTaskPtr& task_ptr);
 

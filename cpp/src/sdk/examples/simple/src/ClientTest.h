@@ -5,16 +5,9 @@
  ******************************************************************************/
 #pragma once
 
-namespace zilliz {
-namespace vecwise {
-namespace client {
+#include <string>
 
 class ClientTest {
 public:
-    static void LoopTest();
+    void Test(const std::string& address, const std::string& port);
 };
-
-
-}
-}
-}
