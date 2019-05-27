@@ -19,7 +19,7 @@ class DBMetaImpl : public Meta {
 public:
     DBMetaImpl(const DBMetaOptions& options_);
 
-    virtual Status add_group(TableSchema& group_info) override;
+    virtual Status CreateTable(TableSchema& table_schema) override;
     virtual Status get_group(TableSchema& group_info_) override;
     virtual Status has_group(const std::string& table_id_, bool& has_or_not_) override;
 

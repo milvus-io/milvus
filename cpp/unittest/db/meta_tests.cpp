@@ -22,7 +22,7 @@ TEST_F(MetaTest, GROUP_TEST) {
 
     meta::TableSchema group;
     group.table_id = table_id;
-    auto status = impl_->add_group(group);
+    auto status = impl_->CreateTable(group);
     ASSERT_TRUE(status.ok());
 
     auto gid = group.id;
@@ -37,7 +37,7 @@ TEST_F(MetaTest, GROUP_TEST) {
     ASSERT_TRUE(!status.ok());
 
     group.table_id = table_id;
-    status = impl_->add_group(group);
+    status = impl_->CreateTable(group);
     ASSERT_TRUE(!status.ok());
 }
 
@@ -46,7 +46,7 @@ TEST_F(MetaTest, GROUP_FILE_TEST) {
 
     meta::TableSchema group;
     group.table_id = table_id;
-    auto status = impl_->add_group(group);
+    auto status = impl_->CreateTable(group);
 
     meta::TableFileSchema group_file;
     group_file.table_id = group.table_id;
@@ -104,7 +104,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
 
     meta::TableSchema group;
     group.table_id = table_id;
-    auto status = impl.add_group(group);
+    auto status = impl.CreateTable(group);
 
     meta::TableFilesSchema files;
     meta::TableFileSchema group_file;
@@ -150,7 +150,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
 
     meta::TableSchema group;
     group.table_id = table_id;
-    auto status = impl.add_group(group);
+    auto status = impl.CreateTable(group);
 
     meta::TableFilesSchema files;
     meta::TableFileSchema group_file;
@@ -188,7 +188,7 @@ TEST_F(MetaTest, GROUP_FILES_TEST) {
 
     meta::TableSchema group;
     group.table_id = table_id;
-    auto status = impl_->add_group(group);
+    auto status = impl_->CreateTable(group);
 
     int new_files_cnt = 4;
     int raw_files_cnt = 5;

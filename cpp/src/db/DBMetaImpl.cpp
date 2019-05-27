@@ -117,9 +117,9 @@ Status DBMetaImpl::delete_group_partitions(const std::string& table_id,
         return Status::OK();
     }
 
-    TableSchema group_info;
-    group_info.table_id = table_id;
-    auto status = get_group(group_info);
+    TableSchema table_schema;
+    table_schema.table_id = table_id;
+    auto status = get_group(table_schema);
     if (!status.ok()) {
         return status;
     }
@@ -148,24 +148,24 @@ Status DBMetaImpl::delete_group_partitions(const std::string& table_id,
     return Status::OK();
 }
 
-Status DBMetaImpl::add_group(TableSchema& group_info) {
-    if (group_info.table_id == "") {
-        NextGroupId(group_info.table_id);
+Status DBMetaImpl::CreateTable(TableSchema& table_schema) {
+    if (table_schema.table_id == "") {
+        NextGroupId(table_schema.table_id);
     }
-    group_info.files_cnt = 0;
-    group_info.id = -1;
-    group_info.created_on = utils::GetMicroSecTimeStamp();
+    table_schema.files_cnt = 0;
+    table_schema.id = -1;
+    table_schema.created_on = utils::GetMicroSecTimeStamp();
 
     {
         try {
-            auto id = ConnectorPtr->insert(group_info);
-            group_info.id = id;
+            auto id = ConnectorPtr->insert(table_schema);
+            table_schema.id = id;
         } catch (...) {
             return Status::DBTransactionError("Add Group Error");
         }
     }
 
-    auto group_path = GetGroupPath(group_info.table_id);
+    auto group_path = GetGroupPath(table_schema.table_id);
 
     if (!boost::filesystem::is_directory(group_path)) {
         auto ret = boost::filesystem::create_directories(group_path);
@@ -178,24 +178,24 @@ Status DBMetaImpl::add_group(TableSchema& group_info) {
     return Status::OK();
 }
 
-Status DBMetaImpl::get_group(TableSchema& group_info) {
-    return get_group_no_lock(group_info);
+Status DBMetaImpl::get_group(TableSchema& table_schema) {
+    return get_group_no_lock(table_schema);
 }
 
-Status DBMetaImpl::get_group_no_lock(TableSchema& group_info) {
+Status DBMetaImpl::get_group_no_lock(TableSchema& table_schema) {
     try {
         auto groups = ConnectorPtr->select(columns(&TableSchema::id,
                                                   &TableSchema::table_id,
                                                   &TableSchema::files_cnt,
                                                   &TableSchema::dimension),
-                                          where(c(&TableSchema::table_id) == group_info.table_id));
+                                          where(c(&TableSchema::table_id) == table_schema.table_id));
         assert(groups.size() <= 1);
         if (groups.size() == 1) {
-            group_info.id = std::get<0>(groups[0]);
-            group_info.files_cnt = std::get<2>(groups[0]);
-            group_info.dimension = std::get<3>(groups[0]);
+            table_schema.id = std::get<0>(groups[0]);
+            table_schema.files_cnt = std::get<2>(groups[0]);
+            table_schema.dimension = std::get<3>(groups[0]);
         } else {
-            return Status::NotFound("Group " + group_info.table_id + " not found");
+            return Status::NotFound("Group " + table_schema.table_id + " not found");
         }
     } catch (std::exception &e) {
         LOG(DEBUG) << e.what();
@@ -226,16 +226,16 @@ Status DBMetaImpl::add_group_file(TableFileSchema& group_file) {
     if (group_file.date == EmptyDate) {
         group_file.date = Meta::GetDate();
     }
-    TableSchema group_info;
-    group_info.table_id = group_file.table_id;
-    auto status = get_group(group_info);
+    TableSchema table_schema;
+    table_schema.table_id = group_file.table_id;
+    auto status = get_group(table_schema);
     if (!status.ok()) {
         return status;
     }
 
     NextFileId(group_file.file_id);
     group_file.file_type = TableFileSchema::NEW;
-    group_file.dimension = group_info.dimension;
+    group_file.dimension = table_schema.dimension;
     group_file.size = 0;
     group_file.created_on = utils::GetMicroSecTimeStamp();
     group_file.updated_time = group_file.created_on;
@@ -288,13 +288,13 @@ Status DBMetaImpl::files_to_index(TableFilesSchema& files) {
             GetGroupFilePath(group_file);
             auto groupItr = groups.find(group_file.table_id);
             if (groupItr == groups.end()) {
-                TableSchema group_info;
-                group_info.table_id = group_file.table_id;
-                auto status = get_group_no_lock(group_info);
+                TableSchema table_schema;
+                table_schema.table_id = group_file.table_id;
+                auto status = get_group_no_lock(table_schema);
                 if (!status.ok()) {
                     return status;
                 }
-                groups[group_file.table_id] = group_info;
+                groups[group_file.table_id] = table_schema;
             }
             group_file.dimension = groups[group_file.table_id].dimension;
             files.push_back(group_file);
@@ -327,9 +327,9 @@ Status DBMetaImpl::files_to_search(const std::string &table_id,
                                                      c(&TableFileSchema::file_type) == (int) TableFileSchema::TO_INDEX or
                                                      c(&TableFileSchema::file_type) == (int) TableFileSchema::INDEX)));
 
-        TableSchema group_info;
-        group_info.table_id = table_id;
-        auto status = get_group_no_lock(group_info);
+        TableSchema table_schema;
+        table_schema.table_id = table_id;
+        auto status = get_group_no_lock(table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -342,7 +342,7 @@ Status DBMetaImpl::files_to_search(const std::string &table_id,
             group_file.file_type = std::get<3>(file);
             group_file.size = std::get<4>(file);
             group_file.date = std::get<5>(file);
-            group_file.dimension = group_info.dimension;
+            group_file.dimension = table_schema.dimension;
             GetGroupFilePath(group_file);
             auto dateItr = files.find(group_file.date);
             if (dateItr == files.end()) {
@@ -372,9 +372,9 @@ Status DBMetaImpl::files_to_merge(const std::string& table_id,
                                           where(c(&TableFileSchema::file_type) == (int)TableFileSchema::RAW and
                                                 c(&TableFileSchema::table_id) == table_id));
 
-        TableSchema group_info;
-        group_info.table_id = table_id;
-        auto status = get_group_no_lock(group_info);
+        TableSchema table_schema;
+        table_schema.table_id = table_id;
+        auto status = get_group_no_lock(table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -387,7 +387,7 @@ Status DBMetaImpl::files_to_merge(const std::string& table_id,
             group_file.file_type = std::get<3>(file);
             group_file.size = std::get<4>(file);
             group_file.date = std::get<5>(file);
-            group_file.dimension = group_info.dimension;
+            group_file.dimension = table_schema.dimension;
             GetGroupFilePath(group_file);
             auto dateItr = files.find(group_file.date);
             if (dateItr == files.end()) {
@@ -670,9 +670,9 @@ Status DBMetaImpl::count(const std::string& table_id, long& result) {
                                                  c(&TableFileSchema::file_type) == (int)TableFileSchema::INDEX) and
                                                 c(&TableFileSchema::table_id) == table_id));
 
-        TableSchema group_info;
-        group_info.table_id = table_id;
-        auto status = get_group_no_lock(group_info);
+        TableSchema table_schema;
+        table_schema.table_id = table_id;
+        auto status = get_group_no_lock(table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -682,7 +682,7 @@ Status DBMetaImpl::count(const std::string& table_id, long& result) {
             result += std::get<0>(file);
         }
 
-        result /= group_info.dimension;
+        result /= table_schema.dimension;
 
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();

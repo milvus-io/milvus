@@ -35,13 +35,13 @@ DBImpl<EngineT>::DBImpl(const Options& options)
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::add_group(meta::TableSchema& group_info) {
-    return _pMeta->add_group(group_info);
+Status DBImpl<EngineT>::add_group(meta::TableSchema& table_schema) {
+    return _pMeta->CreateTable(table_schema);
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::get_group(meta::TableSchema& group_info) {
-    return _pMeta->get_group(group_info);
+Status DBImpl<EngineT>::get_group(meta::TableSchema& table_schema) {
+    return _pMeta->get_group(table_schema);
 }
 
 template<typename EngineT>

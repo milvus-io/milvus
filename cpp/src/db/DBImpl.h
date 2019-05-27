@@ -33,8 +33,8 @@ public:
 
     DBImpl(const Options& options);
 
-    virtual Status add_group(meta::TableSchema& group_info) override;
-    virtual Status get_group(meta::TableSchema& group_info) override;
+    virtual Status add_group(meta::TableSchema& table_schema) override;
+    virtual Status get_group(meta::TableSchema& table_schema) override;
     virtual Status delete_vectors(const std::string& table_id, const meta::DatesT& dates) override;
     virtual Status has_group(const std::string& table_id_, bool& has_or_not_) override;
 
