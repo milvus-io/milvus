@@ -259,7 +259,7 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
     return Status::OK();
 }
 
-Status DBMetaImpl::files_to_index(TableFilesSchema& files) {
+Status DBMetaImpl::FilesToIndex(TableFilesSchema& files) {
     files.clear();
 
     try {
@@ -272,28 +272,28 @@ Status DBMetaImpl::files_to_index(TableFilesSchema& files) {
                                           where(c(&TableFileSchema::file_type) == (int)TableFileSchema::TO_INDEX));
 
         std::map<std::string, TableSchema> groups;
+        TableFileSchema table_file;
 
         for (auto& file : selected) {
-            TableFileSchema group_file;
-            group_file.id = std::get<0>(file);
-            group_file.table_id = std::get<1>(file);
-            group_file.file_id = std::get<2>(file);
-            group_file.file_type = std::get<3>(file);
-            group_file.size = std::get<4>(file);
-            group_file.date = std::get<5>(file);
-            GetGroupFilePath(group_file);
-            auto groupItr = groups.find(group_file.table_id);
+            table_file.id = std::get<0>(file);
+            table_file.table_id = std::get<1>(file);
+            table_file.file_id = std::get<2>(file);
+            table_file.file_type = std::get<3>(file);
+            table_file.size = std::get<4>(file);
+            table_file.date = std::get<5>(file);
+            GetGroupFilePath(table_file);
+            auto groupItr = groups.find(table_file.table_id);
             if (groupItr == groups.end()) {
                 TableSchema table_schema;
-                table_schema.table_id = group_file.table_id;
+                table_schema.table_id = table_file.table_id;
                 auto status = DescribeTable(table_schema);
                 if (!status.ok()) {
                     return status;
                 }
-                groups[group_file.table_id] = table_schema;
+                groups[table_file.table_id] = table_schema;
             }
-            group_file.dimension = groups[group_file.table_id].dimension;
-            files.push_back(group_file);
+            table_file.dimension = groups[table_file.table_id].dimension;
+            files.push_back(table_file);
         }
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();

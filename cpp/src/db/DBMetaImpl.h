@@ -40,7 +40,7 @@ public:
     virtual Status FilesToMerge(const std::string& table_id,
             DatePartionedTableFilesSchema& files) override;
 
-    virtual Status files_to_index(TableFilesSchema&) override;
+    virtual Status FilesToIndex(TableFilesSchema&) override;
 
     virtual Status Archive() override;
 

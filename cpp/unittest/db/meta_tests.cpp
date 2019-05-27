@@ -224,7 +224,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
 
     meta::TableFilesSchema files;
 
-    status = impl_->files_to_index(files);
+    status = impl_->FilesToIndex(files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
@@ -233,7 +233,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date].size(), raw_files_cnt);
 
-    status = impl_->files_to_index(files);
+    status = impl_->FilesToIndex(files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
