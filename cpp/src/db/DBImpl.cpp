@@ -259,17 +259,17 @@ void DBImpl<EngineT>::background_call() {
 template<typename EngineT>
 Status DBImpl<EngineT>::merge_files(const std::string& table_id, const meta::DateT& date,
         const meta::TableFilesSchema& files) {
-    meta::TableFileSchema group_file;
-    group_file.table_id = table_id;
-    group_file.date = date;
-    Status status = _pMeta->add_group_file(group_file);
+    meta::TableFileSchema table_file;
+    table_file.table_id = table_id;
+    table_file.date = date;
+    Status status = _pMeta->CreateTableFile(table_file);
 
     if (!status.ok()) {
         LOG(INFO) << status.ToString() << std::endl;
         return status;
     }
 
-    EngineT index(group_file.dimension, group_file.location);
+    EngineT index(table_file.dimension, table_file.location);
 
     meta::TableFilesSchema updated;
     long  index_size = 0;
@@ -288,14 +288,14 @@ Status DBImpl<EngineT>::merge_files(const std::string& table_id, const meta::Dat
     index.Serialize();
 
     if (index_size >= _options.index_trigger_size) {
-        group_file.file_type = meta::TableFileSchema::TO_INDEX;
+        table_file.file_type = meta::TableFileSchema::TO_INDEX;
     } else {
-        group_file.file_type = meta::TableFileSchema::RAW;
+        table_file.file_type = meta::TableFileSchema::RAW;
     }
-    group_file.size = index_size;
-    updated.push_back(group_file);
+    table_file.size = index_size;
+    updated.push_back(table_file);
     status = _pMeta->update_files(updated);
-    LOG(DEBUG) << "New merged file " << group_file.file_id <<
+    LOG(DEBUG) << "New merged file " << table_file.file_id <<
         " of size=" << index.PhysicalSize()/(1024*1024) << " M";
 
     index.Cache();
@@ -337,10 +337,10 @@ Status DBImpl<EngineT>::background_merge_files(const std::string& table_id) {
 
 template<typename EngineT>
 Status DBImpl<EngineT>::build_index(const meta::TableFileSchema& file) {
-    meta::TableFileSchema group_file;
-    group_file.table_id = file.table_id;
-    group_file.date = file.date;
-    Status status = _pMeta->add_group_file(group_file);
+    meta::TableFileSchema table_file;
+    table_file.table_id = file.table_id;
+    table_file.date = file.date;
+    Status status = _pMeta->CreateTableFile(table_file);
     if (!status.ok()) {
         return status;
     }
@@ -348,18 +348,18 @@ Status DBImpl<EngineT>::build_index(const meta::TableFileSchema& file) {
     EngineT to_index(file.dimension, file.location);
 
     to_index.Load();
-    auto index = to_index.BuildIndex(group_file.location);
+    auto index = to_index.BuildIndex(table_file.location);
 
-    group_file.file_type = meta::TableFileSchema::INDEX;
-    group_file.size = index->Size();
+    table_file.file_type = meta::TableFileSchema::INDEX;
+    table_file.size = index->Size();
 
     auto to_remove = file;
     to_remove.file_type = meta::TableFileSchema::TO_DELETE;
 
-    meta::TableFilesSchema update_files = {to_remove, group_file};
+    meta::TableFilesSchema update_files = {to_remove, table_file};
     _pMeta->update_files(update_files);
 
-    LOG(DEBUG) << "New index file " << group_file.file_id << " of size "
+    LOG(DEBUG) << "New index file " << table_file.file_id << " of size "
         << index->PhysicalSize()/(1024*1024) << " M"
         << " from file " << to_remove.file_id;
 

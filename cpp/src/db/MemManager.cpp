@@ -85,14 +85,14 @@ typename MemManager<EngineT>::MemVectorsPtr MemManager<EngineT>::get_mem_by_grou
         return memIt->second;
     }
 
-    meta::TableFileSchema group_file;
-    group_file.table_id = table_id;
-    auto status = _pMeta->add_group_file(group_file);
+    meta::TableFileSchema table_file;
+    table_file.table_id = table_id;
+    auto status = _pMeta->CreateTableFile(table_file);
     if (!status.ok()) {
         return nullptr;
     }
 
-    _memMap[table_id] = MemVectorsPtr(new MemVectors<EngineT>(_pMeta, group_file, options_));
+    _memMap[table_id] = MemVectorsPtr(new MemVectors<EngineT>(_pMeta, table_file, options_));
     return _memMap[table_id];
 }
 

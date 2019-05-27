@@ -41,53 +41,53 @@ TEST_F(MetaTest, GROUP_TEST) {
     ASSERT_TRUE(!status.ok());
 }
 
-TEST_F(MetaTest, GROUP_FILE_TEST) {
+TEST_F(MetaTest, table_file_TEST) {
     auto table_id = "meta_test_group";
 
     meta::TableSchema group;
     group.table_id = table_id;
     auto status = impl_->CreateTable(group);
 
-    meta::TableFileSchema group_file;
-    group_file.table_id = group.table_id;
-    status = impl_->add_group_file(group_file);
+    meta::TableFileSchema table_file;
+    table_file.table_id = group.table_id;
+    status = impl_->CreateTableFile(table_file);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(group_file.file_type, meta::TableFileSchema::NEW);
+    ASSERT_EQ(table_file.file_type, meta::TableFileSchema::NEW);
 
-    auto file_id = group_file.file_id;
+    auto file_id = table_file.file_id;
 
     auto new_file_type = meta::TableFileSchema::INDEX;
-    group_file.file_type = new_file_type;
+    table_file.file_type = new_file_type;
 
-    status = impl_->update_group_file(group_file);
+    status = impl_->update_group_file(table_file);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(group_file.file_type, new_file_type);
+    ASSERT_EQ(table_file.file_type, new_file_type);
 
     meta::DatesT dates;
     dates.push_back(meta::Meta::GetDate());
-    status = impl_->delete_group_partitions(group_file.table_id, dates);
+    status = impl_->delete_group_partitions(table_file.table_id, dates);
     ASSERT_FALSE(status.ok());
 
     dates.clear();
     for (auto i=2; i < 10; ++i) {
         dates.push_back(meta::Meta::GetDateWithDelta(-1*i));
     }
-    status = impl_->delete_group_partitions(group_file.table_id, dates);
+    status = impl_->delete_group_partitions(table_file.table_id, dates);
     ASSERT_TRUE(status.ok());
 
-    group_file.date = meta::Meta::GetDateWithDelta(-2);
-    status = impl_->update_group_file(group_file);
+    table_file.date = meta::Meta::GetDateWithDelta(-2);
+    status = impl_->update_group_file(table_file);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(group_file.date, meta::Meta::GetDateWithDelta(-2));
-    ASSERT_FALSE(group_file.file_type == meta::TableFileSchema::TO_DELETE);
+    ASSERT_EQ(table_file.date, meta::Meta::GetDateWithDelta(-2));
+    ASSERT_FALSE(table_file.file_type == meta::TableFileSchema::TO_DELETE);
 
     dates.clear();
-    dates.push_back(group_file.date);
-    status = impl_->delete_group_partitions(group_file.table_id, dates);
+    dates.push_back(table_file.date);
+    status = impl_->delete_group_partitions(table_file.table_id, dates);
     ASSERT_TRUE(status.ok());
-    status = impl_->get_group_file(group_file.table_id, group_file.file_id, group_file);
+    status = impl_->get_group_file(table_file.table_id, table_file.file_id, table_file);
     ASSERT_TRUE(status.ok());
-    ASSERT_TRUE(group_file.file_type == meta::TableFileSchema::TO_DELETE);
+    ASSERT_TRUE(table_file.file_type == meta::TableFileSchema::TO_DELETE);
 }
 
 TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
@@ -107,19 +107,19 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     auto status = impl.CreateTable(group);
 
     meta::TableFilesSchema files;
-    meta::TableFileSchema group_file;
-    group_file.table_id = group.table_id;
+    meta::TableFileSchema table_file;
+    table_file.table_id = group.table_id;
 
     auto cnt = 100;
     long ts = utils::GetMicroSecTimeStamp();
     std::vector<int> days;
     for (auto i=0; i<cnt; ++i) {
-        status = impl.add_group_file(group_file);
-        group_file.file_type = meta::TableFileSchema::NEW;
+        status = impl.CreateTableFile(table_file);
+        table_file.file_type = meta::TableFileSchema::NEW;
         int day = rand() % (days_num*2);
-        group_file.created_on = ts - day*meta::D_SEC*meta::US_PS - 10000;
-        status = impl.update_group_file(group_file);
-        files.push_back(group_file);
+        table_file.created_on = ts - day*meta::D_SEC*meta::US_PS - 10000;
+        status = impl.update_group_file(table_file);
+        files.push_back(table_file);
         days.push_back(day);
     }
 
@@ -153,17 +153,17 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     auto status = impl.CreateTable(group);
 
     meta::TableFilesSchema files;
-    meta::TableFileSchema group_file;
-    group_file.table_id = group.table_id;
+    meta::TableFileSchema table_file;
+    table_file.table_id = group.table_id;
 
     auto cnt = 10;
     auto each_size = 2UL;
     for (auto i=0; i<cnt; ++i) {
-        status = impl.add_group_file(group_file);
-        group_file.file_type = meta::TableFileSchema::NEW;
-        group_file.size = each_size * meta::G;
-        status = impl.update_group_file(group_file);
-        files.push_back(group_file);
+        status = impl.CreateTableFile(table_file);
+        table_file.file_type = meta::TableFileSchema::NEW;
+        table_file.size = each_size * meta::G;
+        status = impl.update_group_file(table_file);
+        files.push_back(table_file);
     }
 
     impl.archive_files();
@@ -183,7 +183,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     impl.drop_all();
 }
 
-TEST_F(MetaTest, GROUP_FILES_TEST) {
+TEST_F(MetaTest, TABLE_FILES_TEST) {
     auto table_id = "meta_test_group";
 
     meta::TableSchema group;
@@ -195,31 +195,31 @@ TEST_F(MetaTest, GROUP_FILES_TEST) {
     int to_index_files_cnt = 6;
     int index_files_cnt = 7;
 
-    meta::TableFileSchema group_file;
-    group_file.table_id = group.table_id;
+    meta::TableFileSchema table_file;
+    table_file.table_id = group.table_id;
 
     for (auto i=0; i<new_files_cnt; ++i) {
-        status = impl_->add_group_file(group_file);
-        group_file.file_type = meta::TableFileSchema::NEW;
-        status = impl_->update_group_file(group_file);
+        status = impl_->CreateTableFile(table_file);
+        table_file.file_type = meta::TableFileSchema::NEW;
+        status = impl_->update_group_file(table_file);
     }
 
     for (auto i=0; i<raw_files_cnt; ++i) {
-        status = impl_->add_group_file(group_file);
-        group_file.file_type = meta::TableFileSchema::RAW;
-        status = impl_->update_group_file(group_file);
+        status = impl_->CreateTableFile(table_file);
+        table_file.file_type = meta::TableFileSchema::RAW;
+        status = impl_->update_group_file(table_file);
     }
 
     for (auto i=0; i<to_index_files_cnt; ++i) {
-        status = impl_->add_group_file(group_file);
-        group_file.file_type = meta::TableFileSchema::TO_INDEX;
-        status = impl_->update_group_file(group_file);
+        status = impl_->CreateTableFile(table_file);
+        table_file.file_type = meta::TableFileSchema::TO_INDEX;
+        status = impl_->update_group_file(table_file);
     }
 
     for (auto i=0; i<index_files_cnt; ++i) {
-        status = impl_->add_group_file(group_file);
-        group_file.file_type = meta::TableFileSchema::INDEX;
-        status = impl_->update_group_file(group_file);
+        status = impl_->CreateTableFile(table_file);
+        table_file.file_type = meta::TableFileSchema::INDEX;
+        status = impl_->update_group_file(table_file);
     }
 
     meta::TableFilesSchema files;
@@ -231,15 +231,15 @@ TEST_F(MetaTest, GROUP_FILES_TEST) {
     meta::DatePartionedTableFilesSchema dated_files;
     status = impl_->files_to_merge(group.table_id, dated_files);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(dated_files[group_file.date].size(), raw_files_cnt);
+    ASSERT_EQ(dated_files[table_file.date].size(), raw_files_cnt);
 
     status = impl_->files_to_index(files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
-    meta::DatesT dates = {group_file.date};
+    meta::DatesT dates = {table_file.date};
     status = impl_->files_to_search(table_id, dates, dated_files);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(dated_files[group_file.date].size(),
+    ASSERT_EQ(dated_files[table_file.date].size(),
             to_index_files_cnt+raw_files_cnt+index_files_cnt);
 }
