@@ -5,15 +5,15 @@
  ******************************************************************************/
 #pragma once
 
+#include "DB.h"
+#include "MemManager.h"
+#include "Types.h"
+#include "Traits.h"
+
 #include <mutex>
 #include <condition_variable>
 #include <memory>
 #include <atomic>
-#include "DB.h"
-#include "MemManager.h"
-#include "Types.h"
-#include "FaissExecutionEngine.h"
-#include "Traits.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -95,4 +95,4 @@ private:
 } // namespace vecwise
 } // namespace zilliz
 
-#include "DBImpl.cpp"
+#include "DBImpl.inl"

@@ -3,18 +3,16 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#ifndef MEMMANGE_CPP__
-#define MEMMANGE_CPP__
-
-#include <iostream>
-#include <sstream>
-#include <thread>
-#include <easylogging++.h>
+#pragma once
 
 #include "MemManager.h"
 #include "Meta.h"
 #include "MetaConsts.h"
 
+#include <iostream>
+#include <sstream>
+#include <thread>
+#include <easylogging++.h>
 
 namespace zilliz {
 namespace vecwise {
@@ -32,7 +30,7 @@ MemVectors<EngineT>::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
 
 template<typename EngineT>
 void MemVectors<EngineT>::add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
-    _pIdGenerator->getNextIDNumbers(n_, vector_ids_);
+    _pIdGenerator->GetNextIDNumbers(n_, vector_ids_);
     pEE_->AddWithIds(n_, vectors_, vector_ids_.data());
 }
 
@@ -148,5 +146,3 @@ Status MemManager<EngineT>::serialize(std::vector<std::string>& table_ids) {
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#endif
