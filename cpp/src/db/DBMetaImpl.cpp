@@ -119,7 +119,7 @@ Status DBMetaImpl::delete_group_partitions(const std::string& table_id,
 
     TableSchema table_schema;
     table_schema.table_id = table_id;
-    auto status = get_group(table_schema);
+    auto status = DescribeTable(table_schema);
     if (!status.ok()) {
         return status;
     }
@@ -178,11 +178,7 @@ Status DBMetaImpl::CreateTable(TableSchema& table_schema) {
     return Status::OK();
 }
 
-Status DBMetaImpl::get_group(TableSchema& table_schema) {
-    return get_group_no_lock(table_schema);
-}
-
-Status DBMetaImpl::get_group_no_lock(TableSchema& table_schema) {
+Status DBMetaImpl::DescribeTable(TableSchema& table_schema) {
     try {
         auto groups = ConnectorPtr->select(columns(&TableSchema::id,
                                                   &TableSchema::table_id,
@@ -228,7 +224,7 @@ Status DBMetaImpl::add_group_file(TableFileSchema& group_file) {
     }
     TableSchema table_schema;
     table_schema.table_id = group_file.table_id;
-    auto status = get_group(table_schema);
+    auto status = DescribeTable(table_schema);
     if (!status.ok()) {
         return status;
     }
@@ -290,7 +286,7 @@ Status DBMetaImpl::files_to_index(TableFilesSchema& files) {
             if (groupItr == groups.end()) {
                 TableSchema table_schema;
                 table_schema.table_id = group_file.table_id;
-                auto status = get_group_no_lock(table_schema);
+                auto status = DescribeTable(table_schema);
                 if (!status.ok()) {
                     return status;
                 }
@@ -329,7 +325,7 @@ Status DBMetaImpl::files_to_search(const std::string &table_id,
 
         TableSchema table_schema;
         table_schema.table_id = table_id;
-        auto status = get_group_no_lock(table_schema);
+        auto status = DescribeTable(table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -374,7 +370,7 @@ Status DBMetaImpl::files_to_merge(const std::string& table_id,
 
         TableSchema table_schema;
         table_schema.table_id = table_id;
-        auto status = get_group_no_lock(table_schema);
+        auto status = DescribeTable(table_schema);
         if (!status.ok()) {
             return status;
         }
@@ -672,7 +668,7 @@ Status DBMetaImpl::count(const std::string& table_id, long& result) {
 
         TableSchema table_schema;
         table_schema.table_id = table_id;
-        auto status = get_group_no_lock(table_schema);
+        auto status = DescribeTable(table_schema);
         if (!status.ok()) {
             return status;
         }

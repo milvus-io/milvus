@@ -41,7 +41,7 @@ Status DBImpl<EngineT>::add_group(meta::TableSchema& table_schema) {
 
 template<typename EngineT>
 Status DBImpl<EngineT>::get_group(meta::TableSchema& table_schema) {
-    return _pMeta->get_group(table_schema);
+    return _pMeta->DescribeTable(table_schema);
 }
 
 template<typename EngineT>

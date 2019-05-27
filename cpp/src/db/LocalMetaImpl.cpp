@@ -123,11 +123,11 @@ Status LocalMetaImpl::CreateTable(TableSchema& table_schema) {
     return Status::OK();
 }
 
-Status LocalMetaImpl::get_group(TableSchema& table_schema) {
-    bool group_exist;
-    has_group(table_schema.table_id, group_exist);
-    if (!group_exist) {
-        return Status::NotFound("Group " + table_schema.table_id + " Not Found");
+Status LocalMetaImpl::DescribeTable(TableSchema& table_schema) {
+    bool exist;
+    has_group(table_schema.table_id, exist);
+    if (!exist) {
+        return Status::NotFound("Table " + table_schema.table_id + " Not Found");
     }
 
     return GetGroupMetaInfo(table_schema.table_id, table_schema);

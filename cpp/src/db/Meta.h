@@ -23,7 +23,7 @@ public:
     using Ptr = std::shared_ptr<Meta>;
 
     virtual Status CreateTable(TableSchema& table_schema) = 0;
-    virtual Status get_group(TableSchema& table_schema) = 0;
+    virtual Status DescribeTable(TableSchema& table_schema) = 0;
     virtual Status has_group(const std::string& table_id_, bool& has_or_not_) = 0;
 
     virtual Status add_group_file(TableFileSchema& group_file_info) = 0;
