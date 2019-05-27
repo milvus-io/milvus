@@ -70,7 +70,7 @@ Status DBImpl<EngineT>::search(const std::string& table_id, size_t k, size_t nq,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
 
     meta::DatePartionedTableFilesSchema files;
-    auto status = _pMeta->files_to_search(table_id, dates, files);
+    auto status = _pMeta->FilesToSearch(table_id, dates, files);
     if (!status.ok()) { return status; }
 
     LOG(DEBUG) << "Search DateT Size=" << files.size();

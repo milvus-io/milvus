@@ -35,7 +35,7 @@ public:
 
     virtual Status UpdateTableFiles(TableFilesSchema& files) = 0;
 
-    virtual Status files_to_search(const std::string& table_id,
+    virtual Status FilesToSearch(const std::string& table_id,
                                    const DatesT& partition,
                                    DatePartionedTableFilesSchema& files) = 0;
 

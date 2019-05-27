@@ -303,7 +303,7 @@ Status DBMetaImpl::files_to_index(TableFilesSchema& files) {
     return Status::OK();
 }
 
-Status DBMetaImpl::files_to_search(const std::string &table_id,
+Status DBMetaImpl::FilesToSearch(const std::string &table_id,
                                    const DatesT& partition,
                                    DatePartionedTableFilesSchema &files) {
     files.clear();
@@ -330,21 +330,22 @@ Status DBMetaImpl::files_to_search(const std::string &table_id,
             return status;
         }
 
+        TableFileSchema table_file;
+
         for (auto& file : selected) {
-            TableFileSchema group_file;
-            group_file.id = std::get<0>(file);
-            group_file.table_id = std::get<1>(file);
-            group_file.file_id = std::get<2>(file);
-            group_file.file_type = std::get<3>(file);
-            group_file.size = std::get<4>(file);
-            group_file.date = std::get<5>(file);
-            group_file.dimension = table_schema.dimension;
-            GetGroupFilePath(group_file);
-            auto dateItr = files.find(group_file.date);
+            table_file.id = std::get<0>(file);
+            table_file.table_id = std::get<1>(file);
+            table_file.file_id = std::get<2>(file);
+            table_file.file_type = std::get<3>(file);
+            table_file.size = std::get<4>(file);
+            table_file.date = std::get<5>(file);
+            table_file.dimension = table_schema.dimension;
+            GetGroupFilePath(table_file);
+            auto dateItr = files.find(table_file.date);
             if (dateItr == files.end()) {
-                files[group_file.date] = TableFilesSchema();
+                files[table_file.date] = TableFilesSchema();
             }
-            files[group_file.date].push_back(group_file);
+            files[table_file.date].push_back(table_file);
         }
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
