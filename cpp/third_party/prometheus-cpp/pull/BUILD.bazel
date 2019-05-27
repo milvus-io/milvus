@@ -1,0 +1,20 @@
+cc_library(
+    name = "pull",
+    srcs = glob([
+        "src/**/*.cc",
+        "src/**/*.h",
+    ]),
+    hdrs = glob(
+        ["include/**/*.h"],
+    ),
+    copts = [
+        "-DHAVE_ZLIB",
+    ],
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core",
+        "@civetweb",
+        "@net_zlib_zlib//:z",
+    ],
+)

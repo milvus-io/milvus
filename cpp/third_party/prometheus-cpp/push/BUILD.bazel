@@ -1,0 +1,21 @@
+cc_library(
+    name = "push",
+    srcs = glob([
+        "src/**/*.cc",
+        "src/**/*.h",
+    ]),
+    hdrs = glob(
+        ["include/**/*.h"],
+    ),
+    linkopts = select({
+        "//:windows": [],
+        "//:windows_msvc": [],
+        "//conditions:default": ["-lpthread"],
+    }),
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core",
+        "@com_github_curl//:curl",
+    ],
+)

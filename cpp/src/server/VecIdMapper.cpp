@@ -39,17 +39,6 @@ SimpleIdMapper::~SimpleIdMapper() {
 
 }
 
-ServerError SimpleIdMapper::AddGroup(const std::string& group) {
-    if(id_groups_.count(group) == 0) {
-        id_groups_.insert(std::make_pair(group, ID_MAPPING()));
-    }
-}
-
-//not thread-safe
-bool SimpleIdMapper::IsGroupExist(const std::string& group) const {
-    return id_groups_.count(group) > 0;
-}
-
 //not thread-safe
 ServerError SimpleIdMapper::Put(const std::string& nid, const std::string& sid, const std::string& group) {
     ID_MAPPING& mapping = id_groups_[group];

@@ -13,14 +13,17 @@
 #include <cstring>
 #include <easylogging++.h>
 #include <cache/CpuCacheMgr.h>
+#include "../utils/Log.h"
 
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
+#include "metrics/Metrics.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
+
 
 template<typename EngineT>
 DBImpl<EngineT>::DBImpl(const Options& options)
@@ -36,41 +39,92 @@ DBImpl<EngineT>::DBImpl(const Options& options)
 
 template<typename EngineT>
 Status DBImpl<EngineT>::add_group(meta::GroupSchema& group_info) {
-    return _pMeta->add_group(group_info);
+    Status result = _pMeta->add_group(group_info);
+    if(result.ok()){
+//        SERVER_LOG_INFO << "add_group request successed";
+//        server::Metrics::GetInstance().add_group_success_total().Increment();
+    } else{
+//        SERVER_LOG_INFO << "add_group request failed";
+//        server::Metrics::GetInstance().add_group_fail_total().Increment();
+    }
+    return result;
 }
 
 template<typename EngineT>
 Status DBImpl<EngineT>::get_group(meta::GroupSchema& group_info) {
-    return _pMeta->get_group(group_info);
+    Status result = _pMeta->get_group(group_info);
+    if(result.ok()){
+//        SERVER_LOG_INFO << "get_group request successed";
+//        server::Metrics::GetInstance().get_group_success_total().Increment();
+    } else{
+//        SERVER_LOG_INFO << "get_group request failed";
+//        server::Metrics::GetInstance().get_group_fail_total().Increment();
+    }
+    return result;
 }
 
 template<typename EngineT>
 Status DBImpl<EngineT>::has_group(const std::string& group_id_, bool& has_or_not_) {
-    return _pMeta->has_group(group_id_, has_or_not_);
+    Status result = _pMeta->has_group(group_id_, has_or_not_);
+    if(result.ok()){
+//        SERVER_LOG_INFO << "has_group request successed";
+//        server::Metrics::GetInstance().has_group_success_total().Increment();
+    } else{
+//        SERVER_LOG_INFO << "has_group request failed";
+//        server::Metrics::GetInstance().has_group_fail_total().Increment();
+    }
+    return result;
 }
 
 template<typename EngineT>
 Status DBImpl<EngineT>::get_group_files(const std::string& group_id,
                                const int date_delta,
                                meta::GroupFilesSchema& group_files_info) {
-    return _pMeta->get_group_files(group_id, date_delta, group_files_info);
+    Status result = _pMeta->get_group_files(group_id, date_delta, group_files_info);
+    if(result.ok()){
+//        SERVER_LOG_INFO << "get_group_files request successed";
+//        server::Metrics::GetInstance().get_group_files_success_total().Increment();
+    } else{
+//        SERVER_LOG_INFO << "get_group_files request failed";
+//        server::Metrics::GetInstance().get_group_files_fail_total().Increment();
+    }
+    return result;
 
 }
 
 template<typename EngineT>
 Status DBImpl<EngineT>::add_vectors(const std::string& group_id_,
         size_t n, const float* vectors, IDNumbers& vector_ids_) {
+
+    auto start_time = METRICS_NOW_TIME;
     Status status = _pMemMgr->add_vectors(group_id_, n, vectors, vector_ids_);
+    auto end_time = METRICS_NOW_TIME;
+
+//    std::chrono::microseconds time_span = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+//    double average_time = double(time_span.count()) / n;
+
+    double total_time = METRICS_MICROSECONDS(start_time,end_time);
+    double avg_time = total_time / n;
+    for (int i = 0; i < n; ++i) {
+        METRICS_INSTANCE.AddVectorsDurationHistogramOberve(avg_time);
+    }
+
+//    server::Metrics::GetInstance().add_vector_duration_seconds_quantiles().Observe((average_time));
+
     if (!status.ok()) {
+        METRICS_INSTANCE.AddVectorsFailTotalIncrement(n);
         return status;
     }
+    METRICS_INSTANCE.AddVectorsSuccessTotalIncrement(n);
 }
 
 template<typename EngineT>
 Status DBImpl<EngineT>::search(const std::string &group_id, size_t k, size_t nq,
                       const float *vectors, QueryResults &results) {
+
     meta::DatesT dates = {meta::Meta::GetDate()};
     return search(group_id, k, nq, vectors, dates, results);
+
 }
 
 template<typename EngineT>
@@ -132,11 +186,33 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
                 index.Load();
                 auto file_size = index.PhysicalSize()/(1024*1024);
                 search_set_size += file_size;
+
                 LOG(DEBUG) << "Search file_type " << file.file_type << " Of Size: "
                     << file_size << " M";
 
                 int inner_k = index.Count() < k ? index.Count() : k;
+                auto start_time = METRICS_NOW_TIME;
                 index.Search(nq, vectors, inner_k, output_distence, output_ids);
+                auto end_time = METRICS_NOW_TIME;
+                auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+                if(file.file_type == meta::GroupFileSchema::RAW) {
+                    METRICS_INSTANCE.SearchRawDataDurationSecondsHistogramObserve(total_time);
+                    METRICS_INSTANCE.RawFileSizeHistogramObserve(file_size*1024*1024);
+                    METRICS_INSTANCE.RawFileSizeTotalIncrement(file_size*1024*1024);
+                    METRICS_INSTANCE.RawFileSizeGaugeSet(file_size*1024*1024);
+
+                } else if(file.file_type == meta::GroupFileSchema::TO_INDEX) {
+                    METRICS_INSTANCE.SearchRawDataDurationSecondsHistogramObserve(total_time);
+                    METRICS_INSTANCE.RawFileSizeHistogramObserve(file_size*1024*1024);
+                    METRICS_INSTANCE.RawFileSizeTotalIncrement(file_size*1024*1024);
+                    METRICS_INSTANCE.RawFileSizeGaugeSet(file_size*1024*1024);
+
+                } else {
+                    METRICS_INSTANCE.SearchIndexDataDurationSecondsHistogramObserve(total_time);
+                    METRICS_INSTANCE.IndexFileSizeHistogramObserve(file_size*1024*1024);
+                    METRICS_INSTANCE.IndexFileSizeTotalIncrement(file_size*1024*1024);
+                    METRICS_INSTANCE.IndexFileSizeGaugeSet(file_size*1024*1024);
+                }
                 cluster(output_ids, output_distence, inner_k); // cluster to each query
                 memset(output_distence, 0, k * nq * sizeof(float));
                 memset(output_ids, 0, k * nq * sizeof(long));
@@ -269,8 +345,14 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
     long  index_size = 0;
 
     for (auto& file : files) {
+
+        auto start_time = METRICS_NOW_TIME;
         index.Merge(file.location);
         auto file_schema = file;
+        auto end_time = METRICS_NOW_TIME;
+        auto total_time = METRICS_MICROSECONDS(start_time,end_time);
+        METRICS_INSTANCE.MemTableMergeDurationSecondsHistogramObserve(total_time);
+
         file_schema.file_type = meta::GroupFileSchema::TO_DELETE;
         updated.push_back(file_schema);
         LOG(DEBUG) << "Merging file " << file_schema.file_id;
@@ -278,6 +360,7 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
 
         if (index_size >= _options.index_trigger_size) break;
     }
+
 
     index.Serialize();
 
@@ -340,7 +423,11 @@ Status DBImpl<EngineT>::build_index(const meta::GroupFileSchema& file) {
     EngineT to_index(file.dimension, file.location);
 
     to_index.Load();
+    auto start_time = METRICS_NOW_TIME;
     auto index = to_index.BuildIndex(group_file.location);
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    METRICS_INSTANCE.BuildIndexDurationSecondsHistogramObserve(total_time);
 
     group_file.file_type = meta::GroupFileSchema::INDEX;
     group_file.rows = index->Size();
