@@ -37,7 +37,7 @@ public:
                                   const DatesT& partition,
                                   DatePartionedTableFilesSchema& files) override;
 
-    virtual Status files_to_merge(const std::string& table_id,
+    virtual Status FilesToMerge(const std::string& table_id,
             DatePartionedTableFilesSchema& files) override;
 
     virtual Status files_to_index(TableFilesSchema&) override;
