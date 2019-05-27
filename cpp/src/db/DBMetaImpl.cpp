@@ -431,13 +431,6 @@ Status DBMetaImpl::GetTableFile(TableFileSchema& file_schema) {
     return Status::OK();
 }
 
-Status DBMetaImpl::get_group_files(const std::string& table_id_,
-                               const int date_delta_,
-                               TableFilesSchema& group_files_info_) {
-    // PXU TODO
-    return Status::OK();
-}
-
 // PXU TODO: Support Swap
 Status DBMetaImpl::archive_files() {
     auto& criterias = _options.archive_conf.GetCriterias();

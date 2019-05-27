@@ -33,10 +33,6 @@ public:
     virtual Status GetTableFile(TableFileSchema& file_schema) = 0;
     virtual Status update_group_file(TableFileSchema& group_file_) = 0;
 
-    virtual Status get_group_files(const std::string& table_id_,
-                                   const int date_delta_,
-                                   TableFilesSchema& group_files_info_) = 0;
-
     virtual Status update_files(TableFilesSchema& files) = 0;
 
     virtual Status files_to_search(const std::string& table_id,

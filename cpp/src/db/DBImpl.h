@@ -37,10 +37,6 @@ public:
     virtual Status get_group(meta::TableSchema& table_schema) override;
     virtual Status has_group(const std::string& table_id_, bool& has_or_not_) override;
 
-    virtual Status get_group_files(const std::string& table_id_,
-                                   const int date_delta_,
-                                   meta::TableFilesSchema& group_files_info_) override;
-
     virtual Status add_vectors(const std::string& table_id_,
             size_t n, const float* vectors, IDNumbers& vector_ids_) override;
 
