@@ -27,13 +27,13 @@ TEST_F(MetaTest, GROUP_TEST) {
 
     auto gid = group.id;
     group.id = -1;
-    status = impl_->get_group(group);
+    status = impl_->DescribeTable(group);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(group.id, gid);
     ASSERT_EQ(group.table_id, table_id);
 
     group.table_id = "not_found";
-    status = impl_->get_group(group);
+    status = impl_->DescribeTable(group);
     ASSERT_TRUE(!status.ok());
 
     group.table_id = table_id;

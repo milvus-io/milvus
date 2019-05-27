@@ -19,7 +19,7 @@ public:
     LocalMetaImpl(const DBMetaOptions& options_);
 
     virtual Status CreateTable(TableSchema& table_schema) override;
-    virtual Status get_group(TableSchema& table_schema_) override;
+    virtual Status DescribeTable(TableSchema& table_schema_) override;
     virtual Status has_group(const std::string& table_id_, bool& has_or_not_) override;
 
     virtual Status add_group_file(TableFileSchema& group_file_info) override;

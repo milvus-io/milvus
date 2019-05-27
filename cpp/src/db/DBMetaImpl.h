@@ -20,7 +20,7 @@ public:
     DBMetaImpl(const DBMetaOptions& options_);
 
     virtual Status CreateTable(TableSchema& table_schema) override;
-    virtual Status get_group(TableSchema& group_info_) override;
+    virtual Status DescribeTable(TableSchema& group_info_) override;
     virtual Status has_group(const std::string& table_id_, bool& has_or_not_) override;
 
     virtual Status add_group_file(TableFileSchema& group_file_info) override;
@@ -68,7 +68,6 @@ private:
     Status NextFileId(std::string& file_id);
     Status NextGroupId(std::string& table_id);
     Status discard_files_of_size(long to_discard_size);
-    Status get_group_no_lock(TableSchema& group_info);
     std::string GetGroupPath(const std::string& table_id);
     std::string GetGroupDatePartitionPath(const std::string& table_id, DateT& date);
     void GetGroupFilePath(TableFileSchema& group_file);
