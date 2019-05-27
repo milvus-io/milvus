@@ -48,12 +48,6 @@ struct Options {
 }; // Options
 
 
-struct GroupOptions {
-    size_t dimension;
-    bool has_id = false;
-}; // GroupOptions
-
-
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
