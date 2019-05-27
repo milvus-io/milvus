@@ -316,7 +316,7 @@ Status DBImpl<EngineT>::background_merge_files(const std::string& table_id) {
 
     try_build_index();
 
-    _pMeta->cleanup_ttl_files(1);
+    _pMeta->CleanUpFilesWithTTL(1);
 
     return Status::OK();
 }
@@ -403,12 +403,7 @@ void DBImpl<EngineT>::background_compaction() {
 
 template<typename EngineT>
 Status DBImpl<EngineT>::drop_all() {
-    return _pMeta->drop_all();
-}
-
-template<typename EngineT>
-Status DBImpl<EngineT>::count(const std::string& table_id, long& result) {
-    return _pMeta->count(table_id, result);
+    return _pMeta->DropAll();
 }
 
 template<typename EngineT>

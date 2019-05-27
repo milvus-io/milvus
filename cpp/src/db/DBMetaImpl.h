@@ -46,13 +46,13 @@ public:
 
     virtual Status Size(long& result) override;
 
-    virtual Status cleanup() override;
+    virtual Status CleanUp() override;
 
-    virtual Status cleanup_ttl_files(uint16_t seconds) override;
+    virtual Status CleanUpFilesWithTTL(uint16_t seconds) override;
 
-    virtual Status drop_all() override;
+    virtual Status DropAll() override;
 
-    virtual Status count(const std::string& table_id, long& result) override;
+    virtual Status Count(const std::string& table_id, long& result) override;
 
     virtual ~DBMetaImpl();
 

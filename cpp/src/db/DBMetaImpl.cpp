@@ -105,7 +105,7 @@ Status DBMetaImpl::initialize() {
     ConnectorPtr->open_forever(); // thread safe option
     ConnectorPtr->pragma.journal_mode(journal_mode::WAL); // WAL => write ahead log
 
-    cleanup();
+    CleanUp();
 
     return Status::OK();
 }
@@ -570,7 +570,7 @@ Status DBMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
     return Status::OK();
 }
 
-Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
+Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
     auto now = utils::GetMicroSecTimeStamp();
     try {
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
@@ -583,21 +583,21 @@ Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
                                                 c(&TableFileSchema::updated_time) > now - seconds*US_PS));
 
         TableFilesSchema updated;
+        TableFileSchema table_file;
 
         for (auto& file : selected) {
-            TableFileSchema group_file;
-            group_file.id = std::get<0>(file);
-            group_file.table_id = std::get<1>(file);
-            group_file.file_id = std::get<2>(file);
-            group_file.file_type = std::get<3>(file);
-            group_file.size = std::get<4>(file);
-            group_file.date = std::get<5>(file);
-            GetGroupFilePath(group_file);
-            if (group_file.file_type == TableFileSchema::TO_DELETE) {
-                boost::filesystem::remove(group_file.location);
+            table_file.id = std::get<0>(file);
+            table_file.table_id = std::get<1>(file);
+            table_file.file_id = std::get<2>(file);
+            table_file.file_type = std::get<3>(file);
+            table_file.size = std::get<4>(file);
+            table_file.date = std::get<5>(file);
+            GetGroupFilePath(table_file);
+            if (table_file.file_type == TableFileSchema::TO_DELETE) {
+                boost::filesystem::remove(table_file.location);
             }
-            ConnectorPtr->remove<TableFileSchema>(group_file.id);
-            /* LOG(DEBUG) << "Removing deleted id=" << group_file.id << " location=" << group_file.location << std::endl; */
+            ConnectorPtr->remove<TableFileSchema>(table_file.id);
+            /* LOG(DEBUG) << "Removing deleted id=" << table_file.id << " location=" << table_file.location << std::endl; */
         }
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
@@ -607,7 +607,7 @@ Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
     return Status::OK();
 }
 
-Status DBMetaImpl::cleanup() {
+Status DBMetaImpl::CleanUp() {
     try {
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
                                                    &TableFileSchema::table_id,
@@ -619,21 +619,21 @@ Status DBMetaImpl::cleanup() {
                                                 c(&TableFileSchema::file_type) == (int)TableFileSchema::NEW));
 
         TableFilesSchema updated;
+        TableFileSchema table_file;
 
         for (auto& file : selected) {
-            TableFileSchema group_file;
-            group_file.id = std::get<0>(file);
-            group_file.table_id = std::get<1>(file);
-            group_file.file_id = std::get<2>(file);
-            group_file.file_type = std::get<3>(file);
-            group_file.size = std::get<4>(file);
-            group_file.date = std::get<5>(file);
-            GetGroupFilePath(group_file);
-            if (group_file.file_type == TableFileSchema::TO_DELETE) {
-                boost::filesystem::remove(group_file.location);
+            table_file.id = std::get<0>(file);
+            table_file.table_id = std::get<1>(file);
+            table_file.file_id = std::get<2>(file);
+            table_file.file_type = std::get<3>(file);
+            table_file.size = std::get<4>(file);
+            table_file.date = std::get<5>(file);
+            GetGroupFilePath(table_file);
+            if (table_file.file_type == TableFileSchema::TO_DELETE) {
+                boost::filesystem::remove(table_file.location);
             }
-            ConnectorPtr->remove<TableFileSchema>(group_file.id);
-            /* LOG(DEBUG) << "Removing id=" << group_file.id << " location=" << group_file.location << std::endl; */
+            ConnectorPtr->remove<TableFileSchema>(table_file.id);
+            /* LOG(DEBUG) << "Removing id=" << table_file.id << " location=" << table_file.location << std::endl; */
         }
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
@@ -643,7 +643,7 @@ Status DBMetaImpl::cleanup() {
     return Status::OK();
 }
 
-Status DBMetaImpl::count(const std::string& table_id, long& result) {
+Status DBMetaImpl::Count(const std::string& table_id, long& result) {
 
     try {
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::size,
@@ -674,7 +674,7 @@ Status DBMetaImpl::count(const std::string& table_id, long& result) {
     return Status::OK();
 }
 
-Status DBMetaImpl::drop_all() {
+Status DBMetaImpl::DropAll() {
     if (boost::filesystem::is_directory(_options.path)) {
         boost::filesystem::remove_all(_options.path);
     }
@@ -682,7 +682,7 @@ Status DBMetaImpl::drop_all() {
 }
 
 DBMetaImpl::~DBMetaImpl() {
-    cleanup();
+    CleanUp();
 }
 
 } // namespace meta

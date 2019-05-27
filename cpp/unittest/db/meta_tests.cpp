@@ -137,7 +137,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
         i++;
     }
 
-    impl.drop_all();
+    impl.DropAll();
 }
 
 TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
@@ -180,7 +180,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
         ++i;
     }
 
-    impl.drop_all();
+    impl.DropAll();
 }
 
 TEST_F(MetaTest, TABLE_FILES_TEST) {
