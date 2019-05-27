@@ -399,13 +399,6 @@ Status DBMetaImpl::files_to_merge(const std::string& table_id,
     return Status::OK();
 }
 
-Status DBMetaImpl::has_group_file(const std::string& table_id_,
-                              const std::string& file_id_,
-                              bool& has_or_not_) {
-    //PXU TODO
-    return Status::OK();
-}
-
 Status DBMetaImpl::get_group_file(const std::string& table_id_,
                               const std::string& file_id_,
                               TableFileSchema& group_file_info_) {

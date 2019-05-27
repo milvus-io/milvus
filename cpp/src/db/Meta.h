@@ -30,9 +30,6 @@ public:
     virtual Status DropPartitionsByDates(const std::string& table_id,
             const DatesT& dates) = 0;
 
-    virtual Status has_group_file(const std::string& table_id_,
-                                  const std::string& file_id_,
-                                  bool& has_or_not_) = 0;
     virtual Status get_group_file(const std::string& table_id_,
                                   const std::string& file_id_,
                                   TableFileSchema& group_file_info_) = 0;
