@@ -22,7 +22,7 @@ public:
     Env(const Env&) = delete;
     Env& operator=(const Env&) = delete;
 
-    void schedule(void (*function_)(void* arg_), void* arg_);
+    void Schedule(void (*function)(void* arg), void* arg);
 
     virtual void Stop();
 
@@ -31,25 +31,24 @@ public:
     static Env* Default();
 
 protected:
-    void backgroud_thread_main();
+    void BackgroundThreadMain();
     static void BackgroundThreadEntryPoint(Env* env) {
-        env->backgroud_thread_main();
+        env->BackgroundThreadMain();
     }
 
     struct BGWork {
-      explicit BGWork(void (*function_)(void*), void* arg_)
-          : _function(function_), _arg(arg_)  {}
+      explicit BGWork(void (*function)(void*), void* arg)
+          : function_(function), arg_(arg)  {}
 
-      void (* const _function)(void*);
-      void* const _arg;
+      void (* const function_)(void*);
+      void* const arg_;
     };
 
-    std::mutex _bg_work_mutex;
-    std::condition_variable _bg_work_cv;
-    std::queue<BGWork> _bg_work_queue;
-    bool _bg_work_started;
-    std::atomic<bool> _shutting_down;
-
+    std::mutex bg_work_mutex_;
+    std::condition_variable bg_work_cv_;
+    std::queue<BGWork> bg_work_queue_;
+    bool bg_work_started_;
+    std::atomic<bool> shutting_down_;
 }; // Env
 
 } // namespace engine

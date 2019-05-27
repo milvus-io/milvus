@@ -219,7 +219,7 @@ void DBImpl<EngineT>::try_schedule_compaction() {
     if (!_bg_error.ok()) return;
 
     _bg_compaction_scheduled = true;
-    _env->schedule(&DBImpl<EngineT>::BGWork, this);
+    _env->Schedule(&DBImpl<EngineT>::BGWork, this);
 }
 
 template<typename EngineT>
