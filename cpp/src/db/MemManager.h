@@ -5,15 +5,15 @@
  ******************************************************************************/
 #pragma once
 
+#include "IDGenerator.h"
+#include "Status.h"
+#include "Meta.h"
+
 #include <map>
 #include <string>
 #include <ctime>
 #include <memory>
 #include <mutex>
-#include "IDGenerator.h"
-#include "Status.h"
-#include "Meta.h"
-
 
 namespace zilliz {
 namespace vecwise {
@@ -96,4 +96,4 @@ private:
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-#include "MemManager.cpp"
+#include "MemManager.inl"

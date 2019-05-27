@@ -71,7 +71,7 @@ void DBMetaImpl::GetTableFilePath(TableFileSchema& group_file) {
 Status DBMetaImpl::NextTableId(std::string& table_id) {
     std::stringstream ss;
     SimpleIDGenerator g;
-    ss << g.getNextIDNumber();
+    ss << g.GetNextIDNumber();
     table_id = ss.str();
     return Status::OK();
 }
@@ -79,7 +79,7 @@ Status DBMetaImpl::NextTableId(std::string& table_id) {
 Status DBMetaImpl::NextFileId(std::string& file_id) {
     std::stringstream ss;
     SimpleIDGenerator g;
-    ss << g.getNextIDNumber();
+    ss << g.GetNextIDNumber();
     file_id = ss.str();
     return Status::OK();
 }

@@ -3,9 +3,9 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#include "Utils.h"
 
 #include <chrono>
-#include "Utils.h"
 
 namespace zilliz {
 namespace vecwise {

@@ -3,8 +3,11 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#ifndef DBIMPL_CPP__
-#define DBIMPL_CPP__
+#pragma once
+
+#include "DBImpl.h"
+#include "DBMetaImpl.h"
+#include "Env.h"
 
 #include <assert.h>
 #include <chrono>
@@ -13,10 +16,6 @@
 #include <cstring>
 #include <easylogging++.h>
 #include <cache/CpuCacheMgr.h>
-
-#include "DBImpl.h"
-#include "DBMetaImpl.h"
-#include "Env.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -435,5 +434,3 @@ DBImpl<EngineT>::~DBImpl() {
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#endif
