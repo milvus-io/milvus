@@ -18,8 +18,6 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-static const std::string ROCKSDB_DEFAULT_GROUP = "default";
-
 RocksIdMapper::RocksIdMapper()
 : db_(nullptr) {
     OpenDb();
@@ -30,8 +28,6 @@ RocksIdMapper::~RocksIdMapper() {
 }
 
 void RocksIdMapper::OpenDb() {
-    std::lock_guard<std::mutex> lck(db_mutex_);
-
     if(db_) {
         return;
     }
@@ -83,8 +79,6 @@ void RocksIdMapper::OpenDb() {
 }
 
 void RocksIdMapper::CloseDb() {
-    std::lock_guard<std::mutex> lck(db_mutex_);
-
     for(auto& iter : column_handles_) {
         delete iter.second;
     }
@@ -96,117 +90,7 @@ void RocksIdMapper::CloseDb() {
     }
 }
 
-ServerError RocksIdMapper::AddGroup(const std::string& group) {
-    std::lock_guard<std::mutex> lck(db_mutex_);
-
-    return AddGroupInternal(group);
-}
-
-bool RocksIdMapper::IsGroupExist(const std::string& group) const {
-    std::lock_guard<std::mutex> lck(db_mutex_);
-
-    return IsGroupExistInternal(group);
-}
-
-
 ServerError RocksIdMapper::Put(const std::string& nid, const std::string& sid, const std::string& group) {
-    std::lock_guard<std::mutex> lck(db_mutex_);
-
-    return PutInternal(nid, sid, group);
-}
-
-ServerError RocksIdMapper::Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group) {
-    if(nid.size() != sid.size()) {
-        return SERVER_INVALID_ARGUMENT;
-    }
-
-    std::lock_guard<std::mutex> lck(db_mutex_);
-    ServerError err = SERVER_SUCCESS;
-    for(size_t i = 0; i < nid.size(); i++) {
-        err = PutInternal(nid[i], sid[i], group);
-        if(err != SERVER_SUCCESS) {
-            return err;
-        }
-    }
-
-    return err;
-}
-
-ServerError RocksIdMapper::Get(const std::string& nid, std::string& sid, const std::string& group) const {
-    std::lock_guard<std::mutex> lck(db_mutex_);
-
-    return GetInternal(nid, sid, group);
-}
-
-ServerError RocksIdMapper::Get(const std::vector<std::string>& nid, std::vector<std::string>& sid, const std::string& group) const {
-    sid.clear();
-
-    std::lock_guard<std::mutex> lck(db_mutex_);
-
-    ServerError err = SERVER_SUCCESS;
-    for(size_t i = 0; i < nid.size(); i++) {
-        std::string str_id;
-        ServerError temp_err = GetInternal(nid[i], str_id, group);
-        if(temp_err != SERVER_SUCCESS) {
-            sid.push_back("");
-            SERVER_LOG_ERROR << "ID mapper failed to get id: " << nid[i];
-            err = temp_err;
-            continue;
-        }
-
-        sid.push_back(str_id);
-    }
-
-    return err;
-}
-
-ServerError RocksIdMapper::Delete(const std::string& nid, const std::string& group) {
-    std::lock_guard<std::mutex> lck(db_mutex_);
-
-    return DeleteInternal(nid, group);
-}
-
-ServerError RocksIdMapper::DeleteGroup(const std::string& group) {
-    std::lock_guard<std::mutex> lck(db_mutex_);
-
-    return DeleteGroupInternal(group);
-}
-
-//internal methods(whitout lock)
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-ServerError RocksIdMapper::AddGroupInternal(const std::string& group) {
-    if(!IsGroupExistInternal(group)) {
-        if(db_ == nullptr) {
-            return SERVER_NULL_POINTER;
-        }
-
-        try {//add group
-            rocksdb::ColumnFamilyHandle *cfh = nullptr;
-            rocksdb::Status s = db_->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), group, &cfh);
-            if (!s.ok()) {
-                SERVER_LOG_ERROR << "ID mapper failed to create group:" << s.ToString();
-                return SERVER_UNEXPECTED_ERROR;
-            } else {
-                column_handles_.insert(std::make_pair(group, cfh));
-            }
-        } catch(std::exception& ex) {
-            SERVER_LOG_ERROR << "ID mapper failed to create group: " << ex.what();
-            return SERVER_UNEXPECTED_ERROR;
-        }
-    }
-
-    return SERVER_SUCCESS;
-}
-
-bool RocksIdMapper::IsGroupExistInternal(const std::string& group) const {
-    std::string group_name = group;
-    if(group_name.empty()){
-        group_name = ROCKSDB_DEFAULT_GROUP;
-    }
-    return (column_handles_.count(group_name) > 0 && column_handles_[group_name] != nullptr);
-}
-
-ServerError RocksIdMapper::PutInternal(const std::string& nid, const std::string& sid, const std::string& group) {
     if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }
@@ -220,12 +104,22 @@ ServerError RocksIdMapper::PutInternal(const std::string& nid, const std::string
             return SERVER_UNEXPECTED_ERROR;
         }
     } else {
-        //try create group
-        if(AddGroupInternal(group) != SERVER_SUCCESS){
-            return SERVER_UNEXPECTED_ERROR;
+        rocksdb::ColumnFamilyHandle *cfh = nullptr;
+        if(column_handles_.count(group) == 0) {
+            try {//add group
+                rocksdb::Status s = db_->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), group, &cfh);
+                if (!s.ok()) {
+                    SERVER_LOG_ERROR << "ID mapper failed to create group:" << s.ToString();
+                } else {
+                    column_handles_.insert(std::make_pair(group, cfh));
+                }
+            } catch(std::exception& ex) {
+                std::cout << ex.what() << std::endl;
+            }
+        } else {
+            cfh = column_handles_[group];
         }
 
-        rocksdb::ColumnFamilyHandle *cfh = column_handles_[group];
         rocksdb::Status s = db_->Put(rocksdb::WriteOptions(), cfh, key, value);
         if (!s.ok()) {
             SERVER_LOG_ERROR << "ID mapper failed to put:" << s.ToString();
@@ -236,7 +130,23 @@ ServerError RocksIdMapper::PutInternal(const std::string& nid, const std::string
     return SERVER_SUCCESS;
 }
 
-ServerError RocksIdMapper::GetInternal(const std::string& nid, std::string& sid, const std::string& group) const {
+ServerError RocksIdMapper::Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group) {
+    if(nid.size() != sid.size()) {
+        return SERVER_INVALID_ARGUMENT;
+    }
+
+    ServerError err = SERVER_SUCCESS;
+    for(size_t i = 0; i < nid.size(); i++) {
+        err = Put(nid[i], sid[i], group);
+        if(err != SERVER_SUCCESS) {
+            return err;
+        }
+    }
+
+    return err;
+}
+
+ServerError RocksIdMapper::Get(const std::string& nid, std::string& sid, const std::string& group) const {
     sid = "";
     if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
@@ -263,8 +173,28 @@ ServerError RocksIdMapper::GetInternal(const std::string& nid, std::string& sid,
     return SERVER_SUCCESS;
 }
 
-ServerError RocksIdMapper::DeleteInternal(const std::string& nid, const std::string& group) {
-     if(db_ == nullptr) {
+ServerError RocksIdMapper::Get(const std::vector<std::string>& nid, std::vector<std::string>& sid, const std::string& group) const {
+    sid.clear();
+
+    ServerError err = SERVER_SUCCESS;
+    for(size_t i = 0; i < nid.size(); i++) {
+        std::string str_id;
+        ServerError temp_err = Get(nid[i], str_id, group);
+        if(temp_err != SERVER_SUCCESS) {
+            sid.push_back("");
+            SERVER_LOG_ERROR << "ID mapper failed to get id: " << nid[i];
+            err = temp_err;
+            continue;
+        }
+
+        sid.push_back(str_id);
+    }
+
+    return err;
+}
+
+ServerError RocksIdMapper::Delete(const std::string& nid, const std::string& group) {
+    if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }
 
@@ -288,7 +218,7 @@ ServerError RocksIdMapper::DeleteInternal(const std::string& nid, const std::str
     return SERVER_SUCCESS;
 }
 
-ServerError RocksIdMapper::DeleteGroupInternal(const std::string& group) {
+ServerError RocksIdMapper::DeleteGroup(const std::string& group) {
     if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }

@@ -87,7 +87,6 @@ BaseTaskPtr AddGroupTask::Create(int32_t dimension,
 
 ServerError AddGroupTask::OnExecute() {
     try {
-        IVecIdMapper::GetInstance()->AddGroup(group_id_);
         engine::meta::GroupSchema group_info;
         group_info.dimension = (size_t)dimension_;
         group_info.group_id = group_id_;
@@ -244,13 +243,6 @@ const AttribMap& AddVectorTask::GetVecAttrib() const {
 
 ServerError AddVectorTask::OnExecute() {
     try {
-        if(!IVecIdMapper::GetInstance()->IsGroupExist(group_id_)) {
-            error_code_ = SERVER_UNEXPECTED_ERROR;
-            error_msg_ = "group not exist";
-            SERVER_LOG_ERROR << error_msg_;
-            return error_code_;
-        }
-
         uint64_t vec_dim = GetVecDimension();
         std::vector<float> vec_f;
         vec_f.resize(vec_dim);
@@ -488,14 +480,10 @@ ServerError AddBatchVectorTask::OnExecute() {
                 std::list<std::future<void>> threads_list;
 
                 uint64_t begin_index = 0, end_index = USE_MT;
-                while(true) {
+                while(end_index < vec_count) {
                     threads_list.push_back(
                             GetThreadPool().enqueue(&AddBatchVectorTask::ProcessIdMapping,
                                                this, vector_ids, begin_index, end_index, tensor_ids_));
-                    if(end_index >= vec_count) {
-                        break;
-                    }
-
                     begin_index = end_index;
                     end_index += USE_MT;
                     if(end_index > vec_count) {

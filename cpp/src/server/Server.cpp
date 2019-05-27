@@ -19,6 +19,8 @@
 #include <unistd.h>
 #include <string.h>
 
+#include "metrics/Metrics.h"
+
 namespace zilliz {
 namespace vecwise {
 namespace server {
@@ -133,6 +135,10 @@ Server::Daemonize() {
 
 int
 Server::Start() {
+//    server::Metrics::GetInstance().Init();
+//    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
+    METRICS_INSTANCE.Init();
+
     if (daemonized_) {
         Daemonize();
     }
@@ -160,8 +166,10 @@ Server::Start() {
                 exit(1);
             }
 
-            std::thread counting_down(&server::LicenseCheck::StartCountingDown, license_file_path);
-            counting_down.detach();
+            if(server::LicenseCheck::StartCountingDown(license_file_path) != SERVER_SUCCESS) {
+                SERVER_LOG_ERROR << "License counter start error";
+                exit(1);
+            }
 #endif
 
             // Handle Signal

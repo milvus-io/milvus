@@ -35,6 +35,10 @@ static const std::string CONFIG_GPU_CACHE_CAPACITY = "gpu_cache_capacity";
 static const std::string CONFIG_LICENSE = "license_config";
 static const std::string CONFIG_LICENSE_PATH = "license_path";
 
+static const std::string CONFIG_METRIC = "metric_config";
+static const std::string CONFIG_METRIC_IS_STARTUP = "is_startup";
+static const std::string CONFIG_METRIC_COLLECTOR = "collector";
+
 class ServerConfig {
  public:
     static ServerConfig &GetInstance();
