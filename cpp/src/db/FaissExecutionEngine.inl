@@ -3,8 +3,9 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#ifndef FAISSEXECUTIONENGINE_CPP__
-#define FAISSEXECUTIONENGINE_CPP__
+#pragma once
+
+#include "FaissExecutionEngine.h"
 
 #include <easylogging++.h>
 #include <faiss/AutoTune.h>
@@ -14,8 +15,6 @@
 #include <wrapper/Index.h>
 #include <wrapper/IndexBuilder.h>
 #include <cache/CpuCacheMgr.h>
-
-#include "FaissExecutionEngine.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -135,5 +134,3 @@ Status FaissExecutionEngine<IndexTrait>::Cache() {
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#endif
