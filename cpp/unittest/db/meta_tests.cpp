@@ -106,7 +106,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     group.group_id = group_id;
     auto status = impl.add_group(group);
 
-    meta::GroupFilesSchema files;
+    meta::TableFilesSchema files;
     meta::TableFileSchema group_file;
     group_file.group_id = group.group_id;
 
@@ -152,7 +152,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     group.group_id = group_id;
     auto status = impl.add_group(group);
 
-    meta::GroupFilesSchema files;
+    meta::TableFilesSchema files;
     meta::TableFileSchema group_file;
     group_file.group_id = group.group_id;
 
@@ -222,13 +222,13 @@ TEST_F(MetaTest, GROUP_FILES_TEST) {
         status = impl_->update_group_file(group_file);
     }
 
-    meta::GroupFilesSchema files;
+    meta::TableFilesSchema files;
 
     status = impl_->files_to_index(files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
-    meta::DatePartionedGroupFilesSchema dated_files;
+    meta::DatePartionedTableFilesSchema dated_files;
     status = impl_->files_to_merge(group.group_id, dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[group_file.date].size(), raw_files_cnt);

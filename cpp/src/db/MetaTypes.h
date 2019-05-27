@@ -48,8 +48,8 @@ struct TableFileSchema {
     long created_on;
 }; // TableFileSchema
 
-typedef std::vector<TableFileSchema> GroupFilesSchema;
-typedef std::map<DateT, GroupFilesSchema> DatePartionedGroupFilesSchema;
+typedef std::vector<TableFileSchema> TableFilesSchema;
+typedef std::map<DateT, TableFilesSchema> DatePartionedTableFilesSchema;
 
 } // namespace meta
 } // namespace engine

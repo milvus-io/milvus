@@ -58,7 +58,7 @@ Status DBImpl<EngineT>::has_group(const std::string& group_id_, bool& has_or_not
 template<typename EngineT>
 Status DBImpl<EngineT>::get_group_files(const std::string& group_id,
                                const int date_delta,
-                               meta::GroupFilesSchema& group_files_info) {
+                               meta::TableFilesSchema& group_files_info) {
     return _pMeta->get_group_files(group_id, date_delta, group_files_info);
 
 }
@@ -83,14 +83,14 @@ template<typename EngineT>
 Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
 
-    meta::DatePartionedGroupFilesSchema files;
+    meta::DatePartionedTableFilesSchema files;
     auto status = _pMeta->files_to_search(group_id, dates, files);
     if (!status.ok()) { return status; }
 
     LOG(DEBUG) << "Search DateT Size=" << files.size();
 
-    meta::GroupFilesSchema index_files;
-    meta::GroupFilesSchema raw_files;
+    meta::TableFilesSchema index_files;
+    meta::TableFilesSchema raw_files;
     for (auto &day_files : files) {
         for (auto &file : day_files.second) {
             file.file_type == meta::TableFileSchema::INDEX ?
@@ -132,7 +132,7 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
 
         long search_set_size = 0;
 
-        auto search_in_index = [&](meta::GroupFilesSchema& file_vec) -> void {
+        auto search_in_index = [&](meta::TableFilesSchema& file_vec) -> void {
             for (auto &file : file_vec) {
                 EngineT index(file.dimension, file.location);
                 index.Load();
@@ -258,7 +258,7 @@ void DBImpl<EngineT>::background_call() {
 
 template<typename EngineT>
 Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::DateT& date,
-        const meta::GroupFilesSchema& files) {
+        const meta::TableFilesSchema& files) {
     meta::TableFileSchema group_file;
     group_file.group_id = group_id;
     group_file.date = date;
@@ -271,7 +271,7 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
 
     EngineT index(group_file.dimension, group_file.location);
 
-    meta::GroupFilesSchema updated;
+    meta::TableFilesSchema updated;
     long  index_size = 0;
 
     for (auto& file : files) {
@@ -305,7 +305,7 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
 
 template<typename EngineT>
 Status DBImpl<EngineT>::background_merge_files(const std::string& group_id) {
-    meta::DatePartionedGroupFilesSchema raw_files;
+    meta::DatePartionedTableFilesSchema raw_files;
     auto status = _pMeta->files_to_merge(group_id, raw_files);
     if (!status.ok()) {
         return status;
@@ -356,7 +356,7 @@ Status DBImpl<EngineT>::build_index(const meta::TableFileSchema& file) {
     auto to_remove = file;
     to_remove.file_type = meta::TableFileSchema::TO_DELETE;
 
-    meta::GroupFilesSchema update_files = {to_remove, group_file};
+    meta::TableFilesSchema update_files = {to_remove, group_file};
     _pMeta->update_files(update_files);
 
     LOG(DEBUG) << "New index file " << group_file.file_id << " of size "
@@ -373,7 +373,7 @@ template<typename EngineT>
 void DBImpl<EngineT>::background_build_index() {
     std::lock_guard<std::mutex> lock(build_index_mutex_);
     assert(bg_build_index_started_);
-    meta::GroupFilesSchema to_index_files;
+    meta::TableFilesSchema to_index_files;
     _pMeta->files_to_index(to_index_files);
     Status status;
     for (auto& file : to_index_files) {

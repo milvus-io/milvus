@@ -40,22 +40,22 @@ public:
 
     virtual Status get_group_files(const std::string& group_id_,
                                    const int date_delta_,
-                                   GroupFilesSchema& group_files_info_) = 0;
+                                   TableFilesSchema& group_files_info_) = 0;
 
-    virtual Status update_files(GroupFilesSchema& files) = 0;
+    virtual Status update_files(TableFilesSchema& files) = 0;
 
     virtual Status files_to_search(const std::string& group_id,
                                    const DatesT& partition,
-                                   DatePartionedGroupFilesSchema& files) = 0;
+                                   DatePartionedTableFilesSchema& files) = 0;
 
     virtual Status files_to_merge(const std::string& group_id,
-            DatePartionedGroupFilesSchema& files) = 0;
+            DatePartionedTableFilesSchema& files) = 0;
 
     virtual Status size(long& result) = 0;
 
     virtual Status archive_files() = 0;
 
-    virtual Status files_to_index(GroupFilesSchema&) = 0;
+    virtual Status files_to_index(TableFilesSchema&) = 0;
 
     virtual Status cleanup() = 0;
     virtual Status cleanup_ttl_files(uint16_t) = 0;

@@ -263,7 +263,7 @@ Status DBMetaImpl::add_group_file(TableFileSchema& group_file) {
     return Status::OK();
 }
 
-Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
+Status DBMetaImpl::files_to_index(TableFilesSchema& files) {
     files.clear();
 
     try {
@@ -309,7 +309,7 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
 
 Status DBMetaImpl::files_to_search(const std::string &group_id,
                                    const DatesT& partition,
-                                   DatePartionedGroupFilesSchema &files) {
+                                   DatePartionedTableFilesSchema &files) {
     files.clear();
     DatesT today = {Meta::GetDate()};
     const DatesT& dates = (partition.empty() == true) ? today : partition;
@@ -346,7 +346,7 @@ Status DBMetaImpl::files_to_search(const std::string &group_id,
             GetGroupFilePath(group_file);
             auto dateItr = files.find(group_file.date);
             if (dateItr == files.end()) {
-                files[group_file.date] = GroupFilesSchema();
+                files[group_file.date] = TableFilesSchema();
             }
             files[group_file.date].push_back(group_file);
         }
@@ -359,7 +359,7 @@ Status DBMetaImpl::files_to_search(const std::string &group_id,
 }
 
 Status DBMetaImpl::files_to_merge(const std::string& group_id,
-        DatePartionedGroupFilesSchema& files) {
+        DatePartionedTableFilesSchema& files) {
     files.clear();
 
     try {
@@ -391,7 +391,7 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
             GetGroupFilePath(group_file);
             auto dateItr = files.find(group_file.date);
             if (dateItr == files.end()) {
-                files[group_file.date] = GroupFilesSchema();
+                files[group_file.date] = TableFilesSchema();
             }
             files[group_file.date].push_back(group_file);
         }
@@ -444,7 +444,7 @@ Status DBMetaImpl::get_group_file(const std::string& group_id_,
 
 Status DBMetaImpl::get_group_files(const std::string& group_id_,
                                const int date_delta_,
-                               GroupFilesSchema& group_files_info_) {
+                               TableFilesSchema& group_files_info_) {
     // PXU TODO
     return Status::OK();
 }
@@ -568,7 +568,7 @@ Status DBMetaImpl::update_group_file(TableFileSchema& group_file) {
     return Status::OK();
 }
 
-Status DBMetaImpl::update_files(GroupFilesSchema& files) {
+Status DBMetaImpl::update_files(TableFilesSchema& files) {
     try {
         auto commited = ConnectorPtr->transaction([&] () mutable {
             for (auto& file : files) {
@@ -599,7 +599,7 @@ Status DBMetaImpl::cleanup_ttl_files(uint16_t seconds) {
                                           where(c(&TableFileSchema::file_type) == (int)TableFileSchema::TO_DELETE and
                                                 c(&TableFileSchema::updated_time) > now - seconds*US_PS));
 
-        GroupFilesSchema updated;
+        TableFilesSchema updated;
 
         for (auto& file : selected) {
             TableFileSchema group_file;
@@ -635,7 +635,7 @@ Status DBMetaImpl::cleanup() {
                                           where(c(&TableFileSchema::file_type) == (int)TableFileSchema::TO_DELETE or
                                                 c(&TableFileSchema::file_type) == (int)TableFileSchema::NEW));
 
-        GroupFilesSchema updated;
+        TableFilesSchema updated;
 
         for (auto& file : selected) {
             TableFileSchema group_file;

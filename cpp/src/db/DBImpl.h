@@ -40,7 +40,7 @@ public:
 
     virtual Status get_group_files(const std::string& group_id_,
                                    const int date_delta_,
-                                   meta::GroupFilesSchema& group_files_info_) override;
+                                   meta::TableFilesSchema& group_files_info_) override;
 
     virtual Status add_vectors(const std::string& group_id_,
             size_t n, const float* vectors, IDNumbers& vector_ids_) override;
@@ -66,7 +66,7 @@ private:
     Status try_build_index();
     Status merge_files(const std::string& group_id,
             const meta::DateT& date,
-            const meta::GroupFilesSchema& files);
+            const meta::TableFilesSchema& files);
     Status background_merge_files(const std::string& group_id);
 
     void try_schedule_compaction();
