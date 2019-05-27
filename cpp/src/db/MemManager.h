@@ -31,7 +31,7 @@ public:
     typedef std::shared_ptr<MemVectors<EngineT>> Ptr;
 
     explicit MemVectors(const std::shared_ptr<meta::Meta>&,
-            const meta::GroupFileSchema&, const Options&);
+            const meta::TableFileSchema&, const Options&);
 
     void add(size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
@@ -52,7 +52,7 @@ private:
 
     MetaPtr pMeta_;
     Options options_;
-    meta::GroupFileSchema schema_;
+    meta::TableFileSchema schema_;
     IDGenerator* _pIdGenerator;
     EnginePtr pEE_;
 

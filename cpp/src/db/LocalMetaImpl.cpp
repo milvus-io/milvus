@@ -38,8 +38,8 @@ std::string LocalMetaImpl::GetGroupDatePartitionPath(const std::string& group_id
 }
 
 std::string LocalMetaImpl::GetNextGroupFileLocationByPartition(const std::string& group_id, DateT& date,
-        GroupFileSchema::FILE_TYPE file_type) {
-    std::string suffix = (file_type == GroupFileSchema::RAW) ? ".raw" : ".index";
+        TableFileSchema::FILE_TYPE file_type) {
+    std::string suffix = (file_type == TableFileSchema::RAW) ? ".raw" : ".index";
     SimpleIDGenerator g;
     std::stringstream ss;
     ss << GetGroupPath(group_id) << "/" << date << "/" << g.getNextIDNumber() << suffix;
@@ -54,7 +54,7 @@ std::string LocalMetaImpl::GetGroupMetaPath(const std::string& group_id) {
     return GetGroupMetaPathByGroupPath(GetGroupPath(group_id));
 }
 
-Status LocalMetaImpl::GetGroupMetaInfoByPath(const std::string& path, GroupSchema& group_info) {
+Status LocalMetaImpl::GetGroupMetaInfoByPath(const std::string& path, TableSchema& group_info) {
     boost::property_tree::ptree ptree;
     boost::property_tree::read_json(path, ptree);
     auto files_cnt = ptree.get_child("files_cnt").data();
@@ -71,7 +71,7 @@ Status LocalMetaImpl::GetGroupMetaInfoByPath(const std::string& path, GroupSchem
 
 }
 
-Status LocalMetaImpl::GetGroupMetaInfo(const std::string& group_id, GroupSchema& group_info) {
+Status LocalMetaImpl::GetGroupMetaInfo(const std::string& group_id, TableSchema& group_info) {
     group_info.group_id = group_id;
     return GetGroupMetaInfoByPath(GetGroupMetaPath(group_id), group_info);
 }
@@ -90,7 +90,7 @@ Status LocalMetaImpl::initialize() {
     return Status::OK();
 }
 
-Status LocalMetaImpl::add_group(GroupSchema& group_info) {
+Status LocalMetaImpl::add_group(TableSchema& group_info) {
     std::string real_gid;
     size_t id = SimpleIDGenerator().getNextIDNumber();
     if (group_info.group_id == "") {
@@ -123,7 +123,7 @@ Status LocalMetaImpl::add_group(GroupSchema& group_info) {
     return Status::OK();
 }
 
-Status LocalMetaImpl::get_group(GroupSchema& group_info) {
+Status LocalMetaImpl::get_group(TableSchema& group_info) {
     bool group_exist;
     has_group(group_info.group_id, group_exist);
     if (!group_exist) {
@@ -138,8 +138,8 @@ Status LocalMetaImpl::has_group(const std::string& group_id, bool& has_or_not) {
     return Status::OK();
 }
 
-Status LocalMetaImpl::add_group_file(GroupFileSchema& group_file_info) {
-    GroupSchema group_info;
+Status LocalMetaImpl::add_group_file(TableFileSchema& group_file_info) {
+    TableSchema group_info;
     /* auto status = get_group(group_info); */
     /* if (!status.ok()) { */
     /*     return status; */
@@ -159,7 +159,7 @@ Status LocalMetaImpl::files_to_index(GroupFilesSchema& files) {
     boost::filesystem::directory_iterator end_itr;
     for (boost::filesystem::directory_iterator itr(_options.path); itr != end_itr; ++itr) {
         auto group_path = itr->path().string();
-        GroupSchema group_info;
+        TableSchema group_info;
         GetGroupMetaInfoByPath(GetGroupMetaPathByGroupPath(group_path), group_info);
         for (boost::filesystem::directory_iterator innerItr(group_path); innerItr != end_itr; ++innerItr) {
             auto partition_path = innerItr->path().string();
@@ -169,7 +169,7 @@ Status LocalMetaImpl::files_to_index(GroupFilesSchema& files) {
                 if (suffix == "index") continue;
                 if (INDEX_TRIGGER_SIZE >= GetFileSize(location)) continue;
                 std::cout << "[About to index] " << location << std::endl;
-                GroupFileSchema f;
+                TableFileSchema f;
                 f.location = location;
                 /* f.group_id = group_id; */
                 f.dimension = group_info.dimension;
@@ -188,7 +188,7 @@ Status LocalMetaImpl::files_to_merge(const std::string& group_id,
     /* boost::filesystem::directory_iterator end_itr; */
     /* for (boost::filesystem::directory_iterator itr(_options.path); itr != end_itr; ++itr) { */
     /*     auto group_path = itr->path().string(); */
-    /*     GroupSchema group_info; */
+    /*     TableSchema group_info; */
     /*     GetGroupMetaInfoByPath(GetGroupMetaPathByGroupPath(group_path), group_info); */
     /*     for (boost::filesystem::directory_iterator innerItr(group_path); innerItr != end_itr; ++innerItr) { */
     /*         auto partition_path = innerItr->path().string(); */
@@ -198,7 +198,7 @@ Status LocalMetaImpl::files_to_merge(const std::string& group_id,
     /*             if (suffix == "index") continue; */
     /*             if (INDEX_TRIGGER_SIZE < GetFileSize(location)) continue; */
     /*             std::cout << "[About to index] " << location << std::endl; */
-    /*             GroupFileSchema f; */
+    /*             TableFileSchema f; */
     /*             f.location = location; */
     /*             f.group_id = group_id; */
     /*             f.dimension = group_info.dimension; */
@@ -219,7 +219,7 @@ Status LocalMetaImpl::has_group_file(const std::string& group_id_,
 
 Status LocalMetaImpl::get_group_file(const std::string& group_id_,
                               const std::string& file_id_,
-                              GroupFileSchema& group_file_info_) {
+                              TableFileSchema& group_file_info_) {
     //PXU TODO
     return Status::OK();
 }
@@ -231,7 +231,7 @@ Status LocalMetaImpl::get_group_files(const std::string& group_id_,
     return Status::OK();
 }
 
-Status LocalMetaImpl::update_group_file(GroupFileSchema& group_file_) {
+Status LocalMetaImpl::update_group_file(TableFileSchema& group_file_) {
     //PXU TODO
     return Status::OK();
 }

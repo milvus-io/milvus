@@ -35,12 +35,12 @@ DBImpl<EngineT>::DBImpl(const Options& options)
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::add_group(meta::GroupSchema& group_info) {
+Status DBImpl<EngineT>::add_group(meta::TableSchema& group_info) {
     return _pMeta->add_group(group_info);
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::get_group(meta::GroupSchema& group_info) {
+Status DBImpl<EngineT>::get_group(meta::TableSchema& group_info) {
     return _pMeta->get_group(group_info);
 }
 
@@ -93,7 +93,7 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
     meta::GroupFilesSchema raw_files;
     for (auto &day_files : files) {
         for (auto &file : day_files.second) {
-            file.file_type == meta::GroupFileSchema::INDEX ?
+            file.file_type == meta::TableFileSchema::INDEX ?
             index_files.push_back(file) : raw_files.push_back(file);
         }
     }
@@ -259,7 +259,7 @@ void DBImpl<EngineT>::background_call() {
 template<typename EngineT>
 Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::DateT& date,
         const meta::GroupFilesSchema& files) {
-    meta::GroupFileSchema group_file;
+    meta::TableFileSchema group_file;
     group_file.group_id = group_id;
     group_file.date = date;
     Status status = _pMeta->add_group_file(group_file);
@@ -277,7 +277,7 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
     for (auto& file : files) {
         index.Merge(file.location);
         auto file_schema = file;
-        file_schema.file_type = meta::GroupFileSchema::TO_DELETE;
+        file_schema.file_type = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);
         LOG(DEBUG) << "Merging file " << file_schema.file_id;
         index_size = index.Size();
@@ -288,9 +288,9 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
     index.Serialize();
 
     if (index_size >= _options.index_trigger_size) {
-        group_file.file_type = meta::GroupFileSchema::TO_INDEX;
+        group_file.file_type = meta::TableFileSchema::TO_INDEX;
     } else {
-        group_file.file_type = meta::GroupFileSchema::RAW;
+        group_file.file_type = meta::TableFileSchema::RAW;
     }
     group_file.size = index_size;
     updated.push_back(group_file);
@@ -336,8 +336,8 @@ Status DBImpl<EngineT>::background_merge_files(const std::string& group_id) {
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::build_index(const meta::GroupFileSchema& file) {
-    meta::GroupFileSchema group_file;
+Status DBImpl<EngineT>::build_index(const meta::TableFileSchema& file) {
+    meta::TableFileSchema group_file;
     group_file.group_id = file.group_id;
     group_file.date = file.date;
     Status status = _pMeta->add_group_file(group_file);
@@ -350,11 +350,11 @@ Status DBImpl<EngineT>::build_index(const meta::GroupFileSchema& file) {
     to_index.Load();
     auto index = to_index.BuildIndex(group_file.location);
 
-    group_file.file_type = meta::GroupFileSchema::INDEX;
+    group_file.file_type = meta::TableFileSchema::INDEX;
     group_file.size = index->Size();
 
     auto to_remove = file;
-    to_remove.file_type = meta::GroupFileSchema::TO_DELETE;
+    to_remove.file_type = meta::TableFileSchema::TO_DELETE;
 
     meta::GroupFilesSchema update_files = {to_remove, group_file};
     _pMeta->update_files(update_files);
