@@ -85,7 +85,7 @@ TEST_F(MetaTest, table_file_TEST) {
     dates.push_back(table_file.date);
     status = impl_->DropPartitionsByDates(table_file.table_id, dates);
     ASSERT_TRUE(status.ok());
-    status = impl_->get_group_file(table_file.table_id, table_file.file_id, table_file);
+    status = impl_->GetTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(table_file.file_type == meta::TableFileSchema::TO_DELETE);
 }
@@ -127,7 +127,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     int i = 0;
 
     for (auto file : files) {
-        status = impl.get_group_file(file.table_id, file.file_id, file);
+        status = impl.GetTableFile(file);
         ASSERT_TRUE(status.ok());
         if (days[i] < days_num) {
             ASSERT_EQ(file.file_type, meta::TableFileSchema::NEW);
@@ -170,7 +170,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     int i = 0;
 
     for (auto file : files) {
-        status = impl.get_group_file(file.table_id, file.file_id, file);
+        status = impl.GetTableFile(file);
         ASSERT_TRUE(status.ok());
         if (i < 5) {
             ASSERT_TRUE(file.file_type == meta::TableFileSchema::TO_DELETE);

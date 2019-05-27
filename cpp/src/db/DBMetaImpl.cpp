@@ -399,9 +399,8 @@ Status DBMetaImpl::files_to_merge(const std::string& table_id,
     return Status::OK();
 }
 
-Status DBMetaImpl::get_group_file(const std::string& table_id_,
-                              const std::string& file_id_,
-                              TableFileSchema& group_file_info_) {
+Status DBMetaImpl::GetTableFile(TableFileSchema& file_schema) {
+
     try {
         auto files = ConnectorPtr->select(columns(&TableFileSchema::id,
                                                    &TableFileSchema::table_id,
@@ -409,19 +408,20 @@ Status DBMetaImpl::get_group_file(const std::string& table_id_,
                                                    &TableFileSchema::file_type,
                                                    &TableFileSchema::size,
                                                    &TableFileSchema::date),
-                                          where(c(&TableFileSchema::file_id) == file_id_ and
-                                                c(&TableFileSchema::table_id) == table_id_
+                                          where(c(&TableFileSchema::file_id) == file_schema.file_id and
+                                                c(&TableFileSchema::table_id) == file_schema.table_id
                                           ));
         assert(files.size() <= 1);
         if (files.size() == 1) {
-            group_file_info_.id = std::get<0>(files[0]);
-            group_file_info_.table_id = std::get<1>(files[0]);
-            group_file_info_.file_id = std::get<2>(files[0]);
-            group_file_info_.file_type = std::get<3>(files[0]);
-            group_file_info_.size = std::get<4>(files[0]);
-            group_file_info_.date = std::get<5>(files[0]);
+            file_schema.id = std::get<0>(files[0]);
+            file_schema.table_id = std::get<1>(files[0]);
+            file_schema.file_id = std::get<2>(files[0]);
+            file_schema.file_type = std::get<3>(files[0]);
+            file_schema.size = std::get<4>(files[0]);
+            file_schema.date = std::get<5>(files[0]);
         } else {
-            return Status::NotFound("GroupFile " + file_id_ + " not found");
+            return Status::NotFound("Table:" + file_schema.table_id +
+                    " File:" + file_schema.file_id + " not found");
         }
     } catch (std::exception &e) {
         LOG(DEBUG) << e.what();
