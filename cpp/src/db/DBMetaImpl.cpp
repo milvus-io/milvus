@@ -538,13 +538,13 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
     return discard_files_of_size(to_discard_size);
 }
 
-Status DBMetaImpl::update_group_file(TableFileSchema& group_file) {
-    group_file.updated_time = utils::GetMicroSecTimeStamp();
+Status DBMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
+    file_schema.updated_time = utils::GetMicroSecTimeStamp();
     try {
-        ConnectorPtr->update(group_file);
+        ConnectorPtr->update(file_schema);
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
-        LOG(DEBUG) << "id= " << group_file.id << " file_id=" << group_file.file_id;
+        LOG(DEBUG) << "table_id= " << file_schema.table_id << " file_id=" << file_schema.file_id;
         throw e;
     }
     return Status::OK();

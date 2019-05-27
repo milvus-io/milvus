@@ -59,7 +59,7 @@ TEST_F(MetaTest, table_file_TEST) {
     auto new_file_type = meta::TableFileSchema::INDEX;
     table_file.file_type = new_file_type;
 
-    status = impl_->update_group_file(table_file);
+    status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type, new_file_type);
 
@@ -76,7 +76,7 @@ TEST_F(MetaTest, table_file_TEST) {
     ASSERT_TRUE(status.ok());
 
     table_file.date = meta::Meta::GetDateWithDelta(-2);
-    status = impl_->update_group_file(table_file);
+    status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.date, meta::Meta::GetDateWithDelta(-2));
     ASSERT_FALSE(table_file.file_type == meta::TableFileSchema::TO_DELETE);
@@ -118,7 +118,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
         table_file.file_type = meta::TableFileSchema::NEW;
         int day = rand() % (days_num*2);
         table_file.created_on = ts - day*meta::D_SEC*meta::US_PS - 10000;
-        status = impl.update_group_file(table_file);
+        status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
         days.push_back(day);
     }
@@ -162,7 +162,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
         status = impl.CreateTableFile(table_file);
         table_file.file_type = meta::TableFileSchema::NEW;
         table_file.size = each_size * meta::G;
-        status = impl.update_group_file(table_file);
+        status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
     }
 
@@ -201,25 +201,25 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     for (auto i=0; i<new_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
         table_file.file_type = meta::TableFileSchema::NEW;
-        status = impl_->update_group_file(table_file);
+        status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i=0; i<raw_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
         table_file.file_type = meta::TableFileSchema::RAW;
-        status = impl_->update_group_file(table_file);
+        status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i=0; i<to_index_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
         table_file.file_type = meta::TableFileSchema::TO_INDEX;
-        status = impl_->update_group_file(table_file);
+        status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i=0; i<index_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
         table_file.file_type = meta::TableFileSchema::INDEX;
-        status = impl_->update_group_file(table_file);
+        status = impl_->UpdateTableFile(table_file);
     }
 
     meta::TableFilesSchema files;
