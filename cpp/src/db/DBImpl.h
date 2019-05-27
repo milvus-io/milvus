@@ -35,6 +35,7 @@ public:
 
     virtual Status add_group(meta::GroupSchema& group_info) override;
     virtual Status get_group(meta::GroupSchema& group_info) override;
+    virtual Status delete_vectors(const std::string& group_id, const meta::DatesT& dates) override;
     virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
 
     virtual Status get_group_files(const std::string& group_id_,
@@ -53,6 +54,8 @@ public:
     virtual Status drop_all() override;
 
     virtual Status count(const std::string& group_id, long& result) override;
+
+    virtual Status size(long& result) override;
 
     virtual ~DBImpl();
 
