@@ -9,10 +9,15 @@
 
 #include "utils.h"
 #include "db/DB.h"
+#include "metrics/Metrics.h"
 
 using namespace zilliz::vecwise;
 
 TEST_F(DBTest, DB_TEST) {
+
+
+    server::Metrics::GetInstance().Init();
+    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
 
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
@@ -157,3 +162,4 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     // TODO(linxj): add groundTruth assert
 };
+
