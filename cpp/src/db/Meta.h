@@ -4,13 +4,14 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #pragma once
-#include <cstddef>
-#include <ctime>
-#include <memory>
 
 #include "MetaTypes.h"
 #include "Options.h"
 #include "Status.h"
+
+#include <cstddef>
+#include <ctime>
+#include <memory>
 
 namespace zilliz {
 namespace vecwise {

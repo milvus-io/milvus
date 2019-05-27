@@ -3,6 +3,10 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#include "DBMetaImpl.h"
+#include "IDGenerator.h"
+#include "Utils.h"
+#include "MetaConsts.h"
 
 #include <unistd.h>
 #include <sstream>
@@ -12,11 +16,6 @@
 #include <fstream>
 #include <sqlite_orm.h>
 #include <easylogging++.h>
-
-#include "DBMetaImpl.h"
-#include "IDGenerator.h"
-#include "Utils.h"
-#include "MetaConsts.h"
 
 namespace zilliz {
 namespace vecwise {
