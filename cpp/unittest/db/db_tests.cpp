@@ -16,7 +16,8 @@ using namespace zilliz::vecwise;
 
 TEST_F(DBTest, CONFIG_TEST) {
     {
-        EXPECT_DEATH(engine::ArchiveConf conf("wrong"), "");
+        ASSERT_ANY_THROW(engine::ArchiveConf conf("wrong"));
+        /* EXPECT_DEATH(engine::ArchiveConf conf("wrong"), ""); */
     }
     {
         engine::ArchiveConf conf("delete");
