@@ -55,7 +55,7 @@ Status MemVectors<EngineT>::serialize(std::string& table_id) {
     schema_.file_type = (size >= options_.index_trigger_size) ?
         meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
 
-    auto status = pMeta_->update_group_file(schema_);
+    auto status = pMeta_->UpdateTableFile(schema_);
 
     LOG(DEBUG) << "New " << ((schema_.file_type == meta::TableFileSchema::RAW) ? "raw" : "to_index")
         << " file " << schema_.file_id << " of size " << pEE_->Size() / meta::M << " M";

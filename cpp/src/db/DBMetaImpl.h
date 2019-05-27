@@ -29,7 +29,7 @@ public:
 
     virtual Status GetTableFile(TableFileSchema& file_schema) override;
 
-    virtual Status update_group_file(TableFileSchema& group_file_) override;
+    virtual Status UpdateTableFile(TableFileSchema& file_schema) override;
 
     virtual Status update_files(TableFilesSchema& files) override;
 

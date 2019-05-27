@@ -31,7 +31,7 @@ public:
             const DatesT& dates) = 0;
 
     virtual Status GetTableFile(TableFileSchema& file_schema) = 0;
-    virtual Status update_group_file(TableFileSchema& group_file_) = 0;
+    virtual Status UpdateTableFile(TableFileSchema& file_schema) = 0;
 
     virtual Status update_files(TableFilesSchema& files) = 0;
 
