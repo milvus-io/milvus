@@ -44,7 +44,7 @@ public:
 
     virtual Status Size(long& result) = 0;
 
-    virtual Status archive_files() = 0;
+    virtual Status Archive() = 0;
 
     virtual Status files_to_index(TableFilesSchema&) = 0;
 

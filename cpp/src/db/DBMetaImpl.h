@@ -42,7 +42,7 @@ public:
 
     virtual Status files_to_index(TableFilesSchema&) override;
 
-    virtual Status archive_files() override;
+    virtual Status Archive() override;
 
     virtual Status Size(long& result) override;
 

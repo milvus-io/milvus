@@ -433,7 +433,7 @@ Status DBMetaImpl::GetTableFile(TableFileSchema& file_schema) {
 }
 
 // PXU TODO: Support Swap
-Status DBMetaImpl::archive_files() {
+Status DBMetaImpl::Archive() {
     auto& criterias = _options.archive_conf.GetCriterias();
     if (criterias.size() == 0) {
         return Status::OK();
@@ -496,7 +496,7 @@ Status DBMetaImpl::Size(long& result) {
 }
 
 Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
-    LOG(DEBUG) << "Abort to discard size=" << to_discard_size;
+    LOG(DEBUG) << "About to discard size=" << to_discard_size;
     if (to_discard_size <= 0) {
         return Status::OK();
     }
@@ -507,15 +507,15 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
                                           order_by(&TableFileSchema::id),
                                           limit(10));
         std::vector<int> ids;
+        TableFileSchema table_file;
 
         for (auto& file : selected) {
             if (to_discard_size <= 0) break;
-            TableFileSchema group_file;
-            group_file.id = std::get<0>(file);
-            group_file.size = std::get<1>(file);
-            ids.push_back(group_file.id);
-            LOG(DEBUG) << "Discard group_file.id=" << group_file.id << " group_file.size=" << group_file.size;
-            to_discard_size -= group_file.size;
+            table_file.id = std::get<0>(file);
+            table_file.size = std::get<1>(file);
+            ids.push_back(table_file.id);
+            LOG(DEBUG) << "Discard table_file.id=" << table_file.file_id << " table_file.size=" << table_file.size;
+            to_discard_size -= table_file.size;
         }
 
         if (ids.size() == 0) {
