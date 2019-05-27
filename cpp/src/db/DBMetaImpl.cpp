@@ -201,12 +201,12 @@ Status DBMetaImpl::DescribeTable(TableSchema& table_schema) {
     return Status::OK();
 }
 
-Status DBMetaImpl::has_group(const std::string& table_id, bool& has_or_not) {
+Status DBMetaImpl::HasTable(const std::string& table_id, bool& has_or_not) {
     try {
-        auto groups = ConnectorPtr->select(columns(&TableSchema::id),
+        auto tables = ConnectorPtr->select(columns(&TableSchema::id),
                                           where(c(&TableSchema::table_id) == table_id));
-        assert(groups.size() <= 1);
-        if (groups.size() == 1) {
+        assert(tables.size() <= 1);
+        if (tables.size() == 1) {
             has_or_not = true;
         } else {
             has_or_not = false;

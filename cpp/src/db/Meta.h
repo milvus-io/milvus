@@ -24,7 +24,7 @@ public:
 
     virtual Status CreateTable(TableSchema& table_schema) = 0;
     virtual Status DescribeTable(TableSchema& table_schema) = 0;
-    virtual Status has_group(const std::string& table_id_, bool& has_or_not_) = 0;
+    virtual Status HasTable(const std::string& table_id, bool& has_or_not) = 0;
 
     virtual Status add_group_file(TableFileSchema& group_file_info) = 0;
     virtual Status delete_group_partitions(const std::string& table_id,

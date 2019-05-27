@@ -51,8 +51,8 @@ Status DBImpl<EngineT>::delete_vectors(const std::string& table_id,
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::has_group(const std::string& table_id_, bool& has_or_not_) {
-    return _pMeta->has_group(table_id_, has_or_not_);
+Status DBImpl<EngineT>::has_group(const std::string& table_id, bool& has_or_not) {
+    return _pMeta->HasTable(table_id, has_or_not);
 }
 
 template<typename EngineT>
