@@ -65,14 +65,14 @@ TEST_F(MetaTest, table_file_TEST) {
 
     meta::DatesT dates;
     dates.push_back(meta::Meta::GetDate());
-    status = impl_->delete_group_partitions(table_file.table_id, dates);
+    status = impl_->DropPartitionsByDates(table_file.table_id, dates);
     ASSERT_FALSE(status.ok());
 
     dates.clear();
     for (auto i=2; i < 10; ++i) {
         dates.push_back(meta::Meta::GetDateWithDelta(-1*i));
     }
-    status = impl_->delete_group_partitions(table_file.table_id, dates);
+    status = impl_->DropPartitionsByDates(table_file.table_id, dates);
     ASSERT_TRUE(status.ok());
 
     table_file.date = meta::Meta::GetDateWithDelta(-2);
@@ -83,7 +83,7 @@ TEST_F(MetaTest, table_file_TEST) {
 
     dates.clear();
     dates.push_back(table_file.date);
-    status = impl_->delete_group_partitions(table_file.table_id, dates);
+    status = impl_->DropPartitionsByDates(table_file.table_id, dates);
     ASSERT_TRUE(status.ok());
     status = impl_->get_group_file(table_file.table_id, table_file.file_id, table_file);
     ASSERT_TRUE(status.ok());

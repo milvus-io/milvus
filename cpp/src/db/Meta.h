@@ -27,8 +27,8 @@ public:
     virtual Status HasTable(const std::string& table_id, bool& has_or_not) = 0;
 
     virtual Status CreateTableFile(TableFileSchema& file_schema) = 0;
-    virtual Status delete_group_partitions(const std::string& table_id,
-            const meta::DatesT& dates) = 0;
+    virtual Status DropPartitionsByDates(const std::string& table_id,
+            const DatesT& dates) = 0;
 
     virtual Status has_group_file(const std::string& table_id_,
                                   const std::string& file_id_,

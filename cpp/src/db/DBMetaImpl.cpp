@@ -111,8 +111,8 @@ Status DBMetaImpl::initialize() {
 }
 
 // PXU TODO: Temp solution. Will fix later
-Status DBMetaImpl::delete_group_partitions(const std::string& table_id,
-            const meta::DatesT& dates) {
+Status DBMetaImpl::DropPartitionsByDates(const std::string& table_id,
+            const DatesT& dates) {
     if (dates.size() == 0) {
         return Status::OK();
     }
