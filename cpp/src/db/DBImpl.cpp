@@ -312,7 +312,7 @@ Status DBImpl<EngineT>::background_merge_files(const std::string& table_id) {
         merge_files(table_id, kv.first, kv.second);
     }
 
-    _pMeta->archive_files();
+    _pMeta->Archive();
 
     try_build_index();
 
@@ -350,7 +350,7 @@ Status DBImpl<EngineT>::build_index(const meta::TableFileSchema& file) {
         << " from file " << to_remove.file_id;
 
     index->Cache();
-    _pMeta->archive_files();
+    _pMeta->Archive();
 
     return Status::OK();
 }

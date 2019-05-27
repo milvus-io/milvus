@@ -123,7 +123,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
         days.push_back(day);
     }
 
-    impl.archive_files();
+    impl.Archive();
     int i = 0;
 
     for (auto file : files) {
@@ -166,7 +166,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
         files.push_back(table_file);
     }
 
-    impl.archive_files();
+    impl.Archive();
     int i = 0;
 
     for (auto file : files) {
