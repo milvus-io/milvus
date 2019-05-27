@@ -218,35 +218,35 @@ Status DBMetaImpl::HasTable(const std::string& table_id, bool& has_or_not) {
     return Status::OK();
 }
 
-Status DBMetaImpl::add_group_file(TableFileSchema& group_file) {
-    if (group_file.date == EmptyDate) {
-        group_file.date = Meta::GetDate();
+Status DBMetaImpl::CreateTableFile(TableFileSchema& file_schema) {
+    if (file_schema.date == EmptyDate) {
+        file_schema.date = Meta::GetDate();
     }
     TableSchema table_schema;
-    table_schema.table_id = group_file.table_id;
+    table_schema.table_id = file_schema.table_id;
     auto status = DescribeTable(table_schema);
     if (!status.ok()) {
         return status;
     }
 
-    NextFileId(group_file.file_id);
-    group_file.file_type = TableFileSchema::NEW;
-    group_file.dimension = table_schema.dimension;
-    group_file.size = 0;
-    group_file.created_on = utils::GetMicroSecTimeStamp();
-    group_file.updated_time = group_file.created_on;
-    GetGroupFilePath(group_file);
+    NextFileId(file_schema.file_id);
+    file_schema.file_type = TableFileSchema::NEW;
+    file_schema.dimension = table_schema.dimension;
+    file_schema.size = 0;
+    file_schema.created_on = utils::GetMicroSecTimeStamp();
+    file_schema.updated_time = file_schema.created_on;
+    GetGroupFilePath(file_schema);
 
     {
         try {
-            auto id = ConnectorPtr->insert(group_file);
-            group_file.id = id;
+            auto id = ConnectorPtr->insert(file_schema);
+            file_schema.id = id;
         } catch (...) {
             return Status::DBTransactionError("Add file Error");
         }
     }
 
-    auto partition_path = GetGroupDatePartitionPath(group_file.table_id, group_file.date);
+    auto partition_path = GetGroupDatePartitionPath(file_schema.table_id, file_schema.date);
 
     if (!boost::filesystem::is_directory(partition_path)) {
         auto ret = boost::filesystem::create_directory(partition_path);

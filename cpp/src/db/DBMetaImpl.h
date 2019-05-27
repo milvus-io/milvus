@@ -23,7 +23,7 @@ public:
     virtual Status DescribeTable(TableSchema& group_info_) override;
     virtual Status HasTable(const std::string& table_id, bool& has_or_not) override;
 
-    virtual Status add_group_file(TableFileSchema& group_file_info) override;
+    virtual Status CreateTableFile(TableFileSchema& file_schema) override;
     virtual Status delete_group_partitions(const std::string& table_id,
             const meta::DatesT& dates) override;
 
