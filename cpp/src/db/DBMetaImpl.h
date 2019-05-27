@@ -31,7 +31,7 @@ public:
 
     virtual Status UpdateTableFile(TableFileSchema& file_schema) override;
 
-    virtual Status update_files(TableFilesSchema& files) override;
+    virtual Status UpdateTableFiles(TableFilesSchema& files) override;
 
     virtual Status files_to_merge(const std::string& table_id,
             DatePartionedTableFilesSchema& files) override;

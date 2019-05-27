@@ -280,7 +280,7 @@ Status DBImpl<EngineT>::merge_files(const std::string& table_id, const meta::Dat
     }
     table_file.size = index_size;
     updated.push_back(table_file);
-    status = _pMeta->update_files(updated);
+    status = _pMeta->UpdateTableFiles(updated);
     LOG(DEBUG) << "New merged file " << table_file.file_id <<
         " of size=" << index.PhysicalSize()/(1024*1024) << " M";
 
@@ -343,7 +343,7 @@ Status DBImpl<EngineT>::build_index(const meta::TableFileSchema& file) {
     to_remove.file_type = meta::TableFileSchema::TO_DELETE;
 
     meta::TableFilesSchema update_files = {to_remove, table_file};
-    _pMeta->update_files(update_files);
+    _pMeta->UpdateTableFiles(update_files);
 
     LOG(DEBUG) << "New index file " << table_file.file_id << " of size "
         << index->PhysicalSize()/(1024*1024) << " M"

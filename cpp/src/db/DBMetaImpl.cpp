@@ -550,7 +550,7 @@ Status DBMetaImpl::UpdateTableFile(TableFileSchema& file_schema) {
     return Status::OK();
 }
 
-Status DBMetaImpl::update_files(TableFilesSchema& files) {
+Status DBMetaImpl::UpdateTableFiles(TableFilesSchema& files) {
     try {
         auto commited = ConnectorPtr->transaction([&] () mutable {
             for (auto& file : files) {
