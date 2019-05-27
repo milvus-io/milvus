@@ -33,7 +33,7 @@ public:
     virtual Status GetTableFile(TableFileSchema& file_schema) = 0;
     virtual Status UpdateTableFile(TableFileSchema& file_schema) = 0;
 
-    virtual Status update_files(TableFilesSchema& files) = 0;
+    virtual Status UpdateTableFiles(TableFilesSchema& files) = 0;
 
     virtual Status files_to_search(const std::string& table_id,
                                    const DatesT& partition,
