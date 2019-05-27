@@ -11,6 +11,7 @@
 #include "Options.h"
 #include "Env.h"
 #include "DBMetaImpl.h"
+#include "Exception.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -46,23 +47,28 @@ void ArchiveConf::ParseCritirias(const std::string& criterias) {
             LOG(WARNING) << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
             continue;
         }
-        auto value = std::stoi(kv[1]);
-        criterias_[kv[0]] = value;
+        try {
+            auto value = std::stoi(kv[1]);
+            criterias_[kv[0]] = value;
+        }
+        catch (std::out_of_range&){
+            LOG(ERROR) << "Out of range: '" << kv[1] << "'";
+            throw OutOfRangeException();
+        }
+        catch (...){
+            LOG(ERROR) << "Invalid argument: '" << kv[1] << "'";
+            throw InvalidArgumentException();
+        }
     }
 }
 
 void ArchiveConf::ParseType(const std::string& type) {
     if (type != "delete" && type != "swap") {
-        LOG(ERROR) << "Invalid Archive";
-        assert(false);
+        LOG(ERROR) << "Invalid argument: type='" << type << "'";
+        throw InvalidArgumentException();
     }
     type_ = type;
 }
-
-/* DBMetaOptions::DBMetaOptions(const std::string& dbpath, */
-/*         const std::string& uri) */
-/*     : path(dbpath), backend_uri(uri) { */
-/* } */
 
 } // namespace engine
 } // namespace vecwise
