@@ -39,7 +39,7 @@ public:
 
     size_t approximate_size() const;
 
-    Status serialize(std::string& group_id);
+    Status serialize(std::string& table_id);
 
     ~MemVectors();
 
@@ -70,15 +70,15 @@ public:
     MemManager(const std::shared_ptr<meta::Meta>& meta_, const Options& options)
         : _pMeta(meta_), options_(options) {}
 
-    MemVectorsPtr get_mem_by_group(const std::string& group_id_);
+    MemVectorsPtr get_mem_by_group(const std::string& table_id_);
 
-    Status add_vectors(const std::string& group_id_,
+    Status add_vectors(const std::string& table_id_,
             size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
-    Status serialize(std::vector<std::string>& group_ids);
+    Status serialize(std::vector<std::string>& table_ids);
 
 private:
-    Status add_vectors_no_lock(const std::string& group_id_,
+    Status add_vectors_no_lock(const std::string& table_id_,
             size_t n_, const float* vectors_, IDNumbers& vector_ids_);
     Status mark_memory_as_immutable();
 

@@ -68,11 +68,11 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     engine::meta::TableSchema group_info;
     group_info.dimension = group_dim;
-    group_info.group_id = group_name;
+    group_info.table_id = group_name;
     engine::Status stat = db_->add_group(group_info);
 
     engine::meta::TableSchema group_info_get;
-    group_info_get.group_id = group_name;
+    group_info_get.table_id = group_name;
     stat = db_->get_group(group_info_get);
     ASSERT_STATS(stat);
     ASSERT_EQ(group_info_get.dimension, group_dim);
@@ -113,11 +113,11 @@ TEST_F(DBTest, DB_TEST) {
 
     engine::meta::TableSchema group_info;
     group_info.dimension = group_dim;
-    group_info.group_id = group_name;
+    group_info.table_id = group_name;
     engine::Status stat = db_->add_group(group_info);
 
     engine::meta::TableSchema group_info_get;
-    group_info_get.group_id = group_name;
+    group_info_get.table_id = group_name;
     stat = db_->get_group(group_info_get);
     ASSERT_STATS(stat);
     ASSERT_EQ(group_info_get.dimension, group_dim);
@@ -199,11 +199,11 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     engine::meta::TableSchema group_info;
     group_info.dimension = group_dim;
-    group_info.group_id = group_name;
+    group_info.table_id = group_name;
     engine::Status stat = db_->add_group(group_info);
 
     engine::meta::TableSchema group_info_get;
-    group_info_get.group_id = group_name;
+    group_info_get.table_id = group_name;
     stat = db_->get_group(group_info_get);
     ASSERT_STATS(stat);
     ASSERT_EQ(group_info_get.dimension, group_dim);

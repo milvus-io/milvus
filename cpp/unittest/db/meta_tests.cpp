@@ -18,10 +18,10 @@
 using namespace zilliz::vecwise::engine;
 
 TEST_F(MetaTest, GROUP_TEST) {
-    auto group_id = "meta_test_group";
+    auto table_id = "meta_test_group";
 
     meta::TableSchema group;
-    group.group_id = group_id;
+    group.table_id = table_id;
     auto status = impl_->add_group(group);
     ASSERT_TRUE(status.ok());
 
@@ -30,26 +30,26 @@ TEST_F(MetaTest, GROUP_TEST) {
     status = impl_->get_group(group);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(group.id, gid);
-    ASSERT_EQ(group.group_id, group_id);
+    ASSERT_EQ(group.table_id, table_id);
 
-    group.group_id = "not_found";
+    group.table_id = "not_found";
     status = impl_->get_group(group);
     ASSERT_TRUE(!status.ok());
 
-    group.group_id = group_id;
+    group.table_id = table_id;
     status = impl_->add_group(group);
     ASSERT_TRUE(!status.ok());
 }
 
 TEST_F(MetaTest, GROUP_FILE_TEST) {
-    auto group_id = "meta_test_group";
+    auto table_id = "meta_test_group";
 
     meta::TableSchema group;
-    group.group_id = group_id;
+    group.table_id = table_id;
     auto status = impl_->add_group(group);
 
     meta::TableFileSchema group_file;
-    group_file.group_id = group.group_id;
+    group_file.table_id = group.table_id;
     status = impl_->add_group_file(group_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(group_file.file_type, meta::TableFileSchema::NEW);
@@ -65,14 +65,14 @@ TEST_F(MetaTest, GROUP_FILE_TEST) {
 
     meta::DatesT dates;
     dates.push_back(meta::Meta::GetDate());
-    status = impl_->delete_group_partitions(group_file.group_id, dates);
+    status = impl_->delete_group_partitions(group_file.table_id, dates);
     ASSERT_FALSE(status.ok());
 
     dates.clear();
     for (auto i=2; i < 10; ++i) {
         dates.push_back(meta::Meta::GetDateWithDelta(-1*i));
     }
-    status = impl_->delete_group_partitions(group_file.group_id, dates);
+    status = impl_->delete_group_partitions(group_file.table_id, dates);
     ASSERT_TRUE(status.ok());
 
     group_file.date = meta::Meta::GetDateWithDelta(-2);
@@ -83,9 +83,9 @@ TEST_F(MetaTest, GROUP_FILE_TEST) {
 
     dates.clear();
     dates.push_back(group_file.date);
-    status = impl_->delete_group_partitions(group_file.group_id, dates);
+    status = impl_->delete_group_partitions(group_file.table_id, dates);
     ASSERT_TRUE(status.ok());
-    status = impl_->get_group_file(group_file.group_id, group_file.file_id, group_file);
+    status = impl_->get_group_file(group_file.table_id, group_file.file_id, group_file);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(group_file.file_type == meta::TableFileSchema::TO_DELETE);
 }
@@ -100,15 +100,15 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     options.archive_conf = ArchiveConf("delete", ss.str());
 
     auto impl = meta::DBMetaImpl(options);
-    auto group_id = "meta_test_group";
+    auto table_id = "meta_test_group";
 
     meta::TableSchema group;
-    group.group_id = group_id;
+    group.table_id = table_id;
     auto status = impl.add_group(group);
 
     meta::TableFilesSchema files;
     meta::TableFileSchema group_file;
-    group_file.group_id = group.group_id;
+    group_file.table_id = group.table_id;
 
     auto cnt = 100;
     long ts = utils::GetMicroSecTimeStamp();
@@ -127,7 +127,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     int i = 0;
 
     for (auto file : files) {
-        status = impl.get_group_file(file.group_id, file.file_id, file);
+        status = impl.get_group_file(file.table_id, file.file_id, file);
         ASSERT_TRUE(status.ok());
         if (days[i] < days_num) {
             ASSERT_EQ(file.file_type, meta::TableFileSchema::NEW);
@@ -146,15 +146,15 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     options.archive_conf = ArchiveConf("delete", "disk:11");
 
     auto impl = meta::DBMetaImpl(options);
-    auto group_id = "meta_test_group";
+    auto table_id = "meta_test_group";
 
     meta::TableSchema group;
-    group.group_id = group_id;
+    group.table_id = table_id;
     auto status = impl.add_group(group);
 
     meta::TableFilesSchema files;
     meta::TableFileSchema group_file;
-    group_file.group_id = group.group_id;
+    group_file.table_id = group.table_id;
 
     auto cnt = 10;
     auto each_size = 2UL;
@@ -170,7 +170,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     int i = 0;
 
     for (auto file : files) {
-        status = impl.get_group_file(file.group_id, file.file_id, file);
+        status = impl.get_group_file(file.table_id, file.file_id, file);
         ASSERT_TRUE(status.ok());
         if (i < 5) {
             ASSERT_TRUE(file.file_type == meta::TableFileSchema::TO_DELETE);
@@ -184,10 +184,10 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
 }
 
 TEST_F(MetaTest, GROUP_FILES_TEST) {
-    auto group_id = "meta_test_group";
+    auto table_id = "meta_test_group";
 
     meta::TableSchema group;
-    group.group_id = group_id;
+    group.table_id = table_id;
     auto status = impl_->add_group(group);
 
     int new_files_cnt = 4;
@@ -196,7 +196,7 @@ TEST_F(MetaTest, GROUP_FILES_TEST) {
     int index_files_cnt = 7;
 
     meta::TableFileSchema group_file;
-    group_file.group_id = group.group_id;
+    group_file.table_id = group.table_id;
 
     for (auto i=0; i<new_files_cnt; ++i) {
         status = impl_->add_group_file(group_file);
@@ -229,7 +229,7 @@ TEST_F(MetaTest, GROUP_FILES_TEST) {
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     meta::DatePartionedTableFilesSchema dated_files;
-    status = impl_->files_to_merge(group.group_id, dated_files);
+    status = impl_->files_to_merge(group.table_id, dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[group_file.date].size(), raw_files_cnt);
 
@@ -238,7 +238,7 @@ TEST_F(MetaTest, GROUP_FILES_TEST) {
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     meta::DatesT dates = {group_file.date};
-    status = impl_->files_to_search(group_id, dates, dated_files);
+    status = impl_->files_to_search(table_id, dates, dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[group_file.date].size(),
             to_index_files_cnt+raw_files_cnt+index_files_cnt);

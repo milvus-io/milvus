@@ -45,46 +45,46 @@ Status DBImpl<EngineT>::get_group(meta::TableSchema& group_info) {
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::delete_vectors(const std::string& group_id,
+Status DBImpl<EngineT>::delete_vectors(const std::string& table_id,
         const meta::DatesT& dates) {
-    return _pMeta->delete_group_partitions(group_id, dates);
+    return _pMeta->delete_group_partitions(table_id, dates);
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::has_group(const std::string& group_id_, bool& has_or_not_) {
-    return _pMeta->has_group(group_id_, has_or_not_);
+Status DBImpl<EngineT>::has_group(const std::string& table_id_, bool& has_or_not_) {
+    return _pMeta->has_group(table_id_, has_or_not_);
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::get_group_files(const std::string& group_id,
+Status DBImpl<EngineT>::get_group_files(const std::string& table_id,
                                const int date_delta,
                                meta::TableFilesSchema& group_files_info) {
-    return _pMeta->get_group_files(group_id, date_delta, group_files_info);
+    return _pMeta->get_group_files(table_id, date_delta, group_files_info);
 
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::add_vectors(const std::string& group_id_,
+Status DBImpl<EngineT>::add_vectors(const std::string& table_id_,
         size_t n, const float* vectors, IDNumbers& vector_ids_) {
-    Status status = _pMemMgr->add_vectors(group_id_, n, vectors, vector_ids_);
+    Status status = _pMemMgr->add_vectors(table_id_, n, vectors, vector_ids_);
     if (!status.ok()) {
         return status;
     }
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::search(const std::string &group_id, size_t k, size_t nq,
+Status DBImpl<EngineT>::search(const std::string &table_id, size_t k, size_t nq,
                       const float *vectors, QueryResults &results) {
     meta::DatesT dates = {meta::Meta::GetDate()};
-    return search(group_id, k, nq, vectors, dates, results);
+    return search(table_id, k, nq, vectors, dates, results);
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
+Status DBImpl<EngineT>::search(const std::string& table_id, size_t k, size_t nq,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
 
     meta::DatePartionedTableFilesSchema files;
-    auto status = _pMeta->files_to_search(group_id, dates, files);
+    auto status = _pMeta->files_to_search(table_id, dates, files);
     if (!status.ok()) { return status; }
 
     LOG(DEBUG) << "Search DateT Size=" << files.size();
@@ -204,7 +204,7 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
     }
 
     if (results.empty()) {
-        return Status::NotFound("Group " + group_id + ", search result not found!");
+        return Status::NotFound("Group " + table_id + ", search result not found!");
     }
     return Status::OK();
 }
@@ -257,10 +257,10 @@ void DBImpl<EngineT>::background_call() {
 
 
 template<typename EngineT>
-Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::DateT& date,
+Status DBImpl<EngineT>::merge_files(const std::string& table_id, const meta::DateT& date,
         const meta::TableFilesSchema& files) {
     meta::TableFileSchema group_file;
-    group_file.group_id = group_id;
+    group_file.table_id = table_id;
     group_file.date = date;
     Status status = _pMeta->add_group_file(group_file);
 
@@ -304,9 +304,9 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::background_merge_files(const std::string& group_id) {
+Status DBImpl<EngineT>::background_merge_files(const std::string& table_id) {
     meta::DatePartionedTableFilesSchema raw_files;
-    auto status = _pMeta->files_to_merge(group_id, raw_files);
+    auto status = _pMeta->files_to_merge(table_id, raw_files);
     if (!status.ok()) {
         return status;
     }
@@ -323,7 +323,7 @@ Status DBImpl<EngineT>::background_merge_files(const std::string& group_id) {
             continue;
         }
         has_merge = true;
-        merge_files(group_id, kv.first, kv.second);
+        merge_files(table_id, kv.first, kv.second);
     }
 
     _pMeta->archive_files();
@@ -338,7 +338,7 @@ Status DBImpl<EngineT>::background_merge_files(const std::string& group_id) {
 template<typename EngineT>
 Status DBImpl<EngineT>::build_index(const meta::TableFileSchema& file) {
     meta::TableFileSchema group_file;
-    group_file.group_id = file.group_id;
+    group_file.table_id = file.table_id;
     group_file.date = file.date;
     Status status = _pMeta->add_group_file(group_file);
     if (!status.ok()) {
@@ -402,12 +402,12 @@ Status DBImpl<EngineT>::try_build_index() {
 
 template<typename EngineT>
 void DBImpl<EngineT>::background_compaction() {
-    std::vector<std::string> group_ids;
-    _pMemMgr->serialize(group_ids);
+    std::vector<std::string> table_ids;
+    _pMemMgr->serialize(table_ids);
 
     Status status;
-    for (auto group_id : group_ids) {
-        status = background_merge_files(group_id);
+    for (auto table_id : table_ids) {
+        status = background_merge_files(table_id);
         if (!status.ok()) {
             _bg_error = status;
             return;
@@ -421,8 +421,8 @@ Status DBImpl<EngineT>::drop_all() {
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::count(const std::string& group_id, long& result) {
-    return _pMeta->count(group_id, result);
+Status DBImpl<EngineT>::count(const std::string& table_id, long& result) {
+    return _pMeta->count(table_id, result);
 }
 
 template<typename EngineT>

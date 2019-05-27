@@ -20,7 +20,7 @@ typedef std::vector<DateT> DatesT;
 
 struct TableSchema {
     size_t id;
-    std::string group_id;
+    std::string table_id;
     size_t files_cnt = 0;
     uint16_t dimension;
     std::string location;
@@ -37,7 +37,7 @@ struct TableFileSchema {
     } FILE_TYPE;
 
     size_t id;
-    std::string group_id;
+    std::string table_id;
     std::string file_id;
     int file_type = NEW;
     size_t size;

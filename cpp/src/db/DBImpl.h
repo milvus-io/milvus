@@ -35,25 +35,25 @@ public:
 
     virtual Status add_group(meta::TableSchema& group_info) override;
     virtual Status get_group(meta::TableSchema& group_info) override;
-    virtual Status delete_vectors(const std::string& group_id, const meta::DatesT& dates) override;
-    virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
+    virtual Status delete_vectors(const std::string& table_id, const meta::DatesT& dates) override;
+    virtual Status has_group(const std::string& table_id_, bool& has_or_not_) override;
 
-    virtual Status get_group_files(const std::string& group_id_,
+    virtual Status get_group_files(const std::string& table_id_,
                                    const int date_delta_,
                                    meta::TableFilesSchema& group_files_info_) override;
 
-    virtual Status add_vectors(const std::string& group_id_,
+    virtual Status add_vectors(const std::string& table_id_,
             size_t n, const float* vectors, IDNumbers& vector_ids_) override;
 
-    virtual Status search(const std::string& group_id, size_t k, size_t nq,
+    virtual Status search(const std::string& table_id, size_t k, size_t nq,
             const float* vectors, QueryResults& results) override;
 
-    virtual Status search(const std::string& group_id, size_t k, size_t nq,
+    virtual Status search(const std::string& table_id, size_t k, size_t nq,
             const float* vectors, const meta::DatesT& dates, QueryResults& results) override;
 
     virtual Status drop_all() override;
 
-    virtual Status count(const std::string& group_id, long& result) override;
+    virtual Status count(const std::string& table_id, long& result) override;
 
     virtual Status size(long& result) override;
 
@@ -64,10 +64,10 @@ private:
     void background_build_index();
     Status build_index(const meta::TableFileSchema&);
     Status try_build_index();
-    Status merge_files(const std::string& group_id,
+    Status merge_files(const std::string& table_id,
             const meta::DateT& date,
             const meta::TableFilesSchema& files);
-    Status background_merge_files(const std::string& group_id);
+    Status background_merge_files(const std::string& table_id);
 
     void try_schedule_compaction();
     void start_timer_task(int interval_);
