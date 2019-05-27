@@ -31,10 +31,6 @@ public:
 
     virtual Status update_group_file(TableFileSchema& group_file_) override;
 
-    virtual Status get_group_files(const std::string& table_id_,
-                                   const int date_delta_,
-                                   TableFilesSchema& group_files_info_) override;
-
     virtual Status update_files(TableFilesSchema& files) override;
 
     virtual Status files_to_merge(const std::string& table_id,

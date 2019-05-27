@@ -50,14 +50,6 @@ Status DBImpl<EngineT>::has_group(const std::string& table_id, bool& has_or_not)
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::get_group_files(const std::string& table_id,
-                               const int date_delta,
-                               meta::TableFilesSchema& group_files_info) {
-    return _pMeta->get_group_files(table_id, date_delta, group_files_info);
-
-}
-
-template<typename EngineT>
 Status DBImpl<EngineT>::add_vectors(const std::string& table_id_,
         size_t n, const float* vectors, IDNumbers& vector_ids_) {
     Status status = _pMemMgr->add_vectors(table_id_, n, vectors, vector_ids_);
