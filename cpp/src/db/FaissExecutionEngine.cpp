@@ -79,12 +79,12 @@ Status FaissExecutionEngine<IndexTrait>::Load() {
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time, end_time);
 
-        METRICS_INSTANCE.FaissDiskLoadDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().FaissDiskLoadDurationSecondsHistogramObserve(total_time);
         double total_size = (pIndex_->d) * (pIndex_->ntotal) * 4;
 
 
-        METRICS_INSTANCE.FaissDiskLoadSizeBytesHistogramObserve(total_size);
-        METRICS_INSTANCE.FaissDiskLoadIOSpeedHistogramObserve(total_size/double(total_time));
+        server::Metrics::GetInstance().FaissDiskLoadSizeBytesHistogramObserve(total_size);
+        server::Metrics::GetInstance().FaissDiskLoadIOSpeedHistogramObserve(total_size/double(total_time));
 
     }
     return Status::OK();

@@ -112,16 +112,16 @@ Status DBImpl<EngineT>::add_vectors(const std::string& group_id_,
     double total_time = METRICS_MICROSECONDS(start_time,end_time);
     double avg_time = total_time / n;
     for (int i = 0; i < n; ++i) {
-        METRICS_INSTANCE.AddVectorsDurationHistogramOberve(avg_time);
+        server::Metrics::GetInstance().AddVectorsDurationHistogramOberve(avg_time);
     }
 
 //    server::Metrics::GetInstance().add_vector_duration_seconds_quantiles().Observe((average_time));
 
     if (!status.ok()) {
-        METRICS_INSTANCE.AddVectorsFailTotalIncrement(n);
+        server::Metrics::GetInstance().AddVectorsFailTotalIncrement(n);
         return status;
     }
-    METRICS_INSTANCE.AddVectorsSuccessTotalIncrement(n);
+    server::Metrics::GetInstance().AddVectorsSuccessTotalIncrement(n);
 }
 
 template<typename EngineT>
@@ -202,22 +202,22 @@ Status DBImpl<EngineT>::search(const std::string& group_id, size_t k, size_t nq,
                 auto end_time = METRICS_NOW_TIME;
                 auto total_time = METRICS_MICROSECONDS(start_time, end_time);
                 if(file.file_type == meta::GroupFileSchema::RAW) {
-                    METRICS_INSTANCE.SearchRawDataDurationSecondsHistogramObserve(total_time);
-                    METRICS_INSTANCE.RawFileSizeHistogramObserve(file_size*1024*1024);
-                    METRICS_INSTANCE.RawFileSizeTotalIncrement(file_size*1024*1024);
-                    METRICS_INSTANCE.RawFileSizeGaugeSet(file_size*1024*1024);
+                    server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+                    server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size*1024*1024);
+                    server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size*1024*1024);
+                    server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size*1024*1024);
 
                 } else if(file.file_type == meta::GroupFileSchema::TO_INDEX) {
-                    METRICS_INSTANCE.SearchRawDataDurationSecondsHistogramObserve(total_time);
-                    METRICS_INSTANCE.RawFileSizeHistogramObserve(file_size*1024*1024);
-                    METRICS_INSTANCE.RawFileSizeTotalIncrement(file_size*1024*1024);
-                    METRICS_INSTANCE.RawFileSizeGaugeSet(file_size*1024*1024);
+                    server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+                    server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size*1024*1024);
+                    server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size*1024*1024);
+                    server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size*1024*1024);
 
                 } else {
-                    METRICS_INSTANCE.SearchIndexDataDurationSecondsHistogramObserve(total_time);
-                    METRICS_INSTANCE.IndexFileSizeHistogramObserve(file_size*1024*1024);
-                    METRICS_INSTANCE.IndexFileSizeTotalIncrement(file_size*1024*1024);
-                    METRICS_INSTANCE.IndexFileSizeGaugeSet(file_size*1024*1024);
+                    server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
+                    server::Metrics::GetInstance().IndexFileSizeHistogramObserve(file_size*1024*1024);
+                    server::Metrics::GetInstance().IndexFileSizeTotalIncrement(file_size*1024*1024);
+                    server::Metrics::GetInstance().IndexFileSizeGaugeSet(file_size*1024*1024);
                 }
                 cluster(output_ids, output_distence, inner_k); // cluster to each query
                 memset(output_distence, 0, k * nq * sizeof(float));
@@ -357,7 +357,7 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
         auto file_schema = file;
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-        METRICS_INSTANCE.MemTableMergeDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().MemTableMergeDurationSecondsHistogramObserve(total_time);
 
         file_schema.file_type = meta::GroupFileSchema::TO_DELETE;
         updated.push_back(file_schema);
@@ -435,7 +435,7 @@ Status DBImpl<EngineT>::build_index(const meta::GroupFileSchema& file) {
     auto index = to_index.BuildIndex(group_file.location);
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    METRICS_INSTANCE.BuildIndexDurationSecondsHistogramObserve(total_time);
+    server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
 
     group_file.file_type = meta::GroupFileSchema::INDEX;
     group_file.size = index->Size();

@@ -17,7 +17,7 @@
 
 
 #define METRICS_NOW_TIME std::chrono::system_clock::now()
-#define METRICS_INSTANCE server::GetInstance()
+#define server::Metrics::GetInstance() server::GetInstance()
 #define METRICS_MICROSECONDS(a,b) (std::chrono::duration_cast<std::chrono::microseconds> (b-a)).count();
 
 

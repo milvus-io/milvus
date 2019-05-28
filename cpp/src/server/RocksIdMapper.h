@@ -13,15 +13,19 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <mutex>
 
 namespace zilliz {
 namespace vecwise {
 namespace server {
 
 class RocksIdMapper : public IVecIdMapper{
-public:
+ public:
     RocksIdMapper();
     ~RocksIdMapper();
+
+    ServerError AddGroup(const std::string& group) override;
+    bool IsGroupExist(const std::string& group) const override;
 
     ServerError Put(const std::string& nid, const std::string& sid, const std::string& group = "") override;
     ServerError Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group = "") override;
@@ -32,14 +36,28 @@ public:
     ServerError Delete(const std::string& nid, const std::string& group = "") override;
     ServerError DeleteGroup(const std::string& group) override;
 
-private:
+ private:
     void OpenDb();
     void CloseDb();
 
-private:
+    ServerError AddGroupInternal(const std::string& group);
+
+    bool IsGroupExistInternal(const std::string& group) const;
+
+    ServerError PutInternal(const std::string& nid, const std::string& sid, const std::string& group);
+
+    ServerError GetInternal(const std::string& nid, std::string& sid, const std::string& group) const;
+
+    ServerError DeleteInternal(const std::string& nid, const std::string& group);
+
+    ServerError DeleteGroupInternal(const std::string& group);
+
+ private:
     rocksdb::DB* db_;
-    std::unordered_map<std::string, rocksdb::ColumnFamilyHandle*> column_handles_;
+    mutable std::unordered_map<std::string, rocksdb::ColumnFamilyHandle*> column_handles_;
+    mutable std::mutex db_mutex_;
 };
+
 
 }
 }
