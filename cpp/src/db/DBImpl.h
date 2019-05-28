@@ -28,8 +28,8 @@ namespace meta {
 template <typename EngineT>
 class DBImpl : public DB {
 public:
-    typedef typename meta::Meta::Ptr MetaPtr;
-    typedef typename MemManager<EngineT>::Ptr MemManagerPtr;
+    using MetaPtr = meta::Meta::Ptr;
+    using MemManagerPtr = typename MemManager<EngineT>::Ptr;
 
     DBImpl(const Options& options);
 
