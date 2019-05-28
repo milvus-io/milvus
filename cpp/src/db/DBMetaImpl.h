@@ -19,62 +19,53 @@ class DBMetaImpl : public Meta {
 public:
     DBMetaImpl(const DBMetaOptions& options_);
 
-    virtual Status add_group(GroupSchema& group_info) override;
-    virtual Status get_group(GroupSchema& group_info_) override;
-    virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
+    virtual Status CreateTable(TableSchema& table_schema) override;
+    virtual Status DescribeTable(TableSchema& group_info_) override;
+    virtual Status HasTable(const std::string& table_id, bool& has_or_not) override;
 
-    virtual Status add_group_file(GroupFileSchema& group_file_info) override;
-    virtual Status delete_group_partitions(const std::string& group_id,
-            const meta::DatesT& dates) override;
+    virtual Status CreateTableFile(TableFileSchema& file_schema) override;
+    virtual Status DropPartitionsByDates(const std::string& table_id,
+            const DatesT& dates) override;
 
-    virtual Status has_group_file(const std::string& group_id_,
-                                  const std::string& file_id_,
-                                  bool& has_or_not_) override;
-    virtual Status get_group_file(const std::string& group_id_,
-                                  const std::string& file_id_,
-                                  GroupFileSchema& group_file_info_) override;
-    virtual Status update_group_file(GroupFileSchema& group_file_) override;
+    virtual Status GetTableFile(TableFileSchema& file_schema) override;
 
-    virtual Status get_group_files(const std::string& group_id_,
-                                   const int date_delta_,
-                                   GroupFilesSchema& group_files_info_) override;
+    virtual Status UpdateTableFile(TableFileSchema& file_schema) override;
 
-    virtual Status update_files(GroupFilesSchema& files) override;
+    virtual Status UpdateTableFiles(TableFilesSchema& files) override;
 
-    virtual Status files_to_merge(const std::string& group_id,
-            DatePartionedGroupFilesSchema& files) override;
-
-    virtual Status files_to_search(const std::string& group_id,
+    virtual Status FilesToSearch(const std::string& table_id,
                                   const DatesT& partition,
-                                  DatePartionedGroupFilesSchema& files) override;
+                                  DatePartionedTableFilesSchema& files) override;
 
-    virtual Status files_to_index(GroupFilesSchema&) override;
+    virtual Status FilesToMerge(const std::string& table_id,
+            DatePartionedTableFilesSchema& files) override;
 
-    virtual Status archive_files() override;
+    virtual Status FilesToIndex(TableFilesSchema&) override;
 
-    virtual Status size(long& result) override;
+    virtual Status Archive() override;
 
-    virtual Status cleanup() override;
+    virtual Status Size(long& result) override;
 
-    virtual Status cleanup_ttl_files(uint16_t seconds) override;
+    virtual Status CleanUp() override;
 
-    virtual Status drop_all() override;
+    virtual Status CleanUpFilesWithTTL(uint16_t seconds) override;
 
-    virtual Status count(const std::string& group_id, long& result) override;
+    virtual Status DropAll() override;
+
+    virtual Status Count(const std::string& table_id, long& result) override;
 
     virtual ~DBMetaImpl();
 
 private:
     Status NextFileId(std::string& file_id);
-    Status NextGroupId(std::string& group_id);
-    Status discard_files_of_size(long to_discard_size);
-    Status get_group_no_lock(GroupSchema& group_info);
-    std::string GetGroupPath(const std::string& group_id);
-    std::string GetGroupDatePartitionPath(const std::string& group_id, DateT& date);
-    void GetGroupFilePath(GroupFileSchema& group_file);
-    Status initialize();
+    Status NextTableId(std::string& table_id);
+    Status DiscardFiles(long to_discard_size);
+    std::string GetTablePath(const std::string& table_id);
+    std::string GetTableDatePartitionPath(const std::string& table_id, DateT& date);
+    void GetTableFilePath(TableFileSchema& group_file);
+    Status Initialize();
 
-    const DBMetaOptions _options;
+    const DBMetaOptions options_;
 }; // DBMetaImpl
 
 } // namespace meta

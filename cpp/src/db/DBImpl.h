@@ -5,15 +5,15 @@
  ******************************************************************************/
 #pragma once
 
+#include "DB.h"
+#include "MemManager.h"
+#include "Types.h"
+#include "Traits.h"
+
 #include <mutex>
 #include <condition_variable>
 #include <memory>
 #include <atomic>
-#include "DB.h"
-#include "MemManager.h"
-#include "Types.h"
-#include "FaissExecutionEngine.h"
-#include "Traits.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -28,63 +28,56 @@ namespace meta {
 template <typename EngineT>
 class DBImpl : public DB {
 public:
-    typedef typename meta::Meta::Ptr MetaPtr;
-    typedef typename MemManager<EngineT>::Ptr MemManagerPtr;
+    using MetaPtr = meta::Meta::Ptr;
+    using MemManagerPtr = typename MemManager<EngineT>::Ptr;
 
     DBImpl(const Options& options);
 
-    virtual Status add_group(meta::GroupSchema& group_info) override;
-    virtual Status get_group(meta::GroupSchema& group_info) override;
-    virtual Status delete_vectors(const std::string& group_id, const meta::DatesT& dates) override;
-    virtual Status has_group(const std::string& group_id_, bool& has_or_not_) override;
+    virtual Status CreateTable(meta::TableSchema& table_schema) override;
+    virtual Status DescribeTable(meta::TableSchema& table_schema) override;
+    virtual Status HasTable(const std::string& table_id, bool& has_or_not) override;
 
-    virtual Status get_group_files(const std::string& group_id_,
-                                   const int date_delta_,
-                                   meta::GroupFilesSchema& group_files_info_) override;
+    virtual Status InsertVectors(const std::string& table_id,
+            size_t n, const float* vectors, IDNumbers& vector_ids) override;
 
-    virtual Status add_vectors(const std::string& group_id_,
-            size_t n, const float* vectors, IDNumbers& vector_ids_) override;
-
-    virtual Status search(const std::string& group_id, size_t k, size_t nq,
+    virtual Status Query(const std::string& table_id, size_t k, size_t nq,
             const float* vectors, QueryResults& results) override;
 
-    virtual Status search(const std::string& group_id, size_t k, size_t nq,
+    virtual Status Query(const std::string& table_id, size_t k, size_t nq,
             const float* vectors, const meta::DatesT& dates, QueryResults& results) override;
 
-    virtual Status drop_all() override;
+    virtual Status DropAll() override;
 
-    virtual Status count(const std::string& group_id, long& result) override;
-
-    virtual Status size(long& result) override;
+    virtual Status Size(long& result) override;
 
     virtual ~DBImpl();
 
 private:
 
-    void background_build_index();
-    Status build_index(const meta::GroupFileSchema&);
-    Status try_build_index();
-    Status merge_files(const std::string& group_id,
+    void BackgroundBuildIndex();
+    Status BuildIndex(const meta::TableFileSchema&);
+    Status TryBuildIndex();
+    Status MergeFiles(const std::string& table_id,
             const meta::DateT& date,
-            const meta::GroupFilesSchema& files);
-    Status background_merge_files(const std::string& group_id);
+            const meta::TableFilesSchema& files);
+    Status BackgroundMergeFiles(const std::string& table_id);
 
-    void try_schedule_compaction();
-    void start_timer_task(int interval_);
-    void background_timer_task(int interval_);
+    void TrySchedule();
+    void StartTimerTasks(int interval);
+    void BackgroundTimerTask(int interval);
 
     static void BGWork(void* db);
-    void background_call();
-    void background_compaction();
+    void BackgroundCall();
+    void BackgroundCompaction();
 
-    Env* const _env;
-    const Options _options;
+    Env* const env_;
+    const Options options_;
 
-    std::mutex _mutex;
-    std::condition_variable _bg_work_finish_signal;
-    bool _bg_compaction_scheduled;
-    Status _bg_error;
-    std::atomic<bool> _shutting_down;
+    std::mutex mutex_;
+    std::condition_variable bg_work_finish_signal_;
+    bool bg_compaction_scheduled_;
+    Status bg_error_;
+    std::atomic<bool> shutting_down_;
 
     std::mutex build_index_mutex_;
     bool bg_build_index_started_;
@@ -92,8 +85,8 @@ private:
 
     std::thread bg_timer_thread_;
 
-    MetaPtr _pMeta;
-    MemManagerPtr _pMemMgr;
+    MetaPtr pMeta_;
+    MemManagerPtr pMemMgr_;
 
 }; // DBImpl
 
@@ -102,4 +95,4 @@ private:
 } // namespace vecwise
 } // namespace zilliz
 
-#include "DBImpl.cpp"
+#include "DBImpl.inl"

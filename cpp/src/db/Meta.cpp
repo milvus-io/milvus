@@ -3,9 +3,10 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#include "Meta.h"
+
 #include <ctime>
 #include <stdio.h>
-#include "Meta.h"
 
 namespace zilliz {
 namespace vecwise {
