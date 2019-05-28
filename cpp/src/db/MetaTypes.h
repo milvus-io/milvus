@@ -18,16 +18,16 @@ typedef int DateT;
 const DateT EmptyDate = -1;
 typedef std::vector<DateT> DatesT;
 
-struct GroupSchema {
+struct TableSchema {
     size_t id;
-    std::string group_id;
+    std::string table_id;
     size_t files_cnt = 0;
     uint16_t dimension;
-    std::string location = "";
+    std::string location;
     long created_on;
-}; // GroupSchema
+}; // TableSchema
 
-struct GroupFileSchema {
+struct TableFileSchema {
     typedef enum {
         NEW,
         RAW,
@@ -37,19 +37,19 @@ struct GroupFileSchema {
     } FILE_TYPE;
 
     size_t id;
-    std::string group_id;
+    std::string table_id;
     std::string file_id;
     int file_type = NEW;
     size_t size;
     DateT date = EmptyDate;
     uint16_t dimension;
-    std::string location = "";
+    std::string location;
     long updated_time;
     long created_on;
-}; // GroupFileSchema
+}; // TableFileSchema
 
-typedef std::vector<GroupFileSchema> GroupFilesSchema;
-typedef std::map<DateT, GroupFilesSchema> DatePartionedGroupFilesSchema;
+typedef std::vector<TableFileSchema> TableFilesSchema;
+typedef std::map<DateT, TableFilesSchema> DatePartionedTableFilesSchema;
 
 } // namespace meta
 } // namespace engine

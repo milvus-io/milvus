@@ -23,73 +23,6 @@
 
 using namespace zilliz::vecwise;
 
-TEST_F(DBTest, Metric_Test) {
-
-    using namespace zilliz::vecwise;
-//    server::Metrics::GetInstance().Init();
-    server::Metrics::GetInstance().Init();
-//    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
-//    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
-
-    static const std::string group_name = "test_group";
-    static const int group_dim = 256;
-
-    engine::meta::GroupSchema group_info;
-    group_info.dimension = group_dim;
-    group_info.group_id = group_name;
-    engine::Status stat = db_->add_group(group_info);
-
-    engine::meta::GroupSchema group_info_get;
-    group_info_get.group_id = group_name;
-
-//    int iter = 600000;
-//    for (int i = 0; i < iter; ++i) {
-//        db_->get_group(group_info);
-//        bool b = i % 2;
-//        db_->has_group(std::to_string(i),b);
-//        db_->add_group(group_info);
-//
-//        std::this_thread::sleep_for(std::chrono::microseconds(1));
-//    }
-    stat = db_->get_group(group_info_get);
-    ASSERT_STATS(stat);
-    ASSERT_EQ(group_info_get.dimension, group_dim);
-
-    engine::IDNumbers vector_ids;
-    engine::IDNumbers target_ids;
-
-    int d = 256;
-    int nb = 50;
-    float *xb = new float[d * nb];
-    for(int i = 0; i < nb; i++) {
-        for(int j = 0; j < d; j++) xb[d * i + j] = drand48();
-        xb[d * i] += i / 2000.;
-    }
-
-    int qb = 5;
-    float *qxb = new float[d * qb];
-    for(int i = 0; i < qb; i++) {
-        for(int j = 0; j < d; j++) qxb[d * i + j] = drand48();
-        qxb[d * i] += i / 2000.;
-    }
-
-    int loop =100000;
-
-    for (auto i=0; i<loop; ++i) {
-        if (i==40) {
-            db_->add_vectors(group_name, qb, qxb, target_ids);
-            ASSERT_EQ(target_ids.size(), qb);
-        } else {
-            db_->add_vectors(group_name, nb, xb, vector_ids);
-        }
-        std::this_thread::sleep_for(std::chrono::microseconds(5));
-    }
-
-//    search.join();
-
-    delete [] xb;
-    delete [] qxb;
-};
 
 
 TEST_F(DBTest, Metric_Tes) {
@@ -104,16 +37,15 @@ TEST_F(DBTest, Metric_Tes) {
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
 
-    engine::meta::GroupSchema group_info;
+    engine::meta::TableSchema group_info;
     group_info.dimension = group_dim;
-    group_info.group_id = group_name;
-    engine::Status stat = db_->add_group(group_info);
+    group_info.table_id = group_name;
+    engine::Status stat = db_->CreateTable(group_info);
 
-    engine::meta::GroupSchema group_info_get;
-    group_info_get.group_id = group_name;
-    stat = db_->get_group(group_info_get);
-    ASSERT_STATS(stat);
-    ASSERT_EQ(group_info_get.dimension, group_dim);
+    engine::meta::TableSchema group_info_get;
+    group_info_get.table_id = group_name;
+    stat = db_->DescribeTable(group_info_get);
+
 
     engine::IDNumbers vector_ids;
     engine::IDNumbers target_ids;
@@ -145,11 +77,11 @@ TEST_F(DBTest, Metric_Tes) {
 
         for (auto j=0; j<10; ++j) {
             ss.str("");
-            db_->count(group_name, count);
+            db_->Size(count);
             prev_count = count;
 
             START_TIMER;
-            stat = db_->search(group_name, k, qb, qxb, results);
+            stat = db_->Query(group_name, k, qb, qxb, results);
             ss << "Search " << j << " With Size " << (float)(count*group_dim*sizeof(float))/(1024*1024) << " M";
 //            STOP_TIMER(ss.str());
 
@@ -172,10 +104,10 @@ TEST_F(DBTest, Metric_Tes) {
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
-            db_->add_vectors(group_name, qb, qxb, target_ids);
+            db_->InsertVectors(group_name, qb, qxb, target_ids);
             ASSERT_EQ(target_ids.size(), qb);
         } else {
-            db_->add_vectors(group_name, nb, xb, vector_ids);
+            db_->InsertVectors(group_name, nb, xb, vector_ids);
         }
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }

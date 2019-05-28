@@ -3,14 +3,14 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
-
 #pragma once
 
-#include <string>
-#include <memory>
 #include "DB.h"
 #include "DBMetaImpl.h"
 #include "Options.h"
+
+#include <string>
+#include <memory>
 
 namespace zilliz {
 namespace vecwise {
