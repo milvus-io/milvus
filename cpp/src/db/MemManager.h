@@ -26,24 +26,24 @@ namespace meta {
 template <typename EngineT>
 class MemVectors {
 public:
-    typedef typename EngineT::Ptr EnginePtr;
-    typedef typename meta::Meta::Ptr MetaPtr;
-    typedef std::shared_ptr<MemVectors<EngineT>> Ptr;
+    using EnginePtr = typename EngineT::Ptr;
+    using MetaPtr = meta::Meta::Ptr;
+    using Ptr = std::shared_ptr<MemVectors<EngineT>>;
 
     explicit MemVectors(const std::shared_ptr<meta::Meta>&,
             const meta::TableFileSchema&, const Options&);
 
-    void add(size_t n_, const float* vectors_, IDNumbers& vector_ids_);
+    void Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
-    size_t total() const;
+    size_t Total() const;
 
-    size_t approximate_size() const;
+    size_t ApproximateSize() const;
 
-    Status serialize(std::string& table_id);
+    Status Serialize(std::string& table_id);
 
     ~MemVectors();
 
-    const std::string& location() const { return schema_.location; }
+    const std::string& Location() const { return schema_.location; }
 
 private:
     MemVectors() = delete;
@@ -53,7 +53,7 @@ private:
     MetaPtr pMeta_;
     Options options_;
     meta::TableFileSchema schema_;
-    IDGenerator* _pIdGenerator;
+    IDGenerator* pIdGenerator_;
     EnginePtr pEE_;
 
 }; // MemVectors
@@ -63,32 +63,32 @@ private:
 template<typename EngineT>
 class MemManager {
 public:
-    typedef typename meta::Meta::Ptr MetaPtr;
-    typedef typename MemVectors<EngineT>::Ptr MemVectorsPtr;
-    typedef std::shared_ptr<MemManager<EngineT>> Ptr;
+    using MetaPtr = meta::Meta::Ptr;
+    using MemVectorsPtr = typename MemVectors<EngineT>::Ptr;
+    using Ptr = std::shared_ptr<MemManager<EngineT>>;
 
-    MemManager(const std::shared_ptr<meta::Meta>& meta_, const Options& options)
-        : _pMeta(meta_), options_(options) {}
+    MemManager(const std::shared_ptr<meta::Meta>& meta, const Options& options)
+        : pMeta_(meta), options_(options) {}
 
-    MemVectorsPtr get_mem_by_group(const std::string& table_id_);
+    MemVectorsPtr GetMemByTable(const std::string& table_id);
 
-    Status add_vectors(const std::string& table_id_,
-            size_t n_, const float* vectors_, IDNumbers& vector_ids_);
+    Status InsertVectors(const std::string& table_id,
+            size_t n, const float* vectors, IDNumbers& vector_ids);
 
-    Status serialize(std::vector<std::string>& table_ids);
+    Status Serialize(std::vector<std::string>& table_ids);
 
 private:
-    Status add_vectors_no_lock(const std::string& table_id_,
-            size_t n_, const float* vectors_, IDNumbers& vector_ids_);
-    Status mark_memory_as_immutable();
+    Status InsertVectorsNoLock(const std::string& table_id,
+            size_t n, const float* vectors, IDNumbers& vector_ids);
+    Status ToImmutable();
 
-    typedef std::map<std::string, MemVectorsPtr> MemMap;
-    typedef std::vector<MemVectorsPtr> ImmMemPool;
-    MemMap _memMap;
-    ImmMemPool _immMems;
-    MetaPtr _pMeta;
+    using MemMap = std::map<std::string, MemVectorsPtr>;
+    using ImmMemPool = std::vector<MemVectorsPtr>;
+    MemMap memMap_;
+    ImmMemPool immMems_;
+    MetaPtr pMeta_;
     Options options_;
-    std::mutex _mutex;
+    std::mutex mutex_;
     std::mutex serialization_mtx_;
 }; // MemManager
 

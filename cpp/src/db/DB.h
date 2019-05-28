@@ -21,22 +21,22 @@ class DB {
 public:
     static void Open(const Options& options, DB** dbptr);
 
-    virtual Status add_group(meta::TableSchema& table_schema_) = 0;
-    virtual Status get_group(meta::TableSchema& table_schema_) = 0;
-    virtual Status has_group(const std::string& table_id_, bool& has_or_not_) = 0;
+    virtual Status CreateTable(meta::TableSchema& table_schema_) = 0;
+    virtual Status DescribeTable(meta::TableSchema& table_schema_) = 0;
+    virtual Status HasTable(const std::string& table_id_, bool& has_or_not_) = 0;
 
-    virtual Status add_vectors(const std::string& table_id_,
+    virtual Status InsertVectors(const std::string& table_id_,
             size_t n, const float* vectors, IDNumbers& vector_ids_) = 0;
 
-    virtual Status search(const std::string& table_id, size_t k, size_t nq,
+    virtual Status Query(const std::string& table_id, size_t k, size_t nq,
             const float* vectors, QueryResults& results) = 0;
 
-    virtual Status search(const std::string& table_id, size_t k, size_t nq,
+    virtual Status Query(const std::string& table_id, size_t k, size_t nq,
             const float* vectors, const meta::DatesT& dates, QueryResults& results) = 0;
 
-    virtual Status size(long& result) = 0;
+    virtual Status Size(long& result) = 0;
 
-    virtual Status drop_all() = 0;
+    virtual Status DropAll() = 0;
 
     DB() = default;
     DB(const DB&) = delete;

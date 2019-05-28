@@ -34,38 +34,38 @@ DBImpl<EngineT>::DBImpl(const Options& options)
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::add_group(meta::TableSchema& table_schema) {
+Status DBImpl<EngineT>::CreateTable(meta::TableSchema& table_schema) {
     return pMeta_->CreateTable(table_schema);
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::get_group(meta::TableSchema& table_schema) {
+Status DBImpl<EngineT>::DescribeTable(meta::TableSchema& table_schema) {
     return pMeta_->DescribeTable(table_schema);
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::has_group(const std::string& table_id, bool& has_or_not) {
+Status DBImpl<EngineT>::HasTable(const std::string& table_id, bool& has_or_not) {
     return pMeta_->HasTable(table_id, has_or_not);
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::add_vectors(const std::string& table_id_,
+Status DBImpl<EngineT>::InsertVectors(const std::string& table_id_,
         size_t n, const float* vectors, IDNumbers& vector_ids_) {
-    Status status = pMemMgr_->add_vectors(table_id_, n, vectors, vector_ids_);
+    Status status = pMemMgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
     if (!status.ok()) {
         return status;
     }
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::search(const std::string &table_id, size_t k, size_t nq,
+Status DBImpl<EngineT>::Query(const std::string &table_id, size_t k, size_t nq,
                       const float *vectors, QueryResults &results) {
     meta::DatesT dates = {meta::Meta::GetDate()};
-    return search(table_id, k, nq, vectors, dates, results);
+    return Query(table_id, k, nq, vectors, dates, results);
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::search(const std::string& table_id, size_t k, size_t nq,
+Status DBImpl<EngineT>::Query(const std::string& table_id, size_t k, size_t nq,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
 
     meta::DatePartionedTableFilesSchema files;
@@ -384,7 +384,7 @@ Status DBImpl<EngineT>::TryBuildIndex() {
 template<typename EngineT>
 void DBImpl<EngineT>::BackgroundCompaction() {
     std::vector<std::string> table_ids;
-    pMemMgr_->serialize(table_ids);
+    pMemMgr_->Serialize(table_ids);
 
     Status status;
     for (auto table_id : table_ids) {
@@ -397,12 +397,12 @@ void DBImpl<EngineT>::BackgroundCompaction() {
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::drop_all() {
+Status DBImpl<EngineT>::DropAll() {
     return pMeta_->DropAll();
 }
 
 template<typename EngineT>
-Status DBImpl<EngineT>::size(long& result) {
+Status DBImpl<EngineT>::Size(long& result) {
     return  pMeta_->Size(result);
 }
 
@@ -423,7 +423,7 @@ DBImpl<EngineT>::~DBImpl() {
     }
     bg_timer_thread_.join();
     std::vector<std::string> ids;
-    pMemMgr_->serialize(ids);
+    pMemMgr_->Serialize(ids);
     env_->Stop();
 }
 
