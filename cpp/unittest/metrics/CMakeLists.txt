@@ -16,7 +16,7 @@ aux_source_directory(../../src/db db_srcs)
 aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(../../src/wrapper wrapper_src)
-aux_source_directory(../../src/metrics metrics_files)
+#aux_source_directory(../../src/metrics metrics_files)
 
 include_directories(/usr/include)
 include_directories(../../third_party/build/include)
@@ -27,11 +27,12 @@ include_directories(../db/utils.h)
 
 
 set(require_files
-        ../../src/metrics/PrometheusMetrics.cpp
+        ../../src/metrics/Metrics.cpp
+#        ../../src/metrics/PrometheusMetrics.cpp
         ../../src/server/ServerConfig.cpp
         ../../src/utils/CommonUtil.cpp
         ../../src/utils/TimeRecorder.cpp
-        ../../src/metrics/PrometheusMetrics.cpp
+#        ../../src/metrics/PrometheusMetrics.cpp
         )
 
 set(count_test_src
@@ -47,7 +48,7 @@ set(count_test_src
         ${require_files}
         metrics_test.cpp
         ../db/utils.cpp
-        ../../src/metrics/Metrics.h ../../src/metrics/Metrics.cpp)
+        ../../src/metrics/Metrics.cpp)
 
 
 add_executable(metrics_test ${count_test_src} ${require_files} )
@@ -63,9 +64,9 @@ target_link_libraries(metrics_test
         lz4
         metrics
         gtest
-        prometheus-cpp-pull
-        prometheus-cpp-push
-        prometheus-cpp-core
+#        prometheus-cpp-pull
+#        prometheus-cpp-push
+#        prometheus-cpp-core
         pthread
         z
 
