@@ -66,21 +66,21 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     static const int group_dim = 256;
     long size;
 
-    engine::meta::GroupSchema group_info;
+    engine::meta::TableSchema group_info;
     group_info.dimension = group_dim;
-    group_info.group_id = group_name;
-    engine::Status stat = db_->add_group(group_info);
+    group_info.table_id = group_name;
+    engine::Status stat = db_->CreateTable(group_info);
 
-    engine::meta::GroupSchema group_info_get;
-    group_info_get.group_id = group_name;
-    stat = db_->get_group(group_info_get);
+    engine::meta::TableSchema group_info_get;
+    group_info_get.table_id = group_name;
+    stat = db_->DescribeTable(group_info_get);
     ASSERT_STATS(stat);
     ASSERT_EQ(group_info_get.dimension, group_dim);
 
     engine::IDNumbers vector_ids;
     engine::IDNumbers target_ids;
 
-    db_->size(size);
+    db_->Size(size);
     int d = 256;
     int nb = 20;
     float *xb = new float[d * nb];
@@ -92,13 +92,13 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     int loop = 100000;
 
     for (auto i=0; i<loop; ++i) {
-        db_->add_vectors(group_name, nb, xb, vector_ids);
+        db_->InsertVectors(group_name, nb, xb, vector_ids);
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    db_->size(size);
+    db_->Size(size);
     LOG(DEBUG) << "size=" << size;
     ASSERT_TRUE(size < 1 * engine::meta::G);
 
@@ -111,14 +111,14 @@ TEST_F(DBTest, DB_TEST) {
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
 
-    engine::meta::GroupSchema group_info;
+    engine::meta::TableSchema group_info;
     group_info.dimension = group_dim;
-    group_info.group_id = group_name;
-    engine::Status stat = db_->add_group(group_info);
+    group_info.table_id = group_name;
+    engine::Status stat = db_->CreateTable(group_info);
 
-    engine::meta::GroupSchema group_info_get;
-    group_info_get.group_id = group_name;
-    stat = db_->get_group(group_info_get);
+    engine::meta::TableSchema group_info_get;
+    group_info_get.table_id = group_name;
+    stat = db_->DescribeTable(group_info_get);
     ASSERT_STATS(stat);
     ASSERT_EQ(group_info_get.dimension, group_dim);
 
@@ -152,12 +152,12 @@ TEST_F(DBTest, DB_TEST) {
 
         for (auto j=0; j<10; ++j) {
             ss.str("");
-            db_->count(group_name, count);
+            db_->Size(count);
             prev_count = count;
 
             START_TIMER;
-            stat = db_->search(group_name, k, qb, qxb, results);
-            ss << "Search " << j << " With Size " << (float)(count*group_dim*sizeof(float))/engine::meta::M << " M";
+            stat = db_->Query(group_name, k, qb, qxb, results);
+            ss << "Search " << j << " With Size " << count/engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_STATS(stat);
@@ -179,10 +179,10 @@ TEST_F(DBTest, DB_TEST) {
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
-            db_->add_vectors(group_name, qb, qxb, target_ids);
+            db_->InsertVectors(group_name, qb, qxb, target_ids);
             ASSERT_EQ(target_ids.size(), qb);
         } else {
-            db_->add_vectors(group_name, nb, xb, vector_ids);
+            db_->InsertVectors(group_name, nb, xb, vector_ids);
         }
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
@@ -197,14 +197,14 @@ TEST_F(DBTest, SEARCH_TEST) {
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
 
-    engine::meta::GroupSchema group_info;
+    engine::meta::TableSchema group_info;
     group_info.dimension = group_dim;
-    group_info.group_id = group_name;
-    engine::Status stat = db_->add_group(group_info);
+    group_info.table_id = group_name;
+    engine::Status stat = db_->CreateTable(group_info);
 
-    engine::meta::GroupSchema group_info_get;
-    group_info_get.group_id = group_name;
-    stat = db_->get_group(group_info_get);
+    engine::meta::TableSchema group_info_get;
+    group_info_get.table_id = group_name;
+    stat = db_->DescribeTable(group_info_get);
     ASSERT_STATS(stat);
     ASSERT_EQ(group_info_get.dimension, group_dim);
 
@@ -238,7 +238,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     // insert data
     const int batch_size = 100;
     for (int j = 0; j < nb / batch_size; ++j) {
-        stat = db_->add_vectors(group_name, batch_size, xb.data()+batch_size*j*group_dim, ids);
+        stat = db_->InsertVectors(group_name, batch_size, xb.data()+batch_size*j*group_dim, ids);
         if (j == 200){ sleep(1);}
         ASSERT_STATS(stat);
     }
@@ -246,7 +246,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     sleep(2); // wait until build index finish
 
     engine::QueryResults results;
-    stat = db_->search(group_name, k, nq, xq.data(), results);
+    stat = db_->Query(group_name, k, nq, xq.data(), results);
     ASSERT_STATS(stat);
 
     // TODO(linxj): add groundTruth assert

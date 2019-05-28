@@ -59,5 +59,5 @@ void MetaTest::SetUp() {
 }
 
 void MetaTest::TearDown() {
-    impl_->drop_all();
+    impl_->DropAll();
 }
