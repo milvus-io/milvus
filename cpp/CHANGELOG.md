@@ -11,10 +11,10 @@ Please mark all change in change log and use the ticket from JIRA.
 ### New Feature
 
 - MS-5 - Implement Auto Archive Feature
-- MS-20 - Clean Code Part 1
 
 ### Task
 
 - MS-1 - Add CHANGELOG.md
 - MS-4 - Refactor the vecwise_engine code structure
 - MS-6 - Implement SDK interface part 1
+- MS-20 - Clean Code Part 1
