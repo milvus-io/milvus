@@ -64,6 +64,12 @@ Status DBImpl<EngineT>::get_group(meta::GroupSchema& group_info) {
 }
 
 template<typename EngineT>
+Status DBImpl<EngineT>::delete_vectors(const std::string& group_id,
+        const meta::DatesT& dates) {
+    return _pMeta->delete_group_partitions(group_id, dates);
+}
+
+template<typename EngineT>
 Status DBImpl<EngineT>::has_group(const std::string& group_id_, bool& has_or_not_) {
     Status result = _pMeta->has_group(group_id_, has_or_not_);
     if(result.ok()){
@@ -369,7 +375,7 @@ Status DBImpl<EngineT>::merge_files(const std::string& group_id, const meta::Dat
     } else {
         group_file.file_type = meta::GroupFileSchema::RAW;
     }
-    group_file.rows = index_size;
+    group_file.size = index_size;
     updated.push_back(group_file);
     status = _pMeta->update_files(updated);
     LOG(DEBUG) << "New merged file " << group_file.file_id <<
@@ -403,6 +409,8 @@ Status DBImpl<EngineT>::background_merge_files(const std::string& group_id) {
         merge_files(group_id, kv.first, kv.second);
     }
 
+    _pMeta->archive_files();
+
     try_build_index();
 
     _pMeta->cleanup_ttl_files(1);
@@ -430,7 +438,7 @@ Status DBImpl<EngineT>::build_index(const meta::GroupFileSchema& file) {
     METRICS_INSTANCE.BuildIndexDurationSecondsHistogramObserve(total_time);
 
     group_file.file_type = meta::GroupFileSchema::INDEX;
-    group_file.rows = index->Size();
+    group_file.size = index->Size();
 
     auto to_remove = file;
     to_remove.file_type = meta::GroupFileSchema::TO_DELETE;
@@ -443,6 +451,7 @@ Status DBImpl<EngineT>::build_index(const meta::GroupFileSchema& file) {
         << " from file " << to_remove.file_id;
 
     index->Cache();
+    _pMeta->archive_files();
 
     return Status::OK();
 }
@@ -501,6 +510,11 @@ Status DBImpl<EngineT>::drop_all() {
 template<typename EngineT>
 Status DBImpl<EngineT>::count(const std::string& group_id, long& result) {
     return _pMeta->count(group_id, result);
+}
+
+template<typename EngineT>
+Status DBImpl<EngineT>::size(long& result) {
+    return  _pMeta->size(result);
 }
 
 template<typename EngineT>

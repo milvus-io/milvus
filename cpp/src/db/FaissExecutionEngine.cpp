@@ -48,12 +48,12 @@ size_t FaissExecutionEngine<IndexTrait>::Count() const {
 
 template<class IndexTrait>
 size_t FaissExecutionEngine<IndexTrait>::Size() const {
-    return (size_t)(Count() * pIndex_->d);
+    return (size_t)(Count() * pIndex_->d)*sizeof(float);
 }
 
 template<class IndexTrait>
 size_t FaissExecutionEngine<IndexTrait>::PhysicalSize() const {
-    return (size_t)(Size()*sizeof(float));
+    return (size_t)(Count() * pIndex_->d)*sizeof(float);
 }
 
 template<class IndexTrait>

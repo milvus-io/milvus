@@ -29,17 +29,28 @@ void DBTest::InitLog() {
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
-void DBTest::SetUp() {
-    InitLog();
+engine::Options DBTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/vecwise_test";
+    return options;
+}
+
+void DBTest::SetUp() {
+    InitLog();
+    auto options = GetOptions();
     db_ = engine::DBFactory::Build(options, "Faiss,IDMap");
 }
 
 void DBTest::TearDown() {
     delete db_;
-    auto options = engine::OptionsFactory::Build();
     boost::filesystem::remove_all("/tmp/vecwise_test");
+}
+
+engine::Options DBTest2::GetOptions() {
+    auto options = engine::OptionsFactory::Build();
+    options.meta.path = "/tmp/vecwise_test";
+    options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
+    return options;
 }
 
 void MetaTest::SetUp() {
