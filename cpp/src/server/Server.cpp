@@ -10,6 +10,7 @@
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 #include "license/LicenseCheck.h"
+#include "metrics/Metrics.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -137,7 +138,7 @@ int
 Server::Start() {
 //    server::Metrics::GetInstance().Init();
 //    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
-    METRICS_INSTANCE.Init();
+    server::Metrics::GetInstance().Init();
 
     if (daemonized_) {
         Daemonize();
