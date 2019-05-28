@@ -33,22 +33,22 @@ public:
 
     DBImpl(const Options& options);
 
-    virtual Status add_group(meta::TableSchema& table_schema) override;
-    virtual Status get_group(meta::TableSchema& table_schema) override;
-    virtual Status has_group(const std::string& table_id, bool& has_or_not) override;
+    virtual Status CreateTable(meta::TableSchema& table_schema) override;
+    virtual Status DescribeTable(meta::TableSchema& table_schema) override;
+    virtual Status HasTable(const std::string& table_id, bool& has_or_not) override;
 
-    virtual Status add_vectors(const std::string& table_id,
+    virtual Status InsertVectors(const std::string& table_id,
             size_t n, const float* vectors, IDNumbers& vector_ids) override;
 
-    virtual Status search(const std::string& table_id, size_t k, size_t nq,
+    virtual Status Query(const std::string& table_id, size_t k, size_t nq,
             const float* vectors, QueryResults& results) override;
 
-    virtual Status search(const std::string& table_id, size_t k, size_t nq,
+    virtual Status Query(const std::string& table_id, size_t k, size_t nq,
             const float* vectors, const meta::DatesT& dates, QueryResults& results) override;
 
-    virtual Status drop_all() override;
+    virtual Status DropAll() override;
 
-    virtual Status size(long& result) override;
+    virtual Status Size(long& result) override;
 
     virtual ~DBImpl();
 
