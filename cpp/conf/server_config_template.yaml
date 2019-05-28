@@ -1,7 +1,7 @@
 server_config:
   address: 0.0.0.0
   port: 33001
-  transfer_protocol: json     #optional: binary, compact, json, debug
+  transfer_protocol: binary    #optional: binary, compact, json
   server_mode: thread_pool    #optional: simple, thread_pool
   gpu_index: 0                #which gpu to be used
 

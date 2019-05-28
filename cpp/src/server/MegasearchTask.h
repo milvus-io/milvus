@@ -66,6 +66,20 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class ShowTablesTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(std::vector<std::string>& tables);
+
+protected:
+    ShowTablesTask(std::vector<std::string>& tables);
+
+    ServerError OnExecute() override;
+
+private:
+    std::vector<std::string>& tables_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class AddVectorTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& table_name,
