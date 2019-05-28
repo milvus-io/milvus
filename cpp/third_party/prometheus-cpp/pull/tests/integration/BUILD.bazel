@@ -1,0 +1,26 @@
+cc_binary(
+    name = "sample-server",
+    srcs = ["sample_server.cc"],
+    deps = ["//pull"],
+)
+
+sh_test(
+    name = "scrape-test",
+    size = "small",
+    srcs = ["scrape.sh"],
+    data = [
+        "sample-server",
+        "scrape.conf",
+    ],
+    tags = ["manual"],
+)
+
+sh_test(
+    name = "lint-test",
+    size = "small",
+    srcs = ["lint.sh"],
+    data = [
+        "sample-server",
+    ],
+    tags = ["manual"],
+)

@@ -1,0 +1,12 @@
+PROJECT_NAME           = "Prometheus Client Library for Modern C++"
+
+EXCLUDE_PATTERNS       = */detail/*
+EXCLUDE_SYMBOLS        = prometheus::detail::*
+FILE_PATTERNS          = *.h *.cc
+GENERATE_LATEX         = NO
+GRAPHICAL_HIERARCHY    = NO
+INPUT                  = ../core/include ../core/src ../pull/include ../pull/src ../push/include ../push/src
+RECURSIVE              = YES
+SHOW_FILES             = NO
+SHOW_INCLUDE_FILES     = NO
+SHOW_USED_FILES        = NO
