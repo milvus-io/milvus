@@ -11,7 +11,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ### New Feature
 
 - MS-5 - Implement Auto Archive Feature
-
+- MS-16 - Implement metrics without prometheus
 ### Task
 
 - MS-1 - Add CHANGELOG.md
