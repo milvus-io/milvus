@@ -5,11 +5,12 @@
  ******************************************************************************/
 #pragma once
 
-#include <string>
 #include "Options.h"
 #include "Meta.h"
 #include "Status.h"
 #include "Types.h"
+
+#include <string>
 
 namespace zilliz {
 namespace vecwise {
