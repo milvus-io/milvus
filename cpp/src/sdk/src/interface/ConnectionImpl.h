@@ -51,7 +51,7 @@ public:
     virtual std::string ServerStatus() const override;
 
 private:
-    std::shared_ptr<ClientProxy> client_proxy;
+    std::shared_ptr<ClientProxy> client_proxy_;
 };
     
 }
