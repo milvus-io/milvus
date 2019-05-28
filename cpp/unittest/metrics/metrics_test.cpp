@@ -10,11 +10,11 @@
 #include <string>
 #include <thread>
 #include <gtest/gtest.h>
-#include "prometheus/registry.h"
-#include "prometheus/exposer.h"
+//#include "prometheus/registry.h"
+//#include "prometheus/exposer.h"
 #include <cache/CpuCacheMgr.h>
 
-#include "metrics/MetricBase.h"
+#include "metrics/Metrics.h"
 #include "../db/utils.h"
 #include "db/DB.h"
 #include "db/DBMetaImpl.h"
@@ -27,7 +27,7 @@ TEST_F(DBTest, Metric_Test) {
 
     using namespace zilliz::vecwise;
 //    server::Metrics::GetInstance().Init();
-    server::PrometheusMetrics::GetInstance().Init();
+    server::Metrics::GetInstance().Init();
 //    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
 //    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
 
@@ -97,7 +97,7 @@ TEST_F(DBTest, Metric_Tes) {
 
 //    server::Metrics::GetInstance().Init();
 //    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
-    server::PrometheusMetrics::GetInstance().Init();
+    server::Metrics::GetInstance().Init();
 //    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
     zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->SetCapacity(1*1024*1024*1024);
     std::cout<<zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->CacheCapacity()<<std::endl;
