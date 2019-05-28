@@ -18,3 +18,4 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-4 - Refactor the vecwise_engine code structure
 - MS-6 - Implement SDK interface part 1
 - MS-20 - Clean Code Part 1
+- MS-6 - Implement SDK interface part 2
