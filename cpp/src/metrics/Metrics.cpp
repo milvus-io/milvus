@@ -10,22 +10,27 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
-ServerError
-PrometheusMetrics::Init() {
-    ConfigNode& configNode = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);
-    startup_ = configNode.GetValue(CONFIG_METRIC_IS_STARTUP) == "true" ? true:false;
-    // Following should be read from config file.
-    const std::string bind_address = "8080";
-    const std::string uri = std::string("/metrics");
-    const std::size_t num_threads = 2;
+MetricsBase &
+Metrics::CreateMetricsCollector(MetricCollectorType collector_type) {
+    switch (collector_type) {
+        case MetricCollectorType::PROMETHEUS:
+//            static PrometheusMetrics instance = PrometheusMetrics::GetInstance();
+            return MetricsBase::GetInstance();
+        default:return MetricsBase::GetInstance();
+    }
+}
 
-    // Init Exposer
-    exposer_ptr_ = std::make_shared<prometheus::Exposer>(bind_address, uri, num_threads);
-
-    // Exposer Registry
-    exposer_ptr_->RegisterCollectable(registry_);
-
-    return SERVER_SUCCESS;
+MetricsBase &
+Metrics::GetInstance() {
+    ConfigNode &config = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);
+    std::string collector_typr_str = config.GetValue(CONFIG_METRIC_COLLECTOR);
+    if (collector_typr_str == "prometheus") {
+        return CreateMetricsCollector(MetricCollectorType::PROMETHEUS);
+    } else if (collector_typr_str == "zabbix") {
+        return CreateMetricsCollector(MetricCollectorType::ZABBIX);
+    } else {
+        return CreateMetricsCollector(MetricCollectorType::INVALID);
+    }
 }
 
 }

@@ -150,14 +150,14 @@ Status DBMetaImpl::delete_group_partitions(const std::string& group_id,
 }
 
 Status DBMetaImpl::add_group(GroupSchema& group_info) {
-    METRICS_INSTANCE.MetaAccessTotalIncrement();
+    server::Metrics::GetInstance().MetaAccessTotalIncrement();
     if (group_info.group_id == "") {
         NextGroupId(group_info.group_id);
     }
     group_info.files_cnt = 0;
     group_info.id = -1;
     group_info.created_on = utils::GetMicroSecTimeStamp();
-    auto start_time = MERTICS_NOW_TIME;
+    auto start_time = METRICS_NOW_TIME;
     {
         try {
             auto id = ConnectorPtr->insert(group_info);
@@ -168,7 +168,7 @@ Status DBMetaImpl::add_group(GroupSchema& group_info) {
     }
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-    METRICS_INSTANCE.MetaAccessDurationSecondsHistogramObserve(total_time);
+    server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
 
     auto group_path = GetGroupPath(group_info.group_id);
 
@@ -189,7 +189,7 @@ Status DBMetaImpl::get_group(GroupSchema& group_info) {
 
 Status DBMetaImpl::get_group_no_lock(GroupSchema& group_info) {
     try {
-        METRICS_INSTANCE.MetaAccessTotalIncrement();
+        server::Metrics::GetInstance().MetaAccessTotalIncrement();
         auto start_time = METRICS_NOW_TIME;
         auto groups = ConnectorPtr->select(columns(&GroupSchema::id,
                                                   &GroupSchema::group_id,
@@ -198,7 +198,7 @@ Status DBMetaImpl::get_group_no_lock(GroupSchema& group_info) {
                                           where(c(&GroupSchema::group_id) == group_info.group_id));
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-        METRICS_INSTANCE.MetaAccessDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
         assert(groups.size() <= 1);
         if (groups.size() == 1) {
             group_info.id = std::get<0>(groups[0]);
@@ -217,13 +217,13 @@ Status DBMetaImpl::get_group_no_lock(GroupSchema& group_info) {
 
 Status DBMetaImpl::has_group(const std::string& group_id, bool& has_or_not) {
     try {
-        METRICS_INSTANCE.MetaAccessTotalIncrement();
+        server::Metrics::GetInstance().MetaAccessTotalIncrement();
         auto start_time = METRICS_NOW_TIME;
         auto groups = ConnectorPtr->select(columns(&GroupSchema::id),
                                           where(c(&GroupSchema::group_id) == group_id));
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-        METRICS_INSTANCE.MetaAccessDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
         assert(groups.size() <= 1);
         if (groups.size() == 1) {
             has_or_not = true;
@@ -258,12 +258,12 @@ Status DBMetaImpl::add_group_file(GroupFileSchema& group_file) {
 
     {
         try {
-            METRICS_INSTANCE.MetaAccessTotalIncrement();
+            server::Metrics::GetInstance().MetaAccessTotalIncrement();
             auto start_time = METRICS_NOW_TIME;
             auto id = ConnectorPtr->insert(group_file);
             auto end_time = METRICS_NOW_TIME;
             auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-            METRICS_INSTANCE.MetaAccessDurationSecondsHistogramObserve(total_time);
+            server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
             group_file.id = id;
         } catch (...) {
             return Status::DBTransactionError("Add file Error");
@@ -287,7 +287,7 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
     files.clear();
 
     try {
-        METRICS_INSTANCE.MetaAccessTotalIncrement();
+        server::Metrics::GetInstance().MetaAccessTotalIncrement();
         auto start_time =METRICS_NOW_TIME;
         auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
                                                    &GroupFileSchema::group_id,
@@ -298,7 +298,7 @@ Status DBMetaImpl::files_to_index(GroupFilesSchema& files) {
                                           where(c(&GroupFileSchema::file_type) == (int)GroupFileSchema::TO_INDEX));
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-        METRICS_INSTANCE.MetaAccessDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
 
         std::map<std::string, GroupSchema> groups;
 
@@ -340,7 +340,7 @@ Status DBMetaImpl::files_to_search(const std::string &group_id,
     const DatesT& dates = (partition.empty() == true) ? today : partition;
 
     try {
-        METRICS_INSTANCE.MetaAccessTotalIncrement();
+        server::Metrics::GetInstance().MetaAccessTotalIncrement();
         auto start_time = METRICS_NOW_TIME;
         auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
                                                      &GroupFileSchema::group_id,
@@ -355,7 +355,7 @@ Status DBMetaImpl::files_to_search(const std::string &group_id,
                                                      c(&GroupFileSchema::file_type) == (int) GroupFileSchema::INDEX)));
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-        METRICS_INSTANCE.MetaAccessDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
         GroupSchema group_info;
         group_info.group_id = group_id;
         auto status = get_group_no_lock(group_info);
@@ -392,7 +392,7 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
     files.clear();
 
     try {
-        METRICS_INSTANCE.MetaAccessTotalIncrement();
+        server::Metrics::GetInstance().MetaAccessTotalIncrement();
         auto start_time = METRICS_NOW_TIME;
         auto selected = ConnectorPtr->select(columns(&GroupFileSchema::id,
                                                    &GroupFileSchema::group_id,
@@ -404,7 +404,7 @@ Status DBMetaImpl::files_to_merge(const std::string& group_id,
                                                 c(&GroupFileSchema::group_id) == group_id));
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-        METRICS_INSTANCE.MetaAccessDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
         GroupSchema group_info;
         group_info.group_id = group_id;
         auto status = get_group_no_lock(group_info);
@@ -592,12 +592,12 @@ Status DBMetaImpl::discard_files_of_size(long to_discard_size) {
 Status DBMetaImpl::update_group_file(GroupFileSchema& group_file) {
     group_file.updated_time = utils::GetMicroSecTimeStamp();
     try {
-        METRICS_INSTANCE.MetaAccessTotalIncrement();
+        server::Metrics::GetInstance().MetaAccessTotalIncrement();
         auto start_time = METRICS_NOW_TIME;
         ConnectorPtr->update(group_file);
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-        METRICS_INSTANCE.MetaAccessDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
     } catch (std::exception & e) {
         LOG(DEBUG) << e.what();
         LOG(DEBUG) << "id= " << group_file.id << " file_id=" << group_file.file_id;
@@ -608,7 +608,7 @@ Status DBMetaImpl::update_group_file(GroupFileSchema& group_file) {
 
 Status DBMetaImpl::update_files(GroupFilesSchema& files) {
     try {
-        METRICS_INSTANCE.MetaAccessTotalIncrement();
+        server::Metrics::GetInstance().MetaAccessTotalIncrement();
         auto start_time = METRICS_NOW_TIME;
         auto commited = ConnectorPtr->transaction([&] () mutable {
             for (auto& file : files) {
@@ -617,7 +617,7 @@ Status DBMetaImpl::update_files(GroupFilesSchema& files) {
             }
             auto end_time = METRICS_NOW_TIME;
             auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-            METRICS_INSTANCE.MetaAccessDurationSecondsHistogramObserve(total_time);
+            server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
             return true;
         });
         if (!commited) {
@@ -706,7 +706,7 @@ Status DBMetaImpl::cleanup() {
 Status DBMetaImpl::count(const std::string& group_id, long& result) {
 
     try {
-        METRICS_INSTANCE.MetaAccessTotalIncrement();
+        server::Metrics::GetInstance().MetaAccessTotalIncrement();
         auto start_time = METRICS_NOW_TIME;
         auto selected = ConnectorPtr->select(columns(&GroupFileSchema::size,
                                                    &GroupFileSchema::date),
@@ -716,7 +716,7 @@ Status DBMetaImpl::count(const std::string& group_id, long& result) {
                                                 c(&GroupFileSchema::group_id) == group_id));
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-        METRICS_INSTANCE.MetaAccessDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
         GroupSchema group_info;
         group_info.group_id = group_id;
         auto status = get_group_no_lock(group_info);
