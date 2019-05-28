@@ -9,12 +9,8 @@
 
 #include "utils.h"
 #include "db/DB.h"
-<<<<<<< HEAD
-#include "metrics/Metrics.h"
-=======
 #include "db/DBImpl.h"
 #include "db/MetaConsts.h"
->>>>>>> main/branch-1.2
 
 using namespace zilliz::vecwise;
 
@@ -113,8 +109,6 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 TEST_F(DBTest, DB_TEST) {
 
 
-    server::Metrics::GetInstance().Init();
-    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
 
     static const std::string group_name = "test_group";
     static const int group_dim = 256;

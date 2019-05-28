@@ -15,7 +15,8 @@ set(unittest_libs
         yaml-cpp
         gtest_main
         gmock_main
-        pthread)
+        pthread
+        metrics)
 
 add_subdirectory(server)
 add_subdirectory(db)

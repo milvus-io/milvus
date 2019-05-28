@@ -16,18 +16,21 @@ aux_source_directory(../../src/db db_srcs)
 aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(../../src/wrapper wrapper_src)
-#aux_source_directory(../../src/metrics metrics_files)
+
 
 include_directories(/usr/include)
 include_directories(../../third_party/build/include)
 link_directories(../../third_party/build/lib)
 include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
-include_directories(../db/utils.h)
+#include_directories(../db/utils.h)
+include_directories(../../src/metrics)
 
 
 set(require_files
         ../../src/metrics/Metrics.cpp
+
+#        ../../src/cache/CacheMgr.cpp
 #        ../../src/metrics/PrometheusMetrics.cpp
         ../../src/server/ServerConfig.cpp
         ../../src/utils/CommonUtil.cpp
@@ -39,7 +42,6 @@ set(count_test_src
         #        ${unittest_srcs}
         #        ${config_files}
         #        ${require_files}
-        metrics_test.cpp
         ${unittest_srcs}
         ${config_files}
         ${cache_srcs}
@@ -48,7 +50,8 @@ set(count_test_src
         ${require_files}
         metrics_test.cpp
         ../db/utils.cpp
-        ../../src/metrics/Metrics.cpp)
+        ../../src/metrics/Metrics.h
+        )
 
 
 add_executable(metrics_test ${count_test_src} ${require_files} )

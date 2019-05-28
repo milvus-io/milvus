@@ -11,6 +11,14 @@ db_config:
   db_flush_interval: 5              #unit: second
   idmapper_max_open_file: 128
 
+metric_config:
+  is_startup: true # true is on, false is off
+  collector: prometheus # prometheus, now we only have prometheus
+  prometheus_config:
+    collect_type: pull # pull means prometheus pull the message from megasearch, push means megasearch push metric to push gateway
+    push_gateway_ip_address: 127.0.0.1
+    push_gateway_port: 9091
+
 license_config:
   license_path: "/tmp/system.license"
 

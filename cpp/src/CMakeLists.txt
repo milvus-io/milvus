@@ -13,6 +13,11 @@ aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
 #aux_source_directory(metrics metrics_files)
 
+set(metrics_files
+        metrics/Metrics.cpp
+        metrics/MetricBase.h
+)
+
 
 set(license_check_files
         license/LicenseLibrary.cpp
@@ -22,7 +27,7 @@ set(license_check_files
 set(license_generator_files
         license/LicenseGenerator.cpp
         license/LicenseLibrary.cpp
-        ../unittest/metrics/counter_test.cpp ../unittest/metrics/metrics_test.cpp)
+        )
 
 set(service_files
         thrift/gen-cpp/MegasearchService.cpp
@@ -35,8 +40,8 @@ set(vecwise_engine_files
         ${cache_files}
         ${db_files}
         ${wrapper_files}
-        metrics/Metrics.cpp
-#        ${metrics_files}
+#        metrics/Metrics.cpp
+        ${metrics_files}
         )
 
 set(get_sys_info_files
@@ -97,6 +102,8 @@ endif ()
 cuda_add_library(vecwise_engine STATIC ${vecwise_engine_files})
 target_link_libraries(vecwise_engine ${engine_libs})
 
+add_library(metrics STATIC ${metrics_files})
+
 if (ENABLE_LICENSE STREQUAL "ON")
         add_library(vecwise_license STATIC ${license_check_files})
         target_link_libraries(vecwise_license ${license_libs})
@@ -108,7 +115,7 @@ endif ()
 #        libprometheus-cpp-core.a
 #        )
 
-#add_library(metrics STATIC ${metrics_files} metrics/MetricBase.h)
+#add_library(vecwise_engine STATIC ${metrics_files} )
 #target_link_libraries(metrics ${metrics_lib})
 
 add_executable(vecwise_server
@@ -116,7 +123,7 @@ add_executable(vecwise_server
         ${server_files}
         ${utils_files}
         ${service_files}
-#        ${metrics_files}
+        ${metrics_files}
         ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc
         )
 
