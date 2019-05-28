@@ -5,8 +5,10 @@
 ////////////////////////////////////////////////////////////////////////////////
 #pragma once
 
-#include <vector>
 #include "Types.h"
+
+#include <cstddef>
+#include <vector>
 
 namespace zilliz {
 namespace vecwise {
@@ -14,8 +16,8 @@ namespace engine {
 
 class IDGenerator {
 public:
-    virtual IDNumber getNextIDNumber() = 0;
-    virtual void getNextIDNumbers(size_t n, IDNumbers& ids) = 0;
+    virtual IDNumber GetNextIDNumber() = 0;
+    virtual void GetNextIDNumbers(size_t n, IDNumbers& ids) = 0;
 
     virtual ~IDGenerator();
 
@@ -24,11 +26,11 @@ public:
 
 class SimpleIDGenerator : public IDGenerator {
 public:
-    virtual IDNumber getNextIDNumber() override;
-    virtual void getNextIDNumbers(size_t n, IDNumbers& ids) override;
+    virtual IDNumber GetNextIDNumber() override;
+    virtual void GetNextIDNumbers(size_t n, IDNumbers& ids) override;
 
 private:
-    void nextIDNumbers(size_t n, IDNumbers& ids);
+    void NextIDNumbers(size_t n, IDNumbers& ids);
     const size_t MAX_IDS_PER_MICRO = 1000;
 
 }; // SimpleIDGenerator

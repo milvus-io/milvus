@@ -78,17 +78,17 @@ BaseTaskPtr CreateTableTask::Create(const thrift::TableSchema& schema) {
 
 ServerError CreateTableTask::OnExecute() {
     TimeRecorder rc("CreateTableTask");
-    
+
     try {
         if(schema_.vector_column_array.empty()) {
             return SERVER_INVALID_ARGUMENT;
         }
 
         IVecIdMapper::GetInstance()->AddGroup(schema_.table_name);
-        engine::meta::GroupSchema group_info;
-        group_info.dimension = (uint16_t)schema_.vector_column_array[0].dimension;
-        group_info.group_id = schema_.table_name;
-        engine::Status stat = DB()->add_group(group_info);
+        engine::meta::TableSchema table_schema;
+        table_schema.dimension = (uint16_t)schema_.vector_column_array[0].dimension;
+        table_schema.table_id = schema_.table_name;
+        engine::Status stat = DB()->CreateTable(table_schema);
         if(!stat.ok()) {//could exist
             error_msg_ = "Engine failed: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
@@ -123,9 +123,9 @@ ServerError DescribeTableTask::OnExecute() {
     TimeRecorder rc("DescribeTableTask");
 
     try {
-        engine::meta::GroupSchema group_info;
-        group_info.group_id = table_name_;
-        engine::Status stat = DB()->get_group(group_info);
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id = table_name_;
+        engine::Status stat = DB()->DescribeTable(table_schema);
         if(!stat.ok()) {
             error_code_ = SERVER_GROUP_NOT_EXIST;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -154,8 +154,8 @@ DeleteTableTask::DeleteTableTask(const std::string& table_name)
 
 }
 
-BaseTaskPtr DeleteTableTask::Create(const std::string& group_id) {
-    return std::shared_ptr<BaseTask>(new DeleteTableTask(group_id));
+BaseTaskPtr DeleteTableTask::Create(const std::string& table_id) {
+    return std::shared_ptr<BaseTask>(new DeleteTableTask(table_id));
 }
 
 ServerError DeleteTableTask::OnExecute() {
@@ -195,9 +195,9 @@ ServerError AddVectorTask::OnExecute() {
             return SERVER_SUCCESS;
         }
 
-        engine::meta::GroupSchema group_info;
-        group_info.group_id = table_name_;
-        engine::Status stat = DB()->get_group(group_info);
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id = table_name_;
+        engine::Status stat = DB()->DescribeTable(table_schema);
         if(!stat.ok()) {
             error_code_ = SERVER_GROUP_NOT_EXIST;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -208,7 +208,7 @@ ServerError AddVectorTask::OnExecute() {
         rc.Record("get group info");
 
         uint64_t vec_count = (uint64_t)record_array_.size();
-        uint64_t group_dim = group_info.dimension;
+        uint64_t group_dim = table_schema.dimension;
         std::vector<float> vec_f;
         vec_f.resize(vec_count*group_dim);//allocate enough memory
         for(uint64_t i = 0; i < vec_count; i++) {
@@ -236,7 +236,7 @@ ServerError AddVectorTask::OnExecute() {
 
         rc.Record("prepare vectors data");
 
-        stat = DB()->add_vectors(table_name_, vec_count, vec_f.data(), record_ids_);
+        stat = DB()->InsertVectors(table_name_, vec_count, vec_f.data(), record_ids_);
         rc.Record("add vectors to engine");
         if(!stat.ok()) {
             error_code_ = SERVER_UNEXPECTED_ERROR;
@@ -293,9 +293,9 @@ ServerError SearchVectorTask::OnExecute() {
             return error_code_;
         }
 
-        engine::meta::GroupSchema group_info;
-        group_info.group_id = table_name_;
-        engine::Status stat = DB()->get_group(group_info);
+        engine::meta::TableSchema table_schema;
+        table_schema.table_id = table_name_;
+        engine::Status stat = DB()->DescribeTable(table_schema);
         if(!stat.ok()) {
             error_code_ = SERVER_GROUP_NOT_EXIST;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -305,7 +305,7 @@ ServerError SearchVectorTask::OnExecute() {
 
         std::vector<float> vec_f;
         uint64_t record_count = (uint64_t)record_array_.size();
-        vec_f.resize(record_count*group_info.dimension);
+        vec_f.resize(record_count*table_schema.dimension);
 
         for(uint64_t i = 0; i < record_array_.size(); i++) {
             const auto& record = record_array_[i];
@@ -317,9 +317,9 @@ ServerError SearchVectorTask::OnExecute() {
             }
 
             uint64_t vec_dim = record.vector_map.begin()->second.size() / sizeof(double);//how many double value?
-            if (vec_dim != group_info.dimension) {
+            if (vec_dim != table_schema.dimension) {
                 SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
-                                 << " vs. group dimension:" << group_info.dimension;
+                                 << " vs. group dimension:" << table_schema.dimension;
                 error_code_ = SERVER_INVALID_VECTOR_DIMENSION;
                 error_msg_ = "Engine failed: " + stat.ToString();
                 return error_code_;
@@ -335,7 +335,7 @@ ServerError SearchVectorTask::OnExecute() {
 
         std::vector<DB_DATE> dates;
         engine::QueryResults results;
-        stat = DB()->search(table_name_, (size_t)top_k_, record_count, vec_f.data(), dates, results);
+        stat = DB()->Query(table_name_, (size_t)top_k_, record_count, vec_f.data(), dates, results);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
             return SERVER_UNEXPECTED_ERROR;
