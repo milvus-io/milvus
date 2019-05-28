@@ -10,6 +10,7 @@
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 #include "license/LicenseCheck.h"
+#include "metrics/Metrics.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -18,6 +19,8 @@
 #include <numaif.h>
 #include <unistd.h>
 #include <string.h>
+
+#include "metrics/Metrics.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -133,6 +136,10 @@ Server::Daemonize() {
 
 int
 Server::Start() {
+//    server::Metrics::GetInstance().Init();
+//    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
+    server::Metrics::GetInstance().Init();
+
     if (daemonized_) {
         Daemonize();
     }
@@ -160,8 +167,10 @@ Server::Start() {
                 exit(1);
             }
 
-            std::thread counting_down(&server::LicenseCheck::StartCountingDown, license_file_path);
-            counting_down.detach();
+            if(server::LicenseCheck::StartCountingDown(license_file_path) != SERVER_SUCCESS) {
+                SERVER_LOG_ERROR << "License counter start error";
+                exit(1);
+            }
 #endif
 
             // Handle Signal

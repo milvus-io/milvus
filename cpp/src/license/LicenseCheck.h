@@ -36,6 +36,7 @@ class LicenseCheck {
     static ServerError
     StartCountingDown(const std::string &license_file_path);
 
+ private:
 
 
 };

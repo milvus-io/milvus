@@ -21,7 +21,7 @@ namespace server {
 static const std::string ROCKSDB_DEFAULT_GROUP = "default";
 
 RocksIdMapper::RocksIdMapper()
-: db_(nullptr) {
+    : db_(nullptr) {
     OpenDb();
 }
 
@@ -264,7 +264,7 @@ ServerError RocksIdMapper::GetInternal(const std::string& nid, std::string& sid,
 }
 
 ServerError RocksIdMapper::DeleteInternal(const std::string& nid, const std::string& group) {
-     if(db_ == nullptr) {
+    if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }
 
@@ -306,6 +306,7 @@ ServerError RocksIdMapper::DeleteGroupInternal(const std::string& group) {
 
     return SERVER_SUCCESS;
 }
+
 
 }
 }
