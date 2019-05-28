@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include <ctime>
+#include <stdio.h>
 #include "Meta.h"
 
 namespace zilliz {
@@ -11,13 +12,33 @@ namespace vecwise {
 namespace engine {
 namespace meta {
 
-DateT Meta::GetDate(const std::time_t& t) {
-    tm *ltm = std::localtime(&t);
-    return ltm->tm_year*10000 + ltm->tm_mon*100 + ltm->tm_mday;
+DateT Meta::GetDate(const std::time_t& t, int day_delta) {
+    struct tm ltm;
+    localtime_r(&t, &ltm);
+    if (day_delta > 0) {
+        do {
+            ++ltm.tm_mday;
+            --day_delta;
+        } while(day_delta > 0);
+        mktime(&ltm);
+    } else if (day_delta < 0) {
+        do {
+            --ltm.tm_mday;
+            ++day_delta;
+        } while(day_delta < 0);
+        mktime(&ltm);
+    } else {
+        ltm.tm_mday;
+    }
+    return ltm.tm_year*10000 + ltm.tm_mon*100 + ltm.tm_mday;
+}
+
+DateT Meta::GetDateWithDelta(int day_delta) {
+    return GetDate(std::time(nullptr), day_delta);
 }
 
 DateT Meta::GetDate() {
-    return GetDate(std::time(nullptr));
+    return GetDate(std::time(nullptr), 0);
 }
 
 } // namespace meta
