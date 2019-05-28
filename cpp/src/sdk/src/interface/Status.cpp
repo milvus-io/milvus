@@ -1,3 +1,8 @@
+/*******************************************************************************
+ * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited.
+ * Proprietary and confidential.
+ ******************************************************************************/
 #include "Status.h"
 
 
@@ -22,7 +27,7 @@ void Status::MoveFrom(Status &s) {
 }
 
 Status::Status(const Status &s)
-    : state_((s.state_ == nullptr) ? nullptr : new State(*s.state_)) {}
+        : state_((s.state_ == nullptr) ? nullptr : new State(*s.state_)) {}
 
 Status &Status::operator=(const Status &s) {
     if (state_ != s.state_) {

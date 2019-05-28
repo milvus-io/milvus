@@ -5,22 +5,14 @@
  ******************************************************************************/
 #pragma once
 
-#include "utils/Error.h"
+#include "MegaSearch.h"
 
-#include <cstdint>
-#include <string>
+namespace megasearch {
 
-namespace zilliz {
-namespace vecwise {
-namespace server {
-
-class VecServiceWrapper {
+class ConvertUtil {
 public:
-    static void StartService();
-    static void StopService();
+    static std::string IndexType2Str(megasearch::IndexType index);
+    static megasearch::IndexType Str2IndexType(const std::string& type);
 };
 
-
-}
-}
 }

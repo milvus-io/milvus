@@ -3,22 +3,17 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "VecServiceWrapper.h"
-#include "VecServiceHandler.h"
-#include "VecServiceScheduler.h"
+#include "MegasearchServer.h"
+#include "MegasearchHandler.h"
+#include "megasearch_types.h"
+#include "megasearch_constants.h"
 #include "ServerConfig.h"
-
-#include "utils/Log.h"
-
-#include "thrift/gen-cpp/megasearch_types.h"
-#include "thrift/gen-cpp/megasearch_constants.h"
 
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/protocol/TJSONProtocol.h>
 #include <thrift/protocol/TDebugProtocol.h>
 #include <thrift/protocol/TCompactProtocol.h>
 #include <thrift/server/TSimpleServer.h>
-//#include <thrift/server/TNonblockingServer.h>
 #include <thrift/server/TThreadPoolServer.h>
 #include <thrift/transport/TServerSocket.h>
 #include <thrift/transport/TBufferTransports.h>
@@ -30,6 +25,7 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
+using namespace megasearch::thrift;
 using namespace ::apache::thrift;
 using namespace ::apache::thrift::protocol;
 using namespace ::apache::thrift::transport;
@@ -38,7 +34,8 @@ using namespace ::apache::thrift::concurrency;
 
 static stdcxx::shared_ptr<TServer> s_server;
 
-void VecServiceWrapper::StartService() {
+void
+MegasearchServer::StartService() {
     if(s_server != nullptr){
         StopService();
     }
@@ -52,11 +49,12 @@ void VecServiceWrapper::StartService() {
     std::string mode = server_config.GetValue(CONFIG_SERVER_MODE, "thread_pool");
 
     try {
-        stdcxx::shared_ptr<VecServiceHandler> handler(new VecServiceHandler());
-        stdcxx::shared_ptr<TProcessor> processor(new VecServiceProcessor(handler));
+        stdcxx::shared_ptr<MegasearchServiceHandler> handler(new MegasearchServiceHandler());
+        stdcxx::shared_ptr<TProcessor> processor(new MegasearchServiceProcessor(handler));
         stdcxx::shared_ptr<TServerTransport> server_transport(new TServerSocket(address, port));
         stdcxx::shared_ptr<TTransportFactory> transport_factory(new TBufferedTransportFactory());
 
+        std::string protocol = "json";
         stdcxx::shared_ptr<TProtocolFactory> protocol_factory;
         if (protocol == "binary") {
             protocol_factory.reset(new TBinaryProtocolFactory());
@@ -67,24 +65,14 @@ void VecServiceWrapper::StartService() {
         } else if (protocol == "debug") {
             protocol_factory.reset(new TDebugProtocolFactory());
         } else {
-            SERVER_LOG_INFO << "Service protocol: " << protocol << " is not supported currently";
+            //SERVER_LOG_INFO << "Service protocol: " << protocol << " is not supported currently";
             return;
         }
 
+        std::string mode = "thread_pool";
         if (mode == "simple") {
             s_server.reset(new TSimpleServer(processor, server_transport, transport_factory, protocol_factory));
             s_server->serve();
-//    } else if(mode == "non_blocking") {
-//        ::apache::thrift::stdcxx::shared_ptr<TNonblockingServerTransport> nb_server_transport(new TServerSocket(address, port));
-//        ::apache::thrift::stdcxx::shared_ptr<ThreadManager> threadManager(ThreadManager::newSimpleThreadManager());
-//        ::apache::thrift::stdcxx::shared_ptr<PosixThreadFactory> threadFactory(new PosixThreadFactory());
-//        threadManager->threadFactory(threadFactory);
-//        threadManager->start();
-//
-//        s_server.reset(new TNonblockingServer(processor,
-//                                              protocol_factory,
-//                                              nb_server_transport,
-//                                              threadManager));
         } else if (mode == "thread_pool") {
             stdcxx::shared_ptr<ThreadManager> threadManager(ThreadManager::newSimpleThreadManager());
             stdcxx::shared_ptr<PosixThreadFactory> threadFactory(new PosixThreadFactory());
@@ -98,19 +86,17 @@ void VecServiceWrapper::StartService() {
                                                  threadManager));
             s_server->serve();
         } else {
-            SERVER_LOG_INFO << "Service mode: " << mode << " is not supported currently";
+            //SERVER_LOG_INFO << "Service mode: " << mode << " is not supported currently";
             return;
         }
     } catch (apache::thrift::TException& ex) {
-        SERVER_LOG_ERROR << "Server encounter exception: " << ex.what();
+        //SERVER_LOG_ERROR << "Server encounter exception: " << ex.what();
     }
 }
 
-void VecServiceWrapper::StopService() {
+void
+MegasearchServer::StopService() {
     auto stop_server_worker = [&]{
-        VecServiceScheduler& scheduler = VecServiceScheduler::GetInstance();
-        scheduler.Stop();
-
         if(s_server != nullptr) {
             s_server->stop();
         }

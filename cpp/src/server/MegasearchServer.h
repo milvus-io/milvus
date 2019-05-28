@@ -5,13 +5,17 @@
  ******************************************************************************/
 #pragma once
 
+#include <cstdint>
+#include <string>
+
 namespace zilliz {
 namespace vecwise {
-namespace client {
+namespace server {
 
-class FaissTest {
+class MegasearchServer {
 public:
-    static void test();
+    static void StartService();
+    static void StopService();
 };
 
 }
