@@ -25,7 +25,7 @@ set(license_generator_files
         ../unittest/metrics/counter_test.cpp ../unittest/metrics/metrics_test.cpp)
 
 set(service_files
-        thrift/gen-cpp/VecService.cpp
+        thrift/gen-cpp/MegasearchService.cpp
         thrift/gen-cpp/megasearch_constants.cpp
         thrift/gen-cpp/megasearch_types.cpp
         )
@@ -45,6 +45,7 @@ set(get_sys_info_files
 
 include_directories(/usr/include)
 include_directories(/usr/local/cuda/include)
+include_directories(thrift/gen-cpp)
 
 if (GPU_VERSION STREQUAL "ON")
     link_directories(/usr/local/cuda/lib64)
@@ -151,6 +152,7 @@ endif ()
 
 install(TARGETS vecwise_server DESTINATION bin)
 
+add_subdirectory(sdk)
 #target_link_libraries(
 #        libprometheus-cpp-push.a
 #        libprometheus-cpp-pull.a
@@ -158,3 +160,4 @@ install(TARGETS vecwise_server DESTINATION bin)
 #        pthread
 #        z
 #        ${CURL_LIBRARIES})
+
