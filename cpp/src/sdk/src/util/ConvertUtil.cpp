@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "ConvertUtil.h"
+#include "Exception.h"
 
 #include <map>
 
@@ -20,7 +21,7 @@ std::string ConvertUtil::IndexType2Str(megasearch::IndexType index) {
 
     const auto& iter = s_index2str.find(index);
     if(iter == s_index2str.end()) {
-        return INDEX_RAW;
+        throw Exception(StatusCode::Invalid, "Invalid index type");
     }
 
     return iter->second;
@@ -34,7 +35,7 @@ megasearch::IndexType ConvertUtil::Str2IndexType(const std::string& type) {
 
     const auto& iter = s_str2index.find(type);
     if(iter == s_str2index.end()) {
-        return megasearch::IndexType::raw;
+        throw Exception(StatusCode::Invalid, "Invalid index type");
     }
 
     return iter->second;
