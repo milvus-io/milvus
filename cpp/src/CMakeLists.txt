@@ -11,7 +11,7 @@ aux_source_directory(server server_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
-aux_source_directory(metrics metrics_files)
+#aux_source_directory(metrics metrics_files)
 
 
 set(license_check_files
@@ -35,7 +35,8 @@ set(vecwise_engine_files
         ${cache_files}
         ${db_files}
         ${wrapper_files}
-        ${metrics_files}
+        metrics/Metrics.cpp
+#        ${metrics_files}
         )
 
 set(get_sys_info_files
@@ -57,9 +58,9 @@ if (GPU_VERSION STREQUAL "ON")
             cudart
             cublas
             libsqlite3.a
-            libprometheus-cpp-push.a
-            libprometheus-cpp-pull.a
-            libprometheus-cpp-core.a
+#            libprometheus-cpp-push.a
+#            libprometheus-cpp-pull.a
+#            libprometheus-cpp-core.a
             )
 else()
     set(engine_libs
@@ -70,9 +71,9 @@ else()
             libgfortran.a
             libquadmath.a
             libsqlite3.a
-            libprometheus-cpp-push.a
-            libprometheus-cpp-pull.a
-            libprometheus-cpp-core.a
+#            libprometheus-cpp-push.a
+#            libprometheus-cpp-pull.a
+#            libprometheus-cpp-core.a
             )
 endif ()
 
@@ -106,7 +107,7 @@ endif ()
 #        libprometheus-cpp-core.a
 #        )
 
-add_library(metrics STATIC ${metrics_files})
+#add_library(metrics STATIC ${metrics_files} metrics/MetricBase.h)
 #target_link_libraries(metrics ${metrics_lib})
 
 add_executable(vecwise_server
