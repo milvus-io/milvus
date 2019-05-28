@@ -3,12 +3,51 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "VecServiceScheduler.h"
+#include "MegasearchScheduler.h"
 #include "utils/Log.h"
+
+#include "megasearch_types.h"
+#include "megasearch_constants.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace server {
+    
+using namespace megasearch;
+
+namespace {
+    const std::map<ServerError, thrift::ErrorCode::type> &ErrorMap() {
+        static const std::map<ServerError, thrift::ErrorCode::type> code_map = {
+                {SERVER_UNEXPECTED_ERROR,         thrift::ErrorCode::ILLEGAL_ARGUMENT},
+                {SERVER_NULL_POINTER,             thrift::ErrorCode::ILLEGAL_ARGUMENT},
+                {SERVER_INVALID_ARGUMENT,         thrift::ErrorCode::ILLEGAL_ARGUMENT},
+                {SERVER_FILE_NOT_FOUND,           thrift::ErrorCode::ILLEGAL_ARGUMENT},
+                {SERVER_NOT_IMPLEMENT,            thrift::ErrorCode::ILLEGAL_ARGUMENT},
+                {SERVER_BLOCKING_QUEUE_EMPTY,     thrift::ErrorCode::ILLEGAL_ARGUMENT},
+                {SERVER_GROUP_NOT_EXIST,          thrift::ErrorCode::TABLE_NOT_EXISTS},
+                {SERVER_INVALID_TIME_RANGE,       thrift::ErrorCode::ILLEGAL_RANGE},
+                {SERVER_INVALID_VECTOR_DIMENSION, thrift::ErrorCode::ILLEGAL_DIMENSION},
+        };
+
+        return code_map;
+    }
+
+    const std::map<ServerError, std::string> &ErrorMessage() {
+        static const std::map<ServerError, std::string> msg_map = {
+                {SERVER_UNEXPECTED_ERROR,         "unexpected error occurs"},
+                {SERVER_NULL_POINTER,             "null pointer error"},
+                {SERVER_INVALID_ARGUMENT,         "invalid argument"},
+                {SERVER_FILE_NOT_FOUND,           "file not found"},
+                {SERVER_NOT_IMPLEMENT,            "not implemented"},
+                {SERVER_BLOCKING_QUEUE_EMPTY,     "queue empty"},
+                {SERVER_GROUP_NOT_EXIST,          "group not exist"},
+                {SERVER_INVALID_TIME_RANGE,       "invalid time range"},
+                {SERVER_INVALID_VECTOR_DIMENSION, "invalid vector dimension"},
+        };
+
+        return msg_map;
+    }
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 BaseTask::BaseTask(const std::string& task_group, bool async)
@@ -38,16 +77,40 @@ ServerError BaseTask::WaitToFinish() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-VecServiceScheduler::VecServiceScheduler()
+MegasearchScheduler::MegasearchScheduler()
 : stopped_(false) {
     Start();
 }
 
-VecServiceScheduler::~VecServiceScheduler() {
+MegasearchScheduler::~MegasearchScheduler() {
     Stop();
 }
 
-void VecServiceScheduler::Start() {
+void MegasearchScheduler::ExecTask(BaseTaskPtr& task_ptr) {
+    if(task_ptr == nullptr) {
+        return;
+    }
+
+    MegasearchScheduler& scheduler = MegasearchScheduler::GetInstance();
+    scheduler.ExecuteTask(task_ptr);
+
+    if(!task_ptr->IsAsync()) {
+        task_ptr->WaitToFinish();
+        ServerError err = task_ptr->ErrorCode();
+        if (err != SERVER_SUCCESS) {
+            thrift::Exception ex;
+            ex.__set_code(ErrorMap().at(err));
+            std::string msg = task_ptr->ErrorMsg();
+            if(msg.empty()){
+                msg = ErrorMessage().at(err);
+            }
+            ex.__set_reason(msg);
+            throw ex;
+        }
+    }
+}
+
+void MegasearchScheduler::Start() {
     if(!stopped_) {
         return;
     }
@@ -55,7 +118,7 @@ void VecServiceScheduler::Start() {
     stopped_ = false;
 }
 
-void VecServiceScheduler::Stop() {
+void MegasearchScheduler::Stop() {
     if(stopped_) {
         return;
     }
@@ -80,7 +143,7 @@ void VecServiceScheduler::Stop() {
     SERVER_LOG_INFO << "Scheduler stopped";
 }
 
-ServerError VecServiceScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
+ServerError MegasearchScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
     if(task_ptr == nullptr) {
         return SERVER_NULL_POINTER;
     }
@@ -121,7 +184,7 @@ namespace {
     }
 }
 
-ServerError VecServiceScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
+ServerError MegasearchScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
 
     std::string group_name = task_ptr->TaskGroup();

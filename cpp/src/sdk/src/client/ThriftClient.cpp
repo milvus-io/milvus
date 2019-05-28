@@ -3,11 +3,10 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "ClientSession.h"
-#include "Log.h"
+#include "ThriftClient.h"
 
-#include "thrift/gen-cpp/megasearch_types.h"
-#include "thrift/gen-cpp/megasearch_constants.h"
+#include "megasearch_types.h"
+#include "megasearch_constants.h"
 
 #include <exception>
 
@@ -22,19 +21,31 @@
 #include <thrift/transport/TBufferTransports.h>
 #include <thrift/concurrency/PosixThreadFactory.h>
 
-namespace zilliz {
-namespace vecwise {
-namespace client {
-
-using namespace megasearch;
+namespace megasearch {
 
 using namespace ::apache::thrift;
 using namespace ::apache::thrift::protocol;
 using namespace ::apache::thrift::transport;
 using namespace ::apache::thrift::concurrency;
 
-ClientSession::ClientSession(const std::string &address, int32_t port, const std::string &protocol)
-: client_(nullptr) {
+ThriftClient::ThriftClient() {
+
+}
+
+ThriftClient::~ThriftClient() {
+
+}
+
+MegasearchServiceClientPtr
+ThriftClient::interface() {
+    if(client_ == nullptr) {
+        throw std::exception();
+    }
+    return client_;
+}
+
+Status
+ThriftClient::Connect(const std::string& address, int32_t port, const std::string& protocol) {
     try {
         stdcxx::shared_ptr<TSocket> socket_ptr(new transport::TSocket(address, port));
         stdcxx::shared_ptr<TTransport> transport_ptr(new TBufferedTransport(socket_ptr));
@@ -48,19 +59,21 @@ ClientSession::ClientSession(const std::string &address, int32_t port, const std
         } else if(protocol == "debug") {
             protocol_ptr.reset(new TDebugProtocol(transport_ptr));
         } else {
-            CLIENT_LOG_ERROR << "Service protocol: " << protocol << " is not supported currently";
-            return;
+            //CLIENT_LOG_ERROR << "Service protocol: " << protocol << " is not supported currently";
+            return Status(StatusCode::Invalid, "unsupported protocol");
         }
 
         transport_ptr->open();
-        client_ = std::make_shared<VecServiceClient>(protocol_ptr);
+        client_ = std::make_shared<thrift::MegasearchServiceClient>(protocol_ptr);
     } catch ( std::exception& ex) {
-        CLIENT_LOG_ERROR << "connect encounter exception: " << ex.what();
+        //CLIENT_LOG_ERROR << "connect encounter exception: " << ex.what();
+        return Status(StatusCode::UnknownError, "failed to connect megasearch server" + std::string(ex.what()));
     }
 
+    return Status::OK();
 }
-
-ClientSession::~ClientSession() {
+Status
+ThriftClient::Disconnect() {
     try {
         if(client_ != nullptr) {
             auto protocol = client_->getInputProtocol();
@@ -72,17 +85,20 @@ ClientSession::~ClientSession() {
             }
         }
     } catch ( std::exception& ex) {
-        CLIENT_LOG_ERROR << "disconnect encounter exception: " << ex.what();
+        //CLIENT_LOG_ERROR << "disconnect encounter exception: " << ex.what();
+        return Status(StatusCode::UnknownError, "failed to disconnect: " + std::string(ex.what()));
     }
+
+    return Status::OK();
 }
 
-VecServiceClientPtr ClientSession::interface() {
-    if(client_ == nullptr) {
-        throw std::exception();
-    }
-    return client_;
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
+ThriftClientSession::ThriftClientSession(const std::string& address, int32_t port, const std::string& protocol) {
+    Connect(address, port, protocol);
 }
 
+ThriftClientSession::~ThriftClientSession() {
+    Disconnect();
 }
-}
+
 }
