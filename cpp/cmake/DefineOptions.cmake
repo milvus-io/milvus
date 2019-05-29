@@ -53,7 +53,7 @@ define_option_string(MEGASEARCH_DEPENDENCY_SOURCE
                     "SYSTEM")
 
 define_option(MEGASEARCH_VERBOSE_THIRDPARTY_BUILD
-        "Show output from ExternalProjects rather than just logging to files" OFF)
+        "Show output from ExternalProjects rather than just logging to files" ON)
 
 define_option(MEGASEARCH_BOOST_USE_SHARED "Rely on boost shared libraries where relevant" OFF)
 
@@ -78,6 +78,8 @@ define_option(MEGASEARCH_WITH_LAPACK "Build with LAPACK library" ON)
 define_option(MEGASEARCH_WITH_LZ4 "Build with lz4 compression" ON)
 
 define_option(MEGASEARCH_WITH_OPENBLAS "Build with OpenBLAS library" ON)
+
+define_option(MEGASEARCH_WITH_PROMETHEUS "Build with PROMETHEUS library" ON)
 
 define_option(MEGASEARCH_WITH_ROCKSDB "Build with RocksDB library" ON)
 
@@ -114,9 +116,13 @@ endif()
 
 
 #----------------------------------------------------------------------
-#set_option_category("Test and benchmark")
-#
-#define_option(MEGASEARCH_BUILD_TESTS "Build the MEGASEARCH googletest unit tests" ON)
+set_option_category("Test and benchmark")
+
+if (BUILD_UNIT_TEST)
+    define_option(MEGASEARCH_BUILD_TESTS "Build the MEGASEARCH googletest unit tests" ON)
+else()
+    define_option(MEGASEARCH_BUILD_TESTS "Build the MEGASEARCH googletest unit tests" OFF)
+endif(BUILD_UNIT_TEST)
 
 #----------------------------------------------------------------------
 macro(config_summary)
