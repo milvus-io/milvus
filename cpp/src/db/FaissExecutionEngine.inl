@@ -15,6 +15,8 @@
 #include <wrapper/Index.h>
 #include <wrapper/IndexBuilder.h>
 #include <cache/CpuCacheMgr.h>
+#include "metrics/Metrics.h"
+
 
 namespace zilliz {
 namespace vecwise {
@@ -64,6 +66,7 @@ template<class IndexTrait>
 Status FaissExecutionEngine<IndexTrait>::Load() {
     auto index  = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool to_cache = false;
+    auto start_time = METRICS_NOW_TIME;
     if (!index) {
         index = read_index(location_);
         to_cache = true;
@@ -73,6 +76,16 @@ Status FaissExecutionEngine<IndexTrait>::Load() {
     pIndex_ = index->data();
     if (to_cache) {
         Cache();
+        auto end_time = METRICS_NOW_TIME;
+        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+
+        server::Metrics::GetInstance().FaissDiskLoadDurationSecondsHistogramObserve(total_time);
+        double total_size = (pIndex_->d) * (pIndex_->ntotal) * 4;
+
+
+        server::Metrics::GetInstance().FaissDiskLoadSizeBytesHistogramObserve(total_size);
+        server::Metrics::GetInstance().FaissDiskLoadIOSpeedHistogramObserve(total_size/double(total_time));
+
     }
     return Status::OK();
 }

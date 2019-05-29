@@ -1,0 +1,86 @@
+sudo: required
+dist: xenial
+language: c++
+
+env:
+  global:
+    - secure: "DwlWRs05m1pw3/NprZdVRy3Vog7k+KYIW4O1YQczbKk0t64vYLJMxMh9D8HrngnUv1UDOOU2orEO/hYYjlmiNRqoMA0Me+q9ndqEGjdCvFketH7zYpPXMxV/Uk1E7yYK60CJYbCFK7NossBWlBwSIETUNXXz1MhqF4c7SwDCTQk6ybPUThJVI3/nZLC4Wn9DB4pxPkEZaXJLL3HU0vXH1r0vKRFsjBU0OtDx1KQgtFYVmWbmd7tpxAlDfI11HJjpaoFD6HHcTlwvM5Ogj4lWL8Ze3glJsSsAYntEqgm7GQa4tYWsYmvGC5554WwIQ/0cDsSTLZjk2+FtSGmJpxdwXwmfOzzVjt7Ise7KG2Zg+CZ/IwF9VpwP2xmH/ug926sJDIjMmehZx2eetDzwY3oB3g3AF+JJIoaDF14Skt6QXEFWm/s/PiSQwkenMF80xzUufB7CRCVLR054HfJsQ0m5O8bNtUjyH7byZwOjvz8t/VdlnfFn5Ccs4tniOK6iiwvKmGAaakv6pfA7xKpRbExFkgPoTmejeQX83Ee1/A4JySMPTxkHPsJbMhimpMdbLVJTh9mKJxo2kleCC0MKB7OwTyNwUdR8+nqoZpUknGX6BrGY+R6ou3xlNYRUM9LCxxBKBJB05CswbhRWroun9fbpDTzBz3XPwBjiVTlxUc/YnXA="
+    - secure: "fg0cACBBm7NAjad4Pxhp9DeTGDbcLnD0U9uxclsioTcB5X+88sTsgKRr5gG0hajPG6QF0L8iNt7zp87eZNcSU7JlTWnCBHPAAADD2apFnPUhioth+vPUBsUiKdOksoEG1q/hrjMYQ6yAf3XXd0+/ZaUA1X5v0OA2rjMTpNpNvMaQEN7M3XvcLRr1ydaAD/Wc1PAbuK8owWU3Hyo7+GdxoUWOtYiH44OuHSlSlnVQw2/yRR53yM1StKLZ2xarsWviXr76e1PutqoeeTbBbpAU6xboiyyDVey4Ae83HfOgPiADtsE4UjE2pqX2oqponY2q+0j8kI7sZVODR20nLCKcq9RHJR+yi0JEpsrqC4SE0lPKxG8HHlDaH+NdRVHTdNYuCfENR0R4YX/K59I83kLEnLNpC+j1BzXiRBjYzAMl5UtEDCUQGJcixq6BxE7i1uwskPckmYi2K63TaIxj5nvVm4Um8aHPrWHtbAf4stTDQHcFGcfQeBbX7PswKJAyIljaHn5T7kwAatRuWLHGsVTuxTkhkYohZy+/SDhFakI+6jfz8XZtL8gOIGMnDuvDWT2Di1JPZkBLcKKWpCIXdDaJnTogNid9xBpsX5IMVmlS51FxCOkoIT62gc9Lo+rxwgqFvEe+QIQh2zd8OjgS5m5HsftxCKVCbcPr+RjsNsCyOnQ="
+    - secure: "ijrdtLO7y18oJTcISP1Zl0+O8dbCmo8DB4+3N6kZ9JjL1rVF5NM9nCsaCQ6vmHFOsUjEehvGJR6ZYFOYOMBU11rCPqd2FrEPewtQ0qEYI8eOV062oa/DOxHKyzGPde8eHcopw6b44EjPXx4iZTabcU8U00azNyWinVxKtP8lHJiVH+waNejuoAuMKypM9Lz+RCz/TLg4+DpLvQ5kWfpcFsuBCBAMbCK6Ujmv5mscvKxmWLr2Z79Wl3i5MbBe3IuaDAKXTz0ponkvZCssPr/USD9AA04EEn/Eg95JXOtRUi6Ah/fUBDAF4Ez/7yOHsXD1y8xt332eE8nJqjX3eLqEdplT19M/hBsbXxNCL0iZSZ8LL0JHKYG5beDGvfZmrk4/Nj/qd3Es1NGT6q2kbkrbxWSEFdkniQuwfr+yvAoGv4XFdRMTPH321WrL8wxfud0b2OPMMJo6obDOgRZfHe6c+4Eo9i/G98eL7xOz0kUUILiex8IQKNWnYflH1CqRKBbNs0APAMMlFKQ8FVwLiu/OzA8mjI+CuPGxOdfilgsJfCvKMBvz12y2AIBHdVBf1T6Ph8NZpwKivNYt70QOu5J/rg5K6E6XY1faMgWuDzQkMaeof1esU1IVlXqKBWa9c9rMNHQHTvhZ2KZ1EZvNrCX1fnY/X8fuwnhJ1Aq1nzhJTrM="
+os:
+  - linux
+  - osx
+
+addons:
+  apt:
+    sources:
+    - sourceline: 'deb [arch=amd64] http://storage.googleapis.com/bazel-apt stable jdk1.8'
+      key_url: 'https://storage.googleapis.com/bazel-apt/doc/apt-key.pub.gpg'
+    - sourceline: 'deb https://repos.influxdata.com/ubuntu xenial stable'
+      key_url: 'https://repos.influxdata.com/influxdb.key'
+    packages:
+    - bazel
+    - cmake
+    - curl
+    - doxygen
+    - g++
+    - gcc
+    - git
+    - lcov
+    - libcurl4-openssl-dev
+    - python-pip
+    - telegraf
+  homebrew:
+    packages:
+    - cmake
+    - bazelbuild/tap/bazel
+    - google-benchmark
+    - prometheus
+    - telegraf
+    taps:
+    - bazelbuild/tap
+
+script:
+  - bazel build //...
+  - bazel test --test_output=all //core/... //pull/...
+#  - bazel test --test_output=all //pull/tests/integration:scrape-test
+#  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then bazel test --test_output=all //pull/tests/integration:lint-test; fi
+  - bazel run -c opt //core/benchmarks
+
+  - pushd .
+  - mkdir _build_internal_deps
+  - cd _build_internal_deps
+  - cmake .. -DUSE_THIRDPARTY_LIBRARIES=ON -DENABLE_WARNINGS_AS_ERRORS=ON
+  - make -j 4
+  - ctest -V
+  - mkdir -p deploy
+  - make DESTDIR=`pwd`/deploy install
+  - popd
+
+  - 3rdparty/build_for_travis.sh
+  - rm -rf 3rdparty/*
+
+  - pushd .
+  - mkdir _build_coverage
+  - cd _build_coverage
+  - CFLAGS="--coverage" CXXFLAGS="--coverage" LDFLAGS="--coverage" cmake .. -DCMAKE_INSTALL_PREFIX=../_opt -DUSE_THIRDPARTY_LIBRARIES=OFF
+  - make -j 4
+  - ctest -V -LE Benchmark
+  - mkdir -p deploy
+  - make DESTDIR=`pwd`/deploy install
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then pip install --user cpp-coveralls && coveralls --root .. --build-root . -E ".*/3rdparty/.*" -E ".*/_.*" -E ".*/tests/.*" -E ".*/benchmarks/.*"; fi
+  - popd
+
+  - pushd .
+  - cd doc
+  - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then doxygen && touch html/.nojekyll; fi
+  - popd
+
+deploy:
+  provider: pages
+  local-dir: doc/html
+  github-token: $GITHUB_TOKEN
+  skip-cleanup: true
+  on:
+    branch: master
+    condition: $TRAVIS_OS_NAME == linux

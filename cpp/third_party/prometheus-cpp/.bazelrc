@@ -1,0 +1,8 @@
+build:asan --strip=never 
+build:asan --copt -fsanitize=address
+build:asan --copt -DADDRESS_SANITIZER
+build:asan --copt -O0
+build:asan --copt -fno-omit-frame-pointer
+build:asan --copt -g
+build:asan --linkopt -fsanitize=address 
+build:asan --cc_output_directory_tag=asan

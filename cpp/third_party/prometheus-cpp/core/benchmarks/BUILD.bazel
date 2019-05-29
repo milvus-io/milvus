@@ -1,0 +1,12 @@
+cc_binary(
+    name = "benchmarks",
+    srcs = glob([
+        "*.cc",
+        "*.h",
+    ]),
+    linkstatic = 1,
+    deps = [
+        "//core",
+        "@com_github_google_benchmark//:benchmark",
+    ],
+)

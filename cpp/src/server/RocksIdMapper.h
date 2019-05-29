@@ -20,7 +20,7 @@ namespace vecwise {
 namespace server {
 
 class RocksIdMapper : public IVecIdMapper{
-public:
+ public:
     RocksIdMapper();
     ~RocksIdMapper();
 
@@ -37,7 +37,7 @@ public:
     ServerError Delete(const std::string& nid, const std::string& group = "") override;
     ServerError DeleteGroup(const std::string& group) override;
 
-private:
+ private:
     void OpenDb();
     void CloseDb();
 
@@ -53,11 +53,12 @@ private:
 
     ServerError DeleteGroupInternal(const std::string& group);
 
-private:
+ private:
     rocksdb::DB* db_;
     mutable std::unordered_map<std::string, rocksdb::ColumnFamilyHandle*> column_handles_;
     mutable std::mutex db_mutex_;
 };
+
 
 }
 }

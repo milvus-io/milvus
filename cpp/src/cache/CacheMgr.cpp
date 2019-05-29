@@ -5,6 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "CacheMgr.h"
+#include "metrics/Metrics.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -37,7 +38,7 @@ DataObjPtr CacheMgr::GetItem(const std::string& key) {
     if(cache_ == nullptr) {
         return nullptr;
     }
-
+    server::Metrics::GetInstance().CacheAccessTotalIncrement();
     return cache_->get(key);
 }
 
@@ -56,6 +57,7 @@ void CacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
     }
 
     cache_->insert(key, data);
+    server::Metrics::GetInstance().CacheAccessTotalIncrement();
 }
 
 void CacheMgr::InsertItem(const std::string& key, const engine::Index_ptr& index) {
@@ -65,6 +67,7 @@ void CacheMgr::InsertItem(const std::string& key, const engine::Index_ptr& index
 
     DataObjPtr obj = std::make_shared<DataObj>(index);
     cache_->insert(key, obj);
+    server::Metrics::GetInstance().CacheAccessTotalIncrement();
 }
 
 void CacheMgr::EraseItem(const std::string& key) {
@@ -73,6 +76,7 @@ void CacheMgr::EraseItem(const std::string& key) {
     }
 
     cache_->erase(key);
+    server::Metrics::GetInstance().CacheAccessTotalIncrement();
 }
 
 void CacheMgr::PrintInfo() {
