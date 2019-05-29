@@ -47,10 +47,49 @@ set(vecwise_engine_files
 set(get_sys_info_files
         license/GetSysInfo.cpp)
 
-
 include_directories(/usr/include)
 include_directories(/usr/local/cuda/include)
 include_directories(thrift/gen-cpp)
+
+#target_link_libraries(megasearch boost_system_static)
+#target_link_libraries(megasearch boost_filesystem_static)
+#target_link_libraries(megasearch boost_serialization_static)
+#target_link_libraries(megasearch bzip2)
+#target_link_libraries(megasearch easyloggingpp)
+#target_link_libraries(megasearch faiss)
+#target_link_libraries(megasearch gtest)
+#target_link_libraries(megasearch lapack)
+#target_link_libraries(megasearch lz4)
+#target_link_libraries(megasearch openblas)
+#target_link_libraries(megasearch rocksdb)
+#target_link_libraries(megasearch snappy)
+#target_link_libraries(megasearch sqlite)
+#target_link_libraries(megasearch sqlite_orm)
+#target_link_libraries(megasearch thrift)
+#target_link_libraries(megasearch yaml-cpp)
+#target_link_libraries(megasearch zlib)
+#target_link_libraries(megasearch zstd)
+
+set(third_party_libs
+        boost_system_static
+        boost_filesystem_static
+        boost_serialization_static
+        bzip2
+        easyloggingpp
+        faiss
+        gtest
+        lapack
+        lz4
+        openblas
+        rocksdb
+        snappy
+        sqlite
+#        sqlite_orm
+        thrift
+        yaml-cpp
+        zlib
+        zstd
+        )
 
 if (GPU_VERSION STREQUAL "ON")
     link_directories(/usr/local/cuda/lib64)
@@ -100,13 +139,13 @@ endif ()
 
 
 cuda_add_library(vecwise_engine STATIC ${vecwise_engine_files})
-target_link_libraries(vecwise_engine ${engine_libs})
+target_link_libraries(vecwise_engine ${engine_libs} ${third_party_libs})
 
 add_library(metrics STATIC ${metrics_files})
 
 if (ENABLE_LICENSE STREQUAL "ON")
         add_library(vecwise_license STATIC ${license_check_files})
-        target_link_libraries(vecwise_license ${license_libs})
+        target_link_libraries(vecwise_license ${license_libs} ${third_party_libs})
 endif ()
 
 #set(metrics_lib
@@ -117,17 +156,6 @@ endif ()
 
 #add_library(vecwise_engine STATIC ${metrics_files} )
 #target_link_libraries(metrics ${metrics_lib})
-
-add_executable(vecwise_server
-        ${config_files}
-        ${server_files}
-        ${utils_files}
-        ${service_files}
-        ${metrics_files}
-        ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc
-        )
-
-
 
 set(server_libs
         vecwise_engine
@@ -145,16 +173,30 @@ set(server_libs
         dl
         )
 
+add_executable(vecwise_server
+        ${config_files}
+        ${server_files}
+        ${utils_files}
+        ${service_files}
+        ${metrics_files}
+#        ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc
+        )
+
 if (ENABLE_LICENSE STREQUAL "ON")
-        target_link_libraries(vecwise_server ${server_libs} vecwise_license)
+        target_link_libraries(vecwise_server ${server_libs} vecwise_license ${third_party_libs})
 else ()
-        target_link_libraries(vecwise_server ${server_libs})
+        target_link_libraries(vecwise_server ${server_libs} ${third_party_libs})
 endif()
 
 if (ENABLE_LICENSE STREQUAL "ON")
+        add_executable(get_sys_info ${get_sys_info_files})
         add_executable(license_generator ${license_generator_files})
-        target_link_libraries(get_sys_info ${license_libs} vecwise_license)
-        target_link_libraries(license_generator ${license_libs})
+
+        target_link_libraries(get_sys_info ${license_libs} vecwise_license ${third_party_libs})
+        target_link_libraries(license_generator ${license_libs} ${third_party_libs})
+
+        install(TARGETS get_sys_info DESTINATION bin)
+        install(TARGETS license_generator DESTINATION bin)
 endif ()
 
 install(TARGETS vecwise_server DESTINATION bin)
