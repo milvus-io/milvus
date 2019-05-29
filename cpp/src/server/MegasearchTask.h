@@ -66,6 +66,50 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CreateTablePartitionTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(const thrift::CreateTablePartitionParam &param);
+
+protected:
+    CreateTablePartitionTask(const thrift::CreateTablePartitionParam &param);
+
+    ServerError OnExecute() override;
+
+
+private:
+    const thrift::CreateTablePartitionParam &param_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class DeleteTablePartitionTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(const thrift::DeleteTablePartitionParam &param);
+
+protected:
+    DeleteTablePartitionTask(const thrift::DeleteTablePartitionParam &param);
+
+    ServerError OnExecute() override;
+
+
+private:
+    const thrift::DeleteTablePartitionParam &param_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class ShowTablesTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(std::vector<std::string>& tables);
+
+protected:
+    ShowTablesTask(std::vector<std::string>& tables);
+
+    ServerError OnExecute() override;
+
+private:
+    std::vector<std::string>& tables_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class AddVectorTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& table_name,
@@ -106,6 +150,21 @@ private:
     int64_t top_k_;
     const std::vector<thrift::QueryRecord>& record_array_;
     std::vector<thrift::TopKQueryResult>& result_array_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class PingTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(const std::string& cmd, std::string& result);
+
+protected:
+    PingTask(const std::string& cmd, std::string& result);
+
+    ServerError OnExecute() override;
+
+private:
+    std::string cmd_;
+    std::string& result_;
 };
 
 }

@@ -14,6 +14,10 @@ namespace megasearch {
 
 using MegasearchServiceClientPtr = std::shared_ptr<megasearch::thrift::MegasearchServiceClient>;
 
+static const std::string THRIFT_PROTOCOL_JSON = "json";
+static const std::string THRIFT_PROTOCOL_BINARY = "binary";
+static const std::string THRIFT_PROTOCOL_COMPACT = "compact";
+
 class ThriftClient {
 public:
     ThriftClient();
