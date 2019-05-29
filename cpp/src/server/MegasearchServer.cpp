@@ -54,7 +54,6 @@ MegasearchServer::StartService() {
         stdcxx::shared_ptr<TServerTransport> server_transport(new TServerSocket(address, port));
         stdcxx::shared_ptr<TTransportFactory> transport_factory(new TBufferedTransportFactory());
 
-        std::string protocol = "json";
         stdcxx::shared_ptr<TProtocolFactory> protocol_factory;
         if (protocol == "binary") {
             protocol_factory.reset(new TBinaryProtocolFactory());
@@ -62,8 +61,6 @@ MegasearchServer::StartService() {
             protocol_factory.reset(new TJSONProtocolFactory());
         } else if (protocol == "compact") {
             protocol_factory.reset(new TCompactProtocolFactory());
-        } else if (protocol == "debug") {
-            protocol_factory.reset(new TDebugProtocolFactory());
         } else {
             //SERVER_LOG_INFO << "Service protocol: " << protocol << " is not supported currently";
             return;
