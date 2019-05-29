@@ -14,7 +14,8 @@ enum class StatusCode {
     OK = 0,
     Invalid = 1,
     UnknownError = 2,
-    NotSupported = 3
+    NotSupported = 3,
+    NotConnected = 4
 };
 
 /**

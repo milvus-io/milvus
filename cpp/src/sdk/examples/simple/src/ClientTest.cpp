@@ -162,8 +162,12 @@ namespace {
 void
 ClientTest::Test(const std::string& address, const std::string& port) {
     std::shared_ptr<Connection> conn = Connection::Create();
-    ConnectParam param = { address, port };
-    conn->Connect(param);
+
+    {//connect server
+        ConnectParam param = {address, port};
+        Status stat = conn->Connect(param);
+        std::cout << "Connect function call status: " << stat.ToString() << std::endl;
+    }
 
     {//server version
         std::string version = conn->ServerVersion();
