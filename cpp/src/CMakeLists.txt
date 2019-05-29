@@ -79,6 +79,9 @@ set(third_party_libs
         faiss
         lapack
         openblas
+        prometheus-cpp-push
+        prometheus-cpp-pull
+        prometheus-cpp-core
         rocksdb
         boost_system_static
         boost_filesystem_static
