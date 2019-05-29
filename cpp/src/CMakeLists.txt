@@ -143,6 +143,7 @@ set(server_libs
         libzstd.a
         liblz4.a
         dl
+        metrics
         )
 
 if (ENABLE_LICENSE STREQUAL "ON")

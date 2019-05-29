@@ -87,6 +87,7 @@ class PrometheusMetrics: public MetricsBase {
     void FaissDiskLoadDurationSecondsHistogramObserve(double value) { if(startup_) faiss_disk_load_duration_seconds_histogram_.Observe(value);};
     void FaissDiskLoadSizeBytesHistogramObserve(double value) { if(startup_) faiss_disk_load_size_bytes_histogram_.Observe(value);};
     void FaissDiskLoadIOSpeedHistogramObserve(double value) { if(startup_) faiss_disk_load_IO_speed_histogram_.Observe(value);};
+    void FaissDiskLoadIOSpeedGaugeSet(double value) { if(startup_) faiss_disk_load_IO_speed_gauge_.Set(value);};
 
     void CacheAccessTotalIncrement(double value = 1) { if(startup_) cache_access_total_.Increment(value);};
     void MemTableMergeDurationSecondsHistogramObserve(double value) { if(startup_) mem_table_merge_duration_seconds_histogram_.Observe(value);};
@@ -370,7 +371,14 @@ class PrometheusMetrics: public MetricsBase {
         .Register(*registry_);
     prometheus::Histogram &faiss_disk_load_IO_speed_histogram_ = disk_load_IO_speed_.Add({{"DB","Faiss"}},BucketBoundaries{0.1, 1.0, 10.0});
 
-    ////all from CacheMgr.cpp
+    prometheus::Family<prometheus::Gauge> &faiss_disk_load_IO_speed_ = prometheus::BuildGauge()
+        .Name("disk_load_IO_speed_byte_per_sec")
+        .Help("disk IO speed ")
+        .Register(*registry_);
+    prometheus::Gauge &faiss_disk_load_IO_speed_gauge_ = faiss_disk_load_IO_speed_.Add({{"DB","Faiss"}});
+
+
+        ////all from CacheMgr.cpp
     //record cache access count
     prometheus::Family<prometheus::Counter> &cache_access_ = prometheus::BuildCounter()
         .Name("cache_access_total")
