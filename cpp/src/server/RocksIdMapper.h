@@ -26,6 +26,7 @@ class RocksIdMapper : public IVecIdMapper{
 
     ServerError AddGroup(const std::string& group) override;
     bool IsGroupExist(const std::string& group) const override;
+    ServerError AllGroups(std::vector<std::string>& groups) const override;
 
     ServerError Put(const std::string& nid, const std::string& sid, const std::string& group = "") override;
     ServerError Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group = "") override;
