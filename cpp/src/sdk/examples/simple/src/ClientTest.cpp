@@ -13,6 +13,16 @@
 using namespace megasearch;
 
 namespace {
+    std::string GetTableName();
+
+    static const std::string TABLE_NAME = GetTableName();
+    static const std::string VECTOR_COLUMN_NAME = "face_vector";
+    static const std::string ID_COLUMN_NAME = "aid";
+    static const std::string CITY_COLUMN_NAME = "city";
+    static constexpr int64_t TABLE_DIMENSION = 512;
+    static constexpr int64_t TOTAL_ROW_COUNT = 100000;
+    static constexpr int64_t TOP_K = 10;
+    static constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
@@ -76,12 +86,6 @@ namespace {
         return s_id;
     }
 
-    static const std::string TABLE_NAME = GetTableName();
-    static const std::string VECTOR_COLUMN_NAME = "face_vector";
-    static const std::string AGE_COLUMN_NAME = "age";
-    static const std::string CITY_COLUMN_NAME = "city";
-    static const int64_t TABLE_DIMENSION = 512;
-
     TableSchema BuildTableSchema() {
         TableSchema tb_schema;
         VectorColumn col1;
@@ -90,7 +94,7 @@ namespace {
         col1.store_raw_vector = true;
         tb_schema.vector_column_array.emplace_back(col1);
 
-        Column col2 = {ColumnType::int8, AGE_COLUMN_NAME};
+        Column col2 = {ColumnType::int8, ID_COLUMN_NAME};
         tb_schema.attribute_column_array.emplace_back(col2);
 
         Column col3 = {ColumnType::int16, CITY_COLUMN_NAME};
@@ -139,7 +143,7 @@ namespace {
             if(vector_record_array) {
                 RowRecord record;
                 record.vector_map.insert(std::make_pair(VECTOR_COLUMN_NAME, f_p));
-                record.attribute_map[AGE_COLUMN_NAME] = std::to_string(k%100);
+                record.attribute_map[ID_COLUMN_NAME] = std::to_string(k);
                 record.attribute_map[CITY_COLUMN_NAME] = CITY_MAP.at(k%CITY_MAP.size());
                 vector_record_array->emplace_back(record);
             }
@@ -147,7 +151,7 @@ namespace {
             if(query_record_array) {
                 QueryRecord record;
                 record.vector_map.insert(std::make_pair(VECTOR_COLUMN_NAME, f_p));
-                record.selected_column_array.push_back(AGE_COLUMN_NAME);
+                record.selected_column_array.push_back(ID_COLUMN_NAME);
                 record.selected_column_array.push_back(CITY_COLUMN_NAME);
                 query_record_array->emplace_back(record);
             }
@@ -161,16 +165,20 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     ConnectParam param = { address, port };
     conn->Connect(param);
 
-    {//get server version
+    {//server version
         std::string version = conn->ServerVersion();
         std::cout << "MegaSearch server version: " << version << std::endl;
     }
 
+    {//sdk version
+        std::string version = conn->ClientVersion();
+        std::cout << "SDK version: " << version << std::endl;
+    }
+
     {
-        std::cout << "ShowTables" << std::endl;
         std::vector<std::string> tables;
         Status stat = conn->ShowTables(tables);
-        std::cout << "Function call status: " << stat.ToString() << std::endl;
+        std::cout << "ShowTables function call status: " << stat.ToString() << std::endl;
         std::cout << "All tables: " << std::endl;
         for(auto& table : tables) {
             std::cout << "\t" << table << std::endl;
@@ -180,26 +188,23 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {//create table
         TableSchema tb_schema = BuildTableSchema();
         PrintTableSchema(tb_schema);
-        std::cout << "CreateTable" << std::endl;
         Status stat = conn->CreateTable(tb_schema);
-        std::cout << "Function call status: " << stat.ToString() << std::endl;
+        std::cout << "CreateTable function call status: " << stat.ToString() << std::endl;
     }
 
     {//describe table
         TableSchema tb_schema;
-        std::cout << "DescribeTable" << std::endl;
         Status stat = conn->DescribeTable(TABLE_NAME, tb_schema);
-        std::cout << "Function call status: " << stat.ToString() << std::endl;
+        std::cout << "DescribeTable function call status: " << stat.ToString() << std::endl;
         PrintTableSchema(tb_schema);
     }
 
     {//add vectors
         std::vector<RowRecord> record_array;
-        BuildVectors(0, 10000, &record_array, nullptr);
+        BuildVectors(0, TOTAL_ROW_COUNT, &record_array, nullptr);
         std::vector<int64_t> record_ids;
-        std::cout << "AddVector" << std::endl;
         Status stat = conn->AddVector(TABLE_NAME, record_array, record_ids);
-        std::cout << "Function call status: " << stat.ToString() << std::endl;
+        std::cout << "AddVector function call status: " << stat.ToString() << std::endl;
         PrintRecordIdArray(record_ids);
     }
 
@@ -207,18 +212,17 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "Waiting data persist. Sleep 10 seconds ..." << std::endl;
         sleep(10);
         std::vector<QueryRecord> record_array;
-        BuildVectors(500, 510, nullptr, &record_array);
+        BuildVectors(SEARCH_TARGET, SEARCH_TARGET + 10, nullptr, &record_array);
 
         std::vector<TopKQueryResult> topk_query_result_array;
-        std::cout << "SearchVector" << std::endl;
-        Status stat = conn->SearchVector(TABLE_NAME, record_array, topk_query_result_array, 10);
-        std::cout << "Function call status: " << stat.ToString() << std::endl;
+        Status stat = conn->SearchVector(TABLE_NAME, record_array, topk_query_result_array, TOP_K);
+        std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
         PrintSearchResult(topk_query_result_array);
     }
 
 //    {//delete table
 //        Status stat = conn->DeleteTable(TABLE_NAME);
-//        std::cout << "Delete table result: " << stat.ToString() << std::endl;
+//        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
 //    }
 
     {//server status
