@@ -8,7 +8,7 @@
 #include "utils/Error.h"
 #include "config/ConfigNode.h"
 
-#include <yaml-cpp/yaml.h>
+#include "yaml-cpp/yaml.h"
 
 namespace zilliz {
 namespace vecwise {

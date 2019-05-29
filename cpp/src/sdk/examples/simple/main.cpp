@@ -19,7 +19,8 @@ main(int argc, char *argv[]) {
     printf("Client start...\n");
 
     std::string app_name = basename(argv[0]);
-    static struct option long_options[] = {{"conf_file", optional_argument, 0, 'c'},
+    static struct option long_options[] = {{"server", optional_argument, 0, 's'},
+                                           {"port", optional_argument, 0, 'p'},
                                            {"help", no_argument, 0, 'h'},
                                            {NULL, 0, 0, 0}};
 
@@ -28,9 +29,9 @@ main(int argc, char *argv[]) {
     app_name = argv[0];
 
     int value;
-    while ((value = getopt_long(argc, argv, "c:p:dh", long_options, &option_index)) != -1) {
+    while ((value = getopt_long(argc, argv, "s:p:h", long_options, &option_index)) != -1) {
         switch (value) {
-            case 'h': {
+            case 's': {
                 char *address_ptr = strdup(optarg);
                 address = address_ptr;
                 free(address_ptr);
@@ -38,12 +39,14 @@ main(int argc, char *argv[]) {
             }
             case 'p': {
                 char *port_ptr = strdup(optarg);
-                address = port_ptr;
+                port = port_ptr;
                 free(port_ptr);
                 break;
             }
+            case 'h':
             default:
-                break;
+                print_help(app_name);
+                return EXIT_SUCCESS;
         }
     }
 
@@ -58,7 +61,8 @@ void
 print_help(const std::string &app_name) {
     printf("\n Usage: %s [OPTIONS]\n\n", app_name.c_str());
     printf("  Options:\n");
-    printf("   -h    Megasearch server address\n");
-    printf("   -p    Megasearch server port\n");
+    printf("   -s --server   Server address, default 127.0.0.1\n");
+    printf("   -p --port     Server port, default 33001\n");
+    printf("   -h --help     Print help information\n");
     printf("\n");
 }

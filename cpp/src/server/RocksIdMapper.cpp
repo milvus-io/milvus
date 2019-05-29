@@ -9,6 +9,7 @@
 #include "utils/Log.h"
 #include "utils/CommonUtil.h"
 
+#include "rocksdb/db.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/options.h"
 
@@ -108,6 +109,19 @@ bool RocksIdMapper::IsGroupExist(const std::string& group) const {
     return IsGroupExistInternal(group);
 }
 
+ServerError RocksIdMapper::AllGroups(std::vector<std::string>& groups) const {
+    groups.clear();
+
+    std::lock_guard<std::mutex> lck(db_mutex_);
+    for(auto& pair : column_handles_) {
+        if(pair.first == ROCKSDB_DEFAULT_GROUP) {
+            continue;
+        }
+        groups.push_back(pair.first);
+    }
+
+    return SERVER_SUCCESS;
+}
 
 ServerError RocksIdMapper::Put(const std::string& nid, const std::string& sid, const std::string& group) {
     std::lock_guard<std::mutex> lck(db_mutex_);

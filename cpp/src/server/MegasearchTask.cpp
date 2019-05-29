@@ -21,6 +21,7 @@ namespace server {
 
 static const std::string DQL_TASK_GROUP = "dql";
 static const std::string DDL_DML_TASK_GROUP = "ddl_dml";
+static const std::string PING_TASK_GROUP = "ping";
 
 static const std::string VECTOR_UID = "uid";
 static const uint64_t USE_MT = 5000;
@@ -46,6 +47,10 @@ namespace {
                 SERVER_LOG_ERROR << "Failed to open db";
                 throw ServerException(SERVER_NULL_POINTER, "Failed to open db");
             }
+        }
+
+        ~DBWrapper() {
+            delete db_;
         }
 
         zilliz::vecwise::engine::DB* DB() { return db_; }
@@ -78,17 +83,17 @@ BaseTaskPtr CreateTableTask::Create(const thrift::TableSchema& schema) {
 
 ServerError CreateTableTask::OnExecute() {
     TimeRecorder rc("CreateTableTask");
-
+    
     try {
         if(schema_.vector_column_array.empty()) {
             return SERVER_INVALID_ARGUMENT;
         }
 
         IVecIdMapper::GetInstance()->AddGroup(schema_.table_name);
-        engine::meta::TableSchema table_schema;
-        table_schema.dimension = (uint16_t)schema_.vector_column_array[0].dimension;
-        table_schema.table_id = schema_.table_name;
-        engine::Status stat = DB()->CreateTable(table_schema);
+        engine::meta::TableSchema table_info;
+        table_info.dimension = (uint16_t)schema_.vector_column_array[0].dimension;
+        table_info.table_id = schema_.table_name;
+        engine::Status stat = DB()->CreateTable(table_info);
         if(!stat.ok()) {//could exist
             error_msg_ = "Engine failed: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
@@ -109,7 +114,7 @@ ServerError CreateTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DescribeTableTask::DescribeTableTask(const std::string &table_name, thrift::TableSchema &schema)
-    : BaseTask(DDL_DML_TASK_GROUP),
+    : BaseTask(PING_TASK_GROUP),
       table_name_(table_name),
       schema_(schema) {
     schema_.table_name = table_name_;
@@ -123,9 +128,9 @@ ServerError DescribeTableTask::OnExecute() {
     TimeRecorder rc("DescribeTableTask");
 
     try {
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id = table_name_;
-        engine::Status stat = DB()->DescribeTable(table_schema);
+        engine::meta::TableSchema table_info;
+        table_info.table_id = table_name_;
+        engine::Status stat = DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_GROUP_NOT_EXIST;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -154,8 +159,8 @@ DeleteTableTask::DeleteTableTask(const std::string& table_name)
 
 }
 
-BaseTaskPtr DeleteTableTask::Create(const std::string& table_id) {
-    return std::shared_ptr<BaseTask>(new DeleteTableTask(table_id));
+BaseTaskPtr DeleteTableTask::Create(const std::string& group_id) {
+    return std::shared_ptr<BaseTask>(new DeleteTableTask(group_id));
 }
 
 ServerError DeleteTableTask::OnExecute() {
@@ -168,6 +173,60 @@ ServerError DeleteTableTask::OnExecute() {
     return SERVER_NOT_IMPLEMENT;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+CreateTablePartitionTask::CreateTablePartitionTask(const thrift::CreateTablePartitionParam &param)
+    : BaseTask(DDL_DML_TASK_GROUP),
+      param_(param) {
+
+}
+
+BaseTaskPtr CreateTablePartitionTask::Create(const thrift::CreateTablePartitionParam &param) {
+    return std::shared_ptr<BaseTask>(new CreateTablePartitionTask(param));
+}
+
+ServerError CreateTablePartitionTask::OnExecute() {
+    error_code_ = SERVER_NOT_IMPLEMENT;
+    error_msg_ = "create table partition not implemented";
+    SERVER_LOG_ERROR << error_msg_;
+
+    return SERVER_NOT_IMPLEMENT;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+DeleteTablePartitionTask::DeleteTablePartitionTask(const thrift::DeleteTablePartitionParam &param)
+    : BaseTask(DDL_DML_TASK_GROUP),
+      param_(param) {
+
+}
+
+BaseTaskPtr DeleteTablePartitionTask::Create(const thrift::DeleteTablePartitionParam &param) {
+    return std::shared_ptr<BaseTask>(new DeleteTablePartitionTask(param));
+}
+
+ServerError DeleteTablePartitionTask::OnExecute() {
+    error_code_ = SERVER_NOT_IMPLEMENT;
+    error_msg_ = "delete table partition not implemented";
+    SERVER_LOG_ERROR << error_msg_;
+
+    return SERVER_NOT_IMPLEMENT;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ShowTablesTask::ShowTablesTask(std::vector<std::string>& tables)
+    : BaseTask(PING_TASK_GROUP),
+      tables_(tables) {
+
+}
+
+BaseTaskPtr ShowTablesTask::Create(std::vector<std::string>& tables) {
+    return std::shared_ptr<BaseTask>(new ShowTablesTask(tables));
+}
+
+ServerError ShowTablesTask::OnExecute() {
+    IVecIdMapper::GetInstance()->AllGroups(tables_);
+
+    return SERVER_SUCCESS;
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 AddVectorTask::AddVectorTask(const std::string& table_name,
@@ -178,7 +237,6 @@ AddVectorTask::AddVectorTask(const std::string& table_name,
       record_array_(record_array),
       record_ids_(record_ids) {
     record_ids_.clear();
-    record_ids_.resize(record_array.size());
 }
 
 BaseTaskPtr AddVectorTask::Create(const std::string& table_name,
@@ -195,9 +253,9 @@ ServerError AddVectorTask::OnExecute() {
             return SERVER_SUCCESS;
         }
 
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id = table_name_;
-        engine::Status stat = DB()->DescribeTable(table_schema);
+        engine::meta::TableSchema table_info;
+        table_info.table_id = table_name_;
+        engine::Status stat = DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_GROUP_NOT_EXIST;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -208,7 +266,7 @@ ServerError AddVectorTask::OnExecute() {
         rc.Record("get group info");
 
         uint64_t vec_count = (uint64_t)record_array_.size();
-        uint64_t group_dim = table_schema.dimension;
+        uint64_t group_dim = table_info.dimension;
         std::vector<float> vec_f;
         vec_f.resize(vec_count*group_dim);//allocate enough memory
         for(uint64_t i = 0; i < vec_count; i++) {
@@ -228,6 +286,7 @@ ServerError AddVectorTask::OnExecute() {
                 return error_code_;
             }
 
+            //convert double array to float array(thrift has no float type)
             const double* d_p = reinterpret_cast<const double*>(record.vector_map.begin()->second.data());
             for(uint64_t d = 0; d < vec_dim; d++) {
                 vec_f[i*vec_dim + d] = (float)(d_p[d]);
@@ -245,12 +304,27 @@ ServerError AddVectorTask::OnExecute() {
             return error_code_;
         }
 
-        if(record_ids_.size() < vec_count) {
+        if(record_ids_.size() != vec_count) {
             SERVER_LOG_ERROR << "Vector ID not returned";
             return SERVER_UNEXPECTED_ERROR;
         }
 
-        rc.Record("done");
+        //persist attributes
+        for(uint64_t i = 0; i < vec_count; i++) {
+            const auto &record = record_array_[i];
+
+            //any attributes?
+            if(record.attribute_map.empty()) {
+                continue;
+            }
+
+            std::string nid = std::to_string(record_ids_[i]);
+            std::string attrib_str;
+            AttributeSerializer::Encode(record.attribute_map, attrib_str);
+            IVecIdMapper::GetInstance()->Put(nid, attrib_str, table_name_);
+        }
+
+        rc.Record("persist vector attributes");
 
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
@@ -293,9 +367,9 @@ ServerError SearchVectorTask::OnExecute() {
             return error_code_;
         }
 
-        engine::meta::TableSchema table_schema;
-        table_schema.table_id = table_name_;
-        engine::Status stat = DB()->DescribeTable(table_schema);
+        engine::meta::TableSchema table_info;
+        table_info.table_id = table_name_;
+        engine::Status stat = DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_GROUP_NOT_EXIST;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -305,7 +379,7 @@ ServerError SearchVectorTask::OnExecute() {
 
         std::vector<float> vec_f;
         uint64_t record_count = (uint64_t)record_array_.size();
-        vec_f.resize(record_count*table_schema.dimension);
+        vec_f.resize(record_count*table_info.dimension);
 
         for(uint64_t i = 0; i < record_array_.size(); i++) {
             const auto& record = record_array_[i];
@@ -317,14 +391,15 @@ ServerError SearchVectorTask::OnExecute() {
             }
 
             uint64_t vec_dim = record.vector_map.begin()->second.size() / sizeof(double);//how many double value?
-            if (vec_dim != table_schema.dimension) {
+            if (vec_dim != table_info.dimension) {
                 SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
-                                 << " vs. group dimension:" << table_schema.dimension;
+                                 << " vs. group dimension:" << table_info.dimension;
                 error_code_ = SERVER_INVALID_VECTOR_DIMENSION;
                 error_msg_ = "Engine failed: " + stat.ToString();
                 return error_code_;
             }
 
+            //convert double array to float array(thrift has no float type)
             const double* d_p = reinterpret_cast<const double*>(record.vector_map.begin()->second.data());
             for(uint64_t d = 0; d < vec_dim; d++) {
                 vec_f[i*vec_dim + d] = (float)(d_p[d]);
@@ -336,31 +411,76 @@ ServerError SearchVectorTask::OnExecute() {
         std::vector<DB_DATE> dates;
         engine::QueryResults results;
         stat = DB()->Query(table_name_, (size_t)top_k_, record_count, vec_f.data(), dates, results);
+        rc.Record("search vectors from engine");
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
             return SERVER_UNEXPECTED_ERROR;
-        } else {
-            rc.Record("do searching");
-            for(engine::QueryResult& result : results){
-                thrift::TopKQueryResult thrift_topk_result;
-                for(auto id : result) {
-                    thrift::QueryResult thrift_result;
-                    thrift_result.__set_id(id);
-                    thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
-                }
-
-                result_array_.emplace_back(thrift_topk_result);
-            }
-            rc.Record("construct result");
         }
 
-        rc.Record("done");
+        if(results.size() != record_count) {
+            SERVER_LOG_ERROR << "Search result not returned";
+            return SERVER_UNEXPECTED_ERROR;
+        }
+
+        //construct result array
+        for(uint64_t i = 0; i < record_count; i++) {
+            auto& result = results[i];
+            const auto& record = record_array_[i];
+
+            thrift::TopKQueryResult thrift_topk_result;
+            for(auto id : result) {
+                thrift::QueryResult thrift_result;
+                thrift_result.__set_id(id);
+
+                //need get attributes?
+                if(record.selected_column_array.empty()) {
+                    thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
+                    continue;
+                }
+
+                std::string nid = std::to_string(id);
+                std::string attrib_str;
+                IVecIdMapper::GetInstance()->Get(nid, attrib_str, table_name_);
+
+                AttribMap attrib_map;
+                AttributeSerializer::Decode(attrib_str, attrib_map);
+
+                for(auto& attribute : record.selected_column_array) {
+                    thrift_result.column_map[attribute] = attrib_map[attribute];
+                }
+
+                thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
+            }
+
+            result_array_.emplace_back(thrift_topk_result);
+        }
+        rc.Record("construct result");
 
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
         SERVER_LOG_ERROR << error_msg_;
         return error_code_;
+    }
+
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PingTask::PingTask(const std::string& cmd, std::string& result)
+    : BaseTask(PING_TASK_GROUP),
+      cmd_(cmd),
+      result_(result) {
+
+}
+
+BaseTaskPtr PingTask::Create(const std::string& cmd, std::string& result) {
+    return std::shared_ptr<BaseTask>(new PingTask(cmd, result));
+}
+
+ServerError PingTask::OnExecute() {
+    if(cmd_ == "version") {
+        result_ = "v1.2.0";//currently hardcode
     }
 
     return SERVER_SUCCESS;
