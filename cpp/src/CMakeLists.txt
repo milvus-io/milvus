@@ -83,6 +83,9 @@ set(third_party_libs
         lapack
         lz4
         openblas
+        prometheus-cpp-push
+        prometheus-cpp-pull
+        prometheus-cpp-core
         rocksdb
         snappy
         sqlite

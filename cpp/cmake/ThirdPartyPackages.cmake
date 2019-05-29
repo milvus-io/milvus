@@ -25,6 +25,7 @@ set(MEGASEARCH_THIRDPARTY_DEPENDENCIES
         LAPACK
         Lz4
         OpenBLAS
+        Prometheus
         RocksDB
         Snappy
         SQLite
@@ -58,6 +59,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_gtest()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "OpenBLAS")
         build_openblas()
+    elseif ("${DEPENDENCY_NAME}" STREQUAL "Prometheus")
+        build_prometheus()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "RocksDB")
         build_rocksdb()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "Snappy")
@@ -242,6 +245,13 @@ if (DEFINED ENV{MEGASEARCH_OPENBLAS_URL})
 else ()
     set(OPENBLAS_SOURCE_URL
             "https://github.com/xianyi/OpenBLAS/archive/${OPENBLAS_VERSION}.tar.gz")
+endif()
+
+if (DEFINED ENV{MEGASEARCH_PROMETHEUS_URL})
+    set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
+else ()
+    set(PROMETHEUS_SOURCE_URL
+            "https://github.com/JinHai-CN/prometheus-cpp/archive/${PROMETHEUS_VERSION}.tar.gz")
 endif()
 
 if (DEFINED ENV{MEGASEARCH_ROCKSDB_URL})
@@ -796,7 +806,6 @@ macro(build_gtest)
 
 endmacro()
 
-message(STATUS "MEGASEARCH_BUILD_TESTS: ${MEGASEARCH_BUILD_TESTS}")
 if (MEGASEARCH_BUILD_TESTS)
     #message(STATUS "Resolving gtest dependency")
     resolve_dependency(GTest)
@@ -885,6 +894,92 @@ if(MEGASEARCH_WITH_LZ4)
 endif()
 
 # ----------------------------------------------------------------------
+# Prometheus
+
+macro(build_prometheus)
+    message(STATUS "Building Prometheus-${PROMETHEUS_VERSION} from source")
+    set(PROMETHEUS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/prometheus_ep-prefix/src/prometheus_ep")
+    set(PROMETHEUS_STATIC_LIB_NAME prometheus-cpp)
+    set(PROMETHEUS_CORE_STATIC_LIB
+            "${PROMETHEUS_PREFIX}/core/${CMAKE_STATIC_LIBRARY_PREFIX}${PROMETHEUS_STATIC_LIB_NAME}-core${CMAKE_STATIC_LIBRARY_SUFFIX}"
+            )
+    set(PROMETHEUS_PUSH_STATIC_LIB
+            "${PROMETHEUS_PREFIX}/push/${CMAKE_STATIC_LIBRARY_PREFIX}${PROMETHEUS_STATIC_LIB_NAME}-push${CMAKE_STATIC_LIBRARY_SUFFIX}"
+            )
+    set(PROMETHEUS_PULL_STATIC_LIB
+            "${PROMETHEUS_PREFIX}/pull/${CMAKE_STATIC_LIBRARY_PREFIX}${PROMETHEUS_STATIC_LIB_NAME}-pull${CMAKE_STATIC_LIBRARY_SUFFIX}"
+            )
+
+    set(PROMETHEUS_CMAKE_ARGS
+            ${EP_COMMON_CMAKE_ARGS}
+            -DCMAKE_INSTALL_LIBDIR=lib
+            -DBUILD_SHARED_LIBS=OFF
+            "-DCMAKE_INSTALL_PREFIX=${PROMETHEUS_PREFIX}")
+
+    externalproject_add(prometheus_ep
+            URL
+            ${PROMETHEUS_SOURCE_URL}
+            ${EP_LOG_OPTIONS}
+            CMAKE_ARGS
+            ${PROMETHEUS_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
+            BUILD_IN_SOURCE
+            1
+            INSTALL_COMMAND
+            ${MAKE}
+            "DESTDIR=${PROMETHEUS_PREFIX}"
+            install
+            BUILD_BYPRODUCTS
+            "${PROMETHEUS_CORE_STATIC_LIB}"
+            "${PROMETHEUS_PUSH_STATIC_LIB}"
+            "${PROMETHEUS_PULL_STATIC_LIB}")
+
+    #file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/include")
+
+    add_library(prometheus-cpp-push STATIC IMPORTED)
+    set_target_properties(prometheus-cpp-push
+            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_PUSH_STATIC_LIB}")
+#            INTERFACE_INCLUDE_DIRECTORIES
+#            "${PROMETHEUS_PREFIX}/push/include")
+    add_dependencies(prometheus-cpp-push prometheus_ep)
+
+    add_library(prometheus-cpp-pull STATIC IMPORTED)
+    set_target_properties(prometheus-cpp-pull
+            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_PULL_STATIC_LIB}")
+#            INTERFACE_INCLUDE_DIRECTORIES
+#            "${PROMETHEUS_PREFIX}/pull/include")
+    add_dependencies(prometheus-cpp-pull prometheus_ep)
+
+    add_library(prometheus-cpp-core STATIC IMPORTED)
+    set_target_properties(prometheus-cpp-core
+            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_CORE_STATIC_LIB}")
+#            INTERFACE_INCLUDE_DIRECTORIES
+#            "${PROMETHEUS_PREFIX}/core/include")
+    add_dependencies(prometheus-cpp-core prometheus_ep)
+endmacro()
+
+if(MEGASEARCH_WITH_PROMETHEUS)
+
+    resolve_dependency(Prometheus)
+
+    # TODO: Don't use global includes but rather target_include_directories
+    #get_target_property(PROMETHEUS-core_INCLUDE_DIRS prometheus-core INTERFACE_INCLUDE_DIRECTORIES)
+
+    #get_target_property(PROMETHEUS_PUSH_INCLUDE_DIRS prometheus_push INTERFACE_INCLUDE_DIRECTORIES)
+    link_directories(SYSTEM ${PROMETHEUS_PREFIX}/push/)
+    include_directories(SYSTEM ${PROMETHEUS_PREFIX}/push/include)
+
+    #get_target_property(PROMETHEUS_PULL_INCLUDE_DIRS prometheus_pull INTERFACE_INCLUDE_DIRECTORIES)
+    link_directories(SYSTEM ${PROMETHEUS_PREFIX}/pull/)
+    include_directories(SYSTEM ${PROMETHEUS_PREFIX}/pull/include)
+
+    link_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/)
+    include_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/include)
+endif()
+
+# ----------------------------------------------------------------------
 # RocksDB
 
 macro(build_rocksdb)
@@ -926,6 +1021,7 @@ macro(build_rocksdb)
 endmacro()
 
 if(MEGASEARCH_WITH_ROCKSDB)
+
     resolve_dependency(RocksDB)
 
     # TODO: Don't use global includes but rather target_include_directories
