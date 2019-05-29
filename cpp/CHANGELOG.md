@@ -12,6 +12,8 @@ Please mark all change in change log and use the ticket from JIRA.
 
 - MS-5 - Implement Auto Archive Feature
 - MS-16 - Implement metrics without prometheus
+- MS-26 - cmake. Add thirdparty packages
+
 ### Task
 
 - MS-1 - Add CHANGELOG.md

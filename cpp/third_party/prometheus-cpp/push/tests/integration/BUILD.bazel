@@ -1,5 +1,0 @@
-cc_binary(
-    name = "sample_client",
-    srcs = ["sample_client.cc"],
-    deps = ["//push"],
-)

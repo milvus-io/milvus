@@ -1,6 +1,0 @@
-# This file determines the list of promotional elements added to the header of \
-# your site's homepage. Full list of plugins are shown
-
-- type: button
-  href: docs/getting-started.html
-  text: Get Started

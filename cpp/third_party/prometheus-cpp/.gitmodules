@@ -1,6 +1,0 @@
-[submodule "googletest"]
-	path = 3rdparty/googletest
-	url = https://github.com/google/googletest.git
-[submodule "civetweb"]
-	path = 3rdparty/civetweb
-	url = https://github.com/civetweb/civetweb.git
