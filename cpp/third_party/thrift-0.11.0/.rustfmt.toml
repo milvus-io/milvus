@@ -1,7 +1,0 @@
-max_width = 100
-fn_args_layout = "Block"
-array_layout = "Block"
-where_style = "Rfc"
-generics_indent = "Block"
-fn_call_style = "Block"
-reorder_imported_names = true

@@ -1,9 +1,0 @@
-GSV:  Data file for testing Generalized SVD routines
-8                             Number of values of M, P, N
-0  5  9  10 20 12 12 40       Values of M (row dimension)
-4  0  12 14 10 10 20 15       Values of P (row dimension)
-3  10 15 12  8 20 8  20       Values of N (column dimension)
-20.0                          Threshold value of test ratio
-T                             Put T to test the error exits
-1                             Code to interpret the seed
-GSV   8                       List types on next line if 0 < NTYPES < 8
