@@ -57,22 +57,22 @@ else()
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
     if (GPU_VERSION STREQUAL "ON")
         set(ENABLE_LICENSE "ON")
         add_definitions("-DENABLE_LICENSE")
     endif ()
 else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
 endif()
 
 
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-#if (BUILD_UNIT_TEST)
-#    option(MEGASEARCH_BUILD_TESTS "Build the megasearch test suite" ON)
-#endif(BUILD_UNIT_TEST)
+if (BUILD_UNIT_TEST)
+    option(MEGASEARCH_BUILD_TESTS "Build the megasearch test suite" ON)
+endif(BUILD_UNIT_TEST)
 
 include(ExternalProject)
 include(DefineOptions)
