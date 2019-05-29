@@ -21,7 +21,7 @@ ClientProxy::Connect(const ConnectParam &param) {
     Disconnect();
 
     int32_t port = atoi(param.port.c_str());
-    return ClientPtr()->Connect(param.ip_address, port, "json");
+    return ClientPtr()->Connect(param.ip_address, port, THRIFT_PROTOCOL_BINARY);
 }
 
 Status
@@ -58,7 +58,7 @@ ClientProxy::Disconnect() {
 
 std::string
 ClientProxy::ClientVersion() const {
-    return std::string("Current Version");
+    return std::string("v1.0");
 }
 
 Status

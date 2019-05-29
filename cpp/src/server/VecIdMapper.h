@@ -27,6 +27,7 @@ public:
 
     virtual ServerError AddGroup(const std::string& group) = 0;
     virtual bool IsGroupExist(const std::string& group) const = 0;
+    virtual ServerError AllGroups(std::vector<std::string>& groups) const = 0;
 
     virtual ServerError Put(const std::string& nid, const std::string& sid, const std::string& group = "") = 0;
     virtual ServerError Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group = "") = 0;
@@ -46,6 +47,7 @@ public:
 
     ServerError AddGroup(const std::string& group) override;
     bool IsGroupExist(const std::string& group) const override;
+    ServerError AllGroups(std::vector<std::string>& groups) const override;
 
     ServerError Put(const std::string& nid, const std::string& sid, const std::string& group = "") override;
     ServerError Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group = "") override;

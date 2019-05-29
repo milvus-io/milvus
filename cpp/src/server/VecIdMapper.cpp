@@ -52,6 +52,15 @@ SimpleIdMapper::IsGroupExist(const std::string& group) const {
     return id_groups_.count(group) > 0;
 }
 
+ServerError SimpleIdMapper::AllGroups(std::vector<std::string>& groups) const {
+    groups.clear();
+
+    for(auto& pair : id_groups_) {
+        groups.push_back(pair.first);
+    }
+
+    return SERVER_SUCCESS;
+}
 
 //not thread-safe
 ServerError SimpleIdMapper::Put(const std::string& nid, const std::string& sid, const std::string& group) {
