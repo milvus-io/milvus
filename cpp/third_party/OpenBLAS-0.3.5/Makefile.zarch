@@ -1,6 +1,0 @@
-
-ifeq ($(CORE), Z13)
-CCOMMON_OPT += -march=z13 -mzvector
-FCOMMON_OPT += -march=z13 -mzvector
-endif
-

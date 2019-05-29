@@ -1,0 +1,29 @@
+FORTRAN     = gfortran
+OPTS        = -O2 -Wall -frecursive -m64 -fPIC -mavx2
+POPTS       = -Wall -frecursive -m64 -fPIC -mavx2 -pg -fno-inline
+NOOPT       = -O0 -Wall -frecursive -m64 -fPIC -mavx2
+PNOOPT      = -Wall -frecursive -m64 -fPIC -mavx2 -pg -fno-inline -O0
+LOADOPTS    = -O2 -Wall -frecursive -m64 -fPIC -mavx2 -lm -lpthread -lgfortran
+CC          = cc
+override CFLAGS      = -O2 -DMAX_STACK_ALLOC=2048 -Wall -m64 -DF_INTERFACE_GFORT -fPIC -DNO_AVX512 -DSMP_SERVER -DNO_WARMUP -DMAX_CPU_NUMBER=8 -DMAX_PARALLEL_NUMBER=1 -DVERSION="0.3.5" -mavx2 -DASMNAME= -DASMFNAME=_ -DNAME=_ -DCNAME= -DCHAR_NAME="_" -DCHAR_CNAME="" -DNO_AFFINITY -I. -DHAVE_LAPACK_CONFIG_H
+override ARCH        = ar
+ARCHFLAGS   =  -ru
+RANLIB      = ranlib
+LAPACKLIB   = ../libopenblas_haswellp-r0.3.5.a
+TMGLIB      = ../libopenblas_haswellp-r0.3.5.a
+BLASLIB     = ../../../libopenblas_haswellp-r0.3.5.a
+LAPACKELIB  = ../libopenblas_haswellp-r0.3.5.a
+LAPACKLIB_P = ../libopenblas_haswellp-r0.3.5_p.a
+SUFFIX      = o
+PSUFFIX     = po
+CEXTRALIB   = -lm -lpthread -lgfortran
+TIMER       = INT_ETIME
+LOADER      = gfortran -pthread
+BUILD_DEPRECATED      = 1
+LAPACKE_WITH_TMG      = 1
+SHELL = /bin/sh
+PLAT = _LINUX
+DRVOPTS  = $(NOOPT)
+#ARCHFLAGS= $(ARFLAGS) -ru
+#RANLIB   = ranlib
+

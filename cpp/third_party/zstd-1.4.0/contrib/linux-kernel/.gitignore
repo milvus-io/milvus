@@ -1,4 +1,0 @@
-!lib/zstd
-!lib/zstd/*
-*.o
-*.a

@@ -1,0 +1,14 @@
+#   ZSTD - standard compression algorithm
+#   Copyright (C) 2014-2016, Yann Collet, Facebook
+#   BSD 2-Clause License (http://www.opensource.org/licenses/bsd-license.php)
+
+prefix=/home/yhmo/work/git/vecwise_engine/cpp/third_party/build
+libdir=/home/yhmo/work/git/vecwise_engine/cpp/third_party/build/lib
+includedir=/home/yhmo/work/git/vecwise_engine/cpp/third_party/build/include
+
+Name: zstd
+Description: fast lossless compression algorithm library
+URL: http://www.zstd.net/
+Version: 1.4.0
+Libs: -L${libdir} -lzstd
+Cflags: -I${includedir}
