@@ -8,12 +8,15 @@
 #include "utils/Error.h"
 #include "VecIdMapper.h"
 
-#include "rocksdb/db.h"
-
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <mutex>
+
+namespace rocksdb {
+    class DB;
+    class ColumnFamilyHandle;
+}
 
 namespace zilliz {
 namespace vecwise {

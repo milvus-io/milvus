@@ -71,27 +71,24 @@ include_directories(thrift/gen-cpp)
 #target_link_libraries(megasearch zstd)
 
 set(third_party_libs
-        boost_system_static
-        boost_filesystem_static
-        boost_serialization_static
-        bzip2
         easyloggingpp
+        sqlite
+        #        sqlite_orm
+        thrift
+        yaml-cpp
         faiss
-        gtest
-        gtest_main
-        gmock
         lapack
-        lz4
         openblas
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
         rocksdb
+        boost_system_static
+        boost_filesystem_static
+        boost_serialization_static
+        bzip2
+        lz4
         snappy
-        sqlite
-#        sqlite_orm
-        thrift
-        yaml-cpp
         zlib
         zstd
         )

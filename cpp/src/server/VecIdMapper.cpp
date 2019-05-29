@@ -15,6 +15,7 @@
 #include "rocksdb/options.h"
 
 #include <exception>
+#include <unordered_map>
 
 namespace zilliz {
 namespace vecwise {
@@ -29,6 +30,30 @@ IVecIdMapper* IVecIdMapper::GetInstance() {
     return &s_mapper;
 #endif
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class SimpleIdMapper : public IVecIdMapper{
+public:
+    SimpleIdMapper();
+    ~SimpleIdMapper();
+
+    ServerError AddGroup(const std::string& group) override;
+    bool IsGroupExist(const std::string& group) const override;
+    ServerError AllGroups(std::vector<std::string>& groups) const override;
+
+    ServerError Put(const std::string& nid, const std::string& sid, const std::string& group = "") override;
+    ServerError Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group = "") override;
+
+    ServerError Get(const std::string& nid, std::string& sid, const std::string& group = "") const override;
+    ServerError Get(const std::vector<std::string>& nid, std::vector<std::string>& sid, const std::string& group = "") const override;
+
+    ServerError Delete(const std::string& nid, const std::string& group = "") override;
+    ServerError DeleteGroup(const std::string& group) override;
+
+private:
+    using ID_MAPPING = std::unordered_map<std::string, std::string>;
+    mutable std::unordered_map<std::string, ID_MAPPING> id_groups_;
+};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 SimpleIdMapper::SimpleIdMapper() {

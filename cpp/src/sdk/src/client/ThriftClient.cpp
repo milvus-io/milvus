@@ -65,7 +65,7 @@ ThriftClient::Connect(const std::string& address, int32_t port, const std::strin
         client_ = std::make_shared<thrift::MegasearchServiceClient>(protocol_ptr);
     } catch ( std::exception& ex) {
         //CLIENT_LOG_ERROR << "connect encounter exception: " << ex.what();
-        return Status(StatusCode::UnknownError, "failed to connect megasearch server" + std::string(ex.what()));
+        return Status(StatusCode::NotConnected, "failed to connect megasearch server" + std::string(ex.what()));
     }
 
     return Status::OK();
