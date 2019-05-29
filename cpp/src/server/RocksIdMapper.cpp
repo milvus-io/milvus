@@ -9,6 +9,7 @@
 #include "utils/Log.h"
 #include "utils/CommonUtil.h"
 
+#include "rocksdb/db.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/options.h"
 
