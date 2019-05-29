@@ -32,14 +32,14 @@ MegasearchServiceHandler::DeleteTable(const std::string &table_name) {
 
 void
 MegasearchServiceHandler::CreateTablePartition(const thrift::CreateTablePartitionParam &param) {
-    // Your implementation goes here
-    printf("CreateTablePartition\n");
+    BaseTaskPtr task_ptr = CreateTablePartitionTask::Create(param);
+    MegasearchScheduler::ExecTask(task_ptr);
 }
 
 void
 MegasearchServiceHandler::DeleteTablePartition(const thrift::DeleteTablePartitionParam &param) {
-    // Your implementation goes here
-    printf("DeleteTablePartition\n");
+    BaseTaskPtr task_ptr = DeleteTablePartitionTask::Create(param);
+    MegasearchScheduler::ExecTask(task_ptr);
 }
 
 void
@@ -73,9 +73,8 @@ MegasearchServiceHandler::ShowTables(std::vector<std::string> &_return) {
 
 void
 MegasearchServiceHandler::Ping(std::string& _return, const std::string& cmd) {
-    if(cmd == "version") {
-        _return = "v1.2.0";
-    }
+    BaseTaskPtr task_ptr = PingTask::Create(cmd, _return);
+    MegasearchScheduler::ExecTask(task_ptr);
 }
 
 }
