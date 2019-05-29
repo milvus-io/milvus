@@ -51,7 +51,7 @@ set(require_libs
         )
 
 target_link_libraries(server_test
-        ${unittest_libs}
         ${require_libs}
         ${cuda_library}
+        ${unittest_libs}
         )
