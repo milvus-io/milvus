@@ -45,7 +45,7 @@ set(wrapper_libs
         zstd
         lz4
         )
-target_link_libraries(wrapper_test ${unittest_libs} ${wrapper_libs})
+target_link_libraries(wrapper_test ${wrapper_libs} ${unittest_libs})
 
 set(topk_test_src
         topk_test.cpp

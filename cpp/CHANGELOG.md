@@ -14,6 +14,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-16 - Implement metrics without prometheus
 - MS-6 - Implement SDK interface part 1
 - MS-21 - Implement SDK interface part 2
+- MS-26 - cmake. Add thirdparty packages
 
 ### Task
 
