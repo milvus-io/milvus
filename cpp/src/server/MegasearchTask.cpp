@@ -174,6 +174,44 @@ ServerError DeleteTableTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+CreateTablePartitionTask::CreateTablePartitionTask(const thrift::CreateTablePartitionParam &param)
+    : BaseTask(DDL_DML_TASK_GROUP),
+      param_(param) {
+
+}
+
+BaseTaskPtr CreateTablePartitionTask::Create(const thrift::CreateTablePartitionParam &param) {
+    return std::shared_ptr<BaseTask>(new CreateTablePartitionTask(param));
+}
+
+ServerError CreateTablePartitionTask::OnExecute() {
+    error_code_ = SERVER_NOT_IMPLEMENT;
+    error_msg_ = "create table partition not implemented";
+    SERVER_LOG_ERROR << error_msg_;
+
+    return SERVER_NOT_IMPLEMENT;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+DeleteTablePartitionTask::DeleteTablePartitionTask(const thrift::DeleteTablePartitionParam &param)
+    : BaseTask(DDL_DML_TASK_GROUP),
+      param_(param) {
+
+}
+
+BaseTaskPtr DeleteTablePartitionTask::Create(const thrift::DeleteTablePartitionParam &param) {
+    return std::shared_ptr<BaseTask>(new DeleteTablePartitionTask(param));
+}
+
+ServerError DeleteTablePartitionTask::OnExecute() {
+    error_code_ = SERVER_NOT_IMPLEMENT;
+    error_msg_ = "delete table partition not implemented";
+    SERVER_LOG_ERROR << error_msg_;
+
+    return SERVER_NOT_IMPLEMENT;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ShowTablesTask::ShowTablesTask(std::vector<std::string>& tables)
     : BaseTask(PING_TASK_GROUP),
       tables_(tables) {
@@ -408,8 +446,8 @@ ServerError SearchVectorTask::OnExecute() {
                 AttribMap attrib_map;
                 AttributeSerializer::Decode(attrib_str, attrib_map);
 
-                for(auto& attri : record.selected_column_array) {
-                    thrift_result.column_map[attri] = attrib_map[attri];
+                for(auto& attribute : record.selected_column_array) {
+                    thrift_result.column_map[attribute] = attrib_map[attribute];
                 }
 
                 thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
@@ -424,6 +462,26 @@ ServerError SearchVectorTask::OnExecute() {
         error_msg_ = ex.what();
         SERVER_LOG_ERROR << error_msg_;
         return error_code_;
+    }
+
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PingTask::PingTask(const std::string& cmd, std::string& result)
+    : BaseTask(PING_TASK_GROUP),
+      cmd_(cmd),
+      result_(result) {
+
+}
+
+BaseTaskPtr PingTask::Create(const std::string& cmd, std::string& result) {
+    return std::shared_ptr<BaseTask>(new PingTask(cmd, result));
+}
+
+ServerError PingTask::OnExecute() {
+    if(cmd_ == "version") {
+        result_ = "v1.2.0";//currently hardcode
     }
 
     return SERVER_SUCCESS;

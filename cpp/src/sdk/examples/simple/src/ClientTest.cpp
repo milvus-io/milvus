@@ -40,9 +40,12 @@ namespace {
         BLOCK_SPLITER
         std::cout << "Returned result count: " << topk_query_result_array.size() << std::endl;
 
-        int32_t index = 1;
+        int32_t index = 0;
         for(auto& result : topk_query_result_array) {
-            std::cout << "No. " << std::to_string(index) << " vector top k search result:" << std::endl;
+            index++;
+            std::cout << "No." << std::to_string(index) << " vector top "
+                << std::to_string(result.query_result_arrays.size())
+                << " search result:" << std::endl;
             for(auto& item : result.query_result_arrays) {
                 std::cout << "\t" << std::to_string(item.id) << "\tscore:" << std::to_string(item.score);
                 for(auto& attri : item.column_map) {
@@ -158,6 +161,11 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     ConnectParam param = { address, port };
     conn->Connect(param);
 
+    {//get server version
+        std::string version = conn->ServerVersion();
+        std::cout << "MegaSearch server version: " << version << std::endl;
+    }
+
     {
         std::cout << "ShowTables" << std::endl;
         std::vector<std::string> tables;
@@ -196,6 +204,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//search vectors
+        std::cout << "Waiting data persist. Sleep 10 seconds ..." << std::endl;
         sleep(10);
         std::vector<QueryRecord> record_array;
         BuildVectors(500, 510, nullptr, &record_array);
@@ -212,5 +221,13 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 //        std::cout << "Delete table result: " << stat.ToString() << std::endl;
 //    }
 
+    {//server status
+        std::string status = conn->ServerStatus();
+        std::cout << "Server status before disconnect: " << status << std::endl;
+    }
     Connection::Destroy(conn);
+    {//server status
+        std::string status = conn->ServerStatus();
+        std::cout << "Server status after disconnect: " << status << std::endl;
+    }
 }
