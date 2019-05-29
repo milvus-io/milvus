@@ -237,7 +237,6 @@ AddVectorTask::AddVectorTask(const std::string& table_name,
       record_array_(record_array),
       record_ids_(record_ids) {
     record_ids_.clear();
-    record_ids_.resize(record_array.size());
 }
 
 BaseTaskPtr AddVectorTask::Create(const std::string& table_name,
