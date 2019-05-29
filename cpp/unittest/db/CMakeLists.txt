@@ -42,4 +42,4 @@ set(db_libs
         lz4
         )
 
-target_link_libraries(db_test ${unittest_libs} ${db_libs})
+target_link_libraries(db_test ${db_libs} ${unittest_libs})

@@ -544,6 +544,7 @@ if(MEGASEARCH_WITH_EASYLOGGINGPP)
     resolve_dependency(Easylogging++)
 
     get_target_property(EASYLOGGINGPP_INCLUDE_DIR easyloggingpp INTERFACE_INCLUDE_DIRECTORIES)
+    link_directories(SYSTEM "${EASYLOGGINGPP_PREFIX}/lib")
     include_directories(SYSTEM "${EASYLOGGINGPP_INCLUDE_DIR}")
 endif()
 
@@ -652,7 +653,7 @@ macro(build_faiss)
             "--prefix=${FAISS_PREFIX}"
             "CFLAGS=${EP_C_FLAGS}"
             "CXXFLAGS=${EP_CXX_FLAGS}"
-            "LDFLAGS=-L${OPENBLAS_PREFIX}/lib"
+            "LDFLAGS=-L${OPENBLAS_PREFIX}/lib -L${LAPACK_PREFIX}/lib -lopenblas -llapack"
             --without-python)
 
 #    if(OPENBLAS_STATIC_LIB)
@@ -716,6 +717,7 @@ if(MEGASEARCH_WITH_FAISS)
     resolve_dependency(LAPACK)
     get_target_property(LAPACK_INCLUDE_DIR lapack INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM "${LAPACK_INCLUDE_DIR}")
+    link_directories(SYSTEM "${LAPACK_PREFIX}/lib")
 
     resolve_dependency(FAISS)
     get_target_property(FAISS_INCLUDE_DIR faiss INTERFACE_INCLUDE_DIRECTORIES)
@@ -750,7 +752,14 @@ macro(build_gtest)
             ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${GTEST_PREFIX}"
             "-DCMAKE_INSTALL_LIBDIR=lib"
-            -DCMAKE_CXX_FLAGS=${GTEST_CMAKE_CXX_FLAGS})
+            -DCMAKE_CXX_FLAGS=${GTEST_CMAKE_CXX_FLAGS}
+            -DCMAKE_BUILD_TYPE=Release)
+
+    set(GMOCK_INCLUDE_DIR "${GTEST_PREFIX}/include")
+    set(GMOCK_STATIC_LIB
+            "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gmock${CMAKE_STATIC_LIBRARY_SUFFIX}"
+    )
+
 
     ExternalProject_Add(googletest_ep
                         URL
@@ -758,6 +767,7 @@ macro(build_gtest)
                         BUILD_BYPRODUCTS
                         ${GTEST_STATIC_LIB}
                         ${GTEST_MAIN_STATIC_LIB}
+                        ${GMOCK_STATIC_LIB}
                         CMAKE_ARGS
                         ${GTEST_CMAKE_ARGS}
                         ${EP_LOG_OPTIONS})
@@ -775,11 +785,18 @@ macro(build_gtest)
                             PROPERTIES IMPORTED_LOCATION "${GTEST_MAIN_STATIC_LIB}"
                             INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}")
 
+    add_library(gmock STATIC IMPORTED)
+    set_target_properties(gmock
+            PROPERTIES IMPORTED_LOCATION "${GMOCK_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}")
+
     add_dependencies(gtest googletest_ep)
     add_dependencies(gtest_main googletest_ep)
+    add_dependencies(gmock googletest_ep)
 
 endmacro()
 
+message(STATUS "MEGASEARCH_BUILD_TESTS: ${MEGASEARCH_BUILD_TESTS}")
 if (MEGASEARCH_BUILD_TESTS)
     #message(STATUS "Resolving gtest dependency")
     resolve_dependency(GTest)
@@ -789,6 +806,7 @@ if (MEGASEARCH_BUILD_TESTS)
 
     # TODO: Don't use global includes but rather target_include_directories
     get_target_property(GTEST_INCLUDE_DIR gtest INTERFACE_INCLUDE_DIRECTORIES)
+    link_directories(SYSTEM "${GTEST_PREFIX}/lib")
     include_directories(SYSTEM ${GTEST_INCLUDE_DIR})
 endif()
 
@@ -1124,7 +1142,7 @@ if(MEGASEARCH_WITH_SQLITE_ORM)
 #    ExternalProject_Get_Property(sqlite_orm_ep source_dir)
 #    set(SQLITE_ORM_INCLUDE_DIR ${source_dir}/sqlite_orm_ep)
     include_directories(SYSTEM "${SQLITE_ORM_INCLUDE_DIR}")
-    message(STATUS "SQLITE_ORM_INCLUDE_DIR: ${SQLITE_ORM_INCLUDE_DIR}")
+    #message(STATUS "SQLITE_ORM_INCLUDE_DIR: ${SQLITE_ORM_INCLUDE_DIR}")
 endif()
 
 # ----------------------------------------------------------------------

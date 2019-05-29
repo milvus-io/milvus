@@ -57,7 +57,7 @@ set(count_test_src
 add_executable(metrics_test ${count_test_src} ${require_files} )
 
 target_link_libraries(metrics_test
-        ${unittest_libs}
+
         faiss
         cudart
         cublas
@@ -72,5 +72,5 @@ target_link_libraries(metrics_test
 #        prometheus-cpp-core
         pthread
         z
-
+        ${unittest_libs}
         )

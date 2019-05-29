@@ -78,6 +78,8 @@ set(third_party_libs
         easyloggingpp
         faiss
         gtest
+        gtest_main
+        gmock
         lapack
         lz4
         openblas
@@ -179,7 +181,7 @@ add_executable(vecwise_server
         ${utils_files}
         ${service_files}
         ${metrics_files}
-#        ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc
+        #${EASYLOGGINGPP_INCLUDE_DIR}/easylogging++.cc
         )
 
 if (ENABLE_LICENSE STREQUAL "ON")

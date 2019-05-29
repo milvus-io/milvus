@@ -114,11 +114,9 @@ endif()
 
 
 #----------------------------------------------------------------------
-set_option_category("Test and benchmark")
-
-if (BUILD_UNIT_TEST)
-    define_option(MEGASEARCH_BUILD_TESTS "Build the MEGASEARCH googletest unit tests" ON)
-endif(BUILD_UNIT_TEST)
+#set_option_category("Test and benchmark")
+#
+#define_option(MEGASEARCH_BUILD_TESTS "Build the MEGASEARCH googletest unit tests" ON)
 
 #----------------------------------------------------------------------
 macro(config_summary)
