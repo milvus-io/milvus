@@ -63,6 +63,7 @@ class MetricsBase{
     virtual void RawFileSizeTotalIncrement(double value = 1) {};
     virtual void IndexFileSizeGaugeSet(double value) {};
     virtual void RawFileSizeGaugeSet(double value) {};
+    virtual void FaissDiskLoadIOSpeedGaugeSet(double value) {};
 
 };
 
