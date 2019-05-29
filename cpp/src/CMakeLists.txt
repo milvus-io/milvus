@@ -77,9 +77,6 @@ set(third_party_libs
         bzip2
         easyloggingpp
         faiss
-        gtest
-        gtest_main
-        gmock
         lapack
         lz4
         openblas
