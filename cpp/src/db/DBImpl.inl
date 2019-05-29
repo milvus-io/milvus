@@ -16,10 +16,13 @@
 #include <cstring>
 #include <easylogging++.h>
 #include <cache/CpuCacheMgr.h>
+#include "../utils/Log.h"
+#include "metrics/Metrics.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
+
 
 template<typename EngineT>
 DBImpl<EngineT>::DBImpl(const Options& options)
@@ -51,15 +54,32 @@ Status DBImpl<EngineT>::HasTable(const std::string& table_id, bool& has_or_not) 
 template<typename EngineT>
 Status DBImpl<EngineT>::InsertVectors(const std::string& table_id_,
         size_t n, const float* vectors, IDNumbers& vector_ids_) {
+
+    auto start_time = METRICS_NOW_TIME;
     Status status = pMemMgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
+    auto end_time = METRICS_NOW_TIME;
+
+//    std::chrono::microseconds time_span = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+//    double average_time = double(time_span.count()) / n;
+
+    double total_time = METRICS_MICROSECONDS(start_time,end_time);
+    double avg_time = total_time / n;
+    for (int i = 0; i < n; ++i) {
+        server::Metrics::GetInstance().AddVectorsDurationHistogramOberve(avg_time);
+    }
+
+//    server::Metrics::GetInstance().add_vector_duration_seconds_quantiles().Observe((average_time));
     if (!status.ok()) {
+        server::Metrics::GetInstance().AddVectorsFailTotalIncrement(n);
         return status;
     }
+    server::Metrics::GetInstance().AddVectorsSuccessTotalIncrement(n);
 }
 
 template<typename EngineT>
 Status DBImpl<EngineT>::Query(const std::string &table_id, size_t k, size_t nq,
                       const float *vectors, QueryResults &results) {
+
     meta::DatesT dates = {meta::Meta::GetDate()};
     return Query(table_id, k, nq, vectors, dates, results);
 }
@@ -123,11 +143,34 @@ Status DBImpl<EngineT>::Query(const std::string& table_id, size_t k, size_t nq,
                 index.Load();
                 auto file_size = index.PhysicalSize()/(1024*1024);
                 search_set_size += file_size;
+
                 LOG(DEBUG) << "Search file_type " << file.file_type << " Of Size: "
                     << file_size << " M";
 
                 int inner_k = index.Count() < k ? index.Count() : k;
+                auto start_time = METRICS_NOW_TIME;
                 index.Search(nq, vectors, inner_k, output_distence, output_ids);
+                auto end_time = METRICS_NOW_TIME;
+                auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+                if(file.file_type == meta::TableFileSchema::RAW) {
+                    server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+                    server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size*1024*1024);
+                    server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size*1024*1024);
+                    server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size*1024*1024);
+
+                } else if(file.file_type == meta::TableFileSchema::TO_INDEX) {
+
+                    server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+                    server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size*1024*1024);
+                    server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size*1024*1024);
+                    server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size*1024*1024);
+
+                } else {
+                    server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
+                    server::Metrics::GetInstance().IndexFileSizeHistogramObserve(file_size*1024*1024);
+                    server::Metrics::GetInstance().IndexFileSizeTotalIncrement(file_size*1024*1024);
+                    server::Metrics::GetInstance().IndexFileSizeGaugeSet(file_size*1024*1024);
+                }
                 cluster(output_ids, output_distence, inner_k); // cluster to each query
                 memset(output_distence, 0, k * nq * sizeof(float));
                 memset(output_ids, 0, k * nq * sizeof(long));
@@ -260,8 +303,14 @@ Status DBImpl<EngineT>::MergeFiles(const std::string& table_id, const meta::Date
     long  index_size = 0;
 
     for (auto& file : files) {
+
+        auto start_time = METRICS_NOW_TIME;
         index.Merge(file.location);
         auto file_schema = file;
+        auto end_time = METRICS_NOW_TIME;
+        auto total_time = METRICS_MICROSECONDS(start_time,end_time);
+        server::Metrics::GetInstance().MemTableMergeDurationSecondsHistogramObserve(total_time);
+
         file_schema.file_type = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);
         LOG(DEBUG) << "Merging file " << file_schema.file_id;
@@ -269,6 +318,7 @@ Status DBImpl<EngineT>::MergeFiles(const std::string& table_id, const meta::Date
 
         if (index_size >= options_.index_trigger_size) break;
     }
+
 
     index.Serialize();
 
@@ -329,7 +379,11 @@ Status DBImpl<EngineT>::BuildIndex(const meta::TableFileSchema& file) {
     EngineT to_index(file.dimension, file.location);
 
     to_index.Load();
+    auto start_time = METRICS_NOW_TIME;
     auto index = to_index.BuildIndex(table_file.location);
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
 
     table_file.file_type = meta::TableFileSchema::INDEX;
     table_file.size = index->Size();

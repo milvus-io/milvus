@@ -4,19 +4,27 @@
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
 
+
 aux_source_directory(cache cache_files)
 aux_source_directory(config config_files)
 aux_source_directory(server server_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
+#aux_source_directory(metrics metrics_files)
+
+set(metrics_files
+        metrics/Metrics.cpp
+        metrics/MetricBase.h
+)
+
 
 set(license_check_files
         license/LicenseLibrary.cpp
         license/LicenseCheck.cpp
         )
 
-set(license_generator_src
+set(license_generator_files
         license/LicenseGenerator.cpp
         license/LicenseLibrary.cpp
         )
@@ -27,15 +35,18 @@ set(service_files
         thrift/gen-cpp/megasearch_types.cpp
         )
 
-set(vecwise_engine_src
+set(vecwise_engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
         ${cache_files}
         ${db_files}
         ${wrapper_files}
+#        metrics/Metrics.cpp
+        ${metrics_files}
         )
 
-set(get_sys_info_src
+set(get_sys_info_files
         license/GetSysInfo.cpp)
+
 
 include_directories(/usr/include)
 include_directories(/usr/local/cuda/include)
@@ -53,6 +64,9 @@ if (GPU_VERSION STREQUAL "ON")
             cudart
             cublas
             libsqlite3.a
+#            libprometheus-cpp-push.a
+#            libprometheus-cpp-pull.a
+#            libprometheus-cpp-core.a
             )
 else()
     set(engine_libs
@@ -63,6 +77,9 @@ else()
             libgfortran.a
             libquadmath.a
             libsqlite3.a
+#            libprometheus-cpp-push.a
+#            libprometheus-cpp-pull.a
+#            libprometheus-cpp-core.a
             )
 endif ()
 
@@ -81,21 +98,36 @@ if (ENABLE_LICENSE STREQUAL "ON")
 endif ()
 
 
-cuda_add_library(vecwise_engine STATIC ${vecwise_engine_src})
+
+cuda_add_library(vecwise_engine STATIC ${vecwise_engine_files})
 target_link_libraries(vecwise_engine ${engine_libs})
+
+add_library(metrics STATIC ${metrics_files})
 
 if (ENABLE_LICENSE STREQUAL "ON")
         add_library(vecwise_license STATIC ${license_check_files})
         target_link_libraries(vecwise_license ${license_libs})
 endif ()
 
+#set(metrics_lib
+#        libprometheus-cpp-push.a
+#        libprometheus-cpp-pull.a
+#        libprometheus-cpp-core.a
+#        )
+
+#add_library(vecwise_engine STATIC ${metrics_files} )
+#target_link_libraries(metrics ${metrics_lib})
+
 add_executable(vecwise_server
         ${config_files}
         ${server_files}
         ${utils_files}
         ${service_files}
+        ${metrics_files}
         ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc
         )
+
+
 
 set(server_libs
         vecwise_engine
@@ -120,13 +152,19 @@ else ()
 endif()
 
 if (ENABLE_LICENSE STREQUAL "ON")
-        add_executable(license_generator ${license_generator_src})
-        add_executable(get_sys_info ${get_sys_info_src})
+        add_executable(license_generator ${license_generator_files})
         target_link_libraries(get_sys_info ${license_libs} vecwise_license)
         target_link_libraries(license_generator ${license_libs})
-        install(TARGETS get_sys_info DESTINATION bin)
 endif ()
 
 install(TARGETS vecwise_server DESTINATION bin)
 
 add_subdirectory(sdk)
+#target_link_libraries(
+#        libprometheus-cpp-push.a
+#        libprometheus-cpp-pull.a
+#        libprometheus-cpp-core.a
+#        pthread
+#        z
+#        ${CURL_LIBRARIES})
+

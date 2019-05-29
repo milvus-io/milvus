@@ -39,14 +39,16 @@ SimpleIdMapper::~SimpleIdMapper() {
 
 }
 
-ServerError SimpleIdMapper::AddGroup(const std::string& group) {
+ServerError
+SimpleIdMapper::AddGroup(const std::string& group) {
     if(id_groups_.count(group) == 0) {
         id_groups_.insert(std::make_pair(group, ID_MAPPING()));
     }
 }
 
 //not thread-safe
-bool SimpleIdMapper::IsGroupExist(const std::string& group) const {
+bool
+SimpleIdMapper::IsGroupExist(const std::string& group) const {
     return id_groups_.count(group) > 0;
 }
 

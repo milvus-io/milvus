@@ -108,6 +108,8 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
 TEST_F(DBTest, DB_TEST) {
 
+
+
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
 
@@ -251,3 +253,4 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     // TODO(linxj): add groundTruth assert
 };
+
