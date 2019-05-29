@@ -48,8 +48,8 @@ namespace {
                 << " search result:" << std::endl;
             for(auto& item : result.query_result_arrays) {
                 std::cout << "\t" << std::to_string(item.id) << "\tscore:" << std::to_string(item.score);
-                for(auto& attri : item.column_map) {
-                    std::cout << "\t" << attri.first << ":" << attri.second;
+                for(auto& attribute : item.column_map) {
+                    std::cout << "\t" << attribute.first << ":" << attribute.second;
                 }
                 std::cout << std::endl;
             }
