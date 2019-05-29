@@ -101,6 +101,8 @@ std::string Status::CodeAsString() const {
             break;
         case StatusCode::NotSupported: type = "Not Supported";
             break;
+        case StatusCode::NotConnected: type = "Not Connected";
+            break;
         default: type = "Unknown";
             break;
     }
