@@ -51,9 +51,11 @@ public:
 private:
     std::shared_ptr<ThriftClient>& ClientPtr() const;
 
+    bool IsConnected() const;
+
 private:
     mutable std::shared_ptr<ThriftClient> client_ptr;
-
+    bool connected_ = false;
 };
 
 }
