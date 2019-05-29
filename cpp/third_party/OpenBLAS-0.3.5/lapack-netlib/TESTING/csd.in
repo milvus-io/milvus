@@ -1,9 +1,0 @@
-CSD:  Data file for testing CS decomposition routines
-10                                   Number of values of M, P, Q
-0  10 10 10 10 21 24 30 22 32 55     Values of M (row and column dimension of unitary matrix)
-0  4   4 0  10 9  10 20 12 12 40     Values of P (row dimension of top-left block)
-0  0  10 4  4  15 12 8  20 8  20     Values of Q (column dimension of top-left block)
-30.0                                 Threshold value of test ratio
-T                                    Put T to test the error exits
-1                                    Code to interpret the seed
-CSD   4                              List types on next line if 0 < NTYPES < 3

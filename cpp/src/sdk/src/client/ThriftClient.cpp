@@ -50,14 +50,12 @@ ThriftClient::Connect(const std::string& address, int32_t port, const std::strin
         stdcxx::shared_ptr<TSocket> socket_ptr(new transport::TSocket(address, port));
         stdcxx::shared_ptr<TTransport> transport_ptr(new TBufferedTransport(socket_ptr));
         stdcxx::shared_ptr<TProtocol> protocol_ptr;
-        if(protocol == "binary") {
+        if(protocol == THRIFT_PROTOCOL_BINARY) {
             protocol_ptr.reset(new TBinaryProtocol(transport_ptr));
-        } else if(protocol == "json") {
+        } else if(protocol == THRIFT_PROTOCOL_JSON) {
             protocol_ptr.reset(new TJSONProtocol(transport_ptr));
-        } else if(protocol == "compact") {
+        } else if(protocol == THRIFT_PROTOCOL_COMPACT) {
             protocol_ptr.reset(new TCompactProtocol(transport_ptr));
-        } else if(protocol == "debug") {
-            protocol_ptr.reset(new TDebugProtocol(transport_ptr));
         } else {
             //CLIENT_LOG_ERROR << "Service protocol: " << protocol << " is not supported currently";
             return Status(StatusCode::Invalid, "unsupported protocol");
@@ -67,7 +65,7 @@ ThriftClient::Connect(const std::string& address, int32_t port, const std::strin
         client_ = std::make_shared<thrift::MegasearchServiceClient>(protocol_ptr);
     } catch ( std::exception& ex) {
         //CLIENT_LOG_ERROR << "connect encounter exception: " << ex.what();
-        return Status(StatusCode::UnknownError, "failed to connect megasearch server" + std::string(ex.what()));
+        return Status(StatusCode::NotConnected, "failed to connect megasearch server" + std::string(ex.what()));
     }
 
     return Status::OK();

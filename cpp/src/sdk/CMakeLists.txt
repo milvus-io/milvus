@@ -28,8 +28,7 @@ add_library(megasearch_sdk STATIC
 
 link_directories(../../third_party/build/lib)
 target_link_libraries(megasearch_sdk
-        libthrift.a
-        pthread
+        ${third_party_libs}
         )
 
 add_subdirectory(examples)

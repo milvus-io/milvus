@@ -35,23 +35,23 @@ cuda_add_executable(server_test
 
 set(require_libs
         stdc++
-        boost_system
-        boost_filesystem
-        pthread
-        snappy
-        bz2
-        z
-        zstd
         rocksdb
         faiss
         cudart
         cublas
         sqlite3
+        boost_system
+        boost_filesystem
+        snappy
+        z
+        bz2
+        zstd
         lz4
+        pthread
         )
 
 target_link_libraries(server_test
-        ${unittest_libs}
         ${require_libs}
         ${cuda_library}
+        ${unittest_libs}
         )

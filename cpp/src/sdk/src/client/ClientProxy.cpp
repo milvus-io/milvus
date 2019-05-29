@@ -16,32 +16,50 @@ ClientProxy::ClientPtr() const {
     return client_ptr;
 }
 
+bool ClientProxy::IsConnected() const {
+    return (client_ptr != nullptr && connected_);
+}
+
 Status
 ClientProxy::Connect(const ConnectParam &param) {
     Disconnect();
 
     int32_t port = atoi(param.port.c_str());
-    return ClientPtr()->Connect(param.ip_address, port, "json");
+    Status status = ClientPtr()->Connect(param.ip_address, port, THRIFT_PROTOCOL_BINARY);
+    if(status.ok()) {
+        connected_ = true;
+    }
+
+    return status;
 }
 
 Status
 ClientProxy::Connect(const std::string &uri) {
     Disconnect();
 
-    return Status::NotSupported("Connect interface is not supported.");
+    size_t index = uri.find_first_of(":", 0);
+    if((index == std::string::npos)) {
+        return Status::Invalid("Invalid uri");
+    }
+
+    ConnectParam param;
+    param.ip_address = uri.substr(0, index);
+    param.port = uri.substr(index + 1);
+
+    return Connect(param);
 }
 
 Status
 ClientProxy::Connected() const {
-    if(client_ptr == nullptr) {
-        return Status(StatusCode::UnknownError, "not connected");
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
         std::string info;
         ClientPtr()->interface()->Ping(info, "");
     }  catch ( std::exception& ex) {
-        return Status(StatusCode::UnknownError, "connection lost: " + std::string(ex.what()));
+        return Status(StatusCode::NotConnected, "connection lost: " + std::string(ex.what()));
     }
 
     return Status::OK();
@@ -49,22 +67,23 @@ ClientProxy::Connected() const {
 
 Status
 ClientProxy::Disconnect() {
-    if(client_ptr == nullptr) {
-        return Status(StatusCode::UnknownError, "not connected");
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
     }
 
+    connected_ = false;
     return ClientPtr()->Disconnect();
 }
 
 std::string
 ClientProxy::ClientVersion() const {
-    return std::string("Current Version");
+    return std::string("v1.0");
 }
 
 Status
 ClientProxy::CreateTable(const TableSchema &param) {
-    if(client_ptr == nullptr) {
-        return Status(StatusCode::UnknownError, "not connected");
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
@@ -103,8 +122,8 @@ ClientProxy::CreateTable(const TableSchema &param) {
 
 Status
 ClientProxy::CreateTablePartition(const CreateTablePartitionParam &param) {
-    if(client_ptr == nullptr) {
-        return Status(StatusCode::UnknownError, "not connected");
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
@@ -132,8 +151,8 @@ ClientProxy::CreateTablePartition(const CreateTablePartitionParam &param) {
 
 Status
 ClientProxy::DeleteTablePartition(const DeleteTablePartitionParam &param) {
-    if(client_ptr == nullptr) {
-        return Status(StatusCode::UnknownError, "not connected");
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
@@ -152,8 +171,8 @@ ClientProxy::DeleteTablePartition(const DeleteTablePartitionParam &param) {
 
 Status
 ClientProxy::DeleteTable(const std::string &table_name) {
-    if(client_ptr == nullptr) {
-        return Status(StatusCode::UnknownError, "not connected");
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
@@ -170,8 +189,8 @@ Status
 ClientProxy::AddVector(const std::string &table_name,
                           const std::vector<RowRecord> &record_array,
                           std::vector<int64_t> &id_array) {
-    if(client_ptr == nullptr) {
-        return Status(StatusCode::UnknownError, "not connected");
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
@@ -205,8 +224,8 @@ ClientProxy::SearchVector(const std::string &table_name,
                              const std::vector<QueryRecord> &query_record_array,
                              std::vector<TopKQueryResult> &topk_query_result_array,
                              int64_t topk) {
-    if(client_ptr == nullptr) {
-        return Status(StatusCode::UnknownError, "not connected");
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
@@ -253,8 +272,8 @@ ClientProxy::SearchVector(const std::string &table_name,
 
 Status
 ClientProxy::DescribeTable(const std::string &table_name, TableSchema &table_schema) {
-    if(client_ptr == nullptr) {
-        return Status(StatusCode::UnknownError, "not connected");
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
@@ -290,8 +309,8 @@ ClientProxy::DescribeTable(const std::string &table_name, TableSchema &table_sch
 
 Status
 ClientProxy::ShowTables(std::vector<std::string> &table_array) {
-    if(client_ptr == nullptr) {
-        return Status(StatusCode::UnknownError, "not connected");
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
@@ -306,7 +325,7 @@ ClientProxy::ShowTables(std::vector<std::string> &table_array) {
 
 std::string
 ClientProxy::ServerVersion() const {
-    if(client_ptr == nullptr) {
+    if(!IsConnected()) {
         return "";
     }
 
@@ -321,8 +340,8 @@ ClientProxy::ServerVersion() const {
 
 std::string
 ClientProxy::ServerStatus() const {
-    if(client_ptr == nullptr) {
-        return "not connected";
+    if(!IsConnected()) {
+        return "not connected to server";
     }
 
     try {

@@ -1,9 +1,0 @@
-GLM:  Data file for testing Generalized Linear Regression Model routines
-6                             Number of values of M, P, and N
-0  5  8  15 20 40             Values of M (row dimension)
-9  0  15 12 15 30             Values of P (row dimension)
-5  5  10 25 30 40             Values of N (col dimension), M <= N <= M+P
-20.0                          Threshold value of test ratio
-T                             Put T to test the error exits
-1                             Code to interpret the seed
-GLM  8                        List types on next line if 0 < NTYPES < 8

@@ -1,8 +1,0 @@
-#!/usr/bin/make -f
-
-include /usr/share/cdbs/1/rules/debhelper.mk
-include /usr/share/cdbs/1/class/cmake.mk
-
-
-DEB_CMAKE_EXTRA_FLAGS := -DCMAKE_BUILD_TYPE=RelWithDebInfo ../cmake_unofficial
-

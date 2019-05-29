@@ -1,1 +1,0 @@
-const string foo = "bar"
