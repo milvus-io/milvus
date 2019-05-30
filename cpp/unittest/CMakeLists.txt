@@ -7,6 +7,7 @@ link_directories(
         "${CMAKE_BINARY_DIR}/lib"
         #"${VECWISE_THIRD_PARTY_BUILD}/lib"
         "${GTEST_PREFIX}/lib/"
+
 )
 message(STATUS "GTEST LIB: ${GTEST_PREFIX}/lib")
 
@@ -24,7 +25,14 @@ set(unittest_libs
         pthread
         metrics
         openblas
-        gfortran)
+        gfortran
+        prometheus-cpp-pull
+        prometheus-cpp-push
+        prometheus-cpp-core
+        civetweb
+        dl
+        z
+        )
 
 add_subdirectory(server)
 add_subdirectory(db)
