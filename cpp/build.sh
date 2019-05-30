@@ -72,7 +72,7 @@ if [[ ${MAKE_CLEAN} = "ON" ]]; then
     make clean
 fi
 
-make -j 1 || exit 1
+make -j 4 || exit 1
 
 if [[ ${BUILD_TYPE} != "Debug" ]]; then
     strip src/vecwise_server

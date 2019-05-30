@@ -152,14 +152,16 @@ if("${MAKE}" STREQUAL "")
     endif()
 endif()
 
-# Using make -j in sub-make is fragile
-# see discussion https://github.com/apache/MEGASEARCH/pull/2779
-if(${CMAKE_GENERATOR} MATCHES "Makefiles")
-    set(MAKE_BUILD_ARGS "")
-else()
-    # limit the maximum number of jobs for ninja
-    set(MAKE_BUILD_ARGS "-j4")
-endif()
+set(MAKE_BUILD_ARGS "-j4")
+
+## Using make -j in sub-make is fragile
+## see discussion https://github.com/apache/MEGASEARCH/pull/2779
+#if(${CMAKE_GENERATOR} MATCHES "Makefiles")
+#    set(MAKE_BUILD_ARGS "")
+#else()
+#    # limit the maximum number of jobs for ninja
+#    set(MAKE_BUILD_ARGS "-j4")
+#endif()
 
 # ----------------------------------------------------------------------
 # Find pthreads
@@ -537,6 +539,9 @@ macro(build_easyloggingpp)
             ${EP_LOG_OPTIONS}
             CMAKE_ARGS
             ${EASYLOGGINGPP_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
             BUILD_BYPRODUCTS
             ${EASYLOGGINGPP_STATIC_LIB})
 
@@ -577,7 +582,8 @@ macro(build_openblas)
             BUILD_IN_SOURCE
             1
             BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
             INSTALL_COMMAND
             ${MAKE}
             PREFIX=${OPENBLAS_PREFIX}
@@ -623,6 +629,9 @@ macro(build_lapack)
             ${EP_LOG_OPTIONS}
             CMAKE_ARGS
             ${LAPACK_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
             BUILD_BYPRODUCTS
             ${LAPACK_STATIC_LIB})
 
@@ -694,6 +703,9 @@ macro(build_faiss)
 #            ${FAISS_PREFIX}
 #            BUILD_COMMAND
 #            ${MAKE} ${MAKE_BUILD_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
             BUILD_IN_SOURCE
             1
 #            INSTALL_DIR
@@ -774,6 +786,9 @@ macro(build_gtest)
     ExternalProject_Add(googletest_ep
                         URL
                         ${GTEST_SOURCE_URL}
+                        BUILD_COMMAND
+                        ${MAKE}
+                        ${MAKE_BUILD_ARGS}
                         BUILD_BYPRODUCTS
                         ${GTEST_STATIC_LIB}
                         ${GTEST_MAIN_STATIC_LIB}
@@ -936,27 +951,25 @@ macro(build_prometheus)
             "${PROMETHEUS_PUSH_STATIC_LIB}"
             "${PROMETHEUS_PULL_STATIC_LIB}")
 
-    #file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/include")
-
+    file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/push/include")
     add_library(prometheus-cpp-push STATIC IMPORTED)
     set_target_properties(prometheus-cpp-push
-            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_PUSH_STATIC_LIB}")
-#            INTERFACE_INCLUDE_DIRECTORIES
-#            "${PROMETHEUS_PREFIX}/push/include")
+            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_PUSH_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${PROMETHEUS_PREFIX}/push/include")
     add_dependencies(prometheus-cpp-push prometheus_ep)
 
+    file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/pull/include")
     add_library(prometheus-cpp-pull STATIC IMPORTED)
     set_target_properties(prometheus-cpp-pull
-            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_PULL_STATIC_LIB}")
-#            INTERFACE_INCLUDE_DIRECTORIES
-#            "${PROMETHEUS_PREFIX}/pull/include")
+            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_PULL_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${PROMETHEUS_PREFIX}/pull/include")
     add_dependencies(prometheus-cpp-pull prometheus_ep)
 
+    file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/core/include")
     add_library(prometheus-cpp-core STATIC IMPORTED)
     set_target_properties(prometheus-cpp-core
-            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_CORE_STATIC_LIB}")
-#            INTERFACE_INCLUDE_DIRECTORIES
-#            "${PROMETHEUS_PREFIX}/core/include")
+            PROPERTIES IMPORTED_LOCATION "${PROMETHEUS_CORE_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${PROMETHEUS_PREFIX}/core/include")
     add_dependencies(prometheus-cpp-core prometheus_ep)
 endmacro()
 
@@ -1051,6 +1064,9 @@ macro(build_snappy)
 
     externalproject_add(snappy_ep
                         ${EP_LOG_OPTIONS}
+                        BUILD_COMMAND
+                        ${MAKE}
+                        ${MAKE_BUILD_ARGS}
                         BUILD_IN_SOURCE
                         1
                         INSTALL_DIR
@@ -1360,6 +1376,9 @@ macro(build_thrift)
             BUILD_BYPRODUCTS
             "${THRIFT_STATIC_LIB}"
             "${THRIFT_COMPILER}"
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
             CMAKE_ARGS
             ${THRIFT_CMAKE_ARGS}
             DEPENDS
@@ -1401,6 +1420,9 @@ macro(build_yamlcpp)
             URL
             ${YAMLCPP_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
             BUILD_BYPRODUCTS
             "${YAMLCPP_STATIC_LIB}"
             CMAKE_ARGS
@@ -1448,6 +1470,9 @@ macro(build_zlib)
             URL
             ${ZLIB_SOURCE_URL}
             ${EP_LOG_OPTIONS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
             BUILD_BYPRODUCTS
             "${ZLIB_STATIC_LIB}"
             CMAKE_ARGS
@@ -1515,6 +1540,9 @@ macro(build_zstd)
             ${ZSTD_CMAKE_ARGS}
             SOURCE_SUBDIR
             "build/cmake"
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
             INSTALL_DIR
             ${ZSTD_PREFIX}
             URL
