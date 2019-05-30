@@ -3,7 +3,6 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-namespace cl megasearch.thrift
 namespace cpp megasearch.thrift
 namespace py megasearch.thrift
 namespace d megasearch.thrift
