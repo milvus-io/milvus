@@ -4,7 +4,10 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
+#pragma once
+
 #include "Metrics.h"
+#include "PrometheusMetrics.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -14,8 +17,8 @@ MetricsBase &
 Metrics::CreateMetricsCollector(MetricCollectorType collector_type) {
     switch (collector_type) {
         case MetricCollectorType::PROMETHEUS:
-//            static PrometheusMetrics instance = PrometheusMetrics::GetInstance();
-            return MetricsBase::GetInstance();
+            static PrometheusMetrics instance = PrometheusMetrics::GetInstance();
+            return instance;
         default:return MetricsBase::GetInstance();
     }
 }
@@ -24,6 +27,7 @@ MetricsBase &
 Metrics::GetInstance() {
     ConfigNode &config = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);
     std::string collector_typr_str = config.GetValue(CONFIG_METRIC_COLLECTOR);
+
     if (collector_typr_str == "prometheus") {
         return CreateMetricsCollector(MetricCollectorType::PROMETHEUS);
     } else if (collector_typr_str == "zabbix") {
