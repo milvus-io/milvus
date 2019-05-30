@@ -84,8 +84,8 @@ Status FaissExecutionEngine<IndexTrait>::Load() {
 
 
         server::Metrics::GetInstance().FaissDiskLoadSizeBytesHistogramObserve(total_size);
-        server::Metrics::GetInstance().FaissDiskLoadIOSpeedHistogramObserve(total_size/double(total_time));
-
+//        server::Metrics::GetInstance().FaissDiskLoadIOSpeedHistogramObserve(total_size/double(total_time));
+        server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(total_size/double(total_time));
     }
     return Status::OK();
 }

@@ -11,12 +11,12 @@ aux_source_directory(server server_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
-#aux_source_directory(metrics metrics_files)
+aux_source_directory(metrics metrics_files)
 
-set(metrics_files
-        metrics/Metrics.cpp
-        metrics/MetricBase.h
-)
+#set(metrics_files
+#        metrics/Metrics.cpp
+#        metrics/MetricBase.h
+#)
 
 
 set(license_check_files
@@ -82,6 +82,7 @@ set(third_party_libs
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
+        civetweb
         rocksdb
         boost_system_static
         boost_filesystem_static
@@ -105,9 +106,9 @@ if (GPU_VERSION STREQUAL "ON")
             cudart
             cublas
             libsqlite3.a
-#            libprometheus-cpp-push.a
-#            libprometheus-cpp-pull.a
-#            libprometheus-cpp-core.a
+            libprometheus-cpp-push.a
+            libprometheus-cpp-pull.a
+            libprometheus-cpp-core.a
             )
 else()
     set(engine_libs
@@ -118,9 +119,9 @@ else()
             libgfortran.a
             libquadmath.a
             libsqlite3.a
-#            libprometheus-cpp-push.a
-#            libprometheus-cpp-pull.a
-#            libprometheus-cpp-core.a
+            libprometheus-cpp-push.a
+            libprometheus-cpp-pull.a
+            libprometheus-cpp-core.a
             )
 endif ()
 
@@ -173,6 +174,8 @@ set(server_libs
         libzstd.a
         liblz4.a
         dl
+        metrics
+
         )
 
 add_executable(vecwise_server
