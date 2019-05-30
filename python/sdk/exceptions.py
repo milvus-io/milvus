@@ -1,0 +1,2 @@
+class ConnectParamMissingError(ValueError):
+    pass
