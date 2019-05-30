@@ -977,6 +977,8 @@ if(MEGASEARCH_WITH_PROMETHEUS)
 
     link_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/)
     include_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/include)
+
+    link_directories(${PROMETHEUS_PREFIX}/civetweb_ep-prefix/src/civetweb_ep)
 endif()
 
 # ----------------------------------------------------------------------
