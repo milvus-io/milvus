@@ -17,7 +17,7 @@
 
 
 #define METRICS_NOW_TIME std::chrono::system_clock::now()
-#define server::Metrics::GetInstance() server::GetInstance()
+//#define server::Metrics::GetInstance() server::GetInstance()
 #define METRICS_MICROSECONDS(a,b) (std::chrono::duration_cast<std::chrono::microseconds> (b-a)).count();
 
 
@@ -86,7 +86,7 @@ class PrometheusMetrics: public MetricsBase {
 
     void FaissDiskLoadDurationSecondsHistogramObserve(double value) { if(startup_) faiss_disk_load_duration_seconds_histogram_.Observe(value);};
     void FaissDiskLoadSizeBytesHistogramObserve(double value) { if(startup_) faiss_disk_load_size_bytes_histogram_.Observe(value);};
-    void FaissDiskLoadIOSpeedHistogramObserve(double value) { if(startup_) faiss_disk_load_IO_speed_histogram_.Observe(value);};
+//    void FaissDiskLoadIOSpeedHistogramObserve(double value) { if(startup_) faiss_disk_load_IO_speed_histogram_.Observe(value);};
     void FaissDiskLoadIOSpeedGaugeSet(double value) { if(startup_) faiss_disk_load_IO_speed_gauge_.Set(value);};
 
     void CacheAccessTotalIncrement(double value = 1) { if(startup_) cache_access_total_.Increment(value);};
@@ -212,7 +212,7 @@ class PrometheusMetrics: public MetricsBase {
     prometheus::Counter &add_vectors_fail_total_ = add_vectors_request_.Add({{"outcome", "fail"}});
 
     prometheus::Family<prometheus::Histogram> &add_vectors_duration_seconds_ = prometheus::BuildHistogram()
-        .Name("add_vector_duration_seconds")
+        .Name("add_vector_duration_microseconds")
         .Help("average time of adding every vector")
         .Register(*registry_);
     prometheus::Histogram &add_vectors_duration_histogram_ = add_vectors_duration_seconds_.Add({}, BucketBoundaries{0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.08, 0.1, 0.5, 1});
@@ -227,7 +227,7 @@ class PrometheusMetrics: public MetricsBase {
     prometheus::Counter &search_fail_total_ = search_request_.Add({{"outcome","fail"}});
 
     prometheus::Family<prometheus::Histogram> &search_request_duration_seconds_ = prometheus::BuildHistogram()
-        .Name("search_request_duration_second")
+        .Name("search_request_duration_microsecond")
         .Help("histogram of processing time for each search")
         .Register(*registry_);
     prometheus::Histogram &search_duration_histogram_ = search_request_duration_seconds_.Add({}, BucketBoundaries{0.1, 1.0, 10.0});
@@ -237,14 +237,14 @@ class PrometheusMetrics: public MetricsBase {
         .Name("search_raw_files_bytes")
         .Help("histogram of raw files size by bytes")
         .Register(*registry_);
-    prometheus::Histogram &raw_files_size_histogram_ = raw_files_size_.Add({}, BucketBoundaries{0.1, 1.0, 10.0});
+    prometheus::Histogram &raw_files_size_histogram_ = raw_files_size_.Add({}, BucketBoundaries{1e9, 2e9, 4e9, 6e9, 8e9, 1e10});
 
     //record index_files size histogram
     prometheus::Family<prometheus::Histogram> &index_files_size_ = prometheus::BuildHistogram()
         .Name("search_index_files_bytes")
         .Help("histogram of index files size by bytes")
         .Register(*registry_);
-    prometheus::Histogram &index_files_size_histogram_ = index_files_size_.Add({}, BucketBoundaries{0.1, 1.0, 10.0});
+    prometheus::Histogram &index_files_size_histogram_ = index_files_size_.Add({}, BucketBoundaries{1e9, 2e9, 4e9, 6e9, 8e9, 1e10});
 
     //record index and raw files size counter
     prometheus::Family<prometheus::Counter> &file_size_total_ = prometheus::BuildCounter()
@@ -264,33 +264,33 @@ class PrometheusMetrics: public MetricsBase {
 
     //record processing time for building index
     prometheus::Family<prometheus::Histogram> &build_index_duration_seconds_ = prometheus::BuildHistogram()
-        .Name("build_index_duration_seconds")
+        .Name("build_index_duration_microseconds")
         .Help("histogram of processing time for building index")
         .Register(*registry_);
-    prometheus::Histogram &build_index_duration_seconds_histogram_ = build_index_duration_seconds_.Add({}, BucketBoundaries{0.1, 1.0, 10.0});
+    prometheus::Histogram &build_index_duration_seconds_histogram_ = build_index_duration_seconds_.Add({}, BucketBoundaries{2e6, 4e6, 6e6, 8e6, 1e7});
 
 
     //record processing time for all building index
     prometheus::Family<prometheus::Histogram> &all_build_index_duration_seconds_ = prometheus::BuildHistogram()
-        .Name("all_build_index_duration_seconds")
+        .Name("all_build_index_duration_microseconds")
         .Help("histogram of processing time for building index")
         .Register(*registry_);
-    prometheus::Histogram &all_build_index_duration_seconds_histogram_ = all_build_index_duration_seconds_.Add({}, BucketBoundaries{0.1, 1.0, 10.0});
+    prometheus::Histogram &all_build_index_duration_seconds_histogram_ = all_build_index_duration_seconds_.Add({}, BucketBoundaries{2e6, 4e6, 6e6, 8e6, 1e7});
 
     //record duration of merging mem table
     prometheus::Family<prometheus::Histogram> &mem_table_merge_duration_seconds_ = prometheus::BuildHistogram()
-        .Name("mem_table_merge_duration_seconds")
+        .Name("mem_table_merge_duration_microseconds")
         .Help("histogram of processing time for merging mem tables")
         .Register(*registry_);
-    prometheus::Histogram &mem_table_merge_duration_seconds_histogram_ = mem_table_merge_duration_seconds_.Add({}, BucketBoundaries{0.1, 1.0, 10.0});
+    prometheus::Histogram &mem_table_merge_duration_seconds_histogram_ = mem_table_merge_duration_seconds_.Add({}, BucketBoundaries{5e4, 1e5, 2e5, 4e5, 6e5, 8e5, 1e6});
 
     //record search index and raw data duration
     prometheus::Family<prometheus::Histogram> &search_data_duration_seconds_ = prometheus::BuildHistogram()
-        .Name("search_data_duration_seconds")
+        .Name("search_data_duration_microseconds")
         .Help("histograms of processing time for search index and raw data")
         .Register(*registry_);
-    prometheus::Histogram &search_index_data_duration_seconds_histogram_ = search_data_duration_seconds_.Add({{"type", "index"}}, BucketBoundaries{0.1, 1.0, 10.0});
-    prometheus::Histogram &search_raw_data_duration_seconds_histogram_ = search_data_duration_seconds_.Add({{"type", "raw"}}, BucketBoundaries{0.1, 1.0, 10.0});
+    prometheus::Histogram &search_index_data_duration_seconds_histogram_ = search_data_duration_seconds_.Add({{"type", "index"}}, BucketBoundaries{1e5, 2e5, 4e5, 6e5, 8e5});
+    prometheus::Histogram &search_raw_data_duration_seconds_histogram_ = search_data_duration_seconds_.Add({{"type", "raw"}}, BucketBoundaries{1e5, 2e5, 4e5, 6e5, 8e5});
 
 
     ////all form Cache.cpp
@@ -344,35 +344,35 @@ class PrometheusMetrics: public MetricsBase {
 
     //record meta access duration
     prometheus::Family<prometheus::Histogram> &meta_access_duration_seconds_ = prometheus::BuildHistogram()
-        .Name("meta_access_duration_seconds")
+        .Name("meta_access_duration_microseconds")
         .Help("histogram of processing time for accessing mata")
         .Register(*registry_);
-    prometheus::Histogram &meta_access_duration_seconds_histogram_ = meta_access_duration_seconds_.Add({}, BucketBoundaries{0.1, 1.0, 10.0});
+    prometheus::Histogram &meta_access_duration_seconds_histogram_ = meta_access_duration_seconds_.Add({}, BucketBoundaries{100, 300, 500, 700, 900, 2000, 4000, 6000, 8000, 20000});
 
 
 
     ////all from FaissExecutionEngine.cpp
     //record data loading from disk count, size, duration, IO speed
     prometheus::Family<prometheus::Histogram> &disk_load_duration_second_ = prometheus::BuildHistogram()
-        .Name("disk_load_duration_seconds")
+        .Name("disk_load_duration_microseconds")
         .Help("Histogram of processing time for loading data from disk")
         .Register(*registry_);
-    prometheus::Histogram &faiss_disk_load_duration_seconds_histogram_ = disk_load_duration_second_.Add({{"DB","Faiss"}},BucketBoundaries{0.1, 1.0, 10.0});
+    prometheus::Histogram &faiss_disk_load_duration_seconds_histogram_ = disk_load_duration_second_.Add({{"DB","Faiss"}},BucketBoundaries{2e5, 4e5, 6e5 , 8e5});
 
     prometheus::Family<prometheus::Histogram> &disk_load_size_bytes_ = prometheus::BuildHistogram()
         .Name("disk_load_size_bytes")
         .Help("Histogram of data size by bytes for loading data from disk")
         .Register(*registry_);
-    prometheus::Histogram &faiss_disk_load_size_bytes_histogram_ = disk_load_size_bytes_.Add({{"DB","Faiss"}},BucketBoundaries{0.1, 1.0, 10.0});
+    prometheus::Histogram &faiss_disk_load_size_bytes_histogram_ = disk_load_size_bytes_.Add({{"DB","Faiss"}},BucketBoundaries{1e9, 2e9, 4e9, 6e9, 8e9});
 
-    prometheus::Family<prometheus::Histogram> &disk_load_IO_speed_ = prometheus::BuildHistogram()
-        .Name("disk_load_IO_speed_byte_per_sec")
-        .Help("Histogram of IO speed for loading data from disk")
-        .Register(*registry_);
-    prometheus::Histogram &faiss_disk_load_IO_speed_histogram_ = disk_load_IO_speed_.Add({{"DB","Faiss"}},BucketBoundaries{0.1, 1.0, 10.0});
+//    prometheus::Family<prometheus::Histogram> &disk_load_IO_speed_ = prometheus::BuildHistogram()
+//        .Name("disk_load_IO_speed_byte_per_sec")
+//        .Help("Histogram of IO speed for loading data from disk")
+//        .Register(*registry_);
+//    prometheus::Histogram &faiss_disk_load_IO_speed_histogram_ = disk_load_IO_speed_.Add({{"DB","Faiss"}},BucketBoundaries{1000, 2000, 3000, 4000, 6000, 8000});
 
     prometheus::Family<prometheus::Gauge> &faiss_disk_load_IO_speed_ = prometheus::BuildGauge()
-        .Name("disk_load_IO_speed_byte_per_sec")
+        .Name("disk_load_IO_speed_byte_per_microsec")
         .Help("disk IO speed ")
         .Register(*registry_);
     prometheus::Gauge &faiss_disk_load_IO_speed_gauge_ = faiss_disk_load_IO_speed_.Add({{"DB","Faiss"}});

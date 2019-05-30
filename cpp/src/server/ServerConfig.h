@@ -38,6 +38,8 @@ static const std::string CONFIG_LICENSE_PATH = "license_path";
 static const std::string CONFIG_METRIC = "metric_config";
 static const std::string CONFIG_METRIC_IS_STARTUP = "is_startup";
 static const std::string CONFIG_METRIC_COLLECTOR = "collector";
+static const std::string CONFIG_PROMETHEUS = "prometheus_config";
+static const std::string CONFIG_METRIC_PROMETHEUS_PORT = "port";
 
 class ServerConfig {
  public:

@@ -6,6 +6,7 @@
 
 #include "PrometheusMetrics.h"
 
+
 namespace zilliz {
 namespace vecwise {
 namespace server {
@@ -15,7 +16,7 @@ PrometheusMetrics::Init() {
     ConfigNode& configNode = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);
     startup_ = configNode.GetValue(CONFIG_METRIC_IS_STARTUP) == "true" ? true:false;
     // Following should be read from config file.
-    const std::string bind_address = "8080";
+    const std::string bind_address = configNode.GetChild(CONFIG_PROMETHEUS).GetValue(CONFIG_METRIC_PROMETHEUS_PORT);
     const std::string uri = std::string("/metrics");
     const std::size_t num_threads = 2;
 
