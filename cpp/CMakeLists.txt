@@ -70,9 +70,9 @@ endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-#if (BUILD_UNIT_TEST)
-#    option(MEGASEARCH_BUILD_TESTS "Build the megasearch test suite" ON)
-#endif(BUILD_UNIT_TEST)
+if (BUILD_UNIT_TEST)
+    option(MEGASEARCH_BUILD_TESTS "Build the megasearch test suite" ON)
+endif(BUILD_UNIT_TEST)
 
 include(ExternalProject)
 include(DefineOptions)

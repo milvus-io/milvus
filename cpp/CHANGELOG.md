@@ -23,3 +23,4 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-4 - Refactor the vecwise_engine code structure
 - MS-20 - Clean Code Part 1
 - MS-30 - Use faiss v1.5.2
+- MS-34 - Fix prometheus-cpp thirdparty
