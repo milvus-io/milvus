@@ -1,4 +1,4 @@
 #!/bin/bash
 
-./thrift -r --gen cpp ./megasearch.thrift
+thrift -r --gen cpp ./megasearch.thrift
 
