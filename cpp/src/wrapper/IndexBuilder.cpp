@@ -6,20 +6,50 @@
 
 #include "mutex"
 
+
 #ifdef GPU_VERSION
 #include <faiss/gpu/StandardGpuResources.h>
-#include "faiss/gpu/GpuIndexIVFFlat.h"
-#include "faiss/gpu/GpuAutoTune.h"
+#include <faiss/gpu/GpuIndexIVFFlat.h>
+#include <faiss/gpu/GpuAutoTune.h>
 #endif
 
-#include "faiss/IndexFlat.h"
 
+#include <faiss/IndexFlat.h>
+#include <easylogging++.h>
+
+
+#include "server/ServerConfig.h"
 #include "IndexBuilder.h"
 
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
+
+class GpuResources {
+ public:
+    static GpuResources &GetInstance() {
+        static GpuResources instance;
+        return instance;
+    }
+
+    void SelectGpu() {
+        using namespace zilliz::vecwise::server;
+        ServerConfig &config = ServerConfig::GetInstance();
+        ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
+        gpu_num = server_config.GetInt32Value("gpu_index", 0);
+    }
+
+    int32_t GetGpu() {
+        return gpu_num;
+    }
+
+ private:
+    GpuResources() : gpu_num(0) { SelectGpu(); }
+
+ private:
+    int32_t gpu_num;
+};
 
 using std::vector;
 
@@ -44,7 +74,7 @@ Index_ptr IndexBuilder::build_all(const long &nb,
 
         std::lock_guard<std::mutex> lk(gpu_resource);
         faiss::gpu::StandardGpuResources res;
-        auto device_index = faiss::gpu::index_cpu_to_gpu(&res, 0, ori_index);
+        auto device_index = faiss::gpu::index_cpu_to_gpu(&res, GpuResources::GetInstance().GetGpu(), ori_index);
         if (!device_index->is_trained) {
             nt == 0 || xt == nullptr ? device_index->train(nb, xb)
                                      : device_index->train(nt, xt);
