@@ -31,7 +31,8 @@ set(require_files
         ../../src/metrics/Metrics.cpp
 
 #        ../../src/cache/CacheMgr.cpp
-#        ../../src/metrics/PrometheusMetrics.cpp
+        ../../src/metrics/PrometheusMetrics.cpp
+        ../../src/metrics/MetricBase.h
         ../../src/server/ServerConfig.cpp
         ../../src/utils/CommonUtil.cpp
         ../../src/utils/TimeRecorder.cpp
