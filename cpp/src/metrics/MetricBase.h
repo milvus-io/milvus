@@ -69,6 +69,8 @@ class MetricsBase{
     virtual void DataFileSizeGaugeSet(double value) {};
     virtual void AddVectorsSuccessGaugeSet(double value) {};
     virtual void AddVectorsFailGaugeSet(double value) {};
+    virtual void QueryVectorResponseSummaryObserve(double value, int count = 1) {};
+    virtual void QueryVectorResponsePerSecondGaugeSet(double value) {};
 };
 
 
