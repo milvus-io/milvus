@@ -32,14 +32,14 @@ class IndexBuilder {
                                 const long &nt = 0,
                                 const std::vector<float> &xt = std::vector<float>());
 
-    void train(const long &nt,
-               const std::vector<float> &xt);
-
-    Index_ptr add(const long &nb,
-                  const std::vector<float> &xb,
-                  const std::vector<long> &ids);
-
-    void set_build_option(const Operand_ptr &opd);
+    //void train(const long &nt,
+    //           const std::vector<float> &xt);
+    //
+    //Index_ptr add(const long &nb,
+    //              const std::vector<float> &xb,
+    //              const std::vector<long> &ids);
+    //
+    //void set_build_option(const Operand_ptr &opd);
 
 
  protected:
