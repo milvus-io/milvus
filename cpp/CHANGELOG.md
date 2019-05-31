@@ -26,3 +26,4 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-30 - Use faiss v1.5.2
 - MS-32 - Fix thrift error
 - MS-34 - Fix prometheus-cpp thirdparty
+- MS-37 - Add query, cache usage, disk write speed and file data size metrics
