@@ -138,7 +138,7 @@ int
 Server::Start() {
 //    server::Metrics::GetInstance().Init();
 //    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
-    server::Metrics::GetInstance().Init();
+//    server::Metrics::GetInstance().Init();
 
     if (daemonized_) {
         Daemonize();
@@ -177,7 +177,7 @@ Server::Start() {
             signal(SIGINT, SignalUtil::HandleSignal);
             signal(SIGHUP, SignalUtil::HandleSignal);
             signal(SIGTERM, SignalUtil::HandleSignal);
-
+            server::Metrics::GetInstance().Init();
             SERVER_LOG_INFO << "Vecwise server is running...";
             StartService();
 
