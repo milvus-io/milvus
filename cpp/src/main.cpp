@@ -11,6 +11,7 @@
 #include <string>
 #include <signal.h>
 #include <easylogging++.h>
+#include "metrics/Metrics.h"
 
 #include "utils/SignalUtil.h"
 #include "utils/CommonUtil.h"
@@ -25,7 +26,6 @@ using namespace zilliz::vecwise;
 int
 main(int argc, char *argv[]) {
     printf("Vecwise engine server start...\n");
-
 //    zilliz::lib::gpu::InitMemoryAllocator();
 
     signal(SIGINT, server::SignalUtil::HandleSignal);

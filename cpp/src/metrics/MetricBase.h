@@ -64,7 +64,11 @@ class MetricsBase{
     virtual void IndexFileSizeGaugeSet(double value) {};
     virtual void RawFileSizeGaugeSet(double value) {};
     virtual void FaissDiskLoadIOSpeedGaugeSet(double value) {};
-
+    virtual void QueryResponseSummaryObserve(double value) {};
+    virtual void DiskStoreIOSpeedGaugeSet(double value) {};
+    virtual void DataFileSizeGaugeSet(double value) {};
+    virtual void AddVectorsSuccessGaugeSet(double value) {};
+    virtual void AddVectorsFailGaugeSet(double value) {};
 };
 
 

@@ -71,17 +71,26 @@ Status DBImpl<EngineT>::InsertVectors(const std::string& table_id_,
 //    server::Metrics::GetInstance().add_vector_duration_seconds_quantiles().Observe((average_time));
     if (!status.ok()) {
         server::Metrics::GetInstance().AddVectorsFailTotalIncrement(n);
+        server::Metrics::GetInstance().AddVectorsFailGaugeSet(n);
         return status;
     }
     server::Metrics::GetInstance().AddVectorsSuccessTotalIncrement(n);
+    server::Metrics::GetInstance().AddVectorsSuccessGaugeSet(n);
 }
 
 template<typename EngineT>
 Status DBImpl<EngineT>::Query(const std::string &table_id, size_t k, size_t nq,
                       const float *vectors, QueryResults &results) {
-
+    auto start_time = METRICS_NOW_TIME;
     meta::DatesT dates = {meta::Meta::GetDate()};
-    return Query(table_id, k, nq, vectors, dates, results);
+    Status result = Query(table_id, k, nq, vectors, dates, results);
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time,end_time);
+    auto average_time = total_time / nq;
+    for (int i = 0; i < nq; ++i) {
+        server::Metrics::GetInstance().QueryResponseSummaryObserve(average_time);
+    }
+    return result;
 }
 
 template<typename EngineT>
@@ -250,7 +259,12 @@ void DBImpl<EngineT>::BackgroundTimerTask(int interval) {
         if (shutting_down_.load(std::memory_order_acquire)) break;
 
         std::this_thread::sleep_for(std::chrono::seconds(interval));
-
+        int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheUsage();
+        LOG(DEBUG) << "Cache usage " << cache_total;
+        server::Metrics::GetInstance().CacheUsageGaugeSet(static_cast<double>(cache_total));
+        long size;
+        Size(size);
+        server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
         TrySchedule();
     }
 }

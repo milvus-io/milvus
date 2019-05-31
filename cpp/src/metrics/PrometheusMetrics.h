@@ -97,7 +97,11 @@ class PrometheusMetrics: public MetricsBase {
     void RawFileSizeTotalIncrement(double value = 1) { if(startup_) raw_file_size_total_.Increment(value);};
     void IndexFileSizeGaugeSet(double value) { if(startup_) index_file_size_gauge_.Set(value);};
     void RawFileSizeGaugeSet(double value) { if(startup_) raw_file_size_gauge_.Set(value);};
-
+    void QueryResponseSummaryObserve(double value) {if(startup_) query_response_summary_.Observe(value);};
+    void DiskStoreIOSpeedGaugeSet(double value) { if(startup_) disk_store_IO_speed_gauge_.Set(value);};
+    void DataFileSizeGaugeSet(double value) { if(startup_) data_file_size_gauge_.Set(value);};
+    void AddVectorsSuccessGaugeSet(double value) { if(startup_) add_vectors_success_gauge_.Set(value);};
+    void AddVectorsFailGaugeSet(double value) { if(startup_) add_vectors_fail_gauge_.Set(value);};
 
 
 
@@ -295,11 +299,6 @@ class PrometheusMetrics: public MetricsBase {
 
     ////all form Cache.cpp
     //record cache usage, when insert/erase/clear/free
-    prometheus::Family<prometheus::Gauge> &cache_usage_ = prometheus::BuildGauge()
-        .Name("cache_usage")
-        .Help("total bytes that cache used")
-        .Register(*registry_);
-    prometheus::Gauge &cache_usage_gauge_ = cache_usage_.Add({});
 
 
     ////all from Meta.cpp
@@ -386,6 +385,39 @@ class PrometheusMetrics: public MetricsBase {
         .Register(*registry_);
     prometheus::Counter &cache_access_total_ = cache_access_.Add({});
 
+    // record cache usage and %
+    prometheus::Family<prometheus::Gauge> &cache_usage_ = prometheus::BuildGauge()
+        .Name("cache_usage_bytes")
+        .Help("current cache usage by bytes")
+        .Register(*registry_);
+    prometheus::Gauge &cache_usage_gauge_ = cache_usage_.Add({});
+
+    // record query response
+    using Quantiles = std::vector<prometheus::detail::CKMSQuantiles::Quantile>;
+    prometheus::Family<prometheus::Summary> &query_response_ = prometheus::BuildSummary()
+        .Name("query_response_summary")
+        .Help("query response summary")
+        .Register(*registry_);
+    prometheus::Summary &query_response_summary_ = query_response_.Add({}, Quantiles{{0.95,0.00},{0.9,0.05},{0.8,0.1}});
+
+    prometheus::Family<prometheus::Gauge> &disk_store_IO_speed_ = prometheus::BuildGauge()
+        .Name("disk_store_IO_speed_bytes_per_microseconds")
+        .Help("disk_store_IO_speed")
+        .Register(*registry_);
+    prometheus::Gauge &disk_store_IO_speed_gauge_ = disk_store_IO_speed_.Add({});
+
+    prometheus::Family<prometheus::Gauge> &data_file_size_ = prometheus::BuildGauge()
+        .Name("data_file_size_bytes")
+        .Help("data file size by bytes")
+        .Register(*registry_);
+    prometheus::Gauge &data_file_size_gauge_ = data_file_size_.Add({});
+
+    prometheus::Family<prometheus::Gauge> &add_vectors_ = prometheus::BuildGauge()
+        .Name("add_vectors")
+        .Help("current added vectors")
+        .Register(*registry_);
+    prometheus::Gauge &add_vectors_success_gauge_ = add_vectors_.Add({{"outcome", "success"}});
+    prometheus::Gauge &add_vectors_fail_gauge_ = add_vectors_.Add({{"outcome", "fail"}});
 };
 
 
