@@ -88,8 +88,10 @@ Status DBImpl<EngineT>::Query(const std::string &table_id, size_t k, size_t nq,
     auto total_time = METRICS_MICROSECONDS(start_time,end_time);
     auto average_time = total_time / nq;
     for (int i = 0; i < nq; ++i) {
-        server::Metrics::GetInstance().QueryResponseSummaryObserve(average_time);
+        server::Metrics::GetInstance().QueryResponseSummaryObserve(total_time);
     }
+    server::Metrics::GetInstance().QueryVectorResponseSummaryObserve(average_time, nq);
+    server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq) / total_time);
     return result;
 }
 

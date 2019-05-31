@@ -18,6 +18,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-31 - cmake: add prometheus
 - MS-33 - cmake: add -j4 to make third party packages build faster
 - MS-27 - support gpu config and disable license build config in cmake
+- MS-47 - Add query vps metrics
 
 ### Task
 
