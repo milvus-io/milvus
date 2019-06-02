@@ -39,6 +39,12 @@ protected:
     void InitLog();
     virtual void SetUp() override;
     virtual void TearDown() override;
+    virtual zilliz::vecwise::engine::Options GetOptions();
+};
+
+class DBTest2 : public DBTest {
+protected:
+    virtual zilliz::vecwise::engine::Options GetOptions() override;
 };
 
 

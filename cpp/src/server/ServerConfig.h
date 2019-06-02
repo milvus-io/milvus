@@ -8,7 +8,7 @@
 #include "utils/Error.h"
 #include "config/ConfigNode.h"
 
-#include <yaml-cpp/yaml.h>
+#include "yaml-cpp/yaml.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -34,6 +34,12 @@ static const std::string CONFIG_GPU_CACHE_CAPACITY = "gpu_cache_capacity";
 
 static const std::string CONFIG_LICENSE = "license_config";
 static const std::string CONFIG_LICENSE_PATH = "license_path";
+
+static const std::string CONFIG_METRIC = "metric_config";
+static const std::string CONFIG_METRIC_IS_STARTUP = "is_startup";
+static const std::string CONFIG_METRIC_COLLECTOR = "collector";
+static const std::string CONFIG_PROMETHEUS = "prometheus_config";
+static const std::string CONFIG_METRIC_PROMETHEUS_PORT = "port";
 
 class ServerConfig {
  public:

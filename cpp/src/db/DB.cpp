@@ -7,8 +7,6 @@
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
-/* #include "FaissExecutionEngine.h" */
-/* #include "Traits.h" */
 #include "Factories.h"
 
 namespace zilliz {

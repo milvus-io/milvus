@@ -5,10 +5,10 @@
  ******************************************************************************/
 #pragma once
 
+#include "ExecutionEngine.h"
+
 #include <memory>
 #include <string>
-
-#include "ExecutionEngine.h"
 
 namespace faiss {
     class Index;
@@ -22,7 +22,7 @@ namespace engine {
 template<class IndexTrait>
 class FaissExecutionEngine : public ExecutionEngine<FaissExecutionEngine<IndexTrait>> {
 public:
-    typedef std::shared_ptr<FaissExecutionEngine<IndexTrait>> Ptr;
+    using Ptr = std::shared_ptr<FaissExecutionEngine<IndexTrait>>;
 
     FaissExecutionEngine(uint16_t dimension, const std::string& location);
     FaissExecutionEngine(std::shared_ptr<faiss::Index> index, const std::string& location);
@@ -53,7 +53,9 @@ public:
     Ptr BuildIndex(const std::string&);
 
     Status Cache();
+
 protected:
+
     std::shared_ptr<faiss::Index> pIndex_;
     std::string location_;
 };
@@ -63,4 +65,4 @@ protected:
 } // namespace vecwise
 } // namespace zilliz
 
-#include "FaissExecutionEngine.cpp"
+#include "FaissExecutionEngine.inl"

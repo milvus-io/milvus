@@ -3,6 +3,11 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
+#include "Factories.h"
+#include "DBImpl.h"
+#include "FaissExecutionEngine.h"
+#include "Traits.h"
+
 #include <stdlib.h>
 #include <time.h>
 #include <sstream>
@@ -10,12 +15,6 @@
 #include <vector>
 #include <assert.h>
 #include <easylogging++.h>
-
-#include "Factories.h"
-#include "DBImpl.h"
-#include "FaissExecutionEngine.h"
-#include "Traits.h"
-
 
 namespace zilliz {
 namespace vecwise {

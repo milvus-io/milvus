@@ -13,66 +13,66 @@ namespace vecwise {
 namespace engine {
 
 Env::Env()
-    : _bg_work_started(false),
-      _shutting_down(false) {
+    : bg_work_started_(false),
+      shutting_down_(false) {
 }
 
-void Env::schedule(void (*function_)(void* arg_), void* arg_) {
-    std::unique_lock<std::mutex> lock(_bg_work_mutex);
-    if (_shutting_down) return;
+void Env::Schedule(void (*function)(void* arg), void* arg) {
+    std::unique_lock<std::mutex> lock(bg_work_mutex_);
+    if (shutting_down_) return;
 
-    if (!_bg_work_started) {
-        _bg_work_started = true;
+    if (!bg_work_started_) {
+        bg_work_started_ = true;
         std::thread bg_thread(Env::BackgroundThreadEntryPoint, this);
         bg_thread.detach();
     }
 
-    if (_bg_work_queue.empty()) {
-        _bg_work_cv.notify_one();
+    if (bg_work_queue_.empty()) {
+        bg_work_cv_.notify_one();
     }
 
-    _bg_work_queue.emplace(function_, arg_);
+    bg_work_queue_.emplace(function, arg);
 }
 
-void Env::backgroud_thread_main() {
-    while (!_shutting_down) {
-        std::unique_lock<std::mutex> lock(_bg_work_mutex);
-        while (_bg_work_queue.empty() && !_shutting_down) {
-            _bg_work_cv.wait(lock);
+void Env::BackgroundThreadMain() {
+    while (!shutting_down_) {
+        std::unique_lock<std::mutex> lock(bg_work_mutex_);
+        while (bg_work_queue_.empty() && !shutting_down_) {
+            bg_work_cv_.wait(lock);
         }
 
-        if (_shutting_down) break;
+        if (shutting_down_) break;
 
-        assert(!_bg_work_queue.empty());
-        auto bg_function = _bg_work_queue.front()._function;
-        void* bg_arg = _bg_work_queue.front()._arg;
-        _bg_work_queue.pop();
+        assert(!bg_work_queue_.empty());
+        auto bg_function = bg_work_queue_.front().function_;
+        void* bg_arg = bg_work_queue_.front().arg_;
+        bg_work_queue_.pop();
 
         lock.unlock();
         bg_function(bg_arg);
     }
 
-    std::unique_lock<std::mutex> lock(_bg_work_mutex);
-    _bg_work_started = false;
-    _bg_work_cv.notify_all();
+    std::unique_lock<std::mutex> lock(bg_work_mutex_);
+    bg_work_started_ = false;
+    bg_work_cv_.notify_all();
 }
 
 void Env::Stop() {
     {
-        std::unique_lock<std::mutex> lock(_bg_work_mutex);
-        if (_shutting_down || !_bg_work_started) return;
+        std::unique_lock<std::mutex> lock(bg_work_mutex_);
+        if (shutting_down_ || !bg_work_started_) return;
     }
-    _shutting_down = true;
+    shutting_down_ = true;
     {
-        std::unique_lock<std::mutex> lock(_bg_work_mutex);
-        if (_bg_work_queue.empty()) {
-            _bg_work_cv.notify_one();
+        std::unique_lock<std::mutex> lock(bg_work_mutex_);
+        if (bg_work_queue_.empty()) {
+            bg_work_cv_.notify_one();
         }
-        while (_bg_work_started) {
-            _bg_work_cv.wait(lock);
+        while (bg_work_started_) {
+            bg_work_cv_.wait(lock);
         }
     }
-    _shutting_down = false;
+    shutting_down_ = false;
 }
 
 Env::~Env() {}
