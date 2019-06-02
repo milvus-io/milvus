@@ -288,7 +288,7 @@ if(DEFINED ENV{MEGASEARCH_THRIFT_URL})
     set(THRIFT_SOURCE_URL "$ENV{MEGASEARCH_THRIFT_URL}")
 else()
     set(THRIFT_SOURCE_URL
-            "http://archive.apache.org/dist/thrift/${THRIFT_VERSION}/thrift-${THRIFT_VERSION}.tar.gz")
+            "https://github.com/apache/thrift/archive/${THRIFT_VERSION}.tar.gz")
 endif()
 
 if(DEFINED ENV{MEGASEARCH_YAMLCPP_URL})
