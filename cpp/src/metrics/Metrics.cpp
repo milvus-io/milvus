@@ -4,7 +4,6 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
-#pragma once
 
 #include "Metrics.h"
 #include "PrometheusMetrics.h"

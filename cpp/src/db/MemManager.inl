@@ -8,6 +8,7 @@
 #include "MemManager.h"
 #include "Meta.h"
 #include "MetaConsts.h"
+#include "metrics/Metrics.h"
 
 #include <iostream>
 #include <sstream>
@@ -48,8 +49,14 @@ template<typename EngineT>
 Status MemVectors<EngineT>::Serialize(std::string& table_id) {
     table_id = schema_.table_id;
     auto size = ApproximateSize();
+    auto start_time = METRICS_NOW_TIME;
     pEE_->Serialize();
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     schema_.size = size;
+
+    server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet(size/total_time);
+
     schema_.file_type = (size >= options_.index_trigger_size) ?
         meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
 
