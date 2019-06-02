@@ -1,2 +1,0 @@
-include $(KERNELDIR)/KERNEL.P6
-

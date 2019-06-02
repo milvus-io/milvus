@@ -1,4 +1,0 @@
-#!/bin/bash
-
-echo " Please read https://github.com/xianyi/OpenBLAS/wiki/How-to-use-OpenBLAS-in-Microsoft-Visual-Studio "
-make BINARY=32 CC=gcc FC=gfortran

@@ -5,11 +5,12 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include "Server.h"
 #include "ServerConfig.h"
-#include "VecServiceWrapper.h"
+#include "MegasearchServer.h"
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 #include "license/LicenseCheck.h"
+#include "metrics/Metrics.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -18,6 +19,8 @@
 #include <numaif.h>
 #include <unistd.h>
 #include <string.h>
+
+#include "metrics/Metrics.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -133,6 +136,7 @@ Server::Daemonize() {
 
 int
 Server::Start() {
+
     if (daemonized_) {
         Daemonize();
     }
@@ -160,15 +164,17 @@ Server::Start() {
                 exit(1);
             }
 
-            std::thread counting_down(&server::LicenseCheck::StartCountingDown, license_file_path);
-            counting_down.detach();
+            if(server::LicenseCheck::StartCountingDown(license_file_path) != SERVER_SUCCESS) {
+                SERVER_LOG_ERROR << "License counter start error";
+                exit(1);
+            }
 #endif
 
             // Handle Signal
             signal(SIGINT, SignalUtil::HandleSignal);
             signal(SIGHUP, SignalUtil::HandleSignal);
             signal(SIGTERM, SignalUtil::HandleSignal);
-
+            server::Metrics::GetInstance().Init();
             SERVER_LOG_INFO << "Vecwise server is running...";
             StartService();
 
@@ -225,12 +231,12 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
-    VecServiceWrapper::StartService();
+    MegasearchServer::StartService();
 }
 
 void
 Server::StopService() {
-    VecServiceWrapper::StopService();
+    MegasearchServer::StopService();
 }
 
 }

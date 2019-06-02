@@ -9,6 +9,7 @@
 #include "utils/Log.h"
 #include "utils/CommonUtil.h"
 
+#include "rocksdb/db.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/options.h"
 
@@ -21,7 +22,7 @@ namespace server {
 static const std::string ROCKSDB_DEFAULT_GROUP = "default";
 
 RocksIdMapper::RocksIdMapper()
-: db_(nullptr) {
+    : db_(nullptr) {
     OpenDb();
 }
 
@@ -108,6 +109,19 @@ bool RocksIdMapper::IsGroupExist(const std::string& group) const {
     return IsGroupExistInternal(group);
 }
 
+ServerError RocksIdMapper::AllGroups(std::vector<std::string>& groups) const {
+    groups.clear();
+
+    std::lock_guard<std::mutex> lck(db_mutex_);
+    for(auto& pair : column_handles_) {
+        if(pair.first == ROCKSDB_DEFAULT_GROUP) {
+            continue;
+        }
+        groups.push_back(pair.first);
+    }
+
+    return SERVER_SUCCESS;
+}
 
 ServerError RocksIdMapper::Put(const std::string& nid, const std::string& sid, const std::string& group) {
     std::lock_guard<std::mutex> lck(db_mutex_);
@@ -264,7 +278,7 @@ ServerError RocksIdMapper::GetInternal(const std::string& nid, std::string& sid,
 }
 
 ServerError RocksIdMapper::DeleteInternal(const std::string& nid, const std::string& group) {
-     if(db_ == nullptr) {
+    if(db_ == nullptr) {
         return SERVER_NULL_POINTER;
     }
 
@@ -306,6 +320,7 @@ ServerError RocksIdMapper::DeleteGroupInternal(const std::string& group) {
 
     return SERVER_SUCCESS;
 }
+
 
 }
 }

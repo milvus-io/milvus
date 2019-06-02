@@ -1,8 +1,0 @@
-opam-version: "1"
-maintainer: "XXX(FILL ME IN WITH EMAIL)"
-build: [
-  [make]
-  [make "install"]
-]
-remove: [["ocamlfind" "remove" "thrift"]]
-depends: ["ocamlfind"]

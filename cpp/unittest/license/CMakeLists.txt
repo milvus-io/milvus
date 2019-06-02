@@ -16,6 +16,7 @@ link_directories(/usr/local/cuda/lib64)
 link_directories(/usr/lib/x86_64-linux-gnu)
 link_directories(/usr/lib/nvidia-415)
 link_directories(/usr/local/cuda/targets/x86_64-linux/lib/stubs/)
+link_directories(/usr/local/cuda/lib64/stubs/)
 
 set(require_files
         ../../src/license/LicenseLibrary.cpp
@@ -44,4 +45,4 @@ set(db_libs
         boost_serialization
         )
 
-target_link_libraries(license_test ${unittest_libs} ${db_libs})
+target_link_libraries(license_test ${db_libs} ${unittest_libs})

@@ -8,24 +8,28 @@
 #include "utils/Error.h"
 #include "VecIdMapper.h"
 
-#include "rocksdb/db.h"
-
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <mutex>
+
+namespace rocksdb {
+    class DB;
+    class ColumnFamilyHandle;
+}
 
 namespace zilliz {
 namespace vecwise {
 namespace server {
 
 class RocksIdMapper : public IVecIdMapper{
-public:
+ public:
     RocksIdMapper();
     ~RocksIdMapper();
 
     ServerError AddGroup(const std::string& group) override;
     bool IsGroupExist(const std::string& group) const override;
+    ServerError AllGroups(std::vector<std::string>& groups) const override;
 
     ServerError Put(const std::string& nid, const std::string& sid, const std::string& group = "") override;
     ServerError Put(const std::vector<std::string>& nid, const std::vector<std::string>& sid, const std::string& group = "") override;
@@ -36,7 +40,7 @@ public:
     ServerError Delete(const std::string& nid, const std::string& group = "") override;
     ServerError DeleteGroup(const std::string& group) override;
 
-private:
+ private:
     void OpenDb();
     void CloseDb();
 
@@ -52,11 +56,12 @@ private:
 
     ServerError DeleteGroupInternal(const std::string& group);
 
-private:
+ private:
     rocksdb::DB* db_;
     mutable std::unordered_map<std::string, rocksdb::ColumnFamilyHandle*> column_handles_;
     mutable std::mutex db_mutex_;
 };
+
 
 }
 }

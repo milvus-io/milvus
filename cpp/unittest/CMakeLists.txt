@@ -5,19 +5,37 @@
 #-------------------------------------------------------------------------------
 link_directories(
         "${CMAKE_BINARY_DIR}/lib"
-        "${VECWISE_THIRD_PARTY_BUILD}/lib"
+        #"${VECWISE_THIRD_PARTY_BUILD}/lib"
+        "${GTEST_PREFIX}/lib/"
+
 )
+message(STATUS "GTEST LIB: ${GTEST_PREFIX}/lib")
 
 set(unittest_srcs
-        ${CMAKE_CURRENT_SOURCE_DIR}/vecwise_test.cpp ${VECWISE_THIRD_PARTY_BUILD}/include/easylogging++.cc)
+        ${CMAKE_CURRENT_SOURCE_DIR}/vecwise_test.cpp)
+        #${EASYLOGGINGPP_INCLUDE_DIR}/easylogging++.cc)
 
 set(unittest_libs
         yaml-cpp
+        gtest
+        gmock
         gtest_main
         gmock_main
-        pthread)
+        easyloggingpp
+        pthread
+        metrics
+        openblas
+        gfortran
+        prometheus-cpp-pull
+        prometheus-cpp-push
+        prometheus-cpp-core
+        civetweb
+        dl
+        z
+        )
 
 add_subdirectory(server)
 add_subdirectory(db)
 add_subdirectory(faiss_wrapper)
 add_subdirectory(license)
+add_subdirectory(metrics)

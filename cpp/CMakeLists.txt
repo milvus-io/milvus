@@ -30,6 +30,7 @@ message(STATUS "MegaSearch version: "
 
 set(MEGASEARCH_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 set(MEGASEARCH_BINARY_DIR ${PROJECT_BINARY_DIR})
+
 find_package(CUDA)
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES -arch sm_60 --expt-extended-lambda")
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
@@ -41,6 +42,7 @@ if (GPU_VERSION STREQUAL "ON")
 endif ()
 
 set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED on)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
     message("building vecwise_engine on x86 architecture")
@@ -54,25 +56,27 @@ else()
     set(VECWISE_BUILD_ARCH unknown)
 endif()
 
-
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
+    # if (GPU_VERSION STREQUAL "ON")
+    #     set(ENABLE_LICENSE "ON")
+    #     add_definitions("-DENABLE_LICENSE")
+    # endif ()
 else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
 endif()
 
-if (GPU_VERSION STREQUAL "ON")
-    set(ENABLE_LICENSE "ON")
-    add_definitions("-DENABLE_LICENSE")
-endif ()
+
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-if (BUILD_UNIT_TEST)
-    option(MEGASEARCH_BUILD_TESTS "Build the megasearch test suite" ON)
-endif(BUILD_UNIT_TEST)
+#if (BUILD_UNIT_TEST)
+#    option(MEGASEARCH_BUILD_TESTS "Build the megasearch test suite" ON)
+#endif(BUILD_UNIT_TEST)
 
 include(ExternalProject)
+include(DefineOptions)
+include(BuildUtils)
 include(ThirdPartyPackages)
 
 include_directories(${MEGASEARCH_SOURCE_DIR})
@@ -82,24 +86,22 @@ link_directories(${MEGASEARCH_BINARY_DIR})
 
 set(VECWISE_ENGINE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
 set(VECWISE_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
-set(VECWISE_THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
-set(VECWISE_THIRD_PARTY_BUILD ${CMAKE_CURRENT_SOURCE_DIR}/third_party/build)
+#set(VECWISE_THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+#set(VECWISE_THIRD_PARTY_BUILD ${CMAKE_CURRENT_SOURCE_DIR}/third_party/build)
 
 add_compile_definitions(PROFILER=${PROFILER})
 
 include_directories(${VECWISE_ENGINE_INCLUDE})
 include_directories(${VECWISE_ENGINE_SRC})
-include_directories(${VECWISE_THIRD_PARTY_BUILD}/include)
+#include_directories(${VECWISE_THIRD_PARTY_BUILD}/include)
 
 link_directories(${CMAKE_CURRRENT_BINARY_DIR})
-link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib)
-link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib64)
+#link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib)
+#link_directories(${VECWISE_THIRD_PARTY_BUILD}/lib64)
 #execute_process(COMMAND bash build.sh
 #                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
-
 add_subdirectory(src)
-add_subdirectory(test_client)
 
 if (BUILD_UNIT_TEST)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
@@ -118,3 +120,5 @@ install(FILES
         conf/vecwise_engine_log.conf
         DESTINATION
         conf)
+
+config_summary()

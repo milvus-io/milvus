@@ -1,9 +1,0 @@
-Data file for testing COMPLEX*16 LAPACK linear equation routines RFP format
-9                              Number of values of N (at most 9)
-0 1 2 3 5 6 10 11 50           Values of N
-3                              Number of values of NRHS (at most 9)
-1 2 15                         Values of NRHS (number of right hand sides)
-9                              Number of matrix types (list types on next line if 0 < NTYPES <  9)
-1 2 3 4 5 6 7 8 9              Matrix Types
-30.0                           Threshold value of test ratio
-T                              Put T to test the error exits
