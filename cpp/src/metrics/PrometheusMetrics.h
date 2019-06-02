@@ -81,23 +81,29 @@ class PrometheusMetrics: public MetricsBase {
     void MemUsageTotalGaugeIncrement(double value = 1.0) override { if(startup_) mem_usage_total_gauge_.Increment(value);};
     void MemUsageTotalGaugeDecrement(double value = 1.0) override { if(startup_) mem_usage_total_gauge_.Decrement(value);};
 
-    void MetaAccessTotalIncrement(double value = 1) { if(startup_) meta_access_total_.Increment(value);};
-    void MetaAccessDurationSecondsHistogramObserve(double value) { if(startup_) meta_access_duration_seconds_histogram_.Observe(value);};
+    void MetaAccessTotalIncrement(double value = 1) override { if(startup_) meta_access_total_.Increment(value);};
+    void MetaAccessDurationSecondsHistogramObserve(double value) override { if(startup_) meta_access_duration_seconds_histogram_.Observe(value);};
 
-    void FaissDiskLoadDurationSecondsHistogramObserve(double value) { if(startup_) faiss_disk_load_duration_seconds_histogram_.Observe(value);};
-    void FaissDiskLoadSizeBytesHistogramObserve(double value) { if(startup_) faiss_disk_load_size_bytes_histogram_.Observe(value);};
+    void FaissDiskLoadDurationSecondsHistogramObserve(double value) override { if(startup_) faiss_disk_load_duration_seconds_histogram_.Observe(value);};
+    void FaissDiskLoadSizeBytesHistogramObserve(double value) override { if(startup_) faiss_disk_load_size_bytes_histogram_.Observe(value);};
 //    void FaissDiskLoadIOSpeedHistogramObserve(double value) { if(startup_) faiss_disk_load_IO_speed_histogram_.Observe(value);};
-    void FaissDiskLoadIOSpeedGaugeSet(double value) { if(startup_) faiss_disk_load_IO_speed_gauge_.Set(value);};
+    void FaissDiskLoadIOSpeedGaugeSet(double value) override { if(startup_) faiss_disk_load_IO_speed_gauge_.Set(value);};
 
-    void CacheAccessTotalIncrement(double value = 1) { if(startup_) cache_access_total_.Increment(value);};
-    void MemTableMergeDurationSecondsHistogramObserve(double value) { if(startup_) mem_table_merge_duration_seconds_histogram_.Observe(value);};
-    void SearchIndexDataDurationSecondsHistogramObserve(double value) { if(startup_) search_index_data_duration_seconds_histogram_.Observe(value);};
-    void SearchRawDataDurationSecondsHistogramObserve(double value) { if(startup_) search_raw_data_duration_seconds_histogram_.Observe(value);};
-    void IndexFileSizeTotalIncrement(double value = 1) { if(startup_) index_file_size_total_.Increment(value);};
-    void RawFileSizeTotalIncrement(double value = 1) { if(startup_) raw_file_size_total_.Increment(value);};
-    void IndexFileSizeGaugeSet(double value) { if(startup_) index_file_size_gauge_.Set(value);};
-    void RawFileSizeGaugeSet(double value) { if(startup_) raw_file_size_gauge_.Set(value);};
-
+    void CacheAccessTotalIncrement(double value = 1) override { if(startup_) cache_access_total_.Increment(value);};
+    void MemTableMergeDurationSecondsHistogramObserve(double value) override { if(startup_) mem_table_merge_duration_seconds_histogram_.Observe(value);};
+    void SearchIndexDataDurationSecondsHistogramObserve(double value) override { if(startup_) search_index_data_duration_seconds_histogram_.Observe(value);};
+    void SearchRawDataDurationSecondsHistogramObserve(double value) override { if(startup_) search_raw_data_duration_seconds_histogram_.Observe(value);};
+    void IndexFileSizeTotalIncrement(double value = 1) override { if(startup_) index_file_size_total_.Increment(value);};
+    void RawFileSizeTotalIncrement(double value = 1) override { if(startup_) raw_file_size_total_.Increment(value);};
+    void IndexFileSizeGaugeSet(double value) override { if(startup_) index_file_size_gauge_.Set(value);};
+    void RawFileSizeGaugeSet(double value) override { if(startup_) raw_file_size_gauge_.Set(value);};
+    void QueryResponseSummaryObserve(double value) override {if(startup_) query_response_summary_.Observe(value);};
+    void DiskStoreIOSpeedGaugeSet(double value) override { if(startup_) disk_store_IO_speed_gauge_.Set(value);};
+    void DataFileSizeGaugeSet(double value) override { if(startup_) data_file_size_gauge_.Set(value);};
+    void AddVectorsSuccessGaugeSet(double value) override { if(startup_) add_vectors_success_gauge_.Set(value);};
+    void AddVectorsFailGaugeSet(double value) override { if(startup_) add_vectors_fail_gauge_.Set(value);};
+    void QueryVectorResponseSummaryObserve(double value, int count = 1) override { if (startup_) for(int i = 0 ; i < count ; ++i) query_vector_response_summary_.Observe(value);};
+    void QueryVectorResponsePerSecondGaugeSet(double value) override {if (startup_) query_vector_response_per_second_gauge_.Set(value);};
 
 
 
@@ -295,11 +301,6 @@ class PrometheusMetrics: public MetricsBase {
 
     ////all form Cache.cpp
     //record cache usage, when insert/erase/clear/free
-    prometheus::Family<prometheus::Gauge> &cache_usage_ = prometheus::BuildGauge()
-        .Name("cache_usage")
-        .Help("total bytes that cache used")
-        .Register(*registry_);
-    prometheus::Gauge &cache_usage_gauge_ = cache_usage_.Add({});
 
 
     ////all from Meta.cpp
@@ -385,6 +386,53 @@ class PrometheusMetrics: public MetricsBase {
         .Help("the count of accessing cache ")
         .Register(*registry_);
     prometheus::Counter &cache_access_total_ = cache_access_.Add({});
+
+    // record cache usage and %
+    prometheus::Family<prometheus::Gauge> &cache_usage_ = prometheus::BuildGauge()
+        .Name("cache_usage_bytes")
+        .Help("current cache usage by bytes")
+        .Register(*registry_);
+    prometheus::Gauge &cache_usage_gauge_ = cache_usage_.Add({});
+
+    // record query response
+    using Quantiles = std::vector<prometheus::detail::CKMSQuantiles::Quantile>;
+    prometheus::Family<prometheus::Summary> &query_response_ = prometheus::BuildSummary()
+        .Name("query_response_summary")
+        .Help("query response summary")
+        .Register(*registry_);
+    prometheus::Summary &query_response_summary_ = query_response_.Add({}, Quantiles{{0.95,0.00},{0.9,0.05},{0.8,0.1}});
+
+    prometheus::Family<prometheus::Summary> &query_vector_response_ = prometheus::BuildSummary()
+        .Name("query_vector_response_summary")
+        .Help("query each vector response summary")
+        .Register(*registry_);
+    prometheus::Summary &query_vector_response_summary_ = query_vector_response_.Add({}, Quantiles{{0.95,0.00},{0.9,0.05},{0.8,0.1}});
+
+    prometheus::Family<prometheus::Gauge> &query_vector_response_per_second_ = prometheus::BuildGauge()
+        .Name("query_vector_response_per_microsecond")
+        .Help("the number of vectors can be queried every second ")
+        .Register(*registry_);
+    prometheus::Gauge &query_vector_response_per_second_gauge_ = query_vector_response_per_second_.Add({});
+
+    prometheus::Family<prometheus::Gauge> &disk_store_IO_speed_ = prometheus::BuildGauge()
+        .Name("disk_store_IO_speed_bytes_per_microseconds")
+        .Help("disk_store_IO_speed")
+        .Register(*registry_);
+    prometheus::Gauge &disk_store_IO_speed_gauge_ = disk_store_IO_speed_.Add({});
+
+    prometheus::Family<prometheus::Gauge> &data_file_size_ = prometheus::BuildGauge()
+        .Name("data_file_size_bytes")
+        .Help("data file size by bytes")
+        .Register(*registry_);
+    prometheus::Gauge &data_file_size_gauge_ = data_file_size_.Add({});
+
+    prometheus::Family<prometheus::Gauge> &add_vectors_ = prometheus::BuildGauge()
+        .Name("add_vectors")
+        .Help("current added vectors")
+        .Register(*registry_);
+    prometheus::Gauge &add_vectors_success_gauge_ = add_vectors_.Add({{"outcome", "success"}});
+    prometheus::Gauge &add_vectors_fail_gauge_ = add_vectors_.Add({{"outcome", "fail"}});
+
 
 };
 
