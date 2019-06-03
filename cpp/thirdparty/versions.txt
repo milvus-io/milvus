@@ -36,7 +36,7 @@ ROCKSDB_VERSION=v6.0.2
 SNAPPY_VERSION=1.1.7
 SQLITE_VERSION=3280000
 SQLITE_ORM_VERSION=master
-THRIFT_VERSION=0.12.0
+THRIFT_VERSION=v0.12.0
 YAMLCPP_VERSION=0.6.2
 ZLIB_VERSION=v1.2.11
 ZSTD_VERSION=v1.4.0
@@ -59,7 +59,7 @@ DEPENDENCIES=(
   "MEGASEARCH_SNAPPY_URL snappy-${SNAPPY_VERSION}.tar.gz https://github.com/google/snappy/archive/${SNAPPY_VERSION}.tar.gz"
   "MEGASEARCH_SQLITE_URL sqlite-autoconf-${SQLITE_VERSION}.tar.gz https://www.sqlite.org/2019/sqlite-autoconf-${SQLITE_VERSION}.tar.gz"
   "MEGASEARCH_SQLITE_ORM_URL sqlite_orm-${SQLITE_ORM_VERSION}.tar.gz https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.tar.gz"
-  "MEGASEARCH_THRIFT_URL thrift-${THRIFT_VERSION}.tar.gz http://archive.apache.org/dist/thrift/${THRIFT_VERSION}/thrift-${THRIFT_VERSION}.tar.gz"
+  "MEGASEARCH_THRIFT_URL thrift-${THRIFT_VERSION}.tar.gz https://github.com/apache/thrift/archive/${THRIFT_VERSION}.tar.gz"
   "MEGASEARCH_YAMLCPP_URL yaml-cpp-${YAMLCPP_VERSION}.tar.gz https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz"
   "MEGASEARCH_ZLIB_URL zlib-${ZLIB_VERSION}.tar.gz https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz"
   "MEGASEARCH_ZSTD_URL zstd-${ZSTD_VERSION}.tar.gz https://github.com/facebook/zstd/archive/${ZSTD_VERSION}.tar.gz"
