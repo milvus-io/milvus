@@ -1,6 +1,6 @@
 from enum import IntEnum
-from sdk.exceptions import ConnectParamMissingError
-from sdk.Status import Status
+from typing import NamedTuple
+from .Exceptions import ConnectParamMissingError
 
 
 class IndexType(IntEnum):
@@ -22,19 +22,25 @@ class ColumnType(IntEnum):
 
 class ConnectParam(object):
     """
-    Connect API parameter
+    Connection parameter
 
-    :type ip_address: str
-    :param ip_address: Server IP address
+    :type host: str
+    :param host: Server IP address
 
     :type port: str,
     :param port: Sever PORT
 
     """
-    def __init__(self, ip_address, port):
+    _keys = {'host', 'port'}
+    def __init__(self, host, port):
 
-        self.ip_address = ip_address
+        self.host = host
         self.port = port
+
+    # Make ConnectParam iterable
+    def __iter__(self):
+        yield self.host
+        yield self.port
 
 
 class Column(object):
@@ -131,6 +137,7 @@ class CreateTablePartitionParam(object):
     :type  column_name_to_range: dict{str : Range}
     :param column_name_to_range: Column name to PartitionRange dictionary
     """
+    # TODO Iterable
     def __init__(self, table_name, partition_name, **column_name_to_range):
         self.table_name = table_name
         self.partition_name = partition_name
@@ -148,6 +155,7 @@ class DeleteTablePartitionParam(object):
     :param partition_names: Partition name array
 
     """
+    # TODO Iterable
     def __init__(self, table_name, *partition_names):
         self.table_name = table_name
         self.partition_names = partition_names
@@ -224,8 +232,12 @@ def _abstract():
     raise NotImplementedError('You need to override this function')
 
 
-class Connection(object):
-    """SDK client class"""
+class ConnectIntf(object):
+    """SDK client abstract class
+
+    Connection is a abstract class
+
+    """
 
     @staticmethod
     def create():
