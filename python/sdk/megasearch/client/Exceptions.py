@@ -1,4 +1,8 @@
-class ConnectParamMissingError(ValueError):
+class ParamError(ValueError):
+    pass
+
+
+class ConnectParamMissingError(ParamError):
     pass
 
 

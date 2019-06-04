@@ -1,5 +1,4 @@
 from enum import IntEnum
-from typing import NamedTuple
 from .Exceptions import ConnectParamMissingError
 
 
@@ -72,14 +71,22 @@ class VectorColumn(Column):
     :type  store_raw_vector: bool
     :param store_raw_vector: Is vector self stored in the table
 
+    `Column`:
+        :type  name: str
+        :param name: Name of the column
+
+        :type  type: ColumnType
+        :param type: Default type is ColumnType.VECTOR, can't change
+
     """
-    def __init__(self, dimension=0,
-                    index_type=IndexType.RAW,
-                    store_raw_vector=False):
+    def __init__(self, name,
+                 dimension=0,
+                 index_type=IndexType.RAW,
+                 store_raw_vector=False):
         self.dimension = dimension
         self.index_type = index_type
         self.store_raw_vector = store_raw_vector
-        super(VectorColumn, self).__init__(type=ColumnType.VECTOR)
+        super(VectorColumn, self).__init__(name, type=ColumnType.VECTOR)
 
 
 class TableSchema(object):
@@ -87,20 +94,28 @@ class TableSchema(object):
     Table Schema
 
     :type  table_name: str
-    :param table_name: Table name
+    :param table_name: name of table
 
     :type  vector_columns: list[VectorColumn]
-    :param vector_columns: vector column description
+    :param vector_columns: a list of VectorColumns,
+
+            Stores different types of vectors
 
     :type  attribute_columns: list[Column]
     :param attribute_columns: Columns description
 
+            List of `Columns` whose type isn't VECTOR
+
     :type  partition_column_names: list[str]
     :param partition_column_names: Partition column name
 
+            `Partition columns` are `attribute columns`, the number of
+        partition columns may be less than or equal to attribute columns,
+        this param only stores `column name`
+
     """
     def __init__(self, table_name, vector_columns,
-                 attribute_columns, partition_column_names):
+                 attribute_columns, partition_column_names, **kwargs):
         self.table_name = table_name
         self.vector_columns = vector_columns
         self.attribute_columns = attribute_columns
@@ -138,7 +153,7 @@ class CreateTablePartitionParam(object):
     :param column_name_to_range: Column name to PartitionRange dictionary
     """
     # TODO Iterable
-    def __init__(self, table_name, partition_name, **column_name_to_range):
+    def __init__(self, table_name, partition_name, column_name_to_range):
         self.table_name = table_name
         self.partition_name = partition_name
         self.column_name_to_range = column_name_to_range
@@ -156,7 +171,7 @@ class DeleteTablePartitionParam(object):
 
     """
     # TODO Iterable
-    def __init__(self, table_name, *partition_names):
+    def __init__(self, table_name, partition_names):
         self.table_name = table_name
         self.partition_names = partition_names
 
@@ -168,12 +183,12 @@ class RowRecord(object):
     :type  column_name_to_vector: dict{str : list[float]}
     :param column_name_to_vector: Column name to vector map
 
-    :type  column_name_to_value: dict{str: str}
-    :param column_name_to_value: Other attribute columns
+    :type  column_name_to_attribute: dict{str: str}
+    :param column_name_to_attribute: Other attribute columns
     """
-    def __init__(self, column_name_to_vector, column_name_to_value):
+    def __init__(self, column_name_to_vector, column_name_to_attribute):
         self.column_name_to_vector = column_name_to_vector
-        self.column_name_to_value = column_name_to_value
+        self.column_name_to_attribute = column_name_to_attribute
 
 
 class QueryRecord(object):
@@ -190,7 +205,7 @@ class QueryRecord(object):
     :param name_to_partition_ranges: Range used to select partitions
 
     """
-    def __init__(self, column_name_to_vector, selected_columns, **name_to_partition_ranges):
+    def __init__(self, column_name_to_vector, selected_columns, name_to_partition_ranges):
         self.column_name_to_vector = column_name_to_vector
         self.selected_columns = selected_columns
         self.name_to_partition_ranges = name_to_partition_ranges
@@ -206,14 +221,14 @@ class QueryResult(object):
     :type  score: float
     :param score: Vector similarity 0 <= score <= 100
 
-    :type  column_name_to_value: dict{str : str}
-    :param column_name_to_value: Other columns
+    :type  column_name_to_attribute: dict{str : str}
+    :param column_name_to_attribute: Other columns
 
     """
-    def __init__(self, id, score, **column_name_to_value):
+    def __init__(self, id, score, column_name_to_attribute):
         self.id = id
         self.score = score
-        self.column_name_to_value = column_name_to_value
+        self.column_name_to_value = column_name_to_attribute
 
 
 class TopKQueryResult(object):
@@ -343,7 +358,7 @@ class ConnectIntf(object):
         """
         _abstract()
 
-    def add_vector(self, table_name, records, ids):
+    def add_vector(self, table_name, records):
         """
         Add vectors to table
         should be implemented
@@ -354,14 +369,13 @@ class ConnectIntf(object):
         :type  records: list[RowRecord]
         :param records: list of vectors been inserted
 
-        :type  ids: list[int]
-        :param ids: list of ids
-
-        :return: Status, indicate if vectors inserted successfully
+        :returns:
+            Status : indicate if vectors inserted successfully
+            ids :list of id, after inserted every vector is given a id
         """
         _abstract()
 
-    def search_vector(self, table_name, query_records, query_results, top_k):
+    def search_vector(self, table_name, query_records, top_k):
         """
         Query vectors in a table
         should be implemented
@@ -372,17 +386,16 @@ class ConnectIntf(object):
         :type  query_records: list[QueryRecord]
         :param query_records: all vectors going to be queried
 
-        :type  query_results: list[TopKQueryResult]
-        :param query_results: list of results
-
         :type  top_k: int
         :param top_k: how many similar vectors will be searched
 
-        :return: Status, indicate if query is successful
+        :returns:
+            Status:  indicate if query is successful
+            query_results: list[TopKQueryResult]
         """
         _abstract()
 
-    def describe_table(self, table_name, table_schema):
+    def describe_table(self, table_name):
         """
         Show table information
         should be implemented
@@ -390,39 +403,48 @@ class ConnectIntf(object):
         :type  table_name: str
         :param table_name: which table to be shown
 
-        :type  table_schema: TableSchema
-        :param table_schema: table schema is given when operation is successful
-
-        :return: Status, indicate if query is successful
+        :returns:
+            Status: indicate if query is successful
+            table_schema: TableSchema, given when operation is successful
         """
         _abstract()
 
-    def show_tables(self, tables):
+    def show_tables(self):
         """
         Show all tables in database
         should be implemented
 
-        :type  tables: list[str]
-        :param tables: list of tables
-
-        :return: Status, indicate if this operation is successful
+        :return:
+            Status: indicate if this operation is successful
+            tables: list[str], list of table names
         """
         _abstract()
 
     def client_version(self):
+        """
+        Provide client version
+        should be implemented
+
+        :return: Client version
+        """
+        _abstract()
+        pass
+
+    def server_version(self):
         """
         Provide server version
         should be implemented
 
         :return: Server version
         """
-        _abstract()
-        pass
 
-    def server_status(self):
+    def server_status(self, cmd):
         """
         Provide server status
         should be implemented
+        # TODO What is cmd
+        :type cmd
+        :param cmd
 
         :return: Server status
         """
