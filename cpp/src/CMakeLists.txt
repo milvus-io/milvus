@@ -101,6 +101,7 @@ if (GPU_VERSION STREQUAL "ON")
     set(engine_libs
             pthread
             libfaiss.a
+            libgpufaiss.a
             libgomp.a
             libopenblas.a
             libgfortran.a
