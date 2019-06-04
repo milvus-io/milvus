@@ -6,6 +6,7 @@
 include_directories(../../src)
 
 aux_source_directory(../../src/db db_srcs)
+aux_source_directory(../../src/db/scheduler db_scheduler_srcs)
 aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(../../src/wrapper wrapper_src)
@@ -24,6 +25,7 @@ set(db_test_src
     ${config_files}
     ${cache_srcs}
     ${db_srcs}
+    ${db_scheduler_srcs}
     ${wrapper_src}
     ${require_files}
     utils.cpp

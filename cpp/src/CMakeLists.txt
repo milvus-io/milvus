@@ -10,6 +10,7 @@ aux_source_directory(config config_files)
 aux_source_directory(server server_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
+aux_source_directory(db/scheduler db_scheduler_files)
 aux_source_directory(wrapper wrapper_files)
 aux_source_directory(metrics metrics_files)
 
@@ -39,6 +40,7 @@ set(vecwise_engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
         ${cache_files}
         ${db_files}
+        ${db_scheduler_files}
         ${wrapper_files}
 #        metrics/Metrics.cpp
         ${metrics_files}
