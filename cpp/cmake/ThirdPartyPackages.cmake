@@ -220,7 +220,7 @@ endif()
 if(DEFINED ENV{MEGASEARCH_FAISS_URL})
     set(FAISS_SOURCE_URL "$ENV{MEGASEARCH_FAISS_URL}")
 else()
-    set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
+    set(FAISS_SOURCE_URL "https://github.com/JinHai-CN/faiss/archive/${FAISS_VERSION}.tar.gz")
 endif()
 
 if (DEFINED ENV{MEGASEARCH_GTEST_URL})
@@ -705,7 +705,7 @@ macro(build_faiss)
 #            ${MAKE} ${MAKE_BUILD_ARGS}
             BUILD_COMMAND
             ${MAKE}
-            ${MAKE_BUILD_ARGS}
+            ${MAKE_BUILD_ARGS} all
             BUILD_IN_SOURCE
             1
 #            INSTALL_DIR
