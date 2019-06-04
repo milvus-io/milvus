@@ -705,7 +705,7 @@ macro(build_faiss)
 #            ${MAKE} ${MAKE_BUILD_ARGS}
             BUILD_COMMAND
             ${MAKE}
-            ${MAKE_BUILD_ARGS}
+            ${MAKE_BUILD_ARGS} all
             BUILD_IN_SOURCE
             1
 #            INSTALL_DIR
