@@ -5,19 +5,21 @@
  ******************************************************************************/
 #pragma once
 
-#include "IScheduleStrategy.h"
+#include "IndexLoaderQueue.h"
+#include "SearchContext.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-class StrategyFactory {
-private:
-    StrategyFactory() {}
-
+class IScheduleStrategy {
 public:
-    static ScheduleStrategyPtr CreateMemStrategy();
+    virtual ~IScheduleStrategy() {}
+
+    virtual bool Schedule(const SearchContextPtr &search_context, IndexLoaderQueue::LoaderQueue& loader_list) = 0;
 };
+
+using ScheduleStrategyPtr = std::shared_ptr<IScheduleStrategy>;
 
 }
 }

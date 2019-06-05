@@ -5,7 +5,7 @@
  ******************************************************************************/
 #pragma once
 
-#include "../MetaTypes.h"
+#include "db/MetaTypes.h"
 
 #include <unordered_map>
 #include <vector>
@@ -24,9 +24,9 @@ public:
 
     bool AddIndexFile(TableFileSchemaPtr& index_file);
 
-    uint64_t Topk() const { return topk_; }
-    uint64_t Nq() const  { return nq_; }
-    const float* Vectors() const { return vectors_; }
+    uint64_t topk() const { return topk_; }
+    uint64_t nq() const  { return nq_; }
+    const float* vectors() const { return vectors_; }
 
     using Id2IndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
     const Id2IndexMap& GetIndexMap() const { return map_index_files_; }

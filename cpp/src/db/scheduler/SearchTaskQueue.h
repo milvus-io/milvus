@@ -42,7 +42,7 @@ using SearchTaskPtr = std::shared_ptr<SearchTaskClass>;
 
 class SearchTaskQueue : public server::BlockingQueue<SearchTaskPtr> {
 private:
-    SearchTaskQueue() {}
+    SearchTaskQueue();
 
     SearchTaskQueue(const SearchTaskQueue &rhs) = delete;
 

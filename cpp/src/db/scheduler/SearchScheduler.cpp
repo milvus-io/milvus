@@ -71,6 +71,7 @@ SearchScheduler::IndexLoadWorker() {
     while(true) {
         IndexLoaderContextPtr context = index_queue.Take();
         if(context == nullptr) {
+            SERVER_LOG_INFO << "Stop thread for index loading";
             break;//exit
         }
 
@@ -88,20 +89,25 @@ SearchScheduler::IndexLoadWorker() {
                    << file_size/(1024*1024) << " M";
 
         //metric
-        if(context->file_->file_type == meta::TableFileSchema::RAW) {
-            server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size);
-            server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size);
-            server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size);
-
-        } else if(context->file_->file_type == meta::TableFileSchema::TO_INDEX) {
-            server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size);
-            server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size);
-            server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size);
-
-        } else {
-            server::Metrics::GetInstance().IndexFileSizeHistogramObserve(file_size);
-            server::Metrics::GetInstance().IndexFileSizeTotalIncrement(file_size);
-            server::Metrics::GetInstance().IndexFileSizeGaugeSet(file_size);
+        switch(context->file_->file_type) {
+            case meta::TableFileSchema::RAW: {
+                server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size);
+                server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size);
+                server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size);
+                break;
+            }
+            case meta::TableFileSchema::TO_INDEX: {
+                server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size);
+                server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size);
+                server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size);
+                break;
+            }
+            default: {
+                server::Metrics::GetInstance().IndexFileSizeHistogramObserve(file_size);
+                server::Metrics::GetInstance().IndexFileSizeTotalIncrement(file_size);
+                server::Metrics::GetInstance().IndexFileSizeGaugeSet(file_size);
+                break;
+            }
         }
 
         //put search task to another queue
@@ -122,6 +128,7 @@ SearchScheduler::SearchWorker() {
     while(true) {
         SearchTaskPtr task_ptr = search_queue.Take();
         if(task_ptr == nullptr) {
+            SERVER_LOG_INFO << "Stop thread for searching";
             break;//exit
         }
 

@@ -58,6 +58,12 @@ void TopkResult(SearchContext::ResultSet &result_src,
 }
 }
 
+
+SearchTaskQueue::SearchTaskQueue() {
+    SetCapacity(4);
+}
+
+
 SearchTaskQueue&
 SearchTaskQueue::GetInstance() {
     static SearchTaskQueue s_instance;
@@ -75,21 +81,23 @@ bool SearchTask<trait>::DoSearch() {
     std::vector<long> output_ids;
     std::vector<float> output_distence;
     for(auto& context : search_contexts_) {
-        auto inner_k = index_engine_->Count() < context->Topk() ? index_engine_->Count() : context->Topk();
-        output_ids.resize(inner_k*context->Nq());
-        output_distence.resize(inner_k*context->Nq());
+        auto inner_k = index_engine_->Count() < context->topk() ? index_engine_->Count() : context->topk();
+        output_ids.resize(inner_k*context->nq());
+        output_distence.resize(inner_k*context->nq());
 
         try {
-            index_engine_->Search(context->Nq(), context->Vectors(), inner_k, output_distence.data(),
+            index_engine_->Search(context->nq(), context->vectors(), inner_k, output_distence.data(),
                                   output_ids.data());
         } catch (std::exception& ex) {
             SERVER_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
+            context->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
+            continue;
         }
 
         rc.Record("do search");
 
         SearchContext::ResultSet result_set;
-        ClusterResult(output_ids, output_distence, context->Nq(), inner_k, result_set);
+        ClusterResult(output_ids, output_distence, context->nq(), inner_k, result_set);
         rc.Record("cluster result");
         TopkResult(result_set, inner_k, context->GetResult());
         rc.Record("reduce topk");
