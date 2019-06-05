@@ -8,7 +8,6 @@
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
-#include "utils/Log.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SearchScheduler.h"
 

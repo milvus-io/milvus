@@ -37,7 +37,7 @@ IndexLoaderQueue::Put(const SearchContextPtr &search_context) {
         throw server::ServerException(server::SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
 
-    ScheduleStrategyPtr strategy = CreateStrategy();
+    ScheduleStrategyPtr strategy = StrategyFactory::CreateMemStrategy();
     strategy->Schedule(search_context, queue_);
 
     empty_.notify_all();
