@@ -32,6 +32,7 @@ set(unittest_libs
         civetweb
         dl
         z
+        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
 
 add_subdirectory(server)

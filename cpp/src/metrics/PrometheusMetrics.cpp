@@ -5,6 +5,7 @@
  ******************************************************************************/
 
 #include "PrometheusMetrics.h"
+#include "SystemInfo.h"
 
 
 namespace zilliz {
@@ -25,9 +26,83 @@ PrometheusMetrics::Init() {
 
     // Exposer Registry
     exposer_ptr_->RegisterCollectable(registry_);
-
     return SERVER_SUCCESS;
+
 }
+
+void
+PrometheusMetrics::CPUUsagePercentSet()  {
+    if(!startup_) return ;
+    double usage_percent = server::SystemInfo::GetInstance().CPUPercent();
+    CPU_usage_percent_.Set(usage_percent);
+}
+
+void
+PrometheusMetrics::RAMUsagePercentSet() {
+    if(!startup_) return ;
+    double usage_percent = server::SystemInfo::GetInstance().MemoryPercent();
+    RAM_usage_percent_.Set(usage_percent);
+}
+
+void
+PrometheusMetrics::GPUPercentGaugeSet() {
+    if(!startup_) return;
+    int numDevide = server::SystemInfo::GetInstance().NumDevice();
+    std::vector<unsigned int> values = server::SystemInfo::GetInstance().GPUPercent();
+    if(numDevide >= 1) GPU0_percent_gauge_.Set(static_cast<double>(values[0]));
+    if(numDevide >= 2) GPU1_percent_gauge_.Set(static_cast<double>(values[1]));
+    if(numDevide >= 3) GPU2_percent_gauge_.Set(static_cast<double>(values[2]));
+    if(numDevide >= 4) GPU3_percent_gauge_.Set(static_cast<double>(values[3]));
+    if(numDevide >= 5) GPU4_percent_gauge_.Set(static_cast<double>(values[4]));
+    if(numDevide >= 6) GPU5_percent_gauge_.Set(static_cast<double>(values[5]));
+    if(numDevide >= 7) GPU6_percent_gauge_.Set(static_cast<double>(values[6]));
+    if(numDevide >= 8) GPU7_percent_gauge_.Set(static_cast<double>(values[7]));
+
+    // to do
+}
+
+void PrometheusMetrics::GPUMemoryUsageGaugeSet() {
+    if(!startup_) return;
+    std::vector<unsigned long long> values = server::SystemInfo::GetInstance().GPUMemoryUsed();
+    unsigned long long MtoB = 1024*1024;
+    int numDevice = values.size();
+    if(numDevice >=1) GPU0_memory_usage_gauge_.Set(values[0]/MtoB);
+    if(numDevice >=2) GPU1_memory_usage_gauge_.Set(values[1]/MtoB);
+    if(numDevice >=3) GPU2_memory_usage_gauge_.Set(values[2]/MtoB);
+    if(numDevice >=4) GPU3_memory_usage_gauge_.Set(values[3]/MtoB);
+    if(numDevice >=5) GPU4_memory_usage_gauge_.Set(values[4]/MtoB);
+    if(numDevice >=6) GPU5_memory_usage_gauge_.Set(values[5]/MtoB);
+    if(numDevice >=7) GPU6_memory_usage_gauge_.Set(values[6]/MtoB);
+    if(numDevice >=8) GPU7_memory_usage_gauge_.Set(values[7]/MtoB);
+
+    // to do
+}
+void PrometheusMetrics::AddVectorsPerSecondGaugeSet(int num_vector, int dim, double time) {
+    // MB/s
+    if(!startup_) return;
+
+    long long MtoB = 1024*1024;
+    long long size = num_vector * dim * 4;
+    add_vectors_per_second_gauge_.Set(size/time/MtoB);
+
+}
+void PrometheusMetrics::QueryIndexTypePerSecondSet(std::string type, double value) {
+    if(type == "IVF"){
+        query_index_IVF_type_per_second_gauge_.Set(value);
+    } else if(type == "IDMap"){
+        query_index_IDMAP_type_per_second_gauge_.Set(value);
+    }
+
+}
+void PrometheusMetrics::ConnectionGaugeIncrement() {
+    if(!startup_) return;
+    connection_gauge_.Increment();
+}
+void PrometheusMetrics::ConnectionGaugeDecrement() {
+    if(!startup_) return;
+    connection_gauge_.Decrement();
+}
+
 
 }
 }

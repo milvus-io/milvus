@@ -31,8 +31,12 @@ MemVectors<EngineT>::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
 
 template<typename EngineT>
 void MemVectors<EngineT>::Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
+    auto start_time = METRICS_NOW_TIME;
     pIdGenerator_->GetNextIDNumbers(n_, vector_ids_);
     pEE_->AddWithIds(n_, vectors_, vector_ids_.data());
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_), static_cast<int>(schema_.dimension), total_time);
 }
 
 template<typename EngineT>
@@ -107,6 +111,7 @@ Status MemManager<EngineT>::InsertVectors(const std::string& table_id_,
         const float* vectors_,
         IDNumbers& vector_ids_) {
     std::unique_lock<std::mutex> lock(mutex_);
+
     return InsertVectorsNoLock(table_id_, n_, vectors_, vector_ids_);
 }
 

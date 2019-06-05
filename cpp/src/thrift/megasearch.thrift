@@ -34,7 +34,7 @@ exception Exception {
  * @brief Table column description
  */
 struct Column {
-    1: required i32 type;          ///< Column Type: 0:invealid/1:int8/2:int16/3:int32/4:int64/5:float32/6:float64/7:date/8:vector
+    1: required i32 type;          ///< Column Type: 0:invalid/1:int8/2:int16/3:int32/4:int64/5:float32/6:float64/7:date/8:vector
     2: required string name;       ///< Column name
 }
 
