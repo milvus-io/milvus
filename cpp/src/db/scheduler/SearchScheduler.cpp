@@ -140,12 +140,19 @@ SearchScheduler::SearchWorker() {
         task_ptr->DoSearch();
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-        if(task_ptr->index_type_ == meta::TableFileSchema::RAW) {
-            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-        } else if(task_ptr->index_type_ == meta::TableFileSchema::TO_INDEX) {
-            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-        } else {
-            server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
+        switch(task_ptr->index_type_) {
+            case meta::TableFileSchema::RAW: {
+                server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+                break;
+            }
+            case meta::TableFileSchema::TO_INDEX: {
+                server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+                break;
+            }
+            default: {
+                server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
+                break;
+            }
         }
     }
 
