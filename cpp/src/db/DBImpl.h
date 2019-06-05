@@ -53,6 +53,12 @@ public:
     virtual ~DBImpl();
 
 private:
+    Status QuerySync(const std::string& table_id, size_t k, size_t nq,
+            const float* vectors, const meta::DatesT& dates, QueryResults& results);
+
+    Status QueryAsync(const std::string& table_id, size_t k, size_t nq,
+            const float* vectors, const meta::DatesT& dates, QueryResults& results);
+
 
     void BackgroundBuildIndex();
     Status BuildIndex(const meta::TableFileSchema&);
