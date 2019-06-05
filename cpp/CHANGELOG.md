@@ -10,6 +10,8 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## New Feature
 
+- MS-57 - Implement index load/search pipeline
+
 ## Task
 
 # MegaSearch 0.2.0 (2019-05-31)

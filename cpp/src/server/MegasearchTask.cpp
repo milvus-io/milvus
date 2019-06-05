@@ -455,7 +455,7 @@ ServerError SearchVectorTask::OnExecute() {
             result_array_.emplace_back(thrift_topk_result);
         }
         rc.Record("construct result");
-
+        rc.Elapse("totally cost");
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
