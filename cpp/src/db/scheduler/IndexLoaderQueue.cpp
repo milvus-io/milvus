@@ -15,8 +15,8 @@ namespace engine {
 
 IndexLoaderQueue&
 IndexLoaderQueue::GetInstance() {
-    static IndexLoaderQueue s_instance;
-    return s_instance;
+    static IndexLoaderQueue instance;
+    return instance;
 }
 
 void

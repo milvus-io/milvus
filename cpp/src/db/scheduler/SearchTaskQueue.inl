@@ -66,8 +66,8 @@ SearchTaskQueue::SearchTaskQueue() {
 
 SearchTaskQueue&
 SearchTaskQueue::GetInstance() {
-    static SearchTaskQueue s_instance;
-    return s_instance;
+    static SearchTaskQueue instance;
+    return instance;
 }
 
 template<typename trait>
