@@ -130,8 +130,11 @@ Status FaissExecutionEngine<IndexTrait>::Search(long n,
                                     long k,
                                     float *distances,
                                     long *labels) const {
-
+    auto start_time = METRICS_NOW_TIME;
     pIndex_->search(n, data, k, distances, labels);
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time,end_time);
+    server::Metrics::GetInstance().QueryIndexTypePerSecondSet(IndexTrait::BuildIndexType, double(n)/double(total_time));
     return Status::OK();
 }
 

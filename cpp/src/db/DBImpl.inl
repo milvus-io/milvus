@@ -63,7 +63,7 @@ Status DBImpl<EngineT>::InsertVectors(const std::string& table_id_,
 //    double average_time = double(time_span.count()) / n;
 
     double total_time = METRICS_MICROSECONDS(start_time,end_time);
-    double avg_time = total_time / n;
+    double avg_time = total_time / double(n);
     for (int i = 0; i < n; ++i) {
         server::Metrics::GetInstance().AddVectorsDurationHistogramOberve(avg_time);
     }
@@ -85,13 +85,14 @@ Status DBImpl<EngineT>::Query(const std::string &table_id, size_t k, size_t nq,
     meta::DatesT dates = {meta::Meta::GetDate()};
     Status result = Query(table_id, k, nq, vectors, dates, results);
     auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time,end_time);
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     auto average_time = total_time / nq;
     for (int i = 0; i < nq; ++i) {
         server::Metrics::GetInstance().QueryResponseSummaryObserve(total_time);
     }
     server::Metrics::GetInstance().QueryVectorResponseSummaryObserve(average_time, nq);
     server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq) / total_time);
+    server::Metrics::GetInstance().QueryResponsePerSecondGaugeSet(1.0 / total_time);
     return result;
 }
 
@@ -256,17 +257,23 @@ void DBImpl<EngineT>::StartTimerTasks(int interval) {
 template<typename EngineT>
 void DBImpl<EngineT>::BackgroundTimerTask(int interval) {
     Status status;
+    server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!bg_error_.ok()) break;
         if (shutting_down_.load(std::memory_order_acquire)) break;
 
         std::this_thread::sleep_for(std::chrono::seconds(interval));
-        int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheUsage();
-        LOG(DEBUG) << "Cache usage " << cache_total;
-        server::Metrics::GetInstance().CacheUsageGaugeSet(static_cast<double>(cache_total));
+        server::Metrics::GetInstance().KeepingAliveCounterIncrement(interval);
+        int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
+        int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+        server::Metrics::GetInstance().CacheUsageGaugeSet(cache_usage*100/cache_total);
         long size;
         Size(size);
         server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
+        server::Metrics::GetInstance().CPUUsagePercentSet();
+        server::Metrics::GetInstance().RAMUsagePercentSet();
+        server::Metrics::GetInstance().GPUPercentGaugeSet();
+        server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
         TrySchedule();
     }
 }
