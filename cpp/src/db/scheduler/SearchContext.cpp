@@ -6,7 +6,8 @@
 
 #include "SearchContext.h"
 #include "utils/Log.h"
-#include <time.h>
+
+#include <chrono>
 
 namespace zilliz {
 namespace vecwise {
@@ -17,9 +18,9 @@ SearchContext::SearchContext(uint64_t topk, uint64_t nq, const float* vectors)
       nq_(nq),
       vectors_(vectors) {
     //use current time to identify this context
-    time_t t;
-    time(&t);
-    identity_ = std::to_string(t);
+    std::chrono::system_clock::time_point tp = std::chrono::system_clock::now();
+    long id = tp.time_since_epoch().count();
+    identity_ = std::to_string(id);
 }
 
 bool
