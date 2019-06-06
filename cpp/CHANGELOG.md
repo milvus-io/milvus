@@ -45,4 +45,4 @@ Please mark all change in change log and use the ticket from JIRA.
 
 - MS-1 - Add CHANGELOG.md
 - MS-4 - Refactor the vecwise_engine code structure
-
+- MS-62 - Search range to all if no date specified

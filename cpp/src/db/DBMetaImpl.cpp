@@ -49,6 +49,7 @@ inline auto StoragePrototype(const std::string &path) {
 
 using ConnectorT = decltype(StoragePrototype(""));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
+using ConditionT = decltype(c(&TableFileSchema::id) == 1UL);
 
 std::string DBMetaImpl::GetTablePath(const std::string &table_id) {
     return options_.path + "/tables/" + table_id;
@@ -334,51 +335,93 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
                                  const DatesT &partition,
                                  DatePartionedTableFilesSchema &files) {
     files.clear();
-    DatesT today = {Meta::GetDate()};
-    const DatesT &dates = (partition.empty() == true) ? today : partition;
 
     try {
         server::Metrics::GetInstance().MetaAccessTotalIncrement();
         auto start_time = METRICS_NOW_TIME;
-        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
-                                                     &TableFileSchema::table_id,
-                                                     &TableFileSchema::file_id,
-                                                     &TableFileSchema::file_type,
-                                                     &TableFileSchema::size,
-                                                     &TableFileSchema::date),
-                                             where(c(&TableFileSchema::table_id) == table_id and
-                                                 in(&TableFileSchema::date, dates) and
-                                                 (c(&TableFileSchema::file_type) == (int) TableFileSchema::RAW or
-                                                     c(&TableFileSchema::file_type)
-                                                         == (int) TableFileSchema::TO_INDEX or
-                                                     c(&TableFileSchema::file_type)
-                                                         == (int) TableFileSchema::INDEX)));
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
-        TableSchema table_schema;
-        table_schema.table_id = table_id;
-        auto status = DescribeTable(table_schema);
-        if (!status.ok()) {
-            return status;
-        }
-
-        TableFileSchema table_file;
-
-        for (auto &file : selected) {
-            table_file.id = std::get<0>(file);
-            table_file.table_id = std::get<1>(file);
-            table_file.file_id = std::get<2>(file);
-            table_file.file_type = std::get<3>(file);
-            table_file.size = std::get<4>(file);
-            table_file.date = std::get<5>(file);
-            table_file.dimension = table_schema.dimension;
-            GetTableFilePath(table_file);
-            auto dateItr = files.find(table_file.date);
-            if (dateItr == files.end()) {
-                files[table_file.date] = TableFilesSchema();
+        if (partition.empty()) {
+            auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
+                                                         &TableFileSchema::table_id,
+                                                         &TableFileSchema::file_id,
+                                                         &TableFileSchema::file_type,
+                                                         &TableFileSchema::size,
+                                                         &TableFileSchema::date),
+                                                 where(c(&TableFileSchema::table_id) == table_id and
+                                                     (c(&TableFileSchema::file_type) == (int) TableFileSchema::RAW or
+                                                         c(&TableFileSchema::file_type)
+                                                             == (int) TableFileSchema::TO_INDEX or
+                                                         c(&TableFileSchema::file_type)
+                                                             == (int) TableFileSchema::INDEX)));
+            auto end_time = METRICS_NOW_TIME;
+            auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+            server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
+            TableSchema table_schema;
+            table_schema.table_id = table_id;
+            auto status = DescribeTable(table_schema);
+            if (!status.ok()) {
+                return status;
             }
-            files[table_file.date].push_back(table_file);
+
+            TableFileSchema table_file;
+
+            for (auto &file : selected) {
+                table_file.id = std::get<0>(file);
+                table_file.table_id = std::get<1>(file);
+                table_file.file_id = std::get<2>(file);
+                table_file.file_type = std::get<3>(file);
+                table_file.size = std::get<4>(file);
+                table_file.date = std::get<5>(file);
+                table_file.dimension = table_schema.dimension;
+                GetTableFilePath(table_file);
+                auto dateItr = files.find(table_file.date);
+                if (dateItr == files.end()) {
+                    files[table_file.date] = TableFilesSchema();
+                }
+                files[table_file.date].push_back(table_file);
+            }
+        }
+        else {
+            auto selected = ConnectorPtr->select(columns(&TableFileSchema::id,
+                                                         &TableFileSchema::table_id,
+                                                         &TableFileSchema::file_id,
+                                                         &TableFileSchema::file_type,
+                                                         &TableFileSchema::size,
+                                                         &TableFileSchema::date),
+                                                 where(c(&TableFileSchema::table_id) == table_id and
+                                                     in(&TableFileSchema::date, partition) and
+                                                     (c(&TableFileSchema::file_type) == (int) TableFileSchema::RAW or
+                                                         c(&TableFileSchema::file_type)
+                                                             == (int) TableFileSchema::TO_INDEX or
+                                                         c(&TableFileSchema::file_type)
+                                                             == (int) TableFileSchema::INDEX)));
+            auto end_time = METRICS_NOW_TIME;
+            auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+            server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
+            TableSchema table_schema;
+            table_schema.table_id = table_id;
+            auto status = DescribeTable(table_schema);
+            if (!status.ok()) {
+                return status;
+            }
+
+            TableFileSchema table_file;
+
+            for (auto &file : selected) {
+                table_file.id = std::get<0>(file);
+                table_file.table_id = std::get<1>(file);
+                table_file.file_id = std::get<2>(file);
+                table_file.file_type = std::get<3>(file);
+                table_file.size = std::get<4>(file);
+                table_file.date = std::get<5>(file);
+                table_file.dimension = table_schema.dimension;
+                GetTableFilePath(table_file);
+                auto dateItr = files.find(table_file.date);
+                if (dateItr == files.end()) {
+                    files[table_file.date] = TableFilesSchema();
+                }
+                files[table_file.date].push_back(table_file);
+            }
+
         }
     } catch (std::exception &e) {
         LOG(DEBUG) << e.what();
