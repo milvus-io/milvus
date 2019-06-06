@@ -33,7 +33,7 @@ else()
 endif()
 message(STATUS "Build type = ${BUILD_TYPE}")
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.cf ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.macro ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
 
 project(megasearch VERSION "${MEGASEARCH_VERSION}")
 project(vecwise_engine LANGUAGES CUDA CXX)
