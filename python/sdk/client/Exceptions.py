@@ -6,7 +6,15 @@ class ConnectParamMissingError(ParamError):
     pass
 
 
-class RepeatingConnectError(ValueError):
+class ConnectError(ValueError):
+    pass
+
+
+class NotConnectError(ConnectError):
+    pass
+
+
+class RepeatingConnectError(ConnectError):
     pass
 
 

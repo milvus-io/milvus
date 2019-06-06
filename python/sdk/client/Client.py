@@ -1,15 +1,16 @@
-import logging
+import logging, logging.config
+
 from thrift.transport import TSocket
 from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol, TCompactProtocol, TJSONProtocol
-from thrift.Thrift import TException, TApplicationException
+from thrift.Thrift import TException, TApplicationException, TType
 
-from ..thrift import MegasearchService
-from ..thrift import ttypes
-from .Abstract import (
+from megasearch.thrift import MegasearchService
+from megasearch.thrift import ttypes
+from client.Abstract import (
     ConnectIntf, TableSchema,
-    IndexType, ColumnType,
-    ConnectParam, Column,
+    AbstactIndexType, AbstractColumnType,
+    Column,
     VectorColumn, Range,
     CreateTablePartitionParam,
     DeleteTablePartitionParam,
@@ -17,39 +18,63 @@ from .Abstract import (
     QueryResult, TopKQueryResult
 )
 
-from .Status import Status
-from .Exceptions import (
+from client.Status import Status
+from client.Exceptions import (
     RepeatingConnectError, ConnectParamMissingError,
     DisconnectNotConnectedClientError,
-    ParamError
+    ParamError, NotConnectError
 )
-# TODO, status more specific
 
 LOGGER = logging.getLogger(__name__)
 
 __VERSION__ = '0.0.1'
-__NAME__ = 'Client'
+__NAME__ = 'Thrift_Client'
+
+
+class IndexType(AbstactIndexType):
+    # TODO thrift in IndexType
+    RAW = 1
+    IVFFLAT = 2
+
+
+class ColumnType(AbstractColumnType):
+    # INVALID = 1
+    # INT8 = 2
+    # INT16 = 3
+    # INT32 = 4
+    # INT64 = 5
+    FLOAT32 = 6
+    FLOAT64 = 7
+    DATE = 8
+    # VECTOR = 9
+
+    INVALID = TType.STOP
+    INT8 = TType.I08
+    INT16 = TType.I16
+    INT32 = TType.I32
+    INT64 = TType.I64
+    VECTOR = TType.LIST
 
 
 class Prepare(object):
+
     @classmethod
     def column(cls, name, type):
         """
-        # TODO Is a must
         Table column param
 
-        :param type: ColumnType, type of the column, default=ColumnType.INVALID
+        :param type: ColumnType, type of the column
         :param name: str, name of the column
 
         :return Column
         """
-        # TODO type in Thrift
+        # TODO type in Thrift, may have error
         temp_column = Column(name=name, type=type)
         return ttypes.Column(name=temp_column.name, type=temp_column.type)
 
     @classmethod
     def vector_column(cls, name, dimension,
-                      index_type=IndexType.RAW,
+                      # index_type=IndexType.RAW,
                       store_raw_vector=False):
         """
         Table vector column description
@@ -64,11 +89,19 @@ class Prepare(object):
 
         :return VectorColumn
         """
+        # temp = VectorColumn(name=name, dimension=dimension,
+        #                     index_type=index_type, store_raw_vector=store_raw_vector)
+
+        # return ttypes.VectorColumn(base=base, dimension=temp.dimension,
+        #                            store_raw_vector=temp.store_raw_vector,
+        #                            index_type=temp.index_type)
+
+        # Without IndexType
         temp = VectorColumn(name=name, dimension=dimension,
-                            index_type=index_type, store_raw_vector=store_raw_vector)
-        return ttypes.VectorColumn(base=temp.name, dimension=temp.dimension,
-                                   store_raw_vector=temp.store_raw_vector,
-                                   index_type=temp.index_type)
+                            store_raw_vector=store_raw_vector)
+        base = ttypes.Column(name=temp.name, type=ColumnType.VECTOR)
+        return ttypes.VectorColumn(base=base, dimension=temp.dimension,
+                                   store_raw_vector=temp.store_raw_vector)
 
     @classmethod
     def table_schema(cls, table_name,
@@ -87,7 +120,6 @@ class Prepare(object):
                 - index_type: (optional) IndexType, default=IndexType.RAW
                         Vector's index type
                 - store_raw_vector : (optional) bool, default=False
-                # TODO Is it a MUST
                 - name: str
                         Name of the column
                 - type: ColumnType, default=ColumnType.VECTOR, can't change
@@ -110,10 +142,13 @@ class Prepare(object):
         :return: TableSchema
         """
         temp = TableSchema(table_name,vector_columns,
-                           attribute_columns,partition_column_names)
+                           attribute_columns,
+                           partition_column_names)
 
-        return ttypes.TableSchema(temp.table_name,temp.vector_columns,
-                                  temp.attribute_columns, temp.partition_column_names)
+        return ttypes.TableSchema(table_name=temp.table_name,
+                                  vector_column_array=temp.vector_columns,
+                                  attribute_column_array=temp.attribute_columns,
+                                  partition_column_name_array=temp.partition_column_names)
 
     @classmethod
     def range(cls, start, end):
@@ -140,7 +175,8 @@ class Prepare(object):
 
         :return CreateTablePartitionParam
         """
-        temp = CreateTablePartitionParam(table_name=table_name, partition_name=partition_name,
+        temp = CreateTablePartitionParam(table_name=table_name,
+                                         partition_name=partition_name,
                                          column_name_to_range=column_name_to_range)
         return ttypes.CreateTablePartitionParam(table_name=temp.table_name,
                                                 partition_name=temp.partition_name,
@@ -155,15 +191,14 @@ class Prepare(object):
 
         :return DeleteTablePartitionParam
         """
-        temp = DeleteTablePartitionParam(table_name=table_name, partition_names=partition_names)
+        temp = DeleteTablePartitionParam(table_name=table_name,
+                                         partition_names=partition_names)
         return ttypes.DeleteTablePartitionParam(table_name=table_name,
                                                 partition_name_array=partition_names)
 
     @classmethod
     def row_record(cls, column_name_to_vector, column_name_to_attribute):
         """
-        Record inserted
-
         :param  column_name_to_vector: dict{str : list[float]}
                 Column name to vector map
 
@@ -201,50 +236,21 @@ class Prepare(object):
                                   selected_column_array=temp.selected_columns,
                                   partition_filter_column_map=name_to_partition_ranges)
 
-    @classmethod
-    def query_result(cls, id, score, column_name_to_value):
-        """
-        Query result
 
-        :type  id: int
-        :param id: Output result
-
-        :type  score: float
-        :param score: Vector similarity 0 <= score <= 100
-
-        :type  column_name_to_value: dict{str : str}
-        :param column_name_to_value: Other columns
-
-        """
-        # TODO
-        pass
-
-    @classmethod
-    def top_k_query_result(cls, query_results):
-        """
-        TopK query results
-
-        :type  query_results: list[QueryResult]
-        :param query_results: TopK query results
-
-        """
-        # TODO
-
-
-class Connection(ConnectIntf):
+class MegaSearch(ConnectIntf):
 
     def __init__(self):
         self.transport = None
         self.client = None
-        self.connect_status = None
+        self.status = None
 
     def __repr__(self):
-        return '{}'.format(self.connect_status)
+        return '{}'.format(self.status)
 
     @staticmethod
     def create():
         # TODO in python, maybe this method is useless
-        return Connection()
+        return MegaSearch()
 
     @staticmethod
     def destroy(connection):
@@ -253,44 +259,41 @@ class Connection(ConnectIntf):
 
         pass
 
-    def connect(self, param=None, uri=None):
+    def connect(self, host='localhost', port='9090', uri=None):
         # TODO URI
-        if self.connect_status and self.connect_status == Status(message='Connected'):
+        if self.status and self.status == Status(message='Connected'):
             raise RepeatingConnectError("You have already connected!")
 
-        if not param and not uri:
-            raise ConnectParamMissingError('Need host/port or uri param to connect with!')
+        transport = TSocket.TSocket(host=host, port=port)
+        self.transport = TTransport.TBufferedTransport(transport)
+        protocol = TJSONProtocol.TJSONProtocol(transport)
+        self.client = MegasearchService.Client(protocol)
 
         try:
-            transport = TSocket.TSocket(*param)
-            LOGGER.info('transport: {}, {}'.format(transport.host, transport.port))
-            self.transport = TTransport.TBufferedTransport(transport)
-            protocol = TJSONProtocol.TJSONProtocol(transport)
-            self.client = MegasearchService.Client(protocol)
             transport.open()
-            self.connect_status = Status(Status.OK, 'Connected')
+            self.status = Status(Status.OK, 'Connected')
             LOGGER.info('Connected!')
 
-        except TException as e:
-            self.connect_status = Status(Status.CONNECT_FAILED, message=str(e))
-            LOGGER.error(self.connect_status)
+        except (TTransport.TTransportException, TException) as e:
+            self.status = Status(Status.INVALID, message=str(e))
+            LOGGER.error('logger.error: {}'.format(self.status))
         finally:
-            return self.connect_status
+            return self.status
 
     @property
     def connected(self):
-        return self.connect_status == Status()
+        return self.status == Status()
 
     def disconnect(self):
 
-        if self.connect_status != Status.OK:
-            raise DisconnectNotConnectedClientError("Client is not connected")
+        if not self.transport:
+            raise DisconnectNotConnectedClientError('Error')
 
         try:
 
             self.transport.close()
             LOGGER.info('Client Disconnected!')
-            self.connect_status = None
+            self.status = None
 
         except TException as e:
             return Status(Status.INVALID, str(e))
@@ -303,30 +306,31 @@ class Connection(ConnectIntf):
 
                 `Please use Prepare.table_schema generate param`
 
-        :return: Status, indicate if connect is successful
+        :return: Status, indicate if operation is successful
         """
-        if not isinstance(param, ttypes.TableSchema):
-            raise ParamError('Param wrong, you need to prepare table_schema first!')
+        if not self.client:
+            raise NotConnectError('Please Connect to the server first!')
+
         try:
             self.client.CreateTable(param)
-        except TException as e:
-            LOGGER.error('Unable to create table using param:\n{}'.format(param))
+        except (TApplicationException, TException) as e:
+            LOGGER.error('Unable to create table')
             return Status(Status.INVALID, str(e))
-        return Status('Table {} created!'.format(param.table_name))
+        return Status(message='Table {} created!'.format(param.table_name))
 
     def delete_table(self, table_name):
         """Delete table
 
         :param table_name: Name of the table being deleted
 
-        :return: Status, indicate if connect is successful
+        :return: Status, indicate if operation is successful
         """
         try:
             self.client.DeleteTable(table_name)
-        except TApplicationException as e:
+        except (TApplicationException, TException) as e:
             LOGGER.error('Unable to delete table {}'.format(table_name))
             return Status(Status.INVALID, str(e))
-        return Status('Table {} deleted!'.format(table_name))
+        return Status(message='Table {} deleted!'.format(table_name))
 
     def create_table_partition(self, param):
         """
@@ -340,9 +344,10 @@ class Connection(ConnectIntf):
         """
         try:
             self.client.CreateTablePartition(param)
-        except TApplicationException as e:
+        except (TApplicationException, TException) as e:
+            LOGGER.error('{}'.format(e))
             return Status(Status.INVALID, str(e))
-        return Status('Table partition created successfully!')
+        return Status(message='Table partition created successfully!')
 
     def delete_table_partition(self, param):
         """
@@ -357,9 +362,10 @@ class Connection(ConnectIntf):
         """
         try:
             self.client.DeleteTablePartition(param)
-        except TApplicationException as e:
+        except (TApplicationException, TException) as e:
+            LOGGER.error('{}'.format(e))
             return Status(Status.INVALID, str(e))
-        return Status('Table partition deleted successfully!')
+        return Status(message='Table partition deleted successfully!')
 
     def add_vector(self, table_name, records):
         """
@@ -376,9 +382,10 @@ class Connection(ConnectIntf):
         """
         try:
             ids = self.client.AddVector(table_name=table_name, record_array=records)
-        except TApplicationException as e:
+        except (TApplicationException, TException) as e:
+            LOGGER.error('{}'.format(e))
             return Status(Status.INVALID, str(e)), None
-        return Status('Vector added successfully!'), ids
+        return Status(message='Vector added successfully!'), ids
 
     def search_vector(self, table_name, query_records, top_k):
         """
@@ -395,32 +402,33 @@ class Connection(ConnectIntf):
             Status:  indicate if query is successful
             query_results: list[TopKQueryResult], return when operation is successful
         """
+        # TODO topk_query_results
         try:
             topk_query_results = self.client.SearchVector(
                 table_name=table_name, query_record_array=query_records, topk=top_k)
 
-        except TApplicationException as e:
+        except (TApplicationException, TException) as e:
+            LOGGER.error('{}'.format(e))
             return Status(Status.INVALID, str(e)), None
-        return Status('Success!'), topk_query_results
+        return Status(message='Success!'), topk_query_results
 
     def describe_table(self, table_name):
         """
         Show table information
 
-        :type  table_name: str
-        :param table_name: which table to be shown
+        :param table_name: str, which table to be shown
 
         :returns:
             Status: indicate if query is successful
             table_schema: TableSchema, return when operation is successful
         """
         try:
-            table_schema = self.client.DescribeTable(table_name)
-        except TApplicationException as e:
+            thrift_table_schema = self.client.DescribeTable(table_name)
+        except (TApplicationException, TException) as e:
+            LOGGER.error('{}'.format(e))
             return Status(Status.INVALID, str(e)), None
-
         # TODO Table Schema
-        return Status('Success!'), table_schema
+        return Status(message='Success!'), thrift_table_schema
 
     def show_tables(self):
         """
@@ -433,9 +441,10 @@ class Connection(ConnectIntf):
         """
         try:
             tables = self.client.ShowTables()
-        except TApplicationException as e:
-            return Status(Status.INVALID, str(e))
-        return Status('Success!'), tables
+        except (TApplicationException, TException) as e:
+            LOGGER.error('{}'.format(e))
+            return Status(Status.INVALID, str(e)), None
+        return Status(message='Success!'), tables
 
     def client_version(self):
         """

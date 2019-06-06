@@ -2,12 +2,12 @@ from enum import IntEnum
 from .Exceptions import ConnectParamMissingError
 
 
-class IndexType(IntEnum):
+class AbstactIndexType(object):
     RAW = 1
     IVFFLAT = 2
 
 
-class ColumnType(IntEnum):
+class AbstractColumnType(object):
     INVALID = 1
     INT8 = 2
     INT16 = 3
@@ -17,29 +17,6 @@ class ColumnType(IntEnum):
     FLOAT64 = 7
     DATE = 8
     VECTOR = 9
-
-
-class ConnectParam(object):
-    """
-    Connection parameter
-
-    :type host: str
-    :param host: Server IP address
-
-    :type port: str,
-    :param port: Sever PORT
-
-    """
-    _keys = {'host', 'port'}
-    def __init__(self, host, port):
-
-        self.host = host
-        self.port = port
-
-    # Make ConnectParam iterable
-    def __iter__(self):
-        yield self.host
-        yield self.port
 
 
 class Column(object):
@@ -53,7 +30,7 @@ class Column(object):
     :param name: name of the column
 
     """
-    def __init__(self, name=None, type=ColumnType.INVALID):
+    def __init__(self, name=None, type=AbstractColumnType.INVALID):
         self.type = type
         self.name = name
 
@@ -81,12 +58,12 @@ class VectorColumn(Column):
     """
     def __init__(self, name,
                  dimension=0,
-                 index_type=IndexType.RAW,
+                 index_type=AbstactIndexType.RAW,
                  store_raw_vector=False):
         self.dimension = dimension
         self.index_type = index_type
         self.store_raw_vector = store_raw_vector
-        super(VectorColumn, self).__init__(name, type=ColumnType.VECTOR)
+        super(VectorColumn, self).__init__(name, type=AbstractColumnType.VECTOR)
 
 
 class TableSchema(object):

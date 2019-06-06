@@ -9,17 +9,9 @@ class Status(object):
     NOT_SUPPORTED = 3
     NOT_CONNECTED = 4
 
-    CONNECT_FAILED = 5
-    PERMISSION_DENIED = 6
-    TABLE_NOT_EXISTS = 7
-    PARTITION_NOT_EXIST = 8
-    ILLEGAL_ARGUMENT = 9
-    ILLEGAL_RANGE = 10
-    ILLEGAL_DIMENSION = 11
-
     def __init__(self, code=OK, message=None):
-        self.message = message
         self.code = code
+        self.message = message
 
     def __repr__(self):
         L = ['%s=%r' % (key, value)
