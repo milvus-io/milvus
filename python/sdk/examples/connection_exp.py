@@ -1,5 +1,8 @@
 from client.Client import MegaSearch, Prepare, IndexType, ColumnType
 from client.Status import Status
+import time
+
+from megasearch.thrift import MegasearchService, ttypes
 
 
 def main():
@@ -13,31 +16,65 @@ def main():
     is_connected = mega.connected
     print('Connect status: {}'.format(is_connected))
 
-    # # Create table with 1 vector column, 1 attribute column and 1 partition column
-    # # 1. prepare table_schema
-    # vector_column = {
-    #     'name': 'fake_vec_name01',
-    #     'store_raw_vector': True,
-    #     'dimension': 10
-    # }
-    # attribute_column = {
-    #     'name': 'fake_attri_name01',
-    #     'type': ColumnType.DATE,
-    # }
-    #
-    # table = {
-    #     'table_name': 'fake_table_name01',
-    #     'vector_columns': [Prepare.vector_column(**vector_column)],
-    #     'attribute_columns': [Prepare.column(**attribute_column)],
-    #     'partition_column_names': ['fake_attri_name01']
-    # }
-    # table_schema = Prepare.table_schema(**table)
-    #
-    # # 2. Create Table
-    # create_status = mega.create_table(table_schema)
-    # print('Create table status: {}'.format(create_status))
+    # Create table with 1 vector column, 1 attribute column and 1 partition column
+    # 1. prepare table_schema
 
-    mega.server_status('ok!')
+    # table_schema = Prepare.table_schema(
+    #     table_name='fake_table_name' + time.strftime('%H%M%S'),
+    #
+    #     vector_columns=[Prepare.vector_column(
+    #         name='fake_vector_name' + time.strftime('%H%M%S'),
+    #         store_raw_vector=False,
+    #         dimension=256)],
+    #
+    #     attribute_columns=[],
+    #
+    #     partition_column_names=[]
+    # )
+
+    # get server version
+    print(mega.server_status('version'))
+
+    # show tables and their description
+    statu, tables = mega.show_tables()
+    print(tables)
+
+    for table in tables:
+        s,t = mega.describe_table(table)
+        print('table: {}'.format(t))
+
+    # Create table
+    # 1. create table schema
+    table_schema_full = MegasearchService.TableSchema(
+        table_name='fake' + time.strftime('%H%M%S'),
+
+        vector_column_array=[MegasearchService.VectorColumn(
+            base=MegasearchService.Column(
+                name='111',
+                type=ttypes.TType.I32
+            ),
+            dimension=256,
+        )],
+
+        attribute_column_array=[],
+
+        partition_column_name_array=None
+    )
+
+    table_schema_empty = MegasearchService.TableSchema(
+        table_name='fake' + time.strftime('%H%M%S'),
+
+        vector_column_array=[MegasearchService.VectorColumn()],
+
+        attribute_column_array=[],
+
+        partition_column_name_array=None
+    )
+    # 2. Create Table
+    create_status = mega.create_table(table_schema_full)
+    print('Create table status: {}'.format(create_status))
+
+    # add_vector
 
     # Disconnect
     discnn_status = mega.disconnect()

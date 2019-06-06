@@ -2,6 +2,7 @@ import logging, logging.config
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
+from thrift.transport.TTransport import TTransportException
 from thrift.protocol import TBinaryProtocol, TCompactProtocol, TJSONProtocol
 from thrift.Thrift import TException, TApplicationException, TType
 
@@ -38,15 +39,10 @@ class IndexType(AbstactIndexType):
 
 
 class ColumnType(AbstractColumnType):
-    # INVALID = 1
-    # INT8 = 2
-    # INT16 = 3
-    # INT32 = 4
-    # INT64 = 5
+
     FLOAT32 = 6
     FLOAT64 = 7
     DATE = 8
-    # VECTOR = 9
 
     INVALID = TType.STOP
     INT8 = TType.I08
@@ -62,13 +58,12 @@ class Prepare(object):
     def column(cls, name, type):
         """
         Table column param
-
+        # todo type
         :param type: ColumnType, type of the column
         :param name: str, name of the column
 
         :return Column
         """
-        # TODO type in Thrift, may have error
         temp_column = Column(name=name, type=type)
         return ttypes.Column(name=temp_column.name, type=temp_column.type)
 
@@ -81,7 +76,7 @@ class Prepare(object):
 
         :param dimension: int64, vector dimension
         :param index_type: IndexType
-        :param store_raw_vector: Bool, Is vector self stored in the table
+        :param store_raw_vector: Bool
 
         `Column`:
             :param name: Name of the column
@@ -124,8 +119,8 @@ class Prepare(object):
                         Name of the column
                 - type: ColumnType, default=ColumnType.VECTOR, can't change
 
-        :param attribute_columns: List of Columns. Attribute
-                columns are Columns whose type aren't ColumnType.VECTOR
+        :param attribute_columns: List of Columns. Attribute columns are Columns,
+                    whose types aren't ColumnType.VECTOR
 
             `Column`:
                 - name: str
@@ -266,7 +261,7 @@ class MegaSearch(ConnectIntf):
 
         transport = TSocket.TSocket(host=host, port=port)
         self.transport = TTransport.TBufferedTransport(transport)
-        protocol = TJSONProtocol.TJSONProtocol(transport)
+        protocol = TBinaryProtocol.TBinaryProtocol(transport)
         self.client = MegasearchService.Client(protocol)
 
         try:
@@ -312,8 +307,9 @@ class MegaSearch(ConnectIntf):
             raise NotConnectError('Please Connect to the server first!')
 
         try:
+            LOGGER.error(param)
             self.client.CreateTable(param)
-        except (TApplicationException, TException) as e:
+        except (TApplicationException, ) as e:
             LOGGER.error('Unable to create table')
             return Status(Status.INVALID, str(e))
         return Status(message='Table {} created!'.format(param.table_name))
@@ -463,11 +459,10 @@ class MegaSearch(ConnectIntf):
         # TODO How to get server version
         pass
 
-    def server_status(self, cmd):
+    def server_status(self, cmd=None):
         """
         Provide server status
 
         :return: Server status
         """
-        self.client.Ping(cmd)
-        pass
+        return self.client.Ping(cmd)
