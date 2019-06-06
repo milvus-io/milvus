@@ -264,7 +264,7 @@ ClientProxy::SearchVector(const std::string &table_name,
         }
 
     }  catch ( std::exception& ex) {
-        return Status(StatusCode::UnknownError, "failed to create table partition: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "failed to search vectors: " + std::string(ex.what()));
     }
 
     return Status::OK();
