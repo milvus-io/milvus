@@ -8,6 +8,8 @@
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
+#include "metrics/Metrics.h"
+#include "scheduler/SearchScheduler.h"
 
 #include <assert.h>
 #include <chrono>
@@ -16,8 +18,6 @@
 #include <cstring>
 #include <easylogging++.h>
 #include <cache/CpuCacheMgr.h>
-#include "../utils/Log.h"
-#include "metrics/Metrics.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -98,7 +98,16 @@ Status DBImpl<EngineT>::Query(const std::string &table_id, size_t k, size_t nq,
 template<typename EngineT>
 Status DBImpl<EngineT>::Query(const std::string& table_id, size_t k, size_t nq,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
+#if 0
+    return QuerySync(table_id, k, nq, vectors, dates, results);
+#else
+    return QueryAsync(table_id, k, nq, vectors, dates, results);
+#endif
+}
 
+template<typename EngineT>
+Status DBImpl<EngineT>::QuerySync(const std::string& table_id, size_t k, size_t nq,
+                 const float* vectors, const meta::DatesT& dates, QueryResults& results) {
     meta::DatePartionedTableFilesSchema files;
     auto status = pMeta_->FilesToSearch(table_id, dates, files);
     if (!status.ok()) { return status; }
@@ -150,6 +159,7 @@ Status DBImpl<EngineT>::Query(const std::string& table_id, size_t k, size_t nq,
 
         auto search_in_index = [&](meta::TableFilesSchema& file_vec) -> void {
             for (auto &file : file_vec) {
+
                 EngineT index(file.dimension, file.location);
                 index.Load();
                 auto file_size = index.PhysicalSize()/(1024*1024);
@@ -245,6 +255,40 @@ Status DBImpl<EngineT>::Query(const std::string& table_id, size_t k, size_t nq,
     if (results.empty()) {
         return Status::NotFound("Group " + table_id + ", search result not found!");
     }
+    return Status::OK();
+}
+
+template<typename EngineT>
+Status DBImpl<EngineT>::QueryAsync(const std::string& table_id, size_t k, size_t nq,
+                  const float* vectors, const meta::DatesT& dates, QueryResults& results) {
+    meta::DatePartionedTableFilesSchema files;
+    auto status = pMeta_->FilesToSearch(table_id, dates, files);
+    if (!status.ok()) { return status; }
+
+    LOG(DEBUG) << "Search DateT Size=" << files.size();
+
+    SearchContextPtr context = std::make_shared<SearchContext>(k, nq, vectors);
+
+    for (auto &day_files : files) {
+        for (auto &file : day_files.second) {
+            TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
+            context->AddIndexFile(file_ptr);
+        }
+    }
+
+    SearchScheduler& scheduler = SearchScheduler::GetInstance();
+    scheduler.ScheduleSearchTask(context);
+
+    context->WaitResult();
+    auto& context_result = context->GetResult();
+    for(auto& topk_result : context_result) {
+        QueryResult ids;
+        for(auto& pair : topk_result) {
+            ids.push_back(pair.second);
+        }
+        results.emplace_back(ids);
+    }
+
     return Status::OK();
 }
 
