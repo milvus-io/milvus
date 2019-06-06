@@ -1,0 +1,5 @@
+#pragma once
+
+#define MEGASEARCH_VERSION "@MEGASEARCH_VERSION@"
+#define BUILD_TYPE "@BUILD_TYPE@"
+#define BUILD_TIME @BUILD_TIME@
