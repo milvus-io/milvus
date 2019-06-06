@@ -14,6 +14,7 @@ from client.Exceptions import (
 
 from thrift.transport.TSocket import TSocket
 from megasearch.thrift import ttypes, MegasearchService
+from thrift.transport.TTransport import TTransportException
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,7 +39,6 @@ def vector_column_factory():
     return {
         'name': fake.name(),
         'dimension': fake.dim(),
-        'index_type': IndexType.IVFFLAT,
         'store_raw_vector': True
     }
 
@@ -46,7 +46,7 @@ def vector_column_factory():
 def column_factory():
     return {
         'name': fake.table_name(),
-        'type': IndexType.RAW
+        'type': ColumnType.INT32
     }
 
 
@@ -146,9 +146,10 @@ class TestTable:
 
     def test_false_create_table(self, client):
         param = table_schema_factory()
-        res = client.create_table(param)
-        LOGGER.error('{}'.format(res))
-        assert res != Status.OK
+        with pytest.raises(TTransportException):
+            res = client.create_table(param)
+            LOGGER.error('{}'.format(res))
+            assert res != Status.OK
 
     @mock.patch.object(MegasearchService.Client, 'DeleteTable')
     def test_delete_table(self, DeleteTable, client):

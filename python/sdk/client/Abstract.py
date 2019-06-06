@@ -58,12 +58,13 @@ class VectorColumn(Column):
     """
     def __init__(self, name,
                  dimension=0,
-                 index_type=AbstactIndexType.RAW,
-                 store_raw_vector=False):
+                 index_type=None,
+                 store_raw_vector=False,
+                 type=None):
         self.dimension = dimension
         self.index_type = index_type
         self.store_raw_vector = store_raw_vector
-        super(VectorColumn, self).__init__(name, type=AbstractColumnType.VECTOR)
+        super(VectorColumn, self).__init__(name, type=type)
 
 
 class TableSchema(object):
