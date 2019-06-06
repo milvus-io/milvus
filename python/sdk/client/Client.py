@@ -34,8 +34,8 @@ __NAME__ = 'Thrift_Client'
 
 class IndexType(AbstactIndexType):
     # TODO thrift in IndexType
-    RAW = 1
-    IVFFLAT = 2
+    RAW = '1'
+    IVFFLAT = '2'
 
 
 class ColumnType(AbstractColumnType):
@@ -51,16 +51,17 @@ class ColumnType(AbstractColumnType):
     INT64 = TType.I64
     VECTOR = TType.LIST
 
-
+# TODO Required and Optional
+# TODO Examples
+# TODO ORM
 class Prepare(object):
 
     @classmethod
     def column(cls, name, type):
         """
         Table column param
-        # todo type
-        :param type: ColumnType, type of the column
-        :param name: str, name of the column
+        :param type: (Required) ColumnType, type of the column
+        :param name: (Required) str, name of the column
 
         :return Column
         """
@@ -69,34 +70,34 @@ class Prepare(object):
 
     @classmethod
     def vector_column(cls, name, dimension,
-                      # index_type=IndexType.RAW,
+                      index_type=IndexType.RAW,
                       store_raw_vector=False):
         """
         Table vector column description
 
-        :param dimension: int64, vector dimension
-        :param index_type: IndexType
-        :param store_raw_vector: Bool
+        :param dimension: (Required) int64, vector dimension
+        :param index_type: (Required) IndexType
+        :param store_raw_vector: (Required) Bool
 
         `Column`:
-            :param name: Name of the column
-            :param type: Default type is ColumnType.VECTOR, can't change
+            :param name: (Required) Name of the column
+            :param type: (Required) Default type is ColumnType.VECTOR, can't change
 
         :return VectorColumn
         """
-        # temp = VectorColumn(name=name, dimension=dimension,
-        #                     index_type=index_type, store_raw_vector=store_raw_vector)
 
-        # return ttypes.VectorColumn(base=base, dimension=temp.dimension,
-        #                            store_raw_vector=temp.store_raw_vector,
-        #                            index_type=temp.index_type)
-
-        # Without IndexType
         temp = VectorColumn(name=name, dimension=dimension,
-                            store_raw_vector=store_raw_vector)
+                            index_type=index_type, store_raw_vector=store_raw_vector)
         base = ttypes.Column(name=temp.name, type=ColumnType.VECTOR)
         return ttypes.VectorColumn(base=base, dimension=temp.dimension,
-                                   store_raw_vector=temp.store_raw_vector)
+                                   store_raw_vector=temp.store_raw_vector,
+                                   index_type=temp.index_type)
+
+        # Without IndexType
+        # temp = VectorColumn(name=name, dimension=dimension,
+        #                     store_raw_vector=store_raw_vector)
+        # return ttypes.VectorColumn(base=base, dimension=temp.dimension,
+        #                            store_raw_vector=temp.store_raw_vector)
 
     @classmethod
     def table_schema(cls, table_name,
@@ -105,8 +106,8 @@ class Prepare(object):
                      partition_column_names):
         """
 
-        :param table_name: Name of the table
-        :param vector_columns: List of VectorColumns
+        :param table_name: (Required) Name of the table
+        :param vector_columns: (Required) List of VectorColumns
 
             `VectorColumn`:
                 - dimension: int, default = 0
@@ -119,14 +120,14 @@ class Prepare(object):
                         Name of the column
                 - type: ColumnType, default=ColumnType.VECTOR, can't change
 
-        :param attribute_columns: List of Columns. Attribute columns are Columns,
+        :param attribute_columns: (Optional) List of Columns. Attribute columns are Columns,
                     whose types aren't ColumnType.VECTOR
 
             `Column`:
                 - name: str
                 - type: ColumnType, default=ColumnType.INVALID
 
-        :param partition_column_names: List of str.
+        :param partition_column_names: (Optional) List of str.
 
               Partition columns name
                 indicates which attribute columns is used for partition, can
@@ -148,8 +149,8 @@ class Prepare(object):
     @classmethod
     def range(cls, start, end):
         """
-        :param start: Partition range start value
-        :param end: Partition range end value
+        :param start: (Required) Partition range start value
+        :param end: (Required) Partition range end value
 
         :return Range
         """
@@ -163,10 +164,10 @@ class Prepare(object):
                                      column_name_to_range):
         """
         Create table partition parameters
-        :param table_name: str, Table name,
+        :param table_name: (Required) str, Table name,
             VECTOR/FLOAT32/FLOAT64 ColumnType is not allowed for partition
-        :param partition_name: str partition name, created partition name
-        :param column_name_to_range: dict, column name to partition range dictionary
+        :param partition_name: (Required) str partition name, created partition name
+        :param column_name_to_range: (Required) dict, column name to partition range dictionary
 
         :return CreateTablePartitionParam
         """
@@ -181,8 +182,8 @@ class Prepare(object):
     def delete_table_partition_param(cls, table_name, partition_names):
         """
         Delete table partition parameters
-        :param table_name: Table name
-        :param partition_names: List of partition names
+        :param table_name: (Required) Table name
+        :param partition_names: (Required) List of partition names
 
         :return DeleteTablePartitionParam
         """
@@ -194,10 +195,10 @@ class Prepare(object):
     @classmethod
     def row_record(cls, column_name_to_vector, column_name_to_attribute):
         """
-        :param  column_name_to_vector: dict{str : list[float]}
+        :param  column_name_to_vector: (Required) dict{str : list[float]}
                 Column name to vector map
 
-        :param  column_name_to_attribute: dict{str: str}
+        :param  column_name_to_attribute: (Optional) dict{str: str}
                 Other attribute columns
         """
         temp = RowRecord(column_name_to_vector=column_name_to_vector,
@@ -209,13 +210,13 @@ class Prepare(object):
     def query_record(cls, column_name_to_vector,
                      selected_columns, name_to_partition_ranges):
         """
-        :param column_name_to_vector: dict{str : list[float]}
+        :param column_name_to_vector: (Required) dict{str : list[float]}
                 Query vectors, column name to vector map
 
-        :param selected_columns: list[str_column_name]
+        :param selected_columns: (Optional) list[str_column_name]
                 List of Output columns
 
-        :param name_to_partition_ranges: dict{str : list[Range]}
+        :param name_to_partition_ranges: (Optional) dict{str : list[Range]}
                 Partition Range used to search
 
             `Range`:

@@ -3,8 +3,8 @@ from .Exceptions import ConnectParamMissingError
 
 
 class AbstactIndexType(object):
-    RAW = 1
-    IVFFLAT = 2
+    RAW = '1'
+    IVFFLAT = '2'
 
 
 class AbstractColumnType(object):
@@ -24,10 +24,10 @@ class Column(object):
     Table column description
 
     :type  type: ColumnType
-    :param type: type of the column
+    :param type: (Required) type of the column
 
     :type  name: str
-    :param name: name of the column
+    :param name: (Required) name of the column
 
     """
     def __init__(self, name=None, type=AbstractColumnType.INVALID):
@@ -40,20 +40,20 @@ class VectorColumn(Column):
     Table vector column description
 
     :type  dimension: int, int64
-    :param dimension: vector dimension
+    :param dimension: (Required) vector dimension
 
-    :type  index_type: IndexType
-    :param index_type: IndexType
+    :type  index_type: string IndexType
+    :param index_type: (Required) IndexType
 
     :type  store_raw_vector: bool
-    :param store_raw_vector: Is vector self stored in the table
+    :param store_raw_vector: (Required) Is vector self stored in the table
 
     `Column`:
         :type  name: str
-        :param name: Name of the column
+        :param name: (Required) Name of the column
 
         :type  type: ColumnType
-        :param type: Default type is ColumnType.VECTOR, can't change
+        :param type: (Required) Default type is ColumnType.VECTOR, can't change
 
     """
     def __init__(self, name,
@@ -72,20 +72,20 @@ class TableSchema(object):
     Table Schema
 
     :type  table_name: str
-    :param table_name: name of table
+    :param table_name: (Required) name of table
 
     :type  vector_columns: list[VectorColumn]
-    :param vector_columns: a list of VectorColumns,
+    :param vector_columns: (Required) a list of VectorColumns,
 
             Stores different types of vectors
 
     :type  attribute_columns: list[Column]
-    :param attribute_columns: Columns description
+    :param attribute_columns: (Optional) Columns description
 
             List of `Columns` whose type isn't VECTOR
 
     :type  partition_column_names: list[str]
-    :param partition_column_names: Partition column name
+    :param partition_column_names: (Optional) Partition column name
 
             `Partition columns` are `attribute columns`, the number of
         partition columns may be less than or equal to attribute columns,
@@ -105,10 +105,10 @@ class Range(object):
     Range information
 
     :type  start: str
-    :param start: Range start value
+    :param start: (Required) Range start value
 
     :type  end: str
-    :param end: Range end value
+    :param end: (Required) Range end value
 
     """
     def __init__(self, start, end):
@@ -121,14 +121,14 @@ class CreateTablePartitionParam(object):
     Create table partition parameters
 
     :type  table_name: str
-    :param table_name: Table name,
+    :param table_name: (Required) Table name,
                     VECTOR/FLOAT32/FLOAT64 ColumnType is not allowed for partition
 
     :type  partition_name: str
-    :param partition_name: partition name, created partition name
+    :param partition_name: (Required) partition name, created partition name
 
     :type  column_name_to_range: dict{str : Range}
-    :param column_name_to_range: Column name to PartitionRange dictionary
+    :param column_name_to_range: (Required) Column name to PartitionRange dictionary
     """
     # TODO Iterable
     def __init__(self, table_name, partition_name, column_name_to_range):
@@ -142,10 +142,10 @@ class DeleteTablePartitionParam(object):
     Delete table partition parameters
 
     :type  table_name: str
-    :param table_name: Table name
+    :param table_name: (Required) Table name
 
     :type  partition_names: iterable, str
-    :param partition_names: Partition name array
+    :param partition_names: (Required) Partition name array
 
     """
     # TODO Iterable
@@ -159,10 +159,10 @@ class RowRecord(object):
     Record inserted
 
     :type  column_name_to_vector: dict{str : list[float]}
-    :param column_name_to_vector: Column name to vector map
+    :param column_name_to_vector: (Required) Column name to vector map
 
     :type  column_name_to_attribute: dict{str: str}
-    :param column_name_to_attribute: Other attribute columns
+    :param column_name_to_attribute: (Optional) Other attribute columns
     """
     def __init__(self, column_name_to_vector, column_name_to_attribute):
         self.column_name_to_vector = column_name_to_vector
@@ -173,14 +173,14 @@ class QueryRecord(object):
     """
     Query record
 
-    :type  column_name_to_vector: dict{str : list[float]}
+    :type  column_name_to_vector: (Required) dict{str : list[float]}
     :param column_name_to_vector: Query vectors, column name to vector map
 
     :type  selected_columns: list[str]
-    :param selected_columns: Output column array
+    :param selected_columns: (Optional) Output column array
 
     :type  name_to_partition_ranges: dict{str : list[Range]}
-    :param name_to_partition_ranges: Range used to select partitions
+    :param name_to_partition_ranges: (Optional) Range used to select partitions
 
     """
     def __init__(self, column_name_to_vector, selected_columns, name_to_partition_ranges):
