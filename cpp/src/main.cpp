@@ -4,6 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include "server/Server.h"
+#include "version.h"
 
 #include <getopt.h>
 #include <libgen.h>
@@ -25,8 +26,8 @@ using namespace zilliz::vecwise;
 
 int
 main(int argc, char *argv[]) {
-    printf("Vecwise engine server start...\n");
-//    zilliz::lib::gpu::InitMemoryAllocator();
+    printf("Megasearch %s version: v%s built at %s\n", BUILD_TYPE, MEGASEARCH_VERSION, BUILD_TIME);
+    printf("Megasearch server start...\n");
 
     signal(SIGINT, server::SignalUtil::HandleSignal);
     signal(SIGSEGV, server::SignalUtil::HandleSignal);

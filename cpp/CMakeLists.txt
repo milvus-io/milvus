@@ -7,7 +7,32 @@
 cmake_minimum_required(VERSION 3.14)
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
-set(MEGASEARCH_VERSION "0.1.0")
+MACRO (GET_CURRENT_TIME CURRENT_TIME)
+    execute_process(COMMAND "date" +"%Y-%m-%d %H:%M.%S" OUTPUT_VARIABLE ${CURRENT_TIME})
+ENDMACRO (GET_CURRENT_TIME)
+
+GET_CURRENT_TIME(BUILD_TIME)
+string(REGEX REPLACE "\n" "" BUILD_TIME ${BUILD_TIME})
+message(STATUS "Build time = ${BUILD_TIME}")
+
+MACRO (GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
+    execute_process(COMMAND "git" symbolic-ref --short HEAD OUTPUT_VARIABLE ${GIT_BRANCH_NAME})
+ENDMACRO (GET_GIT_BRANCH_NAME)
+
+GET_GIT_BRANCH_NAME(GIT_BRANCH_NAME)
+string(REGEX REPLACE "\n" "" GIT_BRANCH_NAME ${GIT_BRANCH_NAME})
+
+set(MEGASEARCH_VERSION "${GIT_BRANCH_NAME}")
+string(REGEX REPLACE "branch-" "" MEGASEARCH_VERSION ${MEGASEARCH_VERSION})
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(BUILD_TYPE "release")
+else()
+    set(BUILD_TYPE "debug")
+endif()
+message(STATUS "Build type = ${BUILD_TYPE}")
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.cf ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
 
 string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" MEGASEARCH_BASE_VERSION "${MEGASEARCH_VERSION}")
 
