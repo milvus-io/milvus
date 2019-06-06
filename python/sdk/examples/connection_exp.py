@@ -7,6 +7,7 @@ from megasearch.thrift import MegasearchService, ttypes
 
 def main():
     mega = MegaSearch()
+    print(mega.client_version())
 
     # Connect
     param = {'host': '192.168.1.129', 'port': '33001'}
@@ -34,7 +35,7 @@ def main():
 
     # get server version
     print(mega.server_status('version'))
-
+    print(mega.client.Ping('version'))
     # show tables and their description
     statu, tables = mega.show_tables()
     print(tables)
@@ -51,27 +52,20 @@ def main():
         vector_column_array=[MegasearchService.VectorColumn(
             base=MegasearchService.Column(
                 name='111',
-                type=ttypes.TType.I32
+                type=ttypes.TType.LIST
             ),
+            index_type="aaa",
             dimension=256,
+            store_raw_vector=False,
         )],
 
         attribute_column_array=[],
 
-        partition_column_name_array=None
+        partition_column_name_array=[]
     )
 
-    table_schema_empty = MegasearchService.TableSchema(
-        table_name='fake' + time.strftime('%H%M%S'),
-
-        vector_column_array=[MegasearchService.VectorColumn()],
-
-        attribute_column_array=[],
-
-        partition_column_name_array=None
-    )
     # 2. Create Table
-    create_status = mega.create_table(table_schema_full)
+    create_status = mega.client.CreateTable(param=table_schema_full)
     print('Create table status: {}'.format(create_status))
 
     # add_vector
