@@ -3,11 +3,10 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#pragma once
-
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
+#include "EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SearchScheduler.h"
 
@@ -23,80 +22,107 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
+namespace {
 
-template<typename EngineT>
-DBImpl<EngineT>::DBImpl(const Options& options)
-    : env_(options.env),
-      options_(options),
-      bg_compaction_scheduled_(false),
-      shutting_down_(false),
-      bg_build_index_started_(false),
-      pMeta_(new meta::DBMetaImpl(options_.meta)),
-      pMemMgr_(new MemManager<EngineT>(pMeta_, options_)) {
-    StartTimerTasks(options_.memory_sync_interval);
-}
-
-template<typename EngineT>
-Status DBImpl<EngineT>::CreateTable(meta::TableSchema& table_schema) {
-    return pMeta_->CreateTable(table_schema);
-}
-
-template<typename EngineT>
-Status DBImpl<EngineT>::DescribeTable(meta::TableSchema& table_schema) {
-    return pMeta_->DescribeTable(table_schema);
-}
-
-template<typename EngineT>
-Status DBImpl<EngineT>::HasTable(const std::string& table_id, bool& has_or_not) {
-    return pMeta_->HasTable(table_id, has_or_not);
-}
-
-template<typename EngineT>
-Status DBImpl<EngineT>::InsertVectors(const std::string& table_id_,
-        size_t n, const float* vectors, IDNumbers& vector_ids_) {
-
-    auto start_time = METRICS_NOW_TIME;
-    Status status = pMemMgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
-    auto end_time = METRICS_NOW_TIME;
-
-//    std::chrono::microseconds time_span = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-//    double average_time = double(time_span.count()) / n;
-
-    double total_time = METRICS_MICROSECONDS(start_time,end_time);
+void CollectInsertMetrics(double total_time, size_t n, bool succeed) {
     double avg_time = total_time / n;
     for (int i = 0; i < n; ++i) {
         server::Metrics::GetInstance().AddVectorsDurationHistogramOberve(avg_time);
     }
 
 //    server::Metrics::GetInstance().add_vector_duration_seconds_quantiles().Observe((average_time));
-    if (!status.ok()) {
+    if (succeed) {
+        server::Metrics::GetInstance().AddVectorsSuccessTotalIncrement(n);
+        server::Metrics::GetInstance().AddVectorsSuccessGaugeSet(n);
+    }
+    else {
         server::Metrics::GetInstance().AddVectorsFailTotalIncrement(n);
         server::Metrics::GetInstance().AddVectorsFailGaugeSet(n);
-        return status;
     }
-    server::Metrics::GetInstance().AddVectorsSuccessTotalIncrement(n);
-    server::Metrics::GetInstance().AddVectorsSuccessGaugeSet(n);
 }
 
-template<typename EngineT>
-Status DBImpl<EngineT>::Query(const std::string &table_id, size_t k, size_t nq,
+void CollectQueryMetrics(double total_time, size_t nq) {
+    for (int i = 0; i < nq; ++i) {
+        server::Metrics::GetInstance().QueryResponseSummaryObserve(total_time);
+    }
+    auto average_time = total_time / nq;
+    server::Metrics::GetInstance().QueryVectorResponseSummaryObserve(average_time, nq);
+    server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq) / total_time);
+}
+
+void CollectFileMetrics(meta::TableFileSchema::FILE_TYPE file_type, size_t file_size, double total_time) {
+    switch(file_type) {
+        case meta::TableFileSchema::RAW:
+        case meta::TableFileSchema::TO_INDEX: {
+            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+            server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size);
+            server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size);
+            server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size);
+            break;
+        }
+        default: {
+            server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
+            server::Metrics::GetInstance().IndexFileSizeHistogramObserve(file_size);
+            server::Metrics::GetInstance().IndexFileSizeTotalIncrement(file_size);
+            server::Metrics::GetInstance().IndexFileSizeGaugeSet(file_size);
+            break;
+        }
+    }
+}
+
+}
+
+
+DBImpl::DBImpl(const Options& options)
+    : env_(options.env),
+      options_(options),
+      bg_compaction_scheduled_(false),
+      shutting_down_(false),
+      bg_build_index_started_(false),
+      pMeta_(new meta::DBMetaImpl(options_.meta)),
+      pMemMgr_(new MemManager(pMeta_, options_)) {
+    StartTimerTasks(options_.memory_sync_interval);
+}
+
+Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
+    return pMeta_->CreateTable(table_schema);
+}
+
+Status DBImpl::DescribeTable(meta::TableSchema& table_schema) {
+    return pMeta_->DescribeTable(table_schema);
+}
+
+Status DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
+    return pMeta_->HasTable(table_id, has_or_not);
+}
+
+Status DBImpl::InsertVectors(const std::string& table_id_,
+        size_t n, const float* vectors, IDNumbers& vector_ids_) {
+
+    auto start_time = METRICS_NOW_TIME;
+    Status status = pMemMgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
+    auto end_time = METRICS_NOW_TIME;
+    double total_time = METRICS_MICROSECONDS(start_time,end_time);
+//    std::chrono::microseconds time_span = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+//    double average_time = double(time_span.count()) / n;
+
+    CollectInsertMetrics(total_time, n, status.ok());
+    return status;
+}
+
+Status DBImpl::Query(const std::string &table_id, size_t k, size_t nq,
                       const float *vectors, QueryResults &results) {
     auto start_time = METRICS_NOW_TIME;
     meta::DatesT dates = {meta::Meta::GetDate()};
     Status result = Query(table_id, k, nq, vectors, dates, results);
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-    auto average_time = total_time / nq;
-    for (int i = 0; i < nq; ++i) {
-        server::Metrics::GetInstance().QueryResponseSummaryObserve(total_time);
-    }
-    server::Metrics::GetInstance().QueryVectorResponseSummaryObserve(average_time, nq);
-    server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq) / total_time);
+
+    CollectQueryMetrics(total_time, nq);
     return result;
 }
 
-template<typename EngineT>
-Status DBImpl<EngineT>::Query(const std::string& table_id, size_t k, size_t nq,
+Status DBImpl::Query(const std::string& table_id, size_t k, size_t nq,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
 #if 0
     return QuerySync(table_id, k, nq, vectors, dates, results);
@@ -105,8 +131,7 @@ Status DBImpl<EngineT>::Query(const std::string& table_id, size_t k, size_t nq,
 #endif
 }
 
-template<typename EngineT>
-Status DBImpl<EngineT>::QuerySync(const std::string& table_id, size_t k, size_t nq,
+Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
                  const float* vectors, const meta::DatesT& dates, QueryResults& results) {
     meta::DatePartionedTableFilesSchema files;
     auto status = pMeta_->FilesToSearch(table_id, dates, files);
@@ -160,38 +185,20 @@ Status DBImpl<EngineT>::QuerySync(const std::string& table_id, size_t k, size_t 
         auto search_in_index = [&](meta::TableFilesSchema& file_vec) -> void {
             for (auto &file : file_vec) {
 
-                EngineT index(file.dimension, file.location);
-                index.Load();
-                auto file_size = index.PhysicalSize()/(1024*1024);
+                ExecutionEnginePtr index = EngineFactory::Build(file.dimension, file.location, (EngineType)file.engine_type_);
+                index->Load();
+                auto file_size = index->PhysicalSize();
                 search_set_size += file_size;
 
                 LOG(DEBUG) << "Search file_type " << file.file_type << " Of Size: "
-                    << file_size << " M";
+                    << file_size/(1024*1024) << " M";
 
-                int inner_k = index.Count() < k ? index.Count() : k;
+                int inner_k = index->Count() < k ? index->Count() : k;
                 auto start_time = METRICS_NOW_TIME;
-                index.Search(nq, vectors, inner_k, output_distence, output_ids);
+                index->Search(nq, vectors, inner_k, output_distence, output_ids);
                 auto end_time = METRICS_NOW_TIME;
                 auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-                if(file.file_type == meta::TableFileSchema::RAW) {
-                    server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-                    server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size*1024*1024);
-                    server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size*1024*1024);
-                    server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size*1024*1024);
-
-                } else if(file.file_type == meta::TableFileSchema::TO_INDEX) {
-
-                    server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-                    server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size*1024*1024);
-                    server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size*1024*1024);
-                    server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size*1024*1024);
-
-                } else {
-                    server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
-                    server::Metrics::GetInstance().IndexFileSizeHistogramObserve(file_size*1024*1024);
-                    server::Metrics::GetInstance().IndexFileSizeTotalIncrement(file_size*1024*1024);
-                    server::Metrics::GetInstance().IndexFileSizeGaugeSet(file_size*1024*1024);
-                }
+                CollectFileMetrics((meta::TableFileSchema::FILE_TYPE)file.file_type, file_size, total_time);
                 cluster(output_ids, output_distence, inner_k); // cluster to each query
                 memset(output_distence, 0, k * nq * sizeof(float));
                 memset(output_ids, 0, k * nq * sizeof(long));
@@ -258,8 +265,7 @@ Status DBImpl<EngineT>::QuerySync(const std::string& table_id, size_t k, size_t 
     return Status::OK();
 }
 
-template<typename EngineT>
-Status DBImpl<EngineT>::QueryAsync(const std::string& table_id, size_t k, size_t nq,
+Status DBImpl::QueryAsync(const std::string& table_id, size_t k, size_t nq,
                   const float* vectors, const meta::DatesT& dates, QueryResults& results) {
     meta::DatePartionedTableFilesSchema files;
     auto status = pMeta_->FilesToSearch(table_id, dates, files);
@@ -292,13 +298,12 @@ Status DBImpl<EngineT>::QueryAsync(const std::string& table_id, size_t k, size_t
     return Status::OK();
 }
 
-template<typename EngineT>
-void DBImpl<EngineT>::StartTimerTasks(int interval) {
-    bg_timer_thread_ = std::thread(&DBImpl<EngineT>::BackgroundTimerTask, this, interval);
+void DBImpl::StartTimerTasks(int interval) {
+    bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this, interval);
 }
 
-template<typename EngineT>
-void DBImpl<EngineT>::BackgroundTimerTask(int interval) {
+
+void DBImpl::BackgroundTimerTask(int interval) {
     Status status;
     while (true) {
         if (!bg_error_.ok()) break;
@@ -315,22 +320,19 @@ void DBImpl<EngineT>::BackgroundTimerTask(int interval) {
     }
 }
 
-template<typename EngineT>
-void DBImpl<EngineT>::TrySchedule() {
+void DBImpl::TrySchedule() {
     if (bg_compaction_scheduled_) return;
     if (!bg_error_.ok()) return;
 
     bg_compaction_scheduled_ = true;
-    env_->Schedule(&DBImpl<EngineT>::BGWork, this);
+    env_->Schedule(&DBImpl::BGWork, this);
 }
 
-template<typename EngineT>
-void DBImpl<EngineT>::BGWork(void* db_) {
+void DBImpl::BGWork(void* db_) {
     reinterpret_cast<DBImpl*>(db_)->BackgroundCall();
 }
 
-template<typename EngineT>
-void DBImpl<EngineT>::BackgroundCall() {
+void DBImpl::BackgroundCall() {
     std::lock_guard<std::mutex> lock(mutex_);
     assert(bg_compaction_scheduled_);
 
@@ -343,9 +345,7 @@ void DBImpl<EngineT>::BackgroundCall() {
     bg_work_finish_signal_.notify_all();
 }
 
-
-template<typename EngineT>
-Status DBImpl<EngineT>::MergeFiles(const std::string& table_id, const meta::DateT& date,
+Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         const meta::TableFilesSchema& files) {
     meta::TableFileSchema table_file;
     table_file.table_id = table_id;
@@ -357,7 +357,7 @@ Status DBImpl<EngineT>::MergeFiles(const std::string& table_id, const meta::Date
         return status;
     }
 
-    EngineT index(table_file.dimension, table_file.location);
+    ExecutionEnginePtr index = EngineFactory::Build(table_file.dimension, table_file.location, (EngineType)table_file.engine_type_);
 
     meta::TableFilesSchema updated;
     long  index_size = 0;
@@ -365,7 +365,7 @@ Status DBImpl<EngineT>::MergeFiles(const std::string& table_id, const meta::Date
     for (auto& file : files) {
 
         auto start_time = METRICS_NOW_TIME;
-        index.Merge(file.location);
+        index->Merge(file.location);
         auto file_schema = file;
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time,end_time);
@@ -374,13 +374,13 @@ Status DBImpl<EngineT>::MergeFiles(const std::string& table_id, const meta::Date
         file_schema.file_type = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);
         LOG(DEBUG) << "Merging file " << file_schema.file_id;
-        index_size = index.Size();
+        index_size = index->Size();
 
         if (index_size >= options_.index_trigger_size) break;
     }
 
 
-    index.Serialize();
+    index->Serialize();
 
     if (index_size >= options_.index_trigger_size) {
         table_file.file_type = meta::TableFileSchema::TO_INDEX;
@@ -391,15 +391,14 @@ Status DBImpl<EngineT>::MergeFiles(const std::string& table_id, const meta::Date
     updated.push_back(table_file);
     status = pMeta_->UpdateTableFiles(updated);
     LOG(DEBUG) << "New merged file " << table_file.file_id <<
-        " of size=" << index.PhysicalSize()/(1024*1024) << " M";
+        " of size=" << index->PhysicalSize()/(1024*1024) << " M";
 
-    index.Cache();
+    index->Cache();
 
     return status;
 }
 
-template<typename EngineT>
-Status DBImpl<EngineT>::BackgroundMergeFiles(const std::string& table_id) {
+Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
     meta::DatePartionedTableFilesSchema raw_files;
     auto status = pMeta_->FilesToMerge(table_id, raw_files);
     if (!status.ok()) {
@@ -426,8 +425,7 @@ Status DBImpl<EngineT>::BackgroundMergeFiles(const std::string& table_id) {
     return Status::OK();
 }
 
-template<typename EngineT>
-Status DBImpl<EngineT>::BuildIndex(const meta::TableFileSchema& file) {
+Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
     meta::TableFileSchema table_file;
     table_file.table_id = file.table_id;
     table_file.date = file.date;
@@ -436,11 +434,11 @@ Status DBImpl<EngineT>::BuildIndex(const meta::TableFileSchema& file) {
         return status;
     }
 
-    EngineT to_index(file.dimension, file.location);
+    ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension, file.location, (EngineType)file.engine_type_);
 
-    to_index.Load();
+    to_index->Load();
     auto start_time = METRICS_NOW_TIME;
-    auto index = to_index.BuildIndex(table_file.location);
+    auto index = to_index->BuildIndex(table_file.location);
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
@@ -464,8 +462,7 @@ Status DBImpl<EngineT>::BuildIndex(const meta::TableFileSchema& file) {
     return Status::OK();
 }
 
-template<typename EngineT>
-void DBImpl<EngineT>::BackgroundBuildIndex() {
+void DBImpl::BackgroundBuildIndex() {
     std::lock_guard<std::mutex> lock(build_index_mutex_);
     assert(bg_build_index_started_);
     meta::TableFilesSchema to_index_files;
@@ -485,18 +482,16 @@ void DBImpl<EngineT>::BackgroundBuildIndex() {
     bg_build_index_finish_signal_.notify_all();
 }
 
-template<typename EngineT>
-Status DBImpl<EngineT>::TryBuildIndex() {
+Status DBImpl::TryBuildIndex() {
     if (bg_build_index_started_) return Status::OK();
     if (shutting_down_.load(std::memory_order_acquire)) return Status::OK();
     bg_build_index_started_ = true;
-    std::thread build_index_task(&DBImpl<EngineT>::BackgroundBuildIndex, this);
+    std::thread build_index_task(&DBImpl::BackgroundBuildIndex, this);
     build_index_task.detach();
     return Status::OK();
 }
 
-template<typename EngineT>
-void DBImpl<EngineT>::BackgroundCompaction() {
+void DBImpl::BackgroundCompaction() {
     std::vector<std::string> table_ids;
     pMemMgr_->Serialize(table_ids);
 
@@ -510,18 +505,15 @@ void DBImpl<EngineT>::BackgroundCompaction() {
     }
 }
 
-template<typename EngineT>
-Status DBImpl<EngineT>::DropAll() {
+Status DBImpl::DropAll() {
     return pMeta_->DropAll();
 }
 
-template<typename EngineT>
-Status DBImpl<EngineT>::Size(long& result) {
+Status DBImpl::Size(long& result) {
     return  pMeta_->Size(result);
 }
 
-template<typename EngineT>
-DBImpl<EngineT>::~DBImpl() {
+DBImpl::~DBImpl() {
     {
         std::unique_lock<std::mutex> lock(mutex_);
         shutting_down_.store(true, std::memory_order_release);

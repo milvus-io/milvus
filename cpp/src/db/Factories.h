@@ -8,6 +8,7 @@
 #include "DB.h"
 #include "DBMetaImpl.h"
 #include "Options.h"
+#include "ExecutionEngine.h"
 
 #include <string>
 #include <memory>
@@ -29,8 +30,8 @@ struct DBMetaImplFactory {
 };
 
 struct DBFactory {
-    static std::shared_ptr<DB> Build(const std::string& db_type = "Faiss,IVF");
-    static DB* Build(const Options&, const std::string& db_type = "Faiss,IVF");
+    static std::shared_ptr<DB> Build();
+    static DB* Build(const Options&);
 };
 
 } // namespace engine

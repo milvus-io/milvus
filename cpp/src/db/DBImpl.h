@@ -8,12 +8,12 @@
 #include "DB.h"
 #include "MemManager.h"
 #include "Types.h"
-#include "Traits.h"
 
 #include <mutex>
 #include <condition_variable>
 #include <memory>
 #include <atomic>
+#include <thread>
 
 namespace zilliz {
 namespace vecwise {
@@ -25,11 +25,10 @@ namespace meta {
     class Meta;
 }
 
-template <typename EngineT>
 class DBImpl : public DB {
 public:
     using MetaPtr = meta::Meta::Ptr;
-    using MemManagerPtr = typename MemManager<EngineT>::Ptr;
+    using MemManagerPtr = typename MemManager::Ptr;
 
     DBImpl(const Options& options);
 
@@ -100,5 +99,3 @@ private:
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#include "DBImpl.inl"
