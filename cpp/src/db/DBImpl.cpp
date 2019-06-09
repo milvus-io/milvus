@@ -240,7 +240,7 @@ Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
 
                 int inner_k = dis.size() < k ? dis.size() : k;
                 for (int i = 0; i < inner_k; ++i) {
-                    res.emplace_back(nns[output_ids[i]]); // mapping
+                    res.emplace_back(std::make_pair(nns[output_ids[i]], output_distence[i])); // mapping
                 }
                 results.push_back(res); // append to result list
                 res.clear();
@@ -267,6 +267,8 @@ Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
 
 Status DBImpl::QueryAsync(const std::string& table_id, size_t k, size_t nq,
                   const float* vectors, const meta::DatesT& dates, QueryResults& results) {
+
+    //step 1: get files to search
     meta::DatePartionedTableFilesSchema files;
     auto status = pMeta_->FilesToSearch(table_id, dates, files);
     if (!status.ok()) { return status; }
@@ -282,18 +284,15 @@ Status DBImpl::QueryAsync(const std::string& table_id, size_t k, size_t nq,
         }
     }
 
+    //step 2: put search task to scheduler
     SearchScheduler& scheduler = SearchScheduler::GetInstance();
     scheduler.ScheduleSearchTask(context);
 
     context->WaitResult();
+
+    //step 3: construct results
     auto& context_result = context->GetResult();
-    for(auto& topk_result : context_result) {
-        QueryResult ids;
-        for(auto& pair : topk_result) {
-            ids.push_back(pair.second);
-        }
-        results.emplace_back(ids);
-    }
+    results.swap(context_result);
 
     return Status::OK();
 }

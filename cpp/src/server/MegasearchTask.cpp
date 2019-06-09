@@ -400,9 +400,10 @@ ServerError SearchVectorTask::OnExecute() {
             const auto& record = record_array_[i];
 
             thrift::TopKQueryResult thrift_topk_result;
-            for(auto id : result) {
+            for(auto& pair : result) {
                 thrift::QueryResult thrift_result;
-                thrift_result.__set_id(id);
+                thrift_result.__set_id(pair.first);
+                thrift_result.__set_score(pair.second);
 
                 thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
             }

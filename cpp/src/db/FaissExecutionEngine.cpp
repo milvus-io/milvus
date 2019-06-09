@@ -54,6 +54,10 @@ size_t FaissExecutionEngine::Size() const {
     return (size_t)(Count() * pIndex_->d)*sizeof(float);
 }
 
+size_t FaissExecutionEngine::Dimension() const {
+    return pIndex_->d;
+}
+
 size_t FaissExecutionEngine::PhysicalSize() const {
     return (size_t)(Count() * pIndex_->d)*sizeof(float);
 }
