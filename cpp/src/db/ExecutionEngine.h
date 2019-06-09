@@ -32,6 +32,8 @@ public:
 
     virtual size_t Size() const = 0;
 
+    virtual size_t Dimension() const = 0;
+
     virtual size_t PhysicalSize() const = 0;
 
     virtual Status Serialize() = 0;

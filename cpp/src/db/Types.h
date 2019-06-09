@@ -15,7 +15,7 @@ typedef long IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 
-typedef std::vector<IDNumber> QueryResult;
+typedef std::vector<std::pair<IDNumber, double>> QueryResult;
 typedef std::vector<QueryResult> QueryResults;
 
 

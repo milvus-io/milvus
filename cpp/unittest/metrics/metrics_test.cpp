@@ -87,11 +87,11 @@ TEST_F(DBTest, Metric_Tes) {
 
             ASSERT_STATS(stat);
             for (auto k=0; k<qb; ++k) {
-                ASSERT_EQ(results[k][0], target_ids[k]);
+                ASSERT_EQ(results[k][0].first, target_ids[k]);
                 ss.str("");
                 ss << "Result [" << k << "]:";
                 for (auto result : results[k]) {
-                    ss << result << " ";
+                    ss << result.first << " ";
                 }
                 /* LOG(DEBUG) << ss.str(); */
             }

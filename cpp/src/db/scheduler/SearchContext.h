@@ -31,8 +31,8 @@ public:
     using Id2IndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
     const Id2IndexMap& GetIndexMap() const { return map_index_files_; }
 
-    using Score2IdMap = std::map<float, int64_t>;
-    using ResultSet = std::vector<Score2IdMap>;
+    using Id2ScoreMap = std::vector<std::pair<int64_t, double>>;
+    using ResultSet = std::vector<Id2ScoreMap>;
     const ResultSet& GetResult() const { return result_; }
     ResultSet& GetResult() { return result_; }
 
