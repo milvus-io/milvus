@@ -5,6 +5,8 @@
  ******************************************************************************/
 #pragma once
 
+#include "ExecutionEngine.h"
+
 #include <vector>
 #include <map>
 #include <string>
@@ -25,6 +27,7 @@ struct TableSchema {
     uint16_t dimension;
     std::string location;
     long created_on;
+    int engine_type_ = (int)EngineType::FAISS_IDMAP;
 }; // TableSchema
 
 struct TableFileSchema {
@@ -38,6 +41,7 @@ struct TableFileSchema {
 
     size_t id;
     std::string table_id;
+    int engine_type_ = (int)EngineType::FAISS_IDMAP;
     std::string file_id;
     int file_type = NEW;
     size_t size;

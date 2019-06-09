@@ -10,6 +10,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "metrics/Metrics.h"
+#include "db/EngineFactory.h"
 
 namespace zilliz {
 namespace vecwise {
@@ -79,7 +80,9 @@ SearchScheduler::IndexLoadWorker() {
 
         server::TimeRecorder rc("Load index");
         //load index
-        IndexEnginePtr index_ptr = std::make_shared<IndexClass>(context->file_->dimension, context->file_->location);
+        ExecutionEnginePtr index_ptr = EngineFactory::Build(context->file_->dimension,
+                context->file_->location,
+                (EngineType)context->file_->engine_type_);
         index_ptr->Load();
 
         rc.Record("load index file to memory");
@@ -111,7 +114,7 @@ SearchScheduler::IndexLoadWorker() {
         }
 
         //put search task to another queue
-        SearchTaskPtr task_ptr = std::make_shared<SearchTaskClass>();
+        SearchTaskPtr task_ptr = std::make_shared<SearchTask>();
         task_ptr->index_id_ = context->file_->id;
         task_ptr->index_type_ = context->file_->file_type;
         task_ptr->index_engine_ = index_ptr;

@@ -5,8 +5,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include "Factories.h"
 #include "DBImpl.h"
-#include "FaissExecutionEngine.h"
-#include "Traits.h"
 
 #include <stdlib.h>
 #include <time.h>
@@ -45,28 +43,14 @@ std::shared_ptr<meta::DBMetaImpl> DBMetaImplFactory::Build() {
     return std::shared_ptr<meta::DBMetaImpl>(new meta::DBMetaImpl(options));
 }
 
-std::shared_ptr<DB> DBFactory::Build(const std::string& db_type) {
+std::shared_ptr<DB> DBFactory::Build() {
     auto options = OptionsFactory::Build();
-    auto db = DBFactory::Build(options, db_type);
+    auto db = DBFactory::Build(options);
     return std::shared_ptr<DB>(db);
 }
 
-DB* DBFactory::Build(const Options& options, const std::string& db_type) {
-    std::stringstream ss(db_type);
-    std::string token;
-    std::vector<std::string> tokens;
-    while (std::getline(ss, token, ',')) {
-        tokens.push_back(token);
-    }
-
-    assert(tokens.size()==2);
-    assert(tokens[0]=="Faiss");
-    if (tokens[1] == "IVF") {
-        return new DBImpl<FaissExecutionEngine<IVFIndexTrait>>(options);
-    } else if (tokens[1] == "IDMap") {
-        return new DBImpl<FaissExecutionEngine<IDMapIndexTrait>>(options);
-    }
-    return nullptr;
+DB* DBFactory::Build(const Options& options) {
+    return new DBImpl(options);
 }
 
 } // namespace engine
