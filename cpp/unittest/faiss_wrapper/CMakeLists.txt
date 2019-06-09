@@ -13,8 +13,6 @@ include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
 
 set(require_files
-        ../../src/server/VecIdMapper.cpp
-        ../../src/server/RocksIdMapper.cpp
         ../../src/server/ServerConfig.cpp
         ../../src/utils/CommonUtil.cpp
         ../../src/utils/TimeRecorder.cpp
@@ -38,7 +36,6 @@ set(wrapper_libs
         cudart
         cublas
         sqlite3
-        rocksdb
         snappy
         bz2
         z

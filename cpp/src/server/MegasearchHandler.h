@@ -19,15 +19,15 @@ public:
     MegasearchServiceHandler();
 
     /**
-     * @brief Create table method
-     *
-     * This method is used to create table
-     *
-     * @param param, use to provide table information to be created.
-     *
-     *
-     * @param param
-     */
+   * @brief Create table method
+   *
+   * This method is used to create table
+   *
+   * @param param, use to provide table information to be created.
+   *
+   *
+   * @param param
+   */
     void CreateTable(const megasearch::thrift::TableSchema& param);
 
     /**
@@ -41,30 +41,6 @@ public:
      * @param table_name
      */
     void DeleteTable(const std::string& table_name);
-
-    /**
-     * @brief Create table partition
-     *
-     * This method is used to create table partition.
-     *
-     * @param param, use to provide partition information to be created.
-     *
-     *
-     * @param param
-     */
-    void CreateTablePartition(const megasearch::thrift::CreateTablePartitionParam& param);
-
-    /**
-     * @brief Delete table partition
-     *
-     * This method is used to delete table partition.
-     *
-     * @param param, use to provide partition information to be deleted.
-     *
-     *
-     * @param param
-     */
-    void DeleteTablePartition(const megasearch::thrift::DeleteTablePartitionParam& param);
 
     /**
      * @brief Add vector array to table
@@ -90,31 +66,47 @@ public:
      *
      * @param table_name, table_name is queried.
      * @param query_record_array, all vector are going to be queried.
+     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
      * @param topk, how many similarity vectors will be searched.
      *
      * @return query result array.
      *
      * @param table_name
      * @param query_record_array
+     * @param query_range_array
      * @param topk
      */
     void SearchVector(std::vector<megasearch::thrift::TopKQueryResult> & _return,
             const std::string& table_name,
-            const std::vector<megasearch::thrift::QueryRecord> & query_record_array,
+            const std::vector<megasearch::thrift::RowRecord> & query_record_array,
+            const std::vector<megasearch::thrift::Range> & query_range_array,
             const int64_t topk);
 
     /**
-     * @brief Show table information
+     * @brief Get table schema
      *
-     * This method is used to show table information.
+     * This method is used to get table schema.
      *
-     * @param table_name, which table is show.
+     * @param table_name, target table name.
      *
      * @return table schema
      *
      * @param table_name
      */
     void DescribeTable(megasearch::thrift::TableSchema& _return, const std::string& table_name);
+
+    /**
+     * @brief Get table row count
+     *
+     * This method is used to get table row count.
+     *
+     * @param table_name, target table name.
+     *
+     * @return table row count
+     *
+     * @param table_name
+     */
+    int64_t GetTableRowCount(const std::string& table_name);
 
     /**
      * @brief List all tables in database

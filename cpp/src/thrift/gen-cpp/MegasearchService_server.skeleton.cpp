@@ -51,36 +51,6 @@ class MegasearchServiceHandler : virtual public MegasearchServiceIf {
   }
 
   /**
-   * @brief Create table partition
-   * 
-   * This method is used to create table partition.
-   * 
-   * @param param, use to provide partition information to be created.
-   * 
-   * 
-   * @param param
-   */
-  void CreateTablePartition(const CreateTablePartitionParam& param) {
-    // Your implementation goes here
-    printf("CreateTablePartition\n");
-  }
-
-  /**
-   * @brief Delete table partition
-   * 
-   * This method is used to delete table partition.
-   * 
-   * @param param, use to provide partition information to be deleted.
-   * 
-   * 
-   * @param param
-   */
-  void DeleteTablePartition(const DeleteTablePartitionParam& param) {
-    // Your implementation goes here
-    printf("DeleteTablePartition\n");
-  }
-
-  /**
    * @brief Add vector array to table
    * 
    * This method is used to add vector array to table.
@@ -105,25 +75,27 @@ class MegasearchServiceHandler : virtual public MegasearchServiceIf {
    * 
    * @param table_name, table_name is queried.
    * @param query_record_array, all vector are going to be queried.
+   * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
    * @param topk, how many similarity vectors will be searched.
    * 
    * @return query result array.
    * 
    * @param table_name
    * @param query_record_array
+   * @param query_range_array
    * @param topk
    */
-  void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk) {
+  void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) {
     // Your implementation goes here
     printf("SearchVector\n");
   }
 
   /**
-   * @brief Show table information
+   * @brief Get table schema
    * 
-   * This method is used to show table information.
+   * This method is used to get table schema.
    * 
-   * @param table_name, which table is show.
+   * @param table_name, target table name.
    * 
    * @return table schema
    * 
@@ -132,6 +104,22 @@ class MegasearchServiceHandler : virtual public MegasearchServiceIf {
   void DescribeTable(TableSchema& _return, const std::string& table_name) {
     // Your implementation goes here
     printf("DescribeTable\n");
+  }
+
+  /**
+   * @brief Get table row count
+   * 
+   * This method is used to get table row count.
+   * 
+   * @param table_name, target table name.
+   * 
+   * @return table row count
+   * 
+   * @param table_name
+   */
+  int64_t GetTableRowCount(const std::string& table_name) {
+    // Your implementation goes here
+    printf("GetTableRowCount\n");
   }
 
   /**
