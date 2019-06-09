@@ -19,50 +19,52 @@ namespace vecwise {
 namespace engine {
 
 
-template<class IndexTrait>
-class FaissExecutionEngine : public ExecutionEngine<FaissExecutionEngine<IndexTrait>> {
+class FaissExecutionEngine : public ExecutionEngine {
 public:
-    using Ptr = std::shared_ptr<FaissExecutionEngine<IndexTrait>>;
 
-    FaissExecutionEngine(uint16_t dimension, const std::string& location);
-    FaissExecutionEngine(std::shared_ptr<faiss::Index> index, const std::string& location);
+    FaissExecutionEngine(uint16_t dimension,
+            const std::string& location,
+            const std::string& build_index_type,
+            const std::string& raw_index_type);
 
-    Status AddWithIds(const std::vector<float>& vectors,
-                              const std::vector<long>& vector_ids);
+    FaissExecutionEngine(std::shared_ptr<faiss::Index> index,
+            const std::string& location,
+            const std::string& build_index_type,
+            const std::string& raw_index_type);
 
-    Status AddWithIds(long n, const float *xdata, const long *xids);
+    Status AddWithIds(long n, const float *xdata, const long *xids) override;
 
-    size_t Count() const;
+    size_t Count() const override;
 
-    size_t Size() const;
+    size_t Size() const override;
 
-    size_t PhysicalSize() const;
+    size_t PhysicalSize() const override;
 
-    Status Serialize();
+    Status Serialize() override;
 
-    Status Load();
+    Status Load() override;
 
-    Status Merge(const std::string& location);
+    Status Merge(const std::string& location) override;
 
     Status Search(long n,
                   const float *data,
                   long k,
                   float *distances,
-                  long *labels) const;
+                  long *labels) const override;
 
-    Ptr BuildIndex(const std::string&);
+    ExecutionEnginePtr BuildIndex(const std::string&) override;
 
-    Status Cache();
+    Status Cache() override;
 
 protected:
-
     std::shared_ptr<faiss::Index> pIndex_;
     std::string location_;
+
+    std::string build_index_type_;
+    std::string raw_index_type_;
 };
 
 
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-
-#include "FaissExecutionEngine.inl"

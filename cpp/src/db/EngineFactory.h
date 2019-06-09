@@ -5,22 +5,20 @@
  ******************************************************************************/
 #pragma once
 
+#include "Status.h"
+#include "ExecutionEngine.h"
 
 namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-struct IVFIndexTrait {
-    static const char* BuildIndexType;
-    static const char* RawIndexType;
+class EngineFactory {
+public:
+    static ExecutionEnginePtr Build(uint16_t dimension,
+                                    const std::string& location,
+                                    EngineType type);
 };
 
-struct IDMapIndexTrait {
-    static const char* BuildIndexType;
-    static const char* RawIndexType;
-};
-
-
-} // namespace engine
-} // namespace vecwise
-} // namespace zilliz
+}
+}
+}

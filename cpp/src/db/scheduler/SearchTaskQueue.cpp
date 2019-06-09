@@ -3,8 +3,6 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#pragma once
-
 #include "SearchTaskQueue.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -70,8 +68,7 @@ SearchTaskQueue::GetInstance() {
     return instance;
 }
 
-template<typename trait>
-bool SearchTask<trait>::DoSearch() {
+bool SearchTask::DoSearch() {
     if(index_engine_ == nullptr) {
         return false;
     }
