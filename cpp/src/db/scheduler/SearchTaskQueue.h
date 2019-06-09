@@ -7,8 +7,7 @@
 
 #include "SearchContext.h"
 #include "utils/BlockingQueue.h"
-#include "../FaissExecutionEngine.h"
-#include "../Traits.h"
+#include "db/ExecutionEngine.h"
 
 #include <memory>
 
@@ -16,16 +15,6 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-#ifdef GPU_VERSION
-using IndexTraitClass = IVFIndexTrait;
-#else
-using IndexTraitClass = IDMapIndexTrait;
-#endif
-
-using IndexClass = FaissExecutionEngine<IndexTraitClass>;
-using IndexEnginePtr = std::shared_ptr<IndexClass>;
-
-template <typename trait>
 class SearchTask {
 public:
     bool DoSearch();
@@ -33,12 +22,11 @@ public:
 public:
     size_t index_id_ = 0;
     int index_type_ = 0; //for metrics
-    IndexEnginePtr index_engine_;
+    ExecutionEnginePtr index_engine_;
     std::vector<SearchContextPtr> search_contexts_;
 };
 
-using SearchTaskClass = SearchTask<IndexTraitClass>;
-using SearchTaskPtr = std::shared_ptr<SearchTaskClass>;
+using SearchTaskPtr = std::shared_ptr<SearchTask>;
 
 class SearchTaskQueue : public server::BlockingQueue<SearchTaskPtr> {
 private:
@@ -59,5 +47,3 @@ private:
 }
 }
 }
-
-#include "SearchTaskQueue.inl"

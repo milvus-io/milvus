@@ -7,6 +7,7 @@
 #include "IDGenerator.h"
 #include "Utils.h"
 #include "MetaConsts.h"
+#include "Factories.h"
 #include "metrics/Metrics.h"
 
 #include <unistd.h>
@@ -33,10 +34,12 @@ inline auto StoragePrototype(const std::string &path) {
                                    make_column("table_id", &TableSchema::table_id, unique()),
                                    make_column("dimension", &TableSchema::dimension),
                                    make_column("created_on", &TableSchema::created_on),
-                                   make_column("files_cnt", &TableSchema::files_cnt, default_value(0))),
+                                   make_column("files_cnt", &TableSchema::files_cnt, default_value(0)),
+                                   make_column("engine_type", &TableSchema::engine_type_)),
                         make_table("TableFile",
                                    make_column("id", &TableFileSchema::id, primary_key()),
                                    make_column("table_id", &TableFileSchema::table_id),
+                                   make_column("engine_type", &TableFileSchema::engine_type_),
                                    make_column("file_id", &TableFileSchema::file_id),
                                    make_column("file_type", &TableFileSchema::file_type),
                                    make_column("size", &TableFileSchema::size, default_value(0)),
