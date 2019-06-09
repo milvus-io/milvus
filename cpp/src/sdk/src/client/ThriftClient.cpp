@@ -58,7 +58,7 @@ ThriftClient::Connect(const std::string& address, int32_t port, const std::strin
             protocol_ptr.reset(new TCompactProtocol(transport_ptr));
         } else {
             //CLIENT_LOG_ERROR << "Service protocol: " << protocol << " is not supported currently";
-            return Status(StatusCode::Invalid, "unsupported protocol");
+            return Status(StatusCode::InvalidAgument, "unsupported protocol");
         }
 
         transport_ptr->open();

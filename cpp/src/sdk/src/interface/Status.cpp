@@ -95,7 +95,7 @@ std::string Status::CodeAsString() const {
     switch (code()) {
         case StatusCode::OK: type = "OK";
             break;
-        case StatusCode::Invalid: type = "Invalid";
+        case StatusCode::InvalidAgument: type = "Invalid agument";
             break;
         case StatusCode::UnknownError: type = "Unknown error";
             break;

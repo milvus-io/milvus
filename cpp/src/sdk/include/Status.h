@@ -12,10 +12,13 @@ namespace megasearch {
  */
 enum class StatusCode {
     OK = 0,
-    Invalid = 1,
-    UnknownError = 2,
-    NotSupported = 3,
-    NotConnected = 4
+    // system error section
+    UnknownError = 1,
+    NotSupported,
+    NotConnected,
+
+    // function error section
+    InvalidAgument = 1000,
 };
 
 /**
@@ -171,7 +174,7 @@ class Status {
      */
     template<typename... Args>
     static Status Invalid(Args &&... args) {
-        return Status(StatusCode::Invalid,
+        return Status(StatusCode::InvalidAgument,
                       MessageBuilder(std::forward<Args>(args)...));
     }
 
@@ -221,7 +224,7 @@ class Status {
      * @return, if the status indicates invalid.
      *
      */
-    bool IsInvalid() const { return code() == StatusCode::Invalid; }
+    bool IsInvalid() const { return code() == StatusCode::InvalidAgument; }
 
     /**
      * @brief IsUnknownError

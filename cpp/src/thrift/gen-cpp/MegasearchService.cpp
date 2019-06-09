@@ -383,380 +383,6 @@ uint32_t MegasearchService_DeleteTable_presult::read(::apache::thrift::protocol:
 }
 
 
-MegasearchService_CreateTablePartition_args::~MegasearchService_CreateTablePartition_args() throw() {
-}
-
-
-uint32_t MegasearchService_CreateTablePartition_args::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 2:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->param.read(iprot);
-          this->__isset.param = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  return xfer;
-}
-
-uint32_t MegasearchService_CreateTablePartition_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
-  uint32_t xfer = 0;
-  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_CreateTablePartition_args");
-
-  xfer += oprot->writeFieldBegin("param", ::apache::thrift::protocol::T_STRUCT, 2);
-  xfer += this->param.write(oprot);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-
-MegasearchService_CreateTablePartition_pargs::~MegasearchService_CreateTablePartition_pargs() throw() {
-}
-
-
-uint32_t MegasearchService_CreateTablePartition_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
-  uint32_t xfer = 0;
-  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_CreateTablePartition_pargs");
-
-  xfer += oprot->writeFieldBegin("param", ::apache::thrift::protocol::T_STRUCT, 2);
-  xfer += (*(this->param)).write(oprot);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-
-MegasearchService_CreateTablePartition_result::~MegasearchService_CreateTablePartition_result() throw() {
-}
-
-
-uint32_t MegasearchService_CreateTablePartition_result::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 1:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->e.read(iprot);
-          this->__isset.e = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  return xfer;
-}
-
-uint32_t MegasearchService_CreateTablePartition_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
-
-  uint32_t xfer = 0;
-
-  xfer += oprot->writeStructBegin("MegasearchService_CreateTablePartition_result");
-
-  if (this->__isset.e) {
-    xfer += oprot->writeFieldBegin("e", ::apache::thrift::protocol::T_STRUCT, 1);
-    xfer += this->e.write(oprot);
-    xfer += oprot->writeFieldEnd();
-  }
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-
-MegasearchService_CreateTablePartition_presult::~MegasearchService_CreateTablePartition_presult() throw() {
-}
-
-
-uint32_t MegasearchService_CreateTablePartition_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 1:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->e.read(iprot);
-          this->__isset.e = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  return xfer;
-}
-
-
-MegasearchService_DeleteTablePartition_args::~MegasearchService_DeleteTablePartition_args() throw() {
-}
-
-
-uint32_t MegasearchService_DeleteTablePartition_args::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 2:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->param.read(iprot);
-          this->__isset.param = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  return xfer;
-}
-
-uint32_t MegasearchService_DeleteTablePartition_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
-  uint32_t xfer = 0;
-  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_DeleteTablePartition_args");
-
-  xfer += oprot->writeFieldBegin("param", ::apache::thrift::protocol::T_STRUCT, 2);
-  xfer += this->param.write(oprot);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-
-MegasearchService_DeleteTablePartition_pargs::~MegasearchService_DeleteTablePartition_pargs() throw() {
-}
-
-
-uint32_t MegasearchService_DeleteTablePartition_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
-  uint32_t xfer = 0;
-  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_DeleteTablePartition_pargs");
-
-  xfer += oprot->writeFieldBegin("param", ::apache::thrift::protocol::T_STRUCT, 2);
-  xfer += (*(this->param)).write(oprot);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-
-MegasearchService_DeleteTablePartition_result::~MegasearchService_DeleteTablePartition_result() throw() {
-}
-
-
-uint32_t MegasearchService_DeleteTablePartition_result::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 1:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->e.read(iprot);
-          this->__isset.e = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  return xfer;
-}
-
-uint32_t MegasearchService_DeleteTablePartition_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
-
-  uint32_t xfer = 0;
-
-  xfer += oprot->writeStructBegin("MegasearchService_DeleteTablePartition_result");
-
-  if (this->__isset.e) {
-    xfer += oprot->writeFieldBegin("e", ::apache::thrift::protocol::T_STRUCT, 1);
-    xfer += this->e.write(oprot);
-    xfer += oprot->writeFieldEnd();
-  }
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-
-MegasearchService_DeleteTablePartition_presult::~MegasearchService_DeleteTablePartition_presult() throw() {
-}
-
-
-uint32_t MegasearchService_DeleteTablePartition_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 1:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->e.read(iprot);
-          this->__isset.e = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  return xfer;
-}
-
-
 MegasearchService_AddVector_args::~MegasearchService_AddVector_args() throw() {
 }
 
@@ -794,14 +420,14 @@ uint32_t MegasearchService_AddVector_args::read(::apache::thrift::protocol::TPro
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->record_array.clear();
-            uint32_t _size113;
-            ::apache::thrift::protocol::TType _etype116;
-            xfer += iprot->readListBegin(_etype116, _size113);
-            this->record_array.resize(_size113);
-            uint32_t _i117;
-            for (_i117 = 0; _i117 < _size113; ++_i117)
+            uint32_t _size19;
+            ::apache::thrift::protocol::TType _etype22;
+            xfer += iprot->readListBegin(_etype22, _size19);
+            this->record_array.resize(_size19);
+            uint32_t _i23;
+            for (_i23 = 0; _i23 < _size19; ++_i23)
             {
-              xfer += this->record_array[_i117].read(iprot);
+              xfer += this->record_array[_i23].read(iprot);
             }
             xfer += iprot->readListEnd();
           }
@@ -834,10 +460,10 @@ uint32_t MegasearchService_AddVector_args::write(::apache::thrift::protocol::TPr
   xfer += oprot->writeFieldBegin("record_array", ::apache::thrift::protocol::T_LIST, 3);
   {
     xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->record_array.size()));
-    std::vector<RowRecord> ::const_iterator _iter118;
-    for (_iter118 = this->record_array.begin(); _iter118 != this->record_array.end(); ++_iter118)
+    std::vector<RowRecord> ::const_iterator _iter24;
+    for (_iter24 = this->record_array.begin(); _iter24 != this->record_array.end(); ++_iter24)
     {
-      xfer += (*_iter118).write(oprot);
+      xfer += (*_iter24).write(oprot);
     }
     xfer += oprot->writeListEnd();
   }
@@ -865,10 +491,10 @@ uint32_t MegasearchService_AddVector_pargs::write(::apache::thrift::protocol::TP
   xfer += oprot->writeFieldBegin("record_array", ::apache::thrift::protocol::T_LIST, 3);
   {
     xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>((*(this->record_array)).size()));
-    std::vector<RowRecord> ::const_iterator _iter119;
-    for (_iter119 = (*(this->record_array)).begin(); _iter119 != (*(this->record_array)).end(); ++_iter119)
+    std::vector<RowRecord> ::const_iterator _iter25;
+    for (_iter25 = (*(this->record_array)).begin(); _iter25 != (*(this->record_array)).end(); ++_iter25)
     {
-      xfer += (*_iter119).write(oprot);
+      xfer += (*_iter25).write(oprot);
     }
     xfer += oprot->writeListEnd();
   }
@@ -909,14 +535,14 @@ uint32_t MegasearchService_AddVector_result::read(::apache::thrift::protocol::TP
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->success.clear();
-            uint32_t _size120;
-            ::apache::thrift::protocol::TType _etype123;
-            xfer += iprot->readListBegin(_etype123, _size120);
-            this->success.resize(_size120);
-            uint32_t _i124;
-            for (_i124 = 0; _i124 < _size120; ++_i124)
+            uint32_t _size26;
+            ::apache::thrift::protocol::TType _etype29;
+            xfer += iprot->readListBegin(_etype29, _size26);
+            this->success.resize(_size26);
+            uint32_t _i30;
+            for (_i30 = 0; _i30 < _size26; ++_i30)
             {
-              xfer += iprot->readI64(this->success[_i124]);
+              xfer += iprot->readI64(this->success[_i30]);
             }
             xfer += iprot->readListEnd();
           }
@@ -955,10 +581,10 @@ uint32_t MegasearchService_AddVector_result::write(::apache::thrift::protocol::T
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_LIST, 0);
     {
       xfer += oprot->writeListBegin(::apache::thrift::protocol::T_I64, static_cast<uint32_t>(this->success.size()));
-      std::vector<int64_t> ::const_iterator _iter125;
-      for (_iter125 = this->success.begin(); _iter125 != this->success.end(); ++_iter125)
+      std::vector<int64_t> ::const_iterator _iter31;
+      for (_iter31 = this->success.begin(); _iter31 != this->success.end(); ++_iter31)
       {
-        xfer += oprot->writeI64((*_iter125));
+        xfer += oprot->writeI64((*_iter31));
       }
       xfer += oprot->writeListEnd();
     }
@@ -1003,14 +629,14 @@ uint32_t MegasearchService_AddVector_presult::read(::apache::thrift::protocol::T
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             (*(this->success)).clear();
-            uint32_t _size126;
-            ::apache::thrift::protocol::TType _etype129;
-            xfer += iprot->readListBegin(_etype129, _size126);
-            (*(this->success)).resize(_size126);
-            uint32_t _i130;
-            for (_i130 = 0; _i130 < _size126; ++_i130)
+            uint32_t _size32;
+            ::apache::thrift::protocol::TType _etype35;
+            xfer += iprot->readListBegin(_etype35, _size32);
+            (*(this->success)).resize(_size32);
+            uint32_t _i36;
+            for (_i36 = 0; _i36 < _size32; ++_i36)
             {
-              xfer += iprot->readI64((*(this->success))[_i130]);
+              xfer += iprot->readI64((*(this->success))[_i36]);
             }
             xfer += iprot->readListEnd();
           }
@@ -1077,14 +703,14 @@ uint32_t MegasearchService_SearchVector_args::read(::apache::thrift::protocol::T
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->query_record_array.clear();
-            uint32_t _size131;
-            ::apache::thrift::protocol::TType _etype134;
-            xfer += iprot->readListBegin(_etype134, _size131);
-            this->query_record_array.resize(_size131);
-            uint32_t _i135;
-            for (_i135 = 0; _i135 < _size131; ++_i135)
+            uint32_t _size37;
+            ::apache::thrift::protocol::TType _etype40;
+            xfer += iprot->readListBegin(_etype40, _size37);
+            this->query_record_array.resize(_size37);
+            uint32_t _i41;
+            for (_i41 = 0; _i41 < _size37; ++_i41)
             {
-              xfer += this->query_record_array[_i135].read(iprot);
+              xfer += this->query_record_array[_i41].read(iprot);
             }
             xfer += iprot->readListEnd();
           }
@@ -1094,6 +720,26 @@ uint32_t MegasearchService_SearchVector_args::read(::apache::thrift::protocol::T
         }
         break;
       case 4:
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          {
+            this->query_range_array.clear();
+            uint32_t _size42;
+            ::apache::thrift::protocol::TType _etype45;
+            xfer += iprot->readListBegin(_etype45, _size42);
+            this->query_range_array.resize(_size42);
+            uint32_t _i46;
+            for (_i46 = 0; _i46 < _size42; ++_i46)
+            {
+              xfer += this->query_range_array[_i46].read(iprot);
+            }
+            xfer += iprot->readListEnd();
+          }
+          this->__isset.query_range_array = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 5:
         if (ftype == ::apache::thrift::protocol::T_I64) {
           xfer += iprot->readI64(this->topk);
           this->__isset.topk = true;
@@ -1125,16 +771,28 @@ uint32_t MegasearchService_SearchVector_args::write(::apache::thrift::protocol::
   xfer += oprot->writeFieldBegin("query_record_array", ::apache::thrift::protocol::T_LIST, 3);
   {
     xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->query_record_array.size()));
-    std::vector<QueryRecord> ::const_iterator _iter136;
-    for (_iter136 = this->query_record_array.begin(); _iter136 != this->query_record_array.end(); ++_iter136)
+    std::vector<RowRecord> ::const_iterator _iter47;
+    for (_iter47 = this->query_record_array.begin(); _iter47 != this->query_record_array.end(); ++_iter47)
     {
-      xfer += (*_iter136).write(oprot);
+      xfer += (*_iter47).write(oprot);
     }
     xfer += oprot->writeListEnd();
   }
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("topk", ::apache::thrift::protocol::T_I64, 4);
+  xfer += oprot->writeFieldBegin("query_range_array", ::apache::thrift::protocol::T_LIST, 4);
+  {
+    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->query_range_array.size()));
+    std::vector<Range> ::const_iterator _iter48;
+    for (_iter48 = this->query_range_array.begin(); _iter48 != this->query_range_array.end(); ++_iter48)
+    {
+      xfer += (*_iter48).write(oprot);
+    }
+    xfer += oprot->writeListEnd();
+  }
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("topk", ::apache::thrift::protocol::T_I64, 5);
   xfer += oprot->writeI64(this->topk);
   xfer += oprot->writeFieldEnd();
 
@@ -1160,16 +818,28 @@ uint32_t MegasearchService_SearchVector_pargs::write(::apache::thrift::protocol:
   xfer += oprot->writeFieldBegin("query_record_array", ::apache::thrift::protocol::T_LIST, 3);
   {
     xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>((*(this->query_record_array)).size()));
-    std::vector<QueryRecord> ::const_iterator _iter137;
-    for (_iter137 = (*(this->query_record_array)).begin(); _iter137 != (*(this->query_record_array)).end(); ++_iter137)
+    std::vector<RowRecord> ::const_iterator _iter49;
+    for (_iter49 = (*(this->query_record_array)).begin(); _iter49 != (*(this->query_record_array)).end(); ++_iter49)
     {
-      xfer += (*_iter137).write(oprot);
+      xfer += (*_iter49).write(oprot);
     }
     xfer += oprot->writeListEnd();
   }
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("topk", ::apache::thrift::protocol::T_I64, 4);
+  xfer += oprot->writeFieldBegin("query_range_array", ::apache::thrift::protocol::T_LIST, 4);
+  {
+    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>((*(this->query_range_array)).size()));
+    std::vector<Range> ::const_iterator _iter50;
+    for (_iter50 = (*(this->query_range_array)).begin(); _iter50 != (*(this->query_range_array)).end(); ++_iter50)
+    {
+      xfer += (*_iter50).write(oprot);
+    }
+    xfer += oprot->writeListEnd();
+  }
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("topk", ::apache::thrift::protocol::T_I64, 5);
   xfer += oprot->writeI64((*(this->topk)));
   xfer += oprot->writeFieldEnd();
 
@@ -1208,14 +878,14 @@ uint32_t MegasearchService_SearchVector_result::read(::apache::thrift::protocol:
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->success.clear();
-            uint32_t _size138;
-            ::apache::thrift::protocol::TType _etype141;
-            xfer += iprot->readListBegin(_etype141, _size138);
-            this->success.resize(_size138);
-            uint32_t _i142;
-            for (_i142 = 0; _i142 < _size138; ++_i142)
+            uint32_t _size51;
+            ::apache::thrift::protocol::TType _etype54;
+            xfer += iprot->readListBegin(_etype54, _size51);
+            this->success.resize(_size51);
+            uint32_t _i55;
+            for (_i55 = 0; _i55 < _size51; ++_i55)
             {
-              xfer += this->success[_i142].read(iprot);
+              xfer += this->success[_i55].read(iprot);
             }
             xfer += iprot->readListEnd();
           }
@@ -1254,10 +924,10 @@ uint32_t MegasearchService_SearchVector_result::write(::apache::thrift::protocol
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_LIST, 0);
     {
       xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->success.size()));
-      std::vector<TopKQueryResult> ::const_iterator _iter143;
-      for (_iter143 = this->success.begin(); _iter143 != this->success.end(); ++_iter143)
+      std::vector<TopKQueryResult> ::const_iterator _iter56;
+      for (_iter56 = this->success.begin(); _iter56 != this->success.end(); ++_iter56)
       {
-        xfer += (*_iter143).write(oprot);
+        xfer += (*_iter56).write(oprot);
       }
       xfer += oprot->writeListEnd();
     }
@@ -1302,14 +972,14 @@ uint32_t MegasearchService_SearchVector_presult::read(::apache::thrift::protocol
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             (*(this->success)).clear();
-            uint32_t _size144;
-            ::apache::thrift::protocol::TType _etype147;
-            xfer += iprot->readListBegin(_etype147, _size144);
-            (*(this->success)).resize(_size144);
-            uint32_t _i148;
-            for (_i148 = 0; _i148 < _size144; ++_i148)
+            uint32_t _size57;
+            ::apache::thrift::protocol::TType _etype60;
+            xfer += iprot->readListBegin(_etype60, _size57);
+            (*(this->success)).resize(_size57);
+            uint32_t _i61;
+            for (_i61 = 0; _i61 < _size57; ++_i61)
             {
-              xfer += (*(this->success))[_i148].read(iprot);
+              xfer += (*(this->success))[_i61].read(iprot);
             }
             xfer += iprot->readListEnd();
           }
@@ -1546,6 +1216,213 @@ uint32_t MegasearchService_DescribeTable_presult::read(::apache::thrift::protoco
 }
 
 
+MegasearchService_GetTableRowCount_args::~MegasearchService_GetTableRowCount_args() throw() {
+}
+
+
+uint32_t MegasearchService_GetTableRowCount_args::read(::apache::thrift::protocol::TProtocol* iprot) {
+
+  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
+  uint32_t xfer = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+
+  xfer += iprot->readStructBegin(fname);
+
+  using ::apache::thrift::protocol::TProtocolException;
+
+
+  while (true)
+  {
+    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid)
+    {
+      case 2:
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += iprot->readString(this->table_name);
+          this->__isset.table_name = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      default:
+        xfer += iprot->skip(ftype);
+        break;
+    }
+    xfer += iprot->readFieldEnd();
+  }
+
+  xfer += iprot->readStructEnd();
+
+  return xfer;
+}
+
+uint32_t MegasearchService_GetTableRowCount_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
+  xfer += oprot->writeStructBegin("MegasearchService_GetTableRowCount_args");
+
+  xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
+  xfer += oprot->writeString(this->table_name);
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldStop();
+  xfer += oprot->writeStructEnd();
+  return xfer;
+}
+
+
+MegasearchService_GetTableRowCount_pargs::~MegasearchService_GetTableRowCount_pargs() throw() {
+}
+
+
+uint32_t MegasearchService_GetTableRowCount_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
+  xfer += oprot->writeStructBegin("MegasearchService_GetTableRowCount_pargs");
+
+  xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
+  xfer += oprot->writeString((*(this->table_name)));
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldStop();
+  xfer += oprot->writeStructEnd();
+  return xfer;
+}
+
+
+MegasearchService_GetTableRowCount_result::~MegasearchService_GetTableRowCount_result() throw() {
+}
+
+
+uint32_t MegasearchService_GetTableRowCount_result::read(::apache::thrift::protocol::TProtocol* iprot) {
+
+  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
+  uint32_t xfer = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+
+  xfer += iprot->readStructBegin(fname);
+
+  using ::apache::thrift::protocol::TProtocolException;
+
+
+  while (true)
+  {
+    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid)
+    {
+      case 0:
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += iprot->readI64(this->success);
+          this->__isset.success = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 1:
+        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
+          xfer += this->e.read(iprot);
+          this->__isset.e = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      default:
+        xfer += iprot->skip(ftype);
+        break;
+    }
+    xfer += iprot->readFieldEnd();
+  }
+
+  xfer += iprot->readStructEnd();
+
+  return xfer;
+}
+
+uint32_t MegasearchService_GetTableRowCount_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
+
+  uint32_t xfer = 0;
+
+  xfer += oprot->writeStructBegin("MegasearchService_GetTableRowCount_result");
+
+  if (this->__isset.success) {
+    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_I64, 0);
+    xfer += oprot->writeI64(this->success);
+    xfer += oprot->writeFieldEnd();
+  } else if (this->__isset.e) {
+    xfer += oprot->writeFieldBegin("e", ::apache::thrift::protocol::T_STRUCT, 1);
+    xfer += this->e.write(oprot);
+    xfer += oprot->writeFieldEnd();
+  }
+  xfer += oprot->writeFieldStop();
+  xfer += oprot->writeStructEnd();
+  return xfer;
+}
+
+
+MegasearchService_GetTableRowCount_presult::~MegasearchService_GetTableRowCount_presult() throw() {
+}
+
+
+uint32_t MegasearchService_GetTableRowCount_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
+
+  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
+  uint32_t xfer = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+
+  xfer += iprot->readStructBegin(fname);
+
+  using ::apache::thrift::protocol::TProtocolException;
+
+
+  while (true)
+  {
+    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid)
+    {
+      case 0:
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += iprot->readI64((*(this->success)));
+          this->__isset.success = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 1:
+        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
+          xfer += this->e.read(iprot);
+          this->__isset.e = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      default:
+        xfer += iprot->skip(ftype);
+        break;
+    }
+    xfer += iprot->readFieldEnd();
+  }
+
+  xfer += iprot->readStructEnd();
+
+  return xfer;
+}
+
+
 MegasearchService_ShowTables_args::~MegasearchService_ShowTables_args() throw() {
 }
 
@@ -1633,14 +1510,14 @@ uint32_t MegasearchService_ShowTables_result::read(::apache::thrift::protocol::T
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->success.clear();
-            uint32_t _size149;
-            ::apache::thrift::protocol::TType _etype152;
-            xfer += iprot->readListBegin(_etype152, _size149);
-            this->success.resize(_size149);
-            uint32_t _i153;
-            for (_i153 = 0; _i153 < _size149; ++_i153)
+            uint32_t _size62;
+            ::apache::thrift::protocol::TType _etype65;
+            xfer += iprot->readListBegin(_etype65, _size62);
+            this->success.resize(_size62);
+            uint32_t _i66;
+            for (_i66 = 0; _i66 < _size62; ++_i66)
             {
-              xfer += iprot->readString(this->success[_i153]);
+              xfer += iprot->readString(this->success[_i66]);
             }
             xfer += iprot->readListEnd();
           }
@@ -1679,10 +1556,10 @@ uint32_t MegasearchService_ShowTables_result::write(::apache::thrift::protocol::
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_LIST, 0);
     {
       xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->success.size()));
-      std::vector<std::string> ::const_iterator _iter154;
-      for (_iter154 = this->success.begin(); _iter154 != this->success.end(); ++_iter154)
+      std::vector<std::string> ::const_iterator _iter67;
+      for (_iter67 = this->success.begin(); _iter67 != this->success.end(); ++_iter67)
       {
-        xfer += oprot->writeString((*_iter154));
+        xfer += oprot->writeString((*_iter67));
       }
       xfer += oprot->writeListEnd();
     }
@@ -1727,14 +1604,14 @@ uint32_t MegasearchService_ShowTables_presult::read(::apache::thrift::protocol::
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             (*(this->success)).clear();
-            uint32_t _size155;
-            ::apache::thrift::protocol::TType _etype158;
-            xfer += iprot->readListBegin(_etype158, _size155);
-            (*(this->success)).resize(_size155);
-            uint32_t _i159;
-            for (_i159 = 0; _i159 < _size155; ++_i159)
+            uint32_t _size68;
+            ::apache::thrift::protocol::TType _etype71;
+            xfer += iprot->readListBegin(_etype71, _size68);
+            (*(this->success)).resize(_size68);
+            uint32_t _i72;
+            for (_i72 = 0; _i72 < _size68; ++_i72)
             {
-              xfer += iprot->readString((*(this->success))[_i159]);
+              xfer += iprot->readString((*(this->success))[_i72]);
             }
             xfer += iprot->readListEnd();
           }
@@ -2082,118 +1959,6 @@ void MegasearchServiceClient::recv_DeleteTable()
   return;
 }
 
-void MegasearchServiceClient::CreateTablePartition(const CreateTablePartitionParam& param)
-{
-  send_CreateTablePartition(param);
-  recv_CreateTablePartition();
-}
-
-void MegasearchServiceClient::send_CreateTablePartition(const CreateTablePartitionParam& param)
-{
-  int32_t cseqid = 0;
-  oprot_->writeMessageBegin("CreateTablePartition", ::apache::thrift::protocol::T_CALL, cseqid);
-
-  MegasearchService_CreateTablePartition_pargs args;
-  args.param = &param;
-  args.write(oprot_);
-
-  oprot_->writeMessageEnd();
-  oprot_->getTransport()->writeEnd();
-  oprot_->getTransport()->flush();
-}
-
-void MegasearchServiceClient::recv_CreateTablePartition()
-{
-
-  int32_t rseqid = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TMessageType mtype;
-
-  iprot_->readMessageBegin(fname, mtype, rseqid);
-  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
-    ::apache::thrift::TApplicationException x;
-    x.read(iprot_);
-    iprot_->readMessageEnd();
-    iprot_->getTransport()->readEnd();
-    throw x;
-  }
-  if (mtype != ::apache::thrift::protocol::T_REPLY) {
-    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
-    iprot_->readMessageEnd();
-    iprot_->getTransport()->readEnd();
-  }
-  if (fname.compare("CreateTablePartition") != 0) {
-    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
-    iprot_->readMessageEnd();
-    iprot_->getTransport()->readEnd();
-  }
-  MegasearchService_CreateTablePartition_presult result;
-  result.read(iprot_);
-  iprot_->readMessageEnd();
-  iprot_->getTransport()->readEnd();
-
-  if (result.__isset.e) {
-    throw result.e;
-  }
-  return;
-}
-
-void MegasearchServiceClient::DeleteTablePartition(const DeleteTablePartitionParam& param)
-{
-  send_DeleteTablePartition(param);
-  recv_DeleteTablePartition();
-}
-
-void MegasearchServiceClient::send_DeleteTablePartition(const DeleteTablePartitionParam& param)
-{
-  int32_t cseqid = 0;
-  oprot_->writeMessageBegin("DeleteTablePartition", ::apache::thrift::protocol::T_CALL, cseqid);
-
-  MegasearchService_DeleteTablePartition_pargs args;
-  args.param = &param;
-  args.write(oprot_);
-
-  oprot_->writeMessageEnd();
-  oprot_->getTransport()->writeEnd();
-  oprot_->getTransport()->flush();
-}
-
-void MegasearchServiceClient::recv_DeleteTablePartition()
-{
-
-  int32_t rseqid = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TMessageType mtype;
-
-  iprot_->readMessageBegin(fname, mtype, rseqid);
-  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
-    ::apache::thrift::TApplicationException x;
-    x.read(iprot_);
-    iprot_->readMessageEnd();
-    iprot_->getTransport()->readEnd();
-    throw x;
-  }
-  if (mtype != ::apache::thrift::protocol::T_REPLY) {
-    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
-    iprot_->readMessageEnd();
-    iprot_->getTransport()->readEnd();
-  }
-  if (fname.compare("DeleteTablePartition") != 0) {
-    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
-    iprot_->readMessageEnd();
-    iprot_->getTransport()->readEnd();
-  }
-  MegasearchService_DeleteTablePartition_presult result;
-  result.read(iprot_);
-  iprot_->readMessageEnd();
-  iprot_->getTransport()->readEnd();
-
-  if (result.__isset.e) {
-    throw result.e;
-  }
-  return;
-}
-
 void MegasearchServiceClient::AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array)
 {
   send_AddVector(table_name, record_array);
@@ -2256,13 +2021,13 @@ void MegasearchServiceClient::recv_AddVector(std::vector<int64_t> & _return)
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "AddVector failed: unknown result");
 }
 
-void MegasearchServiceClient::SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk)
+void MegasearchServiceClient::SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
 {
-  send_SearchVector(table_name, query_record_array, topk);
+  send_SearchVector(table_name, query_record_array, query_range_array, topk);
   recv_SearchVector(_return);
 }
 
-void MegasearchServiceClient::send_SearchVector(const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk)
+void MegasearchServiceClient::send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("SearchVector", ::apache::thrift::protocol::T_CALL, cseqid);
@@ -2270,6 +2035,7 @@ void MegasearchServiceClient::send_SearchVector(const std::string& table_name, c
   MegasearchService_SearchVector_pargs args;
   args.table_name = &table_name;
   args.query_record_array = &query_record_array;
+  args.query_range_array = &query_range_array;
   args.topk = &topk;
   args.write(oprot_);
 
@@ -2378,6 +2144,67 @@ void MegasearchServiceClient::recv_DescribeTable(TableSchema& _return)
     throw result.e;
   }
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "DescribeTable failed: unknown result");
+}
+
+int64_t MegasearchServiceClient::GetTableRowCount(const std::string& table_name)
+{
+  send_GetTableRowCount(table_name);
+  return recv_GetTableRowCount();
+}
+
+void MegasearchServiceClient::send_GetTableRowCount(const std::string& table_name)
+{
+  int32_t cseqid = 0;
+  oprot_->writeMessageBegin("GetTableRowCount", ::apache::thrift::protocol::T_CALL, cseqid);
+
+  MegasearchService_GetTableRowCount_pargs args;
+  args.table_name = &table_name;
+  args.write(oprot_);
+
+  oprot_->writeMessageEnd();
+  oprot_->getTransport()->writeEnd();
+  oprot_->getTransport()->flush();
+}
+
+int64_t MegasearchServiceClient::recv_GetTableRowCount()
+{
+
+  int32_t rseqid = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TMessageType mtype;
+
+  iprot_->readMessageBegin(fname, mtype, rseqid);
+  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
+    ::apache::thrift::TApplicationException x;
+    x.read(iprot_);
+    iprot_->readMessageEnd();
+    iprot_->getTransport()->readEnd();
+    throw x;
+  }
+  if (mtype != ::apache::thrift::protocol::T_REPLY) {
+    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+    iprot_->readMessageEnd();
+    iprot_->getTransport()->readEnd();
+  }
+  if (fname.compare("GetTableRowCount") != 0) {
+    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+    iprot_->readMessageEnd();
+    iprot_->getTransport()->readEnd();
+  }
+  int64_t _return;
+  MegasearchService_GetTableRowCount_presult result;
+  result.success = &_return;
+  result.read(iprot_);
+  iprot_->readMessageEnd();
+  iprot_->getTransport()->readEnd();
+
+  if (result.__isset.success) {
+    return _return;
+  }
+  if (result.__isset.e) {
+    throw result.e;
+  }
+  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "GetTableRowCount failed: unknown result");
 }
 
 void MegasearchServiceClient::ShowTables(std::vector<std::string> & _return)
@@ -2632,118 +2459,6 @@ void MegasearchServiceProcessor::process_DeleteTable(int32_t seqid, ::apache::th
   }
 }
 
-void MegasearchServiceProcessor::process_CreateTablePartition(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
-{
-  void* ctx = NULL;
-  if (this->eventHandler_.get() != NULL) {
-    ctx = this->eventHandler_->getContext("MegasearchService.CreateTablePartition", callContext);
-  }
-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.CreateTablePartition");
-
-  if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preRead(ctx, "MegasearchService.CreateTablePartition");
-  }
-
-  MegasearchService_CreateTablePartition_args args;
-  args.read(iprot);
-  iprot->readMessageEnd();
-  uint32_t bytes = iprot->getTransport()->readEnd();
-
-  if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postRead(ctx, "MegasearchService.CreateTablePartition", bytes);
-  }
-
-  MegasearchService_CreateTablePartition_result result;
-  try {
-    iface_->CreateTablePartition(args.param);
-  } catch (Exception &e) {
-    result.e = e;
-    result.__isset.e = true;
-  } catch (const std::exception& e) {
-    if (this->eventHandler_.get() != NULL) {
-      this->eventHandler_->handlerError(ctx, "MegasearchService.CreateTablePartition");
-    }
-
-    ::apache::thrift::TApplicationException x(e.what());
-    oprot->writeMessageBegin("CreateTablePartition", ::apache::thrift::protocol::T_EXCEPTION, seqid);
-    x.write(oprot);
-    oprot->writeMessageEnd();
-    oprot->getTransport()->writeEnd();
-    oprot->getTransport()->flush();
-    return;
-  }
-
-  if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preWrite(ctx, "MegasearchService.CreateTablePartition");
-  }
-
-  oprot->writeMessageBegin("CreateTablePartition", ::apache::thrift::protocol::T_REPLY, seqid);
-  result.write(oprot);
-  oprot->writeMessageEnd();
-  bytes = oprot->getTransport()->writeEnd();
-  oprot->getTransport()->flush();
-
-  if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postWrite(ctx, "MegasearchService.CreateTablePartition", bytes);
-  }
-}
-
-void MegasearchServiceProcessor::process_DeleteTablePartition(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
-{
-  void* ctx = NULL;
-  if (this->eventHandler_.get() != NULL) {
-    ctx = this->eventHandler_->getContext("MegasearchService.DeleteTablePartition", callContext);
-  }
-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.DeleteTablePartition");
-
-  if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preRead(ctx, "MegasearchService.DeleteTablePartition");
-  }
-
-  MegasearchService_DeleteTablePartition_args args;
-  args.read(iprot);
-  iprot->readMessageEnd();
-  uint32_t bytes = iprot->getTransport()->readEnd();
-
-  if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postRead(ctx, "MegasearchService.DeleteTablePartition", bytes);
-  }
-
-  MegasearchService_DeleteTablePartition_result result;
-  try {
-    iface_->DeleteTablePartition(args.param);
-  } catch (Exception &e) {
-    result.e = e;
-    result.__isset.e = true;
-  } catch (const std::exception& e) {
-    if (this->eventHandler_.get() != NULL) {
-      this->eventHandler_->handlerError(ctx, "MegasearchService.DeleteTablePartition");
-    }
-
-    ::apache::thrift::TApplicationException x(e.what());
-    oprot->writeMessageBegin("DeleteTablePartition", ::apache::thrift::protocol::T_EXCEPTION, seqid);
-    x.write(oprot);
-    oprot->writeMessageEnd();
-    oprot->getTransport()->writeEnd();
-    oprot->getTransport()->flush();
-    return;
-  }
-
-  if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preWrite(ctx, "MegasearchService.DeleteTablePartition");
-  }
-
-  oprot->writeMessageBegin("DeleteTablePartition", ::apache::thrift::protocol::T_REPLY, seqid);
-  result.write(oprot);
-  oprot->writeMessageEnd();
-  bytes = oprot->getTransport()->writeEnd();
-  oprot->getTransport()->flush();
-
-  if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postWrite(ctx, "MegasearchService.DeleteTablePartition", bytes);
-  }
-}
-
 void MegasearchServiceProcessor::process_AddVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
 {
   void* ctx = NULL;
@@ -2824,7 +2539,7 @@ void MegasearchServiceProcessor::process_SearchVector(int32_t seqid, ::apache::t
 
   MegasearchService_SearchVector_result result;
   try {
-    iface_->SearchVector(result.success, args.table_name, args.query_record_array, args.topk);
+    iface_->SearchVector(result.success, args.table_name, args.query_record_array, args.query_range_array, args.topk);
     result.__isset.success = true;
   } catch (Exception &e) {
     result.e = e;
@@ -2912,6 +2627,63 @@ void MegasearchServiceProcessor::process_DescribeTable(int32_t seqid, ::apache::
 
   if (this->eventHandler_.get() != NULL) {
     this->eventHandler_->postWrite(ctx, "MegasearchService.DescribeTable", bytes);
+  }
+}
+
+void MegasearchServiceProcessor::process_GetTableRowCount(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+{
+  void* ctx = NULL;
+  if (this->eventHandler_.get() != NULL) {
+    ctx = this->eventHandler_->getContext("MegasearchService.GetTableRowCount", callContext);
+  }
+  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.GetTableRowCount");
+
+  if (this->eventHandler_.get() != NULL) {
+    this->eventHandler_->preRead(ctx, "MegasearchService.GetTableRowCount");
+  }
+
+  MegasearchService_GetTableRowCount_args args;
+  args.read(iprot);
+  iprot->readMessageEnd();
+  uint32_t bytes = iprot->getTransport()->readEnd();
+
+  if (this->eventHandler_.get() != NULL) {
+    this->eventHandler_->postRead(ctx, "MegasearchService.GetTableRowCount", bytes);
+  }
+
+  MegasearchService_GetTableRowCount_result result;
+  try {
+    result.success = iface_->GetTableRowCount(args.table_name);
+    result.__isset.success = true;
+  } catch (Exception &e) {
+    result.e = e;
+    result.__isset.e = true;
+  } catch (const std::exception& e) {
+    if (this->eventHandler_.get() != NULL) {
+      this->eventHandler_->handlerError(ctx, "MegasearchService.GetTableRowCount");
+    }
+
+    ::apache::thrift::TApplicationException x(e.what());
+    oprot->writeMessageBegin("GetTableRowCount", ::apache::thrift::protocol::T_EXCEPTION, seqid);
+    x.write(oprot);
+    oprot->writeMessageEnd();
+    oprot->getTransport()->writeEnd();
+    oprot->getTransport()->flush();
+    return;
+  }
+
+  if (this->eventHandler_.get() != NULL) {
+    this->eventHandler_->preWrite(ctx, "MegasearchService.GetTableRowCount");
+  }
+
+  oprot->writeMessageBegin("GetTableRowCount", ::apache::thrift::protocol::T_REPLY, seqid);
+  result.write(oprot);
+  oprot->writeMessageEnd();
+  bytes = oprot->getTransport()->writeEnd();
+  oprot->getTransport()->flush();
+
+  if (this->eventHandler_.get() != NULL) {
+    this->eventHandler_->postWrite(ctx, "MegasearchService.GetTableRowCount", bytes);
   }
 }
 
@@ -3200,170 +2972,6 @@ void MegasearchServiceConcurrentClient::recv_DeleteTable(const int32_t seqid)
   } // end while(true)
 }
 
-void MegasearchServiceConcurrentClient::CreateTablePartition(const CreateTablePartitionParam& param)
-{
-  int32_t seqid = send_CreateTablePartition(param);
-  recv_CreateTablePartition(seqid);
-}
-
-int32_t MegasearchServiceConcurrentClient::send_CreateTablePartition(const CreateTablePartitionParam& param)
-{
-  int32_t cseqid = this->sync_.generateSeqId();
-  ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
-  oprot_->writeMessageBegin("CreateTablePartition", ::apache::thrift::protocol::T_CALL, cseqid);
-
-  MegasearchService_CreateTablePartition_pargs args;
-  args.param = &param;
-  args.write(oprot_);
-
-  oprot_->writeMessageEnd();
-  oprot_->getTransport()->writeEnd();
-  oprot_->getTransport()->flush();
-
-  sentry.commit();
-  return cseqid;
-}
-
-void MegasearchServiceConcurrentClient::recv_CreateTablePartition(const int32_t seqid)
-{
-
-  int32_t rseqid = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TMessageType mtype;
-
-  // the read mutex gets dropped and reacquired as part of waitForWork()
-  // The destructor of this sentry wakes up other clients
-  ::apache::thrift::async::TConcurrentRecvSentry sentry(&this->sync_, seqid);
-
-  while(true) {
-    if(!this->sync_.getPending(fname, mtype, rseqid)) {
-      iprot_->readMessageBegin(fname, mtype, rseqid);
-    }
-    if(seqid == rseqid) {
-      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
-        ::apache::thrift::TApplicationException x;
-        x.read(iprot_);
-        iprot_->readMessageEnd();
-        iprot_->getTransport()->readEnd();
-        sentry.commit();
-        throw x;
-      }
-      if (mtype != ::apache::thrift::protocol::T_REPLY) {
-        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
-        iprot_->readMessageEnd();
-        iprot_->getTransport()->readEnd();
-      }
-      if (fname.compare("CreateTablePartition") != 0) {
-        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
-        iprot_->readMessageEnd();
-        iprot_->getTransport()->readEnd();
-
-        // in a bad state, don't commit
-        using ::apache::thrift::protocol::TProtocolException;
-        throw TProtocolException(TProtocolException::INVALID_DATA);
-      }
-      MegasearchService_CreateTablePartition_presult result;
-      result.read(iprot_);
-      iprot_->readMessageEnd();
-      iprot_->getTransport()->readEnd();
-
-      if (result.__isset.e) {
-        sentry.commit();
-        throw result.e;
-      }
-      sentry.commit();
-      return;
-    }
-    // seqid != rseqid
-    this->sync_.updatePending(fname, mtype, rseqid);
-
-    // this will temporarily unlock the readMutex, and let other clients get work done
-    this->sync_.waitForWork(seqid);
-  } // end while(true)
-}
-
-void MegasearchServiceConcurrentClient::DeleteTablePartition(const DeleteTablePartitionParam& param)
-{
-  int32_t seqid = send_DeleteTablePartition(param);
-  recv_DeleteTablePartition(seqid);
-}
-
-int32_t MegasearchServiceConcurrentClient::send_DeleteTablePartition(const DeleteTablePartitionParam& param)
-{
-  int32_t cseqid = this->sync_.generateSeqId();
-  ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
-  oprot_->writeMessageBegin("DeleteTablePartition", ::apache::thrift::protocol::T_CALL, cseqid);
-
-  MegasearchService_DeleteTablePartition_pargs args;
-  args.param = &param;
-  args.write(oprot_);
-
-  oprot_->writeMessageEnd();
-  oprot_->getTransport()->writeEnd();
-  oprot_->getTransport()->flush();
-
-  sentry.commit();
-  return cseqid;
-}
-
-void MegasearchServiceConcurrentClient::recv_DeleteTablePartition(const int32_t seqid)
-{
-
-  int32_t rseqid = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TMessageType mtype;
-
-  // the read mutex gets dropped and reacquired as part of waitForWork()
-  // The destructor of this sentry wakes up other clients
-  ::apache::thrift::async::TConcurrentRecvSentry sentry(&this->sync_, seqid);
-
-  while(true) {
-    if(!this->sync_.getPending(fname, mtype, rseqid)) {
-      iprot_->readMessageBegin(fname, mtype, rseqid);
-    }
-    if(seqid == rseqid) {
-      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
-        ::apache::thrift::TApplicationException x;
-        x.read(iprot_);
-        iprot_->readMessageEnd();
-        iprot_->getTransport()->readEnd();
-        sentry.commit();
-        throw x;
-      }
-      if (mtype != ::apache::thrift::protocol::T_REPLY) {
-        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
-        iprot_->readMessageEnd();
-        iprot_->getTransport()->readEnd();
-      }
-      if (fname.compare("DeleteTablePartition") != 0) {
-        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
-        iprot_->readMessageEnd();
-        iprot_->getTransport()->readEnd();
-
-        // in a bad state, don't commit
-        using ::apache::thrift::protocol::TProtocolException;
-        throw TProtocolException(TProtocolException::INVALID_DATA);
-      }
-      MegasearchService_DeleteTablePartition_presult result;
-      result.read(iprot_);
-      iprot_->readMessageEnd();
-      iprot_->getTransport()->readEnd();
-
-      if (result.__isset.e) {
-        sentry.commit();
-        throw result.e;
-      }
-      sentry.commit();
-      return;
-    }
-    // seqid != rseqid
-    this->sync_.updatePending(fname, mtype, rseqid);
-
-    // this will temporarily unlock the readMutex, and let other clients get work done
-    this->sync_.waitForWork(seqid);
-  } // end while(true)
-}
-
 void MegasearchServiceConcurrentClient::AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array)
 {
   int32_t seqid = send_AddVector(table_name, record_array);
@@ -3453,13 +3061,13 @@ void MegasearchServiceConcurrentClient::recv_AddVector(std::vector<int64_t> & _r
   } // end while(true)
 }
 
-void MegasearchServiceConcurrentClient::SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk)
+void MegasearchServiceConcurrentClient::SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
 {
-  int32_t seqid = send_SearchVector(table_name, query_record_array, topk);
+  int32_t seqid = send_SearchVector(table_name, query_record_array, query_range_array, topk);
   recv_SearchVector(_return, seqid);
 }
 
-int32_t MegasearchServiceConcurrentClient::send_SearchVector(const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk)
+int32_t MegasearchServiceConcurrentClient::send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
@@ -3468,6 +3076,7 @@ int32_t MegasearchServiceConcurrentClient::send_SearchVector(const std::string& 
   MegasearchService_SearchVector_pargs args;
   args.table_name = &table_name;
   args.query_record_array = &query_record_array;
+  args.query_range_array = &query_range_array;
   args.topk = &topk;
   args.write(oprot_);
 
@@ -3622,6 +3231,94 @@ void MegasearchServiceConcurrentClient::recv_DescribeTable(TableSchema& _return,
       }
       // in a bad state, don't commit
       throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "DescribeTable failed: unknown result");
+    }
+    // seqid != rseqid
+    this->sync_.updatePending(fname, mtype, rseqid);
+
+    // this will temporarily unlock the readMutex, and let other clients get work done
+    this->sync_.waitForWork(seqid);
+  } // end while(true)
+}
+
+int64_t MegasearchServiceConcurrentClient::GetTableRowCount(const std::string& table_name)
+{
+  int32_t seqid = send_GetTableRowCount(table_name);
+  return recv_GetTableRowCount(seqid);
+}
+
+int32_t MegasearchServiceConcurrentClient::send_GetTableRowCount(const std::string& table_name)
+{
+  int32_t cseqid = this->sync_.generateSeqId();
+  ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
+  oprot_->writeMessageBegin("GetTableRowCount", ::apache::thrift::protocol::T_CALL, cseqid);
+
+  MegasearchService_GetTableRowCount_pargs args;
+  args.table_name = &table_name;
+  args.write(oprot_);
+
+  oprot_->writeMessageEnd();
+  oprot_->getTransport()->writeEnd();
+  oprot_->getTransport()->flush();
+
+  sentry.commit();
+  return cseqid;
+}
+
+int64_t MegasearchServiceConcurrentClient::recv_GetTableRowCount(const int32_t seqid)
+{
+
+  int32_t rseqid = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TMessageType mtype;
+
+  // the read mutex gets dropped and reacquired as part of waitForWork()
+  // The destructor of this sentry wakes up other clients
+  ::apache::thrift::async::TConcurrentRecvSentry sentry(&this->sync_, seqid);
+
+  while(true) {
+    if(!this->sync_.getPending(fname, mtype, rseqid)) {
+      iprot_->readMessageBegin(fname, mtype, rseqid);
+    }
+    if(seqid == rseqid) {
+      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
+        ::apache::thrift::TApplicationException x;
+        x.read(iprot_);
+        iprot_->readMessageEnd();
+        iprot_->getTransport()->readEnd();
+        sentry.commit();
+        throw x;
+      }
+      if (mtype != ::apache::thrift::protocol::T_REPLY) {
+        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+        iprot_->readMessageEnd();
+        iprot_->getTransport()->readEnd();
+      }
+      if (fname.compare("GetTableRowCount") != 0) {
+        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+        iprot_->readMessageEnd();
+        iprot_->getTransport()->readEnd();
+
+        // in a bad state, don't commit
+        using ::apache::thrift::protocol::TProtocolException;
+        throw TProtocolException(TProtocolException::INVALID_DATA);
+      }
+      int64_t _return;
+      MegasearchService_GetTableRowCount_presult result;
+      result.success = &_return;
+      result.read(iprot_);
+      iprot_->readMessageEnd();
+      iprot_->getTransport()->readEnd();
+
+      if (result.__isset.success) {
+        sentry.commit();
+        return _return;
+      }
+      if (result.__isset.e) {
+        sentry.commit();
+        throw result.e;
+      }
+      // in a bad state, don't commit
+      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "GetTableRowCount failed: unknown result");
     }
     // seqid != rseqid
     this->sync_.updatePending(fname, mtype, rseqid);

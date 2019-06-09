@@ -26,13 +26,13 @@ SearchContext::SearchContext(uint64_t topk, uint64_t nq, const float* vectors)
 bool
 SearchContext::AddIndexFile(TableFileSchemaPtr& index_file) {
     std::unique_lock <std::mutex> lock(mtx_);
-    if(index_file == nullptr || map_index_files_.find(index_file->id) != map_index_files_.end()) {
+    if(index_file == nullptr || map_index_files_.find(index_file->id_) != map_index_files_.end()) {
         return false;
     }
 
-    SERVER_LOG_INFO << "SearchContext " << identity_ << " add index file: " << index_file->id;
+    SERVER_LOG_INFO << "SearchContext " << identity_ << " add index file: " << index_file->id_;
 
-    map_index_files_[index_file->id] = index_file;
+    map_index_files_[index_file->id_] = index_file;
     return true;
 }
 
