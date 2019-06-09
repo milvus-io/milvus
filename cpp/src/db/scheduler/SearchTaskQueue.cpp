@@ -28,6 +28,23 @@ void ClusterResult(const std::vector<long> &output_ids,
     }
 }
 
+void MergeResult(SearchContext::Id2ScoreMap &score_src,
+        SearchContext::Id2ScoreMap &score_target,
+        uint64_t topk) {
+    for (auto& pair_src : score_src) {
+        for (auto iter = score_target.begin(); iter != score_target.end(); ++iter) {
+            if(pair_src.second > iter->second) {
+                score_target.insert(iter, pair_src);
+            }
+        }
+    }
+
+    //remove unused items
+    while (score_target.size() > topk) {
+        score_target.pop_back();
+    }
+}
+
 void TopkResult(SearchContext::ResultSet &result_src,
                 uint64_t topk,
                 SearchContext::ResultSet &result_target) {
@@ -44,20 +61,7 @@ void TopkResult(SearchContext::ResultSet &result_src,
     for (size_t i = 0; i < result_src.size(); i++) {
         SearchContext::Id2ScoreMap &score_src = result_src[i];
         SearchContext::Id2ScoreMap &score_target = result_target[i];
-        for (auto& pair_src : score_src) {
-            for (auto iter = score_target.begin(); iter != score_target.end(); ++iter) {
-                if(pair_src.second > iter->second) {
-                    score_target.insert(iter, pair_src);
-                }
-            }
-        }
-
-        //remove unused items
-        while (score_target.size() > topk) {
-            auto it_end = score_target.end();
-            it_end--;
-            score_target.erase(it_end);
-        }
+        MergeResult(score_src, score_target, topk);
     }
 }
 
@@ -141,7 +145,7 @@ bool SearchTask::DoSearch() {
         //step 5: calculate score between 0 ~ 100
         CalcScore(context->nq(), context->vectors(), index_engine_->Dimension(), context->GetResult(), result_set);
         context->GetResult().swap(result_set);
-        rc.Record("reduce topk");
+        rc.Record("calculate score");
 
         //step 6: notify to send result to client
         context->IndexSearchDone(index_id_);
