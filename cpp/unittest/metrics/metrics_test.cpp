@@ -38,12 +38,12 @@ TEST_F(DBTest, Metric_Tes) {
     static const int group_dim = 256;
 
     engine::meta::TableSchema group_info;
-    group_info.dimension = group_dim;
-    group_info.table_id = group_name;
+    group_info.dimension_ = group_dim;
+    group_info.table_id_ = group_name;
     engine::Status stat = db_->CreateTable(group_info);
 
     engine::meta::TableSchema group_info_get;
-    group_info_get.table_id = group_name;
+    group_info_get.table_id_ = group_name;
     stat = db_->DescribeTable(group_info_get);
 
 

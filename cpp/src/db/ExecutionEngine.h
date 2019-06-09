@@ -15,6 +15,7 @@ namespace vecwise {
 namespace engine {
 
 enum class EngineType {
+    INVALID = 0,
     FAISS_IDMAP = 1,
     FAISS_IVFFLAT,
 };

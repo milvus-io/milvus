@@ -31,18 +31,6 @@ MegasearchServiceHandler::DeleteTable(const std::string &table_name) {
 }
 
 void
-MegasearchServiceHandler::CreateTablePartition(const thrift::CreateTablePartitionParam &param) {
-    BaseTaskPtr task_ptr = CreateTablePartitionTask::Create(param);
-    MegasearchScheduler::ExecTask(task_ptr);
-}
-
-void
-MegasearchServiceHandler::DeleteTablePartition(const thrift::DeleteTablePartitionParam &param) {
-    BaseTaskPtr task_ptr = DeleteTablePartitionTask::Create(param);
-    MegasearchScheduler::ExecTask(task_ptr);
-}
-
-void
 MegasearchServiceHandler::AddVector(std::vector<int64_t> &_return,
         const std::string &table_name,
         const std::vector<thrift::RowRecord> &record_array) {
@@ -51,11 +39,12 @@ MegasearchServiceHandler::AddVector(std::vector<int64_t> &_return,
 }
 
 void
-MegasearchServiceHandler::SearchVector(std::vector<thrift::TopKQueryResult> &_return,
-        const std::string &table_name,
-        const std::vector<thrift::QueryRecord> &query_record_array,
-        const int64_t topk) {
-    BaseTaskPtr task_ptr = SearchVectorTask::Create(table_name, query_record_array, topk, _return);
+MegasearchServiceHandler::SearchVector(std::vector<megasearch::thrift::TopKQueryResult> & _return,
+                                       const std::string& table_name,
+                                       const std::vector<megasearch::thrift::RowRecord> & query_record_array,
+                                       const std::vector<megasearch::thrift::Range> & query_range_array,
+                                       const int64_t topk) {
+    BaseTaskPtr task_ptr = SearchVectorTask::Create(table_name, query_record_array, query_range_array, topk, _return);
     MegasearchScheduler::ExecTask(task_ptr);
 }
 
@@ -63,6 +52,18 @@ void
 MegasearchServiceHandler::DescribeTable(thrift::TableSchema &_return, const std::string &table_name) {
     BaseTaskPtr task_ptr = DescribeTableTask::Create(table_name, _return);
     MegasearchScheduler::ExecTask(task_ptr);
+}
+
+int64_t
+MegasearchServiceHandler::GetTableRowCount(const std::string& table_name) {
+    int64_t row_count = 0;
+    {
+        BaseTaskPtr task_ptr = GetTableRowCountTask::Create(table_name, row_count);
+        MegasearchScheduler::ExecTask(task_ptr);
+        task_ptr->WaitToFinish();
+    }
+
+    return row_count;
 }
 
 void

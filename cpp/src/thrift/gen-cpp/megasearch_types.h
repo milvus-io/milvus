@@ -26,10 +26,9 @@ struct ErrorCode {
     CONNECT_FAILED = 1,
     PERMISSION_DENIED = 2,
     TABLE_NOT_EXISTS = 3,
-    PARTITION_NOT_EXIST = 4,
-    ILLEGAL_ARGUMENT = 5,
-    ILLEGAL_RANGE = 6,
-    ILLEGAL_DIMENSION = 7
+    ILLEGAL_ARGUMENT = 4,
+    ILLEGAL_RANGE = 5,
+    ILLEGAL_DIMENSION = 6
   };
 };
 
@@ -39,21 +38,11 @@ std::ostream& operator<<(std::ostream& out, const ErrorCode::type& val);
 
 class Exception;
 
-class Column;
-
-class VectorColumn;
-
 class TableSchema;
 
 class Range;
 
-class CreateTablePartitionParam;
-
-class DeleteTablePartitionParam;
-
 class RowRecord;
-
-class QueryRecord;
 
 class QueryResult;
 
@@ -109,108 +98,11 @@ void swap(Exception &a, Exception &b);
 
 std::ostream& operator<<(std::ostream& out, const Exception& obj);
 
-
-class Column : public virtual ::apache::thrift::TBase {
- public:
-
-  Column(const Column&);
-  Column& operator=(const Column&);
-  Column() : type(0), name() {
-  }
-
-  virtual ~Column() throw();
-  int32_t type;
-  std::string name;
-
-  void __set_type(const int32_t val);
-
-  void __set_name(const std::string& val);
-
-  bool operator == (const Column & rhs) const
-  {
-    if (!(type == rhs.type))
-      return false;
-    if (!(name == rhs.name))
-      return false;
-    return true;
-  }
-  bool operator != (const Column &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const Column & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-  virtual void printTo(std::ostream& out) const;
-};
-
-void swap(Column &a, Column &b);
-
-std::ostream& operator<<(std::ostream& out, const Column& obj);
-
-typedef struct _VectorColumn__isset {
-  _VectorColumn__isset() : store_raw_vector(true) {}
-  bool store_raw_vector :1;
-} _VectorColumn__isset;
-
-class VectorColumn : public virtual ::apache::thrift::TBase {
- public:
-
-  VectorColumn(const VectorColumn&);
-  VectorColumn& operator=(const VectorColumn&);
-  VectorColumn() : dimension(0), index_type(), store_raw_vector(false) {
-  }
-
-  virtual ~VectorColumn() throw();
-  Column base;
-  int64_t dimension;
-  std::string index_type;
-  bool store_raw_vector;
-
-  _VectorColumn__isset __isset;
-
-  void __set_base(const Column& val);
-
-  void __set_dimension(const int64_t val);
-
-  void __set_index_type(const std::string& val);
-
-  void __set_store_raw_vector(const bool val);
-
-  bool operator == (const VectorColumn & rhs) const
-  {
-    if (!(base == rhs.base))
-      return false;
-    if (!(dimension == rhs.dimension))
-      return false;
-    if (!(index_type == rhs.index_type))
-      return false;
-    if (!(store_raw_vector == rhs.store_raw_vector))
-      return false;
-    return true;
-  }
-  bool operator != (const VectorColumn &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const VectorColumn & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-  virtual void printTo(std::ostream& out) const;
-};
-
-void swap(VectorColumn &a, VectorColumn &b);
-
-std::ostream& operator<<(std::ostream& out, const VectorColumn& obj);
-
 typedef struct _TableSchema__isset {
-  _TableSchema__isset() : attribute_column_array(false), partition_column_name_array(false) {}
-  bool attribute_column_array :1;
-  bool partition_column_name_array :1;
+  _TableSchema__isset() : index_type(true), dimension(true), store_raw_vector(true) {}
+  bool index_type :1;
+  bool dimension :1;
+  bool store_raw_vector :1;
 } _TableSchema__isset;
 
 class TableSchema : public virtual ::apache::thrift::TBase {
@@ -218,38 +110,34 @@ class TableSchema : public virtual ::apache::thrift::TBase {
 
   TableSchema(const TableSchema&);
   TableSchema& operator=(const TableSchema&);
-  TableSchema() : table_name() {
+  TableSchema() : table_name(), index_type(0), dimension(0LL), store_raw_vector(false) {
   }
 
   virtual ~TableSchema() throw();
   std::string table_name;
-  std::vector<VectorColumn>  vector_column_array;
-  std::vector<Column>  attribute_column_array;
-  std::vector<std::string>  partition_column_name_array;
+  int32_t index_type;
+  int64_t dimension;
+  bool store_raw_vector;
 
   _TableSchema__isset __isset;
 
   void __set_table_name(const std::string& val);
 
-  void __set_vector_column_array(const std::vector<VectorColumn> & val);
+  void __set_index_type(const int32_t val);
 
-  void __set_attribute_column_array(const std::vector<Column> & val);
+  void __set_dimension(const int64_t val);
 
-  void __set_partition_column_name_array(const std::vector<std::string> & val);
+  void __set_store_raw_vector(const bool val);
 
   bool operator == (const TableSchema & rhs) const
   {
     if (!(table_name == rhs.table_name))
       return false;
-    if (!(vector_column_array == rhs.vector_column_array))
+    if (!(index_type == rhs.index_type))
       return false;
-    if (__isset.attribute_column_array != rhs.__isset.attribute_column_array)
+    if (!(dimension == rhs.dimension))
       return false;
-    else if (__isset.attribute_column_array && !(attribute_column_array == rhs.attribute_column_array))
-      return false;
-    if (__isset.partition_column_name_array != rhs.__isset.partition_column_name_array)
-      return false;
-    else if (__isset.partition_column_name_array && !(partition_column_name_array == rhs.partition_column_name_array))
+    if (!(store_raw_vector == rhs.store_raw_vector))
       return false;
     return true;
   }
@@ -269,6 +157,11 @@ void swap(TableSchema &a, TableSchema &b);
 
 std::ostream& operator<<(std::ostream& out, const TableSchema& obj);
 
+typedef struct _Range__isset {
+  _Range__isset() : start_value(false), end_value(false) {}
+  bool start_value :1;
+  bool end_value :1;
+} _Range__isset;
 
 class Range : public virtual ::apache::thrift::TBase {
  public:
@@ -281,6 +174,8 @@ class Range : public virtual ::apache::thrift::TBase {
   virtual ~Range() throw();
   std::string start_value;
   std::string end_value;
+
+  _Range__isset __isset;
 
   void __set_start_value(const std::string& val);
 
@@ -311,120 +206,22 @@ void swap(Range &a, Range &b);
 std::ostream& operator<<(std::ostream& out, const Range& obj);
 
 
-class CreateTablePartitionParam : public virtual ::apache::thrift::TBase {
- public:
-
-  CreateTablePartitionParam(const CreateTablePartitionParam&);
-  CreateTablePartitionParam& operator=(const CreateTablePartitionParam&);
-  CreateTablePartitionParam() : table_name(), partition_name() {
-  }
-
-  virtual ~CreateTablePartitionParam() throw();
-  std::string table_name;
-  std::string partition_name;
-  std::map<std::string, Range>  range_map;
-
-  void __set_table_name(const std::string& val);
-
-  void __set_partition_name(const std::string& val);
-
-  void __set_range_map(const std::map<std::string, Range> & val);
-
-  bool operator == (const CreateTablePartitionParam & rhs) const
-  {
-    if (!(table_name == rhs.table_name))
-      return false;
-    if (!(partition_name == rhs.partition_name))
-      return false;
-    if (!(range_map == rhs.range_map))
-      return false;
-    return true;
-  }
-  bool operator != (const CreateTablePartitionParam &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const CreateTablePartitionParam & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-  virtual void printTo(std::ostream& out) const;
-};
-
-void swap(CreateTablePartitionParam &a, CreateTablePartitionParam &b);
-
-std::ostream& operator<<(std::ostream& out, const CreateTablePartitionParam& obj);
-
-
-class DeleteTablePartitionParam : public virtual ::apache::thrift::TBase {
- public:
-
-  DeleteTablePartitionParam(const DeleteTablePartitionParam&);
-  DeleteTablePartitionParam& operator=(const DeleteTablePartitionParam&);
-  DeleteTablePartitionParam() : table_name() {
-  }
-
-  virtual ~DeleteTablePartitionParam() throw();
-  std::string table_name;
-  std::vector<std::string>  partition_name_array;
-
-  void __set_table_name(const std::string& val);
-
-  void __set_partition_name_array(const std::vector<std::string> & val);
-
-  bool operator == (const DeleteTablePartitionParam & rhs) const
-  {
-    if (!(table_name == rhs.table_name))
-      return false;
-    if (!(partition_name_array == rhs.partition_name_array))
-      return false;
-    return true;
-  }
-  bool operator != (const DeleteTablePartitionParam &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const DeleteTablePartitionParam & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-  virtual void printTo(std::ostream& out) const;
-};
-
-void swap(DeleteTablePartitionParam &a, DeleteTablePartitionParam &b);
-
-std::ostream& operator<<(std::ostream& out, const DeleteTablePartitionParam& obj);
-
-typedef struct _RowRecord__isset {
-  _RowRecord__isset() : attribute_map(false) {}
-  bool attribute_map :1;
-} _RowRecord__isset;
-
 class RowRecord : public virtual ::apache::thrift::TBase {
  public:
 
   RowRecord(const RowRecord&);
   RowRecord& operator=(const RowRecord&);
-  RowRecord() {
+  RowRecord() : vector_data() {
   }
 
   virtual ~RowRecord() throw();
-  std::map<std::string, std::string>  vector_map;
-  std::map<std::string, std::string>  attribute_map;
+  std::string vector_data;
 
-  _RowRecord__isset __isset;
-
-  void __set_vector_map(const std::map<std::string, std::string> & val);
-
-  void __set_attribute_map(const std::map<std::string, std::string> & val);
+  void __set_vector_data(const std::string& val);
 
   bool operator == (const RowRecord & rhs) const
   {
-    if (!(vector_map == rhs.vector_map))
-      return false;
-    if (!(attribute_map == rhs.attribute_map))
+    if (!(vector_data == rhs.vector_data))
       return false;
     return true;
   }
@@ -444,68 +241,10 @@ void swap(RowRecord &a, RowRecord &b);
 
 std::ostream& operator<<(std::ostream& out, const RowRecord& obj);
 
-typedef struct _QueryRecord__isset {
-  _QueryRecord__isset() : selected_column_array(false), partition_filter_column_map(false) {}
-  bool selected_column_array :1;
-  bool partition_filter_column_map :1;
-} _QueryRecord__isset;
-
-class QueryRecord : public virtual ::apache::thrift::TBase {
- public:
-
-  QueryRecord(const QueryRecord&);
-  QueryRecord& operator=(const QueryRecord&);
-  QueryRecord() {
-  }
-
-  virtual ~QueryRecord() throw();
-  std::map<std::string, std::string>  vector_map;
-  std::vector<std::string>  selected_column_array;
-  std::map<std::string, std::vector<Range> >  partition_filter_column_map;
-
-  _QueryRecord__isset __isset;
-
-  void __set_vector_map(const std::map<std::string, std::string> & val);
-
-  void __set_selected_column_array(const std::vector<std::string> & val);
-
-  void __set_partition_filter_column_map(const std::map<std::string, std::vector<Range> > & val);
-
-  bool operator == (const QueryRecord & rhs) const
-  {
-    if (!(vector_map == rhs.vector_map))
-      return false;
-    if (__isset.selected_column_array != rhs.__isset.selected_column_array)
-      return false;
-    else if (__isset.selected_column_array && !(selected_column_array == rhs.selected_column_array))
-      return false;
-    if (__isset.partition_filter_column_map != rhs.__isset.partition_filter_column_map)
-      return false;
-    else if (__isset.partition_filter_column_map && !(partition_filter_column_map == rhs.partition_filter_column_map))
-      return false;
-    return true;
-  }
-  bool operator != (const QueryRecord &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const QueryRecord & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-  virtual void printTo(std::ostream& out) const;
-};
-
-void swap(QueryRecord &a, QueryRecord &b);
-
-std::ostream& operator<<(std::ostream& out, const QueryRecord& obj);
-
 typedef struct _QueryResult__isset {
-  _QueryResult__isset() : id(false), score(false), column_map(false) {}
+  _QueryResult__isset() : id(false), score(false) {}
   bool id :1;
   bool score :1;
-  bool column_map :1;
 } _QueryResult__isset;
 
 class QueryResult : public virtual ::apache::thrift::TBase {
@@ -519,7 +258,6 @@ class QueryResult : public virtual ::apache::thrift::TBase {
   virtual ~QueryResult() throw();
   int64_t id;
   double score;
-  std::map<std::string, std::string>  column_map;
 
   _QueryResult__isset __isset;
 
@@ -527,15 +265,11 @@ class QueryResult : public virtual ::apache::thrift::TBase {
 
   void __set_score(const double val);
 
-  void __set_column_map(const std::map<std::string, std::string> & val);
-
   bool operator == (const QueryResult & rhs) const
   {
     if (!(id == rhs.id))
       return false;
     if (!(score == rhs.score))
-      return false;
-    if (!(column_map == rhs.column_map))
       return false;
     return true;
   }
