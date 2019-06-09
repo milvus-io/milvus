@@ -24,7 +24,7 @@ MemVectors::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
     options_(options),
     schema_(schema),
     pIdGenerator_(new SimpleIDGenerator()),
-    pEE_(EngineFactory::Build(schema_.dimension, schema_.location, (EngineType)schema_.engine_type_)) {
+    pEE_(EngineFactory::Build(schema_.dimension_, schema_.location_, (EngineType)schema_.engine_type_)) {
 }
 
 void MemVectors::Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
@@ -41,23 +41,23 @@ size_t MemVectors::ApproximateSize() const {
 }
 
 Status MemVectors::Serialize(std::string& table_id) {
-    table_id = schema_.table_id;
+    table_id = schema_.table_id_;
     auto size = ApproximateSize();
     auto start_time = METRICS_NOW_TIME;
     pEE_->Serialize();
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    schema_.size = size;
+    schema_.size_ = size;
 
     server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet(size/total_time);
 
-    schema_.file_type = (size >= options_.index_trigger_size) ?
+    schema_.file_type_ = (size >= options_.index_trigger_size) ?
         meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
 
     auto status = pMeta_->UpdateTableFile(schema_);
 
-    LOG(DEBUG) << "New " << ((schema_.file_type == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-        << " file " << schema_.file_id << " of size " << pEE_->Size() / meta::M << " M";
+    LOG(DEBUG) << "New " << ((schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
+        << " file " << schema_.file_id_ << " of size " << pEE_->Size() / meta::M << " M";
 
     pEE_->Cache();
 
@@ -82,7 +82,7 @@ MemManager::MemVectorsPtr MemManager::GetMemByTable(
     }
 
     meta::TableFileSchema table_file;
-    table_file.table_id = table_id;
+    table_file.table_id_ = table_id;
     auto status = pMeta_->CreateTableFile(table_file);
     if (!status.ok()) {
         return nullptr;

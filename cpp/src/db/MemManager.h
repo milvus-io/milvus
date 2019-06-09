@@ -42,7 +42,7 @@ public:
 
     ~MemVectors();
 
-    const std::string& Location() const { return schema_.location; }
+    const std::string& Location() const { return schema_.location_; }
 
 private:
     MemVectors() = delete;

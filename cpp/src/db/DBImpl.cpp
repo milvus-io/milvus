@@ -50,7 +50,7 @@ void CollectQueryMetrics(double total_time, size_t nq) {
     server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq) / total_time);
 }
 
-void CollectFileMetrics(meta::TableFileSchema::FILE_TYPE file_type, size_t file_size, double total_time) {
+void CollectFileMetrics(int file_type, size_t file_size, double total_time) {
     switch(file_type) {
         case meta::TableFileSchema::RAW:
         case meta::TableFileSchema::TO_INDEX: {
@@ -143,16 +143,16 @@ Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
     meta::TableFilesSchema raw_files;
     for (auto &day_files : files) {
         for (auto &file : day_files.second) {
-            file.file_type == meta::TableFileSchema::INDEX ?
+            file.file_type_ == meta::TableFileSchema::INDEX ?
             index_files.push_back(file) : raw_files.push_back(file);
         }
     }
 
     int dim = 0;
     if (!index_files.empty()) {
-        dim = index_files[0].dimension;
+        dim = index_files[0].dimension_;
     } else if (!raw_files.empty()) {
-        dim = raw_files[0].dimension;
+        dim = raw_files[0].dimension_;
     } else {
         LOG(DEBUG) << "no files to search";
         return Status::OK();
@@ -185,12 +185,12 @@ Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
         auto search_in_index = [&](meta::TableFilesSchema& file_vec) -> void {
             for (auto &file : file_vec) {
 
-                ExecutionEnginePtr index = EngineFactory::Build(file.dimension, file.location, (EngineType)file.engine_type_);
+                ExecutionEnginePtr index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
                 index->Load();
                 auto file_size = index->PhysicalSize();
                 search_set_size += file_size;
 
-                LOG(DEBUG) << "Search file_type " << file.file_type << " Of Size: "
+                LOG(DEBUG) << "Search file_type " << file.file_type_ << " Of Size: "
                     << file_size/(1024*1024) << " M";
 
                 int inner_k = index->Count() < k ? index->Count() : k;
@@ -198,7 +198,7 @@ Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
                 index->Search(nq, vectors, inner_k, output_distence, output_ids);
                 auto end_time = METRICS_NOW_TIME;
                 auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-                CollectFileMetrics((meta::TableFileSchema::FILE_TYPE)file.file_type, file_size, total_time);
+                CollectFileMetrics(file.file_type_, file_size, total_time);
                 cluster(output_ids, output_distence, inner_k); // cluster to each query
                 memset(output_distence, 0, k * nq * sizeof(float));
                 memset(output_ids, 0, k * nq * sizeof(long));
@@ -348,8 +348,8 @@ void DBImpl::BackgroundCall() {
 Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         const meta::TableFilesSchema& files) {
     meta::TableFileSchema table_file;
-    table_file.table_id = table_id;
-    table_file.date = date;
+    table_file.table_id_ = table_id;
+    table_file.date_ = date;
     Status status = pMeta_->CreateTableFile(table_file);
 
     if (!status.ok()) {
@@ -357,7 +357,8 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         return status;
     }
 
-    ExecutionEnginePtr index = EngineFactory::Build(table_file.dimension, table_file.location, (EngineType)table_file.engine_type_);
+    ExecutionEnginePtr index =
+            EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_);
 
     meta::TableFilesSchema updated;
     long  index_size = 0;
@@ -365,15 +366,15 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     for (auto& file : files) {
 
         auto start_time = METRICS_NOW_TIME;
-        index->Merge(file.location);
+        index->Merge(file.location_);
         auto file_schema = file;
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time,end_time);
         server::Metrics::GetInstance().MemTableMergeDurationSecondsHistogramObserve(total_time);
 
-        file_schema.file_type = meta::TableFileSchema::TO_DELETE;
+        file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);
-        LOG(DEBUG) << "Merging file " << file_schema.file_id;
+        LOG(DEBUG) << "Merging file " << file_schema.file_id_;
         index_size = index->Size();
 
         if (index_size >= options_.index_trigger_size) break;
@@ -383,14 +384,14 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     index->Serialize();
 
     if (index_size >= options_.index_trigger_size) {
-        table_file.file_type = meta::TableFileSchema::TO_INDEX;
+        table_file.file_type_ = meta::TableFileSchema::TO_INDEX;
     } else {
-        table_file.file_type = meta::TableFileSchema::RAW;
+        table_file.file_type_ = meta::TableFileSchema::RAW;
     }
-    table_file.size = index_size;
+    table_file.size_ = index_size;
     updated.push_back(table_file);
     status = pMeta_->UpdateTableFiles(updated);
-    LOG(DEBUG) << "New merged file " << table_file.file_id <<
+    LOG(DEBUG) << "New merged file " << table_file.file_id_ <<
         " of size=" << index->PhysicalSize()/(1024*1024) << " M";
 
     index->Cache();
@@ -427,34 +428,34 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 
 Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
     meta::TableFileSchema table_file;
-    table_file.table_id = file.table_id;
-    table_file.date = file.date;
+    table_file.table_id_ = file.table_id_;
+    table_file.date_ = file.date_;
     Status status = pMeta_->CreateTableFile(table_file);
     if (!status.ok()) {
         return status;
     }
 
-    ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension, file.location, (EngineType)file.engine_type_);
+    ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
 
     to_index->Load();
     auto start_time = METRICS_NOW_TIME;
-    auto index = to_index->BuildIndex(table_file.location);
+    auto index = to_index->BuildIndex(table_file.location_);
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
 
-    table_file.file_type = meta::TableFileSchema::INDEX;
-    table_file.size = index->Size();
+    table_file.file_type_ = meta::TableFileSchema::INDEX;
+    table_file.size_ = index->Size();
 
     auto to_remove = file;
-    to_remove.file_type = meta::TableFileSchema::TO_DELETE;
+    to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
 
     meta::TableFilesSchema update_files = {to_remove, table_file};
     pMeta_->UpdateTableFiles(update_files);
 
-    LOG(DEBUG) << "New index file " << table_file.file_id << " of size "
+    LOG(DEBUG) << "New index file " << table_file.file_id_ << " of size "
         << index->PhysicalSize()/(1024*1024) << " M"
-        << " from file " << to_remove.file_id;
+        << " from file " << to_remove.file_id_;
 
     index->Cache();
     pMeta_->Archive();

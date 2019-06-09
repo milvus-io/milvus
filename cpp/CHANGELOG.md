@@ -12,6 +12,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 - MS-57 - Implement index load/search pipeline
 - MS-56 - Add version information when server is started
+- Ms-64 - Different table can have different index type
 
 ## Task
 
