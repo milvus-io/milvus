@@ -3,13 +3,15 @@ class Status(object):
     :attribute code : int (optional) default as ok
     :attribute message : str (optional) current status message
     """
-    OK = 0
-    INVALID = 1
-    UNKNOWN_ERROR = 2
-    NOT_SUPPORTED = 3
-    NOT_CONNECTED = 4
+    SUCCESS = 0
+    CONNECT_FAILED = 1
+    PERMISSION_DENIED = 2
+    TABLE_NOT_EXISTS = 3
+    ILLEGAL_ARGUMENT = 4
+    ILLEGAL_RANGE = 5
+    ILLEGAL_DIMENSION = 6
 
-    def __init__(self, code=OK, message=None):
+    def __init__(self, code=SUCCESS, message=None):
         self.code = code
         self.message = message
 
