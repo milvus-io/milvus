@@ -16,15 +16,7 @@ namespace engine {
 DB::~DB() {}
 
 void DB::Open(const Options& options, DB** dbptr) {
-    *dbptr = nullptr;
-
-#ifdef GPU_VERSION
-    std::string default_index_type{"Faiss,IVF"};
-#else
-    std::string default_index_type{"Faiss,IDMap"};
-#endif
-
-    *dbptr = DBFactory::Build(options, default_index_type);
+    *dbptr = DBFactory::Build(options);
     return;
 }
 

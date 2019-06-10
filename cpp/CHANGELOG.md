@@ -11,6 +11,9 @@ Please mark all change in change log and use the ticket from JIRA.
 ## New Feature
 
 - MS-57 - Implement index load/search pipeline
+- MS-56 - Add version information when server is started
+- MS-64 - Different table can have different index type
+- MS-52 - Return search score
 
 ## Task
 
@@ -45,4 +48,4 @@ Please mark all change in change log and use the ticket from JIRA.
 
 - MS-1 - Add CHANGELOG.md
 - MS-4 - Refactor the vecwise_engine code structure
-
+- MS-62 - Search range to all if no date specified

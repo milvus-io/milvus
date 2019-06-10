@@ -86,7 +86,6 @@ set(third_party_libs
         prometheus-cpp-pull
         prometheus-cpp-core
         civetweb
-        rocksdb
         boost_system_static
         boost_filesystem_static
         boost_serialization_static
@@ -169,7 +168,6 @@ endif ()
 
 set(server_libs
         vecwise_engine
-        librocksdb.a
         libthrift.a
         pthread
         libyaml-cpp.a
