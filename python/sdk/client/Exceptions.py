@@ -2,10 +2,6 @@ class ParamError(ValueError):
     pass
 
 
-class ConnectParamMissingError(ParamError):
-    pass
-
-
 class ConnectError(ValueError):
     pass
 
