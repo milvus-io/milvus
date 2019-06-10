@@ -159,6 +159,8 @@ ClientProxy::SearchVector(const std::string &table_name,
     }
 
     try {
+
+        //step 1: convert vectors data
         std::vector<thrift::RowRecord> thrift_records;
         for(auto& record : query_record_array) {
             thrift::RowRecord thrift_record;
@@ -172,10 +174,21 @@ ClientProxy::SearchVector(const std::string &table_name,
             thrift_records.emplace_back(thrift_record);
         }
 
+        //step 2: convert range array
         std::vector<thrift::Range> thrift_ranges;
+        for(auto& range : query_range_array) {
+            thrift::Range thrift_range;
+            thrift_range.__set_start_value(range.start_value);
+            thrift_range.__set_end_value(range.end_value);
+
+            thrift_ranges.emplace_back(thrift_range);
+        }
+
+        //step 3: search vectors
         std::vector<thrift::TopKQueryResult> result_array;
         ClientPtr()->interface()->SearchVector(result_array, table_name, thrift_records, thrift_ranges, topk);
 
+        //step 4: convert result array
         for(auto& thrift_topk_result : result_array) {
             TopKQueryResult result;
 

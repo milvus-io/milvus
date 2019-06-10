@@ -14,6 +14,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-56 - Add version information when server is started
 - MS-64 - Different table can have different index type
 - MS-52 - Return search score
+- MS-66 - Support time range query
 
 ## Task
 
