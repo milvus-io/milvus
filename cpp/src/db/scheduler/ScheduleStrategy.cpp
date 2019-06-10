@@ -24,21 +24,21 @@ public:
         SearchContext::Id2IndexMap index_files = search_context->GetIndexMap();
         //some index loader alread exists
         for(auto& loader : loader_list) {
-            if(index_files.find(loader->file_->id) != index_files.end()){
+            if(index_files.find(loader->file_->id_) != index_files.end()){
                 SERVER_LOG_INFO << "Append SearchContext to exist IndexLoaderContext";
-                index_files.erase(loader->file_->id);
+                index_files.erase(loader->file_->id_);
                 loader->search_contexts_.push_back(search_context);
             }
         }
 
         //index_files still contains some index files, create new loader
         for(auto& pair : index_files) {
-            SERVER_LOG_INFO << "Create new IndexLoaderContext for: " << pair.second->location;
+            SERVER_LOG_INFO << "Create new IndexLoaderContext for: " << pair.second->location_;
             IndexLoaderContextPtr new_loader = std::make_shared<IndexLoaderContext>();
             new_loader->search_contexts_.push_back(search_context);
             new_loader->file_ = pair.second;
 
-            auto index  = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(pair.second->location);
+            auto index  = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(pair.second->location_);
             if(index != nullptr) {
                 //if the index file has been in memory, increase its priority
                 loader_list.push_front(new_loader);

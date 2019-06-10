@@ -14,37 +14,46 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
-template <typename Derived>
+enum class EngineType {
+    INVALID = 0,
+    FAISS_IDMAP = 1,
+    FAISS_IVFFLAT,
+};
+
 class ExecutionEngine {
 public:
 
-    Status AddWithIds(const std::vector<float>& vectors,
-                              const std::vector<long>& vector_ids);
+    virtual Status AddWithIds(const std::vector<float>& vectors,
+            const std::vector<long>& vector_ids);
 
-    Status AddWithIds(long n, const float *xdata, const long *xids);
+    virtual Status AddWithIds(long n, const float *xdata, const long *xids) = 0;
 
-    size_t Count() const;
+    virtual size_t Count() const = 0;
 
-    size_t Size() const;
+    virtual size_t Size() const = 0;
 
-    size_t PhysicalSize() const;
+    virtual size_t Dimension() const = 0;
 
-    Status Serialize();
+    virtual size_t PhysicalSize() const = 0;
 
-    Status Load();
+    virtual Status Serialize() = 0;
 
-    Status Merge(const std::string& location);
+    virtual Status Load() = 0;
 
-    Status Search(long n,
+    virtual Status Merge(const std::string& location) = 0;
+
+    virtual Status Search(long n,
                   const float *data,
                   long k,
                   float *distances,
-                  long *labels) const;
+                  long *labels) const = 0;
 
-    std::shared_ptr<Derived> BuildIndex(const std::string&);
+    virtual std::shared_ptr<ExecutionEngine> BuildIndex(const std::string&) = 0;
 
-    Status Cache();
+    virtual Status Cache() = 0;
 };
+
+using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
 
 
 } // namespace engine

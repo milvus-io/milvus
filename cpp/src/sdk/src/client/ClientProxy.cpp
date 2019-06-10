@@ -89,81 +89,14 @@ ClientProxy::CreateTable(const TableSchema &param) {
     try {
         thrift::TableSchema schema;
         schema.__set_table_name(param.table_name);
-
-        std::vector<thrift::VectorColumn>  vector_column_array;
-        for(auto& column : param.vector_column_array) {
-            thrift::VectorColumn col;
-            col.__set_dimension(column.dimension);
-            col.__set_index_type(ConvertUtil::IndexType2Str(column.index_type));
-            col.__set_store_raw_vector(column.store_raw_vector);
-            vector_column_array.emplace_back(col);
-        }
-        schema.__set_vector_column_array(vector_column_array);
-
-        std::vector<thrift::Column>  attribute_column_array;
-        for(auto& column : param.attribute_column_array) {
-            thrift::Column col;
-            col.__set_name(col.name);
-            col.__set_type(col.type);
-            attribute_column_array.emplace_back(col);
-        }
-        schema.__set_attribute_column_array(attribute_column_array);
-
-        schema.__set_partition_column_name_array(param.partition_column_name_array);
+        schema.__set_index_type((int)param.index_type);
+        schema.__set_dimension(param.dimension);
+        schema.__set_store_raw_vector(param.store_raw_vector);
 
         ClientPtr()->interface()->CreateTable(schema);
 
     }  catch ( std::exception& ex) {
         return Status(StatusCode::UnknownError, "failed to create table: " + std::string(ex.what()));
-    }
-
-    return Status::OK();
-}
-
-Status
-ClientProxy::CreateTablePartition(const CreateTablePartitionParam &param) {
-    if(!IsConnected()) {
-        return Status(StatusCode::NotConnected, "not connected to server");
-    }
-
-    try {
-        thrift::CreateTablePartitionParam partition_param;
-        partition_param.__set_table_name(param.table_name);
-        partition_param.__set_partition_name(param.partition_name);
-
-        std::map<std::string, thrift::Range> range_map;
-        for(auto& pair : param.range_map) {
-            thrift::Range range;
-            range.__set_start_value(pair.second.start_value);
-            range.__set_end_value(pair.second.end_value);
-            range_map.insert(std::make_pair(pair.first, range));
-        }
-        partition_param.__set_range_map(range_map);
-
-        ClientPtr()->interface()->CreateTablePartition(partition_param);
-
-    }  catch ( std::exception& ex) {
-        return Status(StatusCode::UnknownError, "failed to create table partition: " + std::string(ex.what()));
-    }
-
-    return Status::OK();
-}
-
-Status
-ClientProxy::DeleteTablePartition(const DeleteTablePartitionParam &param) {
-    if(!IsConnected()) {
-        return Status(StatusCode::NotConnected, "not connected to server");
-    }
-
-    try {
-        thrift::DeleteTablePartitionParam partition_param;
-        partition_param.__set_table_name(param.table_name);
-        partition_param.__set_partition_name_array(param.partition_name_array);
-
-        ClientPtr()->interface()->DeleteTablePartition(partition_param);
-
-    }  catch ( std::exception& ex) {
-        return Status(StatusCode::UnknownError, "failed to delete table partition: " + std::string(ex.what()));
     }
 
     return Status::OK();
@@ -197,17 +130,13 @@ ClientProxy::AddVector(const std::string &table_name,
         std::vector<thrift::RowRecord> thrift_records;
         for(auto& record : record_array) {
             thrift::RowRecord thrift_record;
-            thrift_record.__set_attribute_map(record.attribute_map);
 
-            for(auto& pair : record.vector_map) {
-                size_t dim = pair.second.size();
-                std::string& thrift_vector = thrift_record.vector_map[pair.first];
-                thrift_vector.resize(dim * sizeof(double));
-                double *dbl = (double *) (const_cast<char *>(thrift_vector.data()));
-                for (size_t i = 0; i < dim; i++) {
-                    dbl[i] = (double) (pair.second[i]);
-                }
+            thrift_record.vector_data.resize(record.data.size() * sizeof(double));
+            double *dbl = (double *) (const_cast<char *>(thrift_record.vector_data.data()));
+            for (size_t i = 0; i < record.data.size(); i++) {
+                dbl[i] = (double) (record.data[i]);
             }
+
             thrift_records.emplace_back(thrift_record);
         }
         ClientPtr()->interface()->AddVector(id_array, table_name, thrift_records);
@@ -221,33 +150,31 @@ ClientProxy::AddVector(const std::string &table_name,
 
 Status
 ClientProxy::SearchVector(const std::string &table_name,
-                             const std::vector<QueryRecord> &query_record_array,
-                             std::vector<TopKQueryResult> &topk_query_result_array,
-                             int64_t topk) {
+                          const std::vector<RowRecord> &query_record_array,
+                          const std::vector<Range> &query_range_array,
+                          int64_t topk,
+                          std::vector<TopKQueryResult> &topk_query_result_array) {
     if(!IsConnected()) {
         return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
-        std::vector<thrift::QueryRecord> thrift_records;
+        std::vector<thrift::RowRecord> thrift_records;
         for(auto& record : query_record_array) {
-            thrift::QueryRecord thrift_record;
-            thrift_record.__set_selected_column_array(record.selected_column_array);
+            thrift::RowRecord thrift_record;
 
-            for(auto& pair : record.vector_map) {
-                size_t dim = pair.second.size();
-                std::string& thrift_vector = thrift_record.vector_map[pair.first];
-                thrift_vector.resize(dim * sizeof(double));
-                double *dbl = (double *) (const_cast<char *>(thrift_vector.data()));
-                for (size_t i = 0; i < dim; i++) {
-                    dbl[i] = (double) (pair.second[i]);
-                }
+            thrift_record.vector_data.resize(record.data.size() * sizeof(double));
+            double *dbl = (double *) (const_cast<char *>(thrift_record.vector_data.data()));
+            for (size_t i = 0; i < record.data.size(); i++) {
+                dbl[i] = (double) (record.data[i]);
             }
+
             thrift_records.emplace_back(thrift_record);
         }
 
+        std::vector<thrift::Range> thrift_ranges;
         std::vector<thrift::TopKQueryResult> result_array;
-        ClientPtr()->interface()->SearchVector(result_array, table_name, thrift_records, topk);
+        ClientPtr()->interface()->SearchVector(result_array, table_name, thrift_records, thrift_ranges, topk);
 
         for(auto& thrift_topk_result : result_array) {
             TopKQueryResult result;
@@ -255,7 +182,6 @@ ClientProxy::SearchVector(const std::string &table_name,
             for(auto& thrift_query_result : thrift_topk_result.query_result_arrays) {
                 QueryResult query_result;
                 query_result.id = thrift_query_result.id;
-                query_result.column_map = thrift_query_result.column_map;
                 query_result.score = thrift_query_result.score;
                 result.query_result_arrays.emplace_back(query_result);
             }
@@ -281,27 +207,26 @@ ClientProxy::DescribeTable(const std::string &table_name, TableSchema &table_sch
         ClientPtr()->interface()->DescribeTable(thrift_schema, table_name);
 
         table_schema.table_name = thrift_schema.table_name;
-        table_schema.partition_column_name_array = thrift_schema.partition_column_name_array;
-
-        for(auto& thrift_col : thrift_schema.attribute_column_array) {
-            Column col;
-            col.name = col.name;
-            col.type = col.type;
-            table_schema.attribute_column_array.emplace_back(col);
-        }
-
-        for(auto& thrift_col : thrift_schema.vector_column_array) {
-            VectorColumn col;
-            col.store_raw_vector = thrift_col.store_raw_vector;
-            col.index_type = ConvertUtil::Str2IndexType(thrift_col.index_type);
-            col.dimension = thrift_col.dimension;
-            col.name = thrift_col.base.name;
-            col.type = (ColumnType)thrift_col.base.type;
-            table_schema.vector_column_array.emplace_back(col);
-        }
+        table_schema.index_type = (IndexType)thrift_schema.index_type;
 
     }  catch ( std::exception& ex) {
         return Status(StatusCode::UnknownError, "failed to describe table: " + std::string(ex.what()));
+    }
+
+    return Status::OK();
+}
+
+Status
+ClientProxy::GetTableRowCount(const std::string &table_name, int64_t &row_count) {
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
+    }
+
+    try {
+        row_count = ClientPtr()->interface()->GetTableRowCount(table_name);
+
+    }  catch ( std::exception& ex) {
+        return Status(StatusCode::UnknownError, "failed to show tables: " + std::string(ex.what()));
     }
 
     return Status::OK();

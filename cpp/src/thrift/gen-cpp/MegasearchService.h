@@ -47,30 +47,6 @@ class MegasearchServiceIf {
   virtual void DeleteTable(const std::string& table_name) = 0;
 
   /**
-   * @brief Create table partition
-   * 
-   * This method is used to create table partition.
-   * 
-   * @param param, use to provide partition information to be created.
-   * 
-   * 
-   * @param param
-   */
-  virtual void CreateTablePartition(const CreateTablePartitionParam& param) = 0;
-
-  /**
-   * @brief Delete table partition
-   * 
-   * This method is used to delete table partition.
-   * 
-   * @param param, use to provide partition information to be deleted.
-   * 
-   * 
-   * @param param
-   */
-  virtual void DeleteTablePartition(const DeleteTablePartitionParam& param) = 0;
-
-  /**
    * @brief Add vector array to table
    * 
    * This method is used to add vector array to table.
@@ -92,28 +68,43 @@ class MegasearchServiceIf {
    * 
    * @param table_name, table_name is queried.
    * @param query_record_array, all vector are going to be queried.
+   * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
    * @param topk, how many similarity vectors will be searched.
    * 
    * @return query result array.
    * 
    * @param table_name
    * @param query_record_array
+   * @param query_range_array
    * @param topk
    */
-  virtual void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk) = 0;
+  virtual void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) = 0;
 
   /**
-   * @brief Show table information
+   * @brief Get table schema
    * 
-   * This method is used to show table information.
+   * This method is used to get table schema.
    * 
-   * @param table_name, which table is show.
+   * @param table_name, target table name.
    * 
    * @return table schema
    * 
    * @param table_name
    */
   virtual void DescribeTable(TableSchema& _return, const std::string& table_name) = 0;
+
+  /**
+   * @brief Get table row count
+   * 
+   * This method is used to get table row count.
+   * 
+   * @param table_name, target table name.
+   * 
+   * @return table row count
+   * 
+   * @param table_name
+   */
+  virtual int64_t GetTableRowCount(const std::string& table_name) = 0;
 
   /**
    * @brief List all tables in database
@@ -170,20 +161,18 @@ class MegasearchServiceNull : virtual public MegasearchServiceIf {
   void DeleteTable(const std::string& /* table_name */) {
     return;
   }
-  void CreateTablePartition(const CreateTablePartitionParam& /* param */) {
-    return;
-  }
-  void DeleteTablePartition(const DeleteTablePartitionParam& /* param */) {
-    return;
-  }
   void AddVector(std::vector<int64_t> & /* _return */, const std::string& /* table_name */, const std::vector<RowRecord> & /* record_array */) {
     return;
   }
-  void SearchVector(std::vector<TopKQueryResult> & /* _return */, const std::string& /* table_name */, const std::vector<QueryRecord> & /* query_record_array */, const int64_t /* topk */) {
+  void SearchVector(std::vector<TopKQueryResult> & /* _return */, const std::string& /* table_name */, const std::vector<RowRecord> & /* query_record_array */, const std::vector<Range> & /* query_range_array */, const int64_t /* topk */) {
     return;
   }
   void DescribeTable(TableSchema& /* _return */, const std::string& /* table_name */) {
     return;
+  }
+  int64_t GetTableRowCount(const std::string& /* table_name */) {
+    int64_t _return = 0;
+    return _return;
   }
   void ShowTables(std::vector<std::string> & /* _return */) {
     return;
@@ -401,214 +390,6 @@ class MegasearchService_DeleteTable_presult {
 
 };
 
-typedef struct _MegasearchService_CreateTablePartition_args__isset {
-  _MegasearchService_CreateTablePartition_args__isset() : param(false) {}
-  bool param :1;
-} _MegasearchService_CreateTablePartition_args__isset;
-
-class MegasearchService_CreateTablePartition_args {
- public:
-
-  MegasearchService_CreateTablePartition_args(const MegasearchService_CreateTablePartition_args&);
-  MegasearchService_CreateTablePartition_args& operator=(const MegasearchService_CreateTablePartition_args&);
-  MegasearchService_CreateTablePartition_args() {
-  }
-
-  virtual ~MegasearchService_CreateTablePartition_args() throw();
-  CreateTablePartitionParam param;
-
-  _MegasearchService_CreateTablePartition_args__isset __isset;
-
-  void __set_param(const CreateTablePartitionParam& val);
-
-  bool operator == (const MegasearchService_CreateTablePartition_args & rhs) const
-  {
-    if (!(param == rhs.param))
-      return false;
-    return true;
-  }
-  bool operator != (const MegasearchService_CreateTablePartition_args &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const MegasearchService_CreateTablePartition_args & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-};
-
-
-class MegasearchService_CreateTablePartition_pargs {
- public:
-
-
-  virtual ~MegasearchService_CreateTablePartition_pargs() throw();
-  const CreateTablePartitionParam* param;
-
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-};
-
-typedef struct _MegasearchService_CreateTablePartition_result__isset {
-  _MegasearchService_CreateTablePartition_result__isset() : e(false) {}
-  bool e :1;
-} _MegasearchService_CreateTablePartition_result__isset;
-
-class MegasearchService_CreateTablePartition_result {
- public:
-
-  MegasearchService_CreateTablePartition_result(const MegasearchService_CreateTablePartition_result&);
-  MegasearchService_CreateTablePartition_result& operator=(const MegasearchService_CreateTablePartition_result&);
-  MegasearchService_CreateTablePartition_result() {
-  }
-
-  virtual ~MegasearchService_CreateTablePartition_result() throw();
-  Exception e;
-
-  _MegasearchService_CreateTablePartition_result__isset __isset;
-
-  void __set_e(const Exception& val);
-
-  bool operator == (const MegasearchService_CreateTablePartition_result & rhs) const
-  {
-    if (!(e == rhs.e))
-      return false;
-    return true;
-  }
-  bool operator != (const MegasearchService_CreateTablePartition_result &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const MegasearchService_CreateTablePartition_result & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-};
-
-typedef struct _MegasearchService_CreateTablePartition_presult__isset {
-  _MegasearchService_CreateTablePartition_presult__isset() : e(false) {}
-  bool e :1;
-} _MegasearchService_CreateTablePartition_presult__isset;
-
-class MegasearchService_CreateTablePartition_presult {
- public:
-
-
-  virtual ~MegasearchService_CreateTablePartition_presult() throw();
-  Exception e;
-
-  _MegasearchService_CreateTablePartition_presult__isset __isset;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-
-};
-
-typedef struct _MegasearchService_DeleteTablePartition_args__isset {
-  _MegasearchService_DeleteTablePartition_args__isset() : param(false) {}
-  bool param :1;
-} _MegasearchService_DeleteTablePartition_args__isset;
-
-class MegasearchService_DeleteTablePartition_args {
- public:
-
-  MegasearchService_DeleteTablePartition_args(const MegasearchService_DeleteTablePartition_args&);
-  MegasearchService_DeleteTablePartition_args& operator=(const MegasearchService_DeleteTablePartition_args&);
-  MegasearchService_DeleteTablePartition_args() {
-  }
-
-  virtual ~MegasearchService_DeleteTablePartition_args() throw();
-  DeleteTablePartitionParam param;
-
-  _MegasearchService_DeleteTablePartition_args__isset __isset;
-
-  void __set_param(const DeleteTablePartitionParam& val);
-
-  bool operator == (const MegasearchService_DeleteTablePartition_args & rhs) const
-  {
-    if (!(param == rhs.param))
-      return false;
-    return true;
-  }
-  bool operator != (const MegasearchService_DeleteTablePartition_args &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const MegasearchService_DeleteTablePartition_args & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-};
-
-
-class MegasearchService_DeleteTablePartition_pargs {
- public:
-
-
-  virtual ~MegasearchService_DeleteTablePartition_pargs() throw();
-  const DeleteTablePartitionParam* param;
-
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-};
-
-typedef struct _MegasearchService_DeleteTablePartition_result__isset {
-  _MegasearchService_DeleteTablePartition_result__isset() : e(false) {}
-  bool e :1;
-} _MegasearchService_DeleteTablePartition_result__isset;
-
-class MegasearchService_DeleteTablePartition_result {
- public:
-
-  MegasearchService_DeleteTablePartition_result(const MegasearchService_DeleteTablePartition_result&);
-  MegasearchService_DeleteTablePartition_result& operator=(const MegasearchService_DeleteTablePartition_result&);
-  MegasearchService_DeleteTablePartition_result() {
-  }
-
-  virtual ~MegasearchService_DeleteTablePartition_result() throw();
-  Exception e;
-
-  _MegasearchService_DeleteTablePartition_result__isset __isset;
-
-  void __set_e(const Exception& val);
-
-  bool operator == (const MegasearchService_DeleteTablePartition_result & rhs) const
-  {
-    if (!(e == rhs.e))
-      return false;
-    return true;
-  }
-  bool operator != (const MegasearchService_DeleteTablePartition_result &rhs) const {
-    return !(*this == rhs);
-  }
-
-  bool operator < (const MegasearchService_DeleteTablePartition_result & ) const;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
-
-};
-
-typedef struct _MegasearchService_DeleteTablePartition_presult__isset {
-  _MegasearchService_DeleteTablePartition_presult__isset() : e(false) {}
-  bool e :1;
-} _MegasearchService_DeleteTablePartition_presult__isset;
-
-class MegasearchService_DeleteTablePartition_presult {
- public:
-
-
-  virtual ~MegasearchService_DeleteTablePartition_presult() throw();
-  Exception e;
-
-  _MegasearchService_DeleteTablePartition_presult__isset __isset;
-
-  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
-
-};
-
 typedef struct _MegasearchService_AddVector_args__isset {
   _MegasearchService_AddVector_args__isset() : table_name(false), record_array(false) {}
   bool table_name :1;
@@ -729,9 +510,10 @@ class MegasearchService_AddVector_presult {
 };
 
 typedef struct _MegasearchService_SearchVector_args__isset {
-  _MegasearchService_SearchVector_args__isset() : table_name(false), query_record_array(false), topk(false) {}
+  _MegasearchService_SearchVector_args__isset() : table_name(false), query_record_array(false), query_range_array(false), topk(false) {}
   bool table_name :1;
   bool query_record_array :1;
+  bool query_range_array :1;
   bool topk :1;
 } _MegasearchService_SearchVector_args__isset;
 
@@ -745,14 +527,17 @@ class MegasearchService_SearchVector_args {
 
   virtual ~MegasearchService_SearchVector_args() throw();
   std::string table_name;
-  std::vector<QueryRecord>  query_record_array;
+  std::vector<RowRecord>  query_record_array;
+  std::vector<Range>  query_range_array;
   int64_t topk;
 
   _MegasearchService_SearchVector_args__isset __isset;
 
   void __set_table_name(const std::string& val);
 
-  void __set_query_record_array(const std::vector<QueryRecord> & val);
+  void __set_query_record_array(const std::vector<RowRecord> & val);
+
+  void __set_query_range_array(const std::vector<Range> & val);
 
   void __set_topk(const int64_t val);
 
@@ -761,6 +546,8 @@ class MegasearchService_SearchVector_args {
     if (!(table_name == rhs.table_name))
       return false;
     if (!(query_record_array == rhs.query_record_array))
+      return false;
+    if (!(query_range_array == rhs.query_range_array))
       return false;
     if (!(topk == rhs.topk))
       return false;
@@ -784,7 +571,8 @@ class MegasearchService_SearchVector_pargs {
 
   virtual ~MegasearchService_SearchVector_pargs() throw();
   const std::string* table_name;
-  const std::vector<QueryRecord> * query_record_array;
+  const std::vector<RowRecord> * query_record_array;
+  const std::vector<Range> * query_range_array;
   const int64_t* topk;
 
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -961,6 +749,118 @@ class MegasearchService_DescribeTable_presult {
   Exception e;
 
   _MegasearchService_DescribeTable_presult__isset __isset;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+
+};
+
+typedef struct _MegasearchService_GetTableRowCount_args__isset {
+  _MegasearchService_GetTableRowCount_args__isset() : table_name(false) {}
+  bool table_name :1;
+} _MegasearchService_GetTableRowCount_args__isset;
+
+class MegasearchService_GetTableRowCount_args {
+ public:
+
+  MegasearchService_GetTableRowCount_args(const MegasearchService_GetTableRowCount_args&);
+  MegasearchService_GetTableRowCount_args& operator=(const MegasearchService_GetTableRowCount_args&);
+  MegasearchService_GetTableRowCount_args() : table_name() {
+  }
+
+  virtual ~MegasearchService_GetTableRowCount_args() throw();
+  std::string table_name;
+
+  _MegasearchService_GetTableRowCount_args__isset __isset;
+
+  void __set_table_name(const std::string& val);
+
+  bool operator == (const MegasearchService_GetTableRowCount_args & rhs) const
+  {
+    if (!(table_name == rhs.table_name))
+      return false;
+    return true;
+  }
+  bool operator != (const MegasearchService_GetTableRowCount_args &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MegasearchService_GetTableRowCount_args & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+
+class MegasearchService_GetTableRowCount_pargs {
+ public:
+
+
+  virtual ~MegasearchService_GetTableRowCount_pargs() throw();
+  const std::string* table_name;
+
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MegasearchService_GetTableRowCount_result__isset {
+  _MegasearchService_GetTableRowCount_result__isset() : success(false), e(false) {}
+  bool success :1;
+  bool e :1;
+} _MegasearchService_GetTableRowCount_result__isset;
+
+class MegasearchService_GetTableRowCount_result {
+ public:
+
+  MegasearchService_GetTableRowCount_result(const MegasearchService_GetTableRowCount_result&);
+  MegasearchService_GetTableRowCount_result& operator=(const MegasearchService_GetTableRowCount_result&);
+  MegasearchService_GetTableRowCount_result() : success(0) {
+  }
+
+  virtual ~MegasearchService_GetTableRowCount_result() throw();
+  int64_t success;
+  Exception e;
+
+  _MegasearchService_GetTableRowCount_result__isset __isset;
+
+  void __set_success(const int64_t val);
+
+  void __set_e(const Exception& val);
+
+  bool operator == (const MegasearchService_GetTableRowCount_result & rhs) const
+  {
+    if (!(success == rhs.success))
+      return false;
+    if (!(e == rhs.e))
+      return false;
+    return true;
+  }
+  bool operator != (const MegasearchService_GetTableRowCount_result &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MegasearchService_GetTableRowCount_result & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MegasearchService_GetTableRowCount_presult__isset {
+  _MegasearchService_GetTableRowCount_presult__isset() : success(false), e(false) {}
+  bool success :1;
+  bool e :1;
+} _MegasearchService_GetTableRowCount_presult__isset;
+
+class MegasearchService_GetTableRowCount_presult {
+ public:
+
+
+  virtual ~MegasearchService_GetTableRowCount_presult() throw();
+  int64_t* success;
+  Exception e;
+
+  _MegasearchService_GetTableRowCount_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
@@ -1209,21 +1109,18 @@ class MegasearchServiceClient : virtual public MegasearchServiceIf {
   void DeleteTable(const std::string& table_name);
   void send_DeleteTable(const std::string& table_name);
   void recv_DeleteTable();
-  void CreateTablePartition(const CreateTablePartitionParam& param);
-  void send_CreateTablePartition(const CreateTablePartitionParam& param);
-  void recv_CreateTablePartition();
-  void DeleteTablePartition(const DeleteTablePartitionParam& param);
-  void send_DeleteTablePartition(const DeleteTablePartitionParam& param);
-  void recv_DeleteTablePartition();
   void AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array);
   void send_AddVector(const std::string& table_name, const std::vector<RowRecord> & record_array);
   void recv_AddVector(std::vector<int64_t> & _return);
-  void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk);
-  void send_SearchVector(const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk);
+  void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
+  void send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void recv_SearchVector(std::vector<TopKQueryResult> & _return);
   void DescribeTable(TableSchema& _return, const std::string& table_name);
   void send_DescribeTable(const std::string& table_name);
   void recv_DescribeTable(TableSchema& _return);
+  int64_t GetTableRowCount(const std::string& table_name);
+  void send_GetTableRowCount(const std::string& table_name);
+  int64_t recv_GetTableRowCount();
   void ShowTables(std::vector<std::string> & _return);
   void send_ShowTables();
   void recv_ShowTables(std::vector<std::string> & _return);
@@ -1247,11 +1144,10 @@ class MegasearchServiceProcessor : public ::apache::thrift::TDispatchProcessor {
   ProcessMap processMap_;
   void process_CreateTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_DeleteTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
-  void process_CreateTablePartition(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
-  void process_DeleteTablePartition(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_AddVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_SearchVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_DescribeTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  void process_GetTableRowCount(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_ShowTables(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_Ping(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
  public:
@@ -1259,11 +1155,10 @@ class MegasearchServiceProcessor : public ::apache::thrift::TDispatchProcessor {
     iface_(iface) {
     processMap_["CreateTable"] = &MegasearchServiceProcessor::process_CreateTable;
     processMap_["DeleteTable"] = &MegasearchServiceProcessor::process_DeleteTable;
-    processMap_["CreateTablePartition"] = &MegasearchServiceProcessor::process_CreateTablePartition;
-    processMap_["DeleteTablePartition"] = &MegasearchServiceProcessor::process_DeleteTablePartition;
     processMap_["AddVector"] = &MegasearchServiceProcessor::process_AddVector;
     processMap_["SearchVector"] = &MegasearchServiceProcessor::process_SearchVector;
     processMap_["DescribeTable"] = &MegasearchServiceProcessor::process_DescribeTable;
+    processMap_["GetTableRowCount"] = &MegasearchServiceProcessor::process_GetTableRowCount;
     processMap_["ShowTables"] = &MegasearchServiceProcessor::process_ShowTables;
     processMap_["Ping"] = &MegasearchServiceProcessor::process_Ping;
   }
@@ -1312,24 +1207,6 @@ class MegasearchServiceMultiface : virtual public MegasearchServiceIf {
     ifaces_[i]->DeleteTable(table_name);
   }
 
-  void CreateTablePartition(const CreateTablePartitionParam& param) {
-    size_t sz = ifaces_.size();
-    size_t i = 0;
-    for (; i < (sz - 1); ++i) {
-      ifaces_[i]->CreateTablePartition(param);
-    }
-    ifaces_[i]->CreateTablePartition(param);
-  }
-
-  void DeleteTablePartition(const DeleteTablePartitionParam& param) {
-    size_t sz = ifaces_.size();
-    size_t i = 0;
-    for (; i < (sz - 1); ++i) {
-      ifaces_[i]->DeleteTablePartition(param);
-    }
-    ifaces_[i]->DeleteTablePartition(param);
-  }
-
   void AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array) {
     size_t sz = ifaces_.size();
     size_t i = 0;
@@ -1340,13 +1217,13 @@ class MegasearchServiceMultiface : virtual public MegasearchServiceIf {
     return;
   }
 
-  void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk) {
+  void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) {
     size_t sz = ifaces_.size();
     size_t i = 0;
     for (; i < (sz - 1); ++i) {
-      ifaces_[i]->SearchVector(_return, table_name, query_record_array, topk);
+      ifaces_[i]->SearchVector(_return, table_name, query_record_array, query_range_array, topk);
     }
-    ifaces_[i]->SearchVector(_return, table_name, query_record_array, topk);
+    ifaces_[i]->SearchVector(_return, table_name, query_record_array, query_range_array, topk);
     return;
   }
 
@@ -1358,6 +1235,15 @@ class MegasearchServiceMultiface : virtual public MegasearchServiceIf {
     }
     ifaces_[i]->DescribeTable(_return, table_name);
     return;
+  }
+
+  int64_t GetTableRowCount(const std::string& table_name) {
+    size_t sz = ifaces_.size();
+    size_t i = 0;
+    for (; i < (sz - 1); ++i) {
+      ifaces_[i]->GetTableRowCount(table_name);
+    }
+    return ifaces_[i]->GetTableRowCount(table_name);
   }
 
   void ShowTables(std::vector<std::string> & _return) {
@@ -1416,21 +1302,18 @@ class MegasearchServiceConcurrentClient : virtual public MegasearchServiceIf {
   void DeleteTable(const std::string& table_name);
   int32_t send_DeleteTable(const std::string& table_name);
   void recv_DeleteTable(const int32_t seqid);
-  void CreateTablePartition(const CreateTablePartitionParam& param);
-  int32_t send_CreateTablePartition(const CreateTablePartitionParam& param);
-  void recv_CreateTablePartition(const int32_t seqid);
-  void DeleteTablePartition(const DeleteTablePartitionParam& param);
-  int32_t send_DeleteTablePartition(const DeleteTablePartitionParam& param);
-  void recv_DeleteTablePartition(const int32_t seqid);
   void AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array);
   int32_t send_AddVector(const std::string& table_name, const std::vector<RowRecord> & record_array);
   void recv_AddVector(std::vector<int64_t> & _return, const int32_t seqid);
-  void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk);
-  int32_t send_SearchVector(const std::string& table_name, const std::vector<QueryRecord> & query_record_array, const int64_t topk);
+  void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
+  int32_t send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void recv_SearchVector(std::vector<TopKQueryResult> & _return, const int32_t seqid);
   void DescribeTable(TableSchema& _return, const std::string& table_name);
   int32_t send_DescribeTable(const std::string& table_name);
   void recv_DescribeTable(TableSchema& _return, const int32_t seqid);
+  int64_t GetTableRowCount(const std::string& table_name);
+  int32_t send_GetTableRowCount(const std::string& table_name);
+  int64_t recv_GetTableRowCount(const int32_t seqid);
   void ShowTables(std::vector<std::string> & _return);
   int32_t send_ShowTables();
   void recv_ShowTables(std::vector<std::string> & _return, const int32_t seqid);

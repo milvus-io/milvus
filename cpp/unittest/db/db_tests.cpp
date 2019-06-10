@@ -67,15 +67,15 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     long size;
 
     engine::meta::TableSchema group_info;
-    group_info.dimension = group_dim;
-    group_info.table_id = group_name;
+    group_info.dimension_ = group_dim;
+    group_info.table_id_ = group_name;
     engine::Status stat = db_->CreateTable(group_info);
 
     engine::meta::TableSchema group_info_get;
-    group_info_get.table_id = group_name;
+    group_info_get.table_id_ = group_name;
     stat = db_->DescribeTable(group_info_get);
     ASSERT_STATS(stat);
-    ASSERT_EQ(group_info_get.dimension, group_dim);
+    ASSERT_EQ(group_info_get.dimension_, group_dim);
 
     engine::IDNumbers vector_ids;
     engine::IDNumbers target_ids;
@@ -114,15 +114,15 @@ TEST_F(DBTest, DB_TEST) {
     static const int group_dim = 256;
 
     engine::meta::TableSchema group_info;
-    group_info.dimension = group_dim;
-    group_info.table_id = group_name;
+    group_info.dimension_ = group_dim;
+    group_info.table_id_ = group_name;
     engine::Status stat = db_->CreateTable(group_info);
 
     engine::meta::TableSchema group_info_get;
-    group_info_get.table_id = group_name;
+    group_info_get.table_id_ = group_name;
     stat = db_->DescribeTable(group_info_get);
     ASSERT_STATS(stat);
-    ASSERT_EQ(group_info_get.dimension, group_dim);
+    ASSERT_EQ(group_info_get.dimension_, group_dim);
 
     engine::IDNumbers vector_ids;
     engine::IDNumbers target_ids;
@@ -164,11 +164,11 @@ TEST_F(DBTest, DB_TEST) {
 
             ASSERT_STATS(stat);
             for (auto k=0; k<qb; ++k) {
-                ASSERT_EQ(results[k][0], target_ids[k]);
+                ASSERT_EQ(results[k][0].first, target_ids[k]);
                 ss.str("");
                 ss << "Result [" << k << "]:";
                 for (auto result : results[k]) {
-                    ss << result << " ";
+                    ss << result.first << " ";
                 }
                 /* LOG(DEBUG) << ss.str(); */
             }
@@ -200,15 +200,15 @@ TEST_F(DBTest, SEARCH_TEST) {
     static const int group_dim = 256;
 
     engine::meta::TableSchema group_info;
-    group_info.dimension = group_dim;
-    group_info.table_id = group_name;
+    group_info.dimension_ = group_dim;
+    group_info.table_id_ = group_name;
     engine::Status stat = db_->CreateTable(group_info);
 
     engine::meta::TableSchema group_info_get;
-    group_info_get.table_id = group_name;
+    group_info_get.table_id_ = group_name;
     stat = db_->DescribeTable(group_info_get);
     ASSERT_STATS(stat);
-    ASSERT_EQ(group_info_get.dimension, group_dim);
+    ASSERT_EQ(group_info_get.dimension_, group_dim);
 
     // prepare raw data
     size_t nb = 250000;

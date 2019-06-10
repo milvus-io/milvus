@@ -4,7 +4,6 @@
 
 #include <string>
 #include <vector>
-#include <map>
 #include <memory>
 
 /** \brief MegaSearch SDK namespace
@@ -13,128 +12,69 @@ namespace megasearch {
 
 
 /**
- * @brief Column Type
- */
-enum class ColumnType {
-    invalid,
-    int8,
-    int16,
-    int32,
-    int64,
-    float32,
-    float64,
-    date,
-    vector
-};
-
-/**
  * @brief Index Type
  */
 enum class IndexType {
-    raw,
-    ivfflat
+    invalid = 0,
+    cpu_idmap,
+    gpu_ivfflat,
 };
 
 /**
  * @brief Connect API parameter
  */
 struct ConnectParam {
-    std::string ip_address; ///< Server IP address
-    std::string port;       ///< Server PORT
-};
-
-/**
- * @brief Table column description
- */
-struct Column {
-    ColumnType type = ColumnType::invalid;         ///< Column Type: enum ColumnType
-    std::string name;                              ///< Column name
-};
-
-/**
- * @brief Table vector column description
- */
-struct VectorColumn : public Column {
-    VectorColumn() { type = ColumnType::vector; }
-    int64_t dimension = 0;                 ///< Vector dimension
-    IndexType index_type = IndexType::raw; ///< Index type
-    bool store_raw_vector = false;         ///< Is vector self stored in the table
+    std::string ip_address;                                ///< Server IP address
+    std::string port;                                      ///< Server PORT
 };
 
 /**
  * @brief Table Schema
  */
 struct TableSchema {
-    std::string table_name;                                          ///< Table name
-    std::vector<VectorColumn> vector_column_array;                   ///< Vector column description
-    std::vector<Column> attribute_column_array;                      ///< Columns description
-    std::vector<std::string> partition_column_name_array;            ///< Partition column name
+    std::string table_name;                                ///< Table name
+    IndexType index_type = IndexType::invalid;             ///< Index type
+    int64_t dimension = 0;                                 ///< Vector dimension, must be a positive value
+    bool store_raw_vector = false;                          ///< Is vector raw data stored in the table
 };
 
 /**
  * @brief Range information
+ * for DATE partition, the format is like: 'year-month-day'
  */
 struct Range {
-    std::string start_value;     ///< Range start
-    std::string end_value;       ///< Range stop
-};
-
-/**
- * @brief Create table partition parameters
- */
-struct CreateTablePartitionParam {
-    std::string table_name;     ///< Table name, vector/float32/float64 type column is not allowed for partition
-    std::string partition_name;             ///< Partition name, created partition name
-    std::map<std::string, Range> range_map; ///< Column name to PartitionRange map
-};
-
-
-/**
- * @brief Delete table partition parameters
- */
-struct DeleteTablePartitionParam {
-    std::string table_name;                        ///< Table name
-    std::vector<std::string> partition_name_array; ///< Partition name array
+    std::string start_value;                                ///< Range start
+    std::string end_value;                                  ///< Range stop
 };
 
 /**
  * @brief Record inserted
  */
 struct RowRecord {
-    std::map<std::string, std::vector<float>> vector_map; ///< Vector columns
-    std::map<std::string, std::string> attribute_map;     ///< Other attribute columns
-};
-
-/**
- * @brief Query record
- */
-struct QueryRecord {
-    std::map<std::string, std::vector<float>> vector_map;                       ///< Query vectors
-    std::vector<std::string> selected_column_array;                             ///< Output column array
-    std::map<std::string, std::vector<Range>> partition_filter_column_map;      ///< Range used to select partitions
+    std::vector<float> data;                               ///< Vector raw data
 };
 
 /**
  * @brief Query result
  */
 struct QueryResult {
-    int64_t id;                                     ///< Output result
-    double score;                                   ///< Vector similarity score: 0 ~ 100
-    std::map<std::string, std::string> column_map;  ///< Other column
+    int64_t id;                                             ///< Output result
+    double score;                                           ///< Vector similarity score: 0 ~ 100
 };
 
 /**
  * @brief TopK query result
  */
 struct TopKQueryResult {
-    std::vector<QueryResult> query_result_arrays;   ///< TopK query result
+    std::vector<QueryResult> query_result_arrays;           ///< TopK query result
 };
+
 
 /**
  * @brief SDK main class
  */
 class Connection {
- public:
+public:
 
     /**
      * @brief CreateConnection
@@ -229,30 +169,6 @@ class Connection {
 
 
     /**
-     * @brief Create table partition
-     *
-     * This method is used to create table partition.
-     *
-     * @param param, use to provide partition information to be created.
-     *
-     * @return Indicate if table partition is created successfully.
-     */
-    virtual Status CreateTablePartition(const CreateTablePartitionParam &param) = 0;
-
-
-    /**
-     * @brief Delete table partition
-     *
-     * This method is used to delete table partition.
-     *
-     * @param param, use to provide partition information to be deleted.
-     *
-     * @return Indicate if table partition is delete successfully.
-     */
-    virtual Status DeleteTablePartition(const DeleteTablePartitionParam &param) = 0;
-
-
-    /**
      * @brief Add vector to table
      *
      * This method is used to add vector array to table.
@@ -264,8 +180,8 @@ class Connection {
      * @return Indicate if vector array are inserted successfully
      */
     virtual Status AddVector(const std::string &table_name,
-                     const std::vector<RowRecord> &record_array,
-                     std::vector<int64_t> &id_array) = 0;
+                             const std::vector<RowRecord> &record_array,
+                             std::vector<int64_t> &id_array) = 0;
 
 
     /**
@@ -275,15 +191,17 @@ class Connection {
      *
      * @param table_name, table_name is queried.
      * @param query_record_array, all vector are going to be queried.
-     * @param topk_query_result_array, result array.
+     * @param query_range_array, time ranges, if not specified, will search in whole table
      * @param topk, how many similarity vectors will be searched.
+     * @param topk_query_result_array, result array.
      *
      * @return Indicate if query is successful.
      */
     virtual Status SearchVector(const std::string &table_name,
-                        const std::vector<QueryRecord> &query_record_array,
-                        std::vector<TopKQueryResult> &topk_query_result_array,
-                        int64_t topk) = 0;
+                                const std::vector<RowRecord> &query_record_array,
+                                const std::vector<Range> &query_range_array,
+                                int64_t topk,
+                                std::vector<TopKQueryResult> &topk_query_result_array) = 0;
 
     /**
      * @brief Show table description
@@ -296,6 +214,18 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status DescribeTable(const std::string &table_name, TableSchema &table_schema) = 0;
+
+    /**
+     * @brief Get table row count
+     *
+     * This method is used to get table row count.
+     *
+     * @param table_name, table's name.
+     * @param row_count, table total row count.
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status GetTableRowCount(const std::string &table_name, int64_t &row_count) = 0;
 
     /**
      * @brief Show all tables in database
