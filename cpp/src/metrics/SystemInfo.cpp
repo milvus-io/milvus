@@ -21,23 +21,23 @@ namespace vecwise {
 namespace server {
 
 void SystemInfo::Init() {
-    if(initialized) return;
-//    mutex.lock();
-    initialized = true;
-//    mutex.unlock();
+    if(initialized_) return;
+
+    initialized_ = true;
+
     // initialize CPU information
     FILE* file;
-    struct tms timeSample;
+    struct tms time_sample;
     char line[128];
-    lastCPU_ = times(&timeSample);
-    lastSysCPU_ = timeSample.tms_stime;
-    lastUserCPU_ = timeSample.tms_utime;
+    last_cpu_ = times(&time_sample);
+    last_sys_cpu_ = time_sample.tms_stime;
+    last_user_cpu_ = time_sample.tms_utime;
     file = fopen("/proc/cpuinfo", "r");
-    numProcessors = 0;
+    num_processors_ = 0;
     while(fgets(line, 128, file) != NULL){
-        if (strncmp(line, "processor", 9) == 0) numProcessors++;
+        if (strncmp(line, "processor", 9) == 0) num_processors_++;
     }
-    total_RAM_ = GetPhysicalMemory();
+    total_ram_ = GetPhysicalMemory();
     fclose(file);
 
     //initialize GPU information
@@ -47,7 +47,7 @@ void SystemInfo::Init() {
         printf("System information initilization failed");
         return ;
     }
-    nvmlresult = nvmlDeviceGetCount(&numDevice);
+    nvmlresult = nvmlDeviceGetCount(&num_device_);
     if(NVML_SUCCESS != nvmlresult) {
         printf("Unable to get devidce number");
         return ;
@@ -90,7 +90,6 @@ SystemInfo::GetProcessUsedMemory() {
         }
     }
     fclose(file);
-//    printf("RAM is %d",result);
     // return value in Byte
     return (result*1024);
 
@@ -98,33 +97,33 @@ SystemInfo::GetProcessUsedMemory() {
 
 double
 SystemInfo::MemoryPercent() {
-    if (!initialized) Init();
-    return GetProcessUsedMemory()*100/total_RAM_;
+    if (!initialized_) Init();
+    return GetProcessUsedMemory()*100/total_ram_;
 }
 
 double
 SystemInfo::CPUPercent() {
-    if (!initialized) Init();
-    struct tms timeSample;
+    if (!initialized_) Init();
+    struct tms time_sample;
     clock_t now;
     double percent;
 
-    now = times(&timeSample);
-    if (now <= lastCPU_ || timeSample.tms_stime < lastSysCPU_ ||
-        timeSample.tms_utime < lastUserCPU_){
+    now = times(&time_sample);
+    if (now <= last_cpu_ || time_sample.tms_stime < last_sys_cpu_ ||
+        time_sample.tms_utime < last_user_cpu_){
         //Overflow detection. Just skip this value.
         percent = -1.0;
     }
     else{
-        percent = (timeSample.tms_stime - lastSysCPU_) +
-            (timeSample.tms_utime - lastUserCPU_);
-        percent /= (now - lastCPU_);
-        percent /= numProcessors;
+        percent = (time_sample.tms_stime - last_sys_cpu_) +
+            (time_sample.tms_utime - last_user_cpu_);
+        percent /= (now - last_cpu_);
+        percent /= num_processors_;
         percent *= 100;
     }
-    lastCPU_ = now;
-    lastSysCPU_ = timeSample.tms_stime;
-    lastUserCPU_ = timeSample.tms_utime;
+    last_cpu_ = now;
+    last_sys_cpu_ = time_sample.tms_stime;
+    last_user_cpu_ = time_sample.tms_utime;
 
     return percent;
 }
@@ -173,31 +172,26 @@ SystemInfo::split(std::string input) {
 std::vector<unsigned int>
 SystemInfo::GPUPercent() {
     // get GPU usage percent
-    if(!initialized) Init();
+    if(!initialized_) Init();
     std::vector<unsigned int> result;
     nvmlUtilization_t utilization;
-    for (int i = 0; i < numDevice; ++i) {
+    for (int i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
         nvmlDeviceGetHandleByIndex(i, &device);
         nvmlDeviceGetUtilizationRates(device, &utilization);
         result.push_back(utilization.gpu);
     }
     return result;
-//        nvmlDevice_t device;
-//        nvmlUtilization_t utilization;
-//        nvmlDeviceGetHandleByIndex(device_index, &device);
-//        nvmlDeviceGetUtilizationRates(device, &utilization);
-//        return utilization.gpu;
 }
 
 std::vector<unsigned long long>
 SystemInfo::GPUMemoryUsed() {
     // get GPU memory used
-    if(!initialized) Init();
+    if(!initialized_) Init();
 
     std::vector<unsigned long long int> result;
     nvmlMemory_t nvmlMemory;
-    for (int i = 0; i < numDevice; ++i) {
+    for (int i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
         nvmlDeviceGetHandleByIndex(i, &device);
         nvmlDeviceGetMemoryInfo(device, &nvmlMemory);

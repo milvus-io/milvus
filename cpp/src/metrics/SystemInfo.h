@@ -25,12 +25,14 @@ namespace server {
 
 class SystemInfo {
  private:
-    unsigned long total_RAM_ ;
-    clock_t lastCPU_, lastSysCPU_, lastUserCPU_;
-    int numProcessors;
+    unsigned long total_ram_ = 0;
+    clock_t last_cpu_ = clock_t();
+    clock_t last_sys_cpu_ = clock_t();
+    clock_t last_user_cpu_ = clock_t();
+    int num_processors_ = 0;
     //number of GPU
-    unsigned int numDevice;
-    bool initialized = false;
+    unsigned int num_device_ = 0;
+    bool initialized_ = false;
 
  public:
     static SystemInfo &
@@ -40,7 +42,7 @@ class SystemInfo {
     }
 
     void Init();
-    int NumDevice() {return numDevice;};
+    int NumDevice() {return num_device_;};
     long long parseLine(char* line);
     unsigned long GetPhysicalMemory();
     unsigned long GetProcessUsedMemory();
