@@ -17,3 +17,11 @@ void zilliz::vecwise::server::MegasearchThreadPoolServer::onClientDisconnected(a
     server::Metrics::GetInstance().ConnectionGaugeDecrement();
     TThreadPoolServer::onClientDisconnected(pClient);
 }
+zilliz::vecwise::server::MegasearchThreadPoolServer::MegasearchThreadPoolServer(const std::shared_ptr<apache::thrift::TProcessor> &processor,
+                                                                                const std::shared_ptr<apache::thrift::transport::TServerTransport> &serverTransport,
+                                                                                const std::shared_ptr<apache::thrift::transport::TTransportFactory> &transportFactory,
+                                                                                const std::shared_ptr<apache::thrift::protocol::TProtocolFactory> &protocolFactory,
+                                                                                const std::shared_ptr<apache::thrift::concurrency::ThreadManager> &threadManager)
+    : TThreadPoolServer(processor, serverTransport, transportFactory, protocolFactory, threadManager) {
+
+}

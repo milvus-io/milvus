@@ -34,7 +34,11 @@ set(service_files
         thrift/gen-cpp/MegasearchService.cpp
         thrift/gen-cpp/megasearch_constants.cpp
         thrift/gen-cpp/megasearch_types.cpp
-        metrics/SystemInfo.cpp metrics/SystemInfo.h server/MegasearchThreadPoolServer.cpp server/MegasearchThreadPoolServer.h)
+        metrics/SystemInfo.cpp
+        metrics/SystemInfo.h
+        server/MegasearchThreadPoolServer.cpp
+        server/MegasearchThreadPoolServer.h
+        )
 
 set(vecwise_engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
