@@ -75,6 +75,18 @@ namespace {
         return str;
     }
 
+    std::string CurrentTmDate() {
+        time_t tt;
+        time( &tt );
+        tt = tt + 8*3600;
+        tm* t= gmtime( &tt );
+
+        std::string str = std::to_string(t->tm_year + 1900) + "-" + std::to_string(t->tm_mon + 1)
+                          + "-" + std::to_string(t->tm_mday);
+
+        return str;
+    }
+
     std::string GetTableName() {
         static std::string s_id(CurrentTime());
         return s_id;
@@ -170,6 +182,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         BuildVectors(SEARCH_TARGET, SEARCH_TARGET + 10, record_array);
 
         std::vector<Range> query_range_array;
+        Range rg;
+        rg.start_value = CurrentTmDate();
+        rg.end_value = CurrentTmDate();
+        query_range_array.emplace_back(rg);
         std::vector<TopKQueryResult> topk_query_result_array;
         Status stat = conn->SearchVector(TABLE_NAME, record_array, query_range_array, TOP_K, topk_query_result_array);
         std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;

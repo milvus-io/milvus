@@ -75,6 +75,74 @@ namespace {
 
         return map_type[type];
     }
+
+    ServerError
+    ConvertRowRecordToFloatArray(const std::vector<thrift::RowRecord>& record_array,
+                                 uint64_t dimension,
+                                 std::vector<float>& float_array) {
+        ServerError error_code;
+        uint64_t vec_count = record_array.size();
+        float_array.resize(vec_count*dimension);//allocate enough memory
+        for(uint64_t i = 0; i < vec_count; i++) {
+            const auto& record = record_array[i];
+            if(record.vector_data.empty()) {
+                error_code = SERVER_INVALID_ARGUMENT;
+                SERVER_LOG_ERROR << "No vector provided in record";
+                return error_code;
+            }
+            uint64_t vec_dim = record.vector_data.size()/sizeof(double);//how many double value?
+            if(vec_dim != dimension) {
+                SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
+                                 << " vs. group dimension:" << dimension;
+                error_code = SERVER_INVALID_VECTOR_DIMENSION;
+                return error_code;
+            }
+
+            //convert double array to float array(thrift has no float type)
+            const double* d_p = reinterpret_cast<const double*>(record.vector_data.data());
+            for(uint64_t d = 0; d < vec_dim; d++) {
+                float_array[i*vec_dim + d] = (float)(d_p[d]);
+            }
+        }
+
+        return SERVER_SUCCESS;
+    }
+
+    static constexpr long DAY_SECONDS = 86400;
+
+    ServerError
+    ConvertTimeRangeToDBDates(const std::vector<megasearch::thrift::Range> &range_array,
+                              std::vector<DB_DATE>& dates) {
+        dates.clear();
+        ServerError error_code;
+        for(auto& range : range_array) {
+            time_t tt_start, tt_end;
+            tm tm_start, tm_end;
+            if(!CommonUtil::TimeStrToTime(range.start_value, tt_start, tm_start)){
+                error_code = SERVER_INVALID_TIME_RANGE;
+                SERVER_LOG_ERROR << "Invalid time range: " << range.start_value;
+                return error_code;
+            }
+
+            if(!CommonUtil::TimeStrToTime(range.end_value, tt_end, tm_end)){
+                error_code = SERVER_INVALID_TIME_RANGE;
+                SERVER_LOG_ERROR << "Invalid time range: " << range.end_value;
+                return error_code;
+            }
+
+            long days = (tt_end > tt_start) ? (tt_end - tt_start)/DAY_SECONDS : (tt_start - tt_end)/DAY_SECONDS;
+            for(long i = 0; i <= days; i++) {
+                time_t tt_day = tt_start + DAY_SECONDS*i;
+                tm tm_day;
+                CommonUtil::ConvertTime(tt_day, tm_day);
+
+                long date = tm_day.tm_year*10000 + tm_day.tm_mon*100 + tm_day.tm_mday;//according to db logic
+                dates.push_back(date);
+            }
+        }
+
+        return SERVER_SUCCESS;
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -237,37 +305,17 @@ ServerError AddVectorTask::OnExecute() {
         rc.Record("check validation");
 
         //step 2: prepare float data
-        uint64_t vec_count = (uint64_t)record_array_.size();
-        uint64_t group_dim = table_info.dimension_;
         std::vector<float> vec_f;
-        vec_f.resize(vec_count*group_dim);//allocate enough memory
-        for(uint64_t i = 0; i < vec_count; i++) {
-            const auto& record = record_array_[i];
-            if(record.vector_data.empty()) {
-                error_code_ = SERVER_INVALID_ARGUMENT;
-                error_msg_ = "No vector provided in record";
-                SERVER_LOG_ERROR << error_msg_;
-                return error_code_;
-            }
-            uint64_t vec_dim = record.vector_data.size()/sizeof(double);//how many double value?
-            if(vec_dim != group_dim) {
-                SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
-                                 << " vs. group dimension:" << group_dim;
-                error_code_ = SERVER_INVALID_VECTOR_DIMENSION;
-                error_msg_ = "Engine failed: " + stat.ToString();
-                return error_code_;
-            }
-
-            //convert double array to float array(thrift has no float type)
-            const double* d_p = reinterpret_cast<const double*>(record.vector_data.data());
-            for(uint64_t d = 0; d < vec_dim; d++) {
-                vec_f[i*vec_dim + d] = (float)(d_p[d]);
-            }
+        error_code_ = ConvertRowRecordToFloatArray(record_array_, table_info.dimension_, vec_f);
+        if(error_code_ != SERVER_SUCCESS) {
+            error_msg_ = "Invalid row record data";
+            return error_code_;
         }
 
         rc.Record("prepare vectors data");
 
         //step 3: insert vectors
+        uint64_t vec_count = (uint64_t)record_array_.size();
         stat = DB()->InsertVectors(table_name_, vec_count, vec_f.data(), record_ids_);
         rc.Record("add vectors to engine");
         if(!stat.ok()) {
@@ -342,44 +390,29 @@ ServerError SearchVectorTask::OnExecute() {
             return error_code_;
         }
 
+        //step 3: check date range, and convert to db dates
+        std::vector<DB_DATE> dates;
+        error_code_ = ConvertTimeRangeToDBDates(range_array_, dates);
+        if(error_code_ != SERVER_SUCCESS) {
+            error_msg_ = "Invalid query range";
+            return error_code_;
+        }
+
         rc.Record("check validation");
 
         //step 3: prepare float data
         std::vector<float> vec_f;
-        uint64_t record_count = (uint64_t)record_array_.size();
-        vec_f.resize(record_count*table_info.dimension_);
-
-        for(uint64_t i = 0; i < record_array_.size(); i++) {
-            const auto& record = record_array_[i];
-            if (record.vector_data.empty()) {
-                error_code_ = SERVER_INVALID_ARGUMENT;
-                error_msg_ = "Query record has no vector";
-                SERVER_LOG_ERROR << error_msg_;
-                return error_code_;
-            }
-
-            uint64_t vec_dim = record.vector_data.size() / sizeof(double);//how many double value?
-            if (vec_dim != table_info.dimension_) {
-                SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
-                                 << " vs. group dimension:" << table_info.dimension_;
-                error_code_ = SERVER_INVALID_VECTOR_DIMENSION;
-                error_msg_ = "Engine failed: " + stat.ToString();
-                return error_code_;
-            }
-
-            //convert double array to float array(thrift has no float type)
-            const double* d_p = reinterpret_cast<const double*>(record.vector_data.data());
-            for(uint64_t d = 0; d < vec_dim; d++) {
-                vec_f[i*vec_dim + d] = (float)(d_p[d]);
-            }
+        error_code_ = ConvertRowRecordToFloatArray(record_array_, table_info.dimension_, vec_f);
+        if(error_code_ != SERVER_SUCCESS) {
+            error_msg_ = "Invalid row record data";
+            return error_code_;
         }
 
         rc.Record("prepare vector data");
 
-
         //step 4: search vectors
-        std::vector<DB_DATE> dates;
         engine::QueryResults results;
+        uint64_t record_count = (uint64_t)record_array_.size();
         stat = DB()->Query(table_name_, (size_t)top_k_, record_count, vec_f.data(), dates, results);
         rc.Record("search vectors from engine");
         if(!stat.ok()) {
