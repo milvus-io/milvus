@@ -9,24 +9,17 @@
 #include <boost/filesystem/path.hpp>
 #include <boost/serialization/map.hpp>
 #include <boost/filesystem/operations.hpp>
+#include <boost/thread.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 
 namespace zilliz {
 namespace vecwise {
 namespace server {
 
-using IO_SERVICE = boost::asio::io_service;
-
-namespace {
-IO_SERVICE& GetIOService() {
-    static IO_SERVICE io;
-    return io;
-}
-
+LicenseCheck::LicenseCheck() {
 
 }
-
-// Part 1:  Legality check
 
 ServerError
 LicenseCheck::LegalityCheck(const std::string &license_file_path) {
@@ -81,14 +74,16 @@ LicenseCheck::AlterFile(const std::string &license_file_path,
                         const boost::system::error_code &ec,
                         boost::asio::deadline_timer *pt) {
 
-    ServerError err = LegalityCheck(license_file_path);
-    if(err!=SERVER_SUCCESS)
-    {
+    ServerError err = LicenseCheck::LegalityCheck(license_file_path);
+    if(err!=SERVER_SUCCESS) {
+        printf("license file check error\n");
         exit(1);
     }
+
     printf("---runing---\n");
     pt->expires_at(pt->expires_at() + boost::posix_time::hours(1));
-    pt->async_wait(boost::bind(AlterFile, license_file_path, boost::asio::placeholders::error, pt));
+    pt->async_wait(boost::bind(LicenseCheck::AlterFile, license_file_path, boost::asio::placeholders::error, pt));
+
     return SERVER_SUCCESS;
 
 }
@@ -102,22 +97,26 @@ LicenseCheck::StartCountingDown(const std::string &license_file_path) {
     }
 
     //create a thread to run AlterFile
-    std::thread io_thread([&]() {
-        boost::asio::io_service& io = GetIOService();
-        boost::asio::deadline_timer t(io, boost::posix_time::hours(1));
-        t.async_wait(boost::bind(AlterFile, license_file_path, boost::asio::placeholders::error, &t));
-        io.run();//this thread will block here
-    });
-    io_thread.detach();
+    if(counting_thread_ == nullptr) {
+        counting_thread_ = std::make_shared<std::thread>([&]() {
+            boost::asio::deadline_timer t(io_service_, boost::posix_time::hours(1));
+            t.async_wait(boost::bind(LicenseCheck::AlterFile, license_file_path, boost::asio::placeholders::error, &t));
+            io_service_.run();//this thread will block here
+        });
+    }
 
     return SERVER_SUCCESS;
 }
 
 ServerError
 LicenseCheck::StopCountingDown() {
-    boost::asio::io_service& io = GetIOService();
-    if(!io.stopped()) {
-        io.stop();
+    if(!io_service_.stopped()) {
+        io_service_.stop();
+    }
+
+    if(counting_thread_ != nullptr) {
+        counting_thread_->join();
+        counting_thread_ = nullptr;
     }
 
     return SERVER_SUCCESS;

@@ -159,15 +159,13 @@ Server::Start() {
             ConfigNode license_config = config.GetConfig(CONFIG_LICENSE);
             std::string license_file_path = license_config.GetValue(CONFIG_LICENSE_PATH);
             SERVER_LOG_INFO << "License path: " << license_file_path;
+
             if(server::LicenseCheck::LegalityCheck(license_file_path) != SERVER_SUCCESS) {
                 SERVER_LOG_ERROR << "License check failed";
                 exit(1);
             }
 
-            if(server::LicenseCheck::StartCountingDown(license_file_path) != SERVER_SUCCESS) {
-                SERVER_LOG_ERROR << "License counter start error";
-                exit(1);
-            }
+            server::LicenseCheck::GetInstance().StartCountingDown(license_file_path);
 #endif
 
             // Handle Signal
@@ -218,7 +216,7 @@ Server::Stop() {
     StopService();
 
 #ifdef ENABLE_LICENSE
-    server::LicenseCheck::StopCountingDown();
+    server::LicenseCheck::GetInstance().StopCountingDown();
 #endif
 
     SERVER_LOG_INFO << "Vecwise server closed";
