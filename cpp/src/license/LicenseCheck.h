@@ -4,36 +4,43 @@
 #include "LicenseLibrary.h"
 
 #include <boost/asio.hpp>
-#include <boost/thread.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
 
+#include <thread>
+#include <memory>
 
 namespace zilliz {
 namespace vecwise {
 namespace server {
 
 class LicenseCheck {
- public:
-    // Part 1:  Legality check
+private:
+    LicenseCheck();
+
+public:
+    static LicenseCheck &
+    GetInstance() {
+        static LicenseCheck instance;
+        return instance;
+    };
+
     static ServerError
     LegalityCheck(const std::string &license_file_path);
 
+    ServerError
+    StartCountingDown(const std::string &license_file_path);
 
-    // Part 2: Timing check license
+    ServerError
+    StopCountingDown();
+
+private:
     static ServerError
     AlterFile(const std::string &license_file_path,
               const boost::system::error_code &ec,
               boost::asio::deadline_timer *pt);
 
-
-    static ServerError
-    StartCountingDown(const std::string &license_file_path);
-
-    static ServerError
-    StopCountingDown();
-
- private:
-
+private:
+    boost::asio::io_service io_service_;
+    std::shared_ptr<std::thread> counting_thread_;
 
 };
 
