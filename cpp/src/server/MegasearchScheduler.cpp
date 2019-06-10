@@ -24,7 +24,7 @@ namespace {
                 {SERVER_FILE_NOT_FOUND,           thrift::ErrorCode::ILLEGAL_ARGUMENT},
                 {SERVER_NOT_IMPLEMENT,            thrift::ErrorCode::ILLEGAL_ARGUMENT},
                 {SERVER_BLOCKING_QUEUE_EMPTY,     thrift::ErrorCode::ILLEGAL_ARGUMENT},
-                {SERVER_GROUP_NOT_EXIST,          thrift::ErrorCode::TABLE_NOT_EXISTS},
+                {SERVER_TABLE_NOT_EXIST,          thrift::ErrorCode::TABLE_NOT_EXISTS},
                 {SERVER_INVALID_TIME_RANGE,       thrift::ErrorCode::ILLEGAL_RANGE},
                 {SERVER_INVALID_VECTOR_DIMENSION, thrift::ErrorCode::ILLEGAL_DIMENSION},
         };
@@ -40,7 +40,7 @@ namespace {
                 {SERVER_FILE_NOT_FOUND,           "file not found"},
                 {SERVER_NOT_IMPLEMENT,            "not implemented"},
                 {SERVER_BLOCKING_QUEUE_EMPTY,     "queue empty"},
-                {SERVER_GROUP_NOT_EXIST,          "group not exist"},
+                {SERVER_TABLE_NOT_EXIST,          "table not exist"},
                 {SERVER_INVALID_TIME_RANGE,       "invalid time range"},
                 {SERVER_INVALID_VECTOR_DIMENSION, "invalid vector dimension"},
         };

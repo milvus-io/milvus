@@ -38,7 +38,7 @@ engine::Options DBTest::GetOptions() {
 void DBTest::SetUp() {
     InitLog();
     auto options = GetOptions();
-    db_ = engine::DBFactory::Build(options, "Faiss,IDMap");
+    db_ = engine::DBFactory::Build(options);
 }
 
 void DBTest::TearDown() {

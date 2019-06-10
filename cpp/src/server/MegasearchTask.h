@@ -66,36 +66,6 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class CreateTablePartitionTask : public BaseTask {
-public:
-    static BaseTaskPtr Create(const thrift::CreateTablePartitionParam &param);
-
-protected:
-    CreateTablePartitionTask(const thrift::CreateTablePartitionParam &param);
-
-    ServerError OnExecute() override;
-
-
-private:
-    const thrift::CreateTablePartitionParam &param_;
-};
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class DeleteTablePartitionTask : public BaseTask {
-public:
-    static BaseTaskPtr Create(const thrift::DeleteTablePartitionParam &param);
-
-protected:
-    DeleteTablePartitionTask(const thrift::DeleteTablePartitionParam &param);
-
-    ServerError OnExecute() override;
-
-
-private:
-    const thrift::DeleteTablePartitionParam &param_;
-};
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class ShowTablesTask : public BaseTask {
 public:
     static BaseTaskPtr Create(std::vector<std::string>& tables);
@@ -133,14 +103,16 @@ private:
 class SearchVectorTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& table_name,
-                              const std::vector<thrift::QueryRecord>& record_array,
+                              const std::vector<thrift::RowRecord> & query_record_array,
+                              const std::vector<megasearch::thrift::Range> & query_range_array,
                               const int64_t top_k,
                               std::vector<thrift::TopKQueryResult>& result_array);
 
 protected:
     SearchVectorTask(const std::string& table_name,
+                     const std::vector<thrift::RowRecord> & query_record_array,
+                     const std::vector<megasearch::thrift::Range> & query_range_array,
                      const int64_t top_k,
-                     const std::vector<thrift::QueryRecord>& record_array,
                      std::vector<thrift::TopKQueryResult>& result_array);
 
     ServerError OnExecute() override;
@@ -148,8 +120,24 @@ protected:
 private:
     std::string table_name_;
     int64_t top_k_;
-    const std::vector<thrift::QueryRecord>& record_array_;
+    const std::vector<thrift::RowRecord>& record_array_;
+    const std::vector<megasearch::thrift::Range>& range_array_;
     std::vector<thrift::TopKQueryResult>& result_array_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class GetTableRowCountTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(const std::string& table_name, int64_t& row_count);
+
+protected:
+    GetTableRowCountTask(const std::string& table_name, int64_t& row_count);
+
+    ServerError OnExecute() override;
+
+private:
+    std::string table_name_;
+    int64_t& row_count_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

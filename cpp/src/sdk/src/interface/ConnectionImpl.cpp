@@ -56,16 +56,6 @@ ConnectionImpl::CreateTable(const TableSchema &param) {
 }
 
 Status
-ConnectionImpl::CreateTablePartition(const CreateTablePartitionParam &param) {
-    return client_proxy_->CreateTablePartition(param);
-}
-
-Status
-ConnectionImpl::DeleteTablePartition(const DeleteTablePartitionParam &param) {
-    return client_proxy_->DeleteTablePartition(param);
-}
-
-Status
 ConnectionImpl::DeleteTable(const std::string &table_name) {
     return client_proxy_->DeleteTable(table_name);
 }
@@ -79,15 +69,21 @@ ConnectionImpl::AddVector(const std::string &table_name,
 
 Status
 ConnectionImpl::SearchVector(const std::string &table_name,
-                             const std::vector<QueryRecord> &query_record_array,
-                             std::vector<TopKQueryResult> &topk_query_result_array,
-                             int64_t topk) {
-    return client_proxy_->SearchVector(table_name, query_record_array, topk_query_result_array, topk);
+                             const std::vector<RowRecord> &query_record_array,
+                             const std::vector<Range> &query_range_array,
+                             int64_t topk,
+                             std::vector<TopKQueryResult> &topk_query_result_array) {
+    return client_proxy_->SearchVector(table_name, query_record_array, query_range_array, topk, topk_query_result_array);
 }
 
 Status
 ConnectionImpl::DescribeTable(const std::string &table_name, TableSchema &table_schema) {
     return client_proxy_->DescribeTable(table_name, table_schema);
+}
+
+Status
+ConnectionImpl::GetTableRowCount(const std::string &table_name, int64_t &row_count) {
+    return client_proxy_->GetTableRowCount(table_name, row_count);
 }
 
 Status

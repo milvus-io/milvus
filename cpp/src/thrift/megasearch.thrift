@@ -17,104 +17,56 @@ enum ErrorCode {
     SUCCESS = 0,
     CONNECT_FAILED,
     PERMISSION_DENIED,
-	TABLE_NOT_EXISTS,
-	PARTITION_NOT_EXIST,
-	ILLEGAL_ARGUMENT,
-	ILLEGAL_RANGE,
-	ILLEGAL_DIMENSION,
+    TABLE_NOT_EXISTS,
+    ILLEGAL_ARGUMENT,
+    ILLEGAL_RANGE,
+    ILLEGAL_DIMENSION,
 }
 
 exception Exception {
-	1: ErrorCode code;
-	2: string reason;
+    1: ErrorCode code;
+    2: string reason;
 }
 
 
-/**
- * @brief Table column description
- */
-struct Column {
-    1: required i32 type;          ///< Column Type: 0:invalid/1:int8/2:int16/3:int32/4:int64/5:float32/6:float64/7:date/8:vector
-    2: required string name;       ///< Column name
-}
 
-/**
- * @brief Table vector column description
- */
-struct VectorColumn {
-    1: required Column base;                 ///< Base column schema
-    2: required i64 dimension;               ///< Vector dimension
-    3: required string index_type;           ///< Index type, optional: raw, ivf
-    4: bool store_raw_vector = false;        ///< Is vector self stored in the table
-}
-
-/**
  * @brief Table Schema
  */
 struct TableSchema {
-    1: required string table_name;                                        ///< Table name
-    2: required list<VectorColumn> vector_column_array;                   ///< Vector column description
-    3: optional list<Column> attribute_column_array;                      ///< Columns description
-    4: optional list<string> partition_column_name_array;                 ///< Partition column name
+    1: required string table_name;                   ///< Table name
+    2: i32 index_type = 0;                           ///< Index type, optional: 0-invalid, 1-idmap, 2-ivflat
+    3: i64 dimension = 0;                            ///< Vector dimension
+    4: bool store_raw_vector = false;                ///< Store raw data
 }
 
 /**
  * @brief Range Schema
  */
 struct Range {
-    1: required string start_value;     ///< Range start
-    2: required string end_value;       ///< Range stop
-}
-
-/**
- * @brief Create table partition parameters
- */
-struct CreateTablePartitionParam {
-    1: required string table_name;                              ///< Table name, vector/float32/float64 type column is not allowed for partition
-    2: required string partition_name;                          ///< Partition name, created partition name
-    3: required map<string, Range> range_map;              ///< Column name to Range map
-}
-
-
-/**
- * @brief Delete table partition parameters
- */
-struct DeleteTablePartitionParam {
-    1: required string table_name;                        ///< Table name
-    2: required list<string> partition_name_array;        ///< Partition name array
+    1: string start_value;                           ///< Range start
+    2: string end_value;                             ///< Range stop
 }
 
 /**
  * @brief Record inserted
  */
 struct RowRecord {
-    1: required map<string, binary> vector_map; ///< Vector columns
-    2: map<string, string> attribute_map;            ///< Other attribute columns
-}
-
-/**
- * @brief Query record
- */
-struct QueryRecord {
-    1: required map<string, binary> vector_map;                       ///< Query vectors
-    2: optional list<string> selected_column_array;                             ///< Output column array
-    3: optional map<string, list<Range>> partition_filter_column_map;      ///< Range used to select partitions
+    1: required binary vector_data;                  ///< Vector data, double array
 }
 
 /**
  * @brief Query result
  */
 struct QueryResult {
-    1: i64 id;                                     ///< Output result
-    2: double score;                               ///< Vector similarity score: 0 ~ 100
-    3: map<string, string> column_map;        ///< Other column
+    1: i64 id;                                       ///< Output result
+    2: double score;                                 ///< Vector similarity score: 0 ~ 100
 }
 
 /**
  * @brief TopK query result
  */
 struct TopKQueryResult {
-    1: list<QueryResult> query_result_arrays;      ///< TopK query result
+    1: list<QueryResult> query_result_arrays;        ///< TopK query result
 }
 
 service MegasearchService {
@@ -141,28 +93,6 @@ service MegasearchService {
 
 
     /**
-     * @brief Create table partition
-     *
-     * This method is used to create table partition.
-     *
-     * @param param, use to provide partition information to be created.
-     *
-     */
-    void CreateTablePartition(2: CreateTablePartitionParam param) throws(1: Exception e);
-
-
-    /**
-     * @brief Delete table partition
-     *
-     * This method is used to delete table partition.
-     *
-     * @param param, use to provide partition information to be deleted.
-     *
-     */
-    void DeleteTablePartition(2: DeleteTablePartitionParam param) throws(1: Exception e);
-
-
-    /**
      * @brief Add vector array to table
      *
      * This method is used to add vector array to table.
@@ -183,24 +113,39 @@ service MegasearchService {
      *
      * @param table_name, table_name is queried.
      * @param query_record_array, all vector are going to be queried.
+     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
      * @param topk, how many similarity vectors will be searched.
      *
      * @return query result array.
      */
     list<TopKQueryResult> SearchVector(2: string table_name,
-                                       3: list<QueryRecord> query_record_array,
-                                       4: i64 topk) throws(1: Exception e);
+                                       3: list<RowRecord> query_record_array,
+                                       4: list<Range> query_range_array,
+                                       5: i64 topk) throws(1: Exception e);
+
 
     /**
-     * @brief Show table information
+     * @brief Get table schema
      *
-     * This method is used to show table information.
+     * This method is used to get table schema.
      *
-     * @param table_name, which table is show.
+     * @param table_name, target table name.
      *
      * @return table schema
      */
     TableSchema DescribeTable(2: string table_name) throws(1: Exception e);
+
+
+    /**
+     * @brief Get table row count
+     *
+     * This method is used to get table row count.
+     *
+     * @param table_name, target table name.
+     *
+     * @return table row count
+     */
+    i64 GetTableRowCount(2: string table_name) throws(1: Exception e);
 
     /**
      * @brief List all tables in database
@@ -211,6 +156,7 @@ service MegasearchService {
      * @return table names.
      */
     list<string> ShowTables() throws(1: Exception e);
+
 
     /**
      * @brief Give the server status

@@ -5,6 +5,8 @@
  ******************************************************************************/
 #pragma once
 
+#include "ExecutionEngine.h"
+
 #include <vector>
 #include <map>
 #include <string>
@@ -19,12 +21,14 @@ const DateT EmptyDate = -1;
 typedef std::vector<DateT> DatesT;
 
 struct TableSchema {
-    size_t id;
-    std::string table_id;
-    size_t files_cnt = 0;
-    uint16_t dimension;
-    std::string location;
-    long created_on;
+    size_t id_;
+    std::string table_id_;
+    size_t files_cnt_ = 0;
+    uint16_t dimension_;
+    std::string location_;
+    long created_on_;
+    int engine_type_ = (int)EngineType::FAISS_IDMAP;
+    bool store_raw_data_ = false;
 }; // TableSchema
 
 struct TableFileSchema {
@@ -36,16 +40,17 @@ struct TableFileSchema {
         TO_DELETE,
     } FILE_TYPE;
 
-    size_t id;
-    std::string table_id;
-    std::string file_id;
-    int file_type = NEW;
-    size_t size;
-    DateT date = EmptyDate;
-    uint16_t dimension;
-    std::string location;
-    long updated_time;
-    long created_on;
+    size_t id_;
+    std::string table_id_;
+    int engine_type_ = (int)EngineType::FAISS_IDMAP;
+    std::string file_id_;
+    int file_type_ = NEW;
+    size_t size_;
+    DateT date_ = EmptyDate;
+    uint16_t dimension_;
+    std::string location_;
+    long updated_time_;
+    long created_on_;
 }; // TableFileSchema
 
 typedef std::vector<TableFileSchema> TableFilesSchema;
