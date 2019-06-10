@@ -217,6 +217,9 @@ Server::Stop() {
 
     StopService();
 
+#ifdef ENABLE_LICENSE
+    server::LicenseCheck::StopCountingDown();
+#endif
 
     SERVER_LOG_INFO << "Vecwise server closed";
 }

@@ -14,13 +14,6 @@ namespace server {
 
 class LicenseCheck {
  public:
-    static LicenseCheck &
-    GetInstance() {
-        static LicenseCheck instance;
-        return instance;
-    };
-
-
     // Part 1:  Legality check
     static ServerError
     LegalityCheck(const std::string &license_file_path);
@@ -35,6 +28,9 @@ class LicenseCheck {
 
     static ServerError
     StartCountingDown(const std::string &license_file_path);
+
+    static ServerError
+    StopCountingDown();
 
  private:
 

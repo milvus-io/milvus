@@ -1,5 +1,7 @@
 #include "LicenseCheck.h"
 #include <iostream>
+#include <thread>
+
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
 //#include <boost/foreach.hpp>
@@ -13,6 +15,16 @@ namespace zilliz {
 namespace vecwise {
 namespace server {
 
+using IO_SERVICE = boost::asio::io_service;
+
+namespace {
+IO_SERVICE& GetIOService() {
+    static IO_SERVICE io;
+    return io;
+}
+
+
+}
 
 // Part 1:  Legality check
 
@@ -84,11 +96,30 @@ LicenseCheck::AlterFile(const std::string &license_file_path,
 ServerError
 LicenseCheck::StartCountingDown(const std::string &license_file_path) {
 
-    if (!LicenseLibrary::IsFileExistent(license_file_path)) return SERVER_LICENSE_FILE_NOT_EXIST;
-    boost::asio::io_service io;
-    boost::asio::deadline_timer t(io, boost::posix_time::hours(1));
-    t.async_wait(boost::bind(AlterFile, license_file_path, boost::asio::placeholders::error, &t));
-    io.run();
+    if (!LicenseLibrary::IsFileExistent(license_file_path)) {
+        printf("license file not exist\n");
+        exit(1);
+    }
+
+    //create a thread to run AlterFile
+    std::thread io_thread([&]() {
+        boost::asio::io_service& io = GetIOService();
+        boost::asio::deadline_timer t(io, boost::posix_time::hours(1));
+        t.async_wait(boost::bind(AlterFile, license_file_path, boost::asio::placeholders::error, &t));
+        io.run();//this thread will block here
+    });
+    io_thread.detach();
+
+    return SERVER_SUCCESS;
+}
+
+ServerError
+LicenseCheck::StopCountingDown() {
+    boost::asio::io_service& io = GetIOService();
+    if(!io.stopped()) {
+        io.stop();
+    }
+
     return SERVER_SUCCESS;
 }
 
