@@ -1,5 +1,7 @@
 #include "LicenseCheck.h"
 #include <iostream>
+#include <thread>
+
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
 //#include <boost/foreach.hpp>
@@ -7,14 +9,21 @@
 #include <boost/filesystem/path.hpp>
 #include <boost/serialization/map.hpp>
 #include <boost/filesystem/operations.hpp>
+#include <boost/thread.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 
 namespace zilliz {
 namespace vecwise {
 namespace server {
 
+LicenseCheck::LicenseCheck() {
 
-// Part 1:  Legality check
+}
+
+LicenseCheck::~LicenseCheck() {
+    StopCountingDown();
+}
 
 ServerError
 LicenseCheck::LegalityCheck(const std::string &license_file_path) {
@@ -69,14 +78,16 @@ LicenseCheck::AlterFile(const std::string &license_file_path,
                         const boost::system::error_code &ec,
                         boost::asio::deadline_timer *pt) {
 
-    ServerError err = LegalityCheck(license_file_path);
-    if(err!=SERVER_SUCCESS)
-    {
+    ServerError err = LicenseCheck::LegalityCheck(license_file_path);
+    if(err!=SERVER_SUCCESS) {
+        printf("license file check error\n");
         exit(1);
     }
+
     printf("---runing---\n");
     pt->expires_at(pt->expires_at() + boost::posix_time::hours(1));
-    pt->async_wait(boost::bind(AlterFile, license_file_path, boost::asio::placeholders::error, pt));
+    pt->async_wait(boost::bind(LicenseCheck::AlterFile, license_file_path, boost::asio::placeholders::error, pt));
+
     return SERVER_SUCCESS;
 
 }
@@ -84,11 +95,34 @@ LicenseCheck::AlterFile(const std::string &license_file_path,
 ServerError
 LicenseCheck::StartCountingDown(const std::string &license_file_path) {
 
-    if (!LicenseLibrary::IsFileExistent(license_file_path)) return SERVER_LICENSE_FILE_NOT_EXIST;
-    boost::asio::io_service io;
-    boost::asio::deadline_timer t(io, boost::posix_time::hours(1));
-    t.async_wait(boost::bind(AlterFile, license_file_path, boost::asio::placeholders::error, &t));
-    io.run();
+    if (!LicenseLibrary::IsFileExistent(license_file_path)) {
+        printf("license file not exist\n");
+        exit(1);
+    }
+
+    //create a thread to run AlterFile
+    if(counting_thread_ == nullptr) {
+        counting_thread_ = std::make_shared<std::thread>([&]() {
+            boost::asio::deadline_timer t(io_service_, boost::posix_time::hours(1));
+            t.async_wait(boost::bind(LicenseCheck::AlterFile, license_file_path, boost::asio::placeholders::error, &t));
+            io_service_.run();//this thread will block here
+        });
+    }
+
+    return SERVER_SUCCESS;
+}
+
+ServerError
+LicenseCheck::StopCountingDown() {
+    if(!io_service_.stopped()) {
+        io_service_.stop();
+    }
+
+    if(counting_thread_ != nullptr) {
+        counting_thread_->join();
+        counting_thread_ = nullptr;
+    }
+
     return SERVER_SUCCESS;
 }
 
