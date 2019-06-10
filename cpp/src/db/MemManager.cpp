@@ -34,7 +34,7 @@ void MemVectors::Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
     pEE_->AddWithIds(n_, vectors_, vector_ids_.data());
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_), static_cast<int>(schema_.dimension), total_time);
+    server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_), static_cast<int>(schema_.dimension_), total_time);
 }
 
 size_t MemVectors::Total() const {

@@ -22,6 +22,7 @@ class MegasearchThreadPoolServer : public apache::thrift::server::TThreadPoolSer
         const std::shared_ptr<apache::thrift::protocol::TProtocolFactory>& protocolFactory,
         const std::shared_ptr<apache::thrift::concurrency::ThreadManager>& threadManager
         = apache::thrift::concurrency::ThreadManager::newSimpleThreadManager());
+
  protected:
     void onClientConnected(const std::shared_ptr<apache::thrift::server::TConnectedClient>& pClient) override ;
     void onClientDisconnected(apache::thrift::server::TConnectedClient* pClient) override ;
