@@ -18,7 +18,6 @@ int _kErrorCodeValues[] = {
   ErrorCode::CONNECT_FAILED,
   ErrorCode::PERMISSION_DENIED,
   ErrorCode::TABLE_NOT_EXISTS,
-  ErrorCode::PARTITION_NOT_EXIST,
   ErrorCode::ILLEGAL_ARGUMENT,
   ErrorCode::ILLEGAL_RANGE,
   ErrorCode::ILLEGAL_DIMENSION
@@ -28,12 +27,11 @@ const char* _kErrorCodeNames[] = {
   "CONNECT_FAILED",
   "PERMISSION_DENIED",
   "TABLE_NOT_EXISTS",
-  "PARTITION_NOT_EXIST",
   "ILLEGAL_ARGUMENT",
   "ILLEGAL_RANGE",
   "ILLEGAL_DIMENSION"
 };
-const std::map<int, const char*> _ErrorCode_VALUES_TO_NAMES(::apache::thrift::TEnumIterator(8, _kErrorCodeValues, _kErrorCodeNames), ::apache::thrift::TEnumIterator(-1, NULL, NULL));
+const std::map<int, const char*> _ErrorCode_VALUES_TO_NAMES(::apache::thrift::TEnumIterator(7, _kErrorCodeValues, _kErrorCodeNames), ::apache::thrift::TEnumIterator(-1, NULL, NULL));
 
 std::ostream& operator<<(std::ostream& out, const ErrorCode::type& val) {
   std::map<int, const char*>::const_iterator it = _ErrorCode_VALUES_TO_NAMES.find(val);
@@ -171,282 +169,6 @@ const char* Exception::what() const throw() {
 }
 
 
-Column::~Column() throw() {
-}
-
-
-void Column::__set_type(const int32_t val) {
-  this->type = val;
-}
-
-void Column::__set_name(const std::string& val) {
-  this->name = val;
-}
-std::ostream& operator<<(std::ostream& out, const Column& obj)
-{
-  obj.printTo(out);
-  return out;
-}
-
-
-uint32_t Column::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-  bool isset_type = false;
-  bool isset_name = false;
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 1:
-        if (ftype == ::apache::thrift::protocol::T_I32) {
-          xfer += iprot->readI32(this->type);
-          isset_type = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      case 2:
-        if (ftype == ::apache::thrift::protocol::T_STRING) {
-          xfer += iprot->readString(this->name);
-          isset_name = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  if (!isset_type)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  if (!isset_name)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  return xfer;
-}
-
-uint32_t Column::write(::apache::thrift::protocol::TProtocol* oprot) const {
-  uint32_t xfer = 0;
-  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("Column");
-
-  xfer += oprot->writeFieldBegin("type", ::apache::thrift::protocol::T_I32, 1);
-  xfer += oprot->writeI32(this->type);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldBegin("name", ::apache::thrift::protocol::T_STRING, 2);
-  xfer += oprot->writeString(this->name);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-void swap(Column &a, Column &b) {
-  using ::std::swap;
-  swap(a.type, b.type);
-  swap(a.name, b.name);
-}
-
-Column::Column(const Column& other3) {
-  type = other3.type;
-  name = other3.name;
-}
-Column& Column::operator=(const Column& other4) {
-  type = other4.type;
-  name = other4.name;
-  return *this;
-}
-void Column::printTo(std::ostream& out) const {
-  using ::apache::thrift::to_string;
-  out << "Column(";
-  out << "type=" << to_string(type);
-  out << ", " << "name=" << to_string(name);
-  out << ")";
-}
-
-
-VectorColumn::~VectorColumn() throw() {
-}
-
-
-void VectorColumn::__set_base(const Column& val) {
-  this->base = val;
-}
-
-void VectorColumn::__set_dimension(const int64_t val) {
-  this->dimension = val;
-}
-
-void VectorColumn::__set_index_type(const std::string& val) {
-  this->index_type = val;
-}
-
-void VectorColumn::__set_store_raw_vector(const bool val) {
-  this->store_raw_vector = val;
-}
-std::ostream& operator<<(std::ostream& out, const VectorColumn& obj)
-{
-  obj.printTo(out);
-  return out;
-}
-
-
-uint32_t VectorColumn::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-  bool isset_base = false;
-  bool isset_dimension = false;
-  bool isset_index_type = false;
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 1:
-        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
-          xfer += this->base.read(iprot);
-          isset_base = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      case 2:
-        if (ftype == ::apache::thrift::protocol::T_I64) {
-          xfer += iprot->readI64(this->dimension);
-          isset_dimension = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      case 3:
-        if (ftype == ::apache::thrift::protocol::T_STRING) {
-          xfer += iprot->readString(this->index_type);
-          isset_index_type = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      case 4:
-        if (ftype == ::apache::thrift::protocol::T_BOOL) {
-          xfer += iprot->readBool(this->store_raw_vector);
-          this->__isset.store_raw_vector = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  if (!isset_base)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  if (!isset_dimension)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  if (!isset_index_type)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  return xfer;
-}
-
-uint32_t VectorColumn::write(::apache::thrift::protocol::TProtocol* oprot) const {
-  uint32_t xfer = 0;
-  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("VectorColumn");
-
-  xfer += oprot->writeFieldBegin("base", ::apache::thrift::protocol::T_STRUCT, 1);
-  xfer += this->base.write(oprot);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldBegin("dimension", ::apache::thrift::protocol::T_I64, 2);
-  xfer += oprot->writeI64(this->dimension);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldBegin("index_type", ::apache::thrift::protocol::T_STRING, 3);
-  xfer += oprot->writeString(this->index_type);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldBegin("store_raw_vector", ::apache::thrift::protocol::T_BOOL, 4);
-  xfer += oprot->writeBool(this->store_raw_vector);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-void swap(VectorColumn &a, VectorColumn &b) {
-  using ::std::swap;
-  swap(a.base, b.base);
-  swap(a.dimension, b.dimension);
-  swap(a.index_type, b.index_type);
-  swap(a.store_raw_vector, b.store_raw_vector);
-  swap(a.__isset, b.__isset);
-}
-
-VectorColumn::VectorColumn(const VectorColumn& other5) {
-  base = other5.base;
-  dimension = other5.dimension;
-  index_type = other5.index_type;
-  store_raw_vector = other5.store_raw_vector;
-  __isset = other5.__isset;
-}
-VectorColumn& VectorColumn::operator=(const VectorColumn& other6) {
-  base = other6.base;
-  dimension = other6.dimension;
-  index_type = other6.index_type;
-  store_raw_vector = other6.store_raw_vector;
-  __isset = other6.__isset;
-  return *this;
-}
-void VectorColumn::printTo(std::ostream& out) const {
-  using ::apache::thrift::to_string;
-  out << "VectorColumn(";
-  out << "base=" << to_string(base);
-  out << ", " << "dimension=" << to_string(dimension);
-  out << ", " << "index_type=" << to_string(index_type);
-  out << ", " << "store_raw_vector=" << to_string(store_raw_vector);
-  out << ")";
-}
-
-
 TableSchema::~TableSchema() throw() {
 }
 
@@ -455,18 +177,16 @@ void TableSchema::__set_table_name(const std::string& val) {
   this->table_name = val;
 }
 
-void TableSchema::__set_vector_column_array(const std::vector<VectorColumn> & val) {
-  this->vector_column_array = val;
+void TableSchema::__set_index_type(const int32_t val) {
+  this->index_type = val;
 }
 
-void TableSchema::__set_attribute_column_array(const std::vector<Column> & val) {
-  this->attribute_column_array = val;
-__isset.attribute_column_array = true;
+void TableSchema::__set_dimension(const int64_t val) {
+  this->dimension = val;
 }
 
-void TableSchema::__set_partition_column_name_array(const std::vector<std::string> & val) {
-  this->partition_column_name_array = val;
-__isset.partition_column_name_array = true;
+void TableSchema::__set_store_raw_vector(const bool val) {
+  this->store_raw_vector = val;
 }
 std::ostream& operator<<(std::ostream& out, const TableSchema& obj)
 {
@@ -488,7 +208,6 @@ uint32_t TableSchema::read(::apache::thrift::protocol::TProtocol* iprot) {
   using ::apache::thrift::protocol::TProtocolException;
 
   bool isset_table_name = false;
-  bool isset_vector_column_array = false;
 
   while (true)
   {
@@ -507,61 +226,25 @@ uint32_t TableSchema::read(::apache::thrift::protocol::TProtocol* iprot) {
         }
         break;
       case 2:
-        if (ftype == ::apache::thrift::protocol::T_LIST) {
-          {
-            this->vector_column_array.clear();
-            uint32_t _size7;
-            ::apache::thrift::protocol::TType _etype10;
-            xfer += iprot->readListBegin(_etype10, _size7);
-            this->vector_column_array.resize(_size7);
-            uint32_t _i11;
-            for (_i11 = 0; _i11 < _size7; ++_i11)
-            {
-              xfer += this->vector_column_array[_i11].read(iprot);
-            }
-            xfer += iprot->readListEnd();
-          }
-          isset_vector_column_array = true;
+        if (ftype == ::apache::thrift::protocol::T_I32) {
+          xfer += iprot->readI32(this->index_type);
+          this->__isset.index_type = true;
         } else {
           xfer += iprot->skip(ftype);
         }
         break;
       case 3:
-        if (ftype == ::apache::thrift::protocol::T_LIST) {
-          {
-            this->attribute_column_array.clear();
-            uint32_t _size12;
-            ::apache::thrift::protocol::TType _etype15;
-            xfer += iprot->readListBegin(_etype15, _size12);
-            this->attribute_column_array.resize(_size12);
-            uint32_t _i16;
-            for (_i16 = 0; _i16 < _size12; ++_i16)
-            {
-              xfer += this->attribute_column_array[_i16].read(iprot);
-            }
-            xfer += iprot->readListEnd();
-          }
-          this->__isset.attribute_column_array = true;
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += iprot->readI64(this->dimension);
+          this->__isset.dimension = true;
         } else {
           xfer += iprot->skip(ftype);
         }
         break;
       case 4:
-        if (ftype == ::apache::thrift::protocol::T_LIST) {
-          {
-            this->partition_column_name_array.clear();
-            uint32_t _size17;
-            ::apache::thrift::protocol::TType _etype20;
-            xfer += iprot->readListBegin(_etype20, _size17);
-            this->partition_column_name_array.resize(_size17);
-            uint32_t _i21;
-            for (_i21 = 0; _i21 < _size17; ++_i21)
-            {
-              xfer += iprot->readString(this->partition_column_name_array[_i21]);
-            }
-            xfer += iprot->readListEnd();
-          }
-          this->__isset.partition_column_name_array = true;
+        if (ftype == ::apache::thrift::protocol::T_BOOL) {
+          xfer += iprot->readBool(this->store_raw_vector);
+          this->__isset.store_raw_vector = true;
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -577,8 +260,6 @@ uint32_t TableSchema::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   if (!isset_table_name)
     throw TProtocolException(TProtocolException::INVALID_DATA);
-  if (!isset_vector_column_array)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
   return xfer;
 }
 
@@ -591,44 +272,18 @@ uint32_t TableSchema::write(::apache::thrift::protocol::TProtocol* oprot) const 
   xfer += oprot->writeString(this->table_name);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("vector_column_array", ::apache::thrift::protocol::T_LIST, 2);
-  {
-    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->vector_column_array.size()));
-    std::vector<VectorColumn> ::const_iterator _iter22;
-    for (_iter22 = this->vector_column_array.begin(); _iter22 != this->vector_column_array.end(); ++_iter22)
-    {
-      xfer += (*_iter22).write(oprot);
-    }
-    xfer += oprot->writeListEnd();
-  }
+  xfer += oprot->writeFieldBegin("index_type", ::apache::thrift::protocol::T_I32, 2);
+  xfer += oprot->writeI32(this->index_type);
   xfer += oprot->writeFieldEnd();
 
-  if (this->__isset.attribute_column_array) {
-    xfer += oprot->writeFieldBegin("attribute_column_array", ::apache::thrift::protocol::T_LIST, 3);
-    {
-      xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->attribute_column_array.size()));
-      std::vector<Column> ::const_iterator _iter23;
-      for (_iter23 = this->attribute_column_array.begin(); _iter23 != this->attribute_column_array.end(); ++_iter23)
-      {
-        xfer += (*_iter23).write(oprot);
-      }
-      xfer += oprot->writeListEnd();
-    }
-    xfer += oprot->writeFieldEnd();
-  }
-  if (this->__isset.partition_column_name_array) {
-    xfer += oprot->writeFieldBegin("partition_column_name_array", ::apache::thrift::protocol::T_LIST, 4);
-    {
-      xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->partition_column_name_array.size()));
-      std::vector<std::string> ::const_iterator _iter24;
-      for (_iter24 = this->partition_column_name_array.begin(); _iter24 != this->partition_column_name_array.end(); ++_iter24)
-      {
-        xfer += oprot->writeString((*_iter24));
-      }
-      xfer += oprot->writeListEnd();
-    }
-    xfer += oprot->writeFieldEnd();
-  }
+  xfer += oprot->writeFieldBegin("dimension", ::apache::thrift::protocol::T_I64, 3);
+  xfer += oprot->writeI64(this->dimension);
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("store_raw_vector", ::apache::thrift::protocol::T_BOOL, 4);
+  xfer += oprot->writeBool(this->store_raw_vector);
+  xfer += oprot->writeFieldEnd();
+
   xfer += oprot->writeFieldStop();
   xfer += oprot->writeStructEnd();
   return xfer;
@@ -637,34 +292,34 @@ uint32_t TableSchema::write(::apache::thrift::protocol::TProtocol* oprot) const 
 void swap(TableSchema &a, TableSchema &b) {
   using ::std::swap;
   swap(a.table_name, b.table_name);
-  swap(a.vector_column_array, b.vector_column_array);
-  swap(a.attribute_column_array, b.attribute_column_array);
-  swap(a.partition_column_name_array, b.partition_column_name_array);
+  swap(a.index_type, b.index_type);
+  swap(a.dimension, b.dimension);
+  swap(a.store_raw_vector, b.store_raw_vector);
   swap(a.__isset, b.__isset);
 }
 
-TableSchema::TableSchema(const TableSchema& other25) {
-  table_name = other25.table_name;
-  vector_column_array = other25.vector_column_array;
-  attribute_column_array = other25.attribute_column_array;
-  partition_column_name_array = other25.partition_column_name_array;
-  __isset = other25.__isset;
+TableSchema::TableSchema(const TableSchema& other3) {
+  table_name = other3.table_name;
+  index_type = other3.index_type;
+  dimension = other3.dimension;
+  store_raw_vector = other3.store_raw_vector;
+  __isset = other3.__isset;
 }
-TableSchema& TableSchema::operator=(const TableSchema& other26) {
-  table_name = other26.table_name;
-  vector_column_array = other26.vector_column_array;
-  attribute_column_array = other26.attribute_column_array;
-  partition_column_name_array = other26.partition_column_name_array;
-  __isset = other26.__isset;
+TableSchema& TableSchema::operator=(const TableSchema& other4) {
+  table_name = other4.table_name;
+  index_type = other4.index_type;
+  dimension = other4.dimension;
+  store_raw_vector = other4.store_raw_vector;
+  __isset = other4.__isset;
   return *this;
 }
 void TableSchema::printTo(std::ostream& out) const {
   using ::apache::thrift::to_string;
   out << "TableSchema(";
   out << "table_name=" << to_string(table_name);
-  out << ", " << "vector_column_array=" << to_string(vector_column_array);
-  out << ", " << "attribute_column_array="; (__isset.attribute_column_array ? (out << to_string(attribute_column_array)) : (out << "<null>"));
-  out << ", " << "partition_column_name_array="; (__isset.partition_column_name_array ? (out << to_string(partition_column_name_array)) : (out << "<null>"));
+  out << ", " << "index_type=" << to_string(index_type);
+  out << ", " << "dimension=" << to_string(dimension);
+  out << ", " << "store_raw_vector=" << to_string(store_raw_vector);
   out << ")";
 }
 
@@ -699,8 +354,6 @@ uint32_t Range::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   using ::apache::thrift::protocol::TProtocolException;
 
-  bool isset_start_value = false;
-  bool isset_end_value = false;
 
   while (true)
   {
@@ -713,7 +366,7 @@ uint32_t Range::read(::apache::thrift::protocol::TProtocol* iprot) {
       case 1:
         if (ftype == ::apache::thrift::protocol::T_STRING) {
           xfer += iprot->readString(this->start_value);
-          isset_start_value = true;
+          this->__isset.start_value = true;
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -721,7 +374,7 @@ uint32_t Range::read(::apache::thrift::protocol::TProtocol* iprot) {
       case 2:
         if (ftype == ::apache::thrift::protocol::T_STRING) {
           xfer += iprot->readString(this->end_value);
-          isset_end_value = true;
+          this->__isset.end_value = true;
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -735,10 +388,6 @@ uint32_t Range::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   xfer += iprot->readStructEnd();
 
-  if (!isset_start_value)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  if (!isset_end_value)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
   return xfer;
 }
 
@@ -764,15 +413,18 @@ void swap(Range &a, Range &b) {
   using ::std::swap;
   swap(a.start_value, b.start_value);
   swap(a.end_value, b.end_value);
+  swap(a.__isset, b.__isset);
 }
 
-Range::Range(const Range& other27) {
-  start_value = other27.start_value;
-  end_value = other27.end_value;
+Range::Range(const Range& other5) {
+  start_value = other5.start_value;
+  end_value = other5.end_value;
+  __isset = other5.__isset;
 }
-Range& Range::operator=(const Range& other28) {
-  start_value = other28.start_value;
-  end_value = other28.end_value;
+Range& Range::operator=(const Range& other6) {
+  start_value = other6.start_value;
+  end_value = other6.end_value;
+  __isset = other6.__isset;
   return *this;
 }
 void Range::printTo(std::ostream& out) const {
@@ -784,313 +436,12 @@ void Range::printTo(std::ostream& out) const {
 }
 
 
-CreateTablePartitionParam::~CreateTablePartitionParam() throw() {
-}
-
-
-void CreateTablePartitionParam::__set_table_name(const std::string& val) {
-  this->table_name = val;
-}
-
-void CreateTablePartitionParam::__set_partition_name(const std::string& val) {
-  this->partition_name = val;
-}
-
-void CreateTablePartitionParam::__set_range_map(const std::map<std::string, Range> & val) {
-  this->range_map = val;
-}
-std::ostream& operator<<(std::ostream& out, const CreateTablePartitionParam& obj)
-{
-  obj.printTo(out);
-  return out;
-}
-
-
-uint32_t CreateTablePartitionParam::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-  bool isset_table_name = false;
-  bool isset_partition_name = false;
-  bool isset_range_map = false;
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 1:
-        if (ftype == ::apache::thrift::protocol::T_STRING) {
-          xfer += iprot->readString(this->table_name);
-          isset_table_name = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      case 2:
-        if (ftype == ::apache::thrift::protocol::T_STRING) {
-          xfer += iprot->readString(this->partition_name);
-          isset_partition_name = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      case 3:
-        if (ftype == ::apache::thrift::protocol::T_MAP) {
-          {
-            this->range_map.clear();
-            uint32_t _size29;
-            ::apache::thrift::protocol::TType _ktype30;
-            ::apache::thrift::protocol::TType _vtype31;
-            xfer += iprot->readMapBegin(_ktype30, _vtype31, _size29);
-            uint32_t _i33;
-            for (_i33 = 0; _i33 < _size29; ++_i33)
-            {
-              std::string _key34;
-              xfer += iprot->readString(_key34);
-              Range& _val35 = this->range_map[_key34];
-              xfer += _val35.read(iprot);
-            }
-            xfer += iprot->readMapEnd();
-          }
-          isset_range_map = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  if (!isset_table_name)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  if (!isset_partition_name)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  if (!isset_range_map)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  return xfer;
-}
-
-uint32_t CreateTablePartitionParam::write(::apache::thrift::protocol::TProtocol* oprot) const {
-  uint32_t xfer = 0;
-  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("CreateTablePartitionParam");
-
-  xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 1);
-  xfer += oprot->writeString(this->table_name);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldBegin("partition_name", ::apache::thrift::protocol::T_STRING, 2);
-  xfer += oprot->writeString(this->partition_name);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldBegin("range_map", ::apache::thrift::protocol::T_MAP, 3);
-  {
-    xfer += oprot->writeMapBegin(::apache::thrift::protocol::T_STRING, ::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->range_map.size()));
-    std::map<std::string, Range> ::const_iterator _iter36;
-    for (_iter36 = this->range_map.begin(); _iter36 != this->range_map.end(); ++_iter36)
-    {
-      xfer += oprot->writeString(_iter36->first);
-      xfer += _iter36->second.write(oprot);
-    }
-    xfer += oprot->writeMapEnd();
-  }
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-void swap(CreateTablePartitionParam &a, CreateTablePartitionParam &b) {
-  using ::std::swap;
-  swap(a.table_name, b.table_name);
-  swap(a.partition_name, b.partition_name);
-  swap(a.range_map, b.range_map);
-}
-
-CreateTablePartitionParam::CreateTablePartitionParam(const CreateTablePartitionParam& other37) {
-  table_name = other37.table_name;
-  partition_name = other37.partition_name;
-  range_map = other37.range_map;
-}
-CreateTablePartitionParam& CreateTablePartitionParam::operator=(const CreateTablePartitionParam& other38) {
-  table_name = other38.table_name;
-  partition_name = other38.partition_name;
-  range_map = other38.range_map;
-  return *this;
-}
-void CreateTablePartitionParam::printTo(std::ostream& out) const {
-  using ::apache::thrift::to_string;
-  out << "CreateTablePartitionParam(";
-  out << "table_name=" << to_string(table_name);
-  out << ", " << "partition_name=" << to_string(partition_name);
-  out << ", " << "range_map=" << to_string(range_map);
-  out << ")";
-}
-
-
-DeleteTablePartitionParam::~DeleteTablePartitionParam() throw() {
-}
-
-
-void DeleteTablePartitionParam::__set_table_name(const std::string& val) {
-  this->table_name = val;
-}
-
-void DeleteTablePartitionParam::__set_partition_name_array(const std::vector<std::string> & val) {
-  this->partition_name_array = val;
-}
-std::ostream& operator<<(std::ostream& out, const DeleteTablePartitionParam& obj)
-{
-  obj.printTo(out);
-  return out;
-}
-
-
-uint32_t DeleteTablePartitionParam::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-  bool isset_table_name = false;
-  bool isset_partition_name_array = false;
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 1:
-        if (ftype == ::apache::thrift::protocol::T_STRING) {
-          xfer += iprot->readString(this->table_name);
-          isset_table_name = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      case 2:
-        if (ftype == ::apache::thrift::protocol::T_LIST) {
-          {
-            this->partition_name_array.clear();
-            uint32_t _size39;
-            ::apache::thrift::protocol::TType _etype42;
-            xfer += iprot->readListBegin(_etype42, _size39);
-            this->partition_name_array.resize(_size39);
-            uint32_t _i43;
-            for (_i43 = 0; _i43 < _size39; ++_i43)
-            {
-              xfer += iprot->readString(this->partition_name_array[_i43]);
-            }
-            xfer += iprot->readListEnd();
-          }
-          isset_partition_name_array = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  if (!isset_table_name)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  if (!isset_partition_name_array)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  return xfer;
-}
-
-uint32_t DeleteTablePartitionParam::write(::apache::thrift::protocol::TProtocol* oprot) const {
-  uint32_t xfer = 0;
-  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("DeleteTablePartitionParam");
-
-  xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 1);
-  xfer += oprot->writeString(this->table_name);
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldBegin("partition_name_array", ::apache::thrift::protocol::T_LIST, 2);
-  {
-    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->partition_name_array.size()));
-    std::vector<std::string> ::const_iterator _iter44;
-    for (_iter44 = this->partition_name_array.begin(); _iter44 != this->partition_name_array.end(); ++_iter44)
-    {
-      xfer += oprot->writeString((*_iter44));
-    }
-    xfer += oprot->writeListEnd();
-  }
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-void swap(DeleteTablePartitionParam &a, DeleteTablePartitionParam &b) {
-  using ::std::swap;
-  swap(a.table_name, b.table_name);
-  swap(a.partition_name_array, b.partition_name_array);
-}
-
-DeleteTablePartitionParam::DeleteTablePartitionParam(const DeleteTablePartitionParam& other45) {
-  table_name = other45.table_name;
-  partition_name_array = other45.partition_name_array;
-}
-DeleteTablePartitionParam& DeleteTablePartitionParam::operator=(const DeleteTablePartitionParam& other46) {
-  table_name = other46.table_name;
-  partition_name_array = other46.partition_name_array;
-  return *this;
-}
-void DeleteTablePartitionParam::printTo(std::ostream& out) const {
-  using ::apache::thrift::to_string;
-  out << "DeleteTablePartitionParam(";
-  out << "table_name=" << to_string(table_name);
-  out << ", " << "partition_name_array=" << to_string(partition_name_array);
-  out << ")";
-}
-
-
 RowRecord::~RowRecord() throw() {
 }
 
 
-void RowRecord::__set_vector_map(const std::map<std::string, std::string> & val) {
-  this->vector_map = val;
-}
-
-void RowRecord::__set_attribute_map(const std::map<std::string, std::string> & val) {
-  this->attribute_map = val;
+void RowRecord::__set_vector_data(const std::string& val) {
+  this->vector_data = val;
 }
 std::ostream& operator<<(std::ostream& out, const RowRecord& obj)
 {
@@ -1111,7 +462,7 @@ uint32_t RowRecord::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   using ::apache::thrift::protocol::TProtocolException;
 
-  bool isset_vector_map = false;
+  bool isset_vector_data = false;
 
   while (true)
   {
@@ -1122,47 +473,9 @@ uint32_t RowRecord::read(::apache::thrift::protocol::TProtocol* iprot) {
     switch (fid)
     {
       case 1:
-        if (ftype == ::apache::thrift::protocol::T_MAP) {
-          {
-            this->vector_map.clear();
-            uint32_t _size47;
-            ::apache::thrift::protocol::TType _ktype48;
-            ::apache::thrift::protocol::TType _vtype49;
-            xfer += iprot->readMapBegin(_ktype48, _vtype49, _size47);
-            uint32_t _i51;
-            for (_i51 = 0; _i51 < _size47; ++_i51)
-            {
-              std::string _key52;
-              xfer += iprot->readString(_key52);
-              std::string& _val53 = this->vector_map[_key52];
-              xfer += iprot->readBinary(_val53);
-            }
-            xfer += iprot->readMapEnd();
-          }
-          isset_vector_map = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      case 2:
-        if (ftype == ::apache::thrift::protocol::T_MAP) {
-          {
-            this->attribute_map.clear();
-            uint32_t _size54;
-            ::apache::thrift::protocol::TType _ktype55;
-            ::apache::thrift::protocol::TType _vtype56;
-            xfer += iprot->readMapBegin(_ktype55, _vtype56, _size54);
-            uint32_t _i58;
-            for (_i58 = 0; _i58 < _size54; ++_i58)
-            {
-              std::string _key59;
-              xfer += iprot->readString(_key59);
-              std::string& _val60 = this->attribute_map[_key59];
-              xfer += iprot->readString(_val60);
-            }
-            xfer += iprot->readMapEnd();
-          }
-          this->__isset.attribute_map = true;
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += iprot->readBinary(this->vector_data);
+          isset_vector_data = true;
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -1176,7 +489,7 @@ uint32_t RowRecord::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   xfer += iprot->readStructEnd();
 
-  if (!isset_vector_map)
+  if (!isset_vector_data)
     throw TProtocolException(TProtocolException::INVALID_DATA);
   return xfer;
 }
@@ -1186,30 +499,8 @@ uint32_t RowRecord::write(::apache::thrift::protocol::TProtocol* oprot) const {
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
   xfer += oprot->writeStructBegin("RowRecord");
 
-  xfer += oprot->writeFieldBegin("vector_map", ::apache::thrift::protocol::T_MAP, 1);
-  {
-    xfer += oprot->writeMapBegin(::apache::thrift::protocol::T_STRING, ::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->vector_map.size()));
-    std::map<std::string, std::string> ::const_iterator _iter61;
-    for (_iter61 = this->vector_map.begin(); _iter61 != this->vector_map.end(); ++_iter61)
-    {
-      xfer += oprot->writeString(_iter61->first);
-      xfer += oprot->writeBinary(_iter61->second);
-    }
-    xfer += oprot->writeMapEnd();
-  }
-  xfer += oprot->writeFieldEnd();
-
-  xfer += oprot->writeFieldBegin("attribute_map", ::apache::thrift::protocol::T_MAP, 2);
-  {
-    xfer += oprot->writeMapBegin(::apache::thrift::protocol::T_STRING, ::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->attribute_map.size()));
-    std::map<std::string, std::string> ::const_iterator _iter62;
-    for (_iter62 = this->attribute_map.begin(); _iter62 != this->attribute_map.end(); ++_iter62)
-    {
-      xfer += oprot->writeString(_iter62->first);
-      xfer += oprot->writeString(_iter62->second);
-    }
-    xfer += oprot->writeMapEnd();
-  }
+  xfer += oprot->writeFieldBegin("vector_data", ::apache::thrift::protocol::T_STRING, 1);
+  xfer += oprot->writeBinary(this->vector_data);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -1219,254 +510,20 @@ uint32_t RowRecord::write(::apache::thrift::protocol::TProtocol* oprot) const {
 
 void swap(RowRecord &a, RowRecord &b) {
   using ::std::swap;
-  swap(a.vector_map, b.vector_map);
-  swap(a.attribute_map, b.attribute_map);
-  swap(a.__isset, b.__isset);
+  swap(a.vector_data, b.vector_data);
 }
 
-RowRecord::RowRecord(const RowRecord& other63) {
-  vector_map = other63.vector_map;
-  attribute_map = other63.attribute_map;
-  __isset = other63.__isset;
+RowRecord::RowRecord(const RowRecord& other7) {
+  vector_data = other7.vector_data;
 }
-RowRecord& RowRecord::operator=(const RowRecord& other64) {
-  vector_map = other64.vector_map;
-  attribute_map = other64.attribute_map;
-  __isset = other64.__isset;
+RowRecord& RowRecord::operator=(const RowRecord& other8) {
+  vector_data = other8.vector_data;
   return *this;
 }
 void RowRecord::printTo(std::ostream& out) const {
   using ::apache::thrift::to_string;
   out << "RowRecord(";
-  out << "vector_map=" << to_string(vector_map);
-  out << ", " << "attribute_map=" << to_string(attribute_map);
-  out << ")";
-}
-
-
-QueryRecord::~QueryRecord() throw() {
-}
-
-
-void QueryRecord::__set_vector_map(const std::map<std::string, std::string> & val) {
-  this->vector_map = val;
-}
-
-void QueryRecord::__set_selected_column_array(const std::vector<std::string> & val) {
-  this->selected_column_array = val;
-__isset.selected_column_array = true;
-}
-
-void QueryRecord::__set_partition_filter_column_map(const std::map<std::string, std::vector<Range> > & val) {
-  this->partition_filter_column_map = val;
-__isset.partition_filter_column_map = true;
-}
-std::ostream& operator<<(std::ostream& out, const QueryRecord& obj)
-{
-  obj.printTo(out);
-  return out;
-}
-
-
-uint32_t QueryRecord::read(::apache::thrift::protocol::TProtocol* iprot) {
-
-  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
-  uint32_t xfer = 0;
-  std::string fname;
-  ::apache::thrift::protocol::TType ftype;
-  int16_t fid;
-
-  xfer += iprot->readStructBegin(fname);
-
-  using ::apache::thrift::protocol::TProtocolException;
-
-  bool isset_vector_map = false;
-
-  while (true)
-  {
-    xfer += iprot->readFieldBegin(fname, ftype, fid);
-    if (ftype == ::apache::thrift::protocol::T_STOP) {
-      break;
-    }
-    switch (fid)
-    {
-      case 1:
-        if (ftype == ::apache::thrift::protocol::T_MAP) {
-          {
-            this->vector_map.clear();
-            uint32_t _size65;
-            ::apache::thrift::protocol::TType _ktype66;
-            ::apache::thrift::protocol::TType _vtype67;
-            xfer += iprot->readMapBegin(_ktype66, _vtype67, _size65);
-            uint32_t _i69;
-            for (_i69 = 0; _i69 < _size65; ++_i69)
-            {
-              std::string _key70;
-              xfer += iprot->readString(_key70);
-              std::string& _val71 = this->vector_map[_key70];
-              xfer += iprot->readBinary(_val71);
-            }
-            xfer += iprot->readMapEnd();
-          }
-          isset_vector_map = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      case 2:
-        if (ftype == ::apache::thrift::protocol::T_LIST) {
-          {
-            this->selected_column_array.clear();
-            uint32_t _size72;
-            ::apache::thrift::protocol::TType _etype75;
-            xfer += iprot->readListBegin(_etype75, _size72);
-            this->selected_column_array.resize(_size72);
-            uint32_t _i76;
-            for (_i76 = 0; _i76 < _size72; ++_i76)
-            {
-              xfer += iprot->readString(this->selected_column_array[_i76]);
-            }
-            xfer += iprot->readListEnd();
-          }
-          this->__isset.selected_column_array = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      case 3:
-        if (ftype == ::apache::thrift::protocol::T_MAP) {
-          {
-            this->partition_filter_column_map.clear();
-            uint32_t _size77;
-            ::apache::thrift::protocol::TType _ktype78;
-            ::apache::thrift::protocol::TType _vtype79;
-            xfer += iprot->readMapBegin(_ktype78, _vtype79, _size77);
-            uint32_t _i81;
-            for (_i81 = 0; _i81 < _size77; ++_i81)
-            {
-              std::string _key82;
-              xfer += iprot->readString(_key82);
-              std::vector<Range> & _val83 = this->partition_filter_column_map[_key82];
-              {
-                _val83.clear();
-                uint32_t _size84;
-                ::apache::thrift::protocol::TType _etype87;
-                xfer += iprot->readListBegin(_etype87, _size84);
-                _val83.resize(_size84);
-                uint32_t _i88;
-                for (_i88 = 0; _i88 < _size84; ++_i88)
-                {
-                  xfer += _val83[_i88].read(iprot);
-                }
-                xfer += iprot->readListEnd();
-              }
-            }
-            xfer += iprot->readMapEnd();
-          }
-          this->__isset.partition_filter_column_map = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
-      default:
-        xfer += iprot->skip(ftype);
-        break;
-    }
-    xfer += iprot->readFieldEnd();
-  }
-
-  xfer += iprot->readStructEnd();
-
-  if (!isset_vector_map)
-    throw TProtocolException(TProtocolException::INVALID_DATA);
-  return xfer;
-}
-
-uint32_t QueryRecord::write(::apache::thrift::protocol::TProtocol* oprot) const {
-  uint32_t xfer = 0;
-  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("QueryRecord");
-
-  xfer += oprot->writeFieldBegin("vector_map", ::apache::thrift::protocol::T_MAP, 1);
-  {
-    xfer += oprot->writeMapBegin(::apache::thrift::protocol::T_STRING, ::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->vector_map.size()));
-    std::map<std::string, std::string> ::const_iterator _iter89;
-    for (_iter89 = this->vector_map.begin(); _iter89 != this->vector_map.end(); ++_iter89)
-    {
-      xfer += oprot->writeString(_iter89->first);
-      xfer += oprot->writeBinary(_iter89->second);
-    }
-    xfer += oprot->writeMapEnd();
-  }
-  xfer += oprot->writeFieldEnd();
-
-  if (this->__isset.selected_column_array) {
-    xfer += oprot->writeFieldBegin("selected_column_array", ::apache::thrift::protocol::T_LIST, 2);
-    {
-      xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->selected_column_array.size()));
-      std::vector<std::string> ::const_iterator _iter90;
-      for (_iter90 = this->selected_column_array.begin(); _iter90 != this->selected_column_array.end(); ++_iter90)
-      {
-        xfer += oprot->writeString((*_iter90));
-      }
-      xfer += oprot->writeListEnd();
-    }
-    xfer += oprot->writeFieldEnd();
-  }
-  if (this->__isset.partition_filter_column_map) {
-    xfer += oprot->writeFieldBegin("partition_filter_column_map", ::apache::thrift::protocol::T_MAP, 3);
-    {
-      xfer += oprot->writeMapBegin(::apache::thrift::protocol::T_STRING, ::apache::thrift::protocol::T_LIST, static_cast<uint32_t>(this->partition_filter_column_map.size()));
-      std::map<std::string, std::vector<Range> > ::const_iterator _iter91;
-      for (_iter91 = this->partition_filter_column_map.begin(); _iter91 != this->partition_filter_column_map.end(); ++_iter91)
-      {
-        xfer += oprot->writeString(_iter91->first);
-        {
-          xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(_iter91->second.size()));
-          std::vector<Range> ::const_iterator _iter92;
-          for (_iter92 = _iter91->second.begin(); _iter92 != _iter91->second.end(); ++_iter92)
-          {
-            xfer += (*_iter92).write(oprot);
-          }
-          xfer += oprot->writeListEnd();
-        }
-      }
-      xfer += oprot->writeMapEnd();
-    }
-    xfer += oprot->writeFieldEnd();
-  }
-  xfer += oprot->writeFieldStop();
-  xfer += oprot->writeStructEnd();
-  return xfer;
-}
-
-void swap(QueryRecord &a, QueryRecord &b) {
-  using ::std::swap;
-  swap(a.vector_map, b.vector_map);
-  swap(a.selected_column_array, b.selected_column_array);
-  swap(a.partition_filter_column_map, b.partition_filter_column_map);
-  swap(a.__isset, b.__isset);
-}
-
-QueryRecord::QueryRecord(const QueryRecord& other93) {
-  vector_map = other93.vector_map;
-  selected_column_array = other93.selected_column_array;
-  partition_filter_column_map = other93.partition_filter_column_map;
-  __isset = other93.__isset;
-}
-QueryRecord& QueryRecord::operator=(const QueryRecord& other94) {
-  vector_map = other94.vector_map;
-  selected_column_array = other94.selected_column_array;
-  partition_filter_column_map = other94.partition_filter_column_map;
-  __isset = other94.__isset;
-  return *this;
-}
-void QueryRecord::printTo(std::ostream& out) const {
-  using ::apache::thrift::to_string;
-  out << "QueryRecord(";
-  out << "vector_map=" << to_string(vector_map);
-  out << ", " << "selected_column_array="; (__isset.selected_column_array ? (out << to_string(selected_column_array)) : (out << "<null>"));
-  out << ", " << "partition_filter_column_map="; (__isset.partition_filter_column_map ? (out << to_string(partition_filter_column_map)) : (out << "<null>"));
+  out << "vector_data=" << to_string(vector_data);
   out << ")";
 }
 
@@ -1481,10 +538,6 @@ void QueryResult::__set_id(const int64_t val) {
 
 void QueryResult::__set_score(const double val) {
   this->score = val;
-}
-
-void QueryResult::__set_column_map(const std::map<std::string, std::string> & val) {
-  this->column_map = val;
 }
 std::ostream& operator<<(std::ostream& out, const QueryResult& obj)
 {
@@ -1530,29 +583,6 @@ uint32_t QueryResult::read(::apache::thrift::protocol::TProtocol* iprot) {
           xfer += iprot->skip(ftype);
         }
         break;
-      case 3:
-        if (ftype == ::apache::thrift::protocol::T_MAP) {
-          {
-            this->column_map.clear();
-            uint32_t _size95;
-            ::apache::thrift::protocol::TType _ktype96;
-            ::apache::thrift::protocol::TType _vtype97;
-            xfer += iprot->readMapBegin(_ktype96, _vtype97, _size95);
-            uint32_t _i99;
-            for (_i99 = 0; _i99 < _size95; ++_i99)
-            {
-              std::string _key100;
-              xfer += iprot->readString(_key100);
-              std::string& _val101 = this->column_map[_key100];
-              xfer += iprot->readString(_val101);
-            }
-            xfer += iprot->readMapEnd();
-          }
-          this->__isset.column_map = true;
-        } else {
-          xfer += iprot->skip(ftype);
-        }
-        break;
       default:
         xfer += iprot->skip(ftype);
         break;
@@ -1578,19 +608,6 @@ uint32_t QueryResult::write(::apache::thrift::protocol::TProtocol* oprot) const 
   xfer += oprot->writeDouble(this->score);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("column_map", ::apache::thrift::protocol::T_MAP, 3);
-  {
-    xfer += oprot->writeMapBegin(::apache::thrift::protocol::T_STRING, ::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->column_map.size()));
-    std::map<std::string, std::string> ::const_iterator _iter102;
-    for (_iter102 = this->column_map.begin(); _iter102 != this->column_map.end(); ++_iter102)
-    {
-      xfer += oprot->writeString(_iter102->first);
-      xfer += oprot->writeString(_iter102->second);
-    }
-    xfer += oprot->writeMapEnd();
-  }
-  xfer += oprot->writeFieldEnd();
-
   xfer += oprot->writeFieldStop();
   xfer += oprot->writeStructEnd();
   return xfer;
@@ -1600,21 +617,18 @@ void swap(QueryResult &a, QueryResult &b) {
   using ::std::swap;
   swap(a.id, b.id);
   swap(a.score, b.score);
-  swap(a.column_map, b.column_map);
   swap(a.__isset, b.__isset);
 }
 
-QueryResult::QueryResult(const QueryResult& other103) {
-  id = other103.id;
-  score = other103.score;
-  column_map = other103.column_map;
-  __isset = other103.__isset;
+QueryResult::QueryResult(const QueryResult& other9) {
+  id = other9.id;
+  score = other9.score;
+  __isset = other9.__isset;
 }
-QueryResult& QueryResult::operator=(const QueryResult& other104) {
-  id = other104.id;
-  score = other104.score;
-  column_map = other104.column_map;
-  __isset = other104.__isset;
+QueryResult& QueryResult::operator=(const QueryResult& other10) {
+  id = other10.id;
+  score = other10.score;
+  __isset = other10.__isset;
   return *this;
 }
 void QueryResult::printTo(std::ostream& out) const {
@@ -1622,7 +636,6 @@ void QueryResult::printTo(std::ostream& out) const {
   out << "QueryResult(";
   out << "id=" << to_string(id);
   out << ", " << "score=" << to_string(score);
-  out << ", " << "column_map=" << to_string(column_map);
   out << ")";
 }
 
@@ -1666,14 +679,14 @@ uint32_t TopKQueryResult::read(::apache::thrift::protocol::TProtocol* iprot) {
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->query_result_arrays.clear();
-            uint32_t _size105;
-            ::apache::thrift::protocol::TType _etype108;
-            xfer += iprot->readListBegin(_etype108, _size105);
-            this->query_result_arrays.resize(_size105);
-            uint32_t _i109;
-            for (_i109 = 0; _i109 < _size105; ++_i109)
+            uint32_t _size11;
+            ::apache::thrift::protocol::TType _etype14;
+            xfer += iprot->readListBegin(_etype14, _size11);
+            this->query_result_arrays.resize(_size11);
+            uint32_t _i15;
+            for (_i15 = 0; _i15 < _size11; ++_i15)
             {
-              xfer += this->query_result_arrays[_i109].read(iprot);
+              xfer += this->query_result_arrays[_i15].read(iprot);
             }
             xfer += iprot->readListEnd();
           }
@@ -1702,10 +715,10 @@ uint32_t TopKQueryResult::write(::apache::thrift::protocol::TProtocol* oprot) co
   xfer += oprot->writeFieldBegin("query_result_arrays", ::apache::thrift::protocol::T_LIST, 1);
   {
     xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->query_result_arrays.size()));
-    std::vector<QueryResult> ::const_iterator _iter110;
-    for (_iter110 = this->query_result_arrays.begin(); _iter110 != this->query_result_arrays.end(); ++_iter110)
+    std::vector<QueryResult> ::const_iterator _iter16;
+    for (_iter16 = this->query_result_arrays.begin(); _iter16 != this->query_result_arrays.end(); ++_iter16)
     {
-      xfer += (*_iter110).write(oprot);
+      xfer += (*_iter16).write(oprot);
     }
     xfer += oprot->writeListEnd();
   }
@@ -1722,13 +735,13 @@ void swap(TopKQueryResult &a, TopKQueryResult &b) {
   swap(a.__isset, b.__isset);
 }
 
-TopKQueryResult::TopKQueryResult(const TopKQueryResult& other111) {
-  query_result_arrays = other111.query_result_arrays;
-  __isset = other111.__isset;
+TopKQueryResult::TopKQueryResult(const TopKQueryResult& other17) {
+  query_result_arrays = other17.query_result_arrays;
+  __isset = other17.__isset;
 }
-TopKQueryResult& TopKQueryResult::operator=(const TopKQueryResult& other112) {
-  query_result_arrays = other112.query_result_arrays;
-  __isset = other112.__isset;
+TopKQueryResult& TopKQueryResult::operator=(const TopKQueryResult& other18) {
+  query_result_arrays = other18.query_result_arrays;
+  __isset = other18.__isset;
   return *this;
 }
 void TopKQueryResult::printTo(std::ostream& out) const {

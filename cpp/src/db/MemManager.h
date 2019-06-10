@@ -5,6 +5,7 @@
  ******************************************************************************/
 #pragma once
 
+#include "ExecutionEngine.h"
 #include "IDGenerator.h"
 #include "Status.h"
 #include "Meta.h"
@@ -23,12 +24,10 @@ namespace meta {
     class Meta;
 }
 
-template <typename EngineT>
 class MemVectors {
 public:
-    using EnginePtr = typename EngineT::Ptr;
     using MetaPtr = meta::Meta::Ptr;
-    using Ptr = std::shared_ptr<MemVectors<EngineT>>;
+    using Ptr = std::shared_ptr<MemVectors>;
 
     explicit MemVectors(const std::shared_ptr<meta::Meta>&,
             const meta::TableFileSchema&, const Options&);
@@ -43,7 +42,7 @@ public:
 
     ~MemVectors();
 
-    const std::string& Location() const { return schema_.location; }
+    const std::string& Location() const { return schema_.location_; }
 
 private:
     MemVectors() = delete;
@@ -54,18 +53,17 @@ private:
     Options options_;
     meta::TableFileSchema schema_;
     IDGenerator* pIdGenerator_;
-    EnginePtr pEE_;
+    ExecutionEnginePtr pEE_;
 
 }; // MemVectors
 
 
 
-template<typename EngineT>
 class MemManager {
 public:
     using MetaPtr = meta::Meta::Ptr;
-    using MemVectorsPtr = typename MemVectors<EngineT>::Ptr;
-    using Ptr = std::shared_ptr<MemManager<EngineT>>;
+    using MemVectorsPtr = typename MemVectors::Ptr;
+    using Ptr = std::shared_ptr<MemManager>;
 
     MemManager(const std::shared_ptr<meta::Meta>& meta, const Options& options)
         : pMeta_(meta), options_(options) {}
@@ -96,4 +94,3 @@ private:
 } // namespace engine
 } // namespace vecwise
 } // namespace zilliz
-#include "MemManager.inl"

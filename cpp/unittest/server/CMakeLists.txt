@@ -15,8 +15,6 @@ aux_source_directory(../../src/wrapper wrapper_src)
 aux_source_directory(./ test_srcs)
 
 set(require_files
-        ../../src/server/VecIdMapper.cpp
-        ../../src/server/RocksIdMapper.cpp
         ../../src/server/ServerConfig.cpp
         ../../src/utils/CommonUtil.cpp
         ../../src/utils/TimeRecorder.cpp
@@ -35,7 +33,6 @@ cuda_add_executable(server_test
 
 set(require_libs
         stdc++
-        rocksdb
         faiss
         cudart
         cublas

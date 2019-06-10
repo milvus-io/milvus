@@ -25,20 +25,19 @@ public:
 
     virtual Status DeleteTable(const std::string &table_name) override;
 
-    virtual Status CreateTablePartition(const CreateTablePartitionParam &param) override;
-
-    virtual Status DeleteTablePartition(const DeleteTablePartitionParam &param) override;
-
     virtual Status AddVector(const std::string &table_name,
                              const std::vector<RowRecord> &record_array,
                              std::vector<int64_t> &id_array) override;
 
     virtual Status SearchVector(const std::string &table_name,
-                                const std::vector<QueryRecord> &query_record_array,
-                                std::vector<TopKQueryResult> &topk_query_result_array,
-                                int64_t topk) override;
+                                const std::vector<RowRecord> &query_record_array,
+                                const std::vector<Range> &query_range_array,
+                                int64_t topk,
+                                std::vector<TopKQueryResult> &topk_query_result_array) override;
 
     virtual Status DescribeTable(const std::string &table_name, TableSchema &table_schema) override;
+
+    virtual Status GetTableRowCount(const std::string &table_name, int64_t &row_count) override;
 
     virtual Status ShowTables(std::vector<std::string> &table_array) override;
 
