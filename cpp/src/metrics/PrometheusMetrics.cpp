@@ -87,6 +87,7 @@ void PrometheusMetrics::AddVectorsPerSecondGaugeSet(int num_vector, int dim, dou
 
 }
 void PrometheusMetrics::QueryIndexTypePerSecondSet(std::string type, double value) {
+    if(!startup_) return;
     if(type == "IVF"){
         query_index_IVF_type_per_second_gauge_.Set(value);
     } else if(type == "IDMap"){
