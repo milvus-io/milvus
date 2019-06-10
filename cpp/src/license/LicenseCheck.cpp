@@ -21,6 +21,10 @@ LicenseCheck::LicenseCheck() {
 
 }
 
+LicenseCheck::~LicenseCheck() {
+    StopCountingDown();
+}
+
 ServerError
 LicenseCheck::LegalityCheck(const std::string &license_file_path) {
 

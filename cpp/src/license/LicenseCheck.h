@@ -15,6 +15,7 @@ namespace server {
 class LicenseCheck {
 private:
     LicenseCheck();
+    ~LicenseCheck();
 
 public:
     static LicenseCheck &
