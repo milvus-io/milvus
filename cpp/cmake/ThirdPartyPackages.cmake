@@ -717,17 +717,23 @@ macro(build_faiss)
             ${FAISS_STATIC_LIB})
 #            DEPENDS
 #            ${faiss_dependencies})
-    ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep)
-    ExternalProject_Add_StepDependencies(faiss_ep build lapack_ep)
+
+    ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
 
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     add_library(faiss STATIC IMPORTED)
     set_target_properties(
             faiss
             PROPERTIES IMPORTED_LOCATION "${FAISS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}")
+            INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "openblas;lapack" )
 
     add_dependencies(faiss faiss_ep)
+    #add_dependencies(faiss openblas_ep)
+    #add_dependencies(faiss lapack_ep)
+    #target_link_libraries(faiss ${OPENBLAS_PREFIX}/lib)
+    #target_link_libraries(faiss ${LAPACK_PREFIX}/lib)
+
 endmacro()
 
 if(MEGASEARCH_WITH_FAISS)
