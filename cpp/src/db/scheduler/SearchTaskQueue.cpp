@@ -111,7 +111,7 @@ bool SearchTask::DoSearch() {
         return false;
     }
 
-    server::TimeRecorder rc("DoSearch");
+    server::TimeRecorder rc("DoSearch index(" + std::to_string(index_id_) + ")");
 
     std::vector<long> output_ids;
     std::vector<float> output_distence;
