@@ -26,7 +26,6 @@ add_library(megasearch_sdk STATIC
         ${service_files}
         )
 
-link_directories(../../third_party/build/lib)
 target_link_libraries(megasearch_sdk
         ${third_party_libs}
         )
