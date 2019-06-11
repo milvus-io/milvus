@@ -2,20 +2,19 @@ import logging, logging.config
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
-from thrift.transport.TTransport import TTransportException
-from thrift.protocol import TBinaryProtocol, TCompactProtocol, TJSONProtocol
-from thrift.Thrift import TException, TApplicationException, TType
+from thrift.protocol import TBinaryProtocol
+from thrift.Thrift import TException, TApplicationException
 
 from megasearch.thrift import MegasearchService
 from megasearch.thrift import ttypes
 from client.Abstract import (
     ConnectIntf,
     TableSchema,
-    IndexType,
     Range,
     RowRecord,
     QueryResult,
-    TopKQueryResult
+    TopKQueryResult,
+    IndexType
 )
 
 from client.Status import Status
