@@ -19,6 +19,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-70 - cmake: remove redundant libs in src
 - MS-71 - cmake: fix faiss dependency
 - MS-72 - cmake: change prometheus source to git
+- MS-73 - cmake: delete civetweb
 - MS-65 - Implement GetTableRowCount interface
 - MS-45 - Implement DeleteTable interface
 
