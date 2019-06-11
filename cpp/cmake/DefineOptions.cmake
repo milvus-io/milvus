@@ -81,7 +81,7 @@ define_option(MEGASEARCH_WITH_OPENBLAS "Build with OpenBLAS library" ON)
 
 define_option(MEGASEARCH_WITH_PROMETHEUS "Build with PROMETHEUS library" ON)
 
-define_option(MEGASEARCH_WITH_ROCKSDB "Build with RocksDB library" ON)
+define_option(MEGASEARCH_WITH_ROCKSDB "Build with RocksDB library" OFF)
 
 define_option(MEGASEARCH_WITH_SNAPPY "Build with Snappy compression" ON)
 
