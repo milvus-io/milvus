@@ -34,6 +34,10 @@ set(service_files
         thrift/gen-cpp/MegasearchService.cpp
         thrift/gen-cpp/megasearch_constants.cpp
         thrift/gen-cpp/megasearch_types.cpp
+        metrics/SystemInfo.cpp
+        metrics/SystemInfo.h
+        server/MegasearchThreadPoolServer.cpp
+        server/MegasearchThreadPoolServer.h
         )
 
 set(vecwise_engine_files
@@ -73,6 +77,7 @@ set(third_party_libs
         snappy
         zlib
         zstd
+        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
 
 if (GPU_VERSION STREQUAL "ON")
@@ -84,6 +89,7 @@ if (GPU_VERSION STREQUAL "ON")
             libquadmath.a
             cudart
             cublas
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
 else()
     set(engine_libs
@@ -91,6 +97,7 @@ else()
             libgomp.a
             libgfortran.a
             libquadmath.a
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
 endif ()
 
@@ -131,7 +138,6 @@ set(server_libs
         pthread
         dl
         metrics
-
         )
 
 add_executable(vecwise_server

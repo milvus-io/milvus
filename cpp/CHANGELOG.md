@@ -15,6 +15,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-64 - Different table can have different index type
 - MS-52 - Return search score
 - MS-66 - Support time range query
+- MS-68 - Remove rocksdb from third-party
 - MS-70 - cmake: remove redundant libs in src
 
 ## Task
@@ -45,6 +46,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-37 - Add query, cache usage, disk write speed and file data size metrics
 - MS-30 - Use faiss v1.5.2
 - MS-54 - cmake: Change Thrift third party URL to github.com
+- MS-69 - prometheus: add all proposed metrics
 
 ## Task
 
