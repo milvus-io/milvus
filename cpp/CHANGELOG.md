@@ -16,6 +16,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-52 - Return search score
 - MS-66 - Support time range query
 - MS-68 - Remove rocksdb from third-party
+- MS-70 - cmake: remove redundant libs in src
 
 ## Task
 
