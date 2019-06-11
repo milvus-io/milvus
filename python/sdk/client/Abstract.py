@@ -102,7 +102,6 @@ class TopKQueryResult(object):
         return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
 
 
-
 def _abstract():
     raise NotImplementedError('You need to override this function')
 

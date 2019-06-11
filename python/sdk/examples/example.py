@@ -1,11 +1,7 @@
 from client.Client import MegaSearch, Prepare, IndexType
-from client.Status import Status
-import time
 import random
 import struct
 from pprint import pprint
-
-from megasearch.thrift import MegasearchService, ttypes
 
 
 def main():
