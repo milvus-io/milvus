@@ -253,7 +253,8 @@ if (DEFINED ENV{MEGASEARCH_PROMETHEUS_URL})
     set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
 else ()
     set(PROMETHEUS_SOURCE_URL
-            "https://github.com/JinHai-CN/prometheus-cpp/archive/${PROMETHEUS_VERSION}.tar.gz")
+            #"https://github.com/JinHai-CN/prometheus-cpp/archive/${PROMETHEUS_VERSION}.tar.gz"
+            https://github.com/jupp0r/prometheus-cpp.git)
 endif()
 
 if (DEFINED ENV{MEGASEARCH_ROCKSDB_URL})
@@ -929,11 +930,20 @@ macro(build_prometheus)
             ${EP_COMMON_CMAKE_ARGS}
             -DCMAKE_INSTALL_LIBDIR=lib
             -DBUILD_SHARED_LIBS=OFF
-            "-DCMAKE_INSTALL_PREFIX=${PROMETHEUS_PREFIX}")
+            "-DCMAKE_INSTALL_PREFIX=${PROMETHEUS_PREFIX}"
+            -DCMAKE_BUILD_TYPE=Release)
 
     externalproject_add(prometheus_ep
-            URL
+            GIT_REPOSITORY
             ${PROMETHEUS_SOURCE_URL}
+            GIT_TAG
+            ${PROMETHEUS_VERSION}
+            GIT_SHALLOW
+            TRUE
+#            GIT_CONFIG
+#            recurse-submodules=true
+#            URL
+#            ${PROMETHEUS_SOURCE_URL}
             ${EP_LOG_OPTIONS}
             CMAKE_ARGS
             ${PROMETHEUS_CMAKE_ARGS}
@@ -991,7 +1001,7 @@ if(MEGASEARCH_WITH_PROMETHEUS)
     link_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/)
     include_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/include)
 
-    link_directories(${PROMETHEUS_PREFIX}/civetweb_ep-prefix/src/civetweb_ep)
+    #link_directories(${PROMETHEUS_PREFIX}/civetweb_ep-prefix/src/civetweb_ep)
 endif()
 
 # ----------------------------------------------------------------------
