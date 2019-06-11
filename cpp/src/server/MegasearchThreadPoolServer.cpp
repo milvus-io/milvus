@@ -4,16 +4,20 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "metrics/Metrics.h"
-
-
 #include "MegasearchThreadPoolServer.h"
 
+namespace zilliz {
+namespace vecwise {
+namespace server {
 
-void zilliz::vecwise::server::MegasearchThreadPoolServer::onClientConnected(const std::shared_ptr<apache::thrift::server::TConnectedClient> &pClient) {
+void
+MegasearchThreadPoolServer::onClientConnected(const std::shared_ptr<apache::thrift::server::TConnectedClient> &pClient) {
     server::Metrics::GetInstance().ConnectionGaugeIncrement();
     TThreadPoolServer::onClientConnected(pClient);
 }
-void zilliz::vecwise::server::MegasearchThreadPoolServer::onClientDisconnected(apache::thrift::server::TConnectedClient *pClient) {
+
+void
+MegasearchThreadPoolServer::onClientDisconnected(apache::thrift::server::TConnectedClient *pClient) {
     server::Metrics::GetInstance().ConnectionGaugeDecrement();
     TThreadPoolServer::onClientDisconnected(pClient);
 }
@@ -24,4 +28,7 @@ zilliz::vecwise::server::MegasearchThreadPoolServer::MegasearchThreadPoolServer(
                                                                                 const std::shared_ptr<apache::thrift::concurrency::ThreadManager> &threadManager)
     : TThreadPoolServer(processor, serverTransport, transportFactory, protocolFactory, threadManager) {
 
+}
+}
+}
 }

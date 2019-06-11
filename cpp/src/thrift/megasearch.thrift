@@ -29,7 +29,7 @@ exception Exception {
 }
 
 
-
+/**
  * @brief Table Schema
  */
 struct TableSchema {

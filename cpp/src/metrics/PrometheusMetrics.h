@@ -49,6 +49,8 @@ class PrometheusMetrics: public MetricsBase {
     std::shared_ptr<prometheus::Exposer> exposer_ptr_;
     std::shared_ptr<prometheus::Registry> registry_ = std::make_shared<prometheus::Registry>();
     bool startup_ = false;
+//    void GpuPercentInit();
+//    void GpuMemoryInit();
  public:
 
     void AddGroupSuccessTotalIncrement(double value = 1.0) override { if(startup_) add_group_success_total_.Increment(value);};
@@ -115,45 +117,7 @@ class PrometheusMetrics: public MetricsBase {
     void ConnectionGaugeDecrement() override ;
     void KeepingAliveCounterIncrement(double value = 1) override {if(startup_) keeping_alive_counter_.Increment(value);};
 
-//    prometheus::Counter &connection_total() {return connection_total_; }
-//
-//    prometheus::Counter &add_group_success_total()  { return add_group_success_total_; }
-//    prometheus::Counter &add_group_fail_total()  { return add_group_fail_total_; }
-//
-//    prometheus::Counter &get_group_success_total()  { return get_group_success_total_;}
-//    prometheus::Counter &get_group_fail_total()  { return get_group_fail_total_;}
-//
-//    prometheus::Counter &has_group_success_total()  { return has_group_success_total_;}
-//    prometheus::Counter &has_group_fail_total()  { return has_group_fail_total_;}
-//
-//    prometheus::Counter &get_group_files_success_total()  { return get_group_files_success_total_;};
-//    prometheus::Counter &get_group_files_fail_total()  { return get_group_files_fail_total_;}
-//
-//    prometheus::Counter &add_vectors_success_total() { return add_vectors_success_total_; }
-//    prometheus::Counter &add_vectors_fail_total() { return add_vectors_fail_total_; }
-//
-//    prometheus::Histogram &add_vectors_duration_histogram() { return add_vectors_duration_histogram_;}
-//
-//    prometheus::Counter &search_success_total() { return search_success_total_; }
-//    prometheus::Counter &search_fail_total() { return search_fail_total_; }
-//
-//    prometheus::Histogram &search_duration_histogram() { return search_duration_histogram_; }
-//    prometheus::Histogram &raw_files_size_histogram() { return raw_files_size_histogram_; }
-//    prometheus::Histogram &index_files_size_histogram() { return index_files_size_histogram_; }
-//
-//    prometheus::Histogram &build_index_duration_seconds_histogram() { return build_index_duration_seconds_histogram_; }
-//
-//    prometheus::Histogram &all_build_index_duration_seconds_histogram() { return all_build_index_duration_seconds_histogram_; }
-//
-//    prometheus::Gauge &cache_usage_gauge() { return cache_usage_gauge_; }
-//
-//    prometheus::Counter &meta_visit_total() { return meta_visit_total_; }
-//
-//    prometheus::Histogram &meta_visit_duration_seconds_histogram() { return meta_visit_duration_seconds_histogram_; }
-//
-//    prometheus::Gauge &mem_usage_percent_gauge() { return mem_usage_percent_gauge_; }
-//
-//    prometheus::Gauge &mem_usage_total_gauge() { return mem_usage_total_gauge_; }
+
 
 
 
@@ -477,6 +441,7 @@ class PrometheusMetrics: public MetricsBase {
     prometheus::Gauge &GPU5_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "5"}});
     prometheus::Gauge &GPU6_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "6"}});
     prometheus::Gauge &GPU7_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "7"}});
+//    std::vector<prometheus::Gauge> GPU_percent_gauges_;
 
 
 
@@ -494,6 +459,7 @@ class PrometheusMetrics: public MetricsBase {
     prometheus::Gauge &GPU5_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "5"}});
     prometheus::Gauge &GPU6_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "6"}});
     prometheus::Gauge &GPU7_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "7"}});
+//    std::vector<prometheus::Gauge> GPU_memory_usage_gauges_;
 
     prometheus::Family<prometheus::Gauge> &query_index_type_per_second_ = prometheus::BuildGauge()
         .Name("query_index_throughtout_per_microsecond")
