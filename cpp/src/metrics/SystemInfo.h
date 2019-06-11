@@ -42,14 +42,14 @@ class SystemInfo {
     }
 
     void Init();
-    int NumDevice() {return num_device_;};
-    long long parseLine(char* line);
+    int num_device() const {return num_device_;};
+    long long ParseLine(char* line);
     unsigned long GetPhysicalMemory();
     unsigned long GetProcessUsedMemory();
     double MemoryPercent();
     double CPUPercent();
-    std::unordered_map<int,std::vector<double>> GetGPUMemPercent();
-    std::vector<std::string> split(std::string input);
+//    std::unordered_map<int,std::vector<double>> GetGPUMemPercent() {};
+//    std::vector<std::string> split(std::string input) {};
     std::vector<unsigned int> GPUPercent();
     std::vector<unsigned long long> GPUMemoryUsed();
 

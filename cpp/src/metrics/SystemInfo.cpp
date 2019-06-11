@@ -56,7 +56,7 @@ void SystemInfo::Init() {
 }
 
 long long
-SystemInfo::parseLine(char *line) {
+SystemInfo::ParseLine(char *line) {
     // This assumes that a digit will be found and the line ends in " Kb".
     int i = strlen(line);
     const char *p = line;
@@ -80,18 +80,20 @@ unsigned long
 SystemInfo::GetProcessUsedMemory() {
     //Note: this value is in KB!
     FILE* file = fopen("/proc/self/status", "r");
+    constexpr int64_t line_length = 128;
     long long result = -1;
-    char line[128];
+    constexpr int64_t KB_SIZE = 1024;
+    char line[line_length];
 
-    while (fgets(line, 128, file) != NULL){
+    while (fgets(line, line_length, file) != NULL){
         if (strncmp(line, "VmRSS:", 6) == 0){
-            result = parseLine(line);
+            result = ParseLine(line);
             break;
         }
     }
     fclose(file);
     // return value in Byte
-    return (result*1024);
+    return (result*KB_SIZE);
 
 }
 
@@ -128,46 +130,46 @@ SystemInfo::CPUPercent() {
     return percent;
 }
 
-std::unordered_map<int,std::vector<double>>
-SystemInfo::GetGPUMemPercent(){
-    // return GPUID: MEM%
+//std::unordered_map<int,std::vector<double>>
+//SystemInfo::GetGPUMemPercent(){
+//    // return GPUID: MEM%
+//
+//    //write GPU info to a file
+//    system("nvidia-smi pmon -c 1 > GPUInfo.txt");
+//    int pid = (int)getpid();
+//
+//    //parse line
+//    std::ifstream read_file;
+//    read_file.open("GPUInfo.txt");
+//    std::string line;
+//    while(getline(read_file, line)){
+//        std::vector<std::string> words = split(line);
+//        //                    0      1     2    3   4    5    6      7
+//        //words stand for gpuindex, pid, type, sm, mem, enc, dec, command respectively
+//        if(std::stoi(words[1]) != pid) continue;
+//        int GPUindex = std::stoi(words[0]);
+//        double sm_percent = std::stod(words[3]);
+//        double mem_percent = std::stod(words[4]);
+//
+//    }
+//
+//}
 
-    //write GPU info to a file
-    system("nvidia-smi pmon -c 1 > GPUInfo.txt");
-    int pid = (int)getpid();
-
-    //parse line
-    std::ifstream read_file;
-    read_file.open("GPUInfo.txt");
-    std::string line;
-    while(getline(read_file, line)){
-        std::vector<std::string> words = split(line);
-        //                    0      1     2    3   4    5    6      7
-        //words stand for gpuindex, pid, type, sm, mem, enc, dec, command respectively
-        if(std::stoi(words[1]) != pid) continue;
-        int GPUindex = std::stoi(words[0]);
-        double sm_percent = std::stod(words[3]);
-        double mem_percent = std::stod(words[4]);
-
-    }
-
-}
-
-std::vector<std::string>
-SystemInfo::split(std::string input) {
-    std::vector<std::string> words;
-    input += " ";
-    int word_start = 0;
-    for (int i = 0; i < input.size(); ++i) {
-        if(input[i] != ' ') continue;
-        if(input[i] == ' ') {
-            word_start = i + 1;
-            continue;
-        }
-        words.push_back(input.substr(word_start,i-word_start));
-    }
-    return words;
-}
+//std::vector<std::string>
+//SystemInfo::split(std::string input) {
+//    std::vector<std::string> words;
+//    input += " ";
+//    int word_start = 0;
+//    for (int i = 0; i < input.size(); ++i) {
+//        if(input[i] != ' ') continue;
+//        if(input[i] == ' ') {
+//            word_start = i + 1;
+//            continue;
+//        }
+//        words.push_back(input.substr(word_start,i-word_start));
+//    }
+//    return words;
+//}
 
 std::vector<unsigned int>
 SystemInfo::GPUPercent() {
