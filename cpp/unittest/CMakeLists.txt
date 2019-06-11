@@ -29,7 +29,6 @@ set(unittest_libs
         prometheus-cpp-pull
         prometheus-cpp-push
         prometheus-cpp-core
-        civetweb
         dl
         z
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
