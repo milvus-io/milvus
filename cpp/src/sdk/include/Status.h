@@ -72,7 +72,7 @@ class Status {
      * @return, the status is assigned.
      *
      */
-    inline Status &operator=(const Status &s);
+    Status &operator=(const Status &s);
 
     /**
      * @brief Status
@@ -93,7 +93,7 @@ class Status {
      * @return, the status is moved.
      *
      */
-    inline Status &operator=(Status &&s) noexcept;
+    Status &operator=(Status &&s) noexcept;
 
     /**
      * @brief Status

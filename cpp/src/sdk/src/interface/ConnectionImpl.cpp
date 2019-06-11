@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "ConnectionImpl.h"
+#include "version.h"
 
 namespace megasearch {
 
@@ -47,7 +48,7 @@ ConnectionImpl::Disconnect() {
 
 std::string
 ConnectionImpl::ClientVersion() const {
-    return client_proxy_->ClientVersion();
+    return MEGASEARCH_VERSION;
 }
 
 Status
