@@ -8,6 +8,7 @@
 #include "megasearch_types.h"
 #include "megasearch_constants.h"
 #include "ServerConfig.h"
+#include "MegasearchThreadPoolServer.h"
 
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/protocol/TJSONProtocol.h>
@@ -76,7 +77,7 @@ MegasearchServer::StartService() {
             threadManager->threadFactory(threadFactory);
             threadManager->start();
 
-            s_server.reset(new TThreadPoolServer(processor,
+            s_server.reset(new MegasearchThreadPoolServer(processor,
                                                  server_transport,
                                                  transport_factory,
                                                  protocol_factory,

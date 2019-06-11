@@ -34,6 +34,10 @@ set(service_files
         thrift/gen-cpp/MegasearchService.cpp
         thrift/gen-cpp/megasearch_constants.cpp
         thrift/gen-cpp/megasearch_types.cpp
+        metrics/SystemInfo.cpp
+        metrics/SystemInfo.h
+        server/MegasearchThreadPoolServer.cpp
+        server/MegasearchThreadPoolServer.h
         )
 
 set(vecwise_engine_files
@@ -52,6 +56,7 @@ set(get_sys_info_files
 include_directories(/usr/include)
 include_directories(/usr/local/cuda/include)
 include_directories(thrift/gen-cpp)
+
 
 #target_link_libraries(megasearch boost_system_static)
 #target_link_libraries(megasearch boost_filesystem_static)
@@ -93,6 +98,7 @@ set(third_party_libs
         snappy
         zlib
         zstd
+        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
 
 if (GPU_VERSION STREQUAL "ON")
@@ -111,6 +117,7 @@ if (GPU_VERSION STREQUAL "ON")
             libprometheus-cpp-push.a
             libprometheus-cpp-pull.a
             libprometheus-cpp-core.a
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
 else()
     set(engine_libs
@@ -124,6 +131,7 @@ else()
             libprometheus-cpp-push.a
             libprometheus-cpp-pull.a
             libprometheus-cpp-core.a
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
 endif ()
 
@@ -176,7 +184,6 @@ set(server_libs
         liblz4.a
         dl
         metrics
-
         )
 
 add_executable(vecwise_server
