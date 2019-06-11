@@ -18,6 +18,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-68 - Remove rocksdb from third-party
 - MS-70 - cmake: remove redundant libs in src
 - MS-71 - cmake: fix faiss dependency
+- MS-72 - cmake: change prometheus source to git
 
 ## Task
 
