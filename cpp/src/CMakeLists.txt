@@ -34,6 +34,10 @@ set(service_files
         thrift/gen-cpp/MegasearchService.cpp
         thrift/gen-cpp/megasearch_constants.cpp
         thrift/gen-cpp/megasearch_types.cpp
+        metrics/SystemInfo.cpp
+        metrics/SystemInfo.h
+        server/MegasearchThreadPoolServer.cpp
+        server/MegasearchThreadPoolServer.h
         )
 
 set(vecwise_engine_files
@@ -50,32 +54,12 @@ set(get_sys_info_files
         license/GetSysInfo.cpp)
 
 include_directories(/usr/include)
-include_directories(/usr/local/cuda/include)
+include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 include_directories(thrift/gen-cpp)
-
-#target_link_libraries(megasearch boost_system_static)
-#target_link_libraries(megasearch boost_filesystem_static)
-#target_link_libraries(megasearch boost_serialization_static)
-#target_link_libraries(megasearch bzip2)
-#target_link_libraries(megasearch easyloggingpp)
-#target_link_libraries(megasearch faiss)
-#target_link_libraries(megasearch gtest)
-#target_link_libraries(megasearch lapack)
-#target_link_libraries(megasearch lz4)
-#target_link_libraries(megasearch openblas)
-#target_link_libraries(megasearch rocksdb)
-#target_link_libraries(megasearch snappy)
-#target_link_libraries(megasearch sqlite)
-#target_link_libraries(megasearch sqlite_orm)
-#target_link_libraries(megasearch thrift)
-#target_link_libraries(megasearch yaml-cpp)
-#target_link_libraries(megasearch zlib)
-#target_link_libraries(megasearch zstd)
 
 set(third_party_libs
         easyloggingpp
         sqlite
-        #        sqlite_orm
         thrift
         yaml-cpp
         faiss
@@ -92,48 +76,35 @@ set(third_party_libs
         snappy
         zlib
         zstd
+        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
 
 if (GPU_VERSION STREQUAL "ON")
-    link_directories(/usr/local/cuda/lib64)
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
     set(engine_libs
             pthread
-            libfaiss.a
-            libgpufaiss.a
             libgomp.a
-            libopenblas.a
             libgfortran.a
             libquadmath.a
             cudart
             cublas
-            libsqlite3.a
-            libprometheus-cpp-push.a
-            libprometheus-cpp-pull.a
-            libprometheus-cpp-core.a
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
 else()
     set(engine_libs
             pthread
-            libfaiss.a
             libgomp.a
-            libopenblas.a
             libgfortran.a
             libquadmath.a
-            libsqlite3.a
-            libprometheus-cpp-push.a
-            libprometheus-cpp-pull.a
-            libprometheus-cpp-core.a
+            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
 endif ()
 
 if (ENABLE_LICENSE STREQUAL "ON")
-    link_directories(/usr/local/cuda/lib64/stubs)
-    link_directories(/usr/local/cuda/lib64)
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs")
+    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
     set(license_libs
             nvidia-ml
-            libboost_system.a
-            libboost_filesystem.a
-            libboost_serialization.a
             crypto
             cudart
             cublas
@@ -163,19 +134,9 @@ target_link_libraries(metrics ${metrics_lib})
 
 set(server_libs
         vecwise_engine
-        libthrift.a
         pthread
-        libyaml-cpp.a
-        libboost_system.a
-        libboost_filesystem.a
-        libsnappy.a
-        libbz2.a
-        libz.a
-        libzstd.a
-        liblz4.a
         dl
         metrics
-
         )
 
 add_executable(vecwise_server
