@@ -84,7 +84,6 @@ set(third_party_libs
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
-        civetweb
         boost_system_static
         boost_filesystem_static
         boost_serialization_static
@@ -153,14 +152,14 @@ if (ENABLE_LICENSE STREQUAL "ON")
         target_link_libraries(vecwise_license ${license_libs} ${third_party_libs})
 endif ()
 
-#set(metrics_lib
-#        libprometheus-cpp-push.a
-#        libprometheus-cpp-pull.a
-#        libprometheus-cpp-core.a
-#        )
+set(metrics_lib
+        prometheus-cpp-push
+        prometheus-cpp-pull
+        prometheus-cpp-core
+        )
 
 #add_library(vecwise_engine STATIC ${metrics_files} )
-#target_link_libraries(metrics ${metrics_lib})
+target_link_libraries(metrics ${metrics_lib})
 
 set(server_libs
         vecwise_engine
