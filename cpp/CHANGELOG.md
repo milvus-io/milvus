@@ -17,6 +17,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-66 - Support time range query
 - MS-68 - Remove rocksdb from third-party
 - MS-70 - cmake: remove redundant libs in src
+- MS-71 - cmake: fix faiss dependency
 
 ## Task
 
