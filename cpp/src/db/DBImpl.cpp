@@ -145,6 +145,7 @@ Status DBImpl::InsertVectors(const std::string& table_id_,
 
     CollectInsertMetrics(total_time, n, status.ok());
     return status;
+
 }
 
 Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq,
@@ -156,6 +157,7 @@ Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq,
     auto total_time = METRICS_MICROSECONDS(start_time,end_time);
 
     CollectQueryMetrics(total_time, nq);
+
     return result;
 }
 
@@ -341,17 +343,24 @@ void DBImpl::StartTimerTasks(int interval) {
 
 void DBImpl::BackgroundTimerTask(int interval) {
     Status status;
+    server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!bg_error_.ok()) break;
         if (shutting_down_.load(std::memory_order_acquire)) break;
 
         std::this_thread::sleep_for(std::chrono::seconds(interval));
-        int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheUsage();
-        LOG(DEBUG) << "Cache usage " << cache_total;
-        server::Metrics::GetInstance().CacheUsageGaugeSet(static_cast<double>(cache_total));
+
+        server::Metrics::GetInstance().KeepingAliveCounterIncrement(interval);
+        int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
+        int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+        server::Metrics::GetInstance().CacheUsageGaugeSet(cache_usage*100/cache_total);
         uint64_t size;
         Size(size);
         server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
+        server::Metrics::GetInstance().CPUUsagePercentSet();
+        server::Metrics::GetInstance().RAMUsagePercentSet();
+        server::Metrics::GetInstance().GPUPercentGaugeSet();
+        server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
         TrySchedule();
     }
 }
