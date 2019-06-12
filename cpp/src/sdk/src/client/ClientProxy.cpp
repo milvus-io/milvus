@@ -77,7 +77,7 @@ ClientProxy::Disconnect() {
 
 std::string
 ClientProxy::ClientVersion() const {
-    return std::string("v1.0");
+    return "";
 }
 
 Status
@@ -221,6 +221,8 @@ ClientProxy::DescribeTable(const std::string &table_name, TableSchema &table_sch
 
         table_schema.table_name = thrift_schema.table_name;
         table_schema.index_type = (IndexType)thrift_schema.index_type;
+        table_schema.dimension = thrift_schema.dimension;
+        table_schema.store_raw_vector = thrift_schema.store_raw_vector;
 
     }  catch ( std::exception& ex) {
         return Status(StatusCode::UnknownError, "failed to describe table: " + std::string(ex.what()));

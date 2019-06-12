@@ -15,6 +15,13 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-64 - Different table can have different index type
 - MS-52 - Return search score
 - MS-66 - Support time range query
+- MS-68 - Remove rocksdb from third-party
+- MS-70 - cmake: remove redundant libs in src
+- MS-71 - cmake: fix faiss dependency
+- MS-72 - cmake: change prometheus source to git
+- MS-73 - cmake: delete civetweb
+- MS-65 - Implement GetTableRowCount interface
+- MS-45 - Implement DeleteTable interface
 
 ## Task
 
@@ -44,6 +51,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-37 - Add query, cache usage, disk write speed and file data size metrics
 - MS-30 - Use faiss v1.5.2
 - MS-54 - cmake: Change Thrift third party URL to github.com
+- MS-69 - prometheus: add all proposed metrics
 
 ## Task
 

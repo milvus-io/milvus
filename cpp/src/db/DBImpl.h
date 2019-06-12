@@ -33,29 +33,32 @@ public:
     DBImpl(const Options& options);
 
     virtual Status CreateTable(meta::TableSchema& table_schema) override;
+    virtual Status DeleteTable(const std::string& table_id, const meta::DatesT& dates) override;
     virtual Status DescribeTable(meta::TableSchema& table_schema) override;
     virtual Status HasTable(const std::string& table_id, bool& has_or_not) override;
+    virtual Status AllTables(std::vector<meta::TableSchema>& table_schema_array) override;
+    virtual Status GetTableRowCount(const std::string& table_id, uint64_t& row_count) override;
 
     virtual Status InsertVectors(const std::string& table_id,
-            size_t n, const float* vectors, IDNumbers& vector_ids) override;
+                                 uint64_t n, const float* vectors, IDNumbers& vector_ids) override;
 
-    virtual Status Query(const std::string& table_id, size_t k, size_t nq,
+    virtual Status Query(const std::string& table_id, uint64_t k, uint64_t nq,
             const float* vectors, QueryResults& results) override;
 
-    virtual Status Query(const std::string& table_id, size_t k, size_t nq,
+    virtual Status Query(const std::string& table_id, uint64_t k, uint64_t nq,
             const float* vectors, const meta::DatesT& dates, QueryResults& results) override;
 
     virtual Status DropAll() override;
 
-    virtual Status Size(long& result) override;
+    virtual Status Size(uint64_t& result) override;
 
     virtual ~DBImpl();
 
 private:
-    Status QuerySync(const std::string& table_id, size_t k, size_t nq,
+    Status QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
             const float* vectors, const meta::DatesT& dates, QueryResults& results);
 
-    Status QueryAsync(const std::string& table_id, size_t k, size_t nq,
+    Status QueryAsync(const std::string& table_id, uint64_t k, uint64_t nq,
             const float* vectors, const meta::DatesT& dates, QueryResults& results);
 
 

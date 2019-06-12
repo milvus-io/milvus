@@ -6,6 +6,7 @@
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
 #include "Env.h"
+#include "Log.h"
 #include "EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SearchScheduler.h"
@@ -15,8 +16,8 @@
 #include <thread>
 #include <iostream>
 #include <cstring>
-#include <easylogging++.h>
 #include <cache/CpuCacheMgr.h>
+#include <boost/filesystem.hpp>
 
 namespace zilliz {
 namespace vecwise {
@@ -88,6 +89,34 @@ Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
     return pMeta_->CreateTable(table_schema);
 }
 
+Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& dates) {
+    meta::DatePartionedTableFilesSchema files;
+    auto status = pMeta_->FilesToDelete(table_id, dates, files);
+    if (!status.ok()) { return status; }
+
+    for (auto &day_files : files) {
+        for (auto &file : day_files.second) {
+            boost::filesystem::remove(file.location_);
+        }
+    }
+
+    //dates empty means delete all files of the table
+    if(dates.empty()) {
+        meta::TableSchema table_schema;
+        table_schema.table_id_ = table_id;
+        status = DescribeTable(table_schema);
+
+        pMeta_->DeleteTable(table_id);
+        boost::system::error_code ec;
+        boost::filesystem::remove_all(table_schema.location_, ec);
+        if(ec.failed()) {
+            ENGINE_LOG_WARNING << "Failed to remove table folder";
+        }
+    }
+
+    return Status::OK();
+}
+
 Status DBImpl::DescribeTable(meta::TableSchema& table_schema) {
     return pMeta_->DescribeTable(table_schema);
 }
@@ -96,8 +125,16 @@ Status DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
     return pMeta_->HasTable(table_id, has_or_not);
 }
 
+Status DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
+    return pMeta_->AllTables(table_schema_array);
+}
+
+Status DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
+    return pMeta_->Count(table_id, row_count);
+}
+
 Status DBImpl::InsertVectors(const std::string& table_id_,
-        size_t n, const float* vectors, IDNumbers& vector_ids_) {
+        uint64_t n, const float* vectors, IDNumbers& vector_ids_) {
 
     auto start_time = METRICS_NOW_TIME;
     Status status = pMemMgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
@@ -108,9 +145,10 @@ Status DBImpl::InsertVectors(const std::string& table_id_,
 
     CollectInsertMetrics(total_time, n, status.ok());
     return status;
+
 }
 
-Status DBImpl::Query(const std::string &table_id, size_t k, size_t nq,
+Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq,
                       const float *vectors, QueryResults &results) {
     auto start_time = METRICS_NOW_TIME;
     meta::DatesT dates = {meta::Meta::GetDate()};
@@ -119,10 +157,11 @@ Status DBImpl::Query(const std::string &table_id, size_t k, size_t nq,
     auto total_time = METRICS_MICROSECONDS(start_time,end_time);
 
     CollectQueryMetrics(total_time, nq);
+
     return result;
 }
 
-Status DBImpl::Query(const std::string& table_id, size_t k, size_t nq,
+Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
 #if 0
     return QuerySync(table_id, k, nq, vectors, dates, results);
@@ -131,13 +170,13 @@ Status DBImpl::Query(const std::string& table_id, size_t k, size_t nq,
 #endif
 }
 
-Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
+Status DBImpl::QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
                  const float* vectors, const meta::DatesT& dates, QueryResults& results) {
     meta::DatePartionedTableFilesSchema files;
     auto status = pMeta_->FilesToSearch(table_id, dates, files);
     if (!status.ok()) { return status; }
 
-    LOG(DEBUG) << "Search DateT Size=" << files.size();
+    ENGINE_LOG_DEBUG << "Search DateT Size = " << files.size();
 
     meta::TableFilesSchema index_files;
     meta::TableFilesSchema raw_files;
@@ -154,7 +193,7 @@ Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
     } else if (!raw_files.empty()) {
         dim = raw_files[0].dimension_;
     } else {
-        LOG(DEBUG) << "no files to search";
+        ENGINE_LOG_DEBUG << "no files to search";
         return Status::OK();
     }
 
@@ -190,7 +229,7 @@ Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
                 auto file_size = index->PhysicalSize();
                 search_set_size += file_size;
 
-                LOG(DEBUG) << "Search file_type " << file.file_type_ << " Of Size: "
+                ENGINE_LOG_DEBUG << "Search file_type " << file.file_type_ << " Of Size: "
                     << file_size/(1024*1024) << " M";
 
                 int inner_k = index->Count() < k ? index->Count() : k;
@@ -252,7 +291,7 @@ Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
         search_in_index(raw_files);
         search_in_index(index_files);
 
-        LOG(DEBUG) << "Search Overall Set Size=" << search_set_size << " M";
+        ENGINE_LOG_DEBUG << "Search Overall Set Size = " << search_set_size << " M";
         cluster_topk();
 
         free(output_distence);
@@ -265,7 +304,7 @@ Status DBImpl::QuerySync(const std::string& table_id, size_t k, size_t nq,
     return Status::OK();
 }
 
-Status DBImpl::QueryAsync(const std::string& table_id, size_t k, size_t nq,
+Status DBImpl::QueryAsync(const std::string& table_id, uint64_t k, uint64_t nq,
                   const float* vectors, const meta::DatesT& dates, QueryResults& results) {
 
     //step 1: get files to search
@@ -273,7 +312,7 @@ Status DBImpl::QueryAsync(const std::string& table_id, size_t k, size_t nq,
     auto status = pMeta_->FilesToSearch(table_id, dates, files);
     if (!status.ok()) { return status; }
 
-    LOG(DEBUG) << "Search DateT Size=" << files.size();
+    ENGINE_LOG_DEBUG << "Search DateT Size=" << files.size();
 
     SearchContextPtr context = std::make_shared<SearchContext>(k, nq, vectors);
 
@@ -304,17 +343,24 @@ void DBImpl::StartTimerTasks(int interval) {
 
 void DBImpl::BackgroundTimerTask(int interval) {
     Status status;
+    server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!bg_error_.ok()) break;
         if (shutting_down_.load(std::memory_order_acquire)) break;
 
         std::this_thread::sleep_for(std::chrono::seconds(interval));
-        int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheUsage();
-        LOG(DEBUG) << "Cache usage " << cache_total;
-        server::Metrics::GetInstance().CacheUsageGaugeSet(static_cast<double>(cache_total));
-        long size;
+
+        server::Metrics::GetInstance().KeepingAliveCounterIncrement(interval);
+        int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
+        int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+        server::Metrics::GetInstance().CacheUsageGaugeSet(cache_usage*100/cache_total);
+        uint64_t size;
         Size(size);
         server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
+        server::Metrics::GetInstance().CPUUsagePercentSet();
+        server::Metrics::GetInstance().RAMUsagePercentSet();
+        server::Metrics::GetInstance().GPUPercentGaugeSet();
+        server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
         TrySchedule();
     }
 }
@@ -509,7 +555,7 @@ Status DBImpl::DropAll() {
     return pMeta_->DropAll();
 }
 
-Status DBImpl::Size(long& result) {
+Status DBImpl::Size(uint64_t& result) {
     return  pMeta_->Size(result);
 }
 
