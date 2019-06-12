@@ -24,6 +24,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-45 - Implement DeleteTable interface
 
 ## Task
+- MS-74 - Change README.md in cpp
 
 # MegaSearch 0.2.0 (2019-05-31)
 
