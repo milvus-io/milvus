@@ -10,7 +10,8 @@ def main():
     print('# Client version: {}'.format(mega.client_version()))
 
     # Connect
-    param = {'host': '192.168.1.129', 'port': '33001'}
+    # Please change HOST and PORT to correct one
+    param = {'host': 'HOST', 'port': 'PORT'}
     cnn_status = mega.connect(**param)
     print('# Connect Status: {}'.format(cnn_status))
 

@@ -211,7 +211,7 @@ class TestVector:
         table_name = fake.table_name()
         res, table_schema = client.describe_table(table_name)
         assert res == Status.SUCCESS
-        assert isinstance(table_schema, TableSchema)
+        assert isinstance(table_schema, ttypes.TableSchema)
 
     def test_false_decribe_table(self, client):
         table_name = fake.table_name()

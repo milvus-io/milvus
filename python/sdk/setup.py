@@ -1,6 +1,5 @@
 import setuptools
 
-# TODO
 long_description = ''
 
 setuptools.setup(
@@ -11,8 +10,12 @@ setuptools.setup(
     description="Sdk for using MegaSearch",
     packages=setuptools.find_packages(),
     classifiers=[
-        "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3.4",
+        "Programming Language :: Python :: 3.5",
+        "Programming Language :: Python :: 3.6",
         "Operating System :: OS Independent",
     ],
+
+
+    python_requires='>=3.4'
 )
