@@ -21,20 +21,18 @@ class ErrorCode(object):
     CONNECT_FAILED = 1
     PERMISSION_DENIED = 2
     TABLE_NOT_EXISTS = 3
-    PARTITION_NOT_EXIST = 4
-    ILLEGAL_ARGUMENT = 5
-    ILLEGAL_RANGE = 6
-    ILLEGAL_DIMENSION = 7
+    ILLEGAL_ARGUMENT = 4
+    ILLEGAL_RANGE = 5
+    ILLEGAL_DIMENSION = 6
 
     _VALUES_TO_NAMES = {
         0: "SUCCESS",
         1: "CONNECT_FAILED",
         2: "PERMISSION_DENIED",
         3: "TABLE_NOT_EXISTS",
-        4: "PARTITION_NOT_EXIST",
-        5: "ILLEGAL_ARGUMENT",
-        6: "ILLEGAL_RANGE",
-        7: "ILLEGAL_DIMENSION",
+        4: "ILLEGAL_ARGUMENT",
+        5: "ILLEGAL_RANGE",
+        6: "ILLEGAL_DIMENSION",
     }
 
     _NAMES_TO_VALUES = {
@@ -42,10 +40,9 @@ class ErrorCode(object):
         "CONNECT_FAILED": 1,
         "PERMISSION_DENIED": 2,
         "TABLE_NOT_EXISTS": 3,
-        "PARTITION_NOT_EXIST": 4,
-        "ILLEGAL_ARGUMENT": 5,
-        "ILLEGAL_RANGE": 6,
-        "ILLEGAL_DIMENSION": 7,
+        "ILLEGAL_ARGUMENT": 4,
+        "ILLEGAL_RANGE": 5,
+        "ILLEGAL_DIMENSION": 6,
     }
 
 
@@ -120,197 +117,24 @@ class Exception(TException):
         return not (self == other)
 
 
-class Column(object):
-    """
-    @brief Table column description
-
-    Attributes:
-     - type
-     - name
-
-    """
-
-
-    def __init__(self, type=None, name=None,):
-        self.type = type
-        self.name = name
-
-    def read(self, iprot):
-        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
-            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
-            return
-        iprot.readStructBegin()
-        while True:
-            (fname, ftype, fid) = iprot.readFieldBegin()
-            if ftype == TType.STOP:
-                break
-            if fid == 1:
-                if ftype == TType.I32:
-                    self.type = iprot.readI32()
-                else:
-                    iprot.skip(ftype)
-            elif fid == 2:
-                if ftype == TType.STRING:
-                    self.name = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                else:
-                    iprot.skip(ftype)
-            else:
-                iprot.skip(ftype)
-            iprot.readFieldEnd()
-        iprot.readStructEnd()
-
-    def write(self, oprot):
-        if oprot._fast_encode is not None and self.thrift_spec is not None:
-            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
-            return
-        oprot.writeStructBegin('Column')
-        if self.type is not None:
-            oprot.writeFieldBegin('type', TType.I32, 1)
-            oprot.writeI32(self.type)
-            oprot.writeFieldEnd()
-        if self.name is not None:
-            oprot.writeFieldBegin('name', TType.STRING, 2)
-            oprot.writeString(self.name.encode('utf-8') if sys.version_info[0] == 2 else self.name)
-            oprot.writeFieldEnd()
-        oprot.writeFieldStop()
-        oprot.writeStructEnd()
-
-    def validate(self):
-        if self.type is None:
-            raise TProtocolException(message='Required field type is unset!')
-        if self.name is None:
-            raise TProtocolException(message='Required field name is unset!')
-        return
-
-    def __repr__(self):
-        L = ['%s=%r' % (key, value)
-             for key, value in self.__dict__.items()]
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-    def __ne__(self, other):
-        return not (self == other)
-
-
-class VectorColumn(object):
-    """
-    @brief Table vector column description
-
-    Attributes:
-     - base
-     - dimension
-     - index_type
-     - store_raw_vector
-
-    """
-
-
-    def __init__(self, base=None, dimension=None, index_type=None, store_raw_vector=False,):
-        self.base = base
-        self.dimension = dimension
-        self.index_type = index_type
-        self.store_raw_vector = store_raw_vector
-
-    def read(self, iprot):
-        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
-            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
-            return
-        iprot.readStructBegin()
-        while True:
-            (fname, ftype, fid) = iprot.readFieldBegin()
-            if ftype == TType.STOP:
-                break
-            if fid == 1:
-                if ftype == TType.STRUCT:
-                    self.base = Column()
-                    self.base.read(iprot)
-                else:
-                    iprot.skip(ftype)
-            elif fid == 2:
-                if ftype == TType.I64:
-                    self.dimension = iprot.readI64()
-                else:
-                    iprot.skip(ftype)
-            elif fid == 3:
-                if ftype == TType.STRING:
-                    self.index_type = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                else:
-                    iprot.skip(ftype)
-            elif fid == 4:
-                if ftype == TType.BOOL:
-                    self.store_raw_vector = iprot.readBool()
-                else:
-                    iprot.skip(ftype)
-            else:
-                iprot.skip(ftype)
-            iprot.readFieldEnd()
-        iprot.readStructEnd()
-
-    def write(self, oprot):
-        if oprot._fast_encode is not None and self.thrift_spec is not None:
-            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
-            return
-        oprot.writeStructBegin('VectorColumn')
-        if self.base is not None:
-            oprot.writeFieldBegin('base', TType.STRUCT, 1)
-            self.base.write(oprot)
-            oprot.writeFieldEnd()
-        if self.dimension is not None:
-            oprot.writeFieldBegin('dimension', TType.I64, 2)
-            oprot.writeI64(self.dimension)
-            oprot.writeFieldEnd()
-        if self.index_type is not None:
-            oprot.writeFieldBegin('index_type', TType.STRING, 3)
-            oprot.writeString(self.index_type.encode('utf-8') if sys.version_info[0] == 2 else self.index_type)
-            oprot.writeFieldEnd()
-        if self.store_raw_vector is not None:
-            oprot.writeFieldBegin('store_raw_vector', TType.BOOL, 4)
-            oprot.writeBool(self.store_raw_vector)
-            oprot.writeFieldEnd()
-        oprot.writeFieldStop()
-        oprot.writeStructEnd()
-
-    def validate(self):
-        if self.base is None:
-            raise TProtocolException(message='Required field base is unset!')
-        if self.dimension is None:
-            raise TProtocolException(message='Required field dimension is unset!')
-        if self.index_type is None:
-            raise TProtocolException(message='Required field index_type is unset!')
-        return
-
-    def __repr__(self):
-        L = ['%s=%r' % (key, value)
-             for key, value in self.__dict__.items()]
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-    def __ne__(self, other):
-        return not (self == other)
-
-
 class TableSchema(object):
     """
     @brief Table Schema
 
     Attributes:
      - table_name
-     - vector_column_array
-     - attribute_column_array
-     - partition_column_name_array
+     - index_type
+     - dimension
+     - store_raw_vector
 
     """
 
 
-    def __init__(self, table_name=None, vector_column_array=None, attribute_column_array=None, partition_column_name_array=None,):
+    def __init__(self, table_name=None, index_type=0, dimension=0, store_raw_vector=False,):
         self.table_name = table_name
-        self.vector_column_array = vector_column_array
-        self.attribute_column_array = attribute_column_array
-        self.partition_column_name_array = partition_column_name_array
+        self.index_type = index_type
+        self.dimension = dimension
+        self.store_raw_vector = store_raw_vector
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -327,35 +151,18 @@ class TableSchema(object):
                 else:
                     iprot.skip(ftype)
             elif fid == 2:
-                if ftype == TType.LIST:
-                    self.vector_column_array = []
-                    (_etype3, _size0) = iprot.readListBegin()
-                    for _i4 in range(_size0):
-                        _elem5 = VectorColumn()
-                        _elem5.read(iprot)
-                        self.vector_column_array.append(_elem5)
-                    iprot.readListEnd()
+                if ftype == TType.I32:
+                    self.index_type = iprot.readI32()
                 else:
                     iprot.skip(ftype)
             elif fid == 3:
-                if ftype == TType.LIST:
-                    self.attribute_column_array = []
-                    (_etype9, _size6) = iprot.readListBegin()
-                    for _i10 in range(_size6):
-                        _elem11 = Column()
-                        _elem11.read(iprot)
-                        self.attribute_column_array.append(_elem11)
-                    iprot.readListEnd()
+                if ftype == TType.I64:
+                    self.dimension = iprot.readI64()
                 else:
                     iprot.skip(ftype)
             elif fid == 4:
-                if ftype == TType.LIST:
-                    self.partition_column_name_array = []
-                    (_etype15, _size12) = iprot.readListBegin()
-                    for _i16 in range(_size12):
-                        _elem17 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        self.partition_column_name_array.append(_elem17)
-                    iprot.readListEnd()
+                if ftype == TType.BOOL:
+                    self.store_raw_vector = iprot.readBool()
                 else:
                     iprot.skip(ftype)
             else:
@@ -372,26 +179,17 @@ class TableSchema(object):
             oprot.writeFieldBegin('table_name', TType.STRING, 1)
             oprot.writeString(self.table_name.encode('utf-8') if sys.version_info[0] == 2 else self.table_name)
             oprot.writeFieldEnd()
-        if self.vector_column_array is not None:
-            oprot.writeFieldBegin('vector_column_array', TType.LIST, 2)
-            oprot.writeListBegin(TType.STRUCT, len(self.vector_column_array))
-            for iter18 in self.vector_column_array:
-                iter18.write(oprot)
-            oprot.writeListEnd()
+        if self.index_type is not None:
+            oprot.writeFieldBegin('index_type', TType.I32, 2)
+            oprot.writeI32(self.index_type)
             oprot.writeFieldEnd()
-        if self.attribute_column_array is not None:
-            oprot.writeFieldBegin('attribute_column_array', TType.LIST, 3)
-            oprot.writeListBegin(TType.STRUCT, len(self.attribute_column_array))
-            for iter19 in self.attribute_column_array:
-                iter19.write(oprot)
-            oprot.writeListEnd()
+        if self.dimension is not None:
+            oprot.writeFieldBegin('dimension', TType.I64, 3)
+            oprot.writeI64(self.dimension)
             oprot.writeFieldEnd()
-        if self.partition_column_name_array is not None:
-            oprot.writeFieldBegin('partition_column_name_array', TType.LIST, 4)
-            oprot.writeListBegin(TType.STRING, len(self.partition_column_name_array))
-            for iter20 in self.partition_column_name_array:
-                oprot.writeString(iter20.encode('utf-8') if sys.version_info[0] == 2 else iter20)
-            oprot.writeListEnd()
+        if self.store_raw_vector is not None:
+            oprot.writeFieldBegin('store_raw_vector', TType.BOOL, 4)
+            oprot.writeBool(self.store_raw_vector)
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
         oprot.writeStructEnd()
@@ -399,8 +197,6 @@ class TableSchema(object):
     def validate(self):
         if self.table_name is None:
             raise TProtocolException(message='Required field table_name is unset!')
-        if self.vector_column_array is None:
-            raise TProtocolException(message='Required field vector_column_array is unset!')
         return
 
     def __repr__(self):
@@ -471,190 +267,6 @@ class Range(object):
         oprot.writeStructEnd()
 
     def validate(self):
-        if self.start_value is None:
-            raise TProtocolException(message='Required field start_value is unset!')
-        if self.end_value is None:
-            raise TProtocolException(message='Required field end_value is unset!')
-        return
-
-    def __repr__(self):
-        L = ['%s=%r' % (key, value)
-             for key, value in self.__dict__.items()]
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-    def __ne__(self, other):
-        return not (self == other)
-
-
-class CreateTablePartitionParam(object):
-    """
-    @brief Create table partition parameters
-
-    Attributes:
-     - table_name
-     - partition_name
-     - range_map
-
-    """
-
-
-    def __init__(self, table_name=None, partition_name=None, range_map=None,):
-        self.table_name = table_name
-        self.partition_name = partition_name
-        self.range_map = range_map
-
-    def read(self, iprot):
-        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
-            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
-            return
-        iprot.readStructBegin()
-        while True:
-            (fname, ftype, fid) = iprot.readFieldBegin()
-            if ftype == TType.STOP:
-                break
-            if fid == 1:
-                if ftype == TType.STRING:
-                    self.table_name = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                else:
-                    iprot.skip(ftype)
-            elif fid == 2:
-                if ftype == TType.STRING:
-                    self.partition_name = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                else:
-                    iprot.skip(ftype)
-            elif fid == 3:
-                if ftype == TType.MAP:
-                    self.range_map = {}
-                    (_ktype22, _vtype23, _size21) = iprot.readMapBegin()
-                    for _i25 in range(_size21):
-                        _key26 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        _val27 = Range()
-                        _val27.read(iprot)
-                        self.range_map[_key26] = _val27
-                    iprot.readMapEnd()
-                else:
-                    iprot.skip(ftype)
-            else:
-                iprot.skip(ftype)
-            iprot.readFieldEnd()
-        iprot.readStructEnd()
-
-    def write(self, oprot):
-        if oprot._fast_encode is not None and self.thrift_spec is not None:
-            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
-            return
-        oprot.writeStructBegin('CreateTablePartitionParam')
-        if self.table_name is not None:
-            oprot.writeFieldBegin('table_name', TType.STRING, 1)
-            oprot.writeString(self.table_name.encode('utf-8') if sys.version_info[0] == 2 else self.table_name)
-            oprot.writeFieldEnd()
-        if self.partition_name is not None:
-            oprot.writeFieldBegin('partition_name', TType.STRING, 2)
-            oprot.writeString(self.partition_name.encode('utf-8') if sys.version_info[0] == 2 else self.partition_name)
-            oprot.writeFieldEnd()
-        if self.range_map is not None:
-            oprot.writeFieldBegin('range_map', TType.MAP, 3)
-            oprot.writeMapBegin(TType.STRING, TType.STRUCT, len(self.range_map))
-            for kiter28, viter29 in self.range_map.items():
-                oprot.writeString(kiter28.encode('utf-8') if sys.version_info[0] == 2 else kiter28)
-                viter29.write(oprot)
-            oprot.writeMapEnd()
-            oprot.writeFieldEnd()
-        oprot.writeFieldStop()
-        oprot.writeStructEnd()
-
-    def validate(self):
-        if self.table_name is None:
-            raise TProtocolException(message='Required field table_name is unset!')
-        if self.partition_name is None:
-            raise TProtocolException(message='Required field partition_name is unset!')
-        if self.range_map is None:
-            raise TProtocolException(message='Required field range_map is unset!')
-        return
-
-    def __repr__(self):
-        L = ['%s=%r' % (key, value)
-             for key, value in self.__dict__.items()]
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-    def __ne__(self, other):
-        return not (self == other)
-
-
-class DeleteTablePartitionParam(object):
-    """
-    @brief Delete table partition parameters
-
-    Attributes:
-     - table_name
-     - partition_name_array
-
-    """
-
-
-    def __init__(self, table_name=None, partition_name_array=None,):
-        self.table_name = table_name
-        self.partition_name_array = partition_name_array
-
-    def read(self, iprot):
-        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
-            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
-            return
-        iprot.readStructBegin()
-        while True:
-            (fname, ftype, fid) = iprot.readFieldBegin()
-            if ftype == TType.STOP:
-                break
-            if fid == 1:
-                if ftype == TType.STRING:
-                    self.table_name = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                else:
-                    iprot.skip(ftype)
-            elif fid == 2:
-                if ftype == TType.LIST:
-                    self.partition_name_array = []
-                    (_etype33, _size30) = iprot.readListBegin()
-                    for _i34 in range(_size30):
-                        _elem35 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        self.partition_name_array.append(_elem35)
-                    iprot.readListEnd()
-                else:
-                    iprot.skip(ftype)
-            else:
-                iprot.skip(ftype)
-            iprot.readFieldEnd()
-        iprot.readStructEnd()
-
-    def write(self, oprot):
-        if oprot._fast_encode is not None and self.thrift_spec is not None:
-            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
-            return
-        oprot.writeStructBegin('DeleteTablePartitionParam')
-        if self.table_name is not None:
-            oprot.writeFieldBegin('table_name', TType.STRING, 1)
-            oprot.writeString(self.table_name.encode('utf-8') if sys.version_info[0] == 2 else self.table_name)
-            oprot.writeFieldEnd()
-        if self.partition_name_array is not None:
-            oprot.writeFieldBegin('partition_name_array', TType.LIST, 2)
-            oprot.writeListBegin(TType.STRING, len(self.partition_name_array))
-            for iter36 in self.partition_name_array:
-                oprot.writeString(iter36.encode('utf-8') if sys.version_info[0] == 2 else iter36)
-            oprot.writeListEnd()
-            oprot.writeFieldEnd()
-        oprot.writeFieldStop()
-        oprot.writeStructEnd()
-
-    def validate(self):
-        if self.table_name is None:
-            raise TProtocolException(message='Required field table_name is unset!')
-        if self.partition_name_array is None:
-            raise TProtocolException(message='Required field partition_name_array is unset!')
         return
 
     def __repr__(self):
@@ -674,15 +286,13 @@ class RowRecord(object):
     @brief Record inserted
 
     Attributes:
-     - vector_map
-     - attribute_map
+     - vector_data
 
     """
 
 
-    def __init__(self, vector_map=None, attribute_map=None,):
-        self.vector_map = vector_map
-        self.attribute_map = attribute_map
+    def __init__(self, vector_data=None,):
+        self.vector_data = vector_data
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -694,25 +304,8 @@ class RowRecord(object):
             if ftype == TType.STOP:
                 break
             if fid == 1:
-                if ftype == TType.MAP:
-                    self.vector_map = {}
-                    (_ktype38, _vtype39, _size37) = iprot.readMapBegin()
-                    for _i41 in range(_size37):
-                        _key42 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        _val43 = iprot.readBinary()
-                        self.vector_map[_key42] = _val43
-                    iprot.readMapEnd()
-                else:
-                    iprot.skip(ftype)
-            elif fid == 2:
-                if ftype == TType.MAP:
-                    self.attribute_map = {}
-                    (_ktype45, _vtype46, _size44) = iprot.readMapBegin()
-                    for _i48 in range(_size44):
-                        _key49 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        _val50 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        self.attribute_map[_key49] = _val50
-                    iprot.readMapEnd()
+                if ftype == TType.STRING:
+                    self.vector_data = iprot.readBinary()
                 else:
                     iprot.skip(ftype)
             else:
@@ -725,148 +318,16 @@ class RowRecord(object):
             oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
             return
         oprot.writeStructBegin('RowRecord')
-        if self.vector_map is not None:
-            oprot.writeFieldBegin('vector_map', TType.MAP, 1)
-            oprot.writeMapBegin(TType.STRING, TType.STRING, len(self.vector_map))
-            for kiter51, viter52 in self.vector_map.items():
-                oprot.writeString(kiter51.encode('utf-8') if sys.version_info[0] == 2 else kiter51)
-                oprot.writeBinary(viter52)
-            oprot.writeMapEnd()
-            oprot.writeFieldEnd()
-        if self.attribute_map is not None:
-            oprot.writeFieldBegin('attribute_map', TType.MAP, 2)
-            oprot.writeMapBegin(TType.STRING, TType.STRING, len(self.attribute_map))
-            for kiter53, viter54 in self.attribute_map.items():
-                oprot.writeString(kiter53.encode('utf-8') if sys.version_info[0] == 2 else kiter53)
-                oprot.writeString(viter54.encode('utf-8') if sys.version_info[0] == 2 else viter54)
-            oprot.writeMapEnd()
+        if self.vector_data is not None:
+            oprot.writeFieldBegin('vector_data', TType.STRING, 1)
+            oprot.writeBinary(self.vector_data)
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
         oprot.writeStructEnd()
 
     def validate(self):
-        if self.vector_map is None:
-            raise TProtocolException(message='Required field vector_map is unset!')
-        return
-
-    def __repr__(self):
-        L = ['%s=%r' % (key, value)
-             for key, value in self.__dict__.items()]
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-    def __ne__(self, other):
-        return not (self == other)
-
-
-class QueryRecord(object):
-    """
-    @brief Query record
-
-    Attributes:
-     - vector_map
-     - selected_column_array
-     - partition_filter_column_map
-
-    """
-
-
-    def __init__(self, vector_map=None, selected_column_array=None, partition_filter_column_map=None,):
-        self.vector_map = vector_map
-        self.selected_column_array = selected_column_array
-        self.partition_filter_column_map = partition_filter_column_map
-
-    def read(self, iprot):
-        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
-            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
-            return
-        iprot.readStructBegin()
-        while True:
-            (fname, ftype, fid) = iprot.readFieldBegin()
-            if ftype == TType.STOP:
-                break
-            if fid == 1:
-                if ftype == TType.MAP:
-                    self.vector_map = {}
-                    (_ktype56, _vtype57, _size55) = iprot.readMapBegin()
-                    for _i59 in range(_size55):
-                        _key60 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        _val61 = iprot.readBinary()
-                        self.vector_map[_key60] = _val61
-                    iprot.readMapEnd()
-                else:
-                    iprot.skip(ftype)
-            elif fid == 2:
-                if ftype == TType.LIST:
-                    self.selected_column_array = []
-                    (_etype65, _size62) = iprot.readListBegin()
-                    for _i66 in range(_size62):
-                        _elem67 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        self.selected_column_array.append(_elem67)
-                    iprot.readListEnd()
-                else:
-                    iprot.skip(ftype)
-            elif fid == 3:
-                if ftype == TType.MAP:
-                    self.partition_filter_column_map = {}
-                    (_ktype69, _vtype70, _size68) = iprot.readMapBegin()
-                    for _i72 in range(_size68):
-                        _key73 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        _val74 = []
-                        (_etype78, _size75) = iprot.readListBegin()
-                        for _i79 in range(_size75):
-                            _elem80 = Range()
-                            _elem80.read(iprot)
-                            _val74.append(_elem80)
-                        iprot.readListEnd()
-                        self.partition_filter_column_map[_key73] = _val74
-                    iprot.readMapEnd()
-                else:
-                    iprot.skip(ftype)
-            else:
-                iprot.skip(ftype)
-            iprot.readFieldEnd()
-        iprot.readStructEnd()
-
-    def write(self, oprot):
-        if oprot._fast_encode is not None and self.thrift_spec is not None:
-            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
-            return
-        oprot.writeStructBegin('QueryRecord')
-        if self.vector_map is not None:
-            oprot.writeFieldBegin('vector_map', TType.MAP, 1)
-            oprot.writeMapBegin(TType.STRING, TType.STRING, len(self.vector_map))
-            for kiter81, viter82 in self.vector_map.items():
-                oprot.writeString(kiter81.encode('utf-8') if sys.version_info[0] == 2 else kiter81)
-                oprot.writeBinary(viter82)
-            oprot.writeMapEnd()
-            oprot.writeFieldEnd()
-        if self.selected_column_array is not None:
-            oprot.writeFieldBegin('selected_column_array', TType.LIST, 2)
-            oprot.writeListBegin(TType.STRING, len(self.selected_column_array))
-            for iter83 in self.selected_column_array:
-                oprot.writeString(iter83.encode('utf-8') if sys.version_info[0] == 2 else iter83)
-            oprot.writeListEnd()
-            oprot.writeFieldEnd()
-        if self.partition_filter_column_map is not None:
-            oprot.writeFieldBegin('partition_filter_column_map', TType.MAP, 3)
-            oprot.writeMapBegin(TType.STRING, TType.LIST, len(self.partition_filter_column_map))
-            for kiter84, viter85 in self.partition_filter_column_map.items():
-                oprot.writeString(kiter84.encode('utf-8') if sys.version_info[0] == 2 else kiter84)
-                oprot.writeListBegin(TType.STRUCT, len(viter85))
-                for iter86 in viter85:
-                    iter86.write(oprot)
-                oprot.writeListEnd()
-            oprot.writeMapEnd()
-            oprot.writeFieldEnd()
-        oprot.writeFieldStop()
-        oprot.writeStructEnd()
-
-    def validate(self):
-        if self.vector_map is None:
-            raise TProtocolException(message='Required field vector_map is unset!')
+        if self.vector_data is None:
+            raise TProtocolException(message='Required field vector_data is unset!')
         return
 
     def __repr__(self):
@@ -888,15 +349,13 @@ class QueryResult(object):
     Attributes:
      - id
      - score
-     - column_map
 
     """
 
 
-    def __init__(self, id=None, score=None, column_map=None,):
+    def __init__(self, id=None, score=None,):
         self.id = id
         self.score = score
-        self.column_map = column_map
 
     def read(self, iprot):
         if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
@@ -917,17 +376,6 @@ class QueryResult(object):
                     self.score = iprot.readDouble()
                 else:
                     iprot.skip(ftype)
-            elif fid == 3:
-                if ftype == TType.MAP:
-                    self.column_map = {}
-                    (_ktype88, _vtype89, _size87) = iprot.readMapBegin()
-                    for _i91 in range(_size87):
-                        _key92 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        _val93 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        self.column_map[_key92] = _val93
-                    iprot.readMapEnd()
-                else:
-                    iprot.skip(ftype)
             else:
                 iprot.skip(ftype)
             iprot.readFieldEnd()
@@ -945,14 +393,6 @@ class QueryResult(object):
         if self.score is not None:
             oprot.writeFieldBegin('score', TType.DOUBLE, 2)
             oprot.writeDouble(self.score)
-            oprot.writeFieldEnd()
-        if self.column_map is not None:
-            oprot.writeFieldBegin('column_map', TType.MAP, 3)
-            oprot.writeMapBegin(TType.STRING, TType.STRING, len(self.column_map))
-            for kiter94, viter95 in self.column_map.items():
-                oprot.writeString(kiter94.encode('utf-8') if sys.version_info[0] == 2 else kiter94)
-                oprot.writeString(viter95.encode('utf-8') if sys.version_info[0] == 2 else viter95)
-            oprot.writeMapEnd()
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
         oprot.writeStructEnd()
@@ -997,11 +437,11 @@ class TopKQueryResult(object):
             if fid == 1:
                 if ftype == TType.LIST:
                     self.query_result_arrays = []
-                    (_etype99, _size96) = iprot.readListBegin()
-                    for _i100 in range(_size96):
-                        _elem101 = QueryResult()
-                        _elem101.read(iprot)
-                        self.query_result_arrays.append(_elem101)
+                    (_etype3, _size0) = iprot.readListBegin()
+                    for _i4 in range(_size0):
+                        _elem5 = QueryResult()
+                        _elem5.read(iprot)
+                        self.query_result_arrays.append(_elem5)
                     iprot.readListEnd()
                 else:
                     iprot.skip(ftype)
@@ -1018,8 +458,8 @@ class TopKQueryResult(object):
         if self.query_result_arrays is not None:
             oprot.writeFieldBegin('query_result_arrays', TType.LIST, 1)
             oprot.writeListBegin(TType.STRUCT, len(self.query_result_arrays))
-            for iter102 in self.query_result_arrays:
-                iter102.write(oprot)
+            for iter6 in self.query_result_arrays:
+                iter6.write(oprot)
             oprot.writeListEnd()
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
@@ -1044,27 +484,13 @@ Exception.thrift_spec = (
     (1, TType.I32, 'code', None, None, ),  # 1
     (2, TType.STRING, 'reason', 'UTF8', None, ),  # 2
 )
-all_structs.append(Column)
-Column.thrift_spec = (
-    None,  # 0
-    (1, TType.I32, 'type', None, None, ),  # 1
-    (2, TType.STRING, 'name', 'UTF8', None, ),  # 2
-)
-all_structs.append(VectorColumn)
-VectorColumn.thrift_spec = (
-    None,  # 0
-    (1, TType.STRUCT, 'base', [Column, None], None, ),  # 1
-    (2, TType.I64, 'dimension', None, None, ),  # 2
-    (3, TType.STRING, 'index_type', 'UTF8', None, ),  # 3
-    (4, TType.BOOL, 'store_raw_vector', None, False, ),  # 4
-)
 all_structs.append(TableSchema)
 TableSchema.thrift_spec = (
     None,  # 0
     (1, TType.STRING, 'table_name', 'UTF8', None, ),  # 1
-    (2, TType.LIST, 'vector_column_array', (TType.STRUCT, [VectorColumn, None], False), None, ),  # 2
-    (3, TType.LIST, 'attribute_column_array', (TType.STRUCT, [Column, None], False), None, ),  # 3
-    (4, TType.LIST, 'partition_column_name_array', (TType.STRING, 'UTF8', False), None, ),  # 4
+    (2, TType.I32, 'index_type', None, 0, ),  # 2
+    (3, TType.I64, 'dimension', None, 0, ),  # 3
+    (4, TType.BOOL, 'store_raw_vector', None, False, ),  # 4
 )
 all_structs.append(Range)
 Range.thrift_spec = (
@@ -1072,38 +498,16 @@ Range.thrift_spec = (
     (1, TType.STRING, 'start_value', 'UTF8', None, ),  # 1
     (2, TType.STRING, 'end_value', 'UTF8', None, ),  # 2
 )
-all_structs.append(CreateTablePartitionParam)
-CreateTablePartitionParam.thrift_spec = (
-    None,  # 0
-    (1, TType.STRING, 'table_name', 'UTF8', None, ),  # 1
-    (2, TType.STRING, 'partition_name', 'UTF8', None, ),  # 2
-    (3, TType.MAP, 'range_map', (TType.STRING, 'UTF8', TType.STRUCT, [Range, None], False), None, ),  # 3
-)
-all_structs.append(DeleteTablePartitionParam)
-DeleteTablePartitionParam.thrift_spec = (
-    None,  # 0
-    (1, TType.STRING, 'table_name', 'UTF8', None, ),  # 1
-    (2, TType.LIST, 'partition_name_array', (TType.STRING, 'UTF8', False), None, ),  # 2
-)
 all_structs.append(RowRecord)
 RowRecord.thrift_spec = (
     None,  # 0
-    (1, TType.MAP, 'vector_map', (TType.STRING, 'UTF8', TType.STRING, 'BINARY', False), None, ),  # 1
-    (2, TType.MAP, 'attribute_map', (TType.STRING, 'UTF8', TType.STRING, 'UTF8', False), None, ),  # 2
-)
-all_structs.append(QueryRecord)
-QueryRecord.thrift_spec = (
-    None,  # 0
-    (1, TType.MAP, 'vector_map', (TType.STRING, 'UTF8', TType.STRING, 'BINARY', False), None, ),  # 1
-    (2, TType.LIST, 'selected_column_array', (TType.STRING, 'UTF8', False), None, ),  # 2
-    (3, TType.MAP, 'partition_filter_column_map', (TType.STRING, 'UTF8', TType.LIST, (TType.STRUCT, [Range, None], False), False), None, ),  # 3
+    (1, TType.STRING, 'vector_data', 'BINARY', None, ),  # 1
 )
 all_structs.append(QueryResult)
 QueryResult.thrift_spec = (
     None,  # 0
     (1, TType.I64, 'id', None, None, ),  # 1
     (2, TType.DOUBLE, 'score', None, None, ),  # 2
-    (3, TType.MAP, 'column_map', (TType.STRING, 'UTF8', TType.STRING, 'UTF8', False), None, ),  # 3
 )
 all_structs.append(TopKQueryResult)
 TopKQueryResult.thrift_spec = (
