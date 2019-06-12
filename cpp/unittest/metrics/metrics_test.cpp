@@ -72,8 +72,8 @@ TEST_F(DBTest, Metric_Tes) {
 
         INIT_TIMER;
         std::stringstream ss;
-        long count = 0;
-        long prev_count = -1;
+        uint64_t count = 0;
+        uint64_t prev_count = 0;
 
         for (auto j=0; j<10; ++j) {
             ss.str("");

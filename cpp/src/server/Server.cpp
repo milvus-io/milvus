@@ -173,6 +173,7 @@ Server::Start() {
             signal(SIGHUP, SignalUtil::HandleSignal);
             signal(SIGTERM, SignalUtil::HandleSignal);
             server::Metrics::GetInstance().Init();
+            server::SystemInfo::GetInstance().Init();
             SERVER_LOG_INFO << "Vecwise server is running...";
             StartService();
 
