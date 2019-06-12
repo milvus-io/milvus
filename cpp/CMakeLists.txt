@@ -20,11 +20,12 @@ MACRO (GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
 ENDMACRO (GET_GIT_BRANCH_NAME)
 
 GET_GIT_BRANCH_NAME(GIT_BRANCH_NAME)
-string(REGEX REPLACE "\n" "" GIT_BRANCH_NAME ${GIT_BRANCH_NAME})
+if(NOT GIT_BRANCH_NAME STREQUAL "")
+    string(REGEX REPLACE "\n" "" GIT_BRANCH_NAME ${GIT_BRANCH_NAME})
+endif()
 
 set(MEGASEARCH_VERSION "${GIT_BRANCH_NAME}")
 string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]" MEGASEARCH_VERSION "${MEGASEARCH_VERSION}")
-message(STATUS "Build version = ${MEGASEARCH_VERSION}")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(BUILD_TYPE "release")
@@ -32,8 +33,6 @@ else()
     set(BUILD_TYPE "debug")
 endif()
 message(STATUS "Build type = ${BUILD_TYPE}")
-
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.macro ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
 
 project(megasearch VERSION "${MEGASEARCH_VERSION}")
 project(vecwise_engine LANGUAGES CUDA CXX)
@@ -79,8 +78,12 @@ set(MEGASEARCH_VERSION_PATCH "${megasearch_VERSION_PATCH}")
 if(MEGASEARCH_VERSION_MAJOR STREQUAL ""
         OR MEGASEARCH_VERSION_MINOR STREQUAL ""
         OR MEGASEARCH_VERSION_PATCH STREQUAL "")
-    message(FATAL_ERROR "Failed to determine MegaSearch version from '${MEGASEARCH_VERSION}'")
+    message(WARNING "Failed to determine MegaSearch version from '${MEGASEARCH_VERSION}'")
+    set(MEGASEARCH_VERSION "unknown")
 endif()
+
+message(STATUS "Build version = ${MEGASEARCH_VERSION}")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.macro ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
 
 message(STATUS "MegaSearch version: "
         "${MEGASEARCH_VERSION_MAJOR}.${MEGASEARCH_VERSION_MINOR}.${MEGASEARCH_VERSION_PATCH} "
