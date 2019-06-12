@@ -12,4 +12,6 @@ Please mark all change in change log and use the ticket from JIRA.
 
 - MS-10 - Add Python SDK APIs
 
+- MS-11 - Implement Python SDK
+
 ### Task
