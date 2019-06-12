@@ -34,10 +34,10 @@ class Prepare(object):
 
     @classmethod
     def table_schema(cls,
-                     table_name, *,
+                     table_name,
                      dimension,
-                     index_type,
-                     store_raw_vector):
+                     index_type=IndexType.INVALIDE,
+                     store_raw_vector = False):
         """
 
         :param table_name: str, (Required) name of table
@@ -206,7 +206,8 @@ class MegaSearch(ConnectIntf):
 
             if top_k_query_results:
                 for top_k in top_k_query_results:
-                    res.append(TopKQueryResult([QueryResult(qr.id, qr.score)
+                    if top_k:
+                        res.append(TopKQueryResult([QueryResult(qr.id, qr.score)
                                                 for qr in top_k.query_result_arrays]))
 
         except (TApplicationException, TException) as e:
