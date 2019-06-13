@@ -34,6 +34,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-32 - Fix thrift error
 - MS-34 - Fix prometheus-cpp thirdparty
 - MS-67 - Fix license check bug
+- MS-76 - Fix pipeline crash bug
 
 ## Improvement
 
