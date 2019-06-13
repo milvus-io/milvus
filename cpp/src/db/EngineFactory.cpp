@@ -8,7 +8,7 @@
 #include "Log.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 ExecutionEnginePtr

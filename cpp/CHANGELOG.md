@@ -8,6 +8,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-80 - Fix server hang issue
 
 ## Improvement
+- MS-82 - Update server startup welcome message
+- MS-83 - Update vecwise to Milvus
 
 ## New Feature
 

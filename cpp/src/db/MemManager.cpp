@@ -15,7 +15,7 @@
 #include <easylogging++.h>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 MemVectors::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
@@ -144,5 +144,5 @@ Status MemManager::Serialize(std::vector<std::string>& table_ids) {
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

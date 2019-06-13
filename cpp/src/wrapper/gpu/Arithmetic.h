@@ -12,7 +12,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 using Bool = int8_t;

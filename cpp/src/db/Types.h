@@ -8,7 +8,7 @@
 #include <vector>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 typedef long IDNumber;
@@ -20,5 +20,5 @@ typedef std::vector<QueryResult> QueryResults;
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

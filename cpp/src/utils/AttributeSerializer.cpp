@@ -8,7 +8,7 @@
 #include "StringHelpFunctions.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 

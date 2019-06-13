@@ -10,7 +10,7 @@
 #include "SearchTaskQueue.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class SearchScheduler {

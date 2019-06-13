@@ -11,7 +11,7 @@
 #include <vector>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class IDGenerator {
@@ -37,5 +37,5 @@ private:
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz
