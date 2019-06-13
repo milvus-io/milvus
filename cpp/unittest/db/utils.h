@@ -29,28 +29,28 @@
 #endif
 
 
-void ASSERT_STATS(zilliz::vecwise::engine::Status& stat);
+void ASSERT_STATS(zilliz::milvus::engine::Status& stat);
 
 
 class DBTest : public ::testing::Test {
 protected:
-    zilliz::vecwise::engine::DB* db_;
+    zilliz::milvus::engine::DB* db_;
 
     void InitLog();
     virtual void SetUp() override;
     virtual void TearDown() override;
-    virtual zilliz::vecwise::engine::Options GetOptions();
+    virtual zilliz::milvus::engine::Options GetOptions();
 };
 
 class DBTest2 : public DBTest {
 protected:
-    virtual zilliz::vecwise::engine::Options GetOptions() override;
+    virtual zilliz::milvus::engine::Options GetOptions() override;
 };
 
 
 class MetaTest : public DBTest {
 protected:
-    std::shared_ptr<zilliz::vecwise::engine::meta::DBMetaImpl> impl_;
+    std::shared_ptr<zilliz::milvus::engine::meta::DBMetaImpl> impl_;
 
     virtual void SetUp() override;
     virtual void TearDown() override;

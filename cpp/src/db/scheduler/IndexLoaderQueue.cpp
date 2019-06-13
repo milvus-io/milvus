@@ -10,7 +10,7 @@
 #include "utils/Log.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 void

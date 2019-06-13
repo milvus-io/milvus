@@ -12,7 +12,7 @@
 #include <memory>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class SearchTask {

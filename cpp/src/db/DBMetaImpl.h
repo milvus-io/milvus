@@ -9,7 +9,7 @@
 #include "Options.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 namespace meta {
 
@@ -76,5 +76,5 @@ private:
 
 } // namespace meta
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

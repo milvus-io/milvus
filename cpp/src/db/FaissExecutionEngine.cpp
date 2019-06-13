@@ -17,7 +17,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 
@@ -68,7 +68,7 @@ Status FaissExecutionEngine::Serialize() {
 }
 
 Status FaissExecutionEngine::Load() {
-    auto index  = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    auto index  = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool to_cache = false;
     auto start_time = METRICS_NOW_TIME;
     if (!index) {
@@ -98,7 +98,7 @@ Status FaissExecutionEngine::Merge(const std::string& location) {
     if (location == location_) {
         return Status::Error("Cannot Merge Self");
     }
-    auto to_merge = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
+    auto to_merge = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
     if (!to_merge) {
         to_merge = read_index(location);
     }
@@ -140,7 +140,7 @@ Status FaissExecutionEngine::Search(long n,
 }
 
 Status FaissExecutionEngine::Cache() {
-    zilliz::vecwise::cache::CpuCacheMgr::GetInstance(
+    zilliz::milvus::cache::CpuCacheMgr::GetInstance(
             )->InsertItem(location_, std::make_shared<Index>(pIndex_));
 
     return Status::OK();
@@ -148,5 +148,5 @@ Status FaissExecutionEngine::Cache() {
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

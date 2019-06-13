@@ -8,7 +8,7 @@
 #include "server/ServerConfig.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace cache {
 
 CpuCacheMgr::CpuCacheMgr() {

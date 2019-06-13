@@ -14,7 +14,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 LicenseCheck::LicenseCheck() {

@@ -10,7 +10,7 @@
 #include <set>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace cache {
 
 Cache::Cache(int64_t capacity, uint64_t cache_max_count)
@@ -218,6 +218,6 @@ void Cache::print() {
 }
 
 }   // cache
-}   // vecwise
+}   // milvus
 }   // zilliz
 

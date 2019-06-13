@@ -11,7 +11,7 @@
 #include "utils/Log.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class MemScheduleStrategy : public IScheduleStrategy {
@@ -38,7 +38,7 @@ public:
             new_loader->search_contexts_.push_back(search_context);
             new_loader->file_ = pair.second;
 
-            auto index  = zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->GetIndex(pair.second->location_);
+            auto index  = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(pair.second->location_);
             if(index != nullptr) {
                 //if the index file has been in memory, increase its priority
                 loader_list.push_front(new_loader);

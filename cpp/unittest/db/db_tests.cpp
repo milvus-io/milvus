@@ -12,7 +12,7 @@
 #include "db/DBImpl.h"
 #include "db/MetaConsts.h"
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 TEST_F(DBTest, CONFIG_TEST) {
     {

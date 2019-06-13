@@ -13,7 +13,7 @@
 #include <condition_variable>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;

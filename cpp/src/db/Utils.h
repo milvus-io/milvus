@@ -7,7 +7,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 namespace utils {
 
@@ -15,5 +15,5 @@ long GetMicroSecTimeStamp();
 
 } // namespace utils
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz
