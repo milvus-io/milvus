@@ -11,7 +11,7 @@ def main():
 
     # Connect
     # Please change HOST and PORT to correct one
-    param = {'host': '192.168.1.121', 'port': '33001'}
+    param = {'host': 'HOST', 'port': 'PORT'}
     cnn_status = milvus.connect(**param)
     print('# Connect Status: {}'.format(cnn_status))
 
