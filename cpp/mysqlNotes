@@ -1,0 +1,7 @@
+sudo apt-get install mysql-server
+sudo apt-get install libmysqlclient-dev
+
+Install MySQL++
+./configure
+make
+sudo make install
