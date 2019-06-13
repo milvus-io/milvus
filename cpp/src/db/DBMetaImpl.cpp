@@ -21,7 +21,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 namespace meta {
 
@@ -923,5 +923,5 @@ DBMetaImpl::~DBMetaImpl() {
 
 } // namespace meta
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

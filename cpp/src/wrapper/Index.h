@@ -18,7 +18,7 @@
 #include "Operand.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class Index;

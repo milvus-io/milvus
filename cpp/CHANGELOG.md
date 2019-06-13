@@ -5,8 +5,11 @@ Please mark all change in change log and use the ticket from JIRA.
 # MegaSearch 0.3.0 (TBD)
 
 ## Bug
+- MS-80 - Fix server hang issue
 
 ## Improvement
+- MS-82 - Update server startup welcome message
+- MS-83 - Update vecwise to Milvus
 
 ## New Feature
 
@@ -23,6 +26,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-65 - Implement GetTableRowCount interface
 - MS-45 - Implement DeleteTable interface
 - MS-75 - cmake: change faiss version to 1.5.2; add CUDA gencode
+- MS-81 - fix faiss ptx issue; change cuda gencode
 
 ## Task
 - MS-74 - Change README.md in cpp
@@ -34,6 +38,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-32 - Fix thrift error
 - MS-34 - Fix prometheus-cpp thirdparty
 - MS-67 - Fix license check bug
+- MS-76 - Fix pipeline crash bug
 
 ## Improvement
 

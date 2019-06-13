@@ -9,7 +9,7 @@
 #include "Cache.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace cache {
 
 class CacheMgr {

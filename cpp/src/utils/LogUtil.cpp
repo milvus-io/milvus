@@ -10,7 +10,7 @@
 #include <ctype.h>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 int32_t InitLog(const std::string& log_config_file) {
@@ -57,5 +57,5 @@ int32_t InitLog(const std::string& log_config_file) {
 
 
 }   // server
-}   // vecwise
+}   // milvus
 }   // zilliz

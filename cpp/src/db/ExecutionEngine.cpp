@@ -8,7 +8,7 @@
 #include <easylogging++.h>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 Status ExecutionEngine::AddWithIds(const std::vector<float>& vectors, const std::vector<long>& vector_ids) {
@@ -23,5 +23,5 @@ Status ExecutionEngine::AddWithIds(const std::vector<float>& vectors, const std:
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz
