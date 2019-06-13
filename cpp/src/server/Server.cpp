@@ -193,11 +193,13 @@ Server::Stop() {
     if (pid_fd != -1) {
         int ret = lockf(pid_fd, F_ULOCK, 0);
         if(ret != 0){
-
+            printf("Can't lock file: %s\n", strerror(errno));
+            exit(0);
         }
         ret = close(pid_fd);
         if(ret != 0){
-
+            printf("Can't close file: %s\n", strerror(errno));
+            exit(0);
         }
     }
 
@@ -205,7 +207,8 @@ Server::Stop() {
     if (!pid_filename_.empty()) {
         int ret = unlink(pid_filename_.c_str());
         if(ret != 0){
-
+            printf("Can't unlink file: %s\n", strerror(errno));
+            exit(0);
         }
     }
 
@@ -216,6 +219,7 @@ Server::Stop() {
 #ifdef ENABLE_LICENSE
     server::LicenseCheck::GetInstance().StopCountingDown();
 #endif
+    printf("Milvus server is closed!\n");
 }
 
 
