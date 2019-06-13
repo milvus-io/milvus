@@ -23,7 +23,7 @@
 #include "metrics/Metrics.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 Server*
@@ -52,7 +52,7 @@ Server::Daemonize() {
         return;
     }
 
-    SERVER_LOG_INFO << "Vecwise server run in daemonize mode";
+    SERVER_LOG_INFO << "Milvus server run in daemonize mode";
 
 //    std::string log_path(GetLogDirFullPath());
 //    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
@@ -152,9 +152,6 @@ Server::Start() {
             ServerConfig &config = ServerConfig::GetInstance();
             ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
 
-            //print config into console and log
-            config.PrintAll();
-
 #ifdef ENABLE_LICENSE
             ConfigNode license_config = config.GetConfig(CONFIG_LICENSE);
             std::string license_file_path = license_config.GetValue(CONFIG_LICENSE_PATH);
@@ -174,11 +171,11 @@ Server::Start() {
             signal(SIGTERM, SignalUtil::HandleSignal);
             server::Metrics::GetInstance().Init();
             server::SystemInfo::GetInstance().Init();
-            SERVER_LOG_INFO << "Vecwise server is running...";
+            printf("Milvus server start successfully.\n");
             StartService();
 
         } catch(std::exception& ex){
-            SERVER_LOG_ERROR << "Vecwise server encounter exception: " << std::string(ex.what())
+            SERVER_LOG_ERROR << "Milvus server encounter exception: " << std::string(ex.what())
                              << "Is another server instance running?";
             break;
         }
@@ -190,7 +187,7 @@ Server::Start() {
 
 void
 Server::Stop() {
-    SERVER_LOG_INFO << "Vecwise server will be closed";
+    printf("Milvus server is going to shutdown ...\n");
 
     // Unlock and close lockfile
     if (pid_fd != -1) {
@@ -219,8 +216,6 @@ Server::Stop() {
 #ifdef ENABLE_LICENSE
     server::LicenseCheck::GetInstance().StopCountingDown();
 #endif
-
-    SERVER_LOG_INFO << "Vecwise server closed";
 }
 
 

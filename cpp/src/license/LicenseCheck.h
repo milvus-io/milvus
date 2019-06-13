@@ -9,7 +9,7 @@
 #include <memory>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 class LicenseCheck {

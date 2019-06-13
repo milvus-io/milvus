@@ -8,7 +8,7 @@
 #include <string>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class Status {
@@ -90,5 +90,5 @@ inline Status& Status::operator=(Status&& rhs) noexcept {
 }
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

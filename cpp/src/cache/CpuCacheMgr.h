@@ -8,7 +8,7 @@
 #include "CacheMgr.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace cache {
 
 class CpuCacheMgr : public CacheMgr {

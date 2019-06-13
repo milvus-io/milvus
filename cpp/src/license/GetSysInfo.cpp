@@ -7,7 +7,7 @@
 #include <getopt.h>
 #include <memory.h>
 // Not provide path: current work path will be used and system.info.
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 void
 print_usage(const std::string &app_name) {

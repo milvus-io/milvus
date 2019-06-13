@@ -11,7 +11,7 @@
 #include <memory>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 enum class EngineType {
@@ -57,5 +57,5 @@ using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

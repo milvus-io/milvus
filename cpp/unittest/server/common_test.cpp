@@ -7,7 +7,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 
 TEST(CommonTest, COMMON_TEST) {

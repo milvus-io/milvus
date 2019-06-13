@@ -15,7 +15,7 @@ namespace faiss {
 }
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 
@@ -68,5 +68,5 @@ protected:
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

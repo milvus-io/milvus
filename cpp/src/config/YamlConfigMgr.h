@@ -12,7 +12,7 @@
 #include <yaml-cpp/yaml.h>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 class YamlConfigMgr : public IConfigMgr {

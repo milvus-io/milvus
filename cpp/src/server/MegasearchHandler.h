@@ -11,7 +11,7 @@
 #include "MegasearchService.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 class MegasearchServiceHandler : virtual public megasearch::thrift::MegasearchServiceIf {

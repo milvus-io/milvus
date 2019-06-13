@@ -12,7 +12,7 @@
 #include <thread>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 class BaseTask {
