@@ -17,11 +17,13 @@
 
 set(MEGASEARCH_THIRDPARTY_DEPENDENCIES
 
+        ARROW
         BOOST
         BZip2
         Easylogging++
         FAISS
         GTest
+        JSONCONS
         LAPACK
         Lz4
         OpenBLAS
@@ -45,7 +47,9 @@ foreach(DEPENDENCY ${MEGASEARCH_THIRDPARTY_DEPENDENCIES})
 endforeach()
 
 macro(build_dependency DEPENDENCY_NAME)
-    if("${DEPENDENCY_NAME}" STREQUAL "BZip2")
+    if("${DEPENDENCY_NAME}" STREQUAL "ARROW")
+        build_arrow()
+    elseif("${DEPENDENCY_NAME}" STREQUAL "BZip2")
         build_bzip2()
     elseif("${DEPENDENCY_NAME}" STREQUAL "Easylogging++")
         build_easyloggingpp()
@@ -57,6 +61,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_lz4()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "GTest")
         build_gtest()
+    elseif ("${DEPENDENCY_NAME}" STREQUAL "JSONCONS")
+        build_jsoncons()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "OpenBLAS")
         build_openblas()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "Prometheus")
@@ -196,6 +202,14 @@ foreach(_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     set(${_LIB_NAME} "${_LIB_VERSION}")
 endforeach()
 
+if(DEFINED ENV{MEGASEARCH_ARROW_URL})
+    set(ARROW_SOURCE_URL "$ENV{MEGASEARCH_ARROW_URL}")
+else()
+    set(ARROW_SOURCE_URL
+            "https://github.com/youny626/arrow.git"
+            )
+endif()
+
 if(DEFINED ENV{MEGASEARCH_BOOST_URL})
     set(BOOST_SOURCE_URL "$ENV{MEGASEARCH_BOOST_URL}")
 else()
@@ -228,6 +242,13 @@ if (DEFINED ENV{MEGASEARCH_GTEST_URL})
 else ()
     set(GTEST_SOURCE_URL
             "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
+endif()
+
+if (DEFINED ENV{MEGASEARCH_JSONCONS_URL})
+    set(JSONCONS_SOURCE_URL "$ENV{MEGASEARCH_JSONCONS_URL}")
+else ()
+    set(JSONCONS_SOURCE_URL
+            "https://github.com/danielaparker/jsoncons/archive/v${JSONCONS_VERSION}.tar.gz")
 endif()
 
 if(DEFINED ENV{MEGASEARCH_LAPACK_URL})
@@ -308,6 +329,93 @@ if(DEFINED ENV{MEGASEARCH_ZSTD_URL})
     set(ZSTD_SOURCE_URL "$ENV{MEGASEARCH_ZSTD_URL}")
 else()
     set(ZSTD_SOURCE_URL "https://github.com/facebook/zstd/archive/${ZSTD_VERSION}.tar.gz")
+endif()
+
+# ----------------------------------------------------------------------
+# ARROW
+
+macro(build_arrow)
+    message(STATUS "Building Apache ARROW-${ARROW_VERSION} from source")
+    set(ARROW_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep/cpp")
+    set(ARROW_STATIC_LIB_NAME arrow)
+#    set(ARROW_CUDA_STATIC_LIB_NAME arrow_cuda)
+    set(ARROW_STATIC_LIB
+            "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
+            )
+#    set(ARROW_CUDA_STATIC_LIB
+#            "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_CUDA_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
+#            )
+    set(ARROW_INCLUDE_DIR "${ARROW_PREFIX}/include")
+
+    set(ARROW_CMAKE_ARGS
+            ${EP_COMMON_CMAKE_ARGS}
+#            "-DARROW_THRIFT_URL=${THRIFT_SOURCE_URL}"
+            #"env ARROW_THRIFT_URL=${THRIFT_SOURCE_URL}"
+            -DARROW_BUILD_STATIC=ON
+            -DARROW_BUILD_SHARED=OFF
+            -DARROW_PARQUET=ON
+            -DARROW_USE_GLOG=OFF
+            -DCMAKE_INSTALL_PREFIX=${ARROW_PREFIX}
+            "-DCMAKE_LIBRARY_PATH=${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs"
+            -DCMAKE_BUILD_TYPE=Release)
+
+#    set($ENV{ARROW_THRIFT_URL} ${THRIFT_SOURCE_URL})
+
+    externalproject_add(arrow_ep
+            GIT_REPOSITORY
+            ${ARROW_SOURCE_URL}
+            GIT_TAG
+            ${ARROW_VERSION}
+            GIT_SHALLOW
+            TRUE
+#            SOURCE_DIR
+#            ${ARROW_PREFIX}
+#            BINARY_DIR
+#            ${ARROW_PREFIX}
+            SOURCE_SUBDIR
+            cpp
+#            COMMAND
+#            "export \"ARROW_THRIFT_URL=${THRIFT_SOURCE_URL}\""
+            ${EP_LOG_OPTIONS}
+            CMAKE_ARGS
+            ${ARROW_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
+            INSTALL_COMMAND
+            ${MAKE} install
+#            BUILD_IN_SOURCE
+#            1
+            BUILD_BYPRODUCTS
+            "${ARROW_STATIC_LIB}"
+#            "${ARROW_CUDA_STATIC_LIB}"
+            )
+
+#    ExternalProject_Add_StepDependencies(arrow_ep build thrift_ep)
+
+    file(MAKE_DIRECTORY "${ARROW_PREFIX}/include")
+    add_library(arrow STATIC IMPORTED)
+    set_target_properties(arrow
+            PROPERTIES IMPORTED_LOCATION "${ARROW_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INCLUDE_DIR}")
+#            INTERFACE_LINK_LIBRARIES thrift)
+    add_dependencies(arrow arrow_ep)
+
+    set(JEMALLOC_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep-build/jemalloc_ep-prefix/src/jemalloc_ep")
+
+    add_custom_command(TARGET arrow_ep POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${ARROW_PREFIX}/lib/
+            COMMAND ${CMAKE_COMMAND} -E copy ${JEMALLOC_PREFIX}/lib/libjemalloc_pic.a ${ARROW_PREFIX}/lib/
+            DEPENDS ${JEMALLOC_PREFIX}/lib/libjemalloc_pic.a)
+
+endmacro()
+
+if(MEGASEARCH_WITH_ARROW)
+
+    resolve_dependency(ARROW)
+
+    link_directories(SYSTEM ${ARROW_PREFIX}/lib/)
+    include_directories(SYSTEM ${ARROW_INCLUDE_DIR})
 endif()
 
 # ----------------------------------------------------------------------
@@ -850,6 +958,30 @@ if (MEGASEARCH_BUILD_TESTS)
 endif()
 
 # ----------------------------------------------------------------------
+# JSONCONS
+
+macro(build_jsoncons)
+    message(STATUS "Building JSONCONS-${JSONCONS_VERSION} from source")
+
+    set(JSONCONS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/jsoncons_ep-prefix")
+    set(JSONCONS_TAR_NAME "${JSONCONS_PREFIX}/jsoncons-${JSONCONS_VERSION}.tar.gz")
+    set(JSONCONS_INCLUDE_DIR "${JSONCONS_PREFIX}/jsoncons-${JSONCONS_VERSION}/include")
+    if (NOT EXISTS ${JSONCONS_INCLUDE_DIR})
+        file(MAKE_DIRECTORY ${JSONCONS_PREFIX})
+        file(DOWNLOAD ${JSONCONS_SOURCE_URL}
+                ${JSONCONS_TAR_NAME})
+        execute_process(COMMAND ${CMAKE_COMMAND} -E tar -xf ${JSONCONS_TAR_NAME}
+                WORKING_DIRECTORY ${JSONCONS_PREFIX})
+
+    endif ()
+endmacro()
+
+if(MEGASEARCH_WITH_JSONCONS)
+    resolve_dependency(JSONCONS)
+    include_directories(SYSTEM "${JSONCONS_INCLUDE_DIR}")
+endif()
+
+# ----------------------------------------------------------------------
 # lz4
 
 macro(build_lz4)
@@ -1201,16 +1333,16 @@ macro(build_sqlite_orm)
     message(STATUS "Building SQLITE_ORM-${SQLITE_ORM_VERSION} from source")
 
     set(SQLITE_ORM_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/sqlite_orm_ep-prefix")
-    set(SQLITE_ORM_TAR_NAME "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}.tar.gz")    #sqlite_orm-${SQLITE_ORM_VERSION}.tar.gz
-    if (NOT EXISTS ${SQLITE_ORM_TAR_NAME})
+    set(SQLITE_ORM_TAR_NAME "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}.tar.gz")
+    set(SQLITE_ORM_INCLUDE_DIR "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}/include/sqlite_orm")
+    if (NOT EXISTS ${SQLITE_ORM_INCLUDE_DIR})
         file(MAKE_DIRECTORY ${SQLITE_ORM_PREFIX})
-        file(DOWNLOAD https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.tar.gz
+        file(DOWNLOAD ${SQLITE_ORM_SOURCE_URL}
                 ${SQLITE_ORM_TAR_NAME})
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar -xf ${SQLITE_ORM_TAR_NAME}
                         WORKING_DIRECTORY ${SQLITE_ORM_PREFIX})
 
     endif ()
-    set(SQLITE_ORM_INCLUDE_DIR "${SQLITE_ORM_PREFIX}/sqlite_orm-${SQLITE_ORM_VERSION}/include/sqlite_orm")
 
     #set(SQLITE_ORM_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/sqlite_orm_ep-prefix/src/sqlite_orm_ep")
     #set(SQLITE_ORM_INCLUDE_DIR "${SQLITE_ORM_PREFIX}/include/sqlite_orm")
