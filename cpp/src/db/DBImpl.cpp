@@ -20,7 +20,7 @@
 #include <boost/filesystem.hpp>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 namespace {
@@ -580,5 +580,5 @@ DBImpl::~DBImpl() {
 }
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

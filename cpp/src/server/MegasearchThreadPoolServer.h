@@ -10,7 +10,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 class MegasearchThreadPoolServer : public apache::thrift::server::TThreadPoolServer {

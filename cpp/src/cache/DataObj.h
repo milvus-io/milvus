@@ -11,7 +11,7 @@
 #include <memory>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace cache {
 
 class DataObj {

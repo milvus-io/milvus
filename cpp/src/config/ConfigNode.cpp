@@ -12,7 +12,7 @@
 #include <algorithm>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 void ConfigNode::Combine(const ConfigNode& target) {

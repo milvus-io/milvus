@@ -8,7 +8,7 @@
 #include "utils/AttributeSerializer.h"
 #include "utils/StringHelpFunctions.h"
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 TEST(AttribSerializeTest, ATTRIBSERIAL_TEST) {
     std::map<std::string, std::string> attrib;

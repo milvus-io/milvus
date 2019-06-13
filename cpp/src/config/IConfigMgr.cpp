@@ -7,7 +7,7 @@
 #include "YamlConfigMgr.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 IConfigMgr * IConfigMgr::GetInstance() {

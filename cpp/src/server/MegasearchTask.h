@@ -16,7 +16,7 @@
 #include <memory>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 using namespace megasearch;

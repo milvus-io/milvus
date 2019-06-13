@@ -13,7 +13,7 @@
 #include <iostream>
 
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 TEST(LicenseLibraryTest, FILE_EXISTENT_TEST) {
 

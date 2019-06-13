@@ -16,7 +16,7 @@
 #include <thread>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class Env;
@@ -100,5 +100,5 @@ private:
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

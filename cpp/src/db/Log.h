@@ -8,7 +8,7 @@
 #include <easylogging++.h>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 #define ENGINE_DOMAIN_NAME "[ENGINE] "

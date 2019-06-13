@@ -9,7 +9,7 @@
 #include "utils/TimeRecorder.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 using namespace megasearch;

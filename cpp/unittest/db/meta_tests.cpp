@@ -15,7 +15,7 @@
 #include "db/Utils.h"
 #include "db/MetaConsts.h"
 
-using namespace zilliz::vecwise::engine;
+using namespace zilliz::milvus::engine;
 
 TEST_F(MetaTest, GROUP_TEST) {
     auto table_id = "meta_test_group";

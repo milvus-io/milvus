@@ -10,7 +10,7 @@
 #include <iostream>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 IDGenerator::~IDGenerator() {}
@@ -49,5 +49,5 @@ void SimpleIDGenerator::GetNextIDNumbers(size_t n, IDNumbers& ids) {
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz
