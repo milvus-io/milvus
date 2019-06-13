@@ -686,7 +686,15 @@ macro(build_faiss)
     if(${MEGASEARCH_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
-                "--with-cuda-arch=${MEGASEARCH_FAISS_GPU_ARCH}")
+#                "with_cuda_arch=\"-gencode=arch=compute_35,code=compute_35 \\
+#                                    -gencode=arch=compute_52,code=compute_52 \\
+#                                    -gencode=arch=compute_60,code=compute_60 \\
+#                                    -gencode=arch=compute_61,code=compute_61\""
+                "--with-cuda-arch=\"-gencode=arch=compute_35,code=compute_35\""
+                "--with-cuda-arch=\"-gencode=arch=compute_52,code=compute_52\""
+                "--with-cuda-arch=\"-gencode=arch=compute_60,code=compute_60\""
+                "--with-cuda-arch=\"-gencode=arch=compute_61,code=compute_61\""
+                )
     else()
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS} --without-cuda)
     endif()
