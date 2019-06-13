@@ -71,7 +71,7 @@ define_option(MEGASEARCH_WITH_FAISS "Build with FAISS library" ON)
 define_option(MEGASEARCH_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
 
 define_option_string(MEGASEARCH_FAISS_GPU_ARCH "Specifying which GPU architectures to build against"
-        "-gencode=arch=compute_61,code=sm_61")
+        "-gencode=arch=compute_35,code=sm_35 -gencode=arch=compute_52,code=sm_52 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61")
 
 define_option(MEGASEARCH_WITH_LAPACK "Build with LAPACK library" ON)
 
