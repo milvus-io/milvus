@@ -10,7 +10,7 @@
 #include <map>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class Env;
@@ -54,5 +54,5 @@ struct Options {
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

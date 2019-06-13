@@ -20,11 +20,12 @@ MACRO (GET_GIT_BRANCH_NAME GIT_BRANCH_NAME)
 ENDMACRO (GET_GIT_BRANCH_NAME)
 
 GET_GIT_BRANCH_NAME(GIT_BRANCH_NAME)
-string(REGEX REPLACE "\n" "" GIT_BRANCH_NAME ${GIT_BRANCH_NAME})
+if(NOT GIT_BRANCH_NAME STREQUAL "")
+    string(REGEX REPLACE "\n" "" GIT_BRANCH_NAME ${GIT_BRANCH_NAME})
+endif()
 
 set(MEGASEARCH_VERSION "${GIT_BRANCH_NAME}")
 string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]" MEGASEARCH_VERSION "${MEGASEARCH_VERSION}")
-message(STATUS "Build version = ${MEGASEARCH_VERSION}")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(BUILD_TYPE "release")
@@ -32,8 +33,6 @@ else()
     set(BUILD_TYPE "debug")
 endif()
 message(STATUS "Build type = ${BUILD_TYPE}")
-
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.macro ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
 
 project(megasearch VERSION "${MEGASEARCH_VERSION}")
 project(vecwise_engine LANGUAGES CUDA CXX)
@@ -45,33 +44,6 @@ if("${MAKE}" STREQUAL "")
     endif()
 endif()
 
-set(GCC_VERSION 5.3.0)
-set(GCC_DIR "${CMAKE_CURRENT_BINARY_DIR}/gcc")
-set(GCC_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/gcc/gcc_build")
-set(GCC_TAR_NAME "${GCC_BUILD_DIR}/gcc-${GCC_VERSION}.tar.gz")
-if (NOT EXISTS ${GCC_TAR_NAME})
-    file(MAKE_DIRECTORY ${GCC_BUILD_DIR})
-    file(DOWNLOAD http://ftp.tsukuba.wide.ad.jp/software/gcc/releases/gcc-${GCC_VERSION}/${GCC_TAR_NAME}
-            ${GCC_TAR_NAME})
-    message(STATUS "Building GCC-${GCC_VERSION} from source")
-    execute_process(
-            COMMAND
-            "${CMAKE_COMMAND} -E tar -xf ${GCC_TAR_NAME}"
-            COMMAND
-            "./configure --prefix=${GCC_DIR} --with-local-prefix=${GCC_DIR}
-            --enable-languages=cxx,fortran
-            --enable-checking=release
-            --disable-bootstrap"
-            COMMAND
-            "${MAKE} -j4"
-            COMMAND
-            "${MAKE} install"
-            RESULT_VARIABLE	_status
-            #OUTPUT_QUIET
-            #ERROR_QUIET
-            WORKING_DIRECTORY ${GCC_BUILD_DIR})
-endif ()
-
 set(MEGASEARCH_VERSION_MAJOR "${megasearch_VERSION_MAJOR}")
 set(MEGASEARCH_VERSION_MINOR "${megasearch_VERSION_MINOR}")
 set(MEGASEARCH_VERSION_PATCH "${megasearch_VERSION_PATCH}")
@@ -79,8 +51,12 @@ set(MEGASEARCH_VERSION_PATCH "${megasearch_VERSION_PATCH}")
 if(MEGASEARCH_VERSION_MAJOR STREQUAL ""
         OR MEGASEARCH_VERSION_MINOR STREQUAL ""
         OR MEGASEARCH_VERSION_PATCH STREQUAL "")
-    message(FATAL_ERROR "Failed to determine MegaSearch version from '${MEGASEARCH_VERSION}'")
+    message(WARNING "Failed to determine MegaSearch version from '${MEGASEARCH_VERSION}'")
+    set(MEGASEARCH_VERSION "unknown")
 endif()
+
+message(STATUS "Build version = ${MEGASEARCH_VERSION}")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.macro ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
 
 message(STATUS "MegaSearch version: "
         "${MEGASEARCH_VERSION_MAJOR}.${MEGASEARCH_VERSION_MINOR}.${MEGASEARCH_VERSION_PATCH} "

@@ -9,7 +9,7 @@
 #include "PrometheusMetrics.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 MetricsBase &

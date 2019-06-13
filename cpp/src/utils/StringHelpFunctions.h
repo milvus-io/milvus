@@ -10,7 +10,7 @@
 #include <vector>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 class StringHelpFunctions {

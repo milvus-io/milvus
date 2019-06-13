@@ -14,7 +14,7 @@
 #include "DataObj.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace cache {
 
 const std::string SWAP_DIR = ".CACHE";
@@ -65,6 +65,6 @@ private:
 using CachePtr = std::shared_ptr<Cache>;
 
 }   // cache
-}   // vecwise
+}   // milvus
 }   // zilliz
 

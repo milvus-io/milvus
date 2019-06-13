@@ -16,8 +16,8 @@ else:
 from thrift.transport import TTransport, TSocket, TSSLSocket, THttpClient
 from thrift.protocol.TBinaryProtocol import TBinaryProtocol
 
-from megasearch.thrift import MegasearchService
-from megasearch.thrift.ttypes import *
+from milvus.thrift import MilvusService
+from milvus.thrift.ttypes import *
 
 if len(sys.argv) <= 1 or sys.argv[1] == '--help':
     print('')
@@ -108,7 +108,7 @@ else:
     else:
         transport = TTransport.TBufferedTransport(socket)
 protocol = TBinaryProtocol(transport)
-client = MegasearchService.Client(protocol)
+client = MilvusService.Client(protocol)
 transport.open()
 
 if cmd == 'CreateTable':

@@ -13,7 +13,7 @@
 #include <string>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class Env;
@@ -50,5 +50,5 @@ public:
 }; // DB
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

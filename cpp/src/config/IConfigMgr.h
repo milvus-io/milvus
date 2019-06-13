@@ -9,7 +9,7 @@
 #include "ConfigNode.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 // this class can parse nested config file and return config item

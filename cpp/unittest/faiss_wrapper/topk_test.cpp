@@ -9,7 +9,7 @@
 #include "wrapper/gpu/Topk.h"
 
 
-using namespace zilliz::vecwise::engine;
+using namespace zilliz::milvus::engine;
 
 constexpr float threshhold = 0.00001;
 
