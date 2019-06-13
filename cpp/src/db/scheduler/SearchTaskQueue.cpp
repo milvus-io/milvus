@@ -21,7 +21,7 @@ void ClusterResult(const std::vector<long> &output_ids,
     for (auto i = 0; i < nq; i++) {
         SearchContext::Id2ScoreMap id_score;
         for (auto k = 0; k < topk; k++) {
-            uint64_t index = i * nq + k;
+            uint64_t index = i * topk + k;
             id_score.push_back(std::make_pair(output_ids[index], output_distence[index]));
         }
         result_set.emplace_back(id_score);
@@ -125,27 +125,28 @@ bool SearchTask::DoSearch() {
         try {
             index_engine_->Search(context->nq(), context->vectors(), inner_k, output_distence.data(),
                                   output_ids.data());
+
+            rc.Record("do search");
+
+            //step 3: cluster result
+            SearchContext::ResultSet result_set;
+            ClusterResult(output_ids, output_distence, context->nq(), inner_k, result_set);
+            rc.Record("cluster result");
+
+            //step 4: pick up topk result
+            TopkResult(result_set, inner_k, context->GetResult());
+            rc.Record("reduce topk");
+
+            //step 5: calculate score between 0 ~ 100
+            CalcScore(context->nq(), context->vectors(), index_engine_->Dimension(), context->GetResult(), result_set);
+            context->GetResult().swap(result_set);
+            rc.Record("calculate score");
+
         } catch (std::exception& ex) {
             SERVER_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
             context->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
             continue;
         }
-
-        rc.Record("do search");
-
-        //step 3: cluster result
-        SearchContext::ResultSet result_set;
-        ClusterResult(output_ids, output_distence, context->nq(), inner_k, result_set);
-        rc.Record("cluster result");
-
-        //step 4: pick up topk result
-        TopkResult(result_set, inner_k, context->GetResult());
-        rc.Record("reduce topk");
-
-        //step 5: calculate score between 0 ~ 100
-        CalcScore(context->nq(), context->vectors(), index_engine_->Dimension(), context->GetResult(), result_set);
-        context->GetResult().swap(result_set);
-        rc.Record("calculate score");
 
         //step 6: notify to send result to client
         context->IndexSearchDone(index_id_);
