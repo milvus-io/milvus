@@ -13,12 +13,6 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-IndexLoaderQueue&
-IndexLoaderQueue::GetInstance() {
-    static IndexLoaderQueue instance;
-    return instance;
-}
-
 void
 IndexLoaderQueue::Put(const SearchContextPtr &search_context) {
     std::unique_lock <std::mutex> lock(mtx);
@@ -26,6 +20,7 @@ IndexLoaderQueue::Put(const SearchContextPtr &search_context) {
 
     if(search_context == nullptr) {
         queue_.push_back(nullptr);
+        empty_.notify_all();
         return;
     }
 

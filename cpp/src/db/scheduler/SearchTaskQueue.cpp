@@ -94,18 +94,6 @@ void CalcScore(uint64_t vector_count,
 
 }
 
-
-SearchTaskQueue::SearchTaskQueue() {
-    SetCapacity(4);
-}
-
-
-SearchTaskQueue&
-SearchTaskQueue::GetInstance() {
-    static SearchTaskQueue instance;
-    return instance;
-}
-
 bool SearchTask::DoSearch() {
     if(index_engine_ == nullptr) {
         return false;
