@@ -37,6 +37,11 @@ struct DBMetaOptions {
     ArchiveConf archive_conf = ArchiveConf("delete");
 }; // DBMetaOptions
 
+struct MySQLMetaOptions {
+    std::string path;
+
+};
+
 
 struct Options {
     Options();
