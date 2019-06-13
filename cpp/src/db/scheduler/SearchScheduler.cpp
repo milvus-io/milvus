@@ -55,8 +55,7 @@ void CollectDurationMetrics(int index_type, double total_time) {
 }
 
 SearchScheduler::SearchScheduler()
-    : thread_pool_(2),
-      stopped_(true) {
+    : stopped_(true) {
     Start();
 }
 
@@ -75,8 +74,13 @@ SearchScheduler::Start() {
         return true;
     }
 
-    thread_pool_.enqueue(&SearchScheduler::IndexLoadWorker, this);
-    thread_pool_.enqueue(&SearchScheduler::SearchWorker, this);
+    stopped_ = false;
+
+    search_queue_.SetCapacity(2);
+
+    index_load_thread_ = std::make_shared<std::thread>(&SearchScheduler::IndexLoadWorker, this);
+    search_thread_  = std::make_shared<std::thread>(&SearchScheduler::SearchWorker, this);
+
     return true;
 }
 
@@ -86,29 +90,34 @@ SearchScheduler::Stop() {
         return true;
     }
 
-    IndexLoaderQueue& index_queue = IndexLoaderQueue::GetInstance();
-    index_queue.Put(nullptr);
+    if(index_load_thread_) {
+        index_load_queue_.Put(nullptr);
+        index_load_thread_->join();
+        index_load_thread_ = nullptr;
+    }
 
-    SearchTaskQueue& search_queue = SearchTaskQueue::GetInstance();
-    search_queue.Put(nullptr);
+    if(search_thread_) {
+        search_queue_.Put(nullptr);
+        search_thread_->join();
+        search_thread_ = nullptr;
+    }
+
+    stopped_ = true;
 
     return true;
 }
 
 bool
 SearchScheduler::ScheduleSearchTask(SearchContextPtr& search_context) {
-    IndexLoaderQueue& index_queue = IndexLoaderQueue::GetInstance();
-    index_queue.Put(search_context);
+    index_load_queue_.Put(search_context);
 
     return true;
 }
 
 bool
 SearchScheduler::IndexLoadWorker() {
-    IndexLoaderQueue& index_queue = IndexLoaderQueue::GetInstance();
-    SearchTaskQueue& search_queue = SearchTaskQueue::GetInstance();
     while(true) {
-        IndexLoaderContextPtr context = index_queue.Take();
+        IndexLoaderContextPtr context = index_load_queue_.Take();
         if(context == nullptr) {
             SERVER_LOG_INFO << "Stop thread for index loading";
             break;//exit
@@ -137,7 +146,7 @@ SearchScheduler::IndexLoadWorker() {
         task_ptr->index_type_ = context->file_->file_type_;
         task_ptr->index_engine_ = index_ptr;
         task_ptr->search_contexts_.swap(context->search_contexts_);
-        search_queue.Put(task_ptr);
+        search_queue_.Put(task_ptr);
     }
 
     return true;
@@ -145,9 +154,8 @@ SearchScheduler::IndexLoadWorker() {
 
 bool
 SearchScheduler::SearchWorker() {
-    SearchTaskQueue& search_queue = SearchTaskQueue::GetInstance();
     while(true) {
-        SearchTaskPtr task_ptr = search_queue.Take();
+        SearchTaskPtr task_ptr = search_queue_.Take();
         if(task_ptr == nullptr) {
             SERVER_LOG_INFO << "Stop thread for searching";
             break;//exit
