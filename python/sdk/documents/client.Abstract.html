@@ -1,0 +1,353 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<html><head><title>Python: module Abstract</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+</head><body bgcolor="#f0f0f8">
+
+<table width="100%" cellspacing=0 cellpadding=2 border=0 summary="heading">
+<tr bgcolor="#7799ee">
+<td valign=bottom>&nbsp;<br>
+<font color="#ffffff" face="helvetica, arial">&nbsp;<br><big><big><strong>Abstract</strong></big></big></font></td
+><td align=right valign=bottom
+><font color="#ffffff" face="helvetica, arial"><a href="../..">index</a><br><a href="file:/home/yangxuan/vecwise_engine/python/sdk/client/Abstract.py">/home/yangxuan/vecwise_engine/python/sdk/client/Abstract.py</a></font></td></tr></table>
+    <p></p>
+<p>
+<table width="100%" cellspacing=0 cellpadding=2 border=0 summary="section">
+<tr bgcolor="#ee77aa">
+<td colspan=3 valign=bottom>&nbsp;<br>
+<font color="#ffffff" face="helvetica, arial"><big><strong>Classes</strong></big></font></td></tr>
+    
+<tr><td bgcolor="#ee77aa"><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</tt></td><td>&nbsp;</td>
+<td width="100%"><dl>
+<dt><font face="helvetica, arial"><a href="builtins.html#object">builtins.object</a>
+</font></dt><dd>
+<dl>
+<dt><font face="helvetica, arial"><a href="client.Abstract.html#ConnectIntf">ConnectIntf</a>
+</font></dt><dt><font face="helvetica, arial"><a href="client.Abstract.html#QueryResult">QueryResult</a>
+</font></dt><dt><font face="helvetica, arial"><a href="client.Abstract.html#Range">Range</a>
+</font></dt><dt><font face="helvetica, arial"><a href="client.Abstract.html#RowRecord">RowRecord</a>
+</font></dt><dt><font face="helvetica, arial"><a href="client.Abstract.html#TableSchema">TableSchema</a>
+</font></dt><dt><font face="helvetica, arial"><a href="client.Abstract.html#TopKQueryResult">TopKQueryResult</a>
+</font></dt></dl>
+</dd>
+<dt><font face="helvetica, arial"><a href="enum.html#IntEnum">enum.IntEnum</a>(<a href="builtins.html#int">builtins.int</a>, <a href="enum.html#Enum">enum.Enum</a>)
+</font></dt><dd>
+<dl>
+<dt><font face="helvetica, arial"><a href="client.Abstract.html#IndexType">IndexType</a>
+</font></dt></dl>
+</dd>
+</dl>
+ <p>
+<table width="100%" cellspacing=0 cellpadding=2 border=0 summary="section">
+<tr bgcolor="#ffc8d8">
+<td colspan=3 valign=bottom>&nbsp;<br>
+<font color="#000000" face="helvetica, arial"><a name="ConnectIntf">class <strong>ConnectIntf</strong></a>(<a href="builtins.html#object">builtins.object</a>)</font></td></tr>
+    
+<tr bgcolor="#ffc8d8"><td rowspan=2><tt>&nbsp;&nbsp;&nbsp;</tt></td>
+<td colspan=2><tt>SDK&nbsp;client&nbsp;abstract&nbsp;class<br>
+&nbsp;<br>
+Connection&nbsp;is&nbsp;a&nbsp;abstract&nbsp;class<br>&nbsp;</tt></td></tr>
+<tr><td>&nbsp;</td>
+<td width="100%">Methods defined here:<br>
+<dl><dt><a name="ConnectIntf-add_vectors"><strong>add_vectors</strong></a>(self, table_name, records)</dt><dd><tt>Add&nbsp;vectors&nbsp;to&nbsp;table<br>
+Should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;table_name:&nbsp;str<br>
+:param&nbsp;table_name:&nbsp;table&nbsp;name&nbsp;been&nbsp;inserted<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;records:&nbsp;list[<a href="#RowRecord">RowRecord</a>]<br>
+:param&nbsp;records:&nbsp;list&nbsp;of&nbsp;vectors&nbsp;been&nbsp;inserted<br>
+&nbsp;<br>
+:returns<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Status&nbsp;:&nbsp;indicate&nbsp;if&nbsp;vectors&nbsp;inserted&nbsp;successfully<br>
+&nbsp;&nbsp;&nbsp;&nbsp;ids&nbsp;:list&nbsp;of&nbsp;id,&nbsp;after&nbsp;inserted&nbsp;every&nbsp;vector&nbsp;is&nbsp;given&nbsp;a&nbsp;id</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-client_version"><strong>client_version</strong></a>(self)</dt><dd><tt>Provide&nbsp;client&nbsp;version<br>
+should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:return:&nbsp;str,&nbsp;client&nbsp;version</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-connect"><strong>connect</strong></a>(self, host=None, port=None, uri=None)</dt><dd><tt>Connect&nbsp;method&nbsp;should&nbsp;be&nbsp;called&nbsp;before&nbsp;any&nbsp;operations<br>
+Server&nbsp;will&nbsp;be&nbsp;connected&nbsp;after&nbsp;connect&nbsp;return&nbsp;OK<br>
+Should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;host:&nbsp;str<br>
+:param&nbsp;host:&nbsp;host<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;port:&nbsp;str<br>
+:param&nbsp;port:&nbsp;port<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;uri:&nbsp;str<br>
+:param&nbsp;uri:&nbsp;(Optional)&nbsp;uri<br>
+&nbsp;<br>
+:return&nbsp;Status,&nbsp;&nbsp;indicate&nbsp;if&nbsp;connect&nbsp;is&nbsp;successful</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-connected"><strong>connected</strong></a>(self)</dt><dd><tt>connected,&nbsp;connection&nbsp;status<br>
+Should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:return&nbsp;Status,&nbsp;&nbsp;indicate&nbsp;if&nbsp;connect&nbsp;is&nbsp;successful</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-create_table"><strong>create_table</strong></a>(self, param)</dt><dd><tt>Create&nbsp;table<br>
+Should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;param:&nbsp;<a href="#TableSchema">TableSchema</a><br>
+:param&nbsp;param:&nbsp;provide&nbsp;table&nbsp;information&nbsp;to&nbsp;be&nbsp;created<br>
+&nbsp;<br>
+:return&nbsp;Status,&nbsp;indicate&nbsp;if&nbsp;connect&nbsp;is&nbsp;successful</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-delete_table"><strong>delete_table</strong></a>(self, table_name)</dt><dd><tt>Delete&nbsp;table<br>
+Should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;table_name:&nbsp;str<br>
+:param&nbsp;table_name:&nbsp;table_name&nbsp;of&nbsp;the&nbsp;deleting&nbsp;table<br>
+&nbsp;<br>
+:return&nbsp;Status,&nbsp;indicate&nbsp;if&nbsp;connect&nbsp;is&nbsp;successful</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-describe_table"><strong>describe_table</strong></a>(self, table_name)</dt><dd><tt>Show&nbsp;table&nbsp;information<br>
+Should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;table_name:&nbsp;str<br>
+:param&nbsp;table_name:&nbsp;which&nbsp;table&nbsp;to&nbsp;be&nbsp;shown<br>
+&nbsp;<br>
+:returns<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Status:&nbsp;indicate&nbsp;if&nbsp;query&nbsp;is&nbsp;successful<br>
+&nbsp;&nbsp;&nbsp;&nbsp;table_schema:&nbsp;<a href="#TableSchema">TableSchema</a>,&nbsp;given&nbsp;when&nbsp;operation&nbsp;is&nbsp;successful</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-disconnect"><strong>disconnect</strong></a>(self)</dt><dd><tt>Disconnect,&nbsp;server&nbsp;will&nbsp;be&nbsp;disconnected&nbsp;after&nbsp;disconnect&nbsp;return&nbsp;SUCCESS<br>
+Should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:return&nbsp;Status,&nbsp;&nbsp;indicate&nbsp;if&nbsp;connect&nbsp;is&nbsp;successful</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-get_table_row_count"><strong>get_table_row_count</strong></a>(self, table_name)</dt><dd><tt>Get&nbsp;table&nbsp;row&nbsp;count<br>
+Should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;table_name,&nbsp;str<br>
+:param&nbsp;table_name,&nbsp;target&nbsp;table&nbsp;name.<br>
+&nbsp;<br>
+:returns<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Status:&nbsp;indicate&nbsp;if&nbsp;operation&nbsp;is&nbsp;successful<br>
+&nbsp;&nbsp;&nbsp;&nbsp;count:&nbsp;int,&nbsp;table&nbsp;row&nbsp;count</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-search_vectors"><strong>search_vectors</strong></a>(self, table_name, query_records, query_ranges, top_k)</dt><dd><tt>Query&nbsp;vectors&nbsp;in&nbsp;a&nbsp;table<br>
+Should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;table_name:&nbsp;str<br>
+:param&nbsp;table_name:&nbsp;table&nbsp;name&nbsp;been&nbsp;queried<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;query_records:&nbsp;list[<a href="#RowRecord">RowRecord</a>]<br>
+:param&nbsp;query_records:&nbsp;all&nbsp;vectors&nbsp;going&nbsp;to&nbsp;be&nbsp;queried<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;query_ranges:&nbsp;list[<a href="#Range">Range</a>]<br>
+:param&nbsp;query_ranges:&nbsp;Optional&nbsp;ranges&nbsp;for&nbsp;conditional&nbsp;search.<br>
+&nbsp;&nbsp;&nbsp;&nbsp;If&nbsp;not&nbsp;specified,&nbsp;search&nbsp;whole&nbsp;table<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;top_k:&nbsp;int<br>
+:param&nbsp;top_k:&nbsp;how&nbsp;many&nbsp;similar&nbsp;vectors&nbsp;will&nbsp;be&nbsp;searched<br>
+&nbsp;<br>
+:returns<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Status:&nbsp;&nbsp;indicate&nbsp;if&nbsp;query&nbsp;is&nbsp;successful<br>
+&nbsp;&nbsp;&nbsp;&nbsp;query_results:&nbsp;list[<a href="#TopKQueryResult">TopKQueryResult</a>]</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-server_status"><strong>server_status</strong></a>(self, cmd)</dt><dd><tt>Provide&nbsp;server&nbsp;status<br>
+should&nbsp;be&nbsp;implemented<br>
+:type&nbsp;cmd,&nbsp;str<br>
+&nbsp;<br>
+:return:&nbsp;str,&nbsp;server&nbsp;status</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-server_version"><strong>server_version</strong></a>(self)</dt><dd><tt>Provide&nbsp;server&nbsp;version<br>
+should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:return:&nbsp;str,&nbsp;server&nbsp;version</tt></dd></dl>
+
+<dl><dt><a name="ConnectIntf-show_tables"><strong>show_tables</strong></a>(self)</dt><dd><tt>Show&nbsp;all&nbsp;tables&nbsp;in&nbsp;database<br>
+should&nbsp;be&nbsp;implemented<br>
+&nbsp;<br>
+:return<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Status:&nbsp;indicate&nbsp;if&nbsp;this&nbsp;operation&nbsp;is&nbsp;successful<br>
+&nbsp;&nbsp;&nbsp;&nbsp;tables:&nbsp;list[str],&nbsp;list&nbsp;of&nbsp;table&nbsp;names</tt></dd></dl>
+
+<hr>
+Data descriptors defined here:<br>
+<dl><dt><strong>__dict__</strong></dt>
+<dd><tt>dictionary&nbsp;for&nbsp;instance&nbsp;variables&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+<dl><dt><strong>__weakref__</strong></dt>
+<dd><tt>list&nbsp;of&nbsp;weak&nbsp;references&nbsp;to&nbsp;the&nbsp;object&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+</td></tr></table> <p>
+<table width="100%" cellspacing=0 cellpadding=2 border=0 summary="section">
+<tr bgcolor="#ffc8d8">
+<td colspan=3 valign=bottom>&nbsp;<br>
+<font color="#000000" face="helvetica, arial"><a name="IndexType">class <strong>IndexType</strong></a>(<a href="enum.html#IntEnum">enum.IntEnum</a>)</font></td></tr>
+    
+<tr bgcolor="#ffc8d8"><td rowspan=2><tt>&nbsp;&nbsp;&nbsp;</tt></td>
+<td colspan=2><tt>An&nbsp;enumeration.<br>&nbsp;</tt></td></tr>
+<tr><td>&nbsp;</td>
+<td width="100%"><dl><dt>Method resolution order:</dt>
+<dd><a href="client.Abstract.html#IndexType">IndexType</a></dd>
+<dd><a href="enum.html#IntEnum">enum.IntEnum</a></dd>
+<dd><a href="builtins.html#int">builtins.int</a></dd>
+<dd><a href="enum.html#Enum">enum.Enum</a></dd>
+<dd><a href="builtins.html#object">builtins.object</a></dd>
+</dl>
+<hr>
+Data and other attributes defined here:<br>
+<dl><dt><strong>IDMAP</strong> = &lt;IndexType.IDMAP: 1&gt;</dl>
+
+<dl><dt><strong>INVALIDE</strong> = &lt;IndexType.INVALIDE: 0&gt;</dl>
+
+<dl><dt><strong>IVFLAT</strong> = &lt;IndexType.IVFLAT: 2&gt;</dl>
+
+<hr>
+Data descriptors inherited from <a href="enum.html#Enum">enum.Enum</a>:<br>
+<dl><dt><strong>name</strong></dt>
+<dd><tt>The&nbsp;name&nbsp;of&nbsp;the&nbsp;Enum&nbsp;member.</tt></dd>
+</dl>
+<dl><dt><strong>value</strong></dt>
+<dd><tt>The&nbsp;value&nbsp;of&nbsp;the&nbsp;Enum&nbsp;member.</tt></dd>
+</dl>
+<hr>
+Data descriptors inherited from <a href="enum.html#EnumMeta">enum.EnumMeta</a>:<br>
+<dl><dt><strong>__members__</strong></dt>
+<dd><tt>Returns&nbsp;a&nbsp;mapping&nbsp;of&nbsp;member&nbsp;name-&gt;value.<br>
+&nbsp;<br>
+This&nbsp;mapping&nbsp;lists&nbsp;all&nbsp;enum&nbsp;members,&nbsp;including&nbsp;aliases.&nbsp;Note&nbsp;that&nbsp;this<br>
+is&nbsp;a&nbsp;read-only&nbsp;view&nbsp;of&nbsp;the&nbsp;internal&nbsp;mapping.</tt></dd>
+</dl>
+</td></tr></table> <p>
+<table width="100%" cellspacing=0 cellpadding=2 border=0 summary="section">
+<tr bgcolor="#ffc8d8">
+<td colspan=3 valign=bottom>&nbsp;<br>
+<font color="#000000" face="helvetica, arial"><a name="QueryResult">class <strong>QueryResult</strong></a>(<a href="builtins.html#object">builtins.object</a>)</font></td></tr>
+    
+<tr bgcolor="#ffc8d8"><td rowspan=2><tt>&nbsp;&nbsp;&nbsp;</tt></td>
+<td colspan=2><tt>Query&nbsp;result<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;id:&nbsp;int64<br>
+:param&nbsp;id:&nbsp;id&nbsp;of&nbsp;the&nbsp;vector<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;score:&nbsp;float<br>
+:param&nbsp;score:&nbsp;Vector&nbsp;similarity&nbsp;0&nbsp;&lt;=&nbsp;score&nbsp;&lt;=&nbsp;100<br>&nbsp;</tt></td></tr>
+<tr><td>&nbsp;</td>
+<td width="100%">Methods defined here:<br>
+<dl><dt><a name="QueryResult-__init__"><strong>__init__</strong></a>(self, id, score)</dt><dd><tt>Initialize&nbsp;self.&nbsp;&nbsp;See&nbsp;help(type(self))&nbsp;for&nbsp;accurate&nbsp;signature.</tt></dd></dl>
+
+<dl><dt><a name="QueryResult-__repr__"><strong>__repr__</strong></a>(self)</dt><dd><tt>Return&nbsp;repr(self).</tt></dd></dl>
+
+<hr>
+Data descriptors defined here:<br>
+<dl><dt><strong>__dict__</strong></dt>
+<dd><tt>dictionary&nbsp;for&nbsp;instance&nbsp;variables&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+<dl><dt><strong>__weakref__</strong></dt>
+<dd><tt>list&nbsp;of&nbsp;weak&nbsp;references&nbsp;to&nbsp;the&nbsp;object&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+</td></tr></table> <p>
+<table width="100%" cellspacing=0 cellpadding=2 border=0 summary="section">
+<tr bgcolor="#ffc8d8">
+<td colspan=3 valign=bottom>&nbsp;<br>
+<font color="#000000" face="helvetica, arial"><a name="Range">class <strong>Range</strong></a>(<a href="builtins.html#object">builtins.object</a>)</font></td></tr>
+    
+<tr bgcolor="#ffc8d8"><td rowspan=2><tt>&nbsp;&nbsp;&nbsp;</tt></td>
+<td colspan=2><tt><a href="#Range">Range</a>&nbsp;information<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;start:&nbsp;str<br>
+:param&nbsp;start:&nbsp;<a href="#Range">Range</a>&nbsp;start&nbsp;value<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;end:&nbsp;str<br>
+:param&nbsp;end:&nbsp;<a href="#Range">Range</a>&nbsp;end&nbsp;value<br>&nbsp;</tt></td></tr>
+<tr><td>&nbsp;</td>
+<td width="100%">Methods defined here:<br>
+<dl><dt><a name="Range-__init__"><strong>__init__</strong></a>(self, start, end)</dt><dd><tt>Initialize&nbsp;self.&nbsp;&nbsp;See&nbsp;help(type(self))&nbsp;for&nbsp;accurate&nbsp;signature.</tt></dd></dl>
+
+<hr>
+Data descriptors defined here:<br>
+<dl><dt><strong>__dict__</strong></dt>
+<dd><tt>dictionary&nbsp;for&nbsp;instance&nbsp;variables&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+<dl><dt><strong>__weakref__</strong></dt>
+<dd><tt>list&nbsp;of&nbsp;weak&nbsp;references&nbsp;to&nbsp;the&nbsp;object&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+</td></tr></table> <p>
+<table width="100%" cellspacing=0 cellpadding=2 border=0 summary="section">
+<tr bgcolor="#ffc8d8">
+<td colspan=3 valign=bottom>&nbsp;<br>
+<font color="#000000" face="helvetica, arial"><a name="RowRecord">class <strong>RowRecord</strong></a>(<a href="builtins.html#object">builtins.object</a>)</font></td></tr>
+    
+<tr bgcolor="#ffc8d8"><td rowspan=2><tt>&nbsp;&nbsp;&nbsp;</tt></td>
+<td colspan=2><tt>Record&nbsp;inserted<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;vector_data:&nbsp;binary&nbsp;str<br>
+:param&nbsp;vector_data:&nbsp;(Required)&nbsp;a&nbsp;vector<br>&nbsp;</tt></td></tr>
+<tr><td>&nbsp;</td>
+<td width="100%">Methods defined here:<br>
+<dl><dt><a name="RowRecord-__init__"><strong>__init__</strong></a>(self, vector_data)</dt><dd><tt>Initialize&nbsp;self.&nbsp;&nbsp;See&nbsp;help(type(self))&nbsp;for&nbsp;accurate&nbsp;signature.</tt></dd></dl>
+
+<hr>
+Data descriptors defined here:<br>
+<dl><dt><strong>__dict__</strong></dt>
+<dd><tt>dictionary&nbsp;for&nbsp;instance&nbsp;variables&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+<dl><dt><strong>__weakref__</strong></dt>
+<dd><tt>list&nbsp;of&nbsp;weak&nbsp;references&nbsp;to&nbsp;the&nbsp;object&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+</td></tr></table> <p>
+<table width="100%" cellspacing=0 cellpadding=2 border=0 summary="section">
+<tr bgcolor="#ffc8d8">
+<td colspan=3 valign=bottom>&nbsp;<br>
+<font color="#000000" face="helvetica, arial"><a name="TableSchema">class <strong>TableSchema</strong></a>(<a href="builtins.html#object">builtins.object</a>)</font></td></tr>
+    
+<tr bgcolor="#ffc8d8"><td rowspan=2><tt>&nbsp;&nbsp;&nbsp;</tt></td>
+<td colspan=2><tt>Table&nbsp;Schema<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;table_name:&nbsp;str<br>
+:param&nbsp;table_name:&nbsp;(Required)&nbsp;name&nbsp;of&nbsp;table<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;index_type:&nbsp;<a href="#IndexType">IndexType</a><br>
+:param&nbsp;index_type:&nbsp;(Optional)&nbsp;index&nbsp;type,&nbsp;default&nbsp;=&nbsp;0<br>
+&nbsp;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;`<a href="#IndexType">IndexType</a>`:&nbsp;0-invalid,&nbsp;1-idmap,&nbsp;2-ivflat<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;dimension:&nbsp;int64<br>
+:param&nbsp;dimension:&nbsp;(Required)&nbsp;dimension&nbsp;of&nbsp;vector<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;store_raw_vector:&nbsp;bool<br>
+:param&nbsp;store_raw_vector:&nbsp;(Optional)&nbsp;default&nbsp;=&nbsp;False<br>&nbsp;</tt></td></tr>
+<tr><td>&nbsp;</td>
+<td width="100%">Methods defined here:<br>
+<dl><dt><a name="TableSchema-__init__"><strong>__init__</strong></a>(self, table_name, dimension=0, index_type=&lt;IndexType.INVALIDE: 0&gt;, store_raw_vector=False)</dt><dd><tt>Initialize&nbsp;self.&nbsp;&nbsp;See&nbsp;help(type(self))&nbsp;for&nbsp;accurate&nbsp;signature.</tt></dd></dl>
+
+<hr>
+Data descriptors defined here:<br>
+<dl><dt><strong>__dict__</strong></dt>
+<dd><tt>dictionary&nbsp;for&nbsp;instance&nbsp;variables&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+<dl><dt><strong>__weakref__</strong></dt>
+<dd><tt>list&nbsp;of&nbsp;weak&nbsp;references&nbsp;to&nbsp;the&nbsp;object&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+</td></tr></table> <p>
+<table width="100%" cellspacing=0 cellpadding=2 border=0 summary="section">
+<tr bgcolor="#ffc8d8">
+<td colspan=3 valign=bottom>&nbsp;<br>
+<font color="#000000" face="helvetica, arial"><a name="TopKQueryResult">class <strong>TopKQueryResult</strong></a>(<a href="builtins.html#object">builtins.object</a>)</font></td></tr>
+    
+<tr bgcolor="#ffc8d8"><td rowspan=2><tt>&nbsp;&nbsp;&nbsp;</tt></td>
+<td colspan=2><tt>TopK&nbsp;query&nbsp;results<br>
+&nbsp;<br>
+:type&nbsp;&nbsp;query_results:&nbsp;list[<a href="#QueryResult">QueryResult</a>]<br>
+:param&nbsp;query_results:&nbsp;TopK&nbsp;query&nbsp;results<br>&nbsp;</tt></td></tr>
+<tr><td>&nbsp;</td>
+<td width="100%">Methods defined here:<br>
+<dl><dt><a name="TopKQueryResult-__init__"><strong>__init__</strong></a>(self, query_results)</dt><dd><tt>Initialize&nbsp;self.&nbsp;&nbsp;See&nbsp;help(type(self))&nbsp;for&nbsp;accurate&nbsp;signature.</tt></dd></dl>
+
+<dl><dt><a name="TopKQueryResult-__repr__"><strong>__repr__</strong></a>(self)</dt><dd><tt>Return&nbsp;repr(self).</tt></dd></dl>
+
+<hr>
+Data descriptors defined here:<br>
+<dl><dt><strong>__dict__</strong></dt>
+<dd><tt>dictionary&nbsp;for&nbsp;instance&nbsp;variables&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+<dl><dt><strong>__weakref__</strong></dt>
+<dd><tt>list&nbsp;of&nbsp;weak&nbsp;references&nbsp;to&nbsp;the&nbsp;object&nbsp;(if&nbsp;defined)</tt></dd>
+</dl>
+</td></tr></table></td></tr></table>
+</body></html>

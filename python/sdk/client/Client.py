@@ -5,8 +5,8 @@ from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 from thrift.Thrift import TException, TApplicationException
 
-from megasearch.thrift import MegasearchService
-from megasearch.thrift import ttypes
+from milvus.thrift import MilvusService
+from milvus.thrift import ttypes
 from client.Abstract import (
     ConnectIntf,
     TableSchema,
@@ -77,7 +77,7 @@ class Prepare(object):
         return ttypes.RowRecord(vector_data=temp.vector_data)
 
 
-class MegaSearch(ConnectIntf):
+class Milvus(ConnectIntf):
 
     def __init__(self):
         self.status = None
@@ -95,7 +95,7 @@ class MegaSearch(ConnectIntf):
         transport = TSocket.TSocket(host=host, port=port)
         self._transport = TTransport.TBufferedTransport(transport)
         protocol = TBinaryProtocol.TBinaryProtocol(transport)
-        self._client = MegasearchService.Client(protocol)
+        self._client = MilvusService.Client(protocol)
 
         try:
             transport.open()
