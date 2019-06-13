@@ -6,7 +6,8 @@
 #pragma once
 
 #include "SearchContext.h"
-#include "utils/ThreadPool.h"
+#include "IndexLoaderQueue.h"
+#include "SearchTaskQueue.h"
 
 namespace zilliz {
 namespace milvus {
@@ -30,7 +31,12 @@ private:
     bool SearchWorker();
 
 private:
-    server::ThreadPool thread_pool_;
+    std::shared_ptr<std::thread> index_load_thread_;
+    std::shared_ptr<std::thread> search_thread_;
+
+    IndexLoaderQueue index_load_queue_;
+    SearchTaskQueue search_queue_;
+
     bool stopped_ = true;
 };
 
