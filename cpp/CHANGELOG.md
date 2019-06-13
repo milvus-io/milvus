@@ -5,6 +5,7 @@ Please mark all change in change log and use the ticket from JIRA.
 # MegaSearch 0.3.0 (TBD)
 
 ## Bug
+- MS-80 - Fix server hang issue
 
 ## Improvement
 

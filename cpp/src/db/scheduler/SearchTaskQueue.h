@@ -27,21 +27,7 @@ public:
 };
 
 using SearchTaskPtr = std::shared_ptr<SearchTask>;
-
-class SearchTaskQueue : public server::BlockingQueue<SearchTaskPtr> {
-private:
-    SearchTaskQueue();
-
-    SearchTaskQueue(const SearchTaskQueue &rhs) = delete;
-
-    SearchTaskQueue &operator=(const SearchTaskQueue &rhs) = delete;
-
-public:
-    static SearchTaskQueue& GetInstance();
-
-private:
-
-};
+using SearchTaskQueue = server::BlockingQueue<SearchTaskPtr>;
 
 
 }
