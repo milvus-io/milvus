@@ -6,14 +6,14 @@ import random
 import struct
 from faker.providers import BaseProvider
 
-from client.Client import MegaSearch, Prepare
+from client.Client import Milvus, Prepare
 from client.Abstract import IndexType, TableSchema
 from client.Status import Status
 from client.Exceptions import (
     RepeatingConnectError,
     DisconnectNotConnectedClientError
 )
-from megasearch.thrift import ttypes, MegasearchService
+from milvus.thrift import ttypes, MilvusService
 
 from thrift.transport.TSocket import TSocket
 from thrift.transport import TTransport
@@ -77,7 +77,7 @@ class TestConnection:
     @mock.patch.object(TSocket, 'open')
     def test_true_connect(self, open):
         open.return_value = None
-        cnn = MegaSearch()
+        cnn = Milvus()
 
         cnn.connect(**self.param)
         assert cnn.status == Status.SUCCESS
@@ -88,7 +88,7 @@ class TestConnection:
             cnn.connect()
 
     def test_false_connect(self):
-        cnn = MegaSearch()
+        cnn = Milvus()
 
         cnn.connect(**self.param)
         assert cnn.status != Status.SUCCESS
@@ -99,13 +99,13 @@ class TestConnection:
         close.return_value = None
         open.return_value = None
 
-        cnn = MegaSearch()
+        cnn = Milvus()
         cnn.connect(**self.param)
 
         assert cnn.disconnect() == Status.SUCCESS
 
     def test_disconnected_error(self):
-        cnn = MegaSearch()
+        cnn = Milvus()
         cnn.connect_status = Status(Status.PERMISSION_DENIED)
         with pytest.raises(DisconnectNotConnectedClientError):
             cnn.disconnect()
@@ -119,11 +119,11 @@ class TestTable:
         param = {'host': 'localhost', 'port': '5000'}
         open.return_value = None
 
-        cnn = MegaSearch()
+        cnn = Milvus()
         cnn.connect(**param)
         return cnn
 
-    @mock.patch.object(MegasearchService.Client, 'CreateTable')
+    @mock.patch.object(MilvusService.Client, 'CreateTable')
     def test_create_table(self, CreateTable, client):
         CreateTable.return_value = None
 
@@ -138,7 +138,7 @@ class TestTable:
             LOGGER.error('{}'.format(res))
             assert res != Status.SUCCESS
 
-    @mock.patch.object(MegasearchService.Client, 'DeleteTable')
+    @mock.patch.object(MilvusService.Client, 'DeleteTable')
     def test_delete_table(self, DeleteTable, client):
         DeleteTable.return_value = None
         table_name = 'fake_table_name'
@@ -159,11 +159,11 @@ class TestVector:
         param = {'host': 'localhost', 'port': '5000'}
         open.return_value = None
 
-        cnn = MegaSearch()
+        cnn = Milvus()
         cnn.connect(**param)
         return cnn
 
-    @mock.patch.object(MegasearchService.Client, 'AddVector')
+    @mock.patch.object(MilvusService.Client, 'AddVector')
     def test_add_vector(self, AddVector, client):
         AddVector.return_value = None
 
@@ -182,7 +182,7 @@ class TestVector:
         res, ids = client.add_vectors(**param)
         assert res != Status.SUCCESS
 
-    @mock.patch.object(MegasearchService.Client, 'SearchVector')
+    @mock.patch.object(MilvusService.Client, 'SearchVector')
     def test_search_vector(self, SearchVector, client):
         SearchVector.return_value = None, None
         param = {
@@ -204,7 +204,7 @@ class TestVector:
         res, results = client.search_vectors(**param)
         assert res != Status.SUCCESS
 
-    @mock.patch.object(MegasearchService.Client, 'DescribeTable')
+    @mock.patch.object(MilvusService.Client, 'DescribeTable')
     def test_describe_table(self, DescribeTable, client):
         DescribeTable.return_value = table_schema_factory()
 
@@ -219,7 +219,7 @@ class TestVector:
         assert res != Status.SUCCESS
         assert not table_schema
 
-    @mock.patch.object(MegasearchService.Client, 'ShowTables')
+    @mock.patch.object(MilvusService.Client, 'ShowTables')
     def test_show_tables(self, ShowTables, client):
         ShowTables.return_value = [fake.table_name() for _ in range(10)], None
         res, tables = client.show_tables()
@@ -231,7 +231,7 @@ class TestVector:
         assert res != Status.SUCCESS
         assert not tables
 
-    @mock.patch.object(MegasearchService.Client, 'GetTableRowCount')
+    @mock.patch.object(MilvusService.Client, 'GetTableRowCount')
     def test_get_table_row_count(self, GetTableRowCount, client):
         GetTableRowCount.return_value = 22, None
         res, count = client.get_table_row_count('fake_table')

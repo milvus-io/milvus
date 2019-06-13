@@ -1,4 +1,4 @@
-from client.Client import MegaSearch, Prepare, IndexType
+from client.Client import Milvus, Prepare, IndexType
 import random
 import struct
 from pprint import pprint
@@ -6,24 +6,24 @@ from pprint import pprint
 
 def main():
     # Get client version
-    mega = MegaSearch()
-    print('# Client version: {}'.format(mega.client_version()))
+    milvus = Milvus()
+    print('# Client version: {}'.format(milvus.client_version()))
 
     # Connect
     # Please change HOST and PORT to correct one
     param = {'host': 'HOST', 'port': 'PORT'}
-    cnn_status = mega.connect(**param)
+    cnn_status = milvus.connect(**param)
     print('# Connect Status: {}'.format(cnn_status))
 
     # Check if connected
-    is_connected = mega.connected
+    is_connected = milvus.connected
     print('# Is connected: {}'.format(is_connected))
 
     # Get server version
-    print('# Server version: {}'.format(mega.server_version()))
+    print('# Server version: {}'.format(milvus.server_version()))
 
     # Show tables and their description
-    status, tables = mega.show_tables()
+    status, tables = milvus.show_tables()
     print('# Show tables: {}'.format(tables))
 
     # Create table
@@ -36,12 +36,12 @@ def main():
     }
 
     #   02.Create table
-    res_status = mega.create_table(Prepare.table_schema(**param))
+    res_status = milvus.create_table(Prepare.table_schema(**param))
     print('# Create table status: {}'.format(res_status))
 
     # Describe table
     table_name = 'test01'
-    res_status, table = mega.describe_table(table_name)
+    res_status, table = milvus.describe_table(table_name)
     print('# Describe table status: {}'.format(res_status))
     print('# Describe table:{}'.format(table))
 
@@ -53,7 +53,7 @@ def main():
                                               *[random.random()for _ in range(dim)]))
                for _ in range(20)]
     #   02. Add vectors
-    status, ids = mega.add_vectors(table_name=table_name, records=vectors)
+    status, ids = milvus.add_vectors(table_name=table_name, records=vectors)
     print('# Add vector status: {}'.format(status))
     pprint(ids)
 
@@ -67,21 +67,21 @@ def main():
         'top_k': 10,
         # 'query_ranges': None  # Optional
     }
-    sta, results = mega.search_vectors(**param)
+    sta, results = milvus.search_vectors(**param)
     print('# Search vectors status: {}'.format(sta))
     pprint(results)
 
     # Get table row count
-    sta, result = mega.get_table_row_count(table_name)
+    sta, result = milvus.get_table_row_count(table_name)
     print('# Status: {}'.format(sta))
     print('# Count: {}'.format(result))
 
     # Delete table 'test01'
-    res_status = mega.delete_table(table_name)
+    res_status = milvus.delete_table(table_name)
     print('# Delete table status: {}'.format(res_status))
 
     # Disconnect
-    discnn_status = mega.disconnect()
+    discnn_status = milvus.disconnect()
     print('# Disconnect Status: {}'.format(discnn_status))
 
 
