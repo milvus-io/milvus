@@ -9,7 +9,7 @@
 #include <stdio.h>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 namespace meta {
 
@@ -44,5 +44,5 @@ DateT Meta::GetDate() {
 
 } // namespace meta
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

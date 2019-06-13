@@ -9,7 +9,7 @@
 #include "Status.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 const char* Status::CopyState(const char* state) {
@@ -63,5 +63,5 @@ std::string Status::ToString() const {
 }
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

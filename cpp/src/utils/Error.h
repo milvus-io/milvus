@@ -10,7 +10,7 @@
 #include <string>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 using ServerError = int32_t;
@@ -58,6 +58,6 @@ private:
 };
 
 }  // namespace server
-}  // namespace vecwise
+}  // namespace milvus
 }  // namespace zilliz
 

@@ -9,7 +9,7 @@
 #include <string>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class Exception : public std::exception {
@@ -50,5 +50,5 @@ public:
 };
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

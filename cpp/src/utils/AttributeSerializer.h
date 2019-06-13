@@ -10,7 +10,7 @@
 #include "Error.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 using AttribMap = std::map<std::string, std::string>;

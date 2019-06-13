@@ -14,7 +14,7 @@
 #include <memory>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 struct DBMetaOptionsFactory {
@@ -35,5 +35,5 @@ struct DBFactory {
 };
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

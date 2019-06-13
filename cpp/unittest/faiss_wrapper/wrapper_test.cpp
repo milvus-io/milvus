@@ -10,7 +10,7 @@
 #include "wrapper/Index.h"
 #include "wrapper/IndexBuilder.h"
 
-using namespace zilliz::vecwise::engine;
+using namespace zilliz::milvus::engine;
 
 
 TEST(operand_test, Wrapper_Test) {

@@ -23,7 +23,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class GpuResources {
@@ -34,7 +34,7 @@ class GpuResources {
     }
 
     void SelectGpu() {
-        using namespace zilliz::vecwise::server;
+        using namespace zilliz::milvus::server;
         ServerConfig &config = ServerConfig::GetInstance();
         ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
         gpu_num = server_config.GetInt32Value("gpu_index", 0);
@@ -107,7 +107,7 @@ Index_ptr IndexBuilder::build_all(const long &nb, const vector<float> &xb,
     return build_all(nb, xb.data(), ids.data(), nt, xt.data());
 }
 
-BgCpuBuilder::BgCpuBuilder(const zilliz::vecwise::engine::Operand_ptr &opd) : IndexBuilder(opd) {};
+BgCpuBuilder::BgCpuBuilder(const zilliz::milvus::engine::Operand_ptr &opd) : IndexBuilder(opd) {};
 
 Index_ptr BgCpuBuilder::build_all(const long &nb, const float *xb, const long *ids, const long &nt, const float *xt) {
     std::shared_ptr<faiss::Index> index = nullptr;

@@ -9,7 +9,7 @@
 #include "utils/ThreadPool.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class SearchScheduler {

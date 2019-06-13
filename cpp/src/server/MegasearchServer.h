@@ -9,7 +9,7 @@
 #include <string>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 class MegasearchServer {
