@@ -3,11 +3,11 @@ import setuptools
 long_description = ''
 
 setuptools.setup(
-    name="MegaSearch",
-    version="0.0.1",
+    name="Milvus",
+    version="0.1.0",
     author="XuanYang",
     author_email="xuan.yang@zilliz.com",
-    description="Sdk for using MegaSearch",
+    description="Python Sdk for Milvus",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3.4",
