@@ -128,7 +128,7 @@ class ConnectIntf(object):
         :type  uri: str
         :param uri: (Optional) uri
 
-        :return Status,  indicate if connect is successful
+        :return: Status,  indicate if connect is successful
         """
         _abstract()
 
@@ -137,7 +137,7 @@ class ConnectIntf(object):
         connected, connection status
         Should be implemented
 
-        :return Status,  indicate if connect is successful
+        :return: Status,  indicate if connect is successful
         """
         _abstract()
 
@@ -146,7 +146,7 @@ class ConnectIntf(object):
         Disconnect, server will be disconnected after disconnect return SUCCESS
         Should be implemented
 
-        :return Status,  indicate if connect is successful
+        :return: Status,  indicate if connect is successful
         """
         _abstract()
 
@@ -158,7 +158,7 @@ class ConnectIntf(object):
         :type  param: TableSchema
         :param param: provide table information to be created
 
-        :return Status, indicate if connect is successful
+        :return: Status, indicate if connect is successful
         """
         _abstract()
 
@@ -170,7 +170,7 @@ class ConnectIntf(object):
         :type  table_name: str
         :param table_name: table_name of the deleting table
 
-        :return Status, indicate if connect is successful
+        :return: Status, indicate if connect is successful
         """
         _abstract()
 
@@ -185,7 +185,7 @@ class ConnectIntf(object):
         :type  records: list[RowRecord]
         :param records: list of vectors been inserted
 
-        :returns
+        :returns:
             Status : indicate if vectors inserted successfully
             ids :list of id, after inserted every vector is given a id
         """
@@ -209,7 +209,7 @@ class ConnectIntf(object):
         :type  top_k: int
         :param top_k: how many similar vectors will be searched
 
-        :returns
+        :returns:
             Status:  indicate if query is successful
             query_results: list[TopKQueryResult]
         """
@@ -223,7 +223,7 @@ class ConnectIntf(object):
         :type  table_name: str
         :param table_name: which table to be shown
 
-        :returns
+        :returns:
             Status: indicate if query is successful
             table_schema: TableSchema, given when operation is successful
         """
@@ -237,7 +237,7 @@ class ConnectIntf(object):
         :type  table_name, str
         :param table_name, target table name.
 
-        :returns
+        :returns:
             Status: indicate if operation is successful
             count: int, table row count
         """
@@ -248,7 +248,7 @@ class ConnectIntf(object):
         Show all tables in database
         should be implemented
 
-        :return
+        :return:
             Status: indicate if this operation is successful
             tables: list[str], list of table names
         """

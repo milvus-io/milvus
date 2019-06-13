@@ -26,8 +26,8 @@ from client.Exceptions import (
 
 LOGGER = logging.getLogger(__name__)
 
-__VERSION__ = '0.0.1'
-__NAME__ = 'Thrift_Client'
+__VERSION__ = '0.1.0'
+__NAME__ = 'Milvus Python SDK'
 
 
 class Prepare(object):
@@ -39,13 +39,16 @@ class Prepare(object):
                      index_type=IndexType.INVALIDE,
                      store_raw_vector = False):
         """
+        :type table_name: str
+        :type dimension: int
+        :type index_type: IndexType
+        :type store_raw_vector: bool
+        :param table_name: (Required) name of table
+        :param dimension: (Required) dimension of the table
+        :param index_type: (Optional) index type, default = IndexType.INVALID
+        :param store_raw_vector: (Optional) default = False
 
-        :param table_name: str, (Required) name of table
-        :param index_type: IndexType, (Required) index type, default = IndexType.INVALID
-        :param dimension: int64, (Optional) dimension of the table
-        :param store_raw_vector: bool, (Optional) default = False
-
-        :return: TableSchema
+        :return: TableSchema object
         """
         temp = TableSchema(table_name,dimension, index_type, store_raw_vector)
 
@@ -57,10 +60,12 @@ class Prepare(object):
     @classmethod
     def range(cls, start, end):
         """
-        :param start: str, (Required) range start
-        :param end: str (Required) range end
+        :type start: str
+        :type end: str
+        :param start: (Required) range start
+        :param end: (Required) range end
 
-        :return Range
+        :return: Range object
         """
         temp = Range(start=start, end=end)
         return ttypes.Range(start_value=temp.start, end_value=temp.end)
@@ -68,9 +73,12 @@ class Prepare(object):
     @classmethod
     def row_record(cls, vector_data):
         """
-        Record inserted
+        Transfer a float binary str to RowRecord and return
 
-        :param vector_data: float binary str, (Required) a binary str
+        :type vector_data: bytearray or bytes
+        :param vector_data: (Required) binary vector to store
+
+        :return: RowRecord object
 
         """
         temp = RowRecord(vector_data)
@@ -78,6 +86,9 @@ class Prepare(object):
 
 
 class Milvus(ConnectIntf):
+    """
+    The Milvus object is used to connect and communicate with the server
+    """
 
     def __init__(self):
         self.status = None
@@ -88,6 +99,20 @@ class Milvus(ConnectIntf):
         return '{}'.format(self.status)
 
     def connect(self, host='localhost', port='9090', uri=None):
+        """
+        Connect method should be called before any operations.
+        Server will be connected after connect return OK
+
+        :type  host: str
+        :type  port: str
+        :type  uri: str
+        :param host: (Required) host of the server
+        :param port: (Required) port of the server
+        :param uri: (Optional)
+
+        :return: Status, indicate if connect is successful
+        :rtype: Status
+        """
         # TODO URI
         if self.status and self.status == Status.SUCCESS:
             raise RepeatingConnectError("You have already connected!")
@@ -110,9 +135,21 @@ class Milvus(ConnectIntf):
 
     @property
     def connected(self):
+        """
+        Check if client is connected to the server
+
+        :return: if client is connected
+        :rtype bool
+        """
         return self.status == Status.SUCCESS
 
     def disconnect(self):
+        """
+        Disconnect the client
+
+        :return: Status, indicate if disconnect is successful
+        :rtype: Status
+        """
 
         if not self._transport:
             raise DisconnectNotConnectedClientError('Error')
@@ -130,11 +167,13 @@ class Milvus(ConnectIntf):
     def create_table(self, param):
         """Create table
 
-        :param param: Provide table information to be created,
+        :type  param: TableSchema
+        :param param: Provide table information to be created
 
                 `Please use Prepare.table_schema generate param`
 
         :return: Status, indicate if operation is successful
+        :rtype: Status
         """
         if not self._client:
             raise NotConnectError('Please Connect to the server first!')
@@ -147,11 +186,14 @@ class Milvus(ConnectIntf):
         return Status(message='Table {} created!'.format(param.table_name))
 
     def delete_table(self, table_name):
-        """Delete table
+        """
+        Delete table with table_name
 
+        :type  table_name: str
         :param table_name: Name of the table being deleted
 
         :return: Status, indicate if operation is successful
+        :rtype: Status
         """
         try:
             self._client.DeleteTable(table_name)
@@ -164,14 +206,19 @@ class Milvus(ConnectIntf):
         """
         Add vectors to table
 
+        :type  table_name: str
+        :type  records: list[RowRecord]
+
         :param table_name: table name been inserted
-        :param records: List[RowRecord], list of vectors been inserted
+        :param records: list of vectors been inserted
 
                 `Please use Prepare.row_record generate records`
 
         :returns:
-            Status : indicate if vectors inserted successfully
-            ids :list of id, after inserted every vector is given a id
+            Status: indicate if vectors inserted successfully
+
+            ids: list of id, after inserted every vector is given a id
+        :rtype: (Status, list(str))
         """
         try:
             ids = self._client.AddVector(table_name=table_name, record_array=records)
@@ -184,17 +231,26 @@ class Milvus(ConnectIntf):
         """
         Query vectors in a table
 
-        :param table_name: str, table name been queried
-        :param query_records: list[QueryRecord], all vectors going to be queried
+
+
+        :param query_ranges: Optional ranges for conditional search.
+            If not specified, search whole table
+        :type  query_ranges: list[Range]
+        :param table_name: table name been queried
+        :type  table_name: str
+        :param query_records: all vectors going to be queried
 
                 `Please use Prepare.query_record generate QueryRecord`
-
+        :type  query_records: list[RowRecord]
         :param top_k: int, how many similar vectors will be searched
-        :param query_ranges, (Optional) list[Range], search range
+        :type  top_k: int
 
-        :returns:
+        :returns: (Status, res)
+
             Status:  indicate if query is successful
-            res: list[TopKQueryResult], return when operation is successful
+
+            res: return when operation is successful
+        :rtype: (Status, list[TopKQueryResult])
         """
         res = []
         try:
@@ -219,17 +275,17 @@ class Milvus(ConnectIntf):
         """
         Show table information
 
-        :param table_name: str, which table to be shown
+        :type  table_name: str
+        :param table_name: which table to be shown
 
-        :returns:
+        :returns: (Status, table_schema)
             Status: indicate if query is successful
-            table_schema: TableSchema, return when operation is successful
+            table_schema: return when operation is successful
+        :rtype: (Status, TableSchema)
         """
         try:
             temp = self._client.DescribeTable(table_name)
 
-            # res = TableSchema(table_name=temp.table_name, dimension=temp.dimension,
-            #                   index_type=temp.index_type, store_raw_vector=temp.store_raw_vector)
         except (TApplicationException, TException) as e:
             LOGGER.error('{}'.format(e))
             return Status(Status.PERMISSION_DENIED, str(e)), None
@@ -241,14 +297,17 @@ class Milvus(ConnectIntf):
 
         :return:
             Status: indicate if this operation is successful
-            tables: list[str], list of table names, return when operation
+
+            tables: list of table names, return when operation
                     is successful
+        :rtype:
+            (Status, list[str])
         """
         try:
             res = self._client.ShowTables()
             tables = []
             if res:
-                tables, _ = res
+                tables = res
 
         except (TApplicationException, TException) as e:
             LOGGER.error('{}'.format(e))
@@ -259,16 +318,17 @@ class Milvus(ConnectIntf):
         """
         Get table row count
 
-        :type  table_name, str
-        :param table_name, target table name.
+        :type  table_name: str
+        :param table_name: target table name.
 
         :returns:
             Status: indicate if operation is successful
+
             res: int, table row count
 
         """
         try:
-            count, _ = self._client.GetTableRowCount(table_name)
+            count = self._client.GetTableRowCount(table_name)
 
         except (TApplicationException, TException) as e:
             LOGGER.error('{}'.format(e))
@@ -280,6 +340,7 @@ class Milvus(ConnectIntf):
         Provide client version
 
         :return: Client version
+        :rtype: str
         """
         return __VERSION__
 
@@ -299,6 +360,7 @@ class Milvus(ConnectIntf):
         Provide server status
 
         :return: Server status
+        :rtype : str
         """
         if not self.connected:
             raise NotConnectError('You have to connect first')

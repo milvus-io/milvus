@@ -1,7 +1,8 @@
 class Status(object):
     """
-    :attribute code : int (optional) default as ok
-    :attribute message : str (optional) current status message
+    :attribute code: int (optional) default as ok
+
+    :attribute message: str (optional) current status message
     """
     SUCCESS = 0
     CONNECT_FAILED = 1
