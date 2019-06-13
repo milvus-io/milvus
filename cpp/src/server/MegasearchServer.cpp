@@ -23,7 +23,7 @@
 #include <thread>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 using namespace megasearch::thrift;

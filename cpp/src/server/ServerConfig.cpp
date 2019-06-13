@@ -14,7 +14,7 @@
 #include "config/IConfigMgr.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 ServerConfig&

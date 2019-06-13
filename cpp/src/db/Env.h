@@ -12,7 +12,7 @@
 #include <atomic>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class Env {
@@ -52,5 +52,5 @@ protected:
 }; // Env
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

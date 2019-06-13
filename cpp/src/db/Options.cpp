@@ -14,7 +14,7 @@
 #include "Exception.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 Options::Options()
@@ -71,5 +71,5 @@ void ArchiveConf::ParseType(const std::string& type) {
 }
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

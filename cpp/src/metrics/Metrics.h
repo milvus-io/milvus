@@ -16,7 +16,7 @@
 //#include "PrometheusMetrics.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 #define METRICS_NOW_TIME std::chrono::system_clock::now()

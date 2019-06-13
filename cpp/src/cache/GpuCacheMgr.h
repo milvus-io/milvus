@@ -7,7 +7,7 @@
 #include "CacheMgr.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace cache {
 
 class GpuCacheMgr : public CacheMgr {

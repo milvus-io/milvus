@@ -12,7 +12,7 @@
 #include "utils.h"
 #include "db/Factories.h"
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 void ASSERT_STATS(engine::Status& stat) {
     ASSERT_TRUE(stat.ok());

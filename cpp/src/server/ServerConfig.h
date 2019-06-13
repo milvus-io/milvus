@@ -11,7 +11,7 @@
 #include "yaml-cpp/yaml.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 static const std::string CONFIG_SERVER = "server_config";

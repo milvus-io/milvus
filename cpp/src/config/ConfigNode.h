@@ -10,7 +10,7 @@
 #include <map>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 class ConfigNode;

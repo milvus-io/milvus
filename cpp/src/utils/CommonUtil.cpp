@@ -27,7 +27,7 @@
 #endif
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 namespace fs = boost::filesystem;

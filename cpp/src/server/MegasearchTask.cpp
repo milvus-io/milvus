@@ -14,21 +14,21 @@
 #include "version.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 static const std::string DQL_TASK_GROUP = "dql";
 static const std::string DDL_DML_TASK_GROUP = "ddl_dml";
 static const std::string PING_TASK_GROUP = "ping";
 
-using DB_META = zilliz::vecwise::engine::meta::Meta;
-using DB_DATE = zilliz::vecwise::engine::meta::DateT;
+using DB_META = zilliz::milvus::engine::meta::Meta;
+using DB_DATE = zilliz::milvus::engine::meta::DateT;
 
 namespace {
     class DBWrapper {
     public:
         DBWrapper() {
-            zilliz::vecwise::engine::Options opt;
+            zilliz::milvus::engine::Options opt;
             ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
             opt.meta.backend_uri = config.GetValue(CONFIG_DB_URL);
             std::string db_path = config.GetValue(CONFIG_DB_PATH);
@@ -37,7 +37,7 @@ namespace {
 
             CommonUtil::CreateDirectory(opt.meta.path);
 
-            zilliz::vecwise::engine::DB::Open(opt, &db_);
+            zilliz::milvus::engine::DB::Open(opt, &db_);
             if(db_ == nullptr) {
                 SERVER_LOG_ERROR << "Failed to open db";
                 throw ServerException(SERVER_NULL_POINTER, "Failed to open db");
@@ -48,13 +48,13 @@ namespace {
             delete db_;
         }
 
-        zilliz::vecwise::engine::DB* DB() { return db_; }
+        zilliz::milvus::engine::DB* DB() { return db_; }
 
     private:
-        zilliz::vecwise::engine::DB* db_ = nullptr;
+        zilliz::milvus::engine::DB* db_ = nullptr;
     };
 
-    zilliz::vecwise::engine::DB* DB() {
+    zilliz::milvus::engine::DB* DB() {
         static DBWrapper db_wrapper;
         return db_wrapper.DB();
     }

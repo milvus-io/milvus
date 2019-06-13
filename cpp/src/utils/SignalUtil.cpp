@@ -11,11 +11,11 @@
 #include <execinfo.h>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 void SignalUtil::HandleSignal(int signum){
-    SERVER_LOG_INFO << "Server received signal:" << std::to_string(signum);
+
 
     switch(signum){
         case SIGINT:
@@ -26,6 +26,7 @@ void SignalUtil::HandleSignal(int signum){
             exit(0);
         }
         default:{
+            SERVER_LOG_INFO << "Server received signal:" << std::to_string(signum);
             SignalUtil::PrintStacktrace();
 
             std::string info = "Server encounter critical signal:";

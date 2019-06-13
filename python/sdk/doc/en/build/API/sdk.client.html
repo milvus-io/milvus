@@ -1,0 +1,558 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>sdk.client.Client module &mdash; MilvusPythonSDK 0.0.1 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="../_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+        <script type="text/javascript" src="../_static/jquery.js"></script>
+        <script type="text/javascript" src="../_static/underscore.js"></script>
+        <script type="text/javascript" src="../_static/doctools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+    
+    <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="API" href="../api.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../index.html" class="icon icon-home"> MilvusPythonSDK
+          
+
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../api.html">API</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../api.html#client-package">client package</a><ul class="current">
+<li class="toctree-l3 current"><a class="current reference internal" href="#">sdk.client.Client module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#sdk-client-client-milvus">sdk.client.Client.Milvus</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#sdk-client-clinet-prepare">sdk.client.Clinet.Prepare</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-client.Status">sdk.client.Status module</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">MilvusPythonSDK</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="../api.html">API</a> &raquo;</li>
+        
+      <li>sdk.client.Client module</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="../_sources/API/sdk.client.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="sdk-client-client-module">
+<h1>sdk.client.Client module<a class="headerlink" href="#sdk-client-client-module" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="sdk-client-client-milvus">
+<h2>sdk.client.Client.Milvus<a class="headerlink" href="#sdk-client-client-milvus" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="client.Client.Milvus">
+<em class="property">class </em><code class="sig-prename descclassname">client.Client.</code><code class="sig-name descname">Milvus</code><a class="headerlink" href="#client.Client.Milvus" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">client.Abstract.ConnectIntf</span></code></p>
+<p>The Milvus object is used to connect and communicate with the server</p>
+<dl class="method">
+<dt id="client.Client.Milvus.add_vectors">
+<code class="sig-name descname">add_vectors</code><span class="sig-paren">(</span><em class="sig-param">table_name</em>, <em class="sig-param">records</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.add_vectors" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add vectors to table</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>table_name</strong> (<em>str</em>) – table name been inserted</p></li>
+<li><p><strong>records</strong> (<em>list</em><em>[</em><em>RowRecord</em><em>]</em>) – <p>list of vectors been inserted</p>
+<p><cite>Please use Prepare.row_record generate records</cite></p>
+</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><p>Status: indicate if vectors inserted successfully</p>
+<p>ids: list of id, after inserted every vector is given a id</p>
+</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="#client.Status.Status" title="client.Status.Status">Status</a>, list(str))</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.client_version">
+<code class="sig-name descname">client_version</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.client_version" title="Permalink to this definition">¶</a></dt>
+<dd><p>Provide client version</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p>Client version</p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.connect">
+<code class="sig-name descname">connect</code><span class="sig-paren">(</span><em class="sig-param">host='localhost'</em>, <em class="sig-param">port='9090'</em>, <em class="sig-param">uri=None</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.connect" title="Permalink to this definition">¶</a></dt>
+<dd><p>Connect method should be called before any operations.
+Server will be connected after connect return OK</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>host</strong> (<em>str</em>) – (Required) host of the server</p></li>
+<li><p><strong>port</strong> (<em>str</em>) – (Required) port of the server</p></li>
+<li><p><strong>uri</strong> (<em>str</em>) – (Optional)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Status, indicate if connect is successful</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="#client.Status.Status" title="client.Status.Status">Status</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.connected">
+<em class="property">property </em><code class="sig-name descname">connected</code><a class="headerlink" href="#client.Client.Milvus.connected" title="Permalink to this definition">¶</a></dt>
+<dd><p>Check if client is connected to the server</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p>if client is connected</p>
+</dd>
+</dl>
+<p>:rtype bool</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.create_table">
+<code class="sig-name descname">create_table</code><span class="sig-paren">(</span><em class="sig-param">param</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.create_table" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create table</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>param</strong> (<em>TableSchema</em>) – <p>Provide table information to be created</p>
+<p><cite>Please use Prepare.table_schema generate param</cite></p>
+</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Status, indicate if operation is successful</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="#client.Status.Status" title="client.Status.Status">Status</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.delete_table">
+<code class="sig-name descname">delete_table</code><span class="sig-paren">(</span><em class="sig-param">table_name</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.delete_table" title="Permalink to this definition">¶</a></dt>
+<dd><p>Delete table with table_name</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>table_name</strong> (<em>str</em>) – Name of the table being deleted</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Status, indicate if operation is successful</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p><a class="reference internal" href="#client.Status.Status" title="client.Status.Status">Status</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.describe_table">
+<code class="sig-name descname">describe_table</code><span class="sig-paren">(</span><em class="sig-param">table_name</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.describe_table" title="Permalink to this definition">¶</a></dt>
+<dd><p>Show table information</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>table_name</strong> (<em>str</em>) – which table to be shown</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>(Status, table_schema)
+Status: indicate if query is successful
+table_schema: return when operation is successful</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="#client.Status.Status" title="client.Status.Status">Status</a>, TableSchema)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.disconnect">
+<code class="sig-name descname">disconnect</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.disconnect" title="Permalink to this definition">¶</a></dt>
+<dd><p>Disconnect the client</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p>Status, indicate if disconnect is successful</p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p><a class="reference internal" href="#client.Status.Status" title="client.Status.Status">Status</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.get_table_row_count">
+<code class="sig-name descname">get_table_row_count</code><span class="sig-paren">(</span><em class="sig-param">table_name</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.get_table_row_count" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get table row count</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>table_name</strong> (<em>str</em>) – target table name.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><p>Status: indicate if operation is successful</p>
+<p>res: int, table row count</p>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.search_vectors">
+<code class="sig-name descname">search_vectors</code><span class="sig-paren">(</span><em class="sig-param">table_name</em>, <em class="sig-param">top_k</em>, <em class="sig-param">query_records</em>, <em class="sig-param">query_ranges=None</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.search_vectors" title="Permalink to this definition">¶</a></dt>
+<dd><p>Query vectors in a table</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>query_ranges</strong> (<em>list</em><em>[</em><em>Range</em><em>]</em>) – Optional ranges for conditional search.
+If not specified, search whole table</p></li>
+<li><p><strong>table_name</strong> (<em>str</em>) – table name been queried</p></li>
+<li><p><strong>query_records</strong> (<em>list</em><em>[</em><em>RowRecord</em><em>]</em>) – <p>all vectors going to be queried</p>
+<p><cite>Please use Prepare.query_record generate QueryRecord</cite></p>
+</p></li>
+<li><p><strong>top_k</strong> (<em>int</em>) – int, how many similar vectors will be searched</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><p>(Status, res)</p>
+<p>Status:  indicate if query is successful</p>
+<p>res: return when operation is successful</p>
+</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>(<a class="reference internal" href="#client.Status.Status" title="client.Status.Status">Status</a>, list[TopKQueryResult])</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.server_status">
+<code class="sig-name descname">server_status</code><span class="sig-paren">(</span><em class="sig-param">cmd=None</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.server_status" title="Permalink to this definition">¶</a></dt>
+<dd><p>Provide server status</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p>Server status</p>
+</dd>
+</dl>
+<p>:rtype : str</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.server_version">
+<code class="sig-name descname">server_version</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.server_version" title="Permalink to this definition">¶</a></dt>
+<dd><p>Provide server version</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p>Server version</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Milvus.show_tables">
+<code class="sig-name descname">show_tables</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Milvus.show_tables" title="Permalink to this definition">¶</a></dt>
+<dd><p>Show all tables in database</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p><p>Status: indicate if this operation is successful</p>
+<dl class="simple">
+<dt>tables: list of table names, return when operation</dt><dd><p>is successful</p>
+</dd>
+</dl>
+</p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p>(<a class="reference internal" href="#client.Status.Status" title="client.Status.Status">Status</a>, list[str])</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+<div class="section" id="sdk-client-clinet-prepare">
+<h2>sdk.client.Clinet.Prepare<a class="headerlink" href="#sdk-client-clinet-prepare" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="client.Client.Prepare">
+<em class="property">class </em><code class="sig-prename descclassname">client.Client.</code><code class="sig-name descname">Prepare</code><a class="headerlink" href="#client.Client.Prepare" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="method">
+<dt id="client.Client.Prepare.range">
+<em class="property">classmethod </em><code class="sig-name descname">range</code><span class="sig-paren">(</span><em class="sig-param">start</em>, <em class="sig-param">end</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Prepare.range" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>start</strong> (<em>str</em>) – (Required) range start</p></li>
+<li><p><strong>end</strong> (<em>str</em>) – (Required) range end</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Range object</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Prepare.row_record">
+<em class="property">classmethod </em><code class="sig-name descname">row_record</code><span class="sig-paren">(</span><em class="sig-param">vector_data</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Prepare.row_record" title="Permalink to this definition">¶</a></dt>
+<dd><p>Transfer a float binary str to RowRecord and return</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>vector_data</strong> (<em>bytearray</em><em> or </em><em>bytes</em>) – (Required) binary vector to store</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>RowRecord object</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="client.Client.Prepare.table_schema">
+<em class="property">classmethod </em><code class="sig-name descname">table_schema</code><span class="sig-paren">(</span><em class="sig-param">table_name</em>, <em class="sig-param">dimension</em>, <em class="sig-param">index_type=&lt;IndexType.INVALIDE: 0&gt;</em>, <em class="sig-param">store_raw_vector=False</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Client.Prepare.table_schema" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>table_name</strong> (<em>str</em>) – (Required) name of table</p></li>
+<li><p><strong>dimension</strong> (<em>int</em>) – (Required) dimension of the table</p></li>
+<li><p><strong>index_type</strong> (<em>IndexType</em>) – (Optional) index type, default = IndexType.INVALID</p></li>
+<li><p><strong>store_raw_vector</strong> (<em>bool</em>) – (Optional) default = False</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>TableSchema object</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+</div>
+<div class="section" id="module-client.Status">
+<span id="sdk-client-status-module"></span><h1>sdk.client.Status module<a class="headerlink" href="#module-client.Status" title="Permalink to this headline">¶</a></h1>
+<dl class="class">
+<dt id="client.Status.Status">
+<em class="property">class </em><code class="sig-prename descclassname">client.Status.</code><code class="sig-name descname">Status</code><span class="sig-paren">(</span><em class="sig-param">code=0</em>, <em class="sig-param">message=None</em><span class="sig-paren">)</span><a class="headerlink" href="#client.Status.Status" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="field-list simple">
+<dt class="field-odd">Attribute code</dt>
+<dd class="field-odd"><p>int (optional) default as ok</p>
+</dd>
+<dt class="field-even">Attribute message</dt>
+<dd class="field-even"><p>str (optional) current status message</p>
+</dd>
+</dl>
+<dl class="attribute">
+<dt id="client.Status.Status.CONNECT_FAILED">
+<code class="sig-name descname">CONNECT_FAILED</code><em class="property"> = 1</em><a class="headerlink" href="#client.Status.Status.CONNECT_FAILED" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="attribute">
+<dt id="client.Status.Status.ILLEGAL_ARGUMENT">
+<code class="sig-name descname">ILLEGAL_ARGUMENT</code><em class="property"> = 4</em><a class="headerlink" href="#client.Status.Status.ILLEGAL_ARGUMENT" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="attribute">
+<dt id="client.Status.Status.ILLEGAL_DIMENSION">
+<code class="sig-name descname">ILLEGAL_DIMENSION</code><em class="property"> = 6</em><a class="headerlink" href="#client.Status.Status.ILLEGAL_DIMENSION" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="attribute">
+<dt id="client.Status.Status.ILLEGAL_RANGE">
+<code class="sig-name descname">ILLEGAL_RANGE</code><em class="property"> = 5</em><a class="headerlink" href="#client.Status.Status.ILLEGAL_RANGE" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="attribute">
+<dt id="client.Status.Status.PERMISSION_DENIED">
+<code class="sig-name descname">PERMISSION_DENIED</code><em class="property"> = 2</em><a class="headerlink" href="#client.Status.Status.PERMISSION_DENIED" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="attribute">
+<dt id="client.Status.Status.SUCCESS">
+<code class="sig-name descname">SUCCESS</code><em class="property"> = 0</em><a class="headerlink" href="#client.Status.Status.SUCCESS" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="attribute">
+<dt id="client.Status.Status.TABLE_NOT_EXISTS">
+<code class="sig-name descname">TABLE_NOT_EXISTS</code><em class="property"> = 3</em><a class="headerlink" href="#client.Status.Status.TABLE_NOT_EXISTS" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+      
+        <a href="../api.html" class="btn btn-neutral float-left" title="API" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Zilliz
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>
