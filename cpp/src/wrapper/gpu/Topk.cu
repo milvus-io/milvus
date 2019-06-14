@@ -12,8 +12,8 @@
 namespace faiss {
 namespace gpu {
 
-constexpr bool kBoolMax = zilliz::vecwise::engine::kBoolMax;
-constexpr bool kBoolMin = zilliz::vecwise::engine::kBoolMin;
+constexpr bool kBoolMax = zilliz::milvus::engine::kBoolMax;
+constexpr bool kBoolMin = zilliz::milvus::engine::kBoolMin;
 
 template<>
 struct Limits<bool> {
@@ -27,8 +27,8 @@ struct Limits<bool> {
     }
 };
 
-constexpr int8_t kInt8Max = zilliz::vecwise::engine::kInt8Max;
-constexpr int8_t kInt8Min = zilliz::vecwise::engine::kInt8Min;
+constexpr int8_t kInt8Max = zilliz::milvus::engine::kInt8Max;
+constexpr int8_t kInt8Min = zilliz::milvus::engine::kInt8Min;
 
 template<>
 struct Limits<int8_t> {
@@ -42,8 +42,8 @@ struct Limits<int8_t> {
     }
 };
 
-constexpr int16_t kInt16Max = zilliz::vecwise::engine::kInt16Max;
-constexpr int16_t kInt16Min = zilliz::vecwise::engine::kInt16Min;
+constexpr int16_t kInt16Max = zilliz::milvus::engine::kInt16Max;
+constexpr int16_t kInt16Min = zilliz::milvus::engine::kInt16Min;
 
 template<>
 struct Limits<int16_t> {
@@ -57,8 +57,8 @@ struct Limits<int16_t> {
     }
 };
 
-constexpr int64_t kInt64Max = zilliz::vecwise::engine::kInt64Max;
-constexpr int64_t kInt64Min = zilliz::vecwise::engine::kInt64Min;
+constexpr int64_t kInt64Max = zilliz::milvus::engine::kInt64Max;
+constexpr int64_t kInt64Min = zilliz::milvus::engine::kInt64Min;
 
 template<>
 struct Limits<int64_t> {
@@ -72,8 +72,8 @@ struct Limits<int64_t> {
     }
 };
 
-constexpr double kDoubleMax = zilliz::vecwise::engine::kDoubleMax;
-constexpr double kDoubleMin = zilliz::vecwise::engine::kDoubleMin;
+constexpr double kDoubleMax = zilliz::milvus::engine::kDoubleMax;
+constexpr double kDoubleMin = zilliz::milvus::engine::kDoubleMin;
 
 template<>
 struct Limits<double> {
@@ -102,7 +102,7 @@ struct Limits<double> {
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 namespace gpu {
 

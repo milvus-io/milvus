@@ -26,12 +26,12 @@
 BOOST_VERSION=1.70.0
 BZIP2_VERSION=1.0.6
 EASYLOGGINGPP_VERSION=v9.96.7
-FAISS_VERSION=master
+FAISS_VERSION=v1.5.2
 GTEST_VERSION=1.8.1
 LAPACK_VERSION=v3.8.0
 LZ4_VERSION=v1.9.1
 OPENBLAS_VERSION=v0.3.6
-PROMETHEUS_VERSION=master
+PROMETHEUS_VERSION=v0.7.0
 ROCKSDB_VERSION=v6.0.2
 SNAPPY_VERSION=1.1.7
 SQLITE_VERSION=3280000
@@ -49,12 +49,12 @@ DEPENDENCIES=(
   "MEGASEARCH_BOOST_URL boost-${BOOST_VERSION}.tar.gz https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION//./_}.tar.gz"
   "MEGASEARCH_BZIP2_URL bzip2-${BZIP2_VERSION}.tar.gz https://fossies.org/linux/misc/bzip2-${BZIP2_VERSION}.tar.gz"
   "MEGASEARCH_EASYLOGGINGPP_URL easyloggingpp-${EASYLOGGINGPP_VERSION}.tar.gz https://github.com/zuhd-org/easyloggingpp/archive/${EASYLOGGINGPP_VERSION}.tar.gz"
-  "MEGASEARCH_FAISS_URL faiss-${FAISS_VERSION}.tar.gz https://github.com/JinHai-CN/faiss/archive/${FAISS_VERSION}.tar.gz"
+  "MEGASEARCH_FAISS_URL faiss-${FAISS_VERSION}.tar.gz https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz"
   "MEGASEARCH_GTEST_URL gtest-${GTEST_VERSION}.tar.gz https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz"
   "MEGASEARCH_LAPACK_URL lapack-${LAPACK_VERSION}.tar.gz https://github.com/Reference-LAPACK/lapack/archive/${LAPACK_VERSION}.tar.gz
   "MEGASEARCH_LZ4_URL lz4-${LZ4_VERSION}.tar.gz https://github.com/lz4/lz4/archive/${LZ4_VERSION}.tar.gz"
   "MEGASEARCH_OPENBLAS_URL openblas-${OPENBLAS_VERSION}.tar.gz https://github.com/xianyi/OpenBLAS/archive/${OPENBLAS_VERSION}.tar.gz"
-  "MEGASEARCH_PROMETHEUS_URL prometheus-${PROMETHEUS_VERSION}.tar.gz https://github.com/JinHai-CN/prometheus-cpp/archive/${PROMETHEUS_VERSION}.tar.gz"
+  "MEGASEARCH_PROMETHEUS_URL https://github.com/jupp0r/prometheus-cpp.git"
   "MEGASEARCH_ROCKSDB_URL rocksdb-${ROCKSDB_VERSION}.tar.gz https://github.com/facebook/rocksdb/archive/${ROCKSDB_VERSION}.tar.gz"
   "MEGASEARCH_SNAPPY_URL snappy-${SNAPPY_VERSION}.tar.gz https://github.com/google/snappy/archive/${SNAPPY_VERSION}.tar.gz"
   "MEGASEARCH_SQLITE_URL sqlite-autoconf-${SQLITE_VERSION}.tar.gz https://www.sqlite.org/2019/sqlite-autoconf-${SQLITE_VERSION}.tar.gz"

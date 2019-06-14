@@ -22,12 +22,12 @@ INITIALIZE_EASYLOGGINGPP
 
 void print_help(const std::string &app_name);
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 int
 main(int argc, char *argv[]) {
-    printf("Megasearch %s version: v%s built at %s\n", BUILD_TYPE, MEGASEARCH_VERSION, BUILD_TIME);
-    printf("Megasearch server start...\n");
+    printf("\nWelcome to use Milvus by Zillz!\n");
+    printf("Milvus %s version: v%s built at %s\n", BUILD_TYPE, MEGASEARCH_VERSION, BUILD_TIME);
 
     signal(SIGINT, server::SignalUtil::HandleSignal);
     signal(SIGSEGV, server::SignalUtil::HandleSignal);
@@ -53,7 +53,7 @@ main(int argc, char *argv[]) {
 
     if(argc < 2) {
         print_help(app_name);
-        printf("Vecwise engine server exit...\n");
+        printf("Milvus server exit...\n");
         return EXIT_FAILURE;
     }
 
@@ -98,7 +98,7 @@ main(int argc, char *argv[]) {
         }
     }
 
-    zilliz::vecwise::server::InitLog(log_config_file);
+    zilliz::milvus::server::InitLog(log_config_file);
 
     server::Server* server_ptr = server::Server::Instance();
     server_ptr->Init(start_daemonized, pid_filename, config_filename);

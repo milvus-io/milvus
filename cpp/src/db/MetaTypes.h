@@ -12,7 +12,7 @@
 #include <string>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 namespace meta {
 
@@ -58,5 +58,5 @@ typedef std::map<DateT, TableFilesSchema> DatePartionedTableFilesSchema;
 
 } // namespace meta
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

@@ -49,36 +49,6 @@ class Iface(object):
         """
         pass
 
-    def CreateTablePartition(self, param):
-        """
-        @brief Create table partition
-
-        This method is used to create table partition.
-
-        @param param, use to provide partition information to be created.
-
-
-        Parameters:
-         - param
-
-        """
-        pass
-
-    def DeleteTablePartition(self, param):
-        """
-        @brief Delete table partition
-
-        This method is used to delete table partition.
-
-        @param param, use to provide partition information to be deleted.
-
-
-        Parameters:
-         - param
-
-        """
-        pass
-
     def AddVector(self, table_name, record_array):
         """
         @brief Add vector array to table
@@ -97,7 +67,7 @@ class Iface(object):
         """
         pass
 
-    def SearchVector(self, table_name, query_record_array, topk):
+    def SearchVector(self, table_name, query_record_array, query_range_array, topk):
         """
         @brief Query vector
 
@@ -105,6 +75,7 @@ class Iface(object):
 
         @param table_name, table_name is queried.
         @param query_record_array, all vector are going to be queried.
+        @param query_range_array, optional ranges for conditional search. If not specified, search whole table
         @param topk, how many similarity vectors will be searched.
 
         @return query result array.
@@ -112,6 +83,7 @@ class Iface(object):
         Parameters:
          - table_name
          - query_record_array
+         - query_range_array
          - topk
 
         """
@@ -119,13 +91,29 @@ class Iface(object):
 
     def DescribeTable(self, table_name):
         """
-        @brief Show table information
+        @brief Get table schema
 
-        This method is used to show table information.
+        This method is used to get table schema.
 
-        @param table_name, which table is show.
+        @param table_name, target table name.
 
         @return table schema
+
+        Parameters:
+         - table_name
+
+        """
+        pass
+
+    def GetTableRowCount(self, table_name):
+        """
+        @brief Get table row count
+
+        This method is used to get table row count.
+
+        @param table_name, target table name.
+
+        @return table row count
 
         Parameters:
          - table_name
@@ -245,84 +233,6 @@ class Client(Iface):
             raise result.e
         return
 
-    def CreateTablePartition(self, param):
-        """
-        @brief Create table partition
-
-        This method is used to create table partition.
-
-        @param param, use to provide partition information to be created.
-
-
-        Parameters:
-         - param
-
-        """
-        self.send_CreateTablePartition(param)
-        self.recv_CreateTablePartition()
-
-    def send_CreateTablePartition(self, param):
-        self._oprot.writeMessageBegin('CreateTablePartition', TMessageType.CALL, self._seqid)
-        args = CreateTablePartition_args()
-        args.param = param
-        args.write(self._oprot)
-        self._oprot.writeMessageEnd()
-        self._oprot.trans.flush()
-
-    def recv_CreateTablePartition(self):
-        iprot = self._iprot
-        (fname, mtype, rseqid) = iprot.readMessageBegin()
-        if mtype == TMessageType.EXCEPTION:
-            x = TApplicationException()
-            x.read(iprot)
-            iprot.readMessageEnd()
-            raise x
-        result = CreateTablePartition_result()
-        result.read(iprot)
-        iprot.readMessageEnd()
-        if result.e is not None:
-            raise result.e
-        return
-
-    def DeleteTablePartition(self, param):
-        """
-        @brief Delete table partition
-
-        This method is used to delete table partition.
-
-        @param param, use to provide partition information to be deleted.
-
-
-        Parameters:
-         - param
-
-        """
-        self.send_DeleteTablePartition(param)
-        self.recv_DeleteTablePartition()
-
-    def send_DeleteTablePartition(self, param):
-        self._oprot.writeMessageBegin('DeleteTablePartition', TMessageType.CALL, self._seqid)
-        args = DeleteTablePartition_args()
-        args.param = param
-        args.write(self._oprot)
-        self._oprot.writeMessageEnd()
-        self._oprot.trans.flush()
-
-    def recv_DeleteTablePartition(self):
-        iprot = self._iprot
-        (fname, mtype, rseqid) = iprot.readMessageBegin()
-        if mtype == TMessageType.EXCEPTION:
-            x = TApplicationException()
-            x.read(iprot)
-            iprot.readMessageEnd()
-            raise x
-        result = DeleteTablePartition_result()
-        result.read(iprot)
-        iprot.readMessageEnd()
-        if result.e is not None:
-            raise result.e
-        return
-
     def AddVector(self, table_name, record_array):
         """
         @brief Add vector array to table
@@ -368,7 +278,7 @@ class Client(Iface):
             raise result.e
         raise TApplicationException(TApplicationException.MISSING_RESULT, "AddVector failed: unknown result")
 
-    def SearchVector(self, table_name, query_record_array, topk):
+    def SearchVector(self, table_name, query_record_array, query_range_array, topk):
         """
         @brief Query vector
 
@@ -376,6 +286,7 @@ class Client(Iface):
 
         @param table_name, table_name is queried.
         @param query_record_array, all vector are going to be queried.
+        @param query_range_array, optional ranges for conditional search. If not specified, search whole table
         @param topk, how many similarity vectors will be searched.
 
         @return query result array.
@@ -383,17 +294,19 @@ class Client(Iface):
         Parameters:
          - table_name
          - query_record_array
+         - query_range_array
          - topk
 
         """
-        self.send_SearchVector(table_name, query_record_array, topk)
+        self.send_SearchVector(table_name, query_record_array, query_range_array, topk)
         return self.recv_SearchVector()
 
-    def send_SearchVector(self, table_name, query_record_array, topk):
+    def send_SearchVector(self, table_name, query_record_array, query_range_array, topk):
         self._oprot.writeMessageBegin('SearchVector', TMessageType.CALL, self._seqid)
         args = SearchVector_args()
         args.table_name = table_name
         args.query_record_array = query_record_array
+        args.query_range_array = query_range_array
         args.topk = topk
         args.write(self._oprot)
         self._oprot.writeMessageEnd()
@@ -418,11 +331,11 @@ class Client(Iface):
 
     def DescribeTable(self, table_name):
         """
-        @brief Show table information
+        @brief Get table schema
 
-        This method is used to show table information.
+        This method is used to get table schema.
 
-        @param table_name, which table is show.
+        @param table_name, target table name.
 
         @return table schema
 
@@ -457,6 +370,48 @@ class Client(Iface):
         if result.e is not None:
             raise result.e
         raise TApplicationException(TApplicationException.MISSING_RESULT, "DescribeTable failed: unknown result")
+
+    def GetTableRowCount(self, table_name):
+        """
+        @brief Get table row count
+
+        This method is used to get table row count.
+
+        @param table_name, target table name.
+
+        @return table row count
+
+        Parameters:
+         - table_name
+
+        """
+        self.send_GetTableRowCount(table_name)
+        return self.recv_GetTableRowCount()
+
+    def send_GetTableRowCount(self, table_name):
+        self._oprot.writeMessageBegin('GetTableRowCount', TMessageType.CALL, self._seqid)
+        args = GetTableRowCount_args()
+        args.table_name = table_name
+        args.write(self._oprot)
+        self._oprot.writeMessageEnd()
+        self._oprot.trans.flush()
+
+    def recv_GetTableRowCount(self):
+        iprot = self._iprot
+        (fname, mtype, rseqid) = iprot.readMessageBegin()
+        if mtype == TMessageType.EXCEPTION:
+            x = TApplicationException()
+            x.read(iprot)
+            iprot.readMessageEnd()
+            raise x
+        result = GetTableRowCount_result()
+        result.read(iprot)
+        iprot.readMessageEnd()
+        if result.success is not None:
+            return result.success
+        if result.e is not None:
+            raise result.e
+        raise TApplicationException(TApplicationException.MISSING_RESULT, "GetTableRowCount failed: unknown result")
 
     def ShowTables(self):
         """
@@ -542,11 +497,10 @@ class Processor(Iface, TProcessor):
         self._processMap = {}
         self._processMap["CreateTable"] = Processor.process_CreateTable
         self._processMap["DeleteTable"] = Processor.process_DeleteTable
-        self._processMap["CreateTablePartition"] = Processor.process_CreateTablePartition
-        self._processMap["DeleteTablePartition"] = Processor.process_DeleteTablePartition
         self._processMap["AddVector"] = Processor.process_AddVector
         self._processMap["SearchVector"] = Processor.process_SearchVector
         self._processMap["DescribeTable"] = Processor.process_DescribeTable
+        self._processMap["GetTableRowCount"] = Processor.process_GetTableRowCount
         self._processMap["ShowTables"] = Processor.process_ShowTables
         self._processMap["Ping"] = Processor.process_Ping
 
@@ -617,58 +571,6 @@ class Processor(Iface, TProcessor):
         oprot.writeMessageEnd()
         oprot.trans.flush()
 
-    def process_CreateTablePartition(self, seqid, iprot, oprot):
-        args = CreateTablePartition_args()
-        args.read(iprot)
-        iprot.readMessageEnd()
-        result = CreateTablePartition_result()
-        try:
-            self._handler.CreateTablePartition(args.param)
-            msg_type = TMessageType.REPLY
-        except TTransport.TTransportException:
-            raise
-        except Exception as e:
-            msg_type = TMessageType.REPLY
-            result.e = e
-        except TApplicationException as ex:
-            logging.exception('TApplication exception in handler')
-            msg_type = TMessageType.EXCEPTION
-            result = ex
-        except Exception:
-            logging.exception('Unexpected exception in handler')
-            msg_type = TMessageType.EXCEPTION
-            result = TApplicationException(TApplicationException.INTERNAL_ERROR, 'Internal error')
-        oprot.writeMessageBegin("CreateTablePartition", msg_type, seqid)
-        result.write(oprot)
-        oprot.writeMessageEnd()
-        oprot.trans.flush()
-
-    def process_DeleteTablePartition(self, seqid, iprot, oprot):
-        args = DeleteTablePartition_args()
-        args.read(iprot)
-        iprot.readMessageEnd()
-        result = DeleteTablePartition_result()
-        try:
-            self._handler.DeleteTablePartition(args.param)
-            msg_type = TMessageType.REPLY
-        except TTransport.TTransportException:
-            raise
-        except Exception as e:
-            msg_type = TMessageType.REPLY
-            result.e = e
-        except TApplicationException as ex:
-            logging.exception('TApplication exception in handler')
-            msg_type = TMessageType.EXCEPTION
-            result = ex
-        except Exception:
-            logging.exception('Unexpected exception in handler')
-            msg_type = TMessageType.EXCEPTION
-            result = TApplicationException(TApplicationException.INTERNAL_ERROR, 'Internal error')
-        oprot.writeMessageBegin("DeleteTablePartition", msg_type, seqid)
-        result.write(oprot)
-        oprot.writeMessageEnd()
-        oprot.trans.flush()
-
     def process_AddVector(self, seqid, iprot, oprot):
         args = AddVector_args()
         args.read(iprot)
@@ -701,7 +603,7 @@ class Processor(Iface, TProcessor):
         iprot.readMessageEnd()
         result = SearchVector_result()
         try:
-            result.success = self._handler.SearchVector(args.table_name, args.query_record_array, args.topk)
+            result.success = self._handler.SearchVector(args.table_name, args.query_record_array, args.query_range_array, args.topk)
             msg_type = TMessageType.REPLY
         except TTransport.TTransportException:
             raise
@@ -743,6 +645,32 @@ class Processor(Iface, TProcessor):
             msg_type = TMessageType.EXCEPTION
             result = TApplicationException(TApplicationException.INTERNAL_ERROR, 'Internal error')
         oprot.writeMessageBegin("DescribeTable", msg_type, seqid)
+        result.write(oprot)
+        oprot.writeMessageEnd()
+        oprot.trans.flush()
+
+    def process_GetTableRowCount(self, seqid, iprot, oprot):
+        args = GetTableRowCount_args()
+        args.read(iprot)
+        iprot.readMessageEnd()
+        result = GetTableRowCount_result()
+        try:
+            result.success = self._handler.GetTableRowCount(args.table_name)
+            msg_type = TMessageType.REPLY
+        except TTransport.TTransportException:
+            raise
+        except Exception as e:
+            msg_type = TMessageType.REPLY
+            result.e = e
+        except TApplicationException as ex:
+            logging.exception('TApplication exception in handler')
+            msg_type = TMessageType.EXCEPTION
+            result = ex
+        except Exception:
+            logging.exception('Unexpected exception in handler')
+            msg_type = TMessageType.EXCEPTION
+            result = TApplicationException(TApplicationException.INTERNAL_ERROR, 'Internal error')
+        oprot.writeMessageBegin("GetTableRowCount", msg_type, seqid)
         result.write(oprot)
         oprot.writeMessageEnd()
         oprot.trans.flush()
@@ -1055,260 +983,6 @@ DeleteTable_result.thrift_spec = (
 )
 
 
-class CreateTablePartition_args(object):
-    """
-    Attributes:
-     - param
-
-    """
-
-
-    def __init__(self, param=None,):
-        self.param = param
-
-    def read(self, iprot):
-        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
-            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
-            return
-        iprot.readStructBegin()
-        while True:
-            (fname, ftype, fid) = iprot.readFieldBegin()
-            if ftype == TType.STOP:
-                break
-            if fid == 2:
-                if ftype == TType.STRUCT:
-                    self.param = CreateTablePartitionParam()
-                    self.param.read(iprot)
-                else:
-                    iprot.skip(ftype)
-            else:
-                iprot.skip(ftype)
-            iprot.readFieldEnd()
-        iprot.readStructEnd()
-
-    def write(self, oprot):
-        if oprot._fast_encode is not None and self.thrift_spec is not None:
-            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
-            return
-        oprot.writeStructBegin('CreateTablePartition_args')
-        if self.param is not None:
-            oprot.writeFieldBegin('param', TType.STRUCT, 2)
-            self.param.write(oprot)
-            oprot.writeFieldEnd()
-        oprot.writeFieldStop()
-        oprot.writeStructEnd()
-
-    def validate(self):
-        return
-
-    def __repr__(self):
-        L = ['%s=%r' % (key, value)
-             for key, value in self.__dict__.items()]
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-    def __ne__(self, other):
-        return not (self == other)
-all_structs.append(CreateTablePartition_args)
-CreateTablePartition_args.thrift_spec = (
-    None,  # 0
-    None,  # 1
-    (2, TType.STRUCT, 'param', [CreateTablePartitionParam, None], None, ),  # 2
-)
-
-
-class CreateTablePartition_result(object):
-    """
-    Attributes:
-     - e
-
-    """
-
-
-    def __init__(self, e=None,):
-        self.e = e
-
-    def read(self, iprot):
-        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
-            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
-            return
-        iprot.readStructBegin()
-        while True:
-            (fname, ftype, fid) = iprot.readFieldBegin()
-            if ftype == TType.STOP:
-                break
-            if fid == 1:
-                if ftype == TType.STRUCT:
-                    self.e = Exception()
-                    self.e.read(iprot)
-                else:
-                    iprot.skip(ftype)
-            else:
-                iprot.skip(ftype)
-            iprot.readFieldEnd()
-        iprot.readStructEnd()
-
-    def write(self, oprot):
-        if oprot._fast_encode is not None and self.thrift_spec is not None:
-            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
-            return
-        oprot.writeStructBegin('CreateTablePartition_result')
-        if self.e is not None:
-            oprot.writeFieldBegin('e', TType.STRUCT, 1)
-            self.e.write(oprot)
-            oprot.writeFieldEnd()
-        oprot.writeFieldStop()
-        oprot.writeStructEnd()
-
-    def validate(self):
-        return
-
-    def __repr__(self):
-        L = ['%s=%r' % (key, value)
-             for key, value in self.__dict__.items()]
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-    def __ne__(self, other):
-        return not (self == other)
-all_structs.append(CreateTablePartition_result)
-CreateTablePartition_result.thrift_spec = (
-    None,  # 0
-    (1, TType.STRUCT, 'e', [Exception, None], None, ),  # 1
-)
-
-
-class DeleteTablePartition_args(object):
-    """
-    Attributes:
-     - param
-
-    """
-
-
-    def __init__(self, param=None,):
-        self.param = param
-
-    def read(self, iprot):
-        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
-            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
-            return
-        iprot.readStructBegin()
-        while True:
-            (fname, ftype, fid) = iprot.readFieldBegin()
-            if ftype == TType.STOP:
-                break
-            if fid == 2:
-                if ftype == TType.STRUCT:
-                    self.param = DeleteTablePartitionParam()
-                    self.param.read(iprot)
-                else:
-                    iprot.skip(ftype)
-            else:
-                iprot.skip(ftype)
-            iprot.readFieldEnd()
-        iprot.readStructEnd()
-
-    def write(self, oprot):
-        if oprot._fast_encode is not None and self.thrift_spec is not None:
-            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
-            return
-        oprot.writeStructBegin('DeleteTablePartition_args')
-        if self.param is not None:
-            oprot.writeFieldBegin('param', TType.STRUCT, 2)
-            self.param.write(oprot)
-            oprot.writeFieldEnd()
-        oprot.writeFieldStop()
-        oprot.writeStructEnd()
-
-    def validate(self):
-        return
-
-    def __repr__(self):
-        L = ['%s=%r' % (key, value)
-             for key, value in self.__dict__.items()]
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-    def __ne__(self, other):
-        return not (self == other)
-all_structs.append(DeleteTablePartition_args)
-DeleteTablePartition_args.thrift_spec = (
-    None,  # 0
-    None,  # 1
-    (2, TType.STRUCT, 'param', [DeleteTablePartitionParam, None], None, ),  # 2
-)
-
-
-class DeleteTablePartition_result(object):
-    """
-    Attributes:
-     - e
-
-    """
-
-
-    def __init__(self, e=None,):
-        self.e = e
-
-    def read(self, iprot):
-        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
-            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
-            return
-        iprot.readStructBegin()
-        while True:
-            (fname, ftype, fid) = iprot.readFieldBegin()
-            if ftype == TType.STOP:
-                break
-            if fid == 1:
-                if ftype == TType.STRUCT:
-                    self.e = Exception()
-                    self.e.read(iprot)
-                else:
-                    iprot.skip(ftype)
-            else:
-                iprot.skip(ftype)
-            iprot.readFieldEnd()
-        iprot.readStructEnd()
-
-    def write(self, oprot):
-        if oprot._fast_encode is not None and self.thrift_spec is not None:
-            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
-            return
-        oprot.writeStructBegin('DeleteTablePartition_result')
-        if self.e is not None:
-            oprot.writeFieldBegin('e', TType.STRUCT, 1)
-            self.e.write(oprot)
-            oprot.writeFieldEnd()
-        oprot.writeFieldStop()
-        oprot.writeStructEnd()
-
-    def validate(self):
-        return
-
-    def __repr__(self):
-        L = ['%s=%r' % (key, value)
-             for key, value in self.__dict__.items()]
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
-
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
-
-    def __ne__(self, other):
-        return not (self == other)
-all_structs.append(DeleteTablePartition_result)
-DeleteTablePartition_result.thrift_spec = (
-    None,  # 0
-    (1, TType.STRUCT, 'e', [Exception, None], None, ),  # 1
-)
-
-
 class AddVector_args(object):
     """
     Attributes:
@@ -1339,11 +1013,11 @@ class AddVector_args(object):
             elif fid == 3:
                 if ftype == TType.LIST:
                     self.record_array = []
-                    (_etype106, _size103) = iprot.readListBegin()
-                    for _i107 in range(_size103):
-                        _elem108 = RowRecord()
-                        _elem108.read(iprot)
-                        self.record_array.append(_elem108)
+                    (_etype10, _size7) = iprot.readListBegin()
+                    for _i11 in range(_size7):
+                        _elem12 = RowRecord()
+                        _elem12.read(iprot)
+                        self.record_array.append(_elem12)
                     iprot.readListEnd()
                 else:
                     iprot.skip(ftype)
@@ -1364,8 +1038,8 @@ class AddVector_args(object):
         if self.record_array is not None:
             oprot.writeFieldBegin('record_array', TType.LIST, 3)
             oprot.writeListBegin(TType.STRUCT, len(self.record_array))
-            for iter109 in self.record_array:
-                iter109.write(oprot)
+            for iter13 in self.record_array:
+                iter13.write(oprot)
             oprot.writeListEnd()
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
@@ -1418,10 +1092,10 @@ class AddVector_result(object):
             if fid == 0:
                 if ftype == TType.LIST:
                     self.success = []
-                    (_etype113, _size110) = iprot.readListBegin()
-                    for _i114 in range(_size110):
-                        _elem115 = iprot.readI64()
-                        self.success.append(_elem115)
+                    (_etype17, _size14) = iprot.readListBegin()
+                    for _i18 in range(_size14):
+                        _elem19 = iprot.readI64()
+                        self.success.append(_elem19)
                     iprot.readListEnd()
                 else:
                     iprot.skip(ftype)
@@ -1444,8 +1118,8 @@ class AddVector_result(object):
         if self.success is not None:
             oprot.writeFieldBegin('success', TType.LIST, 0)
             oprot.writeListBegin(TType.I64, len(self.success))
-            for iter116 in self.success:
-                oprot.writeI64(iter116)
+            for iter20 in self.success:
+                oprot.writeI64(iter20)
             oprot.writeListEnd()
             oprot.writeFieldEnd()
         if self.e is not None:
@@ -1480,14 +1154,16 @@ class SearchVector_args(object):
     Attributes:
      - table_name
      - query_record_array
+     - query_range_array
      - topk
 
     """
 
 
-    def __init__(self, table_name=None, query_record_array=None, topk=None,):
+    def __init__(self, table_name=None, query_record_array=None, query_range_array=None, topk=None,):
         self.table_name = table_name
         self.query_record_array = query_record_array
+        self.query_range_array = query_range_array
         self.topk = topk
 
     def read(self, iprot):
@@ -1507,15 +1183,26 @@ class SearchVector_args(object):
             elif fid == 3:
                 if ftype == TType.LIST:
                     self.query_record_array = []
-                    (_etype120, _size117) = iprot.readListBegin()
-                    for _i121 in range(_size117):
-                        _elem122 = QueryRecord()
-                        _elem122.read(iprot)
-                        self.query_record_array.append(_elem122)
+                    (_etype24, _size21) = iprot.readListBegin()
+                    for _i25 in range(_size21):
+                        _elem26 = RowRecord()
+                        _elem26.read(iprot)
+                        self.query_record_array.append(_elem26)
                     iprot.readListEnd()
                 else:
                     iprot.skip(ftype)
             elif fid == 4:
+                if ftype == TType.LIST:
+                    self.query_range_array = []
+                    (_etype30, _size27) = iprot.readListBegin()
+                    for _i31 in range(_size27):
+                        _elem32 = Range()
+                        _elem32.read(iprot)
+                        self.query_range_array.append(_elem32)
+                    iprot.readListEnd()
+                else:
+                    iprot.skip(ftype)
+            elif fid == 5:
                 if ftype == TType.I64:
                     self.topk = iprot.readI64()
                 else:
@@ -1537,12 +1224,19 @@ class SearchVector_args(object):
         if self.query_record_array is not None:
             oprot.writeFieldBegin('query_record_array', TType.LIST, 3)
             oprot.writeListBegin(TType.STRUCT, len(self.query_record_array))
-            for iter123 in self.query_record_array:
-                iter123.write(oprot)
+            for iter33 in self.query_record_array:
+                iter33.write(oprot)
+            oprot.writeListEnd()
+            oprot.writeFieldEnd()
+        if self.query_range_array is not None:
+            oprot.writeFieldBegin('query_range_array', TType.LIST, 4)
+            oprot.writeListBegin(TType.STRUCT, len(self.query_range_array))
+            for iter34 in self.query_range_array:
+                iter34.write(oprot)
             oprot.writeListEnd()
             oprot.writeFieldEnd()
         if self.topk is not None:
-            oprot.writeFieldBegin('topk', TType.I64, 4)
+            oprot.writeFieldBegin('topk', TType.I64, 5)
             oprot.writeI64(self.topk)
             oprot.writeFieldEnd()
         oprot.writeFieldStop()
@@ -1566,8 +1260,9 @@ SearchVector_args.thrift_spec = (
     None,  # 0
     None,  # 1
     (2, TType.STRING, 'table_name', 'UTF8', None, ),  # 2
-    (3, TType.LIST, 'query_record_array', (TType.STRUCT, [QueryRecord, None], False), None, ),  # 3
-    (4, TType.I64, 'topk', None, None, ),  # 4
+    (3, TType.LIST, 'query_record_array', (TType.STRUCT, [RowRecord, None], False), None, ),  # 3
+    (4, TType.LIST, 'query_range_array', (TType.STRUCT, [Range, None], False), None, ),  # 4
+    (5, TType.I64, 'topk', None, None, ),  # 5
 )
 
 
@@ -1596,11 +1291,11 @@ class SearchVector_result(object):
             if fid == 0:
                 if ftype == TType.LIST:
                     self.success = []
-                    (_etype127, _size124) = iprot.readListBegin()
-                    for _i128 in range(_size124):
-                        _elem129 = TopKQueryResult()
-                        _elem129.read(iprot)
-                        self.success.append(_elem129)
+                    (_etype38, _size35) = iprot.readListBegin()
+                    for _i39 in range(_size35):
+                        _elem40 = TopKQueryResult()
+                        _elem40.read(iprot)
+                        self.success.append(_elem40)
                     iprot.readListEnd()
                 else:
                     iprot.skip(ftype)
@@ -1623,8 +1318,8 @@ class SearchVector_result(object):
         if self.success is not None:
             oprot.writeFieldBegin('success', TType.LIST, 0)
             oprot.writeListBegin(TType.STRUCT, len(self.success))
-            for iter130 in self.success:
-                iter130.write(oprot)
+            for iter41 in self.success:
+                iter41.write(oprot)
             oprot.writeListEnd()
             oprot.writeFieldEnd()
         if self.e is not None:
@@ -1792,6 +1487,143 @@ DescribeTable_result.thrift_spec = (
 )
 
 
+class GetTableRowCount_args(object):
+    """
+    Attributes:
+     - table_name
+
+    """
+
+
+    def __init__(self, table_name=None,):
+        self.table_name = table_name
+
+    def read(self, iprot):
+        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
+            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
+            return
+        iprot.readStructBegin()
+        while True:
+            (fname, ftype, fid) = iprot.readFieldBegin()
+            if ftype == TType.STOP:
+                break
+            if fid == 2:
+                if ftype == TType.STRING:
+                    self.table_name = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                else:
+                    iprot.skip(ftype)
+            else:
+                iprot.skip(ftype)
+            iprot.readFieldEnd()
+        iprot.readStructEnd()
+
+    def write(self, oprot):
+        if oprot._fast_encode is not None and self.thrift_spec is not None:
+            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
+            return
+        oprot.writeStructBegin('GetTableRowCount_args')
+        if self.table_name is not None:
+            oprot.writeFieldBegin('table_name', TType.STRING, 2)
+            oprot.writeString(self.table_name.encode('utf-8') if sys.version_info[0] == 2 else self.table_name)
+            oprot.writeFieldEnd()
+        oprot.writeFieldStop()
+        oprot.writeStructEnd()
+
+    def validate(self):
+        return
+
+    def __repr__(self):
+        L = ['%s=%r' % (key, value)
+             for key, value in self.__dict__.items()]
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+    def __eq__(self, other):
+        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+    def __ne__(self, other):
+        return not (self == other)
+all_structs.append(GetTableRowCount_args)
+GetTableRowCount_args.thrift_spec = (
+    None,  # 0
+    None,  # 1
+    (2, TType.STRING, 'table_name', 'UTF8', None, ),  # 2
+)
+
+
+class GetTableRowCount_result(object):
+    """
+    Attributes:
+     - success
+     - e
+
+    """
+
+
+    def __init__(self, success=None, e=None,):
+        self.success = success
+        self.e = e
+
+    def read(self, iprot):
+        if iprot._fast_decode is not None and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None:
+            iprot._fast_decode(self, iprot, [self.__class__, self.thrift_spec])
+            return
+        iprot.readStructBegin()
+        while True:
+            (fname, ftype, fid) = iprot.readFieldBegin()
+            if ftype == TType.STOP:
+                break
+            if fid == 0:
+                if ftype == TType.I64:
+                    self.success = iprot.readI64()
+                else:
+                    iprot.skip(ftype)
+            elif fid == 1:
+                if ftype == TType.STRUCT:
+                    self.e = Exception()
+                    self.e.read(iprot)
+                else:
+                    iprot.skip(ftype)
+            else:
+                iprot.skip(ftype)
+            iprot.readFieldEnd()
+        iprot.readStructEnd()
+
+    def write(self, oprot):
+        if oprot._fast_encode is not None and self.thrift_spec is not None:
+            oprot.trans.write(oprot._fast_encode(self, [self.__class__, self.thrift_spec]))
+            return
+        oprot.writeStructBegin('GetTableRowCount_result')
+        if self.success is not None:
+            oprot.writeFieldBegin('success', TType.I64, 0)
+            oprot.writeI64(self.success)
+            oprot.writeFieldEnd()
+        if self.e is not None:
+            oprot.writeFieldBegin('e', TType.STRUCT, 1)
+            self.e.write(oprot)
+            oprot.writeFieldEnd()
+        oprot.writeFieldStop()
+        oprot.writeStructEnd()
+
+    def validate(self):
+        return
+
+    def __repr__(self):
+        L = ['%s=%r' % (key, value)
+             for key, value in self.__dict__.items()]
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(L))
+
+    def __eq__(self, other):
+        return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+    def __ne__(self, other):
+        return not (self == other)
+all_structs.append(GetTableRowCount_result)
+GetTableRowCount_result.thrift_spec = (
+    (0, TType.I64, 'success', None, None, ),  # 0
+    (1, TType.STRUCT, 'e', [Exception, None], None, ),  # 1
+)
+
+
 class ShowTables_args(object):
 
 
@@ -1860,10 +1692,10 @@ class ShowTables_result(object):
             if fid == 0:
                 if ftype == TType.LIST:
                     self.success = []
-                    (_etype134, _size131) = iprot.readListBegin()
-                    for _i135 in range(_size131):
-                        _elem136 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
-                        self.success.append(_elem136)
+                    (_etype45, _size42) = iprot.readListBegin()
+                    for _i46 in range(_size42):
+                        _elem47 = iprot.readString().decode('utf-8') if sys.version_info[0] == 2 else iprot.readString()
+                        self.success.append(_elem47)
                     iprot.readListEnd()
                 else:
                     iprot.skip(ftype)
@@ -1886,8 +1718,8 @@ class ShowTables_result(object):
         if self.success is not None:
             oprot.writeFieldBegin('success', TType.LIST, 0)
             oprot.writeListBegin(TType.STRING, len(self.success))
-            for iter137 in self.success:
-                oprot.writeString(iter137.encode('utf-8') if sys.version_info[0] == 2 else iter137)
+            for iter48 in self.success:
+                oprot.writeString(iter48.encode('utf-8') if sys.version_info[0] == 2 else iter48)
             oprot.writeListEnd()
             oprot.writeFieldEnd()
         if self.e is not None:

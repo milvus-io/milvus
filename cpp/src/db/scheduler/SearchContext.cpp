@@ -10,7 +10,7 @@
 #include <chrono>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 SearchContext::SearchContext(uint64_t topk, uint64_t nq, const float* vectors)

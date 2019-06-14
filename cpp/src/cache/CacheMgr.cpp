@@ -8,7 +8,7 @@
 #include "metrics/Metrics.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace cache {
 
 CacheMgr::CacheMgr() {

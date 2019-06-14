@@ -28,7 +28,7 @@ namespace {
         std::cout << "Table name: " << tb_schema.table_name << std::endl;
         std::cout << "Table index type: " << (int)tb_schema.index_type << std::endl;
         std::cout << "Table dimension: " << tb_schema.dimension << std::endl;
-        std::cout << "Table store raw data: " << tb_schema.store_raw_vector << std::endl;
+        std::cout << "Table store raw data: " << (tb_schema.store_raw_vector ? "true" : "false") << std::endl;
         BLOCK_SPLITER
     }
 
@@ -148,7 +148,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "ShowTables function call status: " << stat.ToString() << std::endl;
         std::cout << "All tables: " << std::endl;
         for(auto& table : tables) {
-            std::cout << "\t" << table << std::endl;
+            int64_t row_count = 0;
+            stat = conn->GetTableRowCount(table, row_count);
+            std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
         }
     }
 
@@ -192,10 +194,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         PrintSearchResult(topk_query_result_array);
     }
 
-//    {//delete table
-//        Status stat = conn->DeleteTable(TABLE_NAME);
-//        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
-//    }
+    {//delete table
+        Status stat = conn->DeleteTable(TABLE_NAME);
+        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
+    }
 
     {//server status
         std::string status = conn->ServerStatus();

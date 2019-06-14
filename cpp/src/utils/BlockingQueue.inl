@@ -4,7 +4,7 @@
 #include "Error.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 template<typename T>

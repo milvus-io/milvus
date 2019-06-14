@@ -220,7 +220,7 @@ endif()
 if(DEFINED ENV{MEGASEARCH_FAISS_URL})
     set(FAISS_SOURCE_URL "$ENV{MEGASEARCH_FAISS_URL}")
 else()
-    set(FAISS_SOURCE_URL "https://github.com/JinHai-CN/faiss/archive/${FAISS_VERSION}.tar.gz")
+    set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
 endif()
 
 if (DEFINED ENV{MEGASEARCH_GTEST_URL})
@@ -253,7 +253,8 @@ if (DEFINED ENV{MEGASEARCH_PROMETHEUS_URL})
     set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
 else ()
     set(PROMETHEUS_SOURCE_URL
-            "https://github.com/JinHai-CN/prometheus-cpp/archive/${PROMETHEUS_VERSION}.tar.gz")
+            #"https://github.com/JinHai-CN/prometheus-cpp/archive/${PROMETHEUS_VERSION}.tar.gz"
+            https://github.com/jupp0r/prometheus-cpp.git)
 endif()
 
 if (DEFINED ENV{MEGASEARCH_ROCKSDB_URL})
@@ -685,7 +686,15 @@ macro(build_faiss)
     if(${MEGASEARCH_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
-                "--with-cuda-arch=${MEGASEARCH_FAISS_GPU_ARCH}")
+#                "with_cuda_arch=\"-gencode=arch=compute_35,code=compute_35 \\
+#                                    -gencode=arch=compute_52,code=compute_52 \\
+#                                    -gencode=arch=compute_60,code=compute_60 \\
+#                                    -gencode=arch=compute_61,code=compute_61\""
+                "--with-cuda-arch=\"-gencode=arch=compute_35,code=compute_35\""
+                "--with-cuda-arch=\"-gencode=arch=compute_52,code=compute_52\""
+                "--with-cuda-arch=\"-gencode=arch=compute_60,code=compute_60\""
+                "--with-cuda-arch=\"-gencode=arch=compute_61,code=compute_61\""
+                )
     else()
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS} --without-cuda)
     endif()
@@ -716,17 +725,23 @@ macro(build_faiss)
             ${FAISS_STATIC_LIB})
 #            DEPENDS
 #            ${faiss_dependencies})
-    ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep)
-    ExternalProject_Add_StepDependencies(faiss_ep build lapack_ep)
+
+    ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
 
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     add_library(faiss STATIC IMPORTED)
     set_target_properties(
             faiss
             PROPERTIES IMPORTED_LOCATION "${FAISS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}")
+            INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "openblas;lapack" )
 
     add_dependencies(faiss faiss_ep)
+    #add_dependencies(faiss openblas_ep)
+    #add_dependencies(faiss lapack_ep)
+    #target_link_libraries(faiss ${OPENBLAS_PREFIX}/lib)
+    #target_link_libraries(faiss ${LAPACK_PREFIX}/lib)
+
 endmacro()
 
 if(MEGASEARCH_WITH_FAISS)
@@ -929,11 +944,20 @@ macro(build_prometheus)
             ${EP_COMMON_CMAKE_ARGS}
             -DCMAKE_INSTALL_LIBDIR=lib
             -DBUILD_SHARED_LIBS=OFF
-            "-DCMAKE_INSTALL_PREFIX=${PROMETHEUS_PREFIX}")
+            "-DCMAKE_INSTALL_PREFIX=${PROMETHEUS_PREFIX}"
+            -DCMAKE_BUILD_TYPE=Release)
 
     externalproject_add(prometheus_ep
-            URL
+            GIT_REPOSITORY
             ${PROMETHEUS_SOURCE_URL}
+            GIT_TAG
+            ${PROMETHEUS_VERSION}
+            GIT_SHALLOW
+            TRUE
+#            GIT_CONFIG
+#            recurse-submodules=true
+#            URL
+#            ${PROMETHEUS_SOURCE_URL}
             ${EP_LOG_OPTIONS}
             CMAKE_ARGS
             ${PROMETHEUS_CMAKE_ARGS}
@@ -991,7 +1015,7 @@ if(MEGASEARCH_WITH_PROMETHEUS)
     link_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/)
     include_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/include)
 
-    link_directories(${PROMETHEUS_PREFIX}/civetweb_ep-prefix/src/civetweb_ep)
+    #link_directories(${PROMETHEUS_PREFIX}/civetweb_ep-prefix/src/civetweb_ep)
 endif()
 
 # ----------------------------------------------------------------------

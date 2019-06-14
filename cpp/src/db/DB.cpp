@@ -10,7 +10,7 @@
 #include "Factories.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 DB::~DB() {}
@@ -21,5 +21,5 @@ void DB::Open(const Options& options, DB** dbptr) {
 }
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

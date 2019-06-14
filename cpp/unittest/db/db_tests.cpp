@@ -12,7 +12,7 @@
 #include "db/DBImpl.h"
 #include "db/MetaConsts.h"
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 TEST_F(DBTest, CONFIG_TEST) {
     {
@@ -64,7 +64,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
-    long size;
+    uint64_t size;
 
     engine::meta::TableSchema group_info;
     group_info.dimension_ = group_dim;
@@ -149,8 +149,8 @@ TEST_F(DBTest, DB_TEST) {
 
         INIT_TIMER;
         std::stringstream ss;
-        long count = 0;
-        long prev_count = -1;
+        uint64_t count = 0;
+        uint64_t prev_count = 0;
 
         for (auto j=0; j<10; ++j) {
             ss.str("");

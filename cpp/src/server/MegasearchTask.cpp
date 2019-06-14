@@ -14,24 +14,21 @@
 #include "version.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 static const std::string DQL_TASK_GROUP = "dql";
 static const std::string DDL_DML_TASK_GROUP = "ddl_dml";
 static const std::string PING_TASK_GROUP = "ping";
 
-static const std::string VECTOR_UID = "uid";
-static const uint64_t USE_MT = 5000;
-
-using DB_META = zilliz::vecwise::engine::meta::Meta;
-using DB_DATE = zilliz::vecwise::engine::meta::DateT;
+using DB_META = zilliz::milvus::engine::meta::Meta;
+using DB_DATE = zilliz::milvus::engine::meta::DateT;
 
 namespace {
     class DBWrapper {
     public:
         DBWrapper() {
-            zilliz::vecwise::engine::Options opt;
+            zilliz::milvus::engine::Options opt;
             ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
             opt.meta.backend_uri = config.GetValue(CONFIG_DB_URL);
             std::string db_path = config.GetValue(CONFIG_DB_PATH);
@@ -40,7 +37,7 @@ namespace {
 
             CommonUtil::CreateDirectory(opt.meta.path);
 
-            zilliz::vecwise::engine::DB::Open(opt, &db_);
+            zilliz::milvus::engine::DB::Open(opt, &db_);
             if(db_ == nullptr) {
                 SERVER_LOG_ERROR << "Failed to open db";
                 throw ServerException(SERVER_NULL_POINTER, "Failed to open db");
@@ -51,13 +48,13 @@ namespace {
             delete db_;
         }
 
-        zilliz::vecwise::engine::DB* DB() { return db_; }
+        zilliz::milvus::engine::DB* DB() { return db_; }
 
     private:
-        zilliz::vecwise::engine::DB* db_ = nullptr;
+        zilliz::milvus::engine::DB* db_ = nullptr;
     };
 
-    zilliz::vecwise::engine::DB* DB() {
+    zilliz::milvus::engine::DB* DB() {
         static DBWrapper db_wrapper;
         return db_wrapper.DB();
     }
@@ -71,6 +68,20 @@ namespace {
 
         if(map_type.find(type) == map_type.end()) {
             return engine::EngineType::INVALID;
+        }
+
+        return map_type[type];
+    }
+
+    int IndexType(engine::EngineType type) {
+        static std::map<engine::EngineType, int> map_type = {
+                {engine::EngineType::INVALID, 0},
+                {engine::EngineType::FAISS_IDMAP, 1},
+                {engine::EngineType::FAISS_IVFFLAT, 2},
+        };
+
+        if(map_type.find(type) == map_type.end()) {
+            return 0;
         }
 
         return map_type[type];
@@ -174,16 +185,17 @@ ServerError CreateTableTask::OnExecute() {
         //step 2: create table
         engine::Status stat = DB()->CreateTable(table_info);
         if(!stat.ok()) {//table could exist
+            error_code_ = SERVER_UNEXPECTED_ERROR;
             error_msg_ = "Engine failed: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
-            return SERVER_SUCCESS;
+            return error_code_;
         }
 
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
         SERVER_LOG_ERROR << error_msg_;
-        return SERVER_UNEXPECTED_ERROR;
+        return error_code_;
     }
 
     rc.Record("done");
@@ -215,9 +227,12 @@ ServerError DescribeTableTask::OnExecute() {
             error_msg_ = "Engine failed: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
-        } else {
-
         }
+
+        schema_.table_name = table_info.table_id_;
+        schema_.index_type = IndexType((engine::EngineType)table_info.engine_type_);
+        schema_.dimension = table_info.dimension_;
+        schema_.store_raw_vector = table_info.store_raw_data_;
 
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
@@ -243,16 +258,53 @@ BaseTaskPtr DeleteTableTask::Create(const std::string& group_id) {
 }
 
 ServerError DeleteTableTask::OnExecute() {
-    error_code_ = SERVER_NOT_IMPLEMENT;
-    error_msg_ = "delete table not implemented";
-    SERVER_LOG_ERROR << error_msg_;
+    try {
+        TimeRecorder rc("DeleteTableTask");
 
-    return SERVER_NOT_IMPLEMENT;
+        //step 1: check validation
+        if (table_name_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Table name cannot be empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        //step 2: check table existence
+        engine::meta::TableSchema table_info;
+        table_info.table_id_ = table_name_;
+        engine::Status stat = DB()->DescribeTable(table_info);
+        if(!stat.ok()) {
+            error_code_ = SERVER_TABLE_NOT_EXIST;
+            error_msg_ = "Engine failed: " + stat.ToString();
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        rc.Record("check validation");
+
+        //step 3: delete table
+        std::vector<DB_DATE> dates;
+        stat = DB()->DeleteTable(table_name_, dates);
+        if(!stat.ok()) {
+            SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+            return SERVER_UNEXPECTED_ERROR;
+        }
+
+        rc.Record("deleta table");
+        rc.Elapse("totally cost");
+    } catch (std::exception& ex) {
+        error_code_ = SERVER_UNEXPECTED_ERROR;
+        error_msg_ = ex.what();
+        SERVER_LOG_ERROR << error_msg_;
+        return error_code_;
+    }
+
+    return SERVER_SUCCESS;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ShowTablesTask::ShowTablesTask(std::vector<std::string>& tables)
-    : BaseTask(PING_TASK_GROUP),
+    : BaseTask(DQL_TASK_GROUP),
       tables_(tables) {
 
 }
@@ -262,6 +314,19 @@ BaseTaskPtr ShowTablesTask::Create(std::vector<std::string>& tables) {
 }
 
 ServerError ShowTablesTask::OnExecute() {
+    std::vector<engine::meta::TableSchema> schema_array;
+    engine::Status stat = DB()->AllTables(schema_array);
+    if(!stat.ok()) {
+        error_code_ = SERVER_UNEXPECTED_ERROR;
+        error_msg_ = "Engine failed: " + stat.ToString();
+        SERVER_LOG_ERROR << error_msg_;
+        return error_code_;
+    }
+
+    tables_.clear();
+    for(auto& schema : schema_array) {
+        tables_.push_back(schema.table_id_);
+    }
 
     return SERVER_SUCCESS;
 }
@@ -468,17 +533,39 @@ BaseTaskPtr GetTableRowCountTask::Create(const std::string& table_name, int64_t&
 }
 
 ServerError GetTableRowCountTask::OnExecute() {
-    if(table_name_.empty()) {
+    try {
+        TimeRecorder rc("GetTableRowCountTask");
+
+        //step 1: check validation
+        if (table_name_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Table name cannot be empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        //step 2: get row count
+        uint64_t row_count = 0;
+        engine::Status stat = DB()->GetTableRowCount(table_name_, row_count);
+        if (!stat.ok()) {
+            error_code_ = SERVER_UNEXPECTED_ERROR;
+            error_msg_ = "Engine failed: " + stat.ToString();
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        row_count_ = (int64_t) row_count;
+
+        rc.Elapse("totally cost");
+
+    } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
-        error_msg_ = "Table name cannot be empty";
+        error_msg_ = ex.what();
         SERVER_LOG_ERROR << error_msg_;
         return error_code_;
     }
 
-    error_code_ = SERVER_NOT_IMPLEMENT;
-    error_msg_ = "Not implemented";
-    SERVER_LOG_ERROR << error_msg_;
-    return error_code_;
+    return SERVER_SUCCESS;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

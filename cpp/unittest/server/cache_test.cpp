@@ -9,7 +9,7 @@
 
 #include "wrapper/Index.h"
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 TEST(CacheTest, CACHE_TEST) {
     cache::CacheMgr* cpu_mgr = cache::CpuCacheMgr::GetInstance();
