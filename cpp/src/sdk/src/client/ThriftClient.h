@@ -5,14 +5,14 @@
  ******************************************************************************/
 #pragma once
 
-#include "MegasearchService.h"
+#include "MilvusService.h"
 #include "Status.h"
 
 #include <memory>
 
-namespace megasearch {
+namespace milvus {
 
-using MegasearchServiceClientPtr = std::shared_ptr<megasearch::thrift::MegasearchServiceClient>;
+using ServiceClientPtr = std::shared_ptr<::milvus::thrift::MilvusServiceClient>;
 
 static const std::string THRIFT_PROTOCOL_JSON = "json";
 static const std::string THRIFT_PROTOCOL_BINARY = "binary";
@@ -23,13 +23,13 @@ public:
     ThriftClient();
     virtual ~ThriftClient();
 
-    MegasearchServiceClientPtr interface();
+    ServiceClientPtr interface();
 
     Status Connect(const std::string& address, int32_t port, const std::string& protocol);
     Status Disconnect();
 
 private:
-    MegasearchServiceClientPtr client_;
+    ServiceClientPtr client_;
 };
 
 

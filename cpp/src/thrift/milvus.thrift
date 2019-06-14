@@ -3,15 +3,15 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-namespace cpp megasearch.thrift
-namespace py megasearch.thrift
-namespace d megasearch.thrift
-namespace dart megasearch.thrift
-namespace java megasearch.thrift
-namespace perl megasearch.thrift
-namespace php megasearch.thrift
-namespace haxe megasearch.thrift
-namespace netcore megasearch.thrift
+namespace cpp milvus.thrift
+namespace py milvus.thrift
+namespace d milvus.thrift
+namespace dart milvus.thrift
+namespace java milvus.thrift
+namespace perl milvus.thrift
+namespace php milvus.thrift
+namespace haxe milvus.thrift
+namespace netcore milvus.thrift
 
 enum ErrorCode {
     SUCCESS = 0,
@@ -69,7 +69,7 @@ struct TopKQueryResult {
     1: list<QueryResult> query_result_arrays;        ///< TopK query result
 }
 
-service MegasearchService {
+service MilvusService {
     /**
      * @brief Create table method
      *

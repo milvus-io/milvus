@@ -12,7 +12,7 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-class MegasearchServer {
+class MilvusServer {
 public:
     static void StartService();
     static void StopService();

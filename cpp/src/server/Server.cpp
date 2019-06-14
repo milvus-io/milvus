@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include "Server.h"
 #include "ServerConfig.h"
-#include "MegasearchServer.h"
+#include "MilvusServer.h"
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
@@ -232,12 +232,12 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
-    MegasearchServer::StartService();
+    MilvusServer::StartService();
 }
 
 void
 Server::StopService() {
-    MegasearchServer::StopService();
+    MilvusServer::StopService();
 }
 
 }

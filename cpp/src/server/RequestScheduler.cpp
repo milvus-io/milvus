@@ -3,17 +3,17 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "MegasearchScheduler.h"
+#include "RequestScheduler.h"
 #include "utils/Log.h"
 
-#include "megasearch_types.h"
-#include "megasearch_constants.h"
+#include "milvus_types.h"
+#include "milvus_constants.h"
 
 namespace zilliz {
 namespace milvus {
 namespace server {
     
-using namespace megasearch;
+using namespace ::milvus;
 
 namespace {
     const std::map<ServerError, thrift::ErrorCode::type> &ErrorMap() {
@@ -77,21 +77,21 @@ ServerError BaseTask::WaitToFinish() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-MegasearchScheduler::MegasearchScheduler()
+RequestScheduler::RequestScheduler()
 : stopped_(false) {
     Start();
 }
 
-MegasearchScheduler::~MegasearchScheduler() {
+RequestScheduler::~RequestScheduler() {
     Stop();
 }
 
-void MegasearchScheduler::ExecTask(BaseTaskPtr& task_ptr) {
+void RequestScheduler::ExecTask(BaseTaskPtr& task_ptr) {
     if(task_ptr == nullptr) {
         return;
     }
 
-    MegasearchScheduler& scheduler = MegasearchScheduler::GetInstance();
+    RequestScheduler& scheduler = RequestScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 
     if(!task_ptr->IsAsync()) {
@@ -110,7 +110,7 @@ void MegasearchScheduler::ExecTask(BaseTaskPtr& task_ptr) {
     }
 }
 
-void MegasearchScheduler::Start() {
+void RequestScheduler::Start() {
     if(!stopped_) {
         return;
     }
@@ -118,7 +118,7 @@ void MegasearchScheduler::Start() {
     stopped_ = false;
 }
 
-void MegasearchScheduler::Stop() {
+void RequestScheduler::Stop() {
     if(stopped_) {
         return;
     }
@@ -143,7 +143,7 @@ void MegasearchScheduler::Stop() {
     SERVER_LOG_INFO << "Scheduler stopped";
 }
 
-ServerError MegasearchScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
+ServerError RequestScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
     if(task_ptr == nullptr) {
         return SERVER_NULL_POINTER;
     }
@@ -184,7 +184,7 @@ namespace {
     }
 }
 
-ServerError MegasearchScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
+ServerError RequestScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
 
     std::string group_name = task_ptr->TaskGroup();
