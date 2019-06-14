@@ -37,12 +37,6 @@ struct DBMetaOptions {
     ArchiveConf archive_conf = ArchiveConf("delete");
 }; // DBMetaOptions
 
-struct MySQLMetaOptions {
-    std::string path;
-
-};
-
-
 struct Options {
     Options();
     uint16_t  memory_sync_interval = 1;
