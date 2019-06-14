@@ -58,7 +58,7 @@ include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 include_directories(thrift/gen-cpp)
 
 set(third_party_libs
-        arrow
+        #arrow
         easyloggingpp
         sqlite
         thrift
@@ -79,6 +79,9 @@ set(third_party_libs
         zstd
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
+if (MEGASEARCH_WITH_ARROW STREQUAL "ON")
+    set(third_party_libs ${third_party_libs} arrow)
+endif() 
 
 if (GPU_VERSION STREQUAL "ON")
     link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
