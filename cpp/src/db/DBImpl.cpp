@@ -10,6 +10,7 @@
 #include "EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SearchScheduler.h"
+#include "utils/TimeRecorder.h"
 
 #include <assert.h>
 #include <chrono>
@@ -69,6 +70,55 @@ void CollectFileMetrics(int file_type, size_t file_size, double total_time) {
             break;
         }
     }
+}
+
+void CalcScore(uint64_t vector_count,
+               const float *vectors_data,
+               uint64_t dimension,
+               const SearchContext::ResultSet &result_src,
+               SearchContext::ResultSet &result_target) {
+    result_target.clear();
+    if(result_src.empty()){
+        return;
+    }
+
+    server::TimeRecorder rc("Calculate Score");
+    int vec_index = 0;
+    for(auto& result : result_src) {
+        const float * vec_data = vectors_data + vec_index*dimension;
+        double vec_len = 0;
+        for(uint64_t i = 0; i < dimension; i++) {
+            vec_len += vec_data[i]*vec_data[i];
+        }
+        vec_index++;
+
+        double max_score = 0.0;
+        for(auto& pair : result) {
+            if(max_score < pair.second) {
+                max_score = pair.second;
+            }
+        }
+
+        //makesure socre is less than 100
+        if(max_score > vec_len) {
+            vec_len = max_score;
+        }
+
+        //avoid divided by zero
+        static constexpr double TOLERANCE = std::numeric_limits<float>::epsilon();
+        if(vec_len < TOLERANCE) {
+            vec_len = TOLERANCE;
+        }
+
+        SearchContext::Id2ScoreMap score_array;
+        double vec_len_inverse = 1.0/vec_len;
+        for(auto& pair : result) {
+            score_array.push_back(std::make_pair(pair.first, (1 - pair.second*vec_len_inverse)*100.0));
+        }
+        result_target.emplace_back(score_array);
+    }
+
+    rc.Elapse("totally cost");
 }
 
 }
@@ -301,6 +351,11 @@ Status DBImpl::QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
     if (results.empty()) {
         return Status::NotFound("Group " + table_id + ", search result not found!");
     }
+
+    QueryResults temp_results;
+    CalcScore(nq, vectors, dim, results, temp_results);
+    results.swap(temp_results);
+
     return Status::OK();
 }
 
@@ -329,9 +384,13 @@ Status DBImpl::QueryAsync(const std::string& table_id, uint64_t k, uint64_t nq,
 
     context->WaitResult();
 
-    //step 3: construct results
+    //step 3: construct results, calculate score between 0 ~ 100
     auto& context_result = context->GetResult();
-    results.swap(context_result);
+    meta::TableSchema table_schema;
+    table_schema.table_id_ = table_id;
+    pMeta_->DescribeTable(table_schema);
+
+    CalcScore(context->nq(), context->vectors(), table_schema.dimension_, context_result, results);
 
     return Status::OK();
 }
