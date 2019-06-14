@@ -55,7 +55,7 @@ define_option_string(MEGASEARCH_DEPENDENCY_SOURCE
 define_option(MEGASEARCH_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 
-define_option(MEGASEARCH_WITH_ARROW "Build with ARROW" ON)
+define_option(MEGASEARCH_WITH_ARROW "Build with ARROW" OFF)
 
 define_option(MEGASEARCH_BOOST_USE_SHARED "Rely on boost shared libraries where relevant" OFF)
 
@@ -79,7 +79,7 @@ define_option(MEGASEARCH_WITH_LAPACK "Build with LAPACK library" ON)
 
 define_option(MEGASEARCH_WITH_LZ4 "Build with lz4 compression" ON)
 
-define_option(MEGASEARCH_WITH_JSONCONS "Build with JSONCONS" ON)
+define_option(MEGASEARCH_WITH_JSONCONS "Build with JSONCONS" OFF)
 
 define_option(MEGASEARCH_WITH_OPENBLAS "Build with OpenBLAS library" ON)
 
