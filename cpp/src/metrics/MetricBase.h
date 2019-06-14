@@ -82,6 +82,7 @@ class MetricsBase{
     virtual void ConnectionGaugeIncrement() {};
     virtual void ConnectionGaugeDecrement() {};
     virtual void KeepingAliveCounterIncrement(double value = 1) {};
+    virtual void OctetsSet() {};
 };
 
 
