@@ -53,6 +53,11 @@ void SystemInfo::Init() {
         return ;
     }
 
+    //initialize network traffic information
+    std::pair<unsigned long long, unsigned long long> in_and_out_octets = Octets();
+    in_octets_ = in_and_out_octets.first;
+    out_octets_ = in_and_out_octets.second;
+    net_time_ = std::chrono::system_clock::now();
 }
 
 long long
@@ -200,6 +205,42 @@ SystemInfo::GPUMemoryUsed() {
         result.push_back(nvmlMemory.used);
     }
     return result;
+}
+
+std::pair<unsigned long long , unsigned long long >
+SystemInfo::Octets(){
+    pid_t pid = getpid();
+//    const std::string filename = "/proc/"+std::to_string(pid)+"/net/netstat";
+    const std::string filename = "/proc/net/netstat";
+    std::ifstream file(filename);
+    std::string lastline = "";
+    std::string line = "";
+    while(file){
+        getline(file, line);
+        if(file.fail()){
+            break;
+        }
+        lastline = line;
+    }
+    std::vector<size_t> space_position;
+    size_t space_pos = lastline.find(" ");
+    while(space_pos != std::string::npos){
+        space_position.push_back(space_pos);
+        space_pos = lastline.find(" ",space_pos+1);
+    }
+    // InOctets is between 6th and 7th " " and OutOctets is between 7th and 8th " "
+    size_t inoctets_begin = space_position[6]+1;
+    size_t inoctets_length = space_position[7]-inoctets_begin;
+    size_t outoctets_begin = space_position[7]+1;
+    size_t outoctets_length = space_position[8]-outoctets_begin;
+    std::string inoctets = lastline.substr(inoctets_begin,inoctets_length);
+    std::string outoctets = lastline.substr(outoctets_begin,outoctets_length);
+
+
+    unsigned long long inoctets_bytes = std::stoull(inoctets);
+    unsigned long long outoctets_bytes = std::stoull(outoctets);
+    std::pair<unsigned long long , unsigned long long > res(inoctets_bytes, outoctets_bytes);
+    return res;
 }
 
 }

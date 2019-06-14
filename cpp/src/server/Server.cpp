@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <csignal>
-#include <numaif.h>
+//#include <numaif.h>
 #include <unistd.h>
 #include <string.h>
 

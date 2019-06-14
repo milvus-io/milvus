@@ -323,6 +323,7 @@ void DBImpl::BackgroundTimerTask(int interval) {
         server::Metrics::GetInstance().RAMUsagePercentSet();
         server::Metrics::GetInstance().GPUPercentGaugeSet();
         server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
+        server::Metrics::GetInstance().OctetsSet();
         TrySchedule();
     }
 }
