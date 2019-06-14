@@ -8,9 +8,9 @@
         sudo apt-get install gfortran flex bison
 
 #### Step 2: build(output to cmake_build folder)
-cmake_build/src/vecwise_server is the server
+cmake_build/src/milvus_server is the server
 
-cmake_build/src/libvecwise_engine.a is the static library
+cmake_build/src/libmilvus_engine.a is the static library
 
     cd [sourcecode path]/cpp
     ./build.sh -t Debug

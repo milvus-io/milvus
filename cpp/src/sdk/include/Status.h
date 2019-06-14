@@ -3,9 +3,9 @@
 #include <string>
 #include <sstream>
 
-/** \brief MegaSearch SDK namespace
+/** \brief Milvus SDK namespace
  */
-namespace megasearch {
+namespace milvus {
 
 /**
  * @brief Status Code for SDK interface return

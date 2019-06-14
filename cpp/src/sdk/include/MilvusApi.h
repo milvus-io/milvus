@@ -6,9 +6,9 @@
 #include <vector>
 #include <memory>
 
-/** \brief MegaSearch SDK namespace
+/** \brief Milvus SDK namespace
  */
-namespace megasearch {
+namespace milvus {
 
 
 /**
@@ -119,7 +119,7 @@ public:
      * Connect function should be called before any operations
      * Server will be connected after Connect return OK
      *
-     * @param uri, use to provide server information, example: megasearch://ipaddress:port
+     * @param uri, use to provide server information, example: milvus://ipaddress:port
      *
      * @return Indicate if connect is successful
      */
