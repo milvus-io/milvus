@@ -19,6 +19,8 @@ namespace meta {
     public:
         MySQLMetaImpl(const DBMetaOptions& options_);
 
+        Status Initialize();
+
         virtual Status CreateTable(TableSchema& table_schema) override;
         virtual Status DeleteTable(const std::string& table_id) override;
         virtual Status DescribeTable(TableSchema& group_info_) override;
@@ -69,7 +71,6 @@ namespace meta {
         std::string GetTablePath(const std::string& table_id);
         std::string GetTableDatePartitionPath(const std::string& table_id, DateT& date);
         void GetTableFilePath(TableFileSchema& group_file);
-        Status Initialize();
 
         const DBMetaOptions options_;
     }; // DBMetaImpl

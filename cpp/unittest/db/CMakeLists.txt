@@ -28,9 +28,12 @@ set(db_test_src
     ${db_scheduler_srcs}
     ${wrapper_src}
     ${require_files}
+    MySQLMetaImpl_test.cpp
     utils.cpp
     db_tests.cpp
     meta_tests.cpp)
+
+include_directories(/usr/include/mysql)
 
 cuda_add_executable(db_test ${db_test_src})
 
@@ -44,4 +47,4 @@ set(db_libs
         lz4
         )
 
-target_link_libraries(db_test ${db_libs} ${unittest_libs})
+target_link_libraries(db_test ${db_libs} ${unittest_libs} /usr/local/lib/libmysqlpp.so)

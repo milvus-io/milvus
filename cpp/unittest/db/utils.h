@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 #include <chrono>
+#include <src/db/MySQLMetaImpl.h>
 
 #include "db/DB.h"
 #include "db/DBMetaImpl.h"
@@ -54,4 +55,9 @@ protected:
 
     virtual void SetUp() override;
     virtual void TearDown() override;
+};
+
+class MySQLTest : public DBTest {
+protected:
+    //std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
 };
