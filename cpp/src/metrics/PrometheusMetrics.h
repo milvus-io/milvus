@@ -116,6 +116,7 @@ class PrometheusMetrics: public MetricsBase {
     void ConnectionGaugeIncrement() override ;
     void ConnectionGaugeDecrement() override ;
     void KeepingAliveCounterIncrement(double value = 1) override {if(startup_) keeping_alive_counter_.Increment(value);};
+    void OctetsSet() override ;
 
 
 
@@ -479,6 +480,13 @@ class PrometheusMetrics: public MetricsBase {
         .Help("total seconds of the serve alive")
         .Register(*registry_);
     prometheus::Counter &keeping_alive_counter_ = keeping_alive_.Add({});
+
+    prometheus::Family<prometheus::Gauge> &octets_ = prometheus::BuildGauge()
+        .Name("octets_bytes_per_second")
+        .Help("octets bytes per second")
+        .Register(*registry_);
+    prometheus::Gauge &inoctets_gauge_ = octets_.Add({{"type", "inoctets"}});
+    prometheus::Gauge &outoctets_gauge_ = octets_.Add({{"type", "outoctets"}});
 
 
 

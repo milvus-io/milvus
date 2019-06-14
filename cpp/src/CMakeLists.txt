@@ -58,6 +58,7 @@ include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 include_directories(thrift/gen-cpp)
 
 set(third_party_libs
+        arrow
         easyloggingpp
         sqlite
         thrift
