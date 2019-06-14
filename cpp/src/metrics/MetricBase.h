@@ -11,7 +11,7 @@
 #include "SystemInfo.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 class MetricsBase{
  public:

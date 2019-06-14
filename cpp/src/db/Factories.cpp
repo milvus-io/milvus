@@ -15,7 +15,7 @@
 #include <easylogging++.h>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 DBMetaOptions DBMetaOptionsFactory::Build(const std::string& path) {
@@ -54,5 +54,5 @@ DB* DBFactory::Build(const Options& options) {
 }
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

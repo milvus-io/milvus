@@ -10,7 +10,7 @@
 #include "megasearch_constants.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
     
 using namespace megasearch;

@@ -11,7 +11,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 namespace gpu {
 

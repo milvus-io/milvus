@@ -12,7 +12,7 @@
 #include <stdexcept>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace cache {
 
 template<typename key_t, typename value_t>
@@ -97,6 +97,6 @@ private:
 };
 
 }   // cache
-}   // vecwise
+}   // milvus
 }   // zilliz
 

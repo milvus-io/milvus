@@ -21,7 +21,7 @@
 #include "db/Factories.h"
 
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 
 
@@ -33,8 +33,9 @@ TEST_F(DBTest, Metric_Tes) {
     server::Metrics::GetInstance().Init();
 
 //    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
-    zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->SetCapacity(4UL*1024*1024*1024);
-    std::cout<<zilliz::vecwise::cache::CpuCacheMgr::GetInstance()->CacheCapacity()<<std::endl;
+    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(2UL*1024*1024*1024);
+    std::cout<<zilliz::milvus::cache::CpuCacheMgr::GetInstance()->CacheCapacity()<<std::endl;
+
     static const std::string group_name = "test_group";
     static const int group_dim = 256;
 
@@ -73,8 +74,8 @@ TEST_F(DBTest, Metric_Tes) {
 
         INIT_TIMER;
         std::stringstream ss;
-        long count = 0;
-        long prev_count = -1;
+        uint64_t count = 0;
+        uint64_t prev_count = 0;
 
         for (auto j=0; j<10; ++j) {
             ss.str("");

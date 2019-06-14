@@ -14,7 +14,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 
@@ -26,17 +26,14 @@ public:
 using IndexLoaderContextPtr = std::shared_ptr<IndexLoaderContext>;
 
 class IndexLoaderQueue {
-private:
+public:
     IndexLoaderQueue() : mtx(), full_(), empty_() {}
 
     IndexLoaderQueue(const IndexLoaderQueue &rhs) = delete;
 
     IndexLoaderQueue &operator=(const IndexLoaderQueue &rhs) = delete;
 
-public:
     using LoaderQueue = std::list<IndexLoaderContextPtr>;
-
-    static IndexLoaderQueue& GetInstance();
 
     void Put(const SearchContextPtr &search_context);
 

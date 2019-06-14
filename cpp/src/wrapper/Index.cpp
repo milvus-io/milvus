@@ -15,7 +15,7 @@
 #include "faiss/index_io.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 using std::string;

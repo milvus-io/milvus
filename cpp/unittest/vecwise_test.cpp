@@ -12,12 +12,12 @@
 
 INITIALIZE_EASYLOGGINGPP
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 int main(int argc, char **argv) {
     std::string exe_path = server::CommonUtil::GetExePath();
     std::string config_filename = exe_path + "/../../../conf/server_config.yaml";
-    zilliz::vecwise::server::ServerConfig& config = zilliz::vecwise::server::ServerConfig::GetInstance();
+    zilliz::milvus::server::ServerConfig& config = zilliz::milvus::server::ServerConfig::GetInstance();
     config.LoadConfigFile(config_filename);
     std::cout << "Load config file form: " << config_filename << std::endl;
 

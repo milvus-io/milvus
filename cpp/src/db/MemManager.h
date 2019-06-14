@@ -17,7 +17,7 @@
 #include <mutex>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 namespace meta {
@@ -92,5 +92,5 @@ private:
 
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz
