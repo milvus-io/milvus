@@ -194,10 +194,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         PrintSearchResult(topk_query_result_array);
     }
 
-    {//delete table
-        Status stat = conn->DeleteTable(TABLE_NAME);
-        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
-    }
+//    {//delete table
+//        Status stat = conn->DeleteTable(TABLE_NAME);
+//        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
+//    }
 
     {//server status
         std::string status = conn->ServerStatus();
