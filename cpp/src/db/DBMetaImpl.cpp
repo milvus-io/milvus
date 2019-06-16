@@ -515,7 +515,8 @@ Status DBMetaImpl::FilesToMerge(const std::string &table_id,
                                                      &TableFileSchema::size_,
                                                      &TableFileSchema::date_),
                                              where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW and
-                                                 c(&TableFileSchema::table_id_) == table_id));
+                                                 c(&TableFileSchema::table_id_) == table_id),
+                                             order_by(&TableFileSchema::size_).desc());
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time, end_time);
         server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);

@@ -10,6 +10,7 @@ db_config:
   db_backend_url: http://127.0.0.1
   db_flush_interval: 5              #unit: second
   idmapper_max_open_file: 128
+  index_trigger_size: 1024          #unit: MB
 
 metric_config:
   is_startup: true # true is on, false is off
