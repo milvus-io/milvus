@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
-# MegaSearch 0.3.0 (TBD)
+# Milvus 0.3.0 (TBD)
 
 ## Bug
 - MS-80 - Fix server hang issue
@@ -34,7 +34,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Task
 - MS-74 - Change README.md in cpp
 
-# MegaSearch 0.2.0 (2019-05-31)
+# Milvus 0.2.0 (2019-05-31)
 
 ## Bug
 

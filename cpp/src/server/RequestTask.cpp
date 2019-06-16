@@ -3,7 +3,7 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "MegasearchTask.h"
+#include "RequestTask.h"
 #include "ServerConfig.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -16,6 +16,8 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
+
+using namespace ::milvus;
 
 static const std::string DQL_TASK_GROUP = "dql";
 static const std::string DDL_DML_TASK_GROUP = "ddl_dml";
@@ -122,7 +124,7 @@ namespace {
     static constexpr long DAY_SECONDS = 86400;
 
     ServerError
-    ConvertTimeRangeToDBDates(const std::vector<megasearch::thrift::Range> &range_array,
+    ConvertTimeRangeToDBDates(const std::vector<thrift::Range> &range_array,
                               std::vector<DB_DATE>& dates) {
         dates.clear();
         ServerError error_code;
@@ -411,7 +413,7 @@ ServerError AddVectorTask::OnExecute() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 SearchVectorTask::SearchVectorTask(const std::string& table_name,
                                    const std::vector<thrift::RowRecord> & query_record_array,
-                                   const std::vector<megasearch::thrift::Range> & query_range_array,
+                                   const std::vector<thrift::Range> & query_range_array,
                                    const int64_t top_k,
                                    std::vector<thrift::TopKQueryResult>& result_array)
     : BaseTask(DQL_TASK_GROUP),
@@ -425,7 +427,7 @@ SearchVectorTask::SearchVectorTask(const std::string& table_name,
 
 BaseTaskPtr SearchVectorTask::Create(const std::string& table_name,
                                      const std::vector<thrift::RowRecord> & query_record_array,
-                                     const std::vector<megasearch::thrift::Range> & query_range_array,
+                                     const std::vector<thrift::Range> & query_range_array,
                                      const int64_t top_k,
                                      std::vector<thrift::TopKQueryResult>& result_array) {
     return std::shared_ptr<BaseTask>(new SearchVectorTask(table_name,
@@ -582,7 +584,7 @@ BaseTaskPtr PingTask::Create(const std::string& cmd, std::string& result) {
 
 ServerError PingTask::OnExecute() {
     if(cmd_ == "version") {
-        result_ = MEGASEARCH_VERSION;
+        result_ = MILVUS_VERSION;
     }
 
     return SERVER_SUCCESS;

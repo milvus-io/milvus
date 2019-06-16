@@ -4,16 +4,16 @@
  * DO NOT EDIT UNLESS YOU ARE SURE THAT YOU KNOW WHAT YOU ARE DOING
  *  @generated
  */
-#include "MegasearchService.h"
+#include "MilvusService.h"
 
-namespace megasearch { namespace thrift {
+namespace milvus { namespace thrift {
 
 
-MegasearchService_CreateTable_args::~MegasearchService_CreateTable_args() throw() {
+MilvusService_CreateTable_args::~MilvusService_CreateTable_args() throw() {
 }
 
 
-uint32_t MegasearchService_CreateTable_args::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_CreateTable_args::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -54,10 +54,10 @@ uint32_t MegasearchService_CreateTable_args::read(::apache::thrift::protocol::TP
   return xfer;
 }
 
-uint32_t MegasearchService_CreateTable_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_CreateTable_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_CreateTable_args");
+  xfer += oprot->writeStructBegin("MilvusService_CreateTable_args");
 
   xfer += oprot->writeFieldBegin("param", ::apache::thrift::protocol::T_STRUCT, 2);
   xfer += this->param.write(oprot);
@@ -69,14 +69,14 @@ uint32_t MegasearchService_CreateTable_args::write(::apache::thrift::protocol::T
 }
 
 
-MegasearchService_CreateTable_pargs::~MegasearchService_CreateTable_pargs() throw() {
+MilvusService_CreateTable_pargs::~MilvusService_CreateTable_pargs() throw() {
 }
 
 
-uint32_t MegasearchService_CreateTable_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_CreateTable_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_CreateTable_pargs");
+  xfer += oprot->writeStructBegin("MilvusService_CreateTable_pargs");
 
   xfer += oprot->writeFieldBegin("param", ::apache::thrift::protocol::T_STRUCT, 2);
   xfer += (*(this->param)).write(oprot);
@@ -88,11 +88,11 @@ uint32_t MegasearchService_CreateTable_pargs::write(::apache::thrift::protocol::
 }
 
 
-MegasearchService_CreateTable_result::~MegasearchService_CreateTable_result() throw() {
+MilvusService_CreateTable_result::~MilvusService_CreateTable_result() throw() {
 }
 
 
-uint32_t MegasearchService_CreateTable_result::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_CreateTable_result::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -133,11 +133,11 @@ uint32_t MegasearchService_CreateTable_result::read(::apache::thrift::protocol::
   return xfer;
 }
 
-uint32_t MegasearchService_CreateTable_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_CreateTable_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
 
   uint32_t xfer = 0;
 
-  xfer += oprot->writeStructBegin("MegasearchService_CreateTable_result");
+  xfer += oprot->writeStructBegin("MilvusService_CreateTable_result");
 
   if (this->__isset.e) {
     xfer += oprot->writeFieldBegin("e", ::apache::thrift::protocol::T_STRUCT, 1);
@@ -150,11 +150,11 @@ uint32_t MegasearchService_CreateTable_result::write(::apache::thrift::protocol:
 }
 
 
-MegasearchService_CreateTable_presult::~MegasearchService_CreateTable_presult() throw() {
+MilvusService_CreateTable_presult::~MilvusService_CreateTable_presult() throw() {
 }
 
 
-uint32_t MegasearchService_CreateTable_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_CreateTable_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -196,11 +196,11 @@ uint32_t MegasearchService_CreateTable_presult::read(::apache::thrift::protocol:
 }
 
 
-MegasearchService_DeleteTable_args::~MegasearchService_DeleteTable_args() throw() {
+MilvusService_DeleteTable_args::~MilvusService_DeleteTable_args() throw() {
 }
 
 
-uint32_t MegasearchService_DeleteTable_args::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_DeleteTable_args::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -241,10 +241,10 @@ uint32_t MegasearchService_DeleteTable_args::read(::apache::thrift::protocol::TP
   return xfer;
 }
 
-uint32_t MegasearchService_DeleteTable_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_DeleteTable_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_DeleteTable_args");
+  xfer += oprot->writeStructBegin("MilvusService_DeleteTable_args");
 
   xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString(this->table_name);
@@ -256,14 +256,14 @@ uint32_t MegasearchService_DeleteTable_args::write(::apache::thrift::protocol::T
 }
 
 
-MegasearchService_DeleteTable_pargs::~MegasearchService_DeleteTable_pargs() throw() {
+MilvusService_DeleteTable_pargs::~MilvusService_DeleteTable_pargs() throw() {
 }
 
 
-uint32_t MegasearchService_DeleteTable_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_DeleteTable_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_DeleteTable_pargs");
+  xfer += oprot->writeStructBegin("MilvusService_DeleteTable_pargs");
 
   xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString((*(this->table_name)));
@@ -275,11 +275,11 @@ uint32_t MegasearchService_DeleteTable_pargs::write(::apache::thrift::protocol::
 }
 
 
-MegasearchService_DeleteTable_result::~MegasearchService_DeleteTable_result() throw() {
+MilvusService_DeleteTable_result::~MilvusService_DeleteTable_result() throw() {
 }
 
 
-uint32_t MegasearchService_DeleteTable_result::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_DeleteTable_result::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -320,11 +320,11 @@ uint32_t MegasearchService_DeleteTable_result::read(::apache::thrift::protocol::
   return xfer;
 }
 
-uint32_t MegasearchService_DeleteTable_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_DeleteTable_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
 
   uint32_t xfer = 0;
 
-  xfer += oprot->writeStructBegin("MegasearchService_DeleteTable_result");
+  xfer += oprot->writeStructBegin("MilvusService_DeleteTable_result");
 
   if (this->__isset.e) {
     xfer += oprot->writeFieldBegin("e", ::apache::thrift::protocol::T_STRUCT, 1);
@@ -337,11 +337,11 @@ uint32_t MegasearchService_DeleteTable_result::write(::apache::thrift::protocol:
 }
 
 
-MegasearchService_DeleteTable_presult::~MegasearchService_DeleteTable_presult() throw() {
+MilvusService_DeleteTable_presult::~MilvusService_DeleteTable_presult() throw() {
 }
 
 
-uint32_t MegasearchService_DeleteTable_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_DeleteTable_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -383,11 +383,11 @@ uint32_t MegasearchService_DeleteTable_presult::read(::apache::thrift::protocol:
 }
 
 
-MegasearchService_AddVector_args::~MegasearchService_AddVector_args() throw() {
+MilvusService_AddVector_args::~MilvusService_AddVector_args() throw() {
 }
 
 
-uint32_t MegasearchService_AddVector_args::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_AddVector_args::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -448,10 +448,10 @@ uint32_t MegasearchService_AddVector_args::read(::apache::thrift::protocol::TPro
   return xfer;
 }
 
-uint32_t MegasearchService_AddVector_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_AddVector_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_AddVector_args");
+  xfer += oprot->writeStructBegin("MilvusService_AddVector_args");
 
   xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString(this->table_name);
@@ -475,14 +475,14 @@ uint32_t MegasearchService_AddVector_args::write(::apache::thrift::protocol::TPr
 }
 
 
-MegasearchService_AddVector_pargs::~MegasearchService_AddVector_pargs() throw() {
+MilvusService_AddVector_pargs::~MilvusService_AddVector_pargs() throw() {
 }
 
 
-uint32_t MegasearchService_AddVector_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_AddVector_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_AddVector_pargs");
+  xfer += oprot->writeStructBegin("MilvusService_AddVector_pargs");
 
   xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString((*(this->table_name)));
@@ -506,11 +506,11 @@ uint32_t MegasearchService_AddVector_pargs::write(::apache::thrift::protocol::TP
 }
 
 
-MegasearchService_AddVector_result::~MegasearchService_AddVector_result() throw() {
+MilvusService_AddVector_result::~MilvusService_AddVector_result() throw() {
 }
 
 
-uint32_t MegasearchService_AddVector_result::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_AddVector_result::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -571,11 +571,11 @@ uint32_t MegasearchService_AddVector_result::read(::apache::thrift::protocol::TP
   return xfer;
 }
 
-uint32_t MegasearchService_AddVector_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_AddVector_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
 
   uint32_t xfer = 0;
 
-  xfer += oprot->writeStructBegin("MegasearchService_AddVector_result");
+  xfer += oprot->writeStructBegin("MilvusService_AddVector_result");
 
   if (this->__isset.success) {
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_LIST, 0);
@@ -600,11 +600,11 @@ uint32_t MegasearchService_AddVector_result::write(::apache::thrift::protocol::T
 }
 
 
-MegasearchService_AddVector_presult::~MegasearchService_AddVector_presult() throw() {
+MilvusService_AddVector_presult::~MilvusService_AddVector_presult() throw() {
 }
 
 
-uint32_t MegasearchService_AddVector_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_AddVector_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -666,11 +666,11 @@ uint32_t MegasearchService_AddVector_presult::read(::apache::thrift::protocol::T
 }
 
 
-MegasearchService_SearchVector_args::~MegasearchService_SearchVector_args() throw() {
+MilvusService_SearchVector_args::~MilvusService_SearchVector_args() throw() {
 }
 
 
-uint32_t MegasearchService_SearchVector_args::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_SearchVector_args::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -759,10 +759,10 @@ uint32_t MegasearchService_SearchVector_args::read(::apache::thrift::protocol::T
   return xfer;
 }
 
-uint32_t MegasearchService_SearchVector_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_SearchVector_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_SearchVector_args");
+  xfer += oprot->writeStructBegin("MilvusService_SearchVector_args");
 
   xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString(this->table_name);
@@ -802,14 +802,14 @@ uint32_t MegasearchService_SearchVector_args::write(::apache::thrift::protocol::
 }
 
 
-MegasearchService_SearchVector_pargs::~MegasearchService_SearchVector_pargs() throw() {
+MilvusService_SearchVector_pargs::~MilvusService_SearchVector_pargs() throw() {
 }
 
 
-uint32_t MegasearchService_SearchVector_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_SearchVector_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_SearchVector_pargs");
+  xfer += oprot->writeStructBegin("MilvusService_SearchVector_pargs");
 
   xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString((*(this->table_name)));
@@ -849,11 +849,11 @@ uint32_t MegasearchService_SearchVector_pargs::write(::apache::thrift::protocol:
 }
 
 
-MegasearchService_SearchVector_result::~MegasearchService_SearchVector_result() throw() {
+MilvusService_SearchVector_result::~MilvusService_SearchVector_result() throw() {
 }
 
 
-uint32_t MegasearchService_SearchVector_result::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_SearchVector_result::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -914,11 +914,11 @@ uint32_t MegasearchService_SearchVector_result::read(::apache::thrift::protocol:
   return xfer;
 }
 
-uint32_t MegasearchService_SearchVector_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_SearchVector_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
 
   uint32_t xfer = 0;
 
-  xfer += oprot->writeStructBegin("MegasearchService_SearchVector_result");
+  xfer += oprot->writeStructBegin("MilvusService_SearchVector_result");
 
   if (this->__isset.success) {
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_LIST, 0);
@@ -943,11 +943,11 @@ uint32_t MegasearchService_SearchVector_result::write(::apache::thrift::protocol
 }
 
 
-MegasearchService_SearchVector_presult::~MegasearchService_SearchVector_presult() throw() {
+MilvusService_SearchVector_presult::~MilvusService_SearchVector_presult() throw() {
 }
 
 
-uint32_t MegasearchService_SearchVector_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_SearchVector_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1009,11 +1009,11 @@ uint32_t MegasearchService_SearchVector_presult::read(::apache::thrift::protocol
 }
 
 
-MegasearchService_DescribeTable_args::~MegasearchService_DescribeTable_args() throw() {
+MilvusService_DescribeTable_args::~MilvusService_DescribeTable_args() throw() {
 }
 
 
-uint32_t MegasearchService_DescribeTable_args::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_DescribeTable_args::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1054,10 +1054,10 @@ uint32_t MegasearchService_DescribeTable_args::read(::apache::thrift::protocol::
   return xfer;
 }
 
-uint32_t MegasearchService_DescribeTable_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_DescribeTable_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_DescribeTable_args");
+  xfer += oprot->writeStructBegin("MilvusService_DescribeTable_args");
 
   xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString(this->table_name);
@@ -1069,14 +1069,14 @@ uint32_t MegasearchService_DescribeTable_args::write(::apache::thrift::protocol:
 }
 
 
-MegasearchService_DescribeTable_pargs::~MegasearchService_DescribeTable_pargs() throw() {
+MilvusService_DescribeTable_pargs::~MilvusService_DescribeTable_pargs() throw() {
 }
 
 
-uint32_t MegasearchService_DescribeTable_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_DescribeTable_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_DescribeTable_pargs");
+  xfer += oprot->writeStructBegin("MilvusService_DescribeTable_pargs");
 
   xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString((*(this->table_name)));
@@ -1088,11 +1088,11 @@ uint32_t MegasearchService_DescribeTable_pargs::write(::apache::thrift::protocol
 }
 
 
-MegasearchService_DescribeTable_result::~MegasearchService_DescribeTable_result() throw() {
+MilvusService_DescribeTable_result::~MilvusService_DescribeTable_result() throw() {
 }
 
 
-uint32_t MegasearchService_DescribeTable_result::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_DescribeTable_result::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1141,11 +1141,11 @@ uint32_t MegasearchService_DescribeTable_result::read(::apache::thrift::protocol
   return xfer;
 }
 
-uint32_t MegasearchService_DescribeTable_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_DescribeTable_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
 
   uint32_t xfer = 0;
 
-  xfer += oprot->writeStructBegin("MegasearchService_DescribeTable_result");
+  xfer += oprot->writeStructBegin("MilvusService_DescribeTable_result");
 
   if (this->__isset.success) {
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_STRUCT, 0);
@@ -1162,11 +1162,11 @@ uint32_t MegasearchService_DescribeTable_result::write(::apache::thrift::protoco
 }
 
 
-MegasearchService_DescribeTable_presult::~MegasearchService_DescribeTable_presult() throw() {
+MilvusService_DescribeTable_presult::~MilvusService_DescribeTable_presult() throw() {
 }
 
 
-uint32_t MegasearchService_DescribeTable_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_DescribeTable_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1216,11 +1216,11 @@ uint32_t MegasearchService_DescribeTable_presult::read(::apache::thrift::protoco
 }
 
 
-MegasearchService_GetTableRowCount_args::~MegasearchService_GetTableRowCount_args() throw() {
+MilvusService_GetTableRowCount_args::~MilvusService_GetTableRowCount_args() throw() {
 }
 
 
-uint32_t MegasearchService_GetTableRowCount_args::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_GetTableRowCount_args::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1261,10 +1261,10 @@ uint32_t MegasearchService_GetTableRowCount_args::read(::apache::thrift::protoco
   return xfer;
 }
 
-uint32_t MegasearchService_GetTableRowCount_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_GetTableRowCount_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_GetTableRowCount_args");
+  xfer += oprot->writeStructBegin("MilvusService_GetTableRowCount_args");
 
   xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString(this->table_name);
@@ -1276,14 +1276,14 @@ uint32_t MegasearchService_GetTableRowCount_args::write(::apache::thrift::protoc
 }
 
 
-MegasearchService_GetTableRowCount_pargs::~MegasearchService_GetTableRowCount_pargs() throw() {
+MilvusService_GetTableRowCount_pargs::~MilvusService_GetTableRowCount_pargs() throw() {
 }
 
 
-uint32_t MegasearchService_GetTableRowCount_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_GetTableRowCount_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_GetTableRowCount_pargs");
+  xfer += oprot->writeStructBegin("MilvusService_GetTableRowCount_pargs");
 
   xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString((*(this->table_name)));
@@ -1295,11 +1295,11 @@ uint32_t MegasearchService_GetTableRowCount_pargs::write(::apache::thrift::proto
 }
 
 
-MegasearchService_GetTableRowCount_result::~MegasearchService_GetTableRowCount_result() throw() {
+MilvusService_GetTableRowCount_result::~MilvusService_GetTableRowCount_result() throw() {
 }
 
 
-uint32_t MegasearchService_GetTableRowCount_result::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_GetTableRowCount_result::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1348,11 +1348,11 @@ uint32_t MegasearchService_GetTableRowCount_result::read(::apache::thrift::proto
   return xfer;
 }
 
-uint32_t MegasearchService_GetTableRowCount_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_GetTableRowCount_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
 
   uint32_t xfer = 0;
 
-  xfer += oprot->writeStructBegin("MegasearchService_GetTableRowCount_result");
+  xfer += oprot->writeStructBegin("MilvusService_GetTableRowCount_result");
 
   if (this->__isset.success) {
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_I64, 0);
@@ -1369,11 +1369,11 @@ uint32_t MegasearchService_GetTableRowCount_result::write(::apache::thrift::prot
 }
 
 
-MegasearchService_GetTableRowCount_presult::~MegasearchService_GetTableRowCount_presult() throw() {
+MilvusService_GetTableRowCount_presult::~MilvusService_GetTableRowCount_presult() throw() {
 }
 
 
-uint32_t MegasearchService_GetTableRowCount_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_GetTableRowCount_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1423,11 +1423,11 @@ uint32_t MegasearchService_GetTableRowCount_presult::read(::apache::thrift::prot
 }
 
 
-MegasearchService_ShowTables_args::~MegasearchService_ShowTables_args() throw() {
+MilvusService_ShowTables_args::~MilvusService_ShowTables_args() throw() {
 }
 
 
-uint32_t MegasearchService_ShowTables_args::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_ShowTables_args::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1455,10 +1455,10 @@ uint32_t MegasearchService_ShowTables_args::read(::apache::thrift::protocol::TPr
   return xfer;
 }
 
-uint32_t MegasearchService_ShowTables_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_ShowTables_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_ShowTables_args");
+  xfer += oprot->writeStructBegin("MilvusService_ShowTables_args");
 
   xfer += oprot->writeFieldStop();
   xfer += oprot->writeStructEnd();
@@ -1466,14 +1466,14 @@ uint32_t MegasearchService_ShowTables_args::write(::apache::thrift::protocol::TP
 }
 
 
-MegasearchService_ShowTables_pargs::~MegasearchService_ShowTables_pargs() throw() {
+MilvusService_ShowTables_pargs::~MilvusService_ShowTables_pargs() throw() {
 }
 
 
-uint32_t MegasearchService_ShowTables_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_ShowTables_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_ShowTables_pargs");
+  xfer += oprot->writeStructBegin("MilvusService_ShowTables_pargs");
 
   xfer += oprot->writeFieldStop();
   xfer += oprot->writeStructEnd();
@@ -1481,11 +1481,11 @@ uint32_t MegasearchService_ShowTables_pargs::write(::apache::thrift::protocol::T
 }
 
 
-MegasearchService_ShowTables_result::~MegasearchService_ShowTables_result() throw() {
+MilvusService_ShowTables_result::~MilvusService_ShowTables_result() throw() {
 }
 
 
-uint32_t MegasearchService_ShowTables_result::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_ShowTables_result::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1546,11 +1546,11 @@ uint32_t MegasearchService_ShowTables_result::read(::apache::thrift::protocol::T
   return xfer;
 }
 
-uint32_t MegasearchService_ShowTables_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_ShowTables_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
 
   uint32_t xfer = 0;
 
-  xfer += oprot->writeStructBegin("MegasearchService_ShowTables_result");
+  xfer += oprot->writeStructBegin("MilvusService_ShowTables_result");
 
   if (this->__isset.success) {
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_LIST, 0);
@@ -1575,11 +1575,11 @@ uint32_t MegasearchService_ShowTables_result::write(::apache::thrift::protocol::
 }
 
 
-MegasearchService_ShowTables_presult::~MegasearchService_ShowTables_presult() throw() {
+MilvusService_ShowTables_presult::~MilvusService_ShowTables_presult() throw() {
 }
 
 
-uint32_t MegasearchService_ShowTables_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_ShowTables_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1641,11 +1641,11 @@ uint32_t MegasearchService_ShowTables_presult::read(::apache::thrift::protocol::
 }
 
 
-MegasearchService_Ping_args::~MegasearchService_Ping_args() throw() {
+MilvusService_Ping_args::~MilvusService_Ping_args() throw() {
 }
 
 
-uint32_t MegasearchService_Ping_args::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_Ping_args::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1686,10 +1686,10 @@ uint32_t MegasearchService_Ping_args::read(::apache::thrift::protocol::TProtocol
   return xfer;
 }
 
-uint32_t MegasearchService_Ping_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_Ping_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_Ping_args");
+  xfer += oprot->writeStructBegin("MilvusService_Ping_args");
 
   xfer += oprot->writeFieldBegin("cmd", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString(this->cmd);
@@ -1701,14 +1701,14 @@ uint32_t MegasearchService_Ping_args::write(::apache::thrift::protocol::TProtoco
 }
 
 
-MegasearchService_Ping_pargs::~MegasearchService_Ping_pargs() throw() {
+MilvusService_Ping_pargs::~MilvusService_Ping_pargs() throw() {
 }
 
 
-uint32_t MegasearchService_Ping_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_Ping_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
   uint32_t xfer = 0;
   ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
-  xfer += oprot->writeStructBegin("MegasearchService_Ping_pargs");
+  xfer += oprot->writeStructBegin("MilvusService_Ping_pargs");
 
   xfer += oprot->writeFieldBegin("cmd", ::apache::thrift::protocol::T_STRING, 2);
   xfer += oprot->writeString((*(this->cmd)));
@@ -1720,11 +1720,11 @@ uint32_t MegasearchService_Ping_pargs::write(::apache::thrift::protocol::TProtoc
 }
 
 
-MegasearchService_Ping_result::~MegasearchService_Ping_result() throw() {
+MilvusService_Ping_result::~MilvusService_Ping_result() throw() {
 }
 
 
-uint32_t MegasearchService_Ping_result::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_Ping_result::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1773,11 +1773,11 @@ uint32_t MegasearchService_Ping_result::read(::apache::thrift::protocol::TProtoc
   return xfer;
 }
 
-uint32_t MegasearchService_Ping_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
+uint32_t MilvusService_Ping_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
 
   uint32_t xfer = 0;
 
-  xfer += oprot->writeStructBegin("MegasearchService_Ping_result");
+  xfer += oprot->writeStructBegin("MilvusService_Ping_result");
 
   if (this->__isset.success) {
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_STRING, 0);
@@ -1794,11 +1794,11 @@ uint32_t MegasearchService_Ping_result::write(::apache::thrift::protocol::TProto
 }
 
 
-MegasearchService_Ping_presult::~MegasearchService_Ping_presult() throw() {
+MilvusService_Ping_presult::~MilvusService_Ping_presult() throw() {
 }
 
 
-uint32_t MegasearchService_Ping_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
+uint32_t MilvusService_Ping_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
 
   ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
   uint32_t xfer = 0;
@@ -1847,18 +1847,18 @@ uint32_t MegasearchService_Ping_presult::read(::apache::thrift::protocol::TProto
   return xfer;
 }
 
-void MegasearchServiceClient::CreateTable(const TableSchema& param)
+void MilvusServiceClient::CreateTable(const TableSchema& param)
 {
   send_CreateTable(param);
   recv_CreateTable();
 }
 
-void MegasearchServiceClient::send_CreateTable(const TableSchema& param)
+void MilvusServiceClient::send_CreateTable(const TableSchema& param)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("CreateTable", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_CreateTable_pargs args;
+  MilvusService_CreateTable_pargs args;
   args.param = &param;
   args.write(oprot_);
 
@@ -1867,7 +1867,7 @@ void MegasearchServiceClient::send_CreateTable(const TableSchema& param)
   oprot_->getTransport()->flush();
 }
 
-void MegasearchServiceClient::recv_CreateTable()
+void MilvusServiceClient::recv_CreateTable()
 {
 
   int32_t rseqid = 0;
@@ -1892,7 +1892,7 @@ void MegasearchServiceClient::recv_CreateTable()
     iprot_->readMessageEnd();
     iprot_->getTransport()->readEnd();
   }
-  MegasearchService_CreateTable_presult result;
+  MilvusService_CreateTable_presult result;
   result.read(iprot_);
   iprot_->readMessageEnd();
   iprot_->getTransport()->readEnd();
@@ -1903,18 +1903,18 @@ void MegasearchServiceClient::recv_CreateTable()
   return;
 }
 
-void MegasearchServiceClient::DeleteTable(const std::string& table_name)
+void MilvusServiceClient::DeleteTable(const std::string& table_name)
 {
   send_DeleteTable(table_name);
   recv_DeleteTable();
 }
 
-void MegasearchServiceClient::send_DeleteTable(const std::string& table_name)
+void MilvusServiceClient::send_DeleteTable(const std::string& table_name)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("DeleteTable", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_DeleteTable_pargs args;
+  MilvusService_DeleteTable_pargs args;
   args.table_name = &table_name;
   args.write(oprot_);
 
@@ -1923,7 +1923,7 @@ void MegasearchServiceClient::send_DeleteTable(const std::string& table_name)
   oprot_->getTransport()->flush();
 }
 
-void MegasearchServiceClient::recv_DeleteTable()
+void MilvusServiceClient::recv_DeleteTable()
 {
 
   int32_t rseqid = 0;
@@ -1948,7 +1948,7 @@ void MegasearchServiceClient::recv_DeleteTable()
     iprot_->readMessageEnd();
     iprot_->getTransport()->readEnd();
   }
-  MegasearchService_DeleteTable_presult result;
+  MilvusService_DeleteTable_presult result;
   result.read(iprot_);
   iprot_->readMessageEnd();
   iprot_->getTransport()->readEnd();
@@ -1959,18 +1959,18 @@ void MegasearchServiceClient::recv_DeleteTable()
   return;
 }
 
-void MegasearchServiceClient::AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array)
+void MilvusServiceClient::AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array)
 {
   send_AddVector(table_name, record_array);
   recv_AddVector(_return);
 }
 
-void MegasearchServiceClient::send_AddVector(const std::string& table_name, const std::vector<RowRecord> & record_array)
+void MilvusServiceClient::send_AddVector(const std::string& table_name, const std::vector<RowRecord> & record_array)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("AddVector", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_AddVector_pargs args;
+  MilvusService_AddVector_pargs args;
   args.table_name = &table_name;
   args.record_array = &record_array;
   args.write(oprot_);
@@ -1980,7 +1980,7 @@ void MegasearchServiceClient::send_AddVector(const std::string& table_name, cons
   oprot_->getTransport()->flush();
 }
 
-void MegasearchServiceClient::recv_AddVector(std::vector<int64_t> & _return)
+void MilvusServiceClient::recv_AddVector(std::vector<int64_t> & _return)
 {
 
   int32_t rseqid = 0;
@@ -2005,7 +2005,7 @@ void MegasearchServiceClient::recv_AddVector(std::vector<int64_t> & _return)
     iprot_->readMessageEnd();
     iprot_->getTransport()->readEnd();
   }
-  MegasearchService_AddVector_presult result;
+  MilvusService_AddVector_presult result;
   result.success = &_return;
   result.read(iprot_);
   iprot_->readMessageEnd();
@@ -2021,18 +2021,18 @@ void MegasearchServiceClient::recv_AddVector(std::vector<int64_t> & _return)
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "AddVector failed: unknown result");
 }
 
-void MegasearchServiceClient::SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
+void MilvusServiceClient::SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
 {
   send_SearchVector(table_name, query_record_array, query_range_array, topk);
   recv_SearchVector(_return);
 }
 
-void MegasearchServiceClient::send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
+void MilvusServiceClient::send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("SearchVector", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_SearchVector_pargs args;
+  MilvusService_SearchVector_pargs args;
   args.table_name = &table_name;
   args.query_record_array = &query_record_array;
   args.query_range_array = &query_range_array;
@@ -2044,7 +2044,7 @@ void MegasearchServiceClient::send_SearchVector(const std::string& table_name, c
   oprot_->getTransport()->flush();
 }
 
-void MegasearchServiceClient::recv_SearchVector(std::vector<TopKQueryResult> & _return)
+void MilvusServiceClient::recv_SearchVector(std::vector<TopKQueryResult> & _return)
 {
 
   int32_t rseqid = 0;
@@ -2069,7 +2069,7 @@ void MegasearchServiceClient::recv_SearchVector(std::vector<TopKQueryResult> & _
     iprot_->readMessageEnd();
     iprot_->getTransport()->readEnd();
   }
-  MegasearchService_SearchVector_presult result;
+  MilvusService_SearchVector_presult result;
   result.success = &_return;
   result.read(iprot_);
   iprot_->readMessageEnd();
@@ -2085,18 +2085,18 @@ void MegasearchServiceClient::recv_SearchVector(std::vector<TopKQueryResult> & _
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SearchVector failed: unknown result");
 }
 
-void MegasearchServiceClient::DescribeTable(TableSchema& _return, const std::string& table_name)
+void MilvusServiceClient::DescribeTable(TableSchema& _return, const std::string& table_name)
 {
   send_DescribeTable(table_name);
   recv_DescribeTable(_return);
 }
 
-void MegasearchServiceClient::send_DescribeTable(const std::string& table_name)
+void MilvusServiceClient::send_DescribeTable(const std::string& table_name)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("DescribeTable", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_DescribeTable_pargs args;
+  MilvusService_DescribeTable_pargs args;
   args.table_name = &table_name;
   args.write(oprot_);
 
@@ -2105,7 +2105,7 @@ void MegasearchServiceClient::send_DescribeTable(const std::string& table_name)
   oprot_->getTransport()->flush();
 }
 
-void MegasearchServiceClient::recv_DescribeTable(TableSchema& _return)
+void MilvusServiceClient::recv_DescribeTable(TableSchema& _return)
 {
 
   int32_t rseqid = 0;
@@ -2130,7 +2130,7 @@ void MegasearchServiceClient::recv_DescribeTable(TableSchema& _return)
     iprot_->readMessageEnd();
     iprot_->getTransport()->readEnd();
   }
-  MegasearchService_DescribeTable_presult result;
+  MilvusService_DescribeTable_presult result;
   result.success = &_return;
   result.read(iprot_);
   iprot_->readMessageEnd();
@@ -2146,18 +2146,18 @@ void MegasearchServiceClient::recv_DescribeTable(TableSchema& _return)
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "DescribeTable failed: unknown result");
 }
 
-int64_t MegasearchServiceClient::GetTableRowCount(const std::string& table_name)
+int64_t MilvusServiceClient::GetTableRowCount(const std::string& table_name)
 {
   send_GetTableRowCount(table_name);
   return recv_GetTableRowCount();
 }
 
-void MegasearchServiceClient::send_GetTableRowCount(const std::string& table_name)
+void MilvusServiceClient::send_GetTableRowCount(const std::string& table_name)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("GetTableRowCount", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_GetTableRowCount_pargs args;
+  MilvusService_GetTableRowCount_pargs args;
   args.table_name = &table_name;
   args.write(oprot_);
 
@@ -2166,7 +2166,7 @@ void MegasearchServiceClient::send_GetTableRowCount(const std::string& table_nam
   oprot_->getTransport()->flush();
 }
 
-int64_t MegasearchServiceClient::recv_GetTableRowCount()
+int64_t MilvusServiceClient::recv_GetTableRowCount()
 {
 
   int32_t rseqid = 0;
@@ -2192,7 +2192,7 @@ int64_t MegasearchServiceClient::recv_GetTableRowCount()
     iprot_->getTransport()->readEnd();
   }
   int64_t _return;
-  MegasearchService_GetTableRowCount_presult result;
+  MilvusService_GetTableRowCount_presult result;
   result.success = &_return;
   result.read(iprot_);
   iprot_->readMessageEnd();
@@ -2207,18 +2207,18 @@ int64_t MegasearchServiceClient::recv_GetTableRowCount()
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "GetTableRowCount failed: unknown result");
 }
 
-void MegasearchServiceClient::ShowTables(std::vector<std::string> & _return)
+void MilvusServiceClient::ShowTables(std::vector<std::string> & _return)
 {
   send_ShowTables();
   recv_ShowTables(_return);
 }
 
-void MegasearchServiceClient::send_ShowTables()
+void MilvusServiceClient::send_ShowTables()
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("ShowTables", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_ShowTables_pargs args;
+  MilvusService_ShowTables_pargs args;
   args.write(oprot_);
 
   oprot_->writeMessageEnd();
@@ -2226,7 +2226,7 @@ void MegasearchServiceClient::send_ShowTables()
   oprot_->getTransport()->flush();
 }
 
-void MegasearchServiceClient::recv_ShowTables(std::vector<std::string> & _return)
+void MilvusServiceClient::recv_ShowTables(std::vector<std::string> & _return)
 {
 
   int32_t rseqid = 0;
@@ -2251,7 +2251,7 @@ void MegasearchServiceClient::recv_ShowTables(std::vector<std::string> & _return
     iprot_->readMessageEnd();
     iprot_->getTransport()->readEnd();
   }
-  MegasearchService_ShowTables_presult result;
+  MilvusService_ShowTables_presult result;
   result.success = &_return;
   result.read(iprot_);
   iprot_->readMessageEnd();
@@ -2267,18 +2267,18 @@ void MegasearchServiceClient::recv_ShowTables(std::vector<std::string> & _return
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "ShowTables failed: unknown result");
 }
 
-void MegasearchServiceClient::Ping(std::string& _return, const std::string& cmd)
+void MilvusServiceClient::Ping(std::string& _return, const std::string& cmd)
 {
   send_Ping(cmd);
   recv_Ping(_return);
 }
 
-void MegasearchServiceClient::send_Ping(const std::string& cmd)
+void MilvusServiceClient::send_Ping(const std::string& cmd)
 {
   int32_t cseqid = 0;
   oprot_->writeMessageBegin("Ping", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_Ping_pargs args;
+  MilvusService_Ping_pargs args;
   args.cmd = &cmd;
   args.write(oprot_);
 
@@ -2287,7 +2287,7 @@ void MegasearchServiceClient::send_Ping(const std::string& cmd)
   oprot_->getTransport()->flush();
 }
 
-void MegasearchServiceClient::recv_Ping(std::string& _return)
+void MilvusServiceClient::recv_Ping(std::string& _return)
 {
 
   int32_t rseqid = 0;
@@ -2312,7 +2312,7 @@ void MegasearchServiceClient::recv_Ping(std::string& _return)
     iprot_->readMessageEnd();
     iprot_->getTransport()->readEnd();
   }
-  MegasearchService_Ping_presult result;
+  MilvusService_Ping_presult result;
   result.success = &_return;
   result.read(iprot_);
   iprot_->readMessageEnd();
@@ -2328,7 +2328,7 @@ void MegasearchServiceClient::recv_Ping(std::string& _return)
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "Ping failed: unknown result");
 }
 
-bool MegasearchServiceProcessor::dispatchCall(::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, const std::string& fname, int32_t seqid, void* callContext) {
+bool MilvusServiceProcessor::dispatchCall(::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, const std::string& fname, int32_t seqid, void* callContext) {
   ProcessMap::iterator pfn;
   pfn = processMap_.find(fname);
   if (pfn == processMap_.end()) {
@@ -2347,28 +2347,28 @@ bool MegasearchServiceProcessor::dispatchCall(::apache::thrift::protocol::TProto
   return true;
 }
 
-void MegasearchServiceProcessor::process_CreateTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+void MilvusServiceProcessor::process_CreateTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
 {
   void* ctx = NULL;
   if (this->eventHandler_.get() != NULL) {
-    ctx = this->eventHandler_->getContext("MegasearchService.CreateTable", callContext);
+    ctx = this->eventHandler_->getContext("MilvusService.CreateTable", callContext);
   }
-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.CreateTable");
+  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MilvusService.CreateTable");
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preRead(ctx, "MegasearchService.CreateTable");
+    this->eventHandler_->preRead(ctx, "MilvusService.CreateTable");
   }
 
-  MegasearchService_CreateTable_args args;
+  MilvusService_CreateTable_args args;
   args.read(iprot);
   iprot->readMessageEnd();
   uint32_t bytes = iprot->getTransport()->readEnd();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postRead(ctx, "MegasearchService.CreateTable", bytes);
+    this->eventHandler_->postRead(ctx, "MilvusService.CreateTable", bytes);
   }
 
-  MegasearchService_CreateTable_result result;
+  MilvusService_CreateTable_result result;
   try {
     iface_->CreateTable(args.param);
   } catch (Exception &e) {
@@ -2376,7 +2376,7 @@ void MegasearchServiceProcessor::process_CreateTable(int32_t seqid, ::apache::th
     result.__isset.e = true;
   } catch (const std::exception& e) {
     if (this->eventHandler_.get() != NULL) {
-      this->eventHandler_->handlerError(ctx, "MegasearchService.CreateTable");
+      this->eventHandler_->handlerError(ctx, "MilvusService.CreateTable");
     }
 
     ::apache::thrift::TApplicationException x(e.what());
@@ -2389,7 +2389,7 @@ void MegasearchServiceProcessor::process_CreateTable(int32_t seqid, ::apache::th
   }
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preWrite(ctx, "MegasearchService.CreateTable");
+    this->eventHandler_->preWrite(ctx, "MilvusService.CreateTable");
   }
 
   oprot->writeMessageBegin("CreateTable", ::apache::thrift::protocol::T_REPLY, seqid);
@@ -2399,32 +2399,32 @@ void MegasearchServiceProcessor::process_CreateTable(int32_t seqid, ::apache::th
   oprot->getTransport()->flush();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postWrite(ctx, "MegasearchService.CreateTable", bytes);
+    this->eventHandler_->postWrite(ctx, "MilvusService.CreateTable", bytes);
   }
 }
 
-void MegasearchServiceProcessor::process_DeleteTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+void MilvusServiceProcessor::process_DeleteTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
 {
   void* ctx = NULL;
   if (this->eventHandler_.get() != NULL) {
-    ctx = this->eventHandler_->getContext("MegasearchService.DeleteTable", callContext);
+    ctx = this->eventHandler_->getContext("MilvusService.DeleteTable", callContext);
   }
-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.DeleteTable");
+  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MilvusService.DeleteTable");
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preRead(ctx, "MegasearchService.DeleteTable");
+    this->eventHandler_->preRead(ctx, "MilvusService.DeleteTable");
   }
 
-  MegasearchService_DeleteTable_args args;
+  MilvusService_DeleteTable_args args;
   args.read(iprot);
   iprot->readMessageEnd();
   uint32_t bytes = iprot->getTransport()->readEnd();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postRead(ctx, "MegasearchService.DeleteTable", bytes);
+    this->eventHandler_->postRead(ctx, "MilvusService.DeleteTable", bytes);
   }
 
-  MegasearchService_DeleteTable_result result;
+  MilvusService_DeleteTable_result result;
   try {
     iface_->DeleteTable(args.table_name);
   } catch (Exception &e) {
@@ -2432,7 +2432,7 @@ void MegasearchServiceProcessor::process_DeleteTable(int32_t seqid, ::apache::th
     result.__isset.e = true;
   } catch (const std::exception& e) {
     if (this->eventHandler_.get() != NULL) {
-      this->eventHandler_->handlerError(ctx, "MegasearchService.DeleteTable");
+      this->eventHandler_->handlerError(ctx, "MilvusService.DeleteTable");
     }
 
     ::apache::thrift::TApplicationException x(e.what());
@@ -2445,7 +2445,7 @@ void MegasearchServiceProcessor::process_DeleteTable(int32_t seqid, ::apache::th
   }
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preWrite(ctx, "MegasearchService.DeleteTable");
+    this->eventHandler_->preWrite(ctx, "MilvusService.DeleteTable");
   }
 
   oprot->writeMessageBegin("DeleteTable", ::apache::thrift::protocol::T_REPLY, seqid);
@@ -2455,32 +2455,32 @@ void MegasearchServiceProcessor::process_DeleteTable(int32_t seqid, ::apache::th
   oprot->getTransport()->flush();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postWrite(ctx, "MegasearchService.DeleteTable", bytes);
+    this->eventHandler_->postWrite(ctx, "MilvusService.DeleteTable", bytes);
   }
 }
 
-void MegasearchServiceProcessor::process_AddVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+void MilvusServiceProcessor::process_AddVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
 {
   void* ctx = NULL;
   if (this->eventHandler_.get() != NULL) {
-    ctx = this->eventHandler_->getContext("MegasearchService.AddVector", callContext);
+    ctx = this->eventHandler_->getContext("MilvusService.AddVector", callContext);
   }
-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.AddVector");
+  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MilvusService.AddVector");
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preRead(ctx, "MegasearchService.AddVector");
+    this->eventHandler_->preRead(ctx, "MilvusService.AddVector");
   }
 
-  MegasearchService_AddVector_args args;
+  MilvusService_AddVector_args args;
   args.read(iprot);
   iprot->readMessageEnd();
   uint32_t bytes = iprot->getTransport()->readEnd();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postRead(ctx, "MegasearchService.AddVector", bytes);
+    this->eventHandler_->postRead(ctx, "MilvusService.AddVector", bytes);
   }
 
-  MegasearchService_AddVector_result result;
+  MilvusService_AddVector_result result;
   try {
     iface_->AddVector(result.success, args.table_name, args.record_array);
     result.__isset.success = true;
@@ -2489,7 +2489,7 @@ void MegasearchServiceProcessor::process_AddVector(int32_t seqid, ::apache::thri
     result.__isset.e = true;
   } catch (const std::exception& e) {
     if (this->eventHandler_.get() != NULL) {
-      this->eventHandler_->handlerError(ctx, "MegasearchService.AddVector");
+      this->eventHandler_->handlerError(ctx, "MilvusService.AddVector");
     }
 
     ::apache::thrift::TApplicationException x(e.what());
@@ -2502,7 +2502,7 @@ void MegasearchServiceProcessor::process_AddVector(int32_t seqid, ::apache::thri
   }
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preWrite(ctx, "MegasearchService.AddVector");
+    this->eventHandler_->preWrite(ctx, "MilvusService.AddVector");
   }
 
   oprot->writeMessageBegin("AddVector", ::apache::thrift::protocol::T_REPLY, seqid);
@@ -2512,32 +2512,32 @@ void MegasearchServiceProcessor::process_AddVector(int32_t seqid, ::apache::thri
   oprot->getTransport()->flush();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postWrite(ctx, "MegasearchService.AddVector", bytes);
+    this->eventHandler_->postWrite(ctx, "MilvusService.AddVector", bytes);
   }
 }
 
-void MegasearchServiceProcessor::process_SearchVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+void MilvusServiceProcessor::process_SearchVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
 {
   void* ctx = NULL;
   if (this->eventHandler_.get() != NULL) {
-    ctx = this->eventHandler_->getContext("MegasearchService.SearchVector", callContext);
+    ctx = this->eventHandler_->getContext("MilvusService.SearchVector", callContext);
   }
-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.SearchVector");
+  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MilvusService.SearchVector");
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preRead(ctx, "MegasearchService.SearchVector");
+    this->eventHandler_->preRead(ctx, "MilvusService.SearchVector");
   }
 
-  MegasearchService_SearchVector_args args;
+  MilvusService_SearchVector_args args;
   args.read(iprot);
   iprot->readMessageEnd();
   uint32_t bytes = iprot->getTransport()->readEnd();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postRead(ctx, "MegasearchService.SearchVector", bytes);
+    this->eventHandler_->postRead(ctx, "MilvusService.SearchVector", bytes);
   }
 
-  MegasearchService_SearchVector_result result;
+  MilvusService_SearchVector_result result;
   try {
     iface_->SearchVector(result.success, args.table_name, args.query_record_array, args.query_range_array, args.topk);
     result.__isset.success = true;
@@ -2546,7 +2546,7 @@ void MegasearchServiceProcessor::process_SearchVector(int32_t seqid, ::apache::t
     result.__isset.e = true;
   } catch (const std::exception& e) {
     if (this->eventHandler_.get() != NULL) {
-      this->eventHandler_->handlerError(ctx, "MegasearchService.SearchVector");
+      this->eventHandler_->handlerError(ctx, "MilvusService.SearchVector");
     }
 
     ::apache::thrift::TApplicationException x(e.what());
@@ -2559,7 +2559,7 @@ void MegasearchServiceProcessor::process_SearchVector(int32_t seqid, ::apache::t
   }
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preWrite(ctx, "MegasearchService.SearchVector");
+    this->eventHandler_->preWrite(ctx, "MilvusService.SearchVector");
   }
 
   oprot->writeMessageBegin("SearchVector", ::apache::thrift::protocol::T_REPLY, seqid);
@@ -2569,32 +2569,32 @@ void MegasearchServiceProcessor::process_SearchVector(int32_t seqid, ::apache::t
   oprot->getTransport()->flush();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postWrite(ctx, "MegasearchService.SearchVector", bytes);
+    this->eventHandler_->postWrite(ctx, "MilvusService.SearchVector", bytes);
   }
 }
 
-void MegasearchServiceProcessor::process_DescribeTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+void MilvusServiceProcessor::process_DescribeTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
 {
   void* ctx = NULL;
   if (this->eventHandler_.get() != NULL) {
-    ctx = this->eventHandler_->getContext("MegasearchService.DescribeTable", callContext);
+    ctx = this->eventHandler_->getContext("MilvusService.DescribeTable", callContext);
   }
-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.DescribeTable");
+  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MilvusService.DescribeTable");
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preRead(ctx, "MegasearchService.DescribeTable");
+    this->eventHandler_->preRead(ctx, "MilvusService.DescribeTable");
   }
 
-  MegasearchService_DescribeTable_args args;
+  MilvusService_DescribeTable_args args;
   args.read(iprot);
   iprot->readMessageEnd();
   uint32_t bytes = iprot->getTransport()->readEnd();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postRead(ctx, "MegasearchService.DescribeTable", bytes);
+    this->eventHandler_->postRead(ctx, "MilvusService.DescribeTable", bytes);
   }
 
-  MegasearchService_DescribeTable_result result;
+  MilvusService_DescribeTable_result result;
   try {
     iface_->DescribeTable(result.success, args.table_name);
     result.__isset.success = true;
@@ -2603,7 +2603,7 @@ void MegasearchServiceProcessor::process_DescribeTable(int32_t seqid, ::apache::
     result.__isset.e = true;
   } catch (const std::exception& e) {
     if (this->eventHandler_.get() != NULL) {
-      this->eventHandler_->handlerError(ctx, "MegasearchService.DescribeTable");
+      this->eventHandler_->handlerError(ctx, "MilvusService.DescribeTable");
     }
 
     ::apache::thrift::TApplicationException x(e.what());
@@ -2616,7 +2616,7 @@ void MegasearchServiceProcessor::process_DescribeTable(int32_t seqid, ::apache::
   }
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preWrite(ctx, "MegasearchService.DescribeTable");
+    this->eventHandler_->preWrite(ctx, "MilvusService.DescribeTable");
   }
 
   oprot->writeMessageBegin("DescribeTable", ::apache::thrift::protocol::T_REPLY, seqid);
@@ -2626,32 +2626,32 @@ void MegasearchServiceProcessor::process_DescribeTable(int32_t seqid, ::apache::
   oprot->getTransport()->flush();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postWrite(ctx, "MegasearchService.DescribeTable", bytes);
+    this->eventHandler_->postWrite(ctx, "MilvusService.DescribeTable", bytes);
   }
 }
 
-void MegasearchServiceProcessor::process_GetTableRowCount(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+void MilvusServiceProcessor::process_GetTableRowCount(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
 {
   void* ctx = NULL;
   if (this->eventHandler_.get() != NULL) {
-    ctx = this->eventHandler_->getContext("MegasearchService.GetTableRowCount", callContext);
+    ctx = this->eventHandler_->getContext("MilvusService.GetTableRowCount", callContext);
   }
-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.GetTableRowCount");
+  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MilvusService.GetTableRowCount");
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preRead(ctx, "MegasearchService.GetTableRowCount");
+    this->eventHandler_->preRead(ctx, "MilvusService.GetTableRowCount");
   }
 
-  MegasearchService_GetTableRowCount_args args;
+  MilvusService_GetTableRowCount_args args;
   args.read(iprot);
   iprot->readMessageEnd();
   uint32_t bytes = iprot->getTransport()->readEnd();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postRead(ctx, "MegasearchService.GetTableRowCount", bytes);
+    this->eventHandler_->postRead(ctx, "MilvusService.GetTableRowCount", bytes);
   }
 
-  MegasearchService_GetTableRowCount_result result;
+  MilvusService_GetTableRowCount_result result;
   try {
     result.success = iface_->GetTableRowCount(args.table_name);
     result.__isset.success = true;
@@ -2660,7 +2660,7 @@ void MegasearchServiceProcessor::process_GetTableRowCount(int32_t seqid, ::apach
     result.__isset.e = true;
   } catch (const std::exception& e) {
     if (this->eventHandler_.get() != NULL) {
-      this->eventHandler_->handlerError(ctx, "MegasearchService.GetTableRowCount");
+      this->eventHandler_->handlerError(ctx, "MilvusService.GetTableRowCount");
     }
 
     ::apache::thrift::TApplicationException x(e.what());
@@ -2673,7 +2673,7 @@ void MegasearchServiceProcessor::process_GetTableRowCount(int32_t seqid, ::apach
   }
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preWrite(ctx, "MegasearchService.GetTableRowCount");
+    this->eventHandler_->preWrite(ctx, "MilvusService.GetTableRowCount");
   }
 
   oprot->writeMessageBegin("GetTableRowCount", ::apache::thrift::protocol::T_REPLY, seqid);
@@ -2683,32 +2683,32 @@ void MegasearchServiceProcessor::process_GetTableRowCount(int32_t seqid, ::apach
   oprot->getTransport()->flush();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postWrite(ctx, "MegasearchService.GetTableRowCount", bytes);
+    this->eventHandler_->postWrite(ctx, "MilvusService.GetTableRowCount", bytes);
   }
 }
 
-void MegasearchServiceProcessor::process_ShowTables(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+void MilvusServiceProcessor::process_ShowTables(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
 {
   void* ctx = NULL;
   if (this->eventHandler_.get() != NULL) {
-    ctx = this->eventHandler_->getContext("MegasearchService.ShowTables", callContext);
+    ctx = this->eventHandler_->getContext("MilvusService.ShowTables", callContext);
   }
-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.ShowTables");
+  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MilvusService.ShowTables");
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preRead(ctx, "MegasearchService.ShowTables");
+    this->eventHandler_->preRead(ctx, "MilvusService.ShowTables");
   }
 
-  MegasearchService_ShowTables_args args;
+  MilvusService_ShowTables_args args;
   args.read(iprot);
   iprot->readMessageEnd();
   uint32_t bytes = iprot->getTransport()->readEnd();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postRead(ctx, "MegasearchService.ShowTables", bytes);
+    this->eventHandler_->postRead(ctx, "MilvusService.ShowTables", bytes);
   }
 
-  MegasearchService_ShowTables_result result;
+  MilvusService_ShowTables_result result;
   try {
     iface_->ShowTables(result.success);
     result.__isset.success = true;
@@ -2717,7 +2717,7 @@ void MegasearchServiceProcessor::process_ShowTables(int32_t seqid, ::apache::thr
     result.__isset.e = true;
   } catch (const std::exception& e) {
     if (this->eventHandler_.get() != NULL) {
-      this->eventHandler_->handlerError(ctx, "MegasearchService.ShowTables");
+      this->eventHandler_->handlerError(ctx, "MilvusService.ShowTables");
     }
 
     ::apache::thrift::TApplicationException x(e.what());
@@ -2730,7 +2730,7 @@ void MegasearchServiceProcessor::process_ShowTables(int32_t seqid, ::apache::thr
   }
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preWrite(ctx, "MegasearchService.ShowTables");
+    this->eventHandler_->preWrite(ctx, "MilvusService.ShowTables");
   }
 
   oprot->writeMessageBegin("ShowTables", ::apache::thrift::protocol::T_REPLY, seqid);
@@ -2740,32 +2740,32 @@ void MegasearchServiceProcessor::process_ShowTables(int32_t seqid, ::apache::thr
   oprot->getTransport()->flush();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postWrite(ctx, "MegasearchService.ShowTables", bytes);
+    this->eventHandler_->postWrite(ctx, "MilvusService.ShowTables", bytes);
   }
 }
 
-void MegasearchServiceProcessor::process_Ping(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+void MilvusServiceProcessor::process_Ping(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
 {
   void* ctx = NULL;
   if (this->eventHandler_.get() != NULL) {
-    ctx = this->eventHandler_->getContext("MegasearchService.Ping", callContext);
+    ctx = this->eventHandler_->getContext("MilvusService.Ping", callContext);
   }
-  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MegasearchService.Ping");
+  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MilvusService.Ping");
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preRead(ctx, "MegasearchService.Ping");
+    this->eventHandler_->preRead(ctx, "MilvusService.Ping");
   }
 
-  MegasearchService_Ping_args args;
+  MilvusService_Ping_args args;
   args.read(iprot);
   iprot->readMessageEnd();
   uint32_t bytes = iprot->getTransport()->readEnd();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postRead(ctx, "MegasearchService.Ping", bytes);
+    this->eventHandler_->postRead(ctx, "MilvusService.Ping", bytes);
   }
 
-  MegasearchService_Ping_result result;
+  MilvusService_Ping_result result;
   try {
     iface_->Ping(result.success, args.cmd);
     result.__isset.success = true;
@@ -2774,7 +2774,7 @@ void MegasearchServiceProcessor::process_Ping(int32_t seqid, ::apache::thrift::p
     result.__isset.e = true;
   } catch (const std::exception& e) {
     if (this->eventHandler_.get() != NULL) {
-      this->eventHandler_->handlerError(ctx, "MegasearchService.Ping");
+      this->eventHandler_->handlerError(ctx, "MilvusService.Ping");
     }
 
     ::apache::thrift::TApplicationException x(e.what());
@@ -2787,7 +2787,7 @@ void MegasearchServiceProcessor::process_Ping(int32_t seqid, ::apache::thrift::p
   }
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->preWrite(ctx, "MegasearchService.Ping");
+    this->eventHandler_->preWrite(ctx, "MilvusService.Ping");
   }
 
   oprot->writeMessageBegin("Ping", ::apache::thrift::protocol::T_REPLY, seqid);
@@ -2797,30 +2797,30 @@ void MegasearchServiceProcessor::process_Ping(int32_t seqid, ::apache::thrift::p
   oprot->getTransport()->flush();
 
   if (this->eventHandler_.get() != NULL) {
-    this->eventHandler_->postWrite(ctx, "MegasearchService.Ping", bytes);
+    this->eventHandler_->postWrite(ctx, "MilvusService.Ping", bytes);
   }
 }
 
-::apache::thrift::stdcxx::shared_ptr< ::apache::thrift::TProcessor > MegasearchServiceProcessorFactory::getProcessor(const ::apache::thrift::TConnectionInfo& connInfo) {
-  ::apache::thrift::ReleaseHandler< MegasearchServiceIfFactory > cleanup(handlerFactory_);
-  ::apache::thrift::stdcxx::shared_ptr< MegasearchServiceIf > handler(handlerFactory_->getHandler(connInfo), cleanup);
-  ::apache::thrift::stdcxx::shared_ptr< ::apache::thrift::TProcessor > processor(new MegasearchServiceProcessor(handler));
+::apache::thrift::stdcxx::shared_ptr< ::apache::thrift::TProcessor > MilvusServiceProcessorFactory::getProcessor(const ::apache::thrift::TConnectionInfo& connInfo) {
+  ::apache::thrift::ReleaseHandler< MilvusServiceIfFactory > cleanup(handlerFactory_);
+  ::apache::thrift::stdcxx::shared_ptr< MilvusServiceIf > handler(handlerFactory_->getHandler(connInfo), cleanup);
+  ::apache::thrift::stdcxx::shared_ptr< ::apache::thrift::TProcessor > processor(new MilvusServiceProcessor(handler));
   return processor;
 }
 
-void MegasearchServiceConcurrentClient::CreateTable(const TableSchema& param)
+void MilvusServiceConcurrentClient::CreateTable(const TableSchema& param)
 {
   int32_t seqid = send_CreateTable(param);
   recv_CreateTable(seqid);
 }
 
-int32_t MegasearchServiceConcurrentClient::send_CreateTable(const TableSchema& param)
+int32_t MilvusServiceConcurrentClient::send_CreateTable(const TableSchema& param)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
   oprot_->writeMessageBegin("CreateTable", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_CreateTable_pargs args;
+  MilvusService_CreateTable_pargs args;
   args.param = &param;
   args.write(oprot_);
 
@@ -2832,7 +2832,7 @@ int32_t MegasearchServiceConcurrentClient::send_CreateTable(const TableSchema& p
   return cseqid;
 }
 
-void MegasearchServiceConcurrentClient::recv_CreateTable(const int32_t seqid)
+void MilvusServiceConcurrentClient::recv_CreateTable(const int32_t seqid)
 {
 
   int32_t rseqid = 0;
@@ -2870,7 +2870,7 @@ void MegasearchServiceConcurrentClient::recv_CreateTable(const int32_t seqid)
         using ::apache::thrift::protocol::TProtocolException;
         throw TProtocolException(TProtocolException::INVALID_DATA);
       }
-      MegasearchService_CreateTable_presult result;
+      MilvusService_CreateTable_presult result;
       result.read(iprot_);
       iprot_->readMessageEnd();
       iprot_->getTransport()->readEnd();
@@ -2890,19 +2890,19 @@ void MegasearchServiceConcurrentClient::recv_CreateTable(const int32_t seqid)
   } // end while(true)
 }
 
-void MegasearchServiceConcurrentClient::DeleteTable(const std::string& table_name)
+void MilvusServiceConcurrentClient::DeleteTable(const std::string& table_name)
 {
   int32_t seqid = send_DeleteTable(table_name);
   recv_DeleteTable(seqid);
 }
 
-int32_t MegasearchServiceConcurrentClient::send_DeleteTable(const std::string& table_name)
+int32_t MilvusServiceConcurrentClient::send_DeleteTable(const std::string& table_name)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
   oprot_->writeMessageBegin("DeleteTable", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_DeleteTable_pargs args;
+  MilvusService_DeleteTable_pargs args;
   args.table_name = &table_name;
   args.write(oprot_);
 
@@ -2914,7 +2914,7 @@ int32_t MegasearchServiceConcurrentClient::send_DeleteTable(const std::string& t
   return cseqid;
 }
 
-void MegasearchServiceConcurrentClient::recv_DeleteTable(const int32_t seqid)
+void MilvusServiceConcurrentClient::recv_DeleteTable(const int32_t seqid)
 {
 
   int32_t rseqid = 0;
@@ -2952,7 +2952,7 @@ void MegasearchServiceConcurrentClient::recv_DeleteTable(const int32_t seqid)
         using ::apache::thrift::protocol::TProtocolException;
         throw TProtocolException(TProtocolException::INVALID_DATA);
       }
-      MegasearchService_DeleteTable_presult result;
+      MilvusService_DeleteTable_presult result;
       result.read(iprot_);
       iprot_->readMessageEnd();
       iprot_->getTransport()->readEnd();
@@ -2972,19 +2972,19 @@ void MegasearchServiceConcurrentClient::recv_DeleteTable(const int32_t seqid)
   } // end while(true)
 }
 
-void MegasearchServiceConcurrentClient::AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array)
+void MilvusServiceConcurrentClient::AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array)
 {
   int32_t seqid = send_AddVector(table_name, record_array);
   recv_AddVector(_return, seqid);
 }
 
-int32_t MegasearchServiceConcurrentClient::send_AddVector(const std::string& table_name, const std::vector<RowRecord> & record_array)
+int32_t MilvusServiceConcurrentClient::send_AddVector(const std::string& table_name, const std::vector<RowRecord> & record_array)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
   oprot_->writeMessageBegin("AddVector", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_AddVector_pargs args;
+  MilvusService_AddVector_pargs args;
   args.table_name = &table_name;
   args.record_array = &record_array;
   args.write(oprot_);
@@ -2997,7 +2997,7 @@ int32_t MegasearchServiceConcurrentClient::send_AddVector(const std::string& tab
   return cseqid;
 }
 
-void MegasearchServiceConcurrentClient::recv_AddVector(std::vector<int64_t> & _return, const int32_t seqid)
+void MilvusServiceConcurrentClient::recv_AddVector(std::vector<int64_t> & _return, const int32_t seqid)
 {
 
   int32_t rseqid = 0;
@@ -3035,7 +3035,7 @@ void MegasearchServiceConcurrentClient::recv_AddVector(std::vector<int64_t> & _r
         using ::apache::thrift::protocol::TProtocolException;
         throw TProtocolException(TProtocolException::INVALID_DATA);
       }
-      MegasearchService_AddVector_presult result;
+      MilvusService_AddVector_presult result;
       result.success = &_return;
       result.read(iprot_);
       iprot_->readMessageEnd();
@@ -3061,19 +3061,19 @@ void MegasearchServiceConcurrentClient::recv_AddVector(std::vector<int64_t> & _r
   } // end while(true)
 }
 
-void MegasearchServiceConcurrentClient::SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
+void MilvusServiceConcurrentClient::SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
 {
   int32_t seqid = send_SearchVector(table_name, query_record_array, query_range_array, topk);
   recv_SearchVector(_return, seqid);
 }
 
-int32_t MegasearchServiceConcurrentClient::send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
+int32_t MilvusServiceConcurrentClient::send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
   oprot_->writeMessageBegin("SearchVector", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_SearchVector_pargs args;
+  MilvusService_SearchVector_pargs args;
   args.table_name = &table_name;
   args.query_record_array = &query_record_array;
   args.query_range_array = &query_range_array;
@@ -3088,7 +3088,7 @@ int32_t MegasearchServiceConcurrentClient::send_SearchVector(const std::string& 
   return cseqid;
 }
 
-void MegasearchServiceConcurrentClient::recv_SearchVector(std::vector<TopKQueryResult> & _return, const int32_t seqid)
+void MilvusServiceConcurrentClient::recv_SearchVector(std::vector<TopKQueryResult> & _return, const int32_t seqid)
 {
 
   int32_t rseqid = 0;
@@ -3126,7 +3126,7 @@ void MegasearchServiceConcurrentClient::recv_SearchVector(std::vector<TopKQueryR
         using ::apache::thrift::protocol::TProtocolException;
         throw TProtocolException(TProtocolException::INVALID_DATA);
       }
-      MegasearchService_SearchVector_presult result;
+      MilvusService_SearchVector_presult result;
       result.success = &_return;
       result.read(iprot_);
       iprot_->readMessageEnd();
@@ -3152,19 +3152,19 @@ void MegasearchServiceConcurrentClient::recv_SearchVector(std::vector<TopKQueryR
   } // end while(true)
 }
 
-void MegasearchServiceConcurrentClient::DescribeTable(TableSchema& _return, const std::string& table_name)
+void MilvusServiceConcurrentClient::DescribeTable(TableSchema& _return, const std::string& table_name)
 {
   int32_t seqid = send_DescribeTable(table_name);
   recv_DescribeTable(_return, seqid);
 }
 
-int32_t MegasearchServiceConcurrentClient::send_DescribeTable(const std::string& table_name)
+int32_t MilvusServiceConcurrentClient::send_DescribeTable(const std::string& table_name)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
   oprot_->writeMessageBegin("DescribeTable", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_DescribeTable_pargs args;
+  MilvusService_DescribeTable_pargs args;
   args.table_name = &table_name;
   args.write(oprot_);
 
@@ -3176,7 +3176,7 @@ int32_t MegasearchServiceConcurrentClient::send_DescribeTable(const std::string&
   return cseqid;
 }
 
-void MegasearchServiceConcurrentClient::recv_DescribeTable(TableSchema& _return, const int32_t seqid)
+void MilvusServiceConcurrentClient::recv_DescribeTable(TableSchema& _return, const int32_t seqid)
 {
 
   int32_t rseqid = 0;
@@ -3214,7 +3214,7 @@ void MegasearchServiceConcurrentClient::recv_DescribeTable(TableSchema& _return,
         using ::apache::thrift::protocol::TProtocolException;
         throw TProtocolException(TProtocolException::INVALID_DATA);
       }
-      MegasearchService_DescribeTable_presult result;
+      MilvusService_DescribeTable_presult result;
       result.success = &_return;
       result.read(iprot_);
       iprot_->readMessageEnd();
@@ -3240,19 +3240,19 @@ void MegasearchServiceConcurrentClient::recv_DescribeTable(TableSchema& _return,
   } // end while(true)
 }
 
-int64_t MegasearchServiceConcurrentClient::GetTableRowCount(const std::string& table_name)
+int64_t MilvusServiceConcurrentClient::GetTableRowCount(const std::string& table_name)
 {
   int32_t seqid = send_GetTableRowCount(table_name);
   return recv_GetTableRowCount(seqid);
 }
 
-int32_t MegasearchServiceConcurrentClient::send_GetTableRowCount(const std::string& table_name)
+int32_t MilvusServiceConcurrentClient::send_GetTableRowCount(const std::string& table_name)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
   oprot_->writeMessageBegin("GetTableRowCount", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_GetTableRowCount_pargs args;
+  MilvusService_GetTableRowCount_pargs args;
   args.table_name = &table_name;
   args.write(oprot_);
 
@@ -3264,7 +3264,7 @@ int32_t MegasearchServiceConcurrentClient::send_GetTableRowCount(const std::stri
   return cseqid;
 }
 
-int64_t MegasearchServiceConcurrentClient::recv_GetTableRowCount(const int32_t seqid)
+int64_t MilvusServiceConcurrentClient::recv_GetTableRowCount(const int32_t seqid)
 {
 
   int32_t rseqid = 0;
@@ -3303,7 +3303,7 @@ int64_t MegasearchServiceConcurrentClient::recv_GetTableRowCount(const int32_t s
         throw TProtocolException(TProtocolException::INVALID_DATA);
       }
       int64_t _return;
-      MegasearchService_GetTableRowCount_presult result;
+      MilvusService_GetTableRowCount_presult result;
       result.success = &_return;
       result.read(iprot_);
       iprot_->readMessageEnd();
@@ -3328,19 +3328,19 @@ int64_t MegasearchServiceConcurrentClient::recv_GetTableRowCount(const int32_t s
   } // end while(true)
 }
 
-void MegasearchServiceConcurrentClient::ShowTables(std::vector<std::string> & _return)
+void MilvusServiceConcurrentClient::ShowTables(std::vector<std::string> & _return)
 {
   int32_t seqid = send_ShowTables();
   recv_ShowTables(_return, seqid);
 }
 
-int32_t MegasearchServiceConcurrentClient::send_ShowTables()
+int32_t MilvusServiceConcurrentClient::send_ShowTables()
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
   oprot_->writeMessageBegin("ShowTables", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_ShowTables_pargs args;
+  MilvusService_ShowTables_pargs args;
   args.write(oprot_);
 
   oprot_->writeMessageEnd();
@@ -3351,7 +3351,7 @@ int32_t MegasearchServiceConcurrentClient::send_ShowTables()
   return cseqid;
 }
 
-void MegasearchServiceConcurrentClient::recv_ShowTables(std::vector<std::string> & _return, const int32_t seqid)
+void MilvusServiceConcurrentClient::recv_ShowTables(std::vector<std::string> & _return, const int32_t seqid)
 {
 
   int32_t rseqid = 0;
@@ -3389,7 +3389,7 @@ void MegasearchServiceConcurrentClient::recv_ShowTables(std::vector<std::string>
         using ::apache::thrift::protocol::TProtocolException;
         throw TProtocolException(TProtocolException::INVALID_DATA);
       }
-      MegasearchService_ShowTables_presult result;
+      MilvusService_ShowTables_presult result;
       result.success = &_return;
       result.read(iprot_);
       iprot_->readMessageEnd();
@@ -3415,19 +3415,19 @@ void MegasearchServiceConcurrentClient::recv_ShowTables(std::vector<std::string>
   } // end while(true)
 }
 
-void MegasearchServiceConcurrentClient::Ping(std::string& _return, const std::string& cmd)
+void MilvusServiceConcurrentClient::Ping(std::string& _return, const std::string& cmd)
 {
   int32_t seqid = send_Ping(cmd);
   recv_Ping(_return, seqid);
 }
 
-int32_t MegasearchServiceConcurrentClient::send_Ping(const std::string& cmd)
+int32_t MilvusServiceConcurrentClient::send_Ping(const std::string& cmd)
 {
   int32_t cseqid = this->sync_.generateSeqId();
   ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
   oprot_->writeMessageBegin("Ping", ::apache::thrift::protocol::T_CALL, cseqid);
 
-  MegasearchService_Ping_pargs args;
+  MilvusService_Ping_pargs args;
   args.cmd = &cmd;
   args.write(oprot_);
 
@@ -3439,7 +3439,7 @@ int32_t MegasearchServiceConcurrentClient::send_Ping(const std::string& cmd)
   return cseqid;
 }
 
-void MegasearchServiceConcurrentClient::recv_Ping(std::string& _return, const int32_t seqid)
+void MilvusServiceConcurrentClient::recv_Ping(std::string& _return, const int32_t seqid)
 {
 
   int32_t rseqid = 0;
@@ -3477,7 +3477,7 @@ void MegasearchServiceConcurrentClient::recv_Ping(std::string& _return, const in
         using ::apache::thrift::protocol::TProtocolException;
         throw TProtocolException(TProtocolException::INVALID_DATA);
       }
-      MegasearchService_Ping_presult result;
+      MilvusService_Ping_presult result;
       result.success = &_return;
       result.read(iprot_);
       iprot_->readMessageEnd();

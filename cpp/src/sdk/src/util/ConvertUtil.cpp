@@ -8,15 +8,15 @@
 
 #include <map>
 
-namespace megasearch {
+namespace milvus {
 
 static const std::string INDEX_RAW = "raw";
 static const std::string INDEX_IVFFLAT = "ivfflat";
 
-std::string ConvertUtil::IndexType2Str(megasearch::IndexType index) {
-    static const std::map<megasearch::IndexType, std::string> s_index2str = {
-            {megasearch::IndexType::cpu_idmap, INDEX_RAW},
-            {megasearch::IndexType::gpu_ivfflat, INDEX_IVFFLAT}
+std::string ConvertUtil::IndexType2Str(IndexType index) {
+    static const std::map<IndexType, std::string> s_index2str = {
+            {IndexType::cpu_idmap, INDEX_RAW},
+            {IndexType::gpu_ivfflat, INDEX_IVFFLAT}
     };
 
     const auto& iter = s_index2str.find(index);
@@ -27,10 +27,10 @@ std::string ConvertUtil::IndexType2Str(megasearch::IndexType index) {
     return iter->second;
 }
 
-megasearch::IndexType ConvertUtil::Str2IndexType(const std::string& type) {
-    static const std::map<std::string, megasearch::IndexType> s_str2index = {
-            {INDEX_RAW, megasearch::IndexType::cpu_idmap},
-            {INDEX_IVFFLAT, megasearch::IndexType::gpu_ivfflat}
+IndexType ConvertUtil::Str2IndexType(const std::string& type) {
+    static const std::map<std::string, IndexType> s_str2index = {
+            {INDEX_RAW, IndexType::cpu_idmap},
+            {INDEX_IVFFLAT, IndexType::gpu_ivfflat}
     };
 
     const auto& iter = s_str2index.find(type);

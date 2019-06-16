@@ -3,12 +3,13 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "MegasearchServer.h"
-#include "MegasearchHandler.h"
-#include "megasearch_types.h"
-#include "megasearch_constants.h"
+#include "MilvusServer.h"
+#include "RequestHandler.h"
 #include "ServerConfig.h"
-#include "MegasearchThreadPoolServer.h"
+#include "ThreadPoolServer.h"
+
+#include "milvus_types.h"
+#include "milvus_constants.h"
 
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/protocol/TJSONProtocol.h>
@@ -26,7 +27,7 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-using namespace megasearch::thrift;
+using namespace ::milvus::thrift;
 using namespace ::apache::thrift;
 using namespace ::apache::thrift::protocol;
 using namespace ::apache::thrift::transport;
@@ -36,7 +37,7 @@ using namespace ::apache::thrift::concurrency;
 static stdcxx::shared_ptr<TServer> s_server;
 
 void
-MegasearchServer::StartService() {
+MilvusServer::StartService() {
     if(s_server != nullptr){
         StopService();
     }
@@ -50,8 +51,8 @@ MegasearchServer::StartService() {
     std::string mode = server_config.GetValue(CONFIG_SERVER_MODE, "thread_pool");
 
     try {
-        stdcxx::shared_ptr<MegasearchServiceHandler> handler(new MegasearchServiceHandler());
-        stdcxx::shared_ptr<TProcessor> processor(new MegasearchServiceProcessor(handler));
+        stdcxx::shared_ptr<RequestHandler> handler(new RequestHandler());
+        stdcxx::shared_ptr<TProcessor> processor(new MilvusServiceProcessor(handler));
         stdcxx::shared_ptr<TServerTransport> server_transport(new TServerSocket(address, port));
         stdcxx::shared_ptr<TTransportFactory> transport_factory(new TBufferedTransportFactory());
 
@@ -77,7 +78,7 @@ MegasearchServer::StartService() {
             threadManager->threadFactory(threadFactory);
             threadManager->start();
 
-            s_server.reset(new MegasearchThreadPoolServer(processor,
+            s_server.reset(new ThreadPoolServer(processor,
                                                  server_transport,
                                                  transport_factory,
                                                  protocol_factory,
@@ -93,7 +94,7 @@ MegasearchServer::StartService() {
 }
 
 void
-MegasearchServer::StopService() {
+MilvusServer::StopService() {
     auto stop_server_worker = [&]{
         if(s_server != nullptr) {
             s_server->stop();
