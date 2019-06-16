@@ -40,9 +40,9 @@ struct DBMetaOptions {
 
 struct Options {
     Options();
-    uint16_t  memory_sync_interval = 1;
+    uint16_t  memory_sync_interval = 1;             //unit: second
     uint16_t  merge_trigger_number = 2;
-    size_t  index_trigger_size = 1024*1024*1024;
+    size_t  index_trigger_size = 1024*1024*1024;    //unit: byte
     Env* env;
     DBMetaOptions meta;
 }; // Options
