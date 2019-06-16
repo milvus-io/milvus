@@ -455,7 +455,8 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
                                                          &TableFileSchema::file_id_,
                                                          &TableFileSchema::file_type_,
                                                          &TableFileSchema::size_,
-                                                         &TableFileSchema::date_),
+                                                         &TableFileSchema::date_,
+                                                         &TableFileSchema::engine_type_),
                                                  where(c(&TableFileSchema::table_id_) == table_id and
                                                      in(&TableFileSchema::date_, partition) and
                                                      (c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW or
@@ -482,6 +483,7 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
                 table_file.file_type_ = std::get<3>(file);
                 table_file.size_ = std::get<4>(file);
                 table_file.date_ = std::get<5>(file);
+                table_file.engine_type_ = std::get<6>(file);
                 table_file.dimension_ = table_schema.dimension_;
                 GetTableFilePath(table_file);
                 auto dateItr = files.find(table_file.date_);

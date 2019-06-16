@@ -8,15 +8,15 @@
 #include <cstdint>
 #include <string>
 
-#include "MegasearchService.h"
+#include "MilvusService.h"
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 
-class MegasearchServiceHandler : virtual public megasearch::thrift::MegasearchServiceIf {
+class RequestHandler : virtual public ::milvus::thrift::MilvusServiceIf {
 public:
-    MegasearchServiceHandler();
+    RequestHandler();
 
     /**
    * @brief Create table method
@@ -28,7 +28,7 @@ public:
    *
    * @param param
    */
-    void CreateTable(const megasearch::thrift::TableSchema& param);
+    void CreateTable(const ::milvus::thrift::TableSchema& param);
 
     /**
      * @brief Delete table method
@@ -57,7 +57,7 @@ public:
      */
     void AddVector(std::vector<int64_t> & _return,
             const std::string& table_name,
-            const std::vector<megasearch::thrift::RowRecord> & record_array);
+            const std::vector<::milvus::thrift::RowRecord> & record_array);
 
     /**
      * @brief Query vector
@@ -76,10 +76,10 @@ public:
      * @param query_range_array
      * @param topk
      */
-    void SearchVector(std::vector<megasearch::thrift::TopKQueryResult> & _return,
+    void SearchVector(std::vector<::milvus::thrift::TopKQueryResult> & _return,
             const std::string& table_name,
-            const std::vector<megasearch::thrift::RowRecord> & query_record_array,
-            const std::vector<megasearch::thrift::Range> & query_range_array,
+            const std::vector<::milvus::thrift::RowRecord> & query_record_array,
+            const std::vector<::milvus::thrift::Range> & query_range_array,
             const int64_t topk);
 
     /**
@@ -93,7 +93,7 @@ public:
      *
      * @param table_name
      */
-    void DescribeTable(megasearch::thrift::TableSchema& _return, const std::string& table_name);
+    void DescribeTable(::milvus::thrift::TableSchema& _return, const std::string& table_name);
 
     /**
      * @brief Get table row count

@@ -1,7 +1,7 @@
 server_config:
   address: 0.0.0.0
   port: 33001
-  transfer_protocol: binary    #optional: binary, compact, json
+  transfer_protocol: binary   #optional: binary, compact, json
   server_mode: thread_pool    #optional: simple, thread_pool
   gpu_index: 0                #which gpu to be used
 
@@ -11,9 +11,18 @@ db_config:
   db_flush_interval: 5              #unit: second
   idmapper_max_open_file: 128
 
+metric_config:
+  is_startup: true # true is on, false is off
+  collector: prometheus # prometheus, now we only have prometheus
+  prometheus_config:
+    collect_type: pull # pull means prometheus pull the message from server, push means server push metric to push gateway
+    port: 8080
+    push_gateway_ip_address: 127.0.0.1
+    push_gateway_port: 9091
+
 license_config:
   license_path: "/tmp/system.license"
 
 cache_config:
-    cpu_cache_capacity: 16   # unit: GB
-    gpu_cache_capacity:  2   # unit: GB
+  cpu_cache_capacity: 16   # unit: GB
+  gpu_cache_capacity:  2   # unit: GB

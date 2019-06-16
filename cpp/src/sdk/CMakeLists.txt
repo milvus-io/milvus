@@ -14,19 +14,19 @@ include_directories(/usr/include)
 include_directories(${CMAKE_SOURCE_DIR}/src/thrift/gen-cpp)
 
 set(service_files
-        ${CMAKE_SOURCE_DIR}/src/thrift/gen-cpp/MegasearchService.cpp
-        ${CMAKE_SOURCE_DIR}/src/thrift/gen-cpp/megasearch_constants.cpp
-        ${CMAKE_SOURCE_DIR}/src/thrift/gen-cpp/megasearch_types.cpp
+        ${CMAKE_SOURCE_DIR}/src/thrift/gen-cpp/MilvusService.cpp
+        ${CMAKE_SOURCE_DIR}/src/thrift/gen-cpp/milvus_constants.cpp
+        ${CMAKE_SOURCE_DIR}/src/thrift/gen-cpp/milvus_types.cpp
         )
 
-add_library(megasearch_sdk STATIC
+add_library(milvus_sdk STATIC
         ${interface_files}
         ${client_files}
         ${util_files}
         ${service_files}
         )
 
-target_link_libraries(megasearch_sdk
+target_link_libraries(milvus_sdk
         ${third_party_libs}
         )
 

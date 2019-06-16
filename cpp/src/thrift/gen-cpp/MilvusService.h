@@ -4,23 +4,23 @@
  * DO NOT EDIT UNLESS YOU ARE SURE THAT YOU KNOW WHAT YOU ARE DOING
  *  @generated
  */
-#ifndef MegasearchService_H
-#define MegasearchService_H
+#ifndef MilvusService_H
+#define MilvusService_H
 
 #include <thrift/TDispatchProcessor.h>
 #include <thrift/async/TConcurrentClientSyncInfo.h>
-#include "megasearch_types.h"
+#include "milvus_types.h"
 
-namespace megasearch { namespace thrift {
+namespace milvus { namespace thrift {
 
 #ifdef _MSC_VER
   #pragma warning( push )
   #pragma warning (disable : 4250 ) //inheriting methods via dominance 
 #endif
 
-class MegasearchServiceIf {
+class MilvusServiceIf {
  public:
-  virtual ~MegasearchServiceIf() {}
+  virtual ~MilvusServiceIf() {}
 
   /**
    * @brief Create table method
@@ -128,33 +128,33 @@ class MegasearchServiceIf {
   virtual void Ping(std::string& _return, const std::string& cmd) = 0;
 };
 
-class MegasearchServiceIfFactory {
+class MilvusServiceIfFactory {
  public:
-  typedef MegasearchServiceIf Handler;
+  typedef MilvusServiceIf Handler;
 
-  virtual ~MegasearchServiceIfFactory() {}
+  virtual ~MilvusServiceIfFactory() {}
 
-  virtual MegasearchServiceIf* getHandler(const ::apache::thrift::TConnectionInfo& connInfo) = 0;
-  virtual void releaseHandler(MegasearchServiceIf* /* handler */) = 0;
+  virtual MilvusServiceIf* getHandler(const ::apache::thrift::TConnectionInfo& connInfo) = 0;
+  virtual void releaseHandler(MilvusServiceIf* /* handler */) = 0;
 };
 
-class MegasearchServiceIfSingletonFactory : virtual public MegasearchServiceIfFactory {
+class MilvusServiceIfSingletonFactory : virtual public MilvusServiceIfFactory {
  public:
-  MegasearchServiceIfSingletonFactory(const ::apache::thrift::stdcxx::shared_ptr<MegasearchServiceIf>& iface) : iface_(iface) {}
-  virtual ~MegasearchServiceIfSingletonFactory() {}
+  MilvusServiceIfSingletonFactory(const ::apache::thrift::stdcxx::shared_ptr<MilvusServiceIf>& iface) : iface_(iface) {}
+  virtual ~MilvusServiceIfSingletonFactory() {}
 
-  virtual MegasearchServiceIf* getHandler(const ::apache::thrift::TConnectionInfo&) {
+  virtual MilvusServiceIf* getHandler(const ::apache::thrift::TConnectionInfo&) {
     return iface_.get();
   }
-  virtual void releaseHandler(MegasearchServiceIf* /* handler */) {}
+  virtual void releaseHandler(MilvusServiceIf* /* handler */) {}
 
  protected:
-  ::apache::thrift::stdcxx::shared_ptr<MegasearchServiceIf> iface_;
+  ::apache::thrift::stdcxx::shared_ptr<MilvusServiceIf> iface_;
 };
 
-class MegasearchServiceNull : virtual public MegasearchServiceIf {
+class MilvusServiceNull : virtual public MilvusServiceIf {
  public:
-  virtual ~MegasearchServiceNull() {}
+  virtual ~MilvusServiceNull() {}
   void CreateTable(const TableSchema& /* param */) {
     return;
   }
@@ -182,37 +182,37 @@ class MegasearchServiceNull : virtual public MegasearchServiceIf {
   }
 };
 
-typedef struct _MegasearchService_CreateTable_args__isset {
-  _MegasearchService_CreateTable_args__isset() : param(false) {}
+typedef struct _MilvusService_CreateTable_args__isset {
+  _MilvusService_CreateTable_args__isset() : param(false) {}
   bool param :1;
-} _MegasearchService_CreateTable_args__isset;
+} _MilvusService_CreateTable_args__isset;
 
-class MegasearchService_CreateTable_args {
+class MilvusService_CreateTable_args {
  public:
 
-  MegasearchService_CreateTable_args(const MegasearchService_CreateTable_args&);
-  MegasearchService_CreateTable_args& operator=(const MegasearchService_CreateTable_args&);
-  MegasearchService_CreateTable_args() {
+  MilvusService_CreateTable_args(const MilvusService_CreateTable_args&);
+  MilvusService_CreateTable_args& operator=(const MilvusService_CreateTable_args&);
+  MilvusService_CreateTable_args() {
   }
 
-  virtual ~MegasearchService_CreateTable_args() throw();
+  virtual ~MilvusService_CreateTable_args() throw();
   TableSchema param;
 
-  _MegasearchService_CreateTable_args__isset __isset;
+  _MilvusService_CreateTable_args__isset __isset;
 
   void __set_param(const TableSchema& val);
 
-  bool operator == (const MegasearchService_CreateTable_args & rhs) const
+  bool operator == (const MilvusService_CreateTable_args & rhs) const
   {
     if (!(param == rhs.param))
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_CreateTable_args &rhs) const {
+  bool operator != (const MilvusService_CreateTable_args &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_CreateTable_args & ) const;
+  bool operator < (const MilvusService_CreateTable_args & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -220,103 +220,103 @@ class MegasearchService_CreateTable_args {
 };
 
 
-class MegasearchService_CreateTable_pargs {
+class MilvusService_CreateTable_pargs {
  public:
 
 
-  virtual ~MegasearchService_CreateTable_pargs() throw();
+  virtual ~MilvusService_CreateTable_pargs() throw();
   const TableSchema* param;
 
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_CreateTable_result__isset {
-  _MegasearchService_CreateTable_result__isset() : e(false) {}
+typedef struct _MilvusService_CreateTable_result__isset {
+  _MilvusService_CreateTable_result__isset() : e(false) {}
   bool e :1;
-} _MegasearchService_CreateTable_result__isset;
+} _MilvusService_CreateTable_result__isset;
 
-class MegasearchService_CreateTable_result {
+class MilvusService_CreateTable_result {
  public:
 
-  MegasearchService_CreateTable_result(const MegasearchService_CreateTable_result&);
-  MegasearchService_CreateTable_result& operator=(const MegasearchService_CreateTable_result&);
-  MegasearchService_CreateTable_result() {
+  MilvusService_CreateTable_result(const MilvusService_CreateTable_result&);
+  MilvusService_CreateTable_result& operator=(const MilvusService_CreateTable_result&);
+  MilvusService_CreateTable_result() {
   }
 
-  virtual ~MegasearchService_CreateTable_result() throw();
+  virtual ~MilvusService_CreateTable_result() throw();
   Exception e;
 
-  _MegasearchService_CreateTable_result__isset __isset;
+  _MilvusService_CreateTable_result__isset __isset;
 
   void __set_e(const Exception& val);
 
-  bool operator == (const MegasearchService_CreateTable_result & rhs) const
+  bool operator == (const MilvusService_CreateTable_result & rhs) const
   {
     if (!(e == rhs.e))
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_CreateTable_result &rhs) const {
+  bool operator != (const MilvusService_CreateTable_result &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_CreateTable_result & ) const;
+  bool operator < (const MilvusService_CreateTable_result & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_CreateTable_presult__isset {
-  _MegasearchService_CreateTable_presult__isset() : e(false) {}
+typedef struct _MilvusService_CreateTable_presult__isset {
+  _MilvusService_CreateTable_presult__isset() : e(false) {}
   bool e :1;
-} _MegasearchService_CreateTable_presult__isset;
+} _MilvusService_CreateTable_presult__isset;
 
-class MegasearchService_CreateTable_presult {
+class MilvusService_CreateTable_presult {
  public:
 
 
-  virtual ~MegasearchService_CreateTable_presult() throw();
+  virtual ~MilvusService_CreateTable_presult() throw();
   Exception e;
 
-  _MegasearchService_CreateTable_presult__isset __isset;
+  _MilvusService_CreateTable_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
 };
 
-typedef struct _MegasearchService_DeleteTable_args__isset {
-  _MegasearchService_DeleteTable_args__isset() : table_name(false) {}
+typedef struct _MilvusService_DeleteTable_args__isset {
+  _MilvusService_DeleteTable_args__isset() : table_name(false) {}
   bool table_name :1;
-} _MegasearchService_DeleteTable_args__isset;
+} _MilvusService_DeleteTable_args__isset;
 
-class MegasearchService_DeleteTable_args {
+class MilvusService_DeleteTable_args {
  public:
 
-  MegasearchService_DeleteTable_args(const MegasearchService_DeleteTable_args&);
-  MegasearchService_DeleteTable_args& operator=(const MegasearchService_DeleteTable_args&);
-  MegasearchService_DeleteTable_args() : table_name() {
+  MilvusService_DeleteTable_args(const MilvusService_DeleteTable_args&);
+  MilvusService_DeleteTable_args& operator=(const MilvusService_DeleteTable_args&);
+  MilvusService_DeleteTable_args() : table_name() {
   }
 
-  virtual ~MegasearchService_DeleteTable_args() throw();
+  virtual ~MilvusService_DeleteTable_args() throw();
   std::string table_name;
 
-  _MegasearchService_DeleteTable_args__isset __isset;
+  _MilvusService_DeleteTable_args__isset __isset;
 
   void __set_table_name(const std::string& val);
 
-  bool operator == (const MegasearchService_DeleteTable_args & rhs) const
+  bool operator == (const MilvusService_DeleteTable_args & rhs) const
   {
     if (!(table_name == rhs.table_name))
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_DeleteTable_args &rhs) const {
+  bool operator != (const MilvusService_DeleteTable_args &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_DeleteTable_args & ) const;
+  bool operator < (const MilvusService_DeleteTable_args & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -324,97 +324,97 @@ class MegasearchService_DeleteTable_args {
 };
 
 
-class MegasearchService_DeleteTable_pargs {
+class MilvusService_DeleteTable_pargs {
  public:
 
 
-  virtual ~MegasearchService_DeleteTable_pargs() throw();
+  virtual ~MilvusService_DeleteTable_pargs() throw();
   const std::string* table_name;
 
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_DeleteTable_result__isset {
-  _MegasearchService_DeleteTable_result__isset() : e(false) {}
+typedef struct _MilvusService_DeleteTable_result__isset {
+  _MilvusService_DeleteTable_result__isset() : e(false) {}
   bool e :1;
-} _MegasearchService_DeleteTable_result__isset;
+} _MilvusService_DeleteTable_result__isset;
 
-class MegasearchService_DeleteTable_result {
+class MilvusService_DeleteTable_result {
  public:
 
-  MegasearchService_DeleteTable_result(const MegasearchService_DeleteTable_result&);
-  MegasearchService_DeleteTable_result& operator=(const MegasearchService_DeleteTable_result&);
-  MegasearchService_DeleteTable_result() {
+  MilvusService_DeleteTable_result(const MilvusService_DeleteTable_result&);
+  MilvusService_DeleteTable_result& operator=(const MilvusService_DeleteTable_result&);
+  MilvusService_DeleteTable_result() {
   }
 
-  virtual ~MegasearchService_DeleteTable_result() throw();
+  virtual ~MilvusService_DeleteTable_result() throw();
   Exception e;
 
-  _MegasearchService_DeleteTable_result__isset __isset;
+  _MilvusService_DeleteTable_result__isset __isset;
 
   void __set_e(const Exception& val);
 
-  bool operator == (const MegasearchService_DeleteTable_result & rhs) const
+  bool operator == (const MilvusService_DeleteTable_result & rhs) const
   {
     if (!(e == rhs.e))
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_DeleteTable_result &rhs) const {
+  bool operator != (const MilvusService_DeleteTable_result &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_DeleteTable_result & ) const;
+  bool operator < (const MilvusService_DeleteTable_result & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_DeleteTable_presult__isset {
-  _MegasearchService_DeleteTable_presult__isset() : e(false) {}
+typedef struct _MilvusService_DeleteTable_presult__isset {
+  _MilvusService_DeleteTable_presult__isset() : e(false) {}
   bool e :1;
-} _MegasearchService_DeleteTable_presult__isset;
+} _MilvusService_DeleteTable_presult__isset;
 
-class MegasearchService_DeleteTable_presult {
+class MilvusService_DeleteTable_presult {
  public:
 
 
-  virtual ~MegasearchService_DeleteTable_presult() throw();
+  virtual ~MilvusService_DeleteTable_presult() throw();
   Exception e;
 
-  _MegasearchService_DeleteTable_presult__isset __isset;
+  _MilvusService_DeleteTable_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
 };
 
-typedef struct _MegasearchService_AddVector_args__isset {
-  _MegasearchService_AddVector_args__isset() : table_name(false), record_array(false) {}
+typedef struct _MilvusService_AddVector_args__isset {
+  _MilvusService_AddVector_args__isset() : table_name(false), record_array(false) {}
   bool table_name :1;
   bool record_array :1;
-} _MegasearchService_AddVector_args__isset;
+} _MilvusService_AddVector_args__isset;
 
-class MegasearchService_AddVector_args {
+class MilvusService_AddVector_args {
  public:
 
-  MegasearchService_AddVector_args(const MegasearchService_AddVector_args&);
-  MegasearchService_AddVector_args& operator=(const MegasearchService_AddVector_args&);
-  MegasearchService_AddVector_args() : table_name() {
+  MilvusService_AddVector_args(const MilvusService_AddVector_args&);
+  MilvusService_AddVector_args& operator=(const MilvusService_AddVector_args&);
+  MilvusService_AddVector_args() : table_name() {
   }
 
-  virtual ~MegasearchService_AddVector_args() throw();
+  virtual ~MilvusService_AddVector_args() throw();
   std::string table_name;
   std::vector<RowRecord>  record_array;
 
-  _MegasearchService_AddVector_args__isset __isset;
+  _MilvusService_AddVector_args__isset __isset;
 
   void __set_table_name(const std::string& val);
 
   void __set_record_array(const std::vector<RowRecord> & val);
 
-  bool operator == (const MegasearchService_AddVector_args & rhs) const
+  bool operator == (const MilvusService_AddVector_args & rhs) const
   {
     if (!(table_name == rhs.table_name))
       return false;
@@ -422,11 +422,11 @@ class MegasearchService_AddVector_args {
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_AddVector_args &rhs) const {
+  bool operator != (const MilvusService_AddVector_args &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_AddVector_args & ) const;
+  bool operator < (const MilvusService_AddVector_args & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -434,11 +434,11 @@ class MegasearchService_AddVector_args {
 };
 
 
-class MegasearchService_AddVector_pargs {
+class MilvusService_AddVector_pargs {
  public:
 
 
-  virtual ~MegasearchService_AddVector_pargs() throw();
+  virtual ~MilvusService_AddVector_pargs() throw();
   const std::string* table_name;
   const std::vector<RowRecord> * record_array;
 
@@ -446,31 +446,31 @@ class MegasearchService_AddVector_pargs {
 
 };
 
-typedef struct _MegasearchService_AddVector_result__isset {
-  _MegasearchService_AddVector_result__isset() : success(false), e(false) {}
+typedef struct _MilvusService_AddVector_result__isset {
+  _MilvusService_AddVector_result__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_AddVector_result__isset;
+} _MilvusService_AddVector_result__isset;
 
-class MegasearchService_AddVector_result {
+class MilvusService_AddVector_result {
  public:
 
-  MegasearchService_AddVector_result(const MegasearchService_AddVector_result&);
-  MegasearchService_AddVector_result& operator=(const MegasearchService_AddVector_result&);
-  MegasearchService_AddVector_result() {
+  MilvusService_AddVector_result(const MilvusService_AddVector_result&);
+  MilvusService_AddVector_result& operator=(const MilvusService_AddVector_result&);
+  MilvusService_AddVector_result() {
   }
 
-  virtual ~MegasearchService_AddVector_result() throw();
+  virtual ~MilvusService_AddVector_result() throw();
   std::vector<int64_t>  success;
   Exception e;
 
-  _MegasearchService_AddVector_result__isset __isset;
+  _MilvusService_AddVector_result__isset __isset;
 
   void __set_success(const std::vector<int64_t> & val);
 
   void __set_e(const Exception& val);
 
-  bool operator == (const MegasearchService_AddVector_result & rhs) const
+  bool operator == (const MilvusService_AddVector_result & rhs) const
   {
     if (!(success == rhs.success))
       return false;
@@ -478,60 +478,60 @@ class MegasearchService_AddVector_result {
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_AddVector_result &rhs) const {
+  bool operator != (const MilvusService_AddVector_result &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_AddVector_result & ) const;
+  bool operator < (const MilvusService_AddVector_result & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_AddVector_presult__isset {
-  _MegasearchService_AddVector_presult__isset() : success(false), e(false) {}
+typedef struct _MilvusService_AddVector_presult__isset {
+  _MilvusService_AddVector_presult__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_AddVector_presult__isset;
+} _MilvusService_AddVector_presult__isset;
 
-class MegasearchService_AddVector_presult {
+class MilvusService_AddVector_presult {
  public:
 
 
-  virtual ~MegasearchService_AddVector_presult() throw();
+  virtual ~MilvusService_AddVector_presult() throw();
   std::vector<int64_t> * success;
   Exception e;
 
-  _MegasearchService_AddVector_presult__isset __isset;
+  _MilvusService_AddVector_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
 };
 
-typedef struct _MegasearchService_SearchVector_args__isset {
-  _MegasearchService_SearchVector_args__isset() : table_name(false), query_record_array(false), query_range_array(false), topk(false) {}
+typedef struct _MilvusService_SearchVector_args__isset {
+  _MilvusService_SearchVector_args__isset() : table_name(false), query_record_array(false), query_range_array(false), topk(false) {}
   bool table_name :1;
   bool query_record_array :1;
   bool query_range_array :1;
   bool topk :1;
-} _MegasearchService_SearchVector_args__isset;
+} _MilvusService_SearchVector_args__isset;
 
-class MegasearchService_SearchVector_args {
+class MilvusService_SearchVector_args {
  public:
 
-  MegasearchService_SearchVector_args(const MegasearchService_SearchVector_args&);
-  MegasearchService_SearchVector_args& operator=(const MegasearchService_SearchVector_args&);
-  MegasearchService_SearchVector_args() : table_name(), topk(0) {
+  MilvusService_SearchVector_args(const MilvusService_SearchVector_args&);
+  MilvusService_SearchVector_args& operator=(const MilvusService_SearchVector_args&);
+  MilvusService_SearchVector_args() : table_name(), topk(0) {
   }
 
-  virtual ~MegasearchService_SearchVector_args() throw();
+  virtual ~MilvusService_SearchVector_args() throw();
   std::string table_name;
   std::vector<RowRecord>  query_record_array;
   std::vector<Range>  query_range_array;
   int64_t topk;
 
-  _MegasearchService_SearchVector_args__isset __isset;
+  _MilvusService_SearchVector_args__isset __isset;
 
   void __set_table_name(const std::string& val);
 
@@ -541,7 +541,7 @@ class MegasearchService_SearchVector_args {
 
   void __set_topk(const int64_t val);
 
-  bool operator == (const MegasearchService_SearchVector_args & rhs) const
+  bool operator == (const MilvusService_SearchVector_args & rhs) const
   {
     if (!(table_name == rhs.table_name))
       return false;
@@ -553,11 +553,11 @@ class MegasearchService_SearchVector_args {
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_SearchVector_args &rhs) const {
+  bool operator != (const MilvusService_SearchVector_args &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_SearchVector_args & ) const;
+  bool operator < (const MilvusService_SearchVector_args & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -565,11 +565,11 @@ class MegasearchService_SearchVector_args {
 };
 
 
-class MegasearchService_SearchVector_pargs {
+class MilvusService_SearchVector_pargs {
  public:
 
 
-  virtual ~MegasearchService_SearchVector_pargs() throw();
+  virtual ~MilvusService_SearchVector_pargs() throw();
   const std::string* table_name;
   const std::vector<RowRecord> * query_record_array;
   const std::vector<Range> * query_range_array;
@@ -579,31 +579,31 @@ class MegasearchService_SearchVector_pargs {
 
 };
 
-typedef struct _MegasearchService_SearchVector_result__isset {
-  _MegasearchService_SearchVector_result__isset() : success(false), e(false) {}
+typedef struct _MilvusService_SearchVector_result__isset {
+  _MilvusService_SearchVector_result__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_SearchVector_result__isset;
+} _MilvusService_SearchVector_result__isset;
 
-class MegasearchService_SearchVector_result {
+class MilvusService_SearchVector_result {
  public:
 
-  MegasearchService_SearchVector_result(const MegasearchService_SearchVector_result&);
-  MegasearchService_SearchVector_result& operator=(const MegasearchService_SearchVector_result&);
-  MegasearchService_SearchVector_result() {
+  MilvusService_SearchVector_result(const MilvusService_SearchVector_result&);
+  MilvusService_SearchVector_result& operator=(const MilvusService_SearchVector_result&);
+  MilvusService_SearchVector_result() {
   }
 
-  virtual ~MegasearchService_SearchVector_result() throw();
+  virtual ~MilvusService_SearchVector_result() throw();
   std::vector<TopKQueryResult>  success;
   Exception e;
 
-  _MegasearchService_SearchVector_result__isset __isset;
+  _MilvusService_SearchVector_result__isset __isset;
 
   void __set_success(const std::vector<TopKQueryResult> & val);
 
   void __set_e(const Exception& val);
 
-  bool operator == (const MegasearchService_SearchVector_result & rhs) const
+  bool operator == (const MilvusService_SearchVector_result & rhs) const
   {
     if (!(success == rhs.success))
       return false;
@@ -611,68 +611,68 @@ class MegasearchService_SearchVector_result {
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_SearchVector_result &rhs) const {
+  bool operator != (const MilvusService_SearchVector_result &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_SearchVector_result & ) const;
+  bool operator < (const MilvusService_SearchVector_result & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_SearchVector_presult__isset {
-  _MegasearchService_SearchVector_presult__isset() : success(false), e(false) {}
+typedef struct _MilvusService_SearchVector_presult__isset {
+  _MilvusService_SearchVector_presult__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_SearchVector_presult__isset;
+} _MilvusService_SearchVector_presult__isset;
 
-class MegasearchService_SearchVector_presult {
+class MilvusService_SearchVector_presult {
  public:
 
 
-  virtual ~MegasearchService_SearchVector_presult() throw();
+  virtual ~MilvusService_SearchVector_presult() throw();
   std::vector<TopKQueryResult> * success;
   Exception e;
 
-  _MegasearchService_SearchVector_presult__isset __isset;
+  _MilvusService_SearchVector_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
 };
 
-typedef struct _MegasearchService_DescribeTable_args__isset {
-  _MegasearchService_DescribeTable_args__isset() : table_name(false) {}
+typedef struct _MilvusService_DescribeTable_args__isset {
+  _MilvusService_DescribeTable_args__isset() : table_name(false) {}
   bool table_name :1;
-} _MegasearchService_DescribeTable_args__isset;
+} _MilvusService_DescribeTable_args__isset;
 
-class MegasearchService_DescribeTable_args {
+class MilvusService_DescribeTable_args {
  public:
 
-  MegasearchService_DescribeTable_args(const MegasearchService_DescribeTable_args&);
-  MegasearchService_DescribeTable_args& operator=(const MegasearchService_DescribeTable_args&);
-  MegasearchService_DescribeTable_args() : table_name() {
+  MilvusService_DescribeTable_args(const MilvusService_DescribeTable_args&);
+  MilvusService_DescribeTable_args& operator=(const MilvusService_DescribeTable_args&);
+  MilvusService_DescribeTable_args() : table_name() {
   }
 
-  virtual ~MegasearchService_DescribeTable_args() throw();
+  virtual ~MilvusService_DescribeTable_args() throw();
   std::string table_name;
 
-  _MegasearchService_DescribeTable_args__isset __isset;
+  _MilvusService_DescribeTable_args__isset __isset;
 
   void __set_table_name(const std::string& val);
 
-  bool operator == (const MegasearchService_DescribeTable_args & rhs) const
+  bool operator == (const MilvusService_DescribeTable_args & rhs) const
   {
     if (!(table_name == rhs.table_name))
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_DescribeTable_args &rhs) const {
+  bool operator != (const MilvusService_DescribeTable_args &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_DescribeTable_args & ) const;
+  bool operator < (const MilvusService_DescribeTable_args & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -680,42 +680,42 @@ class MegasearchService_DescribeTable_args {
 };
 
 
-class MegasearchService_DescribeTable_pargs {
+class MilvusService_DescribeTable_pargs {
  public:
 
 
-  virtual ~MegasearchService_DescribeTable_pargs() throw();
+  virtual ~MilvusService_DescribeTable_pargs() throw();
   const std::string* table_name;
 
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_DescribeTable_result__isset {
-  _MegasearchService_DescribeTable_result__isset() : success(false), e(false) {}
+typedef struct _MilvusService_DescribeTable_result__isset {
+  _MilvusService_DescribeTable_result__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_DescribeTable_result__isset;
+} _MilvusService_DescribeTable_result__isset;
 
-class MegasearchService_DescribeTable_result {
+class MilvusService_DescribeTable_result {
  public:
 
-  MegasearchService_DescribeTable_result(const MegasearchService_DescribeTable_result&);
-  MegasearchService_DescribeTable_result& operator=(const MegasearchService_DescribeTable_result&);
-  MegasearchService_DescribeTable_result() {
+  MilvusService_DescribeTable_result(const MilvusService_DescribeTable_result&);
+  MilvusService_DescribeTable_result& operator=(const MilvusService_DescribeTable_result&);
+  MilvusService_DescribeTable_result() {
   }
 
-  virtual ~MegasearchService_DescribeTable_result() throw();
+  virtual ~MilvusService_DescribeTable_result() throw();
   TableSchema success;
   Exception e;
 
-  _MegasearchService_DescribeTable_result__isset __isset;
+  _MilvusService_DescribeTable_result__isset __isset;
 
   void __set_success(const TableSchema& val);
 
   void __set_e(const Exception& val);
 
-  bool operator == (const MegasearchService_DescribeTable_result & rhs) const
+  bool operator == (const MilvusService_DescribeTable_result & rhs) const
   {
     if (!(success == rhs.success))
       return false;
@@ -723,68 +723,68 @@ class MegasearchService_DescribeTable_result {
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_DescribeTable_result &rhs) const {
+  bool operator != (const MilvusService_DescribeTable_result &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_DescribeTable_result & ) const;
+  bool operator < (const MilvusService_DescribeTable_result & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_DescribeTable_presult__isset {
-  _MegasearchService_DescribeTable_presult__isset() : success(false), e(false) {}
+typedef struct _MilvusService_DescribeTable_presult__isset {
+  _MilvusService_DescribeTable_presult__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_DescribeTable_presult__isset;
+} _MilvusService_DescribeTable_presult__isset;
 
-class MegasearchService_DescribeTable_presult {
+class MilvusService_DescribeTable_presult {
  public:
 
 
-  virtual ~MegasearchService_DescribeTable_presult() throw();
+  virtual ~MilvusService_DescribeTable_presult() throw();
   TableSchema* success;
   Exception e;
 
-  _MegasearchService_DescribeTable_presult__isset __isset;
+  _MilvusService_DescribeTable_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
 };
 
-typedef struct _MegasearchService_GetTableRowCount_args__isset {
-  _MegasearchService_GetTableRowCount_args__isset() : table_name(false) {}
+typedef struct _MilvusService_GetTableRowCount_args__isset {
+  _MilvusService_GetTableRowCount_args__isset() : table_name(false) {}
   bool table_name :1;
-} _MegasearchService_GetTableRowCount_args__isset;
+} _MilvusService_GetTableRowCount_args__isset;
 
-class MegasearchService_GetTableRowCount_args {
+class MilvusService_GetTableRowCount_args {
  public:
 
-  MegasearchService_GetTableRowCount_args(const MegasearchService_GetTableRowCount_args&);
-  MegasearchService_GetTableRowCount_args& operator=(const MegasearchService_GetTableRowCount_args&);
-  MegasearchService_GetTableRowCount_args() : table_name() {
+  MilvusService_GetTableRowCount_args(const MilvusService_GetTableRowCount_args&);
+  MilvusService_GetTableRowCount_args& operator=(const MilvusService_GetTableRowCount_args&);
+  MilvusService_GetTableRowCount_args() : table_name() {
   }
 
-  virtual ~MegasearchService_GetTableRowCount_args() throw();
+  virtual ~MilvusService_GetTableRowCount_args() throw();
   std::string table_name;
 
-  _MegasearchService_GetTableRowCount_args__isset __isset;
+  _MilvusService_GetTableRowCount_args__isset __isset;
 
   void __set_table_name(const std::string& val);
 
-  bool operator == (const MegasearchService_GetTableRowCount_args & rhs) const
+  bool operator == (const MilvusService_GetTableRowCount_args & rhs) const
   {
     if (!(table_name == rhs.table_name))
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_GetTableRowCount_args &rhs) const {
+  bool operator != (const MilvusService_GetTableRowCount_args &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_GetTableRowCount_args & ) const;
+  bool operator < (const MilvusService_GetTableRowCount_args & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -792,42 +792,42 @@ class MegasearchService_GetTableRowCount_args {
 };
 
 
-class MegasearchService_GetTableRowCount_pargs {
+class MilvusService_GetTableRowCount_pargs {
  public:
 
 
-  virtual ~MegasearchService_GetTableRowCount_pargs() throw();
+  virtual ~MilvusService_GetTableRowCount_pargs() throw();
   const std::string* table_name;
 
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_GetTableRowCount_result__isset {
-  _MegasearchService_GetTableRowCount_result__isset() : success(false), e(false) {}
+typedef struct _MilvusService_GetTableRowCount_result__isset {
+  _MilvusService_GetTableRowCount_result__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_GetTableRowCount_result__isset;
+} _MilvusService_GetTableRowCount_result__isset;
 
-class MegasearchService_GetTableRowCount_result {
+class MilvusService_GetTableRowCount_result {
  public:
 
-  MegasearchService_GetTableRowCount_result(const MegasearchService_GetTableRowCount_result&);
-  MegasearchService_GetTableRowCount_result& operator=(const MegasearchService_GetTableRowCount_result&);
-  MegasearchService_GetTableRowCount_result() : success(0) {
+  MilvusService_GetTableRowCount_result(const MilvusService_GetTableRowCount_result&);
+  MilvusService_GetTableRowCount_result& operator=(const MilvusService_GetTableRowCount_result&);
+  MilvusService_GetTableRowCount_result() : success(0) {
   }
 
-  virtual ~MegasearchService_GetTableRowCount_result() throw();
+  virtual ~MilvusService_GetTableRowCount_result() throw();
   int64_t success;
   Exception e;
 
-  _MegasearchService_GetTableRowCount_result__isset __isset;
+  _MilvusService_GetTableRowCount_result__isset __isset;
 
   void __set_success(const int64_t val);
 
   void __set_e(const Exception& val);
 
-  bool operator == (const MegasearchService_GetTableRowCount_result & rhs) const
+  bool operator == (const MilvusService_GetTableRowCount_result & rhs) const
   {
     if (!(success == rhs.success))
       return false;
@@ -835,57 +835,57 @@ class MegasearchService_GetTableRowCount_result {
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_GetTableRowCount_result &rhs) const {
+  bool operator != (const MilvusService_GetTableRowCount_result &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_GetTableRowCount_result & ) const;
+  bool operator < (const MilvusService_GetTableRowCount_result & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_GetTableRowCount_presult__isset {
-  _MegasearchService_GetTableRowCount_presult__isset() : success(false), e(false) {}
+typedef struct _MilvusService_GetTableRowCount_presult__isset {
+  _MilvusService_GetTableRowCount_presult__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_GetTableRowCount_presult__isset;
+} _MilvusService_GetTableRowCount_presult__isset;
 
-class MegasearchService_GetTableRowCount_presult {
+class MilvusService_GetTableRowCount_presult {
  public:
 
 
-  virtual ~MegasearchService_GetTableRowCount_presult() throw();
+  virtual ~MilvusService_GetTableRowCount_presult() throw();
   int64_t* success;
   Exception e;
 
-  _MegasearchService_GetTableRowCount_presult__isset __isset;
+  _MilvusService_GetTableRowCount_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
 };
 
 
-class MegasearchService_ShowTables_args {
+class MilvusService_ShowTables_args {
  public:
 
-  MegasearchService_ShowTables_args(const MegasearchService_ShowTables_args&);
-  MegasearchService_ShowTables_args& operator=(const MegasearchService_ShowTables_args&);
-  MegasearchService_ShowTables_args() {
+  MilvusService_ShowTables_args(const MilvusService_ShowTables_args&);
+  MilvusService_ShowTables_args& operator=(const MilvusService_ShowTables_args&);
+  MilvusService_ShowTables_args() {
   }
 
-  virtual ~MegasearchService_ShowTables_args() throw();
+  virtual ~MilvusService_ShowTables_args() throw();
 
-  bool operator == (const MegasearchService_ShowTables_args & /* rhs */) const
+  bool operator == (const MilvusService_ShowTables_args & /* rhs */) const
   {
     return true;
   }
-  bool operator != (const MegasearchService_ShowTables_args &rhs) const {
+  bool operator != (const MilvusService_ShowTables_args &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_ShowTables_args & ) const;
+  bool operator < (const MilvusService_ShowTables_args & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -893,41 +893,41 @@ class MegasearchService_ShowTables_args {
 };
 
 
-class MegasearchService_ShowTables_pargs {
+class MilvusService_ShowTables_pargs {
  public:
 
 
-  virtual ~MegasearchService_ShowTables_pargs() throw();
+  virtual ~MilvusService_ShowTables_pargs() throw();
 
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_ShowTables_result__isset {
-  _MegasearchService_ShowTables_result__isset() : success(false), e(false) {}
+typedef struct _MilvusService_ShowTables_result__isset {
+  _MilvusService_ShowTables_result__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_ShowTables_result__isset;
+} _MilvusService_ShowTables_result__isset;
 
-class MegasearchService_ShowTables_result {
+class MilvusService_ShowTables_result {
  public:
 
-  MegasearchService_ShowTables_result(const MegasearchService_ShowTables_result&);
-  MegasearchService_ShowTables_result& operator=(const MegasearchService_ShowTables_result&);
-  MegasearchService_ShowTables_result() {
+  MilvusService_ShowTables_result(const MilvusService_ShowTables_result&);
+  MilvusService_ShowTables_result& operator=(const MilvusService_ShowTables_result&);
+  MilvusService_ShowTables_result() {
   }
 
-  virtual ~MegasearchService_ShowTables_result() throw();
+  virtual ~MilvusService_ShowTables_result() throw();
   std::vector<std::string>  success;
   Exception e;
 
-  _MegasearchService_ShowTables_result__isset __isset;
+  _MilvusService_ShowTables_result__isset __isset;
 
   void __set_success(const std::vector<std::string> & val);
 
   void __set_e(const Exception& val);
 
-  bool operator == (const MegasearchService_ShowTables_result & rhs) const
+  bool operator == (const MilvusService_ShowTables_result & rhs) const
   {
     if (!(success == rhs.success))
       return false;
@@ -935,68 +935,68 @@ class MegasearchService_ShowTables_result {
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_ShowTables_result &rhs) const {
+  bool operator != (const MilvusService_ShowTables_result &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_ShowTables_result & ) const;
+  bool operator < (const MilvusService_ShowTables_result & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_ShowTables_presult__isset {
-  _MegasearchService_ShowTables_presult__isset() : success(false), e(false) {}
+typedef struct _MilvusService_ShowTables_presult__isset {
+  _MilvusService_ShowTables_presult__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_ShowTables_presult__isset;
+} _MilvusService_ShowTables_presult__isset;
 
-class MegasearchService_ShowTables_presult {
+class MilvusService_ShowTables_presult {
  public:
 
 
-  virtual ~MegasearchService_ShowTables_presult() throw();
+  virtual ~MilvusService_ShowTables_presult() throw();
   std::vector<std::string> * success;
   Exception e;
 
-  _MegasearchService_ShowTables_presult__isset __isset;
+  _MilvusService_ShowTables_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
 };
 
-typedef struct _MegasearchService_Ping_args__isset {
-  _MegasearchService_Ping_args__isset() : cmd(false) {}
+typedef struct _MilvusService_Ping_args__isset {
+  _MilvusService_Ping_args__isset() : cmd(false) {}
   bool cmd :1;
-} _MegasearchService_Ping_args__isset;
+} _MilvusService_Ping_args__isset;
 
-class MegasearchService_Ping_args {
+class MilvusService_Ping_args {
  public:
 
-  MegasearchService_Ping_args(const MegasearchService_Ping_args&);
-  MegasearchService_Ping_args& operator=(const MegasearchService_Ping_args&);
-  MegasearchService_Ping_args() : cmd() {
+  MilvusService_Ping_args(const MilvusService_Ping_args&);
+  MilvusService_Ping_args& operator=(const MilvusService_Ping_args&);
+  MilvusService_Ping_args() : cmd() {
   }
 
-  virtual ~MegasearchService_Ping_args() throw();
+  virtual ~MilvusService_Ping_args() throw();
   std::string cmd;
 
-  _MegasearchService_Ping_args__isset __isset;
+  _MilvusService_Ping_args__isset __isset;
 
   void __set_cmd(const std::string& val);
 
-  bool operator == (const MegasearchService_Ping_args & rhs) const
+  bool operator == (const MilvusService_Ping_args & rhs) const
   {
     if (!(cmd == rhs.cmd))
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_Ping_args &rhs) const {
+  bool operator != (const MilvusService_Ping_args &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_Ping_args & ) const;
+  bool operator < (const MilvusService_Ping_args & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
@@ -1004,42 +1004,42 @@ class MegasearchService_Ping_args {
 };
 
 
-class MegasearchService_Ping_pargs {
+class MilvusService_Ping_pargs {
  public:
 
 
-  virtual ~MegasearchService_Ping_pargs() throw();
+  virtual ~MilvusService_Ping_pargs() throw();
   const std::string* cmd;
 
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_Ping_result__isset {
-  _MegasearchService_Ping_result__isset() : success(false), e(false) {}
+typedef struct _MilvusService_Ping_result__isset {
+  _MilvusService_Ping_result__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_Ping_result__isset;
+} _MilvusService_Ping_result__isset;
 
-class MegasearchService_Ping_result {
+class MilvusService_Ping_result {
  public:
 
-  MegasearchService_Ping_result(const MegasearchService_Ping_result&);
-  MegasearchService_Ping_result& operator=(const MegasearchService_Ping_result&);
-  MegasearchService_Ping_result() : success() {
+  MilvusService_Ping_result(const MilvusService_Ping_result&);
+  MilvusService_Ping_result& operator=(const MilvusService_Ping_result&);
+  MilvusService_Ping_result() : success() {
   }
 
-  virtual ~MegasearchService_Ping_result() throw();
+  virtual ~MilvusService_Ping_result() throw();
   std::string success;
   Exception e;
 
-  _MegasearchService_Ping_result__isset __isset;
+  _MilvusService_Ping_result__isset __isset;
 
   void __set_success(const std::string& val);
 
   void __set_e(const Exception& val);
 
-  bool operator == (const MegasearchService_Ping_result & rhs) const
+  bool operator == (const MilvusService_Ping_result & rhs) const
   {
     if (!(success == rhs.success))
       return false;
@@ -1047,43 +1047,43 @@ class MegasearchService_Ping_result {
       return false;
     return true;
   }
-  bool operator != (const MegasearchService_Ping_result &rhs) const {
+  bool operator != (const MilvusService_Ping_result &rhs) const {
     return !(*this == rhs);
   }
 
-  bool operator < (const MegasearchService_Ping_result & ) const;
+  bool operator < (const MilvusService_Ping_result & ) const;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
   uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
 
 };
 
-typedef struct _MegasearchService_Ping_presult__isset {
-  _MegasearchService_Ping_presult__isset() : success(false), e(false) {}
+typedef struct _MilvusService_Ping_presult__isset {
+  _MilvusService_Ping_presult__isset() : success(false), e(false) {}
   bool success :1;
   bool e :1;
-} _MegasearchService_Ping_presult__isset;
+} _MilvusService_Ping_presult__isset;
 
-class MegasearchService_Ping_presult {
+class MilvusService_Ping_presult {
  public:
 
 
-  virtual ~MegasearchService_Ping_presult() throw();
+  virtual ~MilvusService_Ping_presult() throw();
   std::string* success;
   Exception e;
 
-  _MegasearchService_Ping_presult__isset __isset;
+  _MilvusService_Ping_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
 };
 
-class MegasearchServiceClient : virtual public MegasearchServiceIf {
+class MilvusServiceClient : virtual public MilvusServiceIf {
  public:
-  MegasearchServiceClient(apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> prot) {
+  MilvusServiceClient(apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> prot) {
     setProtocol(prot);
   }
-  MegasearchServiceClient(apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> iprot, apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> oprot) {
+  MilvusServiceClient(apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> iprot, apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> oprot) {
     setProtocol(iprot,oprot);
   }
  private:
@@ -1134,12 +1134,12 @@ class MegasearchServiceClient : virtual public MegasearchServiceIf {
   ::apache::thrift::protocol::TProtocol* oprot_;
 };
 
-class MegasearchServiceProcessor : public ::apache::thrift::TDispatchProcessor {
+class MilvusServiceProcessor : public ::apache::thrift::TDispatchProcessor {
  protected:
-  ::apache::thrift::stdcxx::shared_ptr<MegasearchServiceIf> iface_;
+  ::apache::thrift::stdcxx::shared_ptr<MilvusServiceIf> iface_;
   virtual bool dispatchCall(::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, const std::string& fname, int32_t seqid, void* callContext);
  private:
-  typedef  void (MegasearchServiceProcessor::*ProcessFunction)(int32_t, ::apache::thrift::protocol::TProtocol*, ::apache::thrift::protocol::TProtocol*, void*);
+  typedef  void (MilvusServiceProcessor::*ProcessFunction)(int32_t, ::apache::thrift::protocol::TProtocol*, ::apache::thrift::protocol::TProtocol*, void*);
   typedef std::map<std::string, ProcessFunction> ProcessMap;
   ProcessMap processMap_;
   void process_CreateTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
@@ -1151,41 +1151,41 @@ class MegasearchServiceProcessor : public ::apache::thrift::TDispatchProcessor {
   void process_ShowTables(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_Ping(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
  public:
-  MegasearchServiceProcessor(::apache::thrift::stdcxx::shared_ptr<MegasearchServiceIf> iface) :
+  MilvusServiceProcessor(::apache::thrift::stdcxx::shared_ptr<MilvusServiceIf> iface) :
     iface_(iface) {
-    processMap_["CreateTable"] = &MegasearchServiceProcessor::process_CreateTable;
-    processMap_["DeleteTable"] = &MegasearchServiceProcessor::process_DeleteTable;
-    processMap_["AddVector"] = &MegasearchServiceProcessor::process_AddVector;
-    processMap_["SearchVector"] = &MegasearchServiceProcessor::process_SearchVector;
-    processMap_["DescribeTable"] = &MegasearchServiceProcessor::process_DescribeTable;
-    processMap_["GetTableRowCount"] = &MegasearchServiceProcessor::process_GetTableRowCount;
-    processMap_["ShowTables"] = &MegasearchServiceProcessor::process_ShowTables;
-    processMap_["Ping"] = &MegasearchServiceProcessor::process_Ping;
+    processMap_["CreateTable"] = &MilvusServiceProcessor::process_CreateTable;
+    processMap_["DeleteTable"] = &MilvusServiceProcessor::process_DeleteTable;
+    processMap_["AddVector"] = &MilvusServiceProcessor::process_AddVector;
+    processMap_["SearchVector"] = &MilvusServiceProcessor::process_SearchVector;
+    processMap_["DescribeTable"] = &MilvusServiceProcessor::process_DescribeTable;
+    processMap_["GetTableRowCount"] = &MilvusServiceProcessor::process_GetTableRowCount;
+    processMap_["ShowTables"] = &MilvusServiceProcessor::process_ShowTables;
+    processMap_["Ping"] = &MilvusServiceProcessor::process_Ping;
   }
 
-  virtual ~MegasearchServiceProcessor() {}
+  virtual ~MilvusServiceProcessor() {}
 };
 
-class MegasearchServiceProcessorFactory : public ::apache::thrift::TProcessorFactory {
+class MilvusServiceProcessorFactory : public ::apache::thrift::TProcessorFactory {
  public:
-  MegasearchServiceProcessorFactory(const ::apache::thrift::stdcxx::shared_ptr< MegasearchServiceIfFactory >& handlerFactory) :
+  MilvusServiceProcessorFactory(const ::apache::thrift::stdcxx::shared_ptr< MilvusServiceIfFactory >& handlerFactory) :
       handlerFactory_(handlerFactory) {}
 
   ::apache::thrift::stdcxx::shared_ptr< ::apache::thrift::TProcessor > getProcessor(const ::apache::thrift::TConnectionInfo& connInfo);
 
  protected:
-  ::apache::thrift::stdcxx::shared_ptr< MegasearchServiceIfFactory > handlerFactory_;
+  ::apache::thrift::stdcxx::shared_ptr< MilvusServiceIfFactory > handlerFactory_;
 };
 
-class MegasearchServiceMultiface : virtual public MegasearchServiceIf {
+class MilvusServiceMultiface : virtual public MilvusServiceIf {
  public:
-  MegasearchServiceMultiface(std::vector<apache::thrift::stdcxx::shared_ptr<MegasearchServiceIf> >& ifaces) : ifaces_(ifaces) {
+  MilvusServiceMultiface(std::vector<apache::thrift::stdcxx::shared_ptr<MilvusServiceIf> >& ifaces) : ifaces_(ifaces) {
   }
-  virtual ~MegasearchServiceMultiface() {}
+  virtual ~MilvusServiceMultiface() {}
  protected:
-  std::vector<apache::thrift::stdcxx::shared_ptr<MegasearchServiceIf> > ifaces_;
-  MegasearchServiceMultiface() {}
-  void add(::apache::thrift::stdcxx::shared_ptr<MegasearchServiceIf> iface) {
+  std::vector<apache::thrift::stdcxx::shared_ptr<MilvusServiceIf> > ifaces_;
+  MilvusServiceMultiface() {}
+  void add(::apache::thrift::stdcxx::shared_ptr<MilvusServiceIf> iface) {
     ifaces_.push_back(iface);
   }
  public:
@@ -1271,12 +1271,12 @@ class MegasearchServiceMultiface : virtual public MegasearchServiceIf {
 // The 'concurrent' client is a thread safe client that correctly handles
 // out of order responses.  It is slower than the regular client, so should
 // only be used when you need to share a connection among multiple threads
-class MegasearchServiceConcurrentClient : virtual public MegasearchServiceIf {
+class MilvusServiceConcurrentClient : virtual public MilvusServiceIf {
  public:
-  MegasearchServiceConcurrentClient(apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> prot) {
+  MilvusServiceConcurrentClient(apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> prot) {
     setProtocol(prot);
   }
-  MegasearchServiceConcurrentClient(apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> iprot, apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> oprot) {
+  MilvusServiceConcurrentClient(apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> iprot, apache::thrift::stdcxx::shared_ptr< ::apache::thrift::protocol::TProtocol> oprot) {
     setProtocol(iprot,oprot);
   }
  private:

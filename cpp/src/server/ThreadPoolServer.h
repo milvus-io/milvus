@@ -13,9 +13,9 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-class MegasearchThreadPoolServer : public apache::thrift::server::TThreadPoolServer {
+class ThreadPoolServer : public apache::thrift::server::TThreadPoolServer {
  public:
-    MegasearchThreadPoolServer(
+    ThreadPoolServer(
         const std::shared_ptr<apache::thrift::TProcessor>& processor,
         const std::shared_ptr<apache::thrift::transport::TServerTransport>& serverTransport,
         const std::shared_ptr<apache::thrift::transport::TTransportFactory>& transportFactory,

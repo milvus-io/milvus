@@ -4,13 +4,13 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "ClientTest.h"
-#include "MegaSearch.h"
+#include "MilvusApi.h"
 
 #include <iostream>
 #include <time.h>
 #include <unistd.h>
 
-using namespace megasearch;
+using namespace ::milvus;
 
 namespace {
     std::string GetTableName();
@@ -23,7 +23,7 @@ namespace {
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
-    void PrintTableSchema(const megasearch::TableSchema& tb_schema) {
+    void PrintTableSchema(const TableSchema& tb_schema) {
         BLOCK_SPLITER
         std::cout << "Table name: " << tb_schema.table_name << std::endl;
         std::cout << "Table index type: " << (int)tb_schema.index_type << std::endl;
@@ -134,7 +134,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//server version
         std::string version = conn->ServerVersion();
-        std::cout << "MegaSearch server version: " << version << std::endl;
+        std::cout << "Server version: " << version << std::endl;
     }
 
     {//sdk version
@@ -194,10 +194,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         PrintSearchResult(topk_query_result_array);
     }
 
-    {//delete table
-        Status stat = conn->DeleteTable(TABLE_NAME);
-        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
-    }
+//    {//delete table
+//        Status stat = conn->DeleteTable(TABLE_NAME);
+//        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
+//    }
 
     {//server status
         std::string status = conn->ServerStatus();
