@@ -8,8 +8,8 @@ server_config:
 db_config:
   db_path: /tmp/milvus
   db_backend_url: http://127.0.0.1
-  db_flush_interval: 5              #unit: second
-  idmapper_max_open_file: 128
+  db_flush_interval: 5                    #flush cache data into disk at intervals, unit: second
+  index_building_threshold: 1024          #build index file when raw data file size larger than this value, unit: MB
 
 metric_config:
   is_startup: true # true is on, false is off
@@ -24,5 +24,4 @@ license_config:
   license_path: "/tmp/system.license"
 
 cache_config:
-    cpu_cache_capacity: 16   # unit: GB
-    gpu_cache_capacity:  2   # unit: GB
+    cpu_cache_capacity: 16   # memory pool to hold index data, unit: GB
