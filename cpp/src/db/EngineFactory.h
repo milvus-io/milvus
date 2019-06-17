@@ -9,7 +9,7 @@
 #include "ExecutionEngine.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class EngineFactory {

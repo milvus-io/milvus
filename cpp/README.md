@@ -2,41 +2,44 @@
 #### Step 1: install necessery tools
 
     centos7 : 
-        yum install gfortran libsqlite3-dev libsnappy-dev libzstd-dev bzip2
+        yum install gfortran flex bison
         
     ubuntu16.04 : 
-        sudo apt-get install gfortran libsqlite3-dev libsnappy-dev libzstd-dev bzip2 liblz4-dev
+        sudo apt-get install gfortran flex bison
 
-#### Step 2: build third-parties
-Note: If you want to debug into third-parties, you can build debug with CXXFLAGS='-g -O0' with option 
-: -t Debug
+#### Step 2: build(output to cmake_build folder)
+cmake_build/src/milvus_server is the server
 
-    cd [sourcecode path]/cpp/thid_party
-    ./build.sh -t Debug
-    ./build.sh -t Release
-    
-#### Step 3: build(output to cmake_build folder)
-cmake_build/src/vecwise_server is the server
-
-cmake_build/src/libvecwise_engine.a is the static library
+cmake_build/src/libmilvus_engine.a is the static library
 
     cd [sourcecode path]/cpp
     ./build.sh -t Debug
     ./build.sh -t Release
     ./build.sh -g # Build GPU version
-    
+
+If you encounter the following error when building:
+`protocol https not supported or disabled in libcurl`
+
+1. Install libcurl4-openssl-dev
+
+2. Install cmake 3.14: 
+
+   ```
+   ./bootstrap --system-curl 
+   make 
+   sudo make install
+   ```
+
 #### To build unittest:
-    
+
     ./build.sh -u
     or
     ./build.sh --unittest
-    
-    
+
 ### Launch server
 Set config in cpp/conf/server_config.yaml
 
 Then launch server with config:
-    
     cd [build output path]
     start_server.sh
     stop_server.sh
@@ -44,7 +47,7 @@ Then launch server with config:
 ### Launch test_client(only for debug)
 If you want to test remote api, you can build test_client.
 test_client use same config file with server:
-    
+
     cd [build output path]/test_client
     test_client -c [sourcecode path]/cpp/conf/server_config.yaml
 

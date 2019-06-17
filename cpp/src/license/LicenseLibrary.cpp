@@ -21,7 +21,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 constexpr int LicenseLibrary::sha256_length_;

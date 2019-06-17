@@ -8,7 +8,7 @@
 #include "IScheduleStrategy.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class StrategyFactory {

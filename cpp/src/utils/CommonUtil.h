@@ -11,7 +11,7 @@
 #include "Error.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 class CommonUtil {
@@ -26,7 +26,13 @@ class CommonUtil {
 
     static std::string GetExePath();
 
-    static void ConvertTime(int year, int month, int day, int hour, int minute, int second, time_t& t_t);
+    static bool TimeStrToTime(const std::string& time_str,
+            time_t &time_integer,
+            tm &time_struct,
+            const std::string& format = "%d-%d-%d %d:%d:%d");
+
+    static void ConvertTime(time_t time_integer, tm &time_struct);
+    static void ConvertTime(tm time_struct, time_t &time_integer);
 };
 
 }

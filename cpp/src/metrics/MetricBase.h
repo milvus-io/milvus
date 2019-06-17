@@ -8,9 +8,10 @@
 
 #include "utils/Error.h"
 #include "server/ServerConfig.h"
+#include "SystemInfo.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 class MetricsBase{
  public:
@@ -71,6 +72,17 @@ class MetricsBase{
     virtual void AddVectorsFailGaugeSet(double value) {};
     virtual void QueryVectorResponseSummaryObserve(double value, int count = 1) {};
     virtual void QueryVectorResponsePerSecondGaugeSet(double value) {};
+    virtual void CPUUsagePercentSet() {};
+    virtual void RAMUsagePercentSet() {};
+    virtual void QueryResponsePerSecondGaugeSet(double value) {};
+    virtual void GPUPercentGaugeSet() {};
+    virtual void GPUMemoryUsageGaugeSet() {};
+    virtual void AddVectorsPerSecondGaugeSet(int num_vector, int dim, double time) {};
+    virtual void QueryIndexTypePerSecondSet(std::string type, double value) {};
+    virtual void ConnectionGaugeIncrement() {};
+    virtual void ConnectionGaugeDecrement() {};
+    virtual void KeepingAliveCounterIncrement(double value = 1) {};
+    virtual void OctetsSet() {};
 };
 
 

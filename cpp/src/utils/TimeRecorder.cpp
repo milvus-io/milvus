@@ -8,7 +8,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 TimeRecorder::TimeRecorder(const std::string &header,

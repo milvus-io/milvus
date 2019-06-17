@@ -9,7 +9,7 @@
 #include "Env.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 Env::Env()
@@ -83,5 +83,5 @@ Env* Env::Default() {
 }
 
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

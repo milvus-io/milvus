@@ -9,7 +9,7 @@
 #include <easylogging++.h>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 #define SERVER_DOMAIN_NAME "[SERVER] "
@@ -30,8 +30,8 @@ namespace server {
 
 #define SERVER_CHECK(func)                                  \
     {                                                       \
-        zilliz::vecwise::server::ServerError error = func;  \
-        if (error != zilliz::vecwise::server::SERVER_SUCCESS) { \
+        zilliz::milvus::server::ServerError error = func;  \
+        if (error != zilliz::milvus::server::SERVER_SUCCESS) { \
             return SERVER_ERROR(error);                     \
         }                                                   \
     }                                                       \
