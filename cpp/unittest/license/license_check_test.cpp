@@ -10,14 +10,14 @@
 #include <iostream>
 
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 TEST(LicenseLibraryTest, CHECK_TEST) {
 
 
     server::ServerError err;
     // 1. Set license file name
-    std::string license_file_path("/tmp/megasearch/abc.license");
+    std::string license_file_path("/tmp/milvus/abc.license");
 
     // 2. Legality check
     err = server::LicenseCheck::LegalityCheck(license_file_path);
@@ -29,7 +29,7 @@ TEST(LicenseLibraryTest, CHECK_ERROR1_TEST){
 
     server::ServerError err;
     // 1. Set license file name
-    std::string license_file_path("/tmp/megasearch/abc");
+    std::string license_file_path("/tmp/milvus/abc");
 
     // 2. Legality check
     err = server::LicenseCheck::LegalityCheck(license_file_path);
@@ -40,7 +40,7 @@ TEST(LicenseLibraryTest, CHECK_ERROR2_TEST){
 
     server::ServerError err;
     // 1. Set license file name
-    std::string license_file_path("/tmp/megasearch/abc.license");
+    std::string license_file_path("/tmp/milvus/abc.license");
 
     // 2. Define output var
     int device_count;
@@ -74,7 +74,7 @@ TEST(LicenseLibraryTest, CHECK_ERROR3_TEST){
 
     server::ServerError err;
     // 1. Set license file name
-    std::string license_file_path("/tmp/megasearch/abc.license");
+    std::string license_file_path("/tmp/milvus/abc.license");
 
     // 2. Define output var
     int device_count;
@@ -108,7 +108,7 @@ TEST(LicenseLibraryTest, CHECK_ERROR4_1_TEST){
 
     server::ServerError err;
     // 1. Set license file name
-    std::string license_file_path("/tmp/megasearch/abc.license");
+    std::string license_file_path("/tmp/milvus/abc.license");
 
     // 2. Define output var
     int device_count;
@@ -147,7 +147,7 @@ TEST(LicenseLibraryTest, CHECK_ERROR4_2_TEST){
 
     server::ServerError err;
     // 1. Set license file name
-    std::string license_file_path("/tmp/megasearch/abc.license");
+    std::string license_file_path("/tmp/milvus/abc.license");
 
     // 2. Define output var
     int device_count;

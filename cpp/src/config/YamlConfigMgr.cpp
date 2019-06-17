@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 ServerError YamlConfigMgr::LoadConfigFile(const std::string &filename) {

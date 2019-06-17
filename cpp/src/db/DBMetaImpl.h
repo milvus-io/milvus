@@ -9,7 +9,7 @@
 #include "Options.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 namespace meta {
 
@@ -20,8 +20,10 @@ public:
     DBMetaImpl(const DBMetaOptions& options_);
 
     virtual Status CreateTable(TableSchema& table_schema) override;
+    virtual Status DeleteTable(const std::string& table_id) override;
     virtual Status DescribeTable(TableSchema& group_info_) override;
     virtual Status HasTable(const std::string& table_id, bool& has_or_not) override;
+    virtual Status AllTables(std::vector<TableSchema>& table_schema_array) override;
 
     virtual Status CreateTableFile(TableFileSchema& file_schema) override;
     virtual Status DropPartitionsByDates(const std::string& table_id,
@@ -40,11 +42,15 @@ public:
     virtual Status FilesToMerge(const std::string& table_id,
             DatePartionedTableFilesSchema& files) override;
 
+    virtual Status FilesToDelete(const std::string& table_id,
+                                 const DatesT& partition,
+                                 DatePartionedTableFilesSchema& files) override;
+
     virtual Status FilesToIndex(TableFilesSchema&) override;
 
     virtual Status Archive() override;
 
-    virtual Status Size(long& result) override;
+    virtual Status Size(uint64_t& result) override;
 
     virtual Status CleanUp() override;
 
@@ -52,7 +58,7 @@ public:
 
     virtual Status DropAll() override;
 
-    virtual Status Count(const std::string& table_id, long& result) override;
+    virtual Status Count(const std::string& table_id, uint64_t& result) override;
 
     virtual ~DBMetaImpl();
 
@@ -70,5 +76,5 @@ private:
 
 } // namespace meta
 } // namespace engine
-} // namespace vecwise
+} // namespace milvus
 } // namespace zilliz

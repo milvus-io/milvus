@@ -1,12 +1,12 @@
 
 macro(set_option_category name)
-    set(MEGASEARCH_OPTION_CATEGORY ${name})
-    list(APPEND "MEGASEARCH_OPTION_CATEGORIES" ${name})
+    set(MILVUS_OPTION_CATEGORY ${name})
+    list(APPEND "MILVUS_OPTION_CATEGORIES" ${name})
 endmacro()
 
 macro(define_option name description default)
     option(${name} ${description} ${default})
-    list(APPEND "MEGASEARCH_${MEGASEARCH_OPTION_CATEGORY}_OPTION_NAMES" ${name})
+    list(APPEND "MILVUS_${MILVUS_OPTION_CATEGORY}_OPTION_NAMES" ${name})
     set("${name}_OPTION_DESCRIPTION" ${description})
     set("${name}_OPTION_DEFAULT" ${default})
     set("${name}_OPTION_TYPE" "bool")
@@ -28,7 +28,7 @@ endfunction()
 
 macro(define_option_string name description default)
     set(${name} ${default} CACHE STRING ${description})
-    list(APPEND "MEGASEARCH_${MEGASEARCH_OPTION_CATEGORY}_OPTION_NAMES" ${name})
+    list(APPEND "MILVUS_${MILVUS_OPTION_CATEGORY}_OPTION_NAMES" ${name})
     set("${name}_OPTION_DESCRIPTION" ${description})
     set("${name}_OPTION_DEFAULT" "\"${default}\"")
     set("${name}_OPTION_TYPE" "string")
@@ -43,65 +43,69 @@ endmacro()
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
-set(MEGASEARCH_DEPENDENCY_SOURCE_DEFAULT "AUTO")
+set(MILVUS_DEPENDENCY_SOURCE_DEFAULT "AUTO")
 
-define_option_string(MEGASEARCH_DEPENDENCY_SOURCE
-                    "Method to use for acquiring MEGASEARCH's build dependencies"
-                    "${MEGASEARCH_DEPENDENCY_SOURCE_DEFAULT}"
+define_option_string(MILVUS_DEPENDENCY_SOURCE
+                    "Method to use for acquiring MILVUS's build dependencies"
+                    "${MILVUS_DEPENDENCY_SOURCE_DEFAULT}"
                     "AUTO"
                     "BUNDLED"
                     "SYSTEM")
 
-define_option(MEGASEARCH_VERBOSE_THIRDPARTY_BUILD
+define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 
-define_option(MEGASEARCH_BOOST_USE_SHARED "Rely on boost shared libraries where relevant" OFF)
+define_option(MILVUS_WITH_ARROW "Build with ARROW" OFF)
 
-define_option(MEGASEARCH_BOOST_VENDORED "Use vendored Boost instead of existing Boost. \
+define_option(MILVUS_BOOST_USE_SHARED "Rely on boost shared libraries where relevant" OFF)
+
+define_option(MILVUS_BOOST_VENDORED "Use vendored Boost instead of existing Boost. \
 Note that this requires linking Boost statically" ON)
 
-define_option(MEGASEARCH_BOOST_HEADER_ONLY "Use only BOOST headers" OFF)
+define_option(MILVUS_BOOST_HEADER_ONLY "Use only BOOST headers" OFF)
 
-define_option(MEGASEARCH_WITH_BZ2 "Build with BZ2 compression" ON)
+define_option(MILVUS_WITH_BZ2 "Build with BZ2 compression" ON)
 
-define_option(MEGASEARCH_WITH_EASYLOGGINGPP "Build with Easylogging++ library" ON)
+define_option(MILVUS_WITH_EASYLOGGINGPP "Build with Easylogging++ library" ON)
 
-define_option(MEGASEARCH_WITH_FAISS "Build with FAISS library" ON)
+define_option(MILVUS_WITH_FAISS "Build with FAISS library" ON)
 
-define_option(MEGASEARCH_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
+define_option(MILVUS_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
 
-define_option_string(MEGASEARCH_FAISS_GPU_ARCH "Specifying which GPU architectures to build against"
-        "-gencode=arch=compute_61,code=sm_61")
+#define_option_string(MILVUS_FAISS_GPU_ARCH "Specifying which GPU architectures to build against"
+#        "-gencode=arch=compute_35,code=compute_35 -gencode=arch=compute_52,code=compute_52 -gencode=arch=compute_60,code=compute_60 -gencode=arch=compute_61,code=compute_61")
 
-define_option(MEGASEARCH_WITH_LAPACK "Build with LAPACK library" ON)
+define_option(MILVUS_WITH_LAPACK "Build with LAPACK library" ON)
 
-define_option(MEGASEARCH_WITH_LZ4 "Build with lz4 compression" ON)
+define_option(MILVUS_WITH_LZ4 "Build with lz4 compression" ON)
 
-define_option(MEGASEARCH_WITH_OPENBLAS "Build with OpenBLAS library" ON)
+define_option(MILVUS_WITH_JSONCONS "Build with JSONCONS" OFF)
 
-define_option(MEGASEARCH_WITH_PROMETHEUS "Build with PROMETHEUS library" ON)
+define_option(MILVUS_WITH_OPENBLAS "Build with OpenBLAS library" ON)
 
-define_option(MEGASEARCH_WITH_ROCKSDB "Build with RocksDB library" ON)
+define_option(MILVUS_WITH_PROMETHEUS "Build with PROMETHEUS library" ON)
 
-define_option(MEGASEARCH_WITH_SNAPPY "Build with Snappy compression" ON)
+define_option(MILVUS_WITH_ROCKSDB "Build with RocksDB library" OFF)
 
-define_option(MEGASEARCH_WITH_SQLITE "Build with SQLite library" ON)
+define_option(MILVUS_WITH_SNAPPY "Build with Snappy compression" ON)
 
-define_option(MEGASEARCH_WITH_SQLITE_ORM "Build with SQLite ORM library" ON)
+define_option(MILVUS_WITH_SQLITE "Build with SQLite library" ON)
 
-define_option(MEGASEARCH_WITH_THRIFT "Build with Apache Thrift library" ON)
+define_option(MILVUS_WITH_SQLITE_ORM "Build with SQLite ORM library" ON)
 
-define_option(MEGASEARCH_WITH_YAMLCPP "Build with yaml-cpp library" ON)
+define_option(MILVUS_WITH_THRIFT "Build with Apache Thrift library" ON)
 
-define_option(MEGASEARCH_WITH_ZLIB "Build with zlib compression" ON)
+define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)
+
+define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
 
 if(CMAKE_VERSION VERSION_LESS 3.7)
-    set(MEGASEARCH_WITH_ZSTD_DEFAULT OFF)
+    set(MILVUS_WITH_ZSTD_DEFAULT OFF)
 else()
     # ExternalProject_Add(SOURCE_SUBDIR) is available since CMake 3.7.
-    set(MEGASEARCH_WITH_ZSTD_DEFAULT ON)
+    set(MILVUS_WITH_ZSTD_DEFAULT ON)
 endif()
-define_option(MEGASEARCH_WITH_ZSTD "Build with zstd compression" ${MEGASEARCH_WITH_ZSTD_DEFAULT})
+define_option(MILVUS_WITH_ZSTD "Build with zstd compression" ${MILVUS_WITH_ZSTD_DEFAULT})
 
 #----------------------------------------------------------------------
 if(MSVC)
@@ -111,7 +115,7 @@ if(MSVC)
             "Pass verbose linking options when linking libraries and executables"
             OFF)
 
-    define_option(MEGASEARCH_USE_STATIC_CRT "Build MEGASEARCH with statically linked CRT" OFF)
+    define_option(MILVUS_USE_STATIC_CRT "Build MILVUS with statically linked CRT" OFF)
 endif()
 
 
@@ -119,15 +123,15 @@ endif()
 set_option_category("Test and benchmark")
 
 if (BUILD_UNIT_TEST)
-    define_option(MEGASEARCH_BUILD_TESTS "Build the MEGASEARCH googletest unit tests" ON)
+    define_option(MILVUS_BUILD_TESTS "Build the MILVUS googletest unit tests" ON)
 else()
-    define_option(MEGASEARCH_BUILD_TESTS "Build the MEGASEARCH googletest unit tests" OFF)
+    define_option(MILVUS_BUILD_TESTS "Build the MILVUS googletest unit tests" OFF)
 endif(BUILD_UNIT_TEST)
 
 #----------------------------------------------------------------------
 macro(config_summary)
     message(STATUS "---------------------------------------------------------------------")
-    message(STATUS "MEGASEARCH version:                                 ${MEGASEARCH_VERSION}")
+    message(STATUS "MILVUS version:                                 ${MILVUS_VERSION}")
     message(STATUS)
     message(STATUS "Build configuration summary:")
 
@@ -139,12 +143,12 @@ macro(config_summary)
                 STATUS "  Compile commands: ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json")
     endif()
 
-    foreach(category ${MEGASEARCH_OPTION_CATEGORIES})
+    foreach(category ${MILVUS_OPTION_CATEGORIES})
 
         message(STATUS)
         message(STATUS "${category} options:")
 
-        set(option_names ${MEGASEARCH_${category}_OPTION_NAMES})
+        set(option_names ${MILVUS_${category}_OPTION_NAMES})
 
         set(max_value_length 0)
         foreach(name ${option_names})

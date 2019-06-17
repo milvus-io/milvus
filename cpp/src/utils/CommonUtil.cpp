@@ -14,6 +14,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <iostream>
+#include <time.h>
 
 #include "boost/filesystem.hpp"
 
@@ -26,7 +27,7 @@
 #endif
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 namespace fs = boost::filesystem;
@@ -150,15 +151,39 @@ std::string CommonUtil::GetExePath() {
     return exe_path;
 }
 
-void CommonUtil::ConvertTime(int year, int month, int day, int hour, int minute, int second, time_t& t_t) {
-    tm t_m;
-    t_m.tm_year = year;
-    t_m.tm_mon = month;
-    t_m.tm_mday = day;
-    t_m.tm_hour = hour;
-    t_m.tm_min = minute;
-    t_m.tm_sec = second;
-    t_t = mktime(&t_m);
+bool CommonUtil::TimeStrToTime(const std::string& time_str,
+                     time_t &time_integer,
+                     tm &time_struct,
+                     const std::string& format) {
+    time_integer = 0;
+    memset(&time_struct, 0, sizeof(tm));
+
+    int ret = sscanf(time_str.c_str(),
+        format.c_str(),
+        &(time_struct.tm_year),
+        &(time_struct.tm_mon),
+        &(time_struct.tm_mday),
+        &(time_struct.tm_hour),
+        &(time_struct.tm_min),
+        &(time_struct.tm_sec));
+    if(ret <= 0) {
+        return false;
+    }
+
+    time_struct.tm_year -= 1900;
+    time_struct.tm_mon--;
+    time_integer = mktime(&time_struct);
+
+    return true;
+}
+
+void CommonUtil::ConvertTime(time_t time_integer, tm &time_struct) {
+    tm* t_m = localtime (&time_integer);
+    memcpy(&time_struct, t_m, sizeof(tm));
+}
+
+void ConvertTime(tm time_struct, time_t &time_integer) {
+    time_integer = mktime(&time_struct);
 }
 
 }

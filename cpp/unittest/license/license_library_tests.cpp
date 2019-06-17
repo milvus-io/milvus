@@ -13,7 +13,7 @@
 #include <iostream>
 
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 
 TEST(LicenseLibraryTest, FILE_EXISTENT_TEST) {
 
@@ -93,7 +93,7 @@ TEST(LicenseLibraryTest, LICENSE_FILE_TEST) {
     }
 
     // 5.GPU_info File
-    std::string GPU_info_file_path("/tmp/megasearch.info");
+    std::string GPU_info_file_path("/tmp/milvus.info");
 
 
     // 6. Generate GPU_info File
@@ -118,7 +118,7 @@ TEST(LicenseLibraryTest, LICENSE_FILE_TEST) {
     }
 
     // 9. Set license file name
-    std::string license_file_path("/tmp/megasearch.license");
+    std::string license_file_path("/tmp/milvus.license");
 
     // 10. Get System Time/starting_time ans End Time
     time_t sysyem_time;
@@ -179,7 +179,7 @@ TEST(LicenseLibraryTest, LICENSE_FILE_TEST) {
 
 
 //    // 17. Generate Secret File
-//    std::string secret_file_path("/tmp/megasearch.secret");
+//    std::string secret_file_path("/tmp/milvus.secret");
 //    err = server::LicenseLibrary::SecretFileSerialization(secret_file_path,
 //                                                          update_time,
 //                                                          file_size,

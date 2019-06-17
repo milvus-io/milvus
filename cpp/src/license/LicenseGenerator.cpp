@@ -8,7 +8,7 @@
 #include "utils/Error.h"
 
 
-using namespace zilliz::vecwise;
+using namespace zilliz::milvus;
 // Not provide path: current work path will be used and system.info.
 
 void

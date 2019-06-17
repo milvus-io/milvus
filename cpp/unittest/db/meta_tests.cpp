@@ -15,7 +15,7 @@
 #include "db/Utils.h"
 #include "db/MetaConsts.h"
 
-using namespace zilliz::vecwise::engine;
+using namespace zilliz::milvus::engine;
 
 TEST_F(MetaTest, GROUP_TEST) {
     auto table_id = "meta_test_group";
@@ -93,7 +93,7 @@ TEST_F(MetaTest, table_file_TEST) {
 TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
     DBMetaOptions options;
-    options.path = "/tmp/vecwise_test";
+    options.path = "/tmp/milvus_test";
     int days_num = rand() % 100;
     std::stringstream ss;
     ss << "days:" << days_num;
@@ -142,7 +142,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
 
 TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     DBMetaOptions options;
-    options.path = "/tmp/vecwise_test";
+    options.path = "/tmp/milvus_test";
     options.archive_conf = ArchiveConf("delete", "disk:11");
 
     auto impl = meta::DBMetaImpl(options);

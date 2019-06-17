@@ -3,7 +3,7 @@
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="off"
 BUILD_GPU="OFF"
-INSTALL_PREFIX=$(pwd)/megasearch
+INSTALL_PREFIX=$(pwd)/milvus
 MAKE_CLEAN="OFF"
 
 while getopts "p:t:uhgr" arg
@@ -75,7 +75,7 @@ fi
 make -j 4 || exit 1
 
 if [[ ${BUILD_TYPE} != "Debug" ]]; then
-    strip src/vecwise_server
+    strip src/milvus_server
 fi
 
 make install

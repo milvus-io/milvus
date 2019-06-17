@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include "Server.h"
 #include "ServerConfig.h"
-#include "MegasearchServer.h"
+#include "MilvusServer.h"
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
@@ -16,14 +16,14 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <csignal>
-#include <numaif.h>
+//#include <numaif.h>
 #include <unistd.h>
 #include <string.h>
 
 #include "metrics/Metrics.h"
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace server {
 
 Server*
@@ -52,7 +52,7 @@ Server::Daemonize() {
         return;
     }
 
-    SERVER_LOG_INFO << "Vecwise server run in daemonize mode";
+    SERVER_LOG_INFO << "Milvus server run in daemonize mode";
 
 //    std::string log_path(GetLogDirFullPath());
 //    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
@@ -152,22 +152,17 @@ Server::Start() {
             ServerConfig &config = ServerConfig::GetInstance();
             ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
 
-            //print config into console and log
-            config.PrintAll();
-
 #ifdef ENABLE_LICENSE
             ConfigNode license_config = config.GetConfig(CONFIG_LICENSE);
             std::string license_file_path = license_config.GetValue(CONFIG_LICENSE_PATH);
             SERVER_LOG_INFO << "License path: " << license_file_path;
+
             if(server::LicenseCheck::LegalityCheck(license_file_path) != SERVER_SUCCESS) {
                 SERVER_LOG_ERROR << "License check failed";
                 exit(1);
             }
 
-            if(server::LicenseCheck::StartCountingDown(license_file_path) != SERVER_SUCCESS) {
-                SERVER_LOG_ERROR << "License counter start error";
-                exit(1);
-            }
+            server::LicenseCheck::GetInstance().StartCountingDown(license_file_path);
 #endif
 
             // Handle Signal
@@ -175,11 +170,12 @@ Server::Start() {
             signal(SIGHUP, SignalUtil::HandleSignal);
             signal(SIGTERM, SignalUtil::HandleSignal);
             server::Metrics::GetInstance().Init();
-            SERVER_LOG_INFO << "Vecwise server is running...";
+            server::SystemInfo::GetInstance().Init();
+            printf("Milvus server start successfully.\n");
             StartService();
 
         } catch(std::exception& ex){
-            SERVER_LOG_ERROR << "Vecwise server encounter exception: " << std::string(ex.what())
+            SERVER_LOG_ERROR << "Milvus server encounter exception: " << std::string(ex.what())
                              << "Is another server instance running?";
             break;
         }
@@ -191,17 +187,19 @@ Server::Start() {
 
 void
 Server::Stop() {
-    SERVER_LOG_INFO << "Vecwise server will be closed";
+    printf("Milvus server is going to shutdown ...\n");
 
     // Unlock and close lockfile
     if (pid_fd != -1) {
         int ret = lockf(pid_fd, F_ULOCK, 0);
         if(ret != 0){
-
+            printf("Can't lock file: %s\n", strerror(errno));
+            exit(0);
         }
         ret = close(pid_fd);
         if(ret != 0){
-
+            printf("Can't close file: %s\n", strerror(errno));
+            exit(0);
         }
     }
 
@@ -209,7 +207,8 @@ Server::Stop() {
     if (!pid_filename_.empty()) {
         int ret = unlink(pid_filename_.c_str());
         if(ret != 0){
-
+            printf("Can't unlink file: %s\n", strerror(errno));
+            exit(0);
         }
     }
 
@@ -217,8 +216,10 @@ Server::Stop() {
 
     StopService();
 
-
-    SERVER_LOG_INFO << "Vecwise server closed";
+#ifdef ENABLE_LICENSE
+    server::LicenseCheck::GetInstance().StopCountingDown();
+#endif
+    printf("Milvus server is closed!\n");
 }
 
 
@@ -231,12 +232,12 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
-    MegasearchServer::StartService();
+    MilvusServer::StartService();
 }
 
 void
 Server::StopService() {
-    MegasearchServer::StopService();
+    MilvusServer::StopService();
 }
 
 }
