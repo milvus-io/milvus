@@ -35,6 +35,7 @@ set(db_test_src
 cuda_add_executable(db_test ${db_test_src})
 
 set(db_libs
+        gpufaiss
         faiss
         cudart
         cublas

@@ -318,7 +318,7 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
     file_schema.updated_time_ = file_schema.created_on_;
     file_schema.engine_type_ = table_schema.engine_type_;
     GetTableFilePath(file_schema);
-
+    ENGINE_LOG_DEBUG << "CreateTableFile " << file_schema.file_id_;
     {
         try {
             server::Metrics::GetInstance().MetaAccessTotalIncrement();
