@@ -6,6 +6,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 - MS-80 - Fix server hang issue
+- MS-89 - Fix compile failed, libgpufaiss.a link missing
 - MS-90 - Fix arch match incorrect on ARM
 
 ## Improvement

@@ -62,6 +62,7 @@ set(third_party_libs
         sqlite
         thrift
         yaml-cpp
+        gpufaiss
         faiss
         lapack
         openblas
