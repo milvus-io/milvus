@@ -101,6 +101,13 @@ else()
             )
 endif ()
 
+if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+    set(engine_libs
+	    ${engine_libs}
+	    libquadmath.a
+	    )
+endif ()
+
 if (ENABLE_LICENSE STREQUAL "ON")
     link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs")
     link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
