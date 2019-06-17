@@ -6,6 +6,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 - MS-80 - Fix server hang issue
+- MS-90 - Fix arch match incorrect on ARM
 
 ## Improvement
 - MS-82 - Update server startup welcome message
