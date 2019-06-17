@@ -15,6 +15,7 @@ cmake_build/src/libmilvus_engine.a is the static library
     cd [sourcecode path]/cpp
     ./build.sh -t Debug
     ./build.sh -t Release
+    ./build.sh -l -t Release # Build license version(only available for Release)
 
 If you encounter the following error when building:
 `protocol https not supported or disabled in libcurl`
