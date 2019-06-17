@@ -102,7 +102,8 @@ else()
             )
 endif ()
 
-if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+
+if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
     set(engine_libs
 	    ${engine_libs}
 	    libquadmath.a
