@@ -6,6 +6,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 - MS-80 - Fix server hang issue
+- MS-89 - Fix compile failed, libgpufaiss.a link missing
 
 ## Improvement
 - MS-82 - Update server startup welcome message
@@ -34,6 +35,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Task
 - MS-74 - Change README.md in cpp
+- MS-88 - Add support for arm architecture
 
 # Milvus 0.2.0 (2019-05-31)
 
