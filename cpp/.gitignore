@@ -1,3 +1,4 @@
 milvus/
 conf/server_config.yaml
 version.h
+megasearch/
