@@ -152,7 +152,7 @@ if("${MAKE}" STREQUAL "")
     endif()
 endif()
 
-set(MAKE_BUILD_ARGS "-j4")
+set(MAKE_BUILD_ARGS "-j2")
 
 ## Using make -j in sub-make is fragile
 ## see discussion https://github.com/apache/MEGASEARCH/pull/2779
@@ -704,14 +704,17 @@ macro(build_faiss)
 #            BUILD_COMMAND
 #            ${MAKE} ${MAKE_BUILD_ARGS}
             BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS} all
+            ${MAKE} ${MAKE_BUILD_ARGS} all
+	    COMMAND
+	    cd gpu && make ${MAKE_BUILD_ARGS}
             BUILD_IN_SOURCE
             1
 #            INSTALL_DIR
 #            ${FAISS_PREFIX}
-#            INSTALL_COMMAND
-#            ""
+            INSTALL_COMMAND
+            ${MAKE} install
+            COMMAND
+            ln -s faiss_ep ../faiss
             BUILD_BYPRODUCTS
             ${FAISS_STATIC_LIB})
 #            DEPENDS
@@ -744,7 +747,10 @@ if(MEGASEARCH_WITH_FAISS)
     resolve_dependency(FAISS)
     get_target_property(FAISS_INCLUDE_DIR faiss INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM "${FAISS_INCLUDE_DIR}")
+    include_directories(SYSTEM "${CMAKE_CURRENT_BINARY_DIR}/faiss_ep-prefix/src/")
+    link_directories(SYSTEM ${FAISS_PREFIX}/)
     link_directories(SYSTEM ${FAISS_PREFIX}/lib/)
+    link_directories(SYSTEM ${FAISS_PREFIX}/gpu/)
 endif()
 
 # ----------------------------------------------------------------------
@@ -1271,17 +1277,19 @@ macro(build_thrift)
             ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${THRIFT_PREFIX}"
             "-DCMAKE_INSTALL_RPATH=${THRIFT_PREFIX}/lib"
-            -DBUILD_SHARED_LIBS=OFF
-            -DBUILD_TESTING=OFF
-            -DBUILD_EXAMPLES=OFF
+	    -DBOOST_ROOT=${BOOST_PREFIX}
+            -DWITH_CPP=ON
+            -DWITH_STATIC_LIB=ON
+	    -DBUILD_SHARED_LIBS=ON
+	    -DBUILD_TESTING=OFF
+	    -DBUILD_EXAMPLES=OFF
             -DBUILD_TUTORIALS=OFF
             -DWITH_QT4=OFF
+            -DWITH_QT5=OFF
             -DWITH_C_GLIB=OFF
             -DWITH_JAVA=OFF
             -DWITH_PYTHON=OFF
             -DWITH_HASKELL=OFF
-            -DWITH_CPP=ON
-            -DWITH_STATIC_LIB=ON
             -DWITH_LIBEVENT=OFF
             -DCMAKE_BUILD_TYPE=Release)
 
@@ -1381,6 +1389,8 @@ macro(build_thrift)
             ${MAKE_BUILD_ARGS}
             CMAKE_ARGS
             ${THRIFT_CMAKE_ARGS}
+	    INSTALL_COMMAND
+	    ${MAKE} install
             DEPENDS
             ${THRIFT_DEPENDENCIES}
             ${EP_LOG_OPTIONS})
@@ -1399,7 +1409,10 @@ if(MEGASEARCH_WITH_THRIFT)
     # TODO: Don't use global includes but rather target_include_directories
 #    MESSAGE(STATUS ${THRIFT_PREFIX}/lib/)
     link_directories(SYSTEM ${THRIFT_PREFIX}/lib/)
+    link_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix/src/thrift_ep-build/lib)
     include_directories(SYSTEM ${THRIFT_INCLUDE_DIR})
+    include_directories(SYSTEM ${THRIFT_PREFIX}/lib/cpp/src)
+    include_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix/src/thrift_ep-build)
 endif()
 
 # ----------------------------------------------------------------------

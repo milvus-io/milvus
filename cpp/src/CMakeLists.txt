@@ -104,7 +104,6 @@ if (GPU_VERSION STREQUAL "ON")
             libgomp.a
             libopenblas.a
             libgfortran.a
-            libquadmath.a
             cudart
             cublas
             libsqlite3.a
@@ -119,7 +118,6 @@ else()
             libgomp.a
             libopenblas.a
             libgfortran.a
-            libquadmath.a
             libsqlite3.a
             libprometheus-cpp-push.a
             libprometheus-cpp-pull.a
