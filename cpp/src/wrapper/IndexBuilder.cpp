@@ -69,6 +69,7 @@ Index_ptr IndexBuilder::build_all(const long &nb,
     std::shared_ptr<faiss::Index> host_index = nullptr;
 #ifdef GPU_VERSION
     {
+        LOG(DEBUG) << "Build index by GPU";
         // TODO: list support index-type.
         faiss::Index *ori_index = faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str());
 
@@ -88,6 +89,7 @@ Index_ptr IndexBuilder::build_all(const long &nb,
     }
 #else
     {
+        LOG(DEBUG) << "Build index by CPU";
         faiss::Index *index = faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str());
         if (!index->is_trained) {
             nt == 0 || xt == nullptr ? index->train(nb, xb)
@@ -113,6 +115,7 @@ Index_ptr BgCpuBuilder::build_all(const long &nb, const float *xb, const long *i
     std::shared_ptr<faiss::Index> index = nullptr;
     index.reset(faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str()));
 
+    LOG(DEBUG) << "Build index by CPU";
     {
         std::lock_guard<std::mutex> lk(cpu_resource);
         if (!index->is_trained) {

@@ -33,6 +33,7 @@ cuda_add_executable(server_test
 
 set(require_libs
         stdc++
+        gpufaiss
         faiss
         cudart
         cublas

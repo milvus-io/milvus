@@ -32,6 +32,7 @@ set(wrapper_libs
         stdc++
         boost_system
         boost_filesystem
+        gpufaiss
         faiss
         cudart
         cublas
