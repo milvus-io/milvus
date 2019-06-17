@@ -37,8 +37,8 @@ namespace {
             opt.memory_sync_interval = (uint16_t)config.GetInt32Value(CONFIG_DB_FLUSH_INTERVAL, 10);
             opt.meta.path = db_path + "/db";
             int64_t index_size = config.GetInt64Value(CONFIG_DB_INDEX_TRIGGER_SIZE);
-            if(index_size > 0) {//ensure larger than zero
-                opt.index_trigger_size = (size_t)index_size;
+            if(index_size > 0) {//ensure larger than zero, unit is MB
+                opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
             }
 
             CommonUtil::CreateDirectory(opt.meta.path);

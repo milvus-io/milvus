@@ -95,7 +95,7 @@ private:
 
     MetaPtr pMeta_;
     MemManagerPtr pMemMgr_;
-    
+
 }; // DBImpl
 
 
