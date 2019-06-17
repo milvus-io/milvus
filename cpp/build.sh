@@ -6,7 +6,7 @@ LICENSE_CHECK="OFF"
 INSTALL_PREFIX=$(pwd)/milvus
 MAKE_CLEAN="OFF"
 
-while getopts "p:t:uhgr" arg
+while getopts "p:t:uhlr" arg
 do
         case $arg in
              t)
