@@ -11,6 +11,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-82 - Update server startup welcome message
 - MS-83 - Update vecwise to Milvus
 - MS-77 - Performance issue of post-search action
+- MS-22 - Enhancement for MemVector size control 
 
 ## New Feature
 
