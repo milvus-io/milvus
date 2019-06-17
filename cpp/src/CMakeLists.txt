@@ -88,7 +88,6 @@ if (GPU_VERSION STREQUAL "ON")
             pthread
             libgomp.a
             libgfortran.a
-            libquadmath.a
             cudart
             cublas
             ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
@@ -98,9 +97,15 @@ else()
             pthread
             libgomp.a
             libgfortran.a
-            libquadmath.a
             ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
+endif ()
+
+if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+    set(engine_libs
+	    ${engine_libs}
+	    libquadmath.a
+	    )
 endif ()
 
 if (ENABLE_LICENSE STREQUAL "ON")
