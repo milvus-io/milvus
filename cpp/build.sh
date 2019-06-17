@@ -2,7 +2,7 @@
 
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="off"
-BUILD_GPU="OFF"
+LICENSE_CHECK="OFF"
 INSTALL_PREFIX=$(pwd)/milvus
 MAKE_CLEAN="OFF"
 
@@ -19,8 +19,8 @@ do
              p)
                 INSTALL_PREFIX=$OPTARG
                 ;;
-             g)
-                BUILD_GPU="ON"
+             l)
+                LICENSE_CHECK="ON"
                 ;;
              r)
                 if [[ -d cmake_build ]]; then
@@ -35,7 +35,7 @@ parameter:
 -t: build type
 -u: building unit test options
 -p: install prefix
--g: build GPU version
+-l: build license version
 -r: remove previous build directory
 
 usage:
@@ -64,7 +64,7 @@ if [[ ${MAKE_CLEAN} = "ON" ]]; then
     -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
     -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
-    -DGPU_VERSION=${BUILD_GPU} \
+    -DCMAKE_LICENSE_CHECK=${LICENSE_CHECK} \
     $@ ../"
     echo ${CMAKE_CMD}
 
