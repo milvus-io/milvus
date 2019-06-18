@@ -6,7 +6,6 @@
 
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
-#include "Env.h"
 #include "Factories.h"
 
 namespace zilliz {

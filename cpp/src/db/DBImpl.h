@@ -8,12 +8,15 @@
 #include "DB.h"
 #include "MemManager.h"
 #include "Types.h"
+#include "utils/ThreadPool.h"
 
 #include <mutex>
 #include <condition_variable>
 #include <memory>
 #include <atomic>
 #include <thread>
+#include <list>
+#include <set>
 
 namespace zilliz {
 namespace milvus {
@@ -62,39 +65,36 @@ private:
             const float* vectors, const meta::DatesT& dates, QueryResults& results);
 
 
-    void BackgroundBuildIndex();
-    Status BuildIndex(const meta::TableFileSchema&);
-    Status TryBuildIndex();
-    Status MergeFiles(const std::string& table_id,
-            const meta::DateT& date,
-            const meta::TableFilesSchema& files);
-    Status BackgroundMergeFiles(const std::string& table_id);
-
-    void TrySchedule();
     void StartTimerTasks(int interval);
     void BackgroundTimerTask(int interval);
 
-    static void BGWork(void* db);
-    void BackgroundCall();
-    void BackgroundCompaction();
+    void StartCompactionTask();
+    Status MergeFiles(const std::string& table_id,
+                      const meta::DateT& date,
+                      const meta::TableFilesSchema& files);
+    Status BackgroundMergeFiles(const std::string& table_id);
+    void BackgroundCompaction(std::set<std::string> table_ids);
 
-    Env* const env_;
+    void StartBuildIndexTask();
+    void BackgroundBuildIndex();
+    Status BuildIndex(const meta::TableFileSchema&);
+
     const Options options_;
 
-    std::mutex mutex_;
-    std::condition_variable bg_work_finish_signal_;
-    bool bg_compaction_scheduled_;
     Status bg_error_;
     std::atomic<bool> shutting_down_;
-
-    std::mutex build_index_mutex_;
-    bool bg_build_index_started_;
-    std::condition_variable bg_build_index_finish_signal_;
 
     std::thread bg_timer_thread_;
 
     MetaPtr pMeta_;
     MemManagerPtr pMemMgr_;
+
+    server::ThreadPool compact_thread_pool_;
+    std::list<std::future<void>> compact_thread_results_;
+    std::set<std::string> compact_table_ids_;
+
+    server::ThreadPool index_thread_pool_;
+    std::list<std::future<void>> index_thread_results_;
 
 }; // DBImpl
 
