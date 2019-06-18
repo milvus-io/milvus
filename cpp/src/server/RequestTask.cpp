@@ -177,18 +177,30 @@ ServerError CreateTableTask::OnExecute() {
     TimeRecorder rc("CreateTableTask");
     
     try {
-        if(schema_.table_name.empty() || schema_.dimension == 0 || schema_.index_type == 0) {
-            return SERVER_INVALID_ARGUMENT;
+        //step 1: check arguments
+        if(schema_.table_name.empty() || schema_.dimension <= 0) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Invalid table name or dimension";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
         }
 
-        //step 1: construct table schema
+        engine::EngineType engine_type = EngineType(schema_.index_type);
+        if(engine_type == engine::EngineType::INVALID) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Invalid index type";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        //step 2: construct table schema
         engine::meta::TableSchema table_info;
         table_info.dimension_ = (uint16_t)schema_.dimension;
         table_info.table_id_ = schema_.table_name;
         table_info.engine_type_ = (int)EngineType(schema_.index_type);
         table_info.store_raw_data_ = schema_.store_raw_vector;
 
-        //step 2: create table
+        //step 3: create table
         engine::Status stat = DB()->CreateTable(table_info);
         if(!stat.ok()) {//table could exist
             error_code_ = SERVER_UNEXPECTED_ERROR;
@@ -225,6 +237,15 @@ ServerError DescribeTableTask::OnExecute() {
     TimeRecorder rc("DescribeTableTask");
 
     try {
+        //step 1: check arguments
+        if(table_name_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Table name cannot be empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        //step 2: get table info
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
         engine::Status stat = DB()->DescribeTable(table_info);
@@ -267,7 +288,7 @@ ServerError DeleteTableTask::OnExecute() {
     try {
         TimeRecorder rc("DeleteTableTask");
 
-        //step 1: check validation
+        //step 1: check arguments
         if (table_name_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
             error_msg_ = "Table name cannot be empty";
@@ -358,11 +379,22 @@ ServerError AddVectorTask::OnExecute() {
     try {
         TimeRecorder rc("AddVectorTask");
 
-        if(record_array_.empty()) {
-            return SERVER_SUCCESS;
+        //step 1: check arguments
+        if (table_name_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Table name cannot be empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
         }
 
-        //step 1: check table existence
+        if(record_array_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Row record array is empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
         engine::Status stat = DB()->DescribeTable(table_info);
@@ -375,7 +407,7 @@ ServerError AddVectorTask::OnExecute() {
 
         rc.Record("check validation");
 
-        //step 2: prepare float data
+        //step 3: prepare float data
         std::vector<float> vec_f;
         error_code_ = ConvertRowRecordToFloatArray(record_array_, table_info.dimension_, vec_f);
         if(error_code_ != SERVER_SUCCESS) {
@@ -385,7 +417,7 @@ ServerError AddVectorTask::OnExecute() {
 
         rc.Record("prepare vectors data");
 
-        //step 3: insert vectors
+        //step 4: insert vectors
         uint64_t vec_count = (uint64_t)record_array_.size();
         stat = DB()->InsertVectors(table_name_, vec_count, vec_f.data(), record_ids_);
         rc.Record("add vectors to engine");
@@ -442,7 +474,14 @@ ServerError SearchVectorTask::OnExecute() {
     try {
         TimeRecorder rc("SearchVectorTask");
 
-        //step 1: check validation
+        //step 1: check arguments
+        if (table_name_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Table name cannot be empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
         if(top_k_ <= 0 || record_array_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
             error_msg_ = "Invalid topk value, or query record array is empty";
@@ -542,7 +581,7 @@ ServerError GetTableRowCountTask::OnExecute() {
     try {
         TimeRecorder rc("GetTableRowCountTask");
 
-        //step 1: check validation
+        //step 1: check arguments
         if (table_name_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
             error_msg_ = "Table name cannot be empty";
