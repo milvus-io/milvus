@@ -5,7 +5,6 @@
  ******************************************************************************/
 #include "DBImpl.h"
 #include "DBMetaImpl.h"
-#include "Env.h"
 #include "Log.h"
 #include "EngineFactory.h"
 #include "metrics/Metrics.h"
@@ -125,13 +124,12 @@ void CalcScore(uint64_t vector_count,
 
 
 DBImpl::DBImpl(const Options& options)
-    : env_(options.env),
-      options_(options),
-      bg_compaction_scheduled_(false),
+    : options_(options),
       shutting_down_(false),
-      bg_build_index_started_(false),
       pMeta_(new meta::DBMetaImpl(options_.meta)),
-      pMemMgr_(new MemManager(pMeta_, options_)) {
+      pMemMgr_(new MemManager(pMeta_, options_)),
+      compact_thread_pool_(1, 1),
+      index_thread_pool_(1, 1) {
     StartTimerTasks(options_.memory_sync_interval);
 }
 
@@ -140,28 +138,10 @@ Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
 }
 
 Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& dates) {
-    meta::DatePartionedTableFilesSchema files;
-    auto status = pMeta_->FilesToDelete(table_id, dates, files);
-    if (!status.ok()) { return status; }
-
-    for (auto &day_files : files) {
-        for (auto &file : day_files.second) {
-            boost::filesystem::remove(file.location_);
-        }
-    }
-
     //dates empty means delete all files of the table
     if(dates.empty()) {
-        meta::TableSchema table_schema;
-        table_schema.table_id_ = table_id;
-        status = DescribeTable(table_schema);
-
-        pMeta_->DeleteTable(table_id);
-        boost::system::error_code ec;
-        boost::filesystem::remove_all(table_schema.location_, ec);
-        if(ec.failed()) {
-            ENGINE_LOG_WARNING << "Failed to remove table folder";
-        }
+        pMemMgr_->EraseMemVector(table_id); //not allow insert
+        pMeta_->DeleteTable(table_id); //soft delete
     }
 
     return Status::OK();
@@ -405,7 +385,15 @@ void DBImpl::BackgroundTimerTask(int interval) {
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (!bg_error_.ok()) break;
-        if (shutting_down_.load(std::memory_order_acquire)) break;
+        if (shutting_down_.load(std::memory_order_acquire)){
+            for(auto& iter : compact_thread_results_) {
+                iter.wait();
+            }
+            for(auto& iter : index_thread_results_) {
+                iter.wait();
+            }
+            break;
+        }
 
         std::this_thread::sleep_for(std::chrono::seconds(interval));
 
@@ -421,33 +409,34 @@ void DBImpl::BackgroundTimerTask(int interval) {
         server::Metrics::GetInstance().GPUPercentGaugeSet();
         server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
         server::Metrics::GetInstance().OctetsSet();
-        TrySchedule();
+
+        StartCompactionTask();
+        StartBuildIndexTask();
     }
 }
 
-void DBImpl::TrySchedule() {
-    if (bg_compaction_scheduled_) return;
-    if (!bg_error_.ok()) return;
+void DBImpl::StartCompactionTask() {
+    //serialize memory data
+    std::vector<std::string> temp_table_ids;
+    pMemMgr_->Serialize(temp_table_ids);
+    for(auto& id : temp_table_ids) {
+        compact_table_ids_.insert(id);
+    }
 
-    bg_compaction_scheduled_ = true;
-    env_->Schedule(&DBImpl::BGWork, this);
-}
+    //compactiong has been finished?
+    if(!compact_thread_results_.empty()) {
+        std::chrono::milliseconds span(10);
+        if (compact_thread_results_.back().wait_for(span) == std::future_status::ready) {
+            compact_thread_results_.pop_back();
+        }
+    }
 
-void DBImpl::BGWork(void* db_) {
-    reinterpret_cast<DBImpl*>(db_)->BackgroundCall();
-}
-
-void DBImpl::BackgroundCall() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    assert(bg_compaction_scheduled_);
-
-    if (!bg_error_.ok() || shutting_down_.load(std::memory_order_acquire))
-        return ;
-
-    BackgroundCompaction();
-
-    bg_compaction_scheduled_ = false;
-    bg_work_finish_signal_.notify_all();
+    //add new compaction task
+    if(compact_thread_results_.empty()) {
+        compact_thread_results_.push_back(
+                compact_thread_pool_.enqueue(&DBImpl::BackgroundCompaction, this, compact_table_ids_));
+        compact_table_ids_.clear();
+    }
 }
 
 Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
@@ -512,7 +501,6 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
     }
 
     bool has_merge = false;
-
     for (auto& kv : raw_files) {
         auto files = kv.second;
         if (files.size() <= options_.merge_trigger_number) {
@@ -520,15 +508,43 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
         }
         has_merge = true;
         MergeFiles(table_id, kv.first, kv.second);
+
+        if (shutting_down_.load(std::memory_order_acquire)){
+            break;
+        }
+    }
+
+    return Status::OK();
+}
+
+void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
+    Status status;
+    for (auto table_id : table_ids) {
+        status = BackgroundMergeFiles(table_id);
+        if (!status.ok()) {
+            bg_error_ = status;
+            return;
+        }
     }
 
     pMeta_->Archive();
-
-    TryBuildIndex();
-
     pMeta_->CleanUpFilesWithTTL(1);
+}
 
-    return Status::OK();
+void DBImpl::StartBuildIndexTask() {
+    //build index has been finished?
+    if(!index_thread_results_.empty()) {
+        std::chrono::milliseconds span(10);
+        if (index_thread_results_.back().wait_for(span) == std::future_status::ready) {
+            index_thread_results_.pop_back();
+        }
+    }
+
+    //add new build index task
+    if(index_thread_results_.empty()) {
+        index_thread_results_.push_back(
+                index_thread_pool_.enqueue(&DBImpl::BackgroundBuildIndex, this));
+    }
 }
 
 Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
@@ -569,8 +585,6 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 }
 
 void DBImpl::BackgroundBuildIndex() {
-    std::lock_guard<std::mutex> lock(build_index_mutex_);
-    assert(bg_build_index_started_);
     meta::TableFilesSchema to_index_files;
     pMeta_->FilesToIndex(to_index_files);
     Status status;
@@ -581,34 +595,12 @@ void DBImpl::BackgroundBuildIndex() {
             bg_error_ = status;
             return;
         }
-    }
-    /* LOG(DEBUG) << "All Buiding index Done"; */
 
-    bg_build_index_started_ = false;
-    bg_build_index_finish_signal_.notify_all();
-}
-
-Status DBImpl::TryBuildIndex() {
-    if (bg_build_index_started_) return Status::OK();
-    if (shutting_down_.load(std::memory_order_acquire)) return Status::OK();
-    bg_build_index_started_ = true;
-    std::thread build_index_task(&DBImpl::BackgroundBuildIndex, this);
-    build_index_task.detach();
-    return Status::OK();
-}
-
-void DBImpl::BackgroundCompaction() {
-    std::vector<std::string> table_ids;
-    pMemMgr_->Serialize(table_ids);
-
-    Status status;
-    for (auto table_id : table_ids) {
-        status = BackgroundMergeFiles(table_id);
-        if (!status.ok()) {
-            bg_error_ = status;
-            return;
+        if (shutting_down_.load(std::memory_order_acquire)){
+            break;
         }
     }
+    /* LOG(DEBUG) << "All Buiding index Done"; */
 }
 
 Status DBImpl::DropAll() {
@@ -620,23 +612,10 @@ Status DBImpl::Size(uint64_t& result) {
 }
 
 DBImpl::~DBImpl() {
-    {
-        std::unique_lock<std::mutex> lock(mutex_);
-        shutting_down_.store(true, std::memory_order_release);
-        while (bg_compaction_scheduled_) {
-            bg_work_finish_signal_.wait(lock);
-        }
-    }
-    {
-        std::unique_lock<std::mutex> lock(build_index_mutex_);
-        while (bg_build_index_started_) {
-            bg_build_index_finish_signal_.wait(lock);
-        }
-    }
+    shutting_down_.store(true, std::memory_order_release);
     bg_timer_thread_.join();
     std::vector<std::string> ids;
     pMemMgr_->Serialize(ids);
-    env_->Stop();
 }
 
 } // namespace engine

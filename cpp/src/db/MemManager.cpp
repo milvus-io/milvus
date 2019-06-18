@@ -142,6 +142,13 @@ Status MemManager::Serialize(std::vector<std::string>& table_ids) {
     return Status::OK();
 }
 
+Status MemManager::EraseMemVector(const std::string& table_id) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    memMap_.erase(table_id);
+
+    return Status::OK();
+}
+
 
 } // namespace engine
 } // namespace milvus

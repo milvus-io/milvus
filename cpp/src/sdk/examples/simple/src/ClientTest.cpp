@@ -20,7 +20,7 @@ namespace {
     static constexpr int64_t TOTAL_ROW_COUNT = 100000;
     static constexpr int64_t TOP_K = 10;
     static constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    static constexpr int64_t ADD_VECTOR_LOOP = 1;
+    static constexpr int64_t ADD_VECTOR_LOOP = 2;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
@@ -179,8 +179,8 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//search vectors
-        std::cout << "Waiting data persist. Sleep 10 seconds ..." << std::endl;
-        sleep(10);
+        std::cout << "Waiting data persist. Sleep 1 seconds ..." << std::endl;
+        sleep(1);
         std::vector<RowRecord> record_array;
         BuildVectors(SEARCH_TARGET, SEARCH_TARGET + 10, record_array);
 

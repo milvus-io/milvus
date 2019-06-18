@@ -29,24 +29,43 @@ using namespace sqlite_orm;
 
 namespace {
 
-void HandleException(std::exception &e) {
-    ENGINE_LOG_DEBUG << "Engine meta exception: " << e.what();
-    throw e;
+Status HandleException(const std::string& desc, std::exception &e) {
+    ENGINE_LOG_ERROR << desc << ": " << e.what();
+    return Status::DBTransactionError(desc, e.what());
 }
+
+class MetricCollector {
+public:
+    MetricCollector() {
+        server::Metrics::GetInstance().MetaAccessTotalIncrement();
+        start_time_ = METRICS_NOW_TIME;
+    }
+
+    ~MetricCollector() {
+        auto end_time = METRICS_NOW_TIME;
+        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
+    }
+
+private:
+    using TIME_POINT = std::chrono::system_clock::time_point;
+    TIME_POINT start_time_;
+};
 
 }
 
 inline auto StoragePrototype(const std::string &path) {
     return make_storage(path,
-                        make_table("Table",
+                        make_table("Tables",
                                    make_column("id", &TableSchema::id_, primary_key()),
                                    make_column("table_id", &TableSchema::table_id_, unique()),
+                                   make_column("state", &TableSchema::state_),
                                    make_column("dimension", &TableSchema::dimension_),
                                    make_column("created_on", &TableSchema::created_on_),
                                    make_column("files_cnt", &TableSchema::files_cnt_, default_value(0)),
                                    make_column("engine_type", &TableSchema::engine_type_),
                                    make_column("store_raw_data", &TableSchema::store_raw_data_)),
-                        make_table("TableFile",
+                        make_table("TableFiles",
                                    make_column("id", &TableFileSchema::id_, primary_key()),
                                    make_column("table_id", &TableFileSchema::table_id_),
                                    make_column("engine_type", &TableFileSchema::engine_type_),
@@ -109,9 +128,9 @@ Status DBMetaImpl::Initialize() {
     if (!boost::filesystem::is_directory(options_.path)) {
         auto ret = boost::filesystem::create_directory(options_.path);
         if (!ret) {
-            ENGINE_LOG_ERROR << "Create directory " << options_.path << " Error";
+            ENGINE_LOG_ERROR << "Failed to create db directory " << options_.path;
+            return Status::DBTransactionError("Failed to create db directory", options_.path);
         }
-        assert(ret);
     }
 
     ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(options_.path + "/meta.sqlite"));
@@ -139,15 +158,15 @@ Status DBMetaImpl::DropPartitionsByDates(const std::string &table_id,
         return status;
     }
 
-    auto yesterday = GetDateWithDelta(-1);
-
-    for (auto &date : dates) {
-        if (date >= yesterday) {
-            return Status::Error("Could not delete partitions with 2 days");
-        }
-    }
-
     try {
+        auto yesterday = GetDateWithDelta(-1);
+
+        for (auto &date : dates) {
+            if (date >= yesterday) {
+                return Status::Error("Could not delete partitions with 2 days");
+            }
+        }
+
         ConnectorPtr->update_all(
             set(
                 c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_DELETE
@@ -157,40 +176,43 @@ Status DBMetaImpl::DropPartitionsByDates(const std::string &table_id,
                     in(&TableFileSchema::date_, dates)
             ));
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when drop partition", e);
     }
+
     return Status::OK();
 }
 
 Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
-    server::Metrics::GetInstance().MetaAccessTotalIncrement();
-    if (table_schema.table_id_ == "") {
-        NextTableId(table_schema.table_id_);
-    }
-    table_schema.files_cnt_ = 0;
-    table_schema.id_ = -1;
-    table_schema.created_on_ = utils::GetMicroSecTimeStamp();
-    auto start_time = METRICS_NOW_TIME;
-    {
+    try {
+        MetricCollector metric;
+
+        server::Metrics::GetInstance().MetaAccessTotalIncrement();
+        if (table_schema.table_id_ == "") {
+            NextTableId(table_schema.table_id_);
+        }
+        table_schema.files_cnt_ = 0;
+        table_schema.id_ = -1;
+        table_schema.created_on_ = utils::GetMicroSecTimeStamp();
+
         try {
             auto id = ConnectorPtr->insert(table_schema);
             table_schema.id_ = id;
         } catch (...) {
             return Status::DBTransactionError("Add Table Error");
         }
-    }
-    auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
 
-    auto table_path = GetTablePath(table_schema.table_id_);
-    table_schema.location_ = table_path;
-    if (!boost::filesystem::is_directory(table_path)) {
-        auto ret = boost::filesystem::create_directories(table_path);
-        if (!ret) {
-            ENGINE_LOG_ERROR << "Create directory " << table_path << " Error";
+        auto table_path = GetTablePath(table_schema.table_id_);
+        table_schema.location_ = table_path;
+        if (!boost::filesystem::is_directory(table_path)) {
+            auto ret = boost::filesystem::create_directories(table_path);
+            if (!ret) {
+                ENGINE_LOG_ERROR << "Create directory " << table_path << " Error";
+            }
+            assert(ret);
         }
-        assert(ret);
+
+    } catch (std::exception &e) {
+        return HandleException("Encounter exception when create table", e);
     }
 
     return Status::OK();
@@ -198,14 +220,31 @@ Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
 
 Status DBMetaImpl::DeleteTable(const std::string& table_id) {
     try {
-        //drop the table from meta
-        auto tables = ConnectorPtr->select(columns(&TableSchema::id_),
+        MetricCollector metric;
+
+        //soft delete table
+        auto tables = ConnectorPtr->select(columns(&TableSchema::id_,
+                                                   &TableSchema::files_cnt_,
+                                                   &TableSchema::dimension_,
+                                                   &TableSchema::engine_type_,
+                                                   &TableSchema::store_raw_data_,
+                                                   &TableSchema::created_on_),
                                            where(c(&TableSchema::table_id_) == table_id));
         for (auto &table : tables) {
-            ConnectorPtr->remove<TableSchema>(std::get<0>(table));
+            TableSchema table_schema;
+            table_schema.table_id_ = table_id;
+            table_schema.state_ = (int)TableSchema::TO_DELETE;
+            table_schema.id_ = std::get<0>(table);
+            table_schema.files_cnt_ = std::get<1>(table);
+            table_schema.dimension_ = std::get<2>(table);
+            table_schema.engine_type_ = std::get<3>(table);
+            table_schema.store_raw_data_ = std::get<4>(table);
+            table_schema.created_on_ = std::get<5>(table);
+
+            ConnectorPtr->update<TableSchema>(table_schema);
         }
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when delete table", e);
     }
 
     return Status::OK();
@@ -213,19 +252,17 @@ Status DBMetaImpl::DeleteTable(const std::string& table_id) {
 
 Status DBMetaImpl::DescribeTable(TableSchema &table_schema) {
     try {
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        auto start_time = METRICS_NOW_TIME;
+        MetricCollector metric;
+
         auto groups = ConnectorPtr->select(columns(&TableSchema::id_,
                                                    &TableSchema::table_id_,
                                                    &TableSchema::files_cnt_,
                                                    &TableSchema::dimension_,
                                                    &TableSchema::engine_type_,
                                                    &TableSchema::store_raw_data_),
-                                           where(c(&TableSchema::table_id_) == table_schema.table_id_));
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
-        assert(groups.size() <= 1);
+                                           where(c(&TableSchema::table_id_) == table_schema.table_id_
+                                                 and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
+
         if (groups.size() == 1) {
             table_schema.id_ = std::get<0>(groups[0]);
             table_schema.files_cnt_ = std::get<2>(groups[0]);
@@ -240,47 +277,44 @@ Status DBMetaImpl::DescribeTable(TableSchema &table_schema) {
         table_schema.location_ = table_path;
 
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when describe table", e);
     }
 
     return Status::OK();
 }
 
 Status DBMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
-    try {
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        auto start_time = METRICS_NOW_TIME;
+    has_or_not = false;
 
+    try {
+        MetricCollector metric;
         auto tables = ConnectorPtr->select(columns(&TableSchema::id_),
-                                           where(c(&TableSchema::table_id_) == table_id));
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
-        assert(tables.size() <= 1);
+                                           where(c(&TableSchema::table_id_) == table_id
+                                           and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
         if (tables.size() == 1) {
             has_or_not = true;
         } else {
             has_or_not = false;
         }
+
     } catch (std::exception &e) {
-        HandleException(e);
+        HandleException("Encounter exception when lookup table", e);
     }
+
     return Status::OK();
 }
 
 Status DBMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
     try {
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        auto start_time = METRICS_NOW_TIME;
+        MetricCollector metric;
+
         auto selected = ConnectorPtr->select(columns(&TableSchema::id_,
                                                    &TableSchema::table_id_,
                                                    &TableSchema::files_cnt_,
                                                    &TableSchema::dimension_,
                                                    &TableSchema::engine_type_,
-                                                   &TableSchema::store_raw_data_));
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
+                                                   &TableSchema::store_raw_data_),
+                                             where(c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
         for (auto &table : selected) {
             TableSchema schema;
             schema.id_ = std::get<0>(table);
@@ -292,8 +326,9 @@ Status DBMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
 
             table_schema_array.emplace_back(schema);
         }
+
     } catch (std::exception &e) {
-        HandleException(e);
+        HandleException("Encounter exception when lookup all tables", e);
     }
 
     return Status::OK();
@@ -310,37 +345,33 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         return status;
     }
 
-    NextFileId(file_schema.file_id_);
-    file_schema.file_type_ = TableFileSchema::NEW;
-    file_schema.dimension_ = table_schema.dimension_;
-    file_schema.size_ = 0;
-    file_schema.created_on_ = utils::GetMicroSecTimeStamp();
-    file_schema.updated_time_ = file_schema.created_on_;
-    file_schema.engine_type_ = table_schema.engine_type_;
-    GetTableFilePath(file_schema);
-    ENGINE_LOG_DEBUG << "CreateTableFile " << file_schema.file_id_;
-    {
-        try {
-            server::Metrics::GetInstance().MetaAccessTotalIncrement();
-            auto start_time = METRICS_NOW_TIME;
-            auto id = ConnectorPtr->insert(file_schema);
-            file_schema.id_ = id;
-            auto end_time = METRICS_NOW_TIME;
-            auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-            server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
-        } catch (...) {
-            return Status::DBTransactionError("Add file Error");
-        }
-    }
+    try {
+        MetricCollector metric;
 
-    auto partition_path = GetTableDatePartitionPath(file_schema.table_id_, file_schema.date_);
+        NextFileId(file_schema.file_id_);
+        file_schema.file_type_ = TableFileSchema::NEW;
+        file_schema.dimension_ = table_schema.dimension_;
+        file_schema.size_ = 0;
+        file_schema.created_on_ = utils::GetMicroSecTimeStamp();
+        file_schema.updated_time_ = file_schema.created_on_;
+        file_schema.engine_type_ = table_schema.engine_type_;
+        GetTableFilePath(file_schema);
 
-    if (!boost::filesystem::is_directory(partition_path)) {
-        auto ret = boost::filesystem::create_directory(partition_path);
-        if (!ret) {
-            ENGINE_LOG_ERROR << "Create directory " << partition_path << " Error";
+        auto id = ConnectorPtr->insert(file_schema);
+        file_schema.id_ = id;
+
+        auto partition_path = GetTableDatePartitionPath(file_schema.table_id_, file_schema.date_);
+
+        if (!boost::filesystem::is_directory(partition_path)) {
+            auto ret = boost::filesystem::create_directory(partition_path);
+            if (!ret) {
+                ENGINE_LOG_ERROR << "Create directory " << partition_path << " Error";
+                return Status::DBTransactionError("Failed to create partition directory");
+            }
         }
-        assert(ret);
+
+    } catch (std::exception& ex) {
+        return HandleException("Encounter exception when create table file", ex);
     }
 
     return Status::OK();
@@ -350,8 +381,8 @@ Status DBMetaImpl::FilesToIndex(TableFilesSchema &files) {
     files.clear();
 
     try {
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        auto start_time = METRICS_NOW_TIME;
+        MetricCollector metric;
+
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
                                                      &TableFileSchema::table_id_,
                                                      &TableFileSchema::file_id_,
@@ -361,9 +392,6 @@ Status DBMetaImpl::FilesToIndex(TableFilesSchema &files) {
                                                      &TableFileSchema::engine_type_),
                                              where(c(&TableFileSchema::file_type_)
                                                        == (int) TableFileSchema::TO_INDEX));
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
 
         std::map<std::string, TableSchema> groups;
         TableFileSchema table_file;
@@ -391,8 +419,9 @@ Status DBMetaImpl::FilesToIndex(TableFilesSchema &files) {
             table_file.dimension_ = groups[table_file.table_id_].dimension_;
             files.push_back(table_file);
         }
+
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when iterate raw files", e);
     }
 
     return Status::OK();
@@ -404,8 +433,8 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
     files.clear();
 
     try {
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        auto start_time = METRICS_NOW_TIME;
+        MetricCollector metric;
+
         if (partition.empty()) {
             auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
                                                          &TableFileSchema::table_id_,
@@ -420,9 +449,7 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
                                                              == (int) TableFileSchema::TO_INDEX or
                                                          c(&TableFileSchema::file_type_)
                                                              == (int) TableFileSchema::INDEX)));
-            auto end_time = METRICS_NOW_TIME;
-            auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-            server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
+
             TableSchema table_schema;
             table_schema.table_id_ = table_id;
             auto status = DescribeTable(table_schema);
@@ -464,9 +491,7 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
                                                              == (int) TableFileSchema::TO_INDEX or
                                                          c(&TableFileSchema::file_type_)
                                                              == (int) TableFileSchema::INDEX)));
-            auto end_time = METRICS_NOW_TIME;
-            auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-            server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
+
             TableSchema table_schema;
             table_schema.table_id_ = table_id;
             auto status = DescribeTable(table_schema);
@@ -495,7 +520,7 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
 
         }
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when iterate index files", e);
     }
 
     return Status::OK();
@@ -506,8 +531,8 @@ Status DBMetaImpl::FilesToMerge(const std::string &table_id,
     files.clear();
 
     try {
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        auto start_time = METRICS_NOW_TIME;
+        MetricCollector metric;
+
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
                                                      &TableFileSchema::table_id_,
                                                      &TableFileSchema::file_id_,
@@ -517,9 +542,7 @@ Status DBMetaImpl::FilesToMerge(const std::string &table_id,
                                              where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW and
                                                  c(&TableFileSchema::table_id_) == table_id),
                                              order_by(&TableFileSchema::size_).desc());
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
+
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
         auto status = DescribeTable(table_schema);
@@ -545,7 +568,7 @@ Status DBMetaImpl::FilesToMerge(const std::string &table_id,
             files[table_file.date_].push_back(table_file);
         }
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when iterate merge files", e);
     }
 
     return Status::OK();
@@ -563,9 +586,7 @@ Status DBMetaImpl::FilesToDelete(const std::string& table_id,
                                                          &TableFileSchema::file_id_,
                                                          &TableFileSchema::size_,
                                                          &TableFileSchema::date_),
-                                                 where(c(&TableFileSchema::file_type_) !=
-                                                       (int) TableFileSchema::TO_DELETE
-                                                       and c(&TableFileSchema::table_id_) == table_id));
+                                                 where(c(&TableFileSchema::table_id_) == table_id));
 
             //step 2: erase table files from meta
             for (auto &file : selected) {
@@ -592,9 +613,7 @@ Status DBMetaImpl::FilesToDelete(const std::string& table_id,
                                                          &TableFileSchema::file_id_,
                                                          &TableFileSchema::size_,
                                                          &TableFileSchema::date_),
-                                                 where(c(&TableFileSchema::file_type_) !=
-                                                       (int) TableFileSchema::TO_DELETE
-                                                       and in(&TableFileSchema::date_, partition)
+                                                 where(in(&TableFileSchema::date_, partition)
                                                        and c(&TableFileSchema::table_id_) == table_id));
 
             //step 2: erase table files from meta
@@ -617,7 +636,7 @@ Status DBMetaImpl::FilesToDelete(const std::string& table_id,
         }
 
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when iterate delete files", e);
     }
 
     return Status::OK();
@@ -648,7 +667,7 @@ Status DBMetaImpl::GetTableFile(TableFileSchema &file_schema) {
                 " File:" + file_schema.file_id_ + " not found");
         }
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when lookup table file", e);
     }
 
     return Status::OK();
@@ -677,7 +696,7 @@ Status DBMetaImpl::Archive() {
                             c(&TableFileSchema::file_type_) != (int) TableFileSchema::TO_DELETE
                     ));
             } catch (std::exception &e) {
-                HandleException(e);
+                return HandleException("Encounter exception when update table files", e);
             }
         }
         if (criteria == "disk") {
@@ -707,7 +726,7 @@ Status DBMetaImpl::Size(uint64_t &result) {
             result += (uint64_t) (*std::get<0>(sub_query));
         }
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when calculte db size", e);
     }
 
     return Status::OK();
@@ -752,7 +771,7 @@ Status DBMetaImpl::DiscardFiles(long to_discard_size) {
             ));
 
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when discard table file", e);
     }
 
     return DiscardFiles(to_discard_size);
@@ -761,38 +780,33 @@ Status DBMetaImpl::DiscardFiles(long to_discard_size) {
 Status DBMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     file_schema.updated_time_ = utils::GetMicroSecTimeStamp();
     try {
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        auto start_time = METRICS_NOW_TIME;
+        MetricCollector metric;
+
         ConnectorPtr->update(file_schema);
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
+
     } catch (std::exception &e) {
         ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
-        HandleException(e);
+        return HandleException("Encounter exception when update table file", e);
     }
     return Status::OK();
 }
 
 Status DBMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
     try {
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        auto start_time = METRICS_NOW_TIME;
+        MetricCollector metric;
+
         auto commited = ConnectorPtr->transaction([&]() mutable {
             for (auto &file : files) {
                 file.updated_time_ = utils::GetMicroSecTimeStamp();
                 ConnectorPtr->update(file);
             }
-            auto end_time = METRICS_NOW_TIME;
-            auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-            server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
             return true;
         });
         if (!commited) {
             return Status::DBTransactionError("Update files Error");
         }
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when update table files", e);
     }
     return Status::OK();
 }
@@ -830,7 +844,7 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
             /* LOG(DEBUG) << "Removing deleted id=" << table_file.id << " location=" << table_file.location << std::endl; */
         }
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when clean table files", e);
     }
 
     return Status::OK();
@@ -868,7 +882,7 @@ Status DBMetaImpl::CleanUp() {
             /* LOG(DEBUG) << "Removing id=" << table_file.id << " location=" << table_file.location << std::endl; */
         }
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when clean table file", e);
     }
 
     return Status::OK();
@@ -877,9 +891,8 @@ Status DBMetaImpl::CleanUp() {
 Status DBMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 
     try {
+        MetricCollector metric;
 
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        auto start_time = METRICS_NOW_TIME;
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::size_,
                                                      &TableFileSchema::date_),
                                              where((c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW or
@@ -888,9 +901,7 @@ Status DBMetaImpl::Count(const std::string &table_id, uint64_t &result) {
                                                      c(&TableFileSchema::file_type_) == (int) TableFileSchema::INDEX)
                                                        and
                                                            c(&TableFileSchema::table_id_) == table_id));
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
+
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
         auto status = DescribeTable(table_schema);
@@ -908,7 +919,7 @@ Status DBMetaImpl::Count(const std::string &table_id, uint64_t &result) {
         result /= sizeof(float);
 
     } catch (std::exception &e) {
-        HandleException(e);
+        return HandleException("Encounter exception when calculate table file size", e);
     }
     return Status::OK();
 }
