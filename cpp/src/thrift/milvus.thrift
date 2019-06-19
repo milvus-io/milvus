@@ -123,6 +123,23 @@ service MilvusService {
                                        4: list<Range> query_range_array,
                                        5: i64 topk) throws(1: Exception e);
 
+    /**
+     * @brief Internal use query interface
+     *
+     * This method is used to query vector in specified files.
+     *
+     * @param file_id_array, specified files id array, queried.
+     * @param query_record_array, all vector are going to be queried.
+     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+     * @param topk, how many similarity vectors will be searched.
+     *
+     * @return query result array.
+     */
+    list<TopKQueryResult> SearchVectorInFiles(2: string table_name,
+                                              3: list<string> file_id_array,
+                                              4: list<RowRecord> query_record_array,
+                                              5: list<Range> query_range_array,
+                                              6: i64 topk) throws(1: Exception e);
 
     /**
      * @brief Get table schema

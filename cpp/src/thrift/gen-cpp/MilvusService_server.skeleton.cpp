@@ -91,6 +91,29 @@ class MilvusServiceHandler : virtual public MilvusServiceIf {
   }
 
   /**
+   * @brief Internal use query interface
+   * 
+   * This method is used to query vector in specified files.
+   * 
+   * @param file_id_array, specified files id array, queried.
+   * @param query_record_array, all vector are going to be queried.
+   * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+   * @param topk, how many similarity vectors will be searched.
+   * 
+   * @return query result array.
+   * 
+   * @param table_name
+   * @param file_id_array
+   * @param query_record_array
+   * @param query_range_array
+   * @param topk
+   */
+  void SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) {
+    // Your implementation goes here
+    printf("SearchVectorInFiles\n");
+  }
+
+  /**
    * @brief Get table schema
    * 
    * This method is used to get table schema.
