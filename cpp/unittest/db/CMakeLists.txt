@@ -29,7 +29,7 @@ set(db_test_src
 cuda_add_executable(db_test ${db_test_src})
 
 set(db_libs
-        gpufaiss
+        libgpufaiss.a
         faiss
         cudart
         cublas
@@ -40,3 +40,5 @@ set(db_libs
         )
 
 target_link_libraries(db_test ${db_libs} ${unittest_libs})
+
+install(TARGETS db_test DESTINATION bin)

@@ -15,12 +15,6 @@ INITIALIZE_EASYLOGGINGPP
 using namespace zilliz::milvus;
 
 int main(int argc, char **argv) {
-    std::string exe_path = server::CommonUtil::GetExePath();
-    std::string config_filename = exe_path + "/../../../conf/server_config.yaml";
-    zilliz::milvus::server::ServerConfig& config = zilliz::milvus::server::ServerConfig::GetInstance();
-    config.LoadConfigFile(config_filename);
-    std::cout << "Load config file form: " << config_filename << std::endl;
-
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

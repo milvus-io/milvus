@@ -31,3 +31,5 @@ target_link_libraries(milvus_sdk
         )
 
 add_subdirectory(examples)
+
+install(TARGETS milvus_sdk DESTINATION bin)

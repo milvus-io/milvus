@@ -24,7 +24,7 @@ set(wrapper_libs
         stdc++
         boost_system
         boost_filesystem
-        gpufaiss
+        libgpufaiss.a
         faiss
         cudart
         cublas
@@ -41,5 +41,4 @@ set(topk_test_src
         topk_test.cpp
         ${CMAKE_SOURCE_DIR}/src/wrapper/gpu/Topk.cu)
 
-#cuda_add_executable(topk_test ${topk_test_src})
-#target_link_libraries(topk_test ${unittest_libs} ${faiss_libs})
+install(TARGETS wrapper_test DESTINATION bin)
