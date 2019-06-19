@@ -15,6 +15,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-77 - Performance issue of post-search action
 - MS-22 - Enhancement for MemVector size control 
 - MS-92 - Unify behavior of debug and release build
+- MS-98 - Install all unit test to installation directory
 
 ## New Feature
 
