@@ -107,6 +107,8 @@ else()
 endif()
 define_option(MILVUS_WITH_ZSTD "Build with zstd compression" ${MILVUS_WITH_ZSTD_DEFAULT})
 
+define_option(MILVUS_WITH_AWS "Build with AWS SDK" ON)
+
 #----------------------------------------------------------------------
 if(MSVC)
     set_option_category("MSVC")

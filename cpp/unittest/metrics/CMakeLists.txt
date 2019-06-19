@@ -17,6 +17,7 @@ aux_source_directory(../../src/db/scheduler db_scheduler_srcs)
 aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(../../src/wrapper wrapper_src)
+aux_source_directory(../../src/metrics metrics_src)
 
 
 include_directories(/usr/include)
@@ -28,32 +29,26 @@ link_directories("/usr/local/cuda/lib64")
 include_directories(../../src/metrics)
 
 
-set(require_files
-        ../../src/metrics/Metrics.cpp
-
-#        ../../src/cache/CacheMgr.cpp
-        ../../src/metrics/PrometheusMetrics.cpp
-        ../../src/metrics/MetricBase.h
-        ../../src/server/ServerConfig.cpp
-        ../../src/utils/CommonUtil.cpp
-        ../../src/utils/TimeRecorder.cpp
+#set(metrics_src_files
+#        ../../src/metrics/Metrics.cpp
+#        ../../src/metrics/Metrics.h
 #        ../../src/metrics/PrometheusMetrics.cpp
-        )
+#        ../../src/metrics/MetricBase.h
+#        ../../src/server/ServerConfig.cpp
+#        ../../src/utils/CommonUtil.cpp
+#        ../../src/utils/TimeRecorder.cpp
+#        )
 
 set(count_test_src
-        #        ${unittest_srcs}
-        #        ${config_files}
-        #        ${require_files}
         ${unittest_srcs}
         ${config_files}
         ${cache_srcs}
         ${db_srcs}
         ${db_scheduler_srcs}
         ${wrapper_src}
-        ${require_files}
+        ${metrics_src}
         metrics_test.cpp
         ../db/utils.cpp
-        ../../src/metrics/Metrics.h
         )
 
 
