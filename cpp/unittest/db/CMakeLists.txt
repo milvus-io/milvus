@@ -3,22 +3,16 @@
 # Unauthorized copying of this file, via any medium is strictly prohibited.
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
-include_directories(../../src)
-
-aux_source_directory(../../src/db db_srcs)
-aux_source_directory(../../src/db/scheduler db_scheduler_srcs)
-aux_source_directory(../../src/config config_files)
-aux_source_directory(../../src/cache cache_srcs)
-aux_source_directory(../../src/wrapper wrapper_src)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db db_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler db_scheduler_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_src)
 
 include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
 
-set(require_files
-        ../../src/server/ServerConfig.cpp
-        ../../src/utils/CommonUtil.cpp
-        ../../src/utils/TimeRecorder.cpp
-        )
+
 
 set(db_test_src
     ${unittest_srcs}
