@@ -35,6 +35,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-84 - cmake: add arrow, jemalloc and jsoncons third party; default build option OFF
 - MS-85 - add NetIO metric
 - MS-96 - add new query interface for specified files
+- MS-97 - Add S3 SDK for MinIO Storage
 
 ## Task
 - MS-74 - Change README.md in cpp
