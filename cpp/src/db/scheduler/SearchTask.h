@@ -27,7 +27,6 @@ public:
 };
 
 using SearchTaskPtr = std::shared_ptr<SearchTask>;
-using SearchTaskQueue = server::BlockingQueue<SearchTaskPtr>;
 
 
 }

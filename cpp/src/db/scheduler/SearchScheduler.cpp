@@ -6,7 +6,7 @@
 
 #include "SearchScheduler.h"
 #include "IndexLoaderQueue.h"
-#include "SearchTaskQueue.h"
+#include "SearchTask.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "metrics/Metrics.h"

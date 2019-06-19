@@ -186,10 +186,18 @@ Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
     try {
         MetricCollector metric;
 
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
         if (table_schema.table_id_ == "") {
             NextTableId(table_schema.table_id_);
+        } else {
+            auto table = ConnectorPtr->select(columns(&TableSchema::state_),
+                                               where(c(&TableSchema::table_id_) == table_schema.table_id_));
+            if (table.size() == 1) {
+                std::string msg = (TableSchema::TO_DELETE == std::get<0>(table[0])) ?
+                        "Table already exists" : "Table already exists and it is in delete state, please wait a second";
+                return Status::Error(msg);
+            }
         }
+
         table_schema.files_cnt_ = 0;
         table_schema.id_ = -1;
         table_schema.created_on_ = utils::GetMicroSecTimeStamp();
@@ -207,8 +215,8 @@ Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
             auto ret = boost::filesystem::create_directories(table_path);
             if (!ret) {
                 ENGINE_LOG_ERROR << "Create directory " << table_path << " Error";
+                return Status::Error("Failed to create table path");
             }
-            assert(ret);
         }
 
     } catch (std::exception &e) {
@@ -733,10 +741,12 @@ Status DBMetaImpl::Size(uint64_t &result) {
 }
 
 Status DBMetaImpl::DiscardFiles(long to_discard_size) {
-    LOG(DEBUG) << "About to discard size=" << to_discard_size;
     if (to_discard_size <= 0) {
         return Status::OK();
     }
+
+    LOG(DEBUG) << "About to discard size=" << to_discard_size;
+
     try {
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
                                                      &TableFileSchema::size_),

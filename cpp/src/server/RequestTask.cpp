@@ -221,7 +221,7 @@ ServerError CreateTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DescribeTableTask::DescribeTableTask(const std::string &table_name, thrift::TableSchema &schema)
-    : BaseTask(PING_TASK_GROUP),
+    : BaseTask(DDL_DML_TASK_GROUP),
       table_name_(table_name),
       schema_(schema) {
     schema_.table_name = table_name_;
@@ -329,7 +329,7 @@ ServerError DeleteTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ShowTablesTask::ShowTablesTask(std::vector<std::string>& tables)
-    : BaseTask(DQL_TASK_GROUP),
+    : BaseTask(DDL_DML_TASK_GROUP),
       tables_(tables) {
 
 }
@@ -451,13 +451,13 @@ SearchVectorTask::SearchVectorTask(const std::string &table_name,
                                    const std::vector<thrift::Range> &query_range_array,
                                    const int64_t top_k,
                                    std::vector<thrift::TopKQueryResult> &result_array)
-        : BaseTask(DQL_TASK_GROUP),
-          table_name_(table_name),
-          file_id_array_(file_id_array),
-          record_array_(query_record_array),
-          range_array_(query_range_array),
-          top_k_(top_k),
-          result_array_(result_array) {
+    : BaseTask(DQL_TASK_GROUP),
+      table_name_(table_name),
+      file_id_array_(file_id_array),
+      record_array_(query_record_array),
+      range_array_(query_range_array),
+      top_k_(top_k),
+      result_array_(result_array) {
 
 }
 
@@ -575,7 +575,7 @@ ServerError SearchVectorTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 GetTableRowCountTask::GetTableRowCountTask(const std::string& table_name, int64_t& row_count)
-: BaseTask(DQL_TASK_GROUP),
+: BaseTask(DDL_DML_TASK_GROUP),
   table_name_(table_name),
   row_count_(row_count) {
 
