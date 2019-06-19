@@ -13,7 +13,7 @@ set(s3_client_test_src
         ${unittest_srcs}
         ${s3_client_src}
         ${require_files}
-        s3_client_test.cpp
+        S3ClientTest.cpp
         ${MILVUS_ENGINE_SRC}/db/Status.cpp
         )
 
@@ -35,3 +35,5 @@ target_link_libraries(s3_test
         ${unittest_libs}
         curl
         crypto)
+
+install(TARGETS s3_test DESTINATION bin)
