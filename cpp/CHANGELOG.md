@@ -34,6 +34,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-81 - fix faiss ptx issue; change cuda gencode
 - MS-84 - cmake: add arrow, jemalloc and jsoncons third party; default build option OFF
 - MS-85 - add NetIO metric
+- MS-97 - Add S3 SDK for MinIO Storage
 
 ## Task
 - MS-74 - Change README.md in cpp
