@@ -14,12 +14,6 @@ aux_source_directory(db/scheduler db_scheduler_files)
 aux_source_directory(wrapper wrapper_files)
 aux_source_directory(metrics metrics_files)
 
-#set(metrics_files
-#        metrics/Metrics.cpp
-#        metrics/MetricBase.h
-#)
-
-
 set(license_check_files
         license/LicenseLibrary.cpp
         license/LicenseCheck.cpp
@@ -52,6 +46,10 @@ set(engine_files
 
 set(get_sys_info_files
         license/GetSysInfo.cpp)
+
+set(s3_client_files
+        storage/s3/S3ClientWrapper.cpp
+        storage/s3/S3ClientWrapper.h)
 
 include_directories(/usr/include)
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
