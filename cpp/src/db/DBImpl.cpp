@@ -25,6 +25,10 @@ namespace engine {
 
 namespace {
 
+static constexpr uint64_t METRIC_ACTION_INTERVAL = 1;
+static constexpr uint64_t COMPACT_ACTION_INTERVAL = 1;
+static constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
+
 void CollectInsertMetrics(double total_time, size_t n, bool succeed) {
     double avg_time = total_time / n;
     for (int i = 0; i < n; ++i) {
@@ -130,7 +134,7 @@ DBImpl::DBImpl(const Options& options)
       pMemMgr_(new MemManager(pMeta_, options_)),
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
-    StartTimerTasks(options_.memory_sync_interval);
+    StartTimerTasks();
 }
 
 Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
@@ -399,12 +403,11 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
     return Status::OK();
 }
 
-void DBImpl::StartTimerTasks(int interval) {
-    bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this, interval);
+void DBImpl::StartTimerTasks() {
+    bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
 }
 
-
-void DBImpl::BackgroundTimerTask(int interval) {
+void DBImpl::BackgroundTimerTask() {
     Status status;
     server::SystemInfo::GetInstance().Init();
     while (true) {
@@ -419,27 +422,42 @@ void DBImpl::BackgroundTimerTask(int interval) {
             break;
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(interval));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 
-        server::Metrics::GetInstance().KeepingAliveCounterIncrement(interval);
-        int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
-        int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
-        server::Metrics::GetInstance().CacheUsageGaugeSet(cache_usage*100/cache_total);
-        uint64_t size;
-        Size(size);
-        server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
-        server::Metrics::GetInstance().CPUUsagePercentSet();
-        server::Metrics::GetInstance().RAMUsagePercentSet();
-        server::Metrics::GetInstance().GPUPercentGaugeSet();
-        server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
-        server::Metrics::GetInstance().OctetsSet();
-
+        StartMetricTask();
         StartCompactionTask();
         StartBuildIndexTask();
     }
 }
 
+void DBImpl::StartMetricTask() {
+    static uint64_t metric_clock_tick = 0;
+    metric_clock_tick++;
+    if(metric_clock_tick%METRIC_ACTION_INTERVAL != 0) {
+        return;
+    }
+
+    server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
+    int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
+    int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+    server::Metrics::GetInstance().CacheUsageGaugeSet(cache_usage*100/cache_total);
+    uint64_t size;
+    Size(size);
+    server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
+    server::Metrics::GetInstance().CPUUsagePercentSet();
+    server::Metrics::GetInstance().RAMUsagePercentSet();
+    server::Metrics::GetInstance().GPUPercentGaugeSet();
+    server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
+    server::Metrics::GetInstance().OctetsSet();
+}
+
 void DBImpl::StartCompactionTask() {
+    static uint64_t compact_clock_tick = 0;
+    compact_clock_tick++;
+    if(compact_clock_tick%COMPACT_ACTION_INTERVAL != 0) {
+        return;
+    }
+
     //serialize memory data
     std::vector<std::string> temp_table_ids;
     pMemMgr_->Serialize(temp_table_ids);
@@ -556,6 +574,12 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
 }
 
 void DBImpl::StartBuildIndexTask() {
+    static uint64_t index_clock_tick = 0;
+    index_clock_tick++;
+    if(index_clock_tick%INDEX_ACTION_INTERVAL != 0) {
+        return;
+    }
+
     //build index has been finished?
     if(!index_thread_results_.empty()) {
         std::chrono::milliseconds span(10);
@@ -581,29 +605,36 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
     }
 
     ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
+    if(to_index == nullptr) {
+        return Status::Error("Invalid engine type");
+    }
 
-    to_index->Load();
-    auto start_time = METRICS_NOW_TIME;
-    auto index = to_index->BuildIndex(table_file.location_);
-    auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
+    try {
+        to_index->Load();
+        auto start_time = METRICS_NOW_TIME;
+        auto index = to_index->BuildIndex(table_file.location_);
+        auto end_time = METRICS_NOW_TIME;
+        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+        server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
 
-    table_file.file_type_ = meta::TableFileSchema::INDEX;
-    table_file.size_ = index->Size();
+        table_file.file_type_ = meta::TableFileSchema::INDEX;
+        table_file.size_ = index->Size();
 
-    auto to_remove = file;
-    to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
+        auto to_remove = file;
+        to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
 
-    meta::TableFilesSchema update_files = {to_remove, table_file};
-    pMeta_->UpdateTableFiles(update_files);
+        meta::TableFilesSchema update_files = {to_remove, table_file};
+        pMeta_->UpdateTableFiles(update_files);
 
-    LOG(DEBUG) << "New index file " << table_file.file_id_ << " of size "
-        << index->PhysicalSize()/(1024*1024) << " M"
-        << " from file " << to_remove.file_id_;
+        LOG(DEBUG) << "New index file " << table_file.file_id_ << " of size "
+                   << index->PhysicalSize()/(1024*1024) << " M"
+                   << " from file " << to_remove.file_id_;
 
-    index->Cache();
-    pMeta_->Archive();
+        index->Cache();
+
+    } catch (std::exception& ex) {
+        return Status::Error("Build index encounter exception", ex.what());
+    }
 
     return Status::OK();
 }

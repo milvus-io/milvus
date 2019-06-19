@@ -70,8 +70,10 @@ private:
             const meta::DatesT& dates, QueryResults& results);
 
 
-    void StartTimerTasks(int interval);
-    void BackgroundTimerTask(int interval);
+    void StartTimerTasks();
+    void BackgroundTimerTask();
+
+    void StartMetricTask();
 
     void StartCompactionTask();
     Status MergeFiles(const std::string& table_id,

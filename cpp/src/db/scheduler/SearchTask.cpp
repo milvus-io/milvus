@@ -3,7 +3,7 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "SearchTaskQueue.h"
+#include "SearchTask.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 

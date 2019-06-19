@@ -7,7 +7,7 @@
 
 #include "SearchContext.h"
 #include "IndexLoaderQueue.h"
-#include "SearchTaskQueue.h"
+#include "SearchTask.h"
 
 namespace zilliz {
 namespace milvus {
@@ -35,6 +35,8 @@ private:
     std::shared_ptr<std::thread> search_thread_;
 
     IndexLoaderQueue index_load_queue_;
+
+    using SearchTaskQueue = server::BlockingQueue<SearchTaskPtr>;
     SearchTaskQueue search_queue_;
 
     bool stopped_ = true;
