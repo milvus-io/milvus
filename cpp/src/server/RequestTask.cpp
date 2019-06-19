@@ -447,26 +447,29 @@ ServerError AddVectorTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-SearchVectorTask::SearchVectorTask(const std::string& table_name,
-                                   const std::vector<thrift::RowRecord> & query_record_array,
-                                   const std::vector<thrift::Range> & query_range_array,
+SearchVectorTask::SearchVectorTask(const std::string &table_name,
+                                   const std::vector<std::string>& file_id_array,
+                                   const std::vector<thrift::RowRecord> &query_record_array,
+                                   const std::vector<thrift::Range> &query_range_array,
                                    const int64_t top_k,
-                                   std::vector<thrift::TopKQueryResult>& result_array)
-    : BaseTask(DQL_TASK_GROUP),
-      table_name_(table_name),
-      record_array_(query_record_array),
-      range_array_(query_range_array),
-      top_k_(top_k),
-      result_array_(result_array) {
+                                   std::vector<thrift::TopKQueryResult> &result_array)
+        : BaseTask(DQL_TASK_GROUP),
+          table_name_(table_name),
+          file_id_array_(file_id_array),
+          record_array_(query_record_array),
+          range_array_(query_range_array),
+          top_k_(top_k),
+          result_array_(result_array) {
 
 }
 
 BaseTaskPtr SearchVectorTask::Create(const std::string& table_name,
+                                     const std::vector<std::string>& file_id_array,
                                      const std::vector<thrift::RowRecord> & query_record_array,
                                      const std::vector<thrift::Range> & query_range_array,
                                      const int64_t top_k,
                                      std::vector<thrift::TopKQueryResult>& result_array) {
-    return std::shared_ptr<BaseTask>(new SearchVectorTask(table_name,
+    return std::shared_ptr<BaseTask>(new SearchVectorTask(table_name, file_id_array,
             query_record_array, query_range_array, top_k, result_array));
 }
 
@@ -523,7 +526,13 @@ ServerError SearchVectorTask::OnExecute() {
         //step 4: search vectors
         engine::QueryResults results;
         uint64_t record_count = (uint64_t)record_array_.size();
-        stat = DB()->Query(table_name_, (size_t)top_k_, record_count, vec_f.data(), dates, results);
+
+        if(file_id_array_.empty()) {
+            stat = DB()->Query(table_name_, (size_t) top_k_, record_count, vec_f.data(), dates, results);
+        } else {
+            stat = DB()->Query(table_name_, file_id_array_, (size_t) top_k_, record_count, vec_f.data(), dates, results);
+        }
+
         rc.Record("search vectors from engine");
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
@@ -555,6 +564,7 @@ ServerError SearchVectorTask::OnExecute() {
         }
         rc.Record("construct result");
         rc.Elapse("totally cost");
+
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
