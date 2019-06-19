@@ -81,6 +81,26 @@ class MilvusServiceIf {
   virtual void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) = 0;
 
   /**
+   * @brief Internal use query interface
+   * 
+   * This method is used to query vector in specified files.
+   * 
+   * @param file_id_array, specified files id array, queried.
+   * @param query_record_array, all vector are going to be queried.
+   * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+   * @param topk, how many similarity vectors will be searched.
+   * 
+   * @return query result array.
+   * 
+   * @param table_name
+   * @param file_id_array
+   * @param query_record_array
+   * @param query_range_array
+   * @param topk
+   */
+  virtual void SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) = 0;
+
+  /**
    * @brief Get table schema
    * 
    * This method is used to get table schema.
@@ -165,6 +185,9 @@ class MilvusServiceNull : virtual public MilvusServiceIf {
     return;
   }
   void SearchVector(std::vector<TopKQueryResult> & /* _return */, const std::string& /* table_name */, const std::vector<RowRecord> & /* query_record_array */, const std::vector<Range> & /* query_range_array */, const int64_t /* topk */) {
+    return;
+  }
+  void SearchVectorInFiles(std::vector<TopKQueryResult> & /* _return */, const std::string& /* table_name */, const std::vector<std::string> & /* file_id_array */, const std::vector<RowRecord> & /* query_record_array */, const std::vector<Range> & /* query_range_array */, const int64_t /* topk */) {
     return;
   }
   void DescribeTable(TableSchema& /* _return */, const std::string& /* table_name */) {
@@ -637,6 +660,146 @@ class MilvusService_SearchVector_presult {
   Exception e;
 
   _MilvusService_SearchVector_presult__isset __isset;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+
+};
+
+typedef struct _MilvusService_SearchVectorInFiles_args__isset {
+  _MilvusService_SearchVectorInFiles_args__isset() : table_name(false), file_id_array(false), query_record_array(false), query_range_array(false), topk(false) {}
+  bool table_name :1;
+  bool file_id_array :1;
+  bool query_record_array :1;
+  bool query_range_array :1;
+  bool topk :1;
+} _MilvusService_SearchVectorInFiles_args__isset;
+
+class MilvusService_SearchVectorInFiles_args {
+ public:
+
+  MilvusService_SearchVectorInFiles_args(const MilvusService_SearchVectorInFiles_args&);
+  MilvusService_SearchVectorInFiles_args& operator=(const MilvusService_SearchVectorInFiles_args&);
+  MilvusService_SearchVectorInFiles_args() : table_name(), topk(0) {
+  }
+
+  virtual ~MilvusService_SearchVectorInFiles_args() throw();
+  std::string table_name;
+  std::vector<std::string>  file_id_array;
+  std::vector<RowRecord>  query_record_array;
+  std::vector<Range>  query_range_array;
+  int64_t topk;
+
+  _MilvusService_SearchVectorInFiles_args__isset __isset;
+
+  void __set_table_name(const std::string& val);
+
+  void __set_file_id_array(const std::vector<std::string> & val);
+
+  void __set_query_record_array(const std::vector<RowRecord> & val);
+
+  void __set_query_range_array(const std::vector<Range> & val);
+
+  void __set_topk(const int64_t val);
+
+  bool operator == (const MilvusService_SearchVectorInFiles_args & rhs) const
+  {
+    if (!(table_name == rhs.table_name))
+      return false;
+    if (!(file_id_array == rhs.file_id_array))
+      return false;
+    if (!(query_record_array == rhs.query_record_array))
+      return false;
+    if (!(query_range_array == rhs.query_range_array))
+      return false;
+    if (!(topk == rhs.topk))
+      return false;
+    return true;
+  }
+  bool operator != (const MilvusService_SearchVectorInFiles_args &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MilvusService_SearchVectorInFiles_args & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+
+class MilvusService_SearchVectorInFiles_pargs {
+ public:
+
+
+  virtual ~MilvusService_SearchVectorInFiles_pargs() throw();
+  const std::string* table_name;
+  const std::vector<std::string> * file_id_array;
+  const std::vector<RowRecord> * query_record_array;
+  const std::vector<Range> * query_range_array;
+  const int64_t* topk;
+
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MilvusService_SearchVectorInFiles_result__isset {
+  _MilvusService_SearchVectorInFiles_result__isset() : success(false), e(false) {}
+  bool success :1;
+  bool e :1;
+} _MilvusService_SearchVectorInFiles_result__isset;
+
+class MilvusService_SearchVectorInFiles_result {
+ public:
+
+  MilvusService_SearchVectorInFiles_result(const MilvusService_SearchVectorInFiles_result&);
+  MilvusService_SearchVectorInFiles_result& operator=(const MilvusService_SearchVectorInFiles_result&);
+  MilvusService_SearchVectorInFiles_result() {
+  }
+
+  virtual ~MilvusService_SearchVectorInFiles_result() throw();
+  std::vector<TopKQueryResult>  success;
+  Exception e;
+
+  _MilvusService_SearchVectorInFiles_result__isset __isset;
+
+  void __set_success(const std::vector<TopKQueryResult> & val);
+
+  void __set_e(const Exception& val);
+
+  bool operator == (const MilvusService_SearchVectorInFiles_result & rhs) const
+  {
+    if (!(success == rhs.success))
+      return false;
+    if (!(e == rhs.e))
+      return false;
+    return true;
+  }
+  bool operator != (const MilvusService_SearchVectorInFiles_result &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MilvusService_SearchVectorInFiles_result & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MilvusService_SearchVectorInFiles_presult__isset {
+  _MilvusService_SearchVectorInFiles_presult__isset() : success(false), e(false) {}
+  bool success :1;
+  bool e :1;
+} _MilvusService_SearchVectorInFiles_presult__isset;
+
+class MilvusService_SearchVectorInFiles_presult {
+ public:
+
+
+  virtual ~MilvusService_SearchVectorInFiles_presult() throw();
+  std::vector<TopKQueryResult> * success;
+  Exception e;
+
+  _MilvusService_SearchVectorInFiles_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
@@ -1115,6 +1278,9 @@ class MilvusServiceClient : virtual public MilvusServiceIf {
   void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void recv_SearchVector(std::vector<TopKQueryResult> & _return);
+  void SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
+  void send_SearchVectorInFiles(const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
+  void recv_SearchVectorInFiles(std::vector<TopKQueryResult> & _return);
   void DescribeTable(TableSchema& _return, const std::string& table_name);
   void send_DescribeTable(const std::string& table_name);
   void recv_DescribeTable(TableSchema& _return);
@@ -1146,6 +1312,7 @@ class MilvusServiceProcessor : public ::apache::thrift::TDispatchProcessor {
   void process_DeleteTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_AddVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_SearchVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  void process_SearchVectorInFiles(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_DescribeTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_GetTableRowCount(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_ShowTables(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
@@ -1157,6 +1324,7 @@ class MilvusServiceProcessor : public ::apache::thrift::TDispatchProcessor {
     processMap_["DeleteTable"] = &MilvusServiceProcessor::process_DeleteTable;
     processMap_["AddVector"] = &MilvusServiceProcessor::process_AddVector;
     processMap_["SearchVector"] = &MilvusServiceProcessor::process_SearchVector;
+    processMap_["SearchVectorInFiles"] = &MilvusServiceProcessor::process_SearchVectorInFiles;
     processMap_["DescribeTable"] = &MilvusServiceProcessor::process_DescribeTable;
     processMap_["GetTableRowCount"] = &MilvusServiceProcessor::process_GetTableRowCount;
     processMap_["ShowTables"] = &MilvusServiceProcessor::process_ShowTables;
@@ -1224,6 +1392,16 @@ class MilvusServiceMultiface : virtual public MilvusServiceIf {
       ifaces_[i]->SearchVector(_return, table_name, query_record_array, query_range_array, topk);
     }
     ifaces_[i]->SearchVector(_return, table_name, query_record_array, query_range_array, topk);
+    return;
+  }
+
+  void SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) {
+    size_t sz = ifaces_.size();
+    size_t i = 0;
+    for (; i < (sz - 1); ++i) {
+      ifaces_[i]->SearchVectorInFiles(_return, table_name, file_id_array, query_record_array, query_range_array, topk);
+    }
+    ifaces_[i]->SearchVectorInFiles(_return, table_name, file_id_array, query_record_array, query_range_array, topk);
     return;
   }
 
@@ -1308,6 +1486,9 @@ class MilvusServiceConcurrentClient : virtual public MilvusServiceIf {
   void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   int32_t send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void recv_SearchVector(std::vector<TopKQueryResult> & _return, const int32_t seqid);
+  void SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
+  int32_t send_SearchVectorInFiles(const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
+  void recv_SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const int32_t seqid);
   void DescribeTable(TableSchema& _return, const std::string& table_name);
   int32_t send_DescribeTable(const std::string& table_name);
   void recv_DescribeTable(TableSchema& _return, const int32_t seqid);
