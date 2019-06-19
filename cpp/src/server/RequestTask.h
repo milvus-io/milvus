@@ -102,6 +102,7 @@ private:
 class SearchVectorTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& table_name,
+                              const std::vector<std::string>& file_id_array,
                               const std::vector<::milvus::thrift::RowRecord> & query_record_array,
                               const std::vector<::milvus::thrift::Range> & query_range_array,
                               const int64_t top_k,
@@ -109,6 +110,7 @@ public:
 
 protected:
     SearchVectorTask(const std::string& table_name,
+                     const std::vector<std::string>& file_id_array,
                      const std::vector<::milvus::thrift::RowRecord> & query_record_array,
                      const std::vector<::milvus::thrift::Range> & query_range_array,
                      const int64_t top_k,
@@ -118,6 +120,7 @@ protected:
 
 private:
     std::string table_name_;
+    std::vector<std::string> file_id_array_;
     int64_t top_k_;
     const std::vector<::milvus::thrift::RowRecord>& record_array_;
     const std::vector<::milvus::thrift::Range>& range_array_;

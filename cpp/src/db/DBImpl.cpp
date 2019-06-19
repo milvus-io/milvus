@@ -196,8 +196,39 @@ Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq,
 #if 0
     return QuerySync(table_id, k, nq, vectors, dates, results);
 #else
-    return QueryAsync(table_id, k, nq, vectors, dates, results);
+
+    //get all table files from table
+    meta::DatePartionedTableFilesSchema files;
+    auto status = pMeta_->FilesToSearch(table_id, dates, files);
+    if (!status.ok()) { return status; }
+
+    meta::TableFilesSchema file_id_array;
+    for (auto &day_files : files) {
+        for (auto &file : day_files.second) {
+            file_id_array.push_back(file);
+        }
+    }
+
+    return QueryAsync(table_id, file_id_array, k, nq, vectors, dates, results);
 #endif
+}
+
+Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>& file_ids,
+        uint64_t k, uint64_t nq, const float* vectors,
+        const meta::DatesT& dates, QueryResults& results) {
+    //get specified files
+    meta::TableFilesSchema files_array;
+    for (auto &id : file_ids) {
+        meta::TableFileSchema table_file;
+        table_file.table_id_ = id;
+        auto status = pMeta_->GetTableFile(table_file);
+        if (!status.ok()) {
+            return status;
+        }
+        files_array.emplace_back(table_file);
+    }
+
+    return QueryAsync(table_id, files_array, k, nq, vectors, dates, results);
 }
 
 Status DBImpl::QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
@@ -339,23 +370,16 @@ Status DBImpl::QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
     return Status::OK();
 }
 
-Status DBImpl::QueryAsync(const std::string& table_id, uint64_t k, uint64_t nq,
-                  const float* vectors, const meta::DatesT& dates, QueryResults& results) {
+Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
+                          uint64_t k, uint64_t nq, const float* vectors,
+                          const meta::DatesT& dates, QueryResults& results) {
 
     //step 1: get files to search
-    meta::DatePartionedTableFilesSchema files;
-    auto status = pMeta_->FilesToSearch(table_id, dates, files);
-    if (!status.ok()) { return status; }
-
     ENGINE_LOG_DEBUG << "Search DateT Size=" << files.size();
-
     SearchContextPtr context = std::make_shared<SearchContext>(k, nq, vectors);
-
-    for (auto &day_files : files) {
-        for (auto &file : day_files.second) {
-            TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
-            context->AddIndexFile(file_ptr);
-        }
+    for (auto &file : files) {
+        TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
+        context->AddIndexFile(file_ptr);
     }
 
     //step 2: put search task to scheduler
