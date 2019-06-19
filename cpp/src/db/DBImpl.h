@@ -48,6 +48,10 @@ public:
     virtual Status Query(const std::string& table_id, uint64_t k, uint64_t nq,
             const float* vectors, const meta::DatesT& dates, QueryResults& results) override;
 
+    virtual Status Query(const std::string& table_id, const std::vector<std::string>& file_ids,
+                         uint64_t k, uint64_t nq, const float* vectors,
+                         const meta::DatesT& dates, QueryResults& results) override;
+
     virtual Status DropAll() override;
 
     virtual Status Size(uint64_t& result) override;
@@ -58,8 +62,9 @@ private:
     Status QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
             const float* vectors, const meta::DatesT& dates, QueryResults& results);
 
-    Status QueryAsync(const std::string& table_id, uint64_t k, uint64_t nq,
-            const float* vectors, const meta::DatesT& dates, QueryResults& results);
+    Status QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
+            uint64_t k, uint64_t nq, const float* vectors,
+            const meta::DatesT& dates, QueryResults& results);
 
 
     void BackgroundBuildIndex();
