@@ -31,7 +31,7 @@ cuda_add_executable(server_test
 
 set(require_libs
         stdc++
-        gpufaiss
+        libgpufaiss.a
         faiss
         cudart
         cublas
@@ -51,3 +51,5 @@ target_link_libraries(server_test
         ${cuda_library}
         ${unittest_libs}
         )
+
+install(TARGETS server_test DESTINATION bin)
