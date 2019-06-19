@@ -1009,6 +1009,393 @@ uint32_t MilvusService_SearchVector_presult::read(::apache::thrift::protocol::TP
 }
 
 
+MilvusService_SearchVectorInFiles_args::~MilvusService_SearchVectorInFiles_args() throw() {
+}
+
+
+uint32_t MilvusService_SearchVectorInFiles_args::read(::apache::thrift::protocol::TProtocol* iprot) {
+
+  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
+  uint32_t xfer = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+
+  xfer += iprot->readStructBegin(fname);
+
+  using ::apache::thrift::protocol::TProtocolException;
+
+
+  while (true)
+  {
+    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid)
+    {
+      case 2:
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += iprot->readString(this->table_name);
+          this->__isset.table_name = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 3:
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          {
+            this->file_id_array.clear();
+            uint32_t _size62;
+            ::apache::thrift::protocol::TType _etype65;
+            xfer += iprot->readListBegin(_etype65, _size62);
+            this->file_id_array.resize(_size62);
+            uint32_t _i66;
+            for (_i66 = 0; _i66 < _size62; ++_i66)
+            {
+              xfer += iprot->readString(this->file_id_array[_i66]);
+            }
+            xfer += iprot->readListEnd();
+          }
+          this->__isset.file_id_array = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 4:
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          {
+            this->query_record_array.clear();
+            uint32_t _size67;
+            ::apache::thrift::protocol::TType _etype70;
+            xfer += iprot->readListBegin(_etype70, _size67);
+            this->query_record_array.resize(_size67);
+            uint32_t _i71;
+            for (_i71 = 0; _i71 < _size67; ++_i71)
+            {
+              xfer += this->query_record_array[_i71].read(iprot);
+            }
+            xfer += iprot->readListEnd();
+          }
+          this->__isset.query_record_array = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 5:
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          {
+            this->query_range_array.clear();
+            uint32_t _size72;
+            ::apache::thrift::protocol::TType _etype75;
+            xfer += iprot->readListBegin(_etype75, _size72);
+            this->query_range_array.resize(_size72);
+            uint32_t _i76;
+            for (_i76 = 0; _i76 < _size72; ++_i76)
+            {
+              xfer += this->query_range_array[_i76].read(iprot);
+            }
+            xfer += iprot->readListEnd();
+          }
+          this->__isset.query_range_array = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 6:
+        if (ftype == ::apache::thrift::protocol::T_I64) {
+          xfer += iprot->readI64(this->topk);
+          this->__isset.topk = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      default:
+        xfer += iprot->skip(ftype);
+        break;
+    }
+    xfer += iprot->readFieldEnd();
+  }
+
+  xfer += iprot->readStructEnd();
+
+  return xfer;
+}
+
+uint32_t MilvusService_SearchVectorInFiles_args::write(::apache::thrift::protocol::TProtocol* oprot) const {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
+  xfer += oprot->writeStructBegin("MilvusService_SearchVectorInFiles_args");
+
+  xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
+  xfer += oprot->writeString(this->table_name);
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("file_id_array", ::apache::thrift::protocol::T_LIST, 3);
+  {
+    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->file_id_array.size()));
+    std::vector<std::string> ::const_iterator _iter77;
+    for (_iter77 = this->file_id_array.begin(); _iter77 != this->file_id_array.end(); ++_iter77)
+    {
+      xfer += oprot->writeString((*_iter77));
+    }
+    xfer += oprot->writeListEnd();
+  }
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("query_record_array", ::apache::thrift::protocol::T_LIST, 4);
+  {
+    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->query_record_array.size()));
+    std::vector<RowRecord> ::const_iterator _iter78;
+    for (_iter78 = this->query_record_array.begin(); _iter78 != this->query_record_array.end(); ++_iter78)
+    {
+      xfer += (*_iter78).write(oprot);
+    }
+    xfer += oprot->writeListEnd();
+  }
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("query_range_array", ::apache::thrift::protocol::T_LIST, 5);
+  {
+    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->query_range_array.size()));
+    std::vector<Range> ::const_iterator _iter79;
+    for (_iter79 = this->query_range_array.begin(); _iter79 != this->query_range_array.end(); ++_iter79)
+    {
+      xfer += (*_iter79).write(oprot);
+    }
+    xfer += oprot->writeListEnd();
+  }
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("topk", ::apache::thrift::protocol::T_I64, 6);
+  xfer += oprot->writeI64(this->topk);
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldStop();
+  xfer += oprot->writeStructEnd();
+  return xfer;
+}
+
+
+MilvusService_SearchVectorInFiles_pargs::~MilvusService_SearchVectorInFiles_pargs() throw() {
+}
+
+
+uint32_t MilvusService_SearchVectorInFiles_pargs::write(::apache::thrift::protocol::TProtocol* oprot) const {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
+  xfer += oprot->writeStructBegin("MilvusService_SearchVectorInFiles_pargs");
+
+  xfer += oprot->writeFieldBegin("table_name", ::apache::thrift::protocol::T_STRING, 2);
+  xfer += oprot->writeString((*(this->table_name)));
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("file_id_array", ::apache::thrift::protocol::T_LIST, 3);
+  {
+    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>((*(this->file_id_array)).size()));
+    std::vector<std::string> ::const_iterator _iter80;
+    for (_iter80 = (*(this->file_id_array)).begin(); _iter80 != (*(this->file_id_array)).end(); ++_iter80)
+    {
+      xfer += oprot->writeString((*_iter80));
+    }
+    xfer += oprot->writeListEnd();
+  }
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("query_record_array", ::apache::thrift::protocol::T_LIST, 4);
+  {
+    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>((*(this->query_record_array)).size()));
+    std::vector<RowRecord> ::const_iterator _iter81;
+    for (_iter81 = (*(this->query_record_array)).begin(); _iter81 != (*(this->query_record_array)).end(); ++_iter81)
+    {
+      xfer += (*_iter81).write(oprot);
+    }
+    xfer += oprot->writeListEnd();
+  }
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("query_range_array", ::apache::thrift::protocol::T_LIST, 5);
+  {
+    xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>((*(this->query_range_array)).size()));
+    std::vector<Range> ::const_iterator _iter82;
+    for (_iter82 = (*(this->query_range_array)).begin(); _iter82 != (*(this->query_range_array)).end(); ++_iter82)
+    {
+      xfer += (*_iter82).write(oprot);
+    }
+    xfer += oprot->writeListEnd();
+  }
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("topk", ::apache::thrift::protocol::T_I64, 6);
+  xfer += oprot->writeI64((*(this->topk)));
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldStop();
+  xfer += oprot->writeStructEnd();
+  return xfer;
+}
+
+
+MilvusService_SearchVectorInFiles_result::~MilvusService_SearchVectorInFiles_result() throw() {
+}
+
+
+uint32_t MilvusService_SearchVectorInFiles_result::read(::apache::thrift::protocol::TProtocol* iprot) {
+
+  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
+  uint32_t xfer = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+
+  xfer += iprot->readStructBegin(fname);
+
+  using ::apache::thrift::protocol::TProtocolException;
+
+
+  while (true)
+  {
+    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid)
+    {
+      case 0:
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          {
+            this->success.clear();
+            uint32_t _size83;
+            ::apache::thrift::protocol::TType _etype86;
+            xfer += iprot->readListBegin(_etype86, _size83);
+            this->success.resize(_size83);
+            uint32_t _i87;
+            for (_i87 = 0; _i87 < _size83; ++_i87)
+            {
+              xfer += this->success[_i87].read(iprot);
+            }
+            xfer += iprot->readListEnd();
+          }
+          this->__isset.success = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 1:
+        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
+          xfer += this->e.read(iprot);
+          this->__isset.e = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      default:
+        xfer += iprot->skip(ftype);
+        break;
+    }
+    xfer += iprot->readFieldEnd();
+  }
+
+  xfer += iprot->readStructEnd();
+
+  return xfer;
+}
+
+uint32_t MilvusService_SearchVectorInFiles_result::write(::apache::thrift::protocol::TProtocol* oprot) const {
+
+  uint32_t xfer = 0;
+
+  xfer += oprot->writeStructBegin("MilvusService_SearchVectorInFiles_result");
+
+  if (this->__isset.success) {
+    xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_LIST, 0);
+    {
+      xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRUCT, static_cast<uint32_t>(this->success.size()));
+      std::vector<TopKQueryResult> ::const_iterator _iter88;
+      for (_iter88 = this->success.begin(); _iter88 != this->success.end(); ++_iter88)
+      {
+        xfer += (*_iter88).write(oprot);
+      }
+      xfer += oprot->writeListEnd();
+    }
+    xfer += oprot->writeFieldEnd();
+  } else if (this->__isset.e) {
+    xfer += oprot->writeFieldBegin("e", ::apache::thrift::protocol::T_STRUCT, 1);
+    xfer += this->e.write(oprot);
+    xfer += oprot->writeFieldEnd();
+  }
+  xfer += oprot->writeFieldStop();
+  xfer += oprot->writeStructEnd();
+  return xfer;
+}
+
+
+MilvusService_SearchVectorInFiles_presult::~MilvusService_SearchVectorInFiles_presult() throw() {
+}
+
+
+uint32_t MilvusService_SearchVectorInFiles_presult::read(::apache::thrift::protocol::TProtocol* iprot) {
+
+  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
+  uint32_t xfer = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+
+  xfer += iprot->readStructBegin(fname);
+
+  using ::apache::thrift::protocol::TProtocolException;
+
+
+  while (true)
+  {
+    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid)
+    {
+      case 0:
+        if (ftype == ::apache::thrift::protocol::T_LIST) {
+          {
+            (*(this->success)).clear();
+            uint32_t _size89;
+            ::apache::thrift::protocol::TType _etype92;
+            xfer += iprot->readListBegin(_etype92, _size89);
+            (*(this->success)).resize(_size89);
+            uint32_t _i93;
+            for (_i93 = 0; _i93 < _size89; ++_i93)
+            {
+              xfer += (*(this->success))[_i93].read(iprot);
+            }
+            xfer += iprot->readListEnd();
+          }
+          this->__isset.success = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 1:
+        if (ftype == ::apache::thrift::protocol::T_STRUCT) {
+          xfer += this->e.read(iprot);
+          this->__isset.e = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      default:
+        xfer += iprot->skip(ftype);
+        break;
+    }
+    xfer += iprot->readFieldEnd();
+  }
+
+  xfer += iprot->readStructEnd();
+
+  return xfer;
+}
+
+
 MilvusService_DescribeTable_args::~MilvusService_DescribeTable_args() throw() {
 }
 
@@ -1510,14 +1897,14 @@ uint32_t MilvusService_ShowTables_result::read(::apache::thrift::protocol::TProt
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             this->success.clear();
-            uint32_t _size62;
-            ::apache::thrift::protocol::TType _etype65;
-            xfer += iprot->readListBegin(_etype65, _size62);
-            this->success.resize(_size62);
-            uint32_t _i66;
-            for (_i66 = 0; _i66 < _size62; ++_i66)
+            uint32_t _size94;
+            ::apache::thrift::protocol::TType _etype97;
+            xfer += iprot->readListBegin(_etype97, _size94);
+            this->success.resize(_size94);
+            uint32_t _i98;
+            for (_i98 = 0; _i98 < _size94; ++_i98)
             {
-              xfer += iprot->readString(this->success[_i66]);
+              xfer += iprot->readString(this->success[_i98]);
             }
             xfer += iprot->readListEnd();
           }
@@ -1556,10 +1943,10 @@ uint32_t MilvusService_ShowTables_result::write(::apache::thrift::protocol::TPro
     xfer += oprot->writeFieldBegin("success", ::apache::thrift::protocol::T_LIST, 0);
     {
       xfer += oprot->writeListBegin(::apache::thrift::protocol::T_STRING, static_cast<uint32_t>(this->success.size()));
-      std::vector<std::string> ::const_iterator _iter67;
-      for (_iter67 = this->success.begin(); _iter67 != this->success.end(); ++_iter67)
+      std::vector<std::string> ::const_iterator _iter99;
+      for (_iter99 = this->success.begin(); _iter99 != this->success.end(); ++_iter99)
       {
-        xfer += oprot->writeString((*_iter67));
+        xfer += oprot->writeString((*_iter99));
       }
       xfer += oprot->writeListEnd();
     }
@@ -1604,14 +1991,14 @@ uint32_t MilvusService_ShowTables_presult::read(::apache::thrift::protocol::TPro
         if (ftype == ::apache::thrift::protocol::T_LIST) {
           {
             (*(this->success)).clear();
-            uint32_t _size68;
-            ::apache::thrift::protocol::TType _etype71;
-            xfer += iprot->readListBegin(_etype71, _size68);
-            (*(this->success)).resize(_size68);
-            uint32_t _i72;
-            for (_i72 = 0; _i72 < _size68; ++_i72)
+            uint32_t _size100;
+            ::apache::thrift::protocol::TType _etype103;
+            xfer += iprot->readListBegin(_etype103, _size100);
+            (*(this->success)).resize(_size100);
+            uint32_t _i104;
+            for (_i104 = 0; _i104 < _size100; ++_i104)
             {
-              xfer += iprot->readString((*(this->success))[_i72]);
+              xfer += iprot->readString((*(this->success))[_i104]);
             }
             xfer += iprot->readListEnd();
           }
@@ -2083,6 +2470,71 @@ void MilvusServiceClient::recv_SearchVector(std::vector<TopKQueryResult> & _retu
     throw result.e;
   }
   throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SearchVector failed: unknown result");
+}
+
+void MilvusServiceClient::SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
+{
+  send_SearchVectorInFiles(table_name, file_id_array, query_record_array, query_range_array, topk);
+  recv_SearchVectorInFiles(_return);
+}
+
+void MilvusServiceClient::send_SearchVectorInFiles(const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
+{
+  int32_t cseqid = 0;
+  oprot_->writeMessageBegin("SearchVectorInFiles", ::apache::thrift::protocol::T_CALL, cseqid);
+
+  MilvusService_SearchVectorInFiles_pargs args;
+  args.table_name = &table_name;
+  args.file_id_array = &file_id_array;
+  args.query_record_array = &query_record_array;
+  args.query_range_array = &query_range_array;
+  args.topk = &topk;
+  args.write(oprot_);
+
+  oprot_->writeMessageEnd();
+  oprot_->getTransport()->writeEnd();
+  oprot_->getTransport()->flush();
+}
+
+void MilvusServiceClient::recv_SearchVectorInFiles(std::vector<TopKQueryResult> & _return)
+{
+
+  int32_t rseqid = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TMessageType mtype;
+
+  iprot_->readMessageBegin(fname, mtype, rseqid);
+  if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
+    ::apache::thrift::TApplicationException x;
+    x.read(iprot_);
+    iprot_->readMessageEnd();
+    iprot_->getTransport()->readEnd();
+    throw x;
+  }
+  if (mtype != ::apache::thrift::protocol::T_REPLY) {
+    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+    iprot_->readMessageEnd();
+    iprot_->getTransport()->readEnd();
+  }
+  if (fname.compare("SearchVectorInFiles") != 0) {
+    iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+    iprot_->readMessageEnd();
+    iprot_->getTransport()->readEnd();
+  }
+  MilvusService_SearchVectorInFiles_presult result;
+  result.success = &_return;
+  result.read(iprot_);
+  iprot_->readMessageEnd();
+  iprot_->getTransport()->readEnd();
+
+  if (result.__isset.success) {
+    // _return pointer has now been filled
+    return;
+  }
+  if (result.__isset.e) {
+    throw result.e;
+  }
+  throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SearchVectorInFiles failed: unknown result");
 }
 
 void MilvusServiceClient::DescribeTable(TableSchema& _return, const std::string& table_name)
@@ -2570,6 +3022,63 @@ void MilvusServiceProcessor::process_SearchVector(int32_t seqid, ::apache::thrif
 
   if (this->eventHandler_.get() != NULL) {
     this->eventHandler_->postWrite(ctx, "MilvusService.SearchVector", bytes);
+  }
+}
+
+void MilvusServiceProcessor::process_SearchVectorInFiles(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext)
+{
+  void* ctx = NULL;
+  if (this->eventHandler_.get() != NULL) {
+    ctx = this->eventHandler_->getContext("MilvusService.SearchVectorInFiles", callContext);
+  }
+  ::apache::thrift::TProcessorContextFreer freer(this->eventHandler_.get(), ctx, "MilvusService.SearchVectorInFiles");
+
+  if (this->eventHandler_.get() != NULL) {
+    this->eventHandler_->preRead(ctx, "MilvusService.SearchVectorInFiles");
+  }
+
+  MilvusService_SearchVectorInFiles_args args;
+  args.read(iprot);
+  iprot->readMessageEnd();
+  uint32_t bytes = iprot->getTransport()->readEnd();
+
+  if (this->eventHandler_.get() != NULL) {
+    this->eventHandler_->postRead(ctx, "MilvusService.SearchVectorInFiles", bytes);
+  }
+
+  MilvusService_SearchVectorInFiles_result result;
+  try {
+    iface_->SearchVectorInFiles(result.success, args.table_name, args.file_id_array, args.query_record_array, args.query_range_array, args.topk);
+    result.__isset.success = true;
+  } catch (Exception &e) {
+    result.e = e;
+    result.__isset.e = true;
+  } catch (const std::exception& e) {
+    if (this->eventHandler_.get() != NULL) {
+      this->eventHandler_->handlerError(ctx, "MilvusService.SearchVectorInFiles");
+    }
+
+    ::apache::thrift::TApplicationException x(e.what());
+    oprot->writeMessageBegin("SearchVectorInFiles", ::apache::thrift::protocol::T_EXCEPTION, seqid);
+    x.write(oprot);
+    oprot->writeMessageEnd();
+    oprot->getTransport()->writeEnd();
+    oprot->getTransport()->flush();
+    return;
+  }
+
+  if (this->eventHandler_.get() != NULL) {
+    this->eventHandler_->preWrite(ctx, "MilvusService.SearchVectorInFiles");
+  }
+
+  oprot->writeMessageBegin("SearchVectorInFiles", ::apache::thrift::protocol::T_REPLY, seqid);
+  result.write(oprot);
+  oprot->writeMessageEnd();
+  bytes = oprot->getTransport()->writeEnd();
+  oprot->getTransport()->flush();
+
+  if (this->eventHandler_.get() != NULL) {
+    this->eventHandler_->postWrite(ctx, "MilvusService.SearchVectorInFiles", bytes);
   }
 }
 
@@ -3143,6 +3652,98 @@ void MilvusServiceConcurrentClient::recv_SearchVector(std::vector<TopKQueryResul
       }
       // in a bad state, don't commit
       throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SearchVector failed: unknown result");
+    }
+    // seqid != rseqid
+    this->sync_.updatePending(fname, mtype, rseqid);
+
+    // this will temporarily unlock the readMutex, and let other clients get work done
+    this->sync_.waitForWork(seqid);
+  } // end while(true)
+}
+
+void MilvusServiceConcurrentClient::SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
+{
+  int32_t seqid = send_SearchVectorInFiles(table_name, file_id_array, query_record_array, query_range_array, topk);
+  recv_SearchVectorInFiles(_return, seqid);
+}
+
+int32_t MilvusServiceConcurrentClient::send_SearchVectorInFiles(const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk)
+{
+  int32_t cseqid = this->sync_.generateSeqId();
+  ::apache::thrift::async::TConcurrentSendSentry sentry(&this->sync_);
+  oprot_->writeMessageBegin("SearchVectorInFiles", ::apache::thrift::protocol::T_CALL, cseqid);
+
+  MilvusService_SearchVectorInFiles_pargs args;
+  args.table_name = &table_name;
+  args.file_id_array = &file_id_array;
+  args.query_record_array = &query_record_array;
+  args.query_range_array = &query_range_array;
+  args.topk = &topk;
+  args.write(oprot_);
+
+  oprot_->writeMessageEnd();
+  oprot_->getTransport()->writeEnd();
+  oprot_->getTransport()->flush();
+
+  sentry.commit();
+  return cseqid;
+}
+
+void MilvusServiceConcurrentClient::recv_SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const int32_t seqid)
+{
+
+  int32_t rseqid = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TMessageType mtype;
+
+  // the read mutex gets dropped and reacquired as part of waitForWork()
+  // The destructor of this sentry wakes up other clients
+  ::apache::thrift::async::TConcurrentRecvSentry sentry(&this->sync_, seqid);
+
+  while(true) {
+    if(!this->sync_.getPending(fname, mtype, rseqid)) {
+      iprot_->readMessageBegin(fname, mtype, rseqid);
+    }
+    if(seqid == rseqid) {
+      if (mtype == ::apache::thrift::protocol::T_EXCEPTION) {
+        ::apache::thrift::TApplicationException x;
+        x.read(iprot_);
+        iprot_->readMessageEnd();
+        iprot_->getTransport()->readEnd();
+        sentry.commit();
+        throw x;
+      }
+      if (mtype != ::apache::thrift::protocol::T_REPLY) {
+        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+        iprot_->readMessageEnd();
+        iprot_->getTransport()->readEnd();
+      }
+      if (fname.compare("SearchVectorInFiles") != 0) {
+        iprot_->skip(::apache::thrift::protocol::T_STRUCT);
+        iprot_->readMessageEnd();
+        iprot_->getTransport()->readEnd();
+
+        // in a bad state, don't commit
+        using ::apache::thrift::protocol::TProtocolException;
+        throw TProtocolException(TProtocolException::INVALID_DATA);
+      }
+      MilvusService_SearchVectorInFiles_presult result;
+      result.success = &_return;
+      result.read(iprot_);
+      iprot_->readMessageEnd();
+      iprot_->getTransport()->readEnd();
+
+      if (result.__isset.success) {
+        // _return pointer has now been filled
+        sentry.commit();
+        return;
+      }
+      if (result.__isset.e) {
+        sentry.commit();
+        throw result.e;
+      }
+      // in a bad state, don't commit
+      throw ::apache::thrift::TApplicationException(::apache::thrift::TApplicationException::MISSING_RESULT, "SearchVectorInFiles failed: unknown result");
     }
     // seqid != rseqid
     this->sync_.updatePending(fname, mtype, rseqid);
