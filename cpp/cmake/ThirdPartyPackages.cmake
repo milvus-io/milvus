@@ -35,7 +35,8 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         Thrift
         yaml-cpp
         ZLIB
-        ZSTD)
+        ZSTD
+        AWS)
 
 message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
@@ -83,6 +84,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_zlib()
     elseif("${DEPENDENCY_NAME}" STREQUAL "ZSTD")
         build_zstd()
+    elseif("${DEPENDENCY_NAME}" STREQUAL "AWS")
+        build_aws()
     else()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -330,6 +333,11 @@ else()
     set(ZSTD_SOURCE_URL "https://github.com/facebook/zstd/archive/${ZSTD_VERSION}.tar.gz")
 endif()
 
+if(DEFINED ENV{MILVUS_AWS_URL})
+    set(AWS_SOURCE_URL "$ENV{MILVUS_AWS_URL}")
+else()
+    set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
+endif()
 # ----------------------------------------------------------------------
 # ARROW
 
@@ -1735,4 +1743,69 @@ if(MILVUS_WITH_ZSTD)
     get_target_property(ZSTD_INCLUDE_DIR zstd INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${ZSTD_PREFIX}/lib)
     include_directories(SYSTEM ${ZSTD_INCLUDE_DIR})
+endif()
+
+# ----------------------------------------------------------------------
+# aws
+macro(build_aws)
+    message(STATUS "Building aws-${AWS_VERSION} from source")
+    set(AWS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/aws_ep-prefix/src/aws_ep")
+
+    set(AWS_CMAKE_ARGS
+            ${EP_COMMON_TOOLCHAIN}
+            "-DCMAKE_INSTALL_PREFIX=${AWS_PREFIX}"
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DCMAKE_INSTALL_LIBDIR=lib #${CMAKE_INSTALL_LIBDIR}
+            -DBUILD_ONLY=s3
+            -DBUILD_SHARED_LIBS=off
+            -DENABLE_TESTING=off
+            -DENABLE_UNITY_BUILD=on
+            -DNO_ENCRYPTION=off)
+
+    set(AWS_STATIC_LIB "${AWS_PREFIX}/lib/libs3.a")
+    # Only pass our C flags on Unix as on MSVC it leads to a
+    # "incompatible command-line options" error
+    set(AWS_CMAKE_ARGS
+            ${AWS_CMAKE_ARGS}
+            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+            -DCMAKE_C_FLAGS=${EP_C_FLAGS}
+            -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
+
+    if(CMAKE_VERSION VERSION_LESS 3.7)
+        message(FATAL_ERROR "Building AWS using ExternalProject requires at least CMake 3.7")
+    endif()
+
+    externalproject_add(aws_ep
+            ${EP_LOG_OPTIONS}
+            CMAKE_ARGS
+            ${AWS_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
+            INSTALL_DIR
+            ${AWS_PREFIX}
+            URL
+            ${AWS_SOURCE_URL}
+            BUILD_BYPRODUCTS
+            "${AWS_STATIC_LIB}")
+
+
+    file(MAKE_DIRECTORY "${AWS_PREFIX}/include")
+
+    add_library(aws STATIC IMPORTED)
+    set_target_properties(aws
+            PROPERTIES IMPORTED_LOCATION "${AWS_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${AWS_PREFIX}/include")
+
+    add_dependencies(aws aws_ep)
+endmacro()
+
+if(MILVUS_WITH_AWS)
+    resolve_dependency(AWS)
+
+    # TODO: Don't use global includes but rather target_include_directories
+    get_target_property(AWS_INCLUDE_DIR aws INTERFACE_INCLUDE_DIRECTORIES)
+    link_directories(SYSTEM ${AWS_PREFIX}/lib)
+    include_directories(SYSTEM ${AWS_INCLUDE_DIR})
 endif()
