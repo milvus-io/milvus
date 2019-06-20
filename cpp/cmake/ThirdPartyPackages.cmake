@@ -1754,7 +1754,7 @@ macro(build_aws)
     set(AWS_CMAKE_ARGS
             ${EP_COMMON_TOOLCHAIN}
             "-DCMAKE_INSTALL_PREFIX=${AWS_PREFIX}"
-            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_INSTALL_LIBDIR=lib #${CMAKE_INSTALL_LIBDIR}
             -DBUILD_ONLY=s3
             -DBUILD_SHARED_LIBS=off
