@@ -3,7 +3,7 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "MegasearchTask.h"
+#include "RequestTask.h"
 #include "ServerConfig.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -16,6 +16,8 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
+
+using namespace ::milvus;
 
 static const std::string DQL_TASK_GROUP = "dql";
 static const std::string DDL_DML_TASK_GROUP = "ddl_dml";
@@ -34,6 +36,10 @@ namespace {
             std::string db_path = config.GetValue(CONFIG_DB_PATH);
             opt.memory_sync_interval = (uint16_t)config.GetInt32Value(CONFIG_DB_FLUSH_INTERVAL, 10);
             opt.meta.path = db_path + "/db";
+            int64_t index_size = config.GetInt64Value(CONFIG_DB_INDEX_TRIGGER_SIZE);
+            if(index_size > 0) {//ensure larger than zero, unit is MB
+                opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
+            }
 
             CommonUtil::CreateDirectory(opt.meta.path);
 
@@ -122,7 +128,7 @@ namespace {
     static constexpr long DAY_SECONDS = 86400;
 
     ServerError
-    ConvertTimeRangeToDBDates(const std::vector<megasearch::thrift::Range> &range_array,
+    ConvertTimeRangeToDBDates(const std::vector<thrift::Range> &range_array,
                               std::vector<DB_DATE>& dates) {
         dates.clear();
         ServerError error_code;
@@ -171,18 +177,30 @@ ServerError CreateTableTask::OnExecute() {
     TimeRecorder rc("CreateTableTask");
     
     try {
-        if(schema_.table_name.empty() || schema_.dimension == 0 || schema_.index_type == 0) {
-            return SERVER_INVALID_ARGUMENT;
+        //step 1: check arguments
+        if(schema_.table_name.empty() || schema_.dimension <= 0) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Invalid table name or dimension";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
         }
 
-        //step 1: construct table schema
+        engine::EngineType engine_type = EngineType(schema_.index_type);
+        if(engine_type == engine::EngineType::INVALID) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Invalid index type";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        //step 2: construct table schema
         engine::meta::TableSchema table_info;
         table_info.dimension_ = (uint16_t)schema_.dimension;
         table_info.table_id_ = schema_.table_name;
         table_info.engine_type_ = (int)EngineType(schema_.index_type);
         table_info.store_raw_data_ = schema_.store_raw_vector;
 
-        //step 2: create table
+        //step 3: create table
         engine::Status stat = DB()->CreateTable(table_info);
         if(!stat.ok()) {//table could exist
             error_code_ = SERVER_UNEXPECTED_ERROR;
@@ -219,6 +237,15 @@ ServerError DescribeTableTask::OnExecute() {
     TimeRecorder rc("DescribeTableTask");
 
     try {
+        //step 1: check arguments
+        if(table_name_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Table name cannot be empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        //step 2: get table info
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
         engine::Status stat = DB()->DescribeTable(table_info);
@@ -261,7 +288,7 @@ ServerError DeleteTableTask::OnExecute() {
     try {
         TimeRecorder rc("DeleteTableTask");
 
-        //step 1: check validation
+        //step 1: check arguments
         if (table_name_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
             error_msg_ = "Table name cannot be empty";
@@ -352,11 +379,22 @@ ServerError AddVectorTask::OnExecute() {
     try {
         TimeRecorder rc("AddVectorTask");
 
-        if(record_array_.empty()) {
-            return SERVER_SUCCESS;
+        //step 1: check arguments
+        if (table_name_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Table name cannot be empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
         }
 
-        //step 1: check table existence
+        if(record_array_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Row record array is empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
         engine::Status stat = DB()->DescribeTable(table_info);
@@ -369,7 +407,7 @@ ServerError AddVectorTask::OnExecute() {
 
         rc.Record("check validation");
 
-        //step 2: prepare float data
+        //step 3: prepare float data
         std::vector<float> vec_f;
         error_code_ = ConvertRowRecordToFloatArray(record_array_, table_info.dimension_, vec_f);
         if(error_code_ != SERVER_SUCCESS) {
@@ -379,7 +417,7 @@ ServerError AddVectorTask::OnExecute() {
 
         rc.Record("prepare vectors data");
 
-        //step 3: insert vectors
+        //step 4: insert vectors
         uint64_t vec_count = (uint64_t)record_array_.size();
         stat = DB()->InsertVectors(table_name_, vec_count, vec_f.data(), record_ids_);
         rc.Record("add vectors to engine");
@@ -409,26 +447,29 @@ ServerError AddVectorTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-SearchVectorTask::SearchVectorTask(const std::string& table_name,
-                                   const std::vector<thrift::RowRecord> & query_record_array,
-                                   const std::vector<megasearch::thrift::Range> & query_range_array,
+SearchVectorTask::SearchVectorTask(const std::string &table_name,
+                                   const std::vector<std::string>& file_id_array,
+                                   const std::vector<thrift::RowRecord> &query_record_array,
+                                   const std::vector<thrift::Range> &query_range_array,
                                    const int64_t top_k,
-                                   std::vector<thrift::TopKQueryResult>& result_array)
-    : BaseTask(DQL_TASK_GROUP),
-      table_name_(table_name),
-      record_array_(query_record_array),
-      range_array_(query_range_array),
-      top_k_(top_k),
-      result_array_(result_array) {
+                                   std::vector<thrift::TopKQueryResult> &result_array)
+        : BaseTask(DQL_TASK_GROUP),
+          table_name_(table_name),
+          file_id_array_(file_id_array),
+          record_array_(query_record_array),
+          range_array_(query_range_array),
+          top_k_(top_k),
+          result_array_(result_array) {
 
 }
 
 BaseTaskPtr SearchVectorTask::Create(const std::string& table_name,
+                                     const std::vector<std::string>& file_id_array,
                                      const std::vector<thrift::RowRecord> & query_record_array,
-                                     const std::vector<megasearch::thrift::Range> & query_range_array,
+                                     const std::vector<thrift::Range> & query_range_array,
                                      const int64_t top_k,
                                      std::vector<thrift::TopKQueryResult>& result_array) {
-    return std::shared_ptr<BaseTask>(new SearchVectorTask(table_name,
+    return std::shared_ptr<BaseTask>(new SearchVectorTask(table_name, file_id_array,
             query_record_array, query_range_array, top_k, result_array));
 }
 
@@ -436,7 +477,14 @@ ServerError SearchVectorTask::OnExecute() {
     try {
         TimeRecorder rc("SearchVectorTask");
 
-        //step 1: check validation
+        //step 1: check arguments
+        if (table_name_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Table name cannot be empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
         if(top_k_ <= 0 || record_array_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
             error_msg_ = "Invalid topk value, or query record array is empty";
@@ -478,7 +526,13 @@ ServerError SearchVectorTask::OnExecute() {
         //step 4: search vectors
         engine::QueryResults results;
         uint64_t record_count = (uint64_t)record_array_.size();
-        stat = DB()->Query(table_name_, (size_t)top_k_, record_count, vec_f.data(), dates, results);
+
+        if(file_id_array_.empty()) {
+            stat = DB()->Query(table_name_, (size_t) top_k_, record_count, vec_f.data(), dates, results);
+        } else {
+            stat = DB()->Query(table_name_, file_id_array_, (size_t) top_k_, record_count, vec_f.data(), dates, results);
+        }
+
         rc.Record("search vectors from engine");
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
@@ -510,6 +564,7 @@ ServerError SearchVectorTask::OnExecute() {
         }
         rc.Record("construct result");
         rc.Elapse("totally cost");
+
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
@@ -536,7 +591,7 @@ ServerError GetTableRowCountTask::OnExecute() {
     try {
         TimeRecorder rc("GetTableRowCountTask");
 
-        //step 1: check validation
+        //step 1: check arguments
         if (table_name_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
             error_msg_ = "Table name cannot be empty";
@@ -582,7 +637,7 @@ BaseTaskPtr PingTask::Create(const std::string& cmd, std::string& result) {
 
 ServerError PingTask::OnExecute() {
     if(cmd_ == "version") {
-        result_ = MEGASEARCH_VERSION;
+        result_ = MILVUS_VERSION;
     }
 
     return SERVER_SUCCESS;

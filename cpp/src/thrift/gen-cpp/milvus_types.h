@@ -4,8 +4,8 @@
  * DO NOT EDIT UNLESS YOU ARE SURE THAT YOU KNOW WHAT YOU ARE DOING
  *  @generated
  */
-#ifndef megasearch_TYPES_H
-#define megasearch_TYPES_H
+#ifndef milvus_TYPES_H
+#define milvus_TYPES_H
 
 #include <iosfwd>
 
@@ -18,7 +18,7 @@
 #include <thrift/stdcxx.h>
 
 
-namespace megasearch { namespace thrift {
+namespace milvus { namespace thrift {
 
 struct ErrorCode {
   enum type {

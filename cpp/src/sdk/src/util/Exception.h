@@ -9,7 +9,7 @@
 
 #include <exception>
 
-namespace megasearch {
+namespace milvus {
 class Exception : public std::exception {
 public:
     Exception(StatusCode error_code,

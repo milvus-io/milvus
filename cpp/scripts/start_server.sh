@@ -1,4 +1,4 @@
 #!/bin/bash
 
-../bin/vecwise_server -c ../conf/server_config.yaml -l ../conf/vecwise_engine_log.conf
+../bin/milvus_server -c ../conf/server_config.yaml -l ../conf/log_config.conf
 

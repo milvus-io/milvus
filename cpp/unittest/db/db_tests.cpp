@@ -69,6 +69,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     engine::meta::TableSchema group_info;
     group_info.dimension_ = group_dim;
     group_info.table_id_ = group_name;
+    group_info.engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
     engine::Status stat = db_->CreateTable(group_info);
 
     engine::meta::TableSchema group_info_get;
@@ -116,6 +117,7 @@ TEST_F(DBTest, DB_TEST) {
     engine::meta::TableSchema group_info;
     group_info.dimension_ = group_dim;
     group_info.table_id_ = group_name;
+    group_info.engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
     engine::Status stat = db_->CreateTable(group_info);
 
     engine::meta::TableSchema group_info_get;
@@ -202,6 +204,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     engine::meta::TableSchema group_info;
     group_info.dimension_ = group_dim;
     group_info.table_id_ = group_name;
+    group_info.engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
     engine::Status stat = db_->CreateTable(group_info);
 
     engine::meta::TableSchema group_info_get;

@@ -31,7 +31,7 @@ void DBTest::InitLog() {
 
 engine::Options DBTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
-    options.meta.path = "/tmp/vecwise_test";
+    options.meta.path = "/tmp/milvus_test";
     return options;
 }
 
@@ -43,12 +43,12 @@ void DBTest::SetUp() {
 
 void DBTest::TearDown() {
     delete db_;
-    boost::filesystem::remove_all("/tmp/vecwise_test");
+    boost::filesystem::remove_all("/tmp/milvus_test");
 }
 
 engine::Options DBTest2::GetOptions() {
     auto options = engine::OptionsFactory::Build();
-    options.meta.path = "/tmp/vecwise_test";
+    options.meta.path = "/tmp/milvus_test";
     options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
     return options;
 }

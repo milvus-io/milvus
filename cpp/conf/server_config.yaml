@@ -8,14 +8,14 @@ server_config:
 db_config:
   db_path: /tmp/milvus
   db_backend_url: http://127.0.0.1
-  db_flush_interval: 5              #unit: second
-  idmapper_max_open_file: 128
+  db_flush_interval: 5                    #flush cache data into disk at intervals, unit: second
+  index_building_threshold: 1024          #build index file when raw data file size larger than this value, unit: MB
 
 metric_config:
   is_startup: true # true is on, false is off
   collector: prometheus # prometheus, now we only have prometheus
   prometheus_config:
-    collect_type: pull # pull means prometheus pull the message from megasearch, push means megasearch push metric to push gateway
+    collect_type: pull # pull means prometheus pull the message from server, push means server push metric to push gateway
     port: 8080
     push_gateway_ip_address: 127.0.0.1
     push_gateway_port: 9091
@@ -24,5 +24,4 @@ license_config:
   license_path: "/tmp/system.license"
 
 cache_config:
-    cpu_cache_capacity: 16   # unit: GB
-    gpu_cache_capacity:  2   # unit: GB
+    cpu_cache_capacity: 16   # memory pool to hold index data, unit: GB
