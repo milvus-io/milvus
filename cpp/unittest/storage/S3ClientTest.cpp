@@ -8,7 +8,6 @@
 #include "storage/s3/S3ClientWrapper.h"
 #include <gtest/gtest.h>
 #include <memory.h>
-#include <cmake-build-debug/boost_ep-prefix/src/boost_ep/boost/exception/detail/shared_ptr.hpp>
 #include <fstream>
 
 

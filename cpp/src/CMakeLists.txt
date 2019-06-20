@@ -160,7 +160,6 @@ add_executable(milvus_server
         ${utils_files}
         ${service_files}
         ${metrics_files}
-        #${EASYLOGGINGPP_INCLUDE_DIR}/easylogging++.cc
         )
 
 if (ENABLE_LICENSE STREQUAL "ON")
@@ -183,11 +182,3 @@ endif ()
 install(TARGETS milvus_server DESTINATION bin)
 
 add_subdirectory(sdk)
-#target_link_libraries(
-#        libprometheus-cpp-push.a
-#        libprometheus-cpp-pull.a
-#        libprometheus-cpp-core.a
-#        pthread
-#        z
-#        ${CURL_LIBRARIES})
-

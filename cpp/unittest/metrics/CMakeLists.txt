@@ -62,7 +62,7 @@ set(count_test_src
 add_executable(metrics_test ${count_test_src} ${require_files} )
 
 target_link_libraries(metrics_test
-        gpufaiss
+        libgpufaiss.a
         faiss
         cudart
         cublas
@@ -72,10 +72,9 @@ target_link_libraries(metrics_test
         lz4
         metrics
         gtest
-#        prometheus-cpp-pull
-#        prometheus-cpp-push
-#        prometheus-cpp-core
         pthread
         z
         ${unittest_libs}
         )
+
+install(TARGETS metrics_test DESTINATION bin)
