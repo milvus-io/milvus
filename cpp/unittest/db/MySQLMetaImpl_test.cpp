@@ -32,11 +32,11 @@ using namespace zilliz::milvus::engine;
 //}
 
 TEST_F(MySQLTest, core) {
-    DBMetaOptions options;
-    //dialect+driver://username:password@host:port/database
-    options.backend_uri = "mysql://root:1234@:/test";
-    options.path = "/tmp/vecwise_test";
-    meta::MySQLMetaImpl impl(options);
+//    DBMetaOptions options;
+//    //dialect+driver://username:password@host:port/database
+//    options.backend_uri = "mysql://root:1234@:/test";
+//    options.path = "/tmp/vecwise_test";
+    meta::MySQLMetaImpl impl(getDBMetaOptions());
 //    auto status = impl.Initialize();
 //    ASSERT_TRUE(status.ok());
 
@@ -185,10 +185,10 @@ TEST_F(MySQLTest, core) {
 
 TEST_F(MySQLTest, GROUP_TEST) {
 
-    DBMetaOptions options;
-    options.backend_uri = "mysql://root:1234@:/test";
-    options.path = "/tmp/vecwise_test";
-    meta::MySQLMetaImpl impl(options);
+//    DBMetaOptions options;
+//    options.backend_uri = "mysql://root:1234@:/test";
+//    options.path = "/tmp/vecwise_test";
+    meta::MySQLMetaImpl impl(getDBMetaOptions());
     
     auto table_id = "meta_test_group";
 
@@ -219,10 +219,10 @@ TEST_F(MySQLTest, GROUP_TEST) {
 
 TEST_F(MySQLTest, table_file_TEST) {
 
-    DBMetaOptions options;
-    options.backend_uri = "mysql://root:1234@:/test";
-    options.path = "/tmp/vecwise_test";
-    meta::MySQLMetaImpl impl(options);
+//    DBMetaOptions options;
+//    options.backend_uri = "mysql://root:1234@:/test";
+//    options.path = "/tmp/vecwise_test";
+    meta::MySQLMetaImpl impl(getDBMetaOptions());
 
     auto table_id = "meta_test_group";
 
@@ -277,13 +277,13 @@ TEST_F(MySQLTest, table_file_TEST) {
 
 TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
-    DBMetaOptions options;
-    options.path = "/tmp/vecwise_test";
+    DBMetaOptions options = getDBMetaOptions();
+//    options.path = "/tmp/vecwise_test";
     int days_num = rand() % 100;
     std::stringstream ss;
     ss << "days:" << days_num;
     options.archive_conf = ArchiveConf("delete", ss.str());
-    options.backend_uri = "mysql://root:1234@:/test";
+//    options.backend_uri = "mysql://root:1234@:/test";
 
     meta::MySQLMetaImpl impl(options);
 
@@ -329,10 +329,10 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
 }
 
 TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
-    DBMetaOptions options;
-    options.path = "/tmp/vecwise_test";
+    DBMetaOptions options = getDBMetaOptions();
+//    options.path = "/tmp/vecwise_test";
     options.archive_conf = ArchiveConf("delete", "disk:11");
-    options.backend_uri = "mysql://root:1234@:/test";
+//    options.backend_uri = "mysql://root:1234@:/test";
 
     meta::MySQLMetaImpl impl(options);
 
@@ -376,10 +376,10 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
 
 TEST_F(MySQLTest, TABLE_FILES_TEST) {
 
-    DBMetaOptions options;
-    options.backend_uri = "mysql://root:1234@:/test";
-    options.path = "/tmp/vecwise_test";
-    meta::MySQLMetaImpl impl(options);
+//    DBMetaOptions options;
+//    options.backend_uri = "mysql://root:1234@:/test";
+//    options.path = "/tmp/vecwise_test";
+    meta::MySQLMetaImpl impl(getDBMetaOptions());
 
     auto table_id = "meta_test_group";
 

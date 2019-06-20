@@ -7,6 +7,7 @@
 
 #include "DB.h"
 #include "DBMetaImpl.h"
+#include "MySQLMetaImpl.h"
 #include "Options.h"
 #include "ExecutionEngine.h"
 
@@ -27,6 +28,7 @@ struct OptionsFactory {
 
 struct DBMetaImplFactory {
     static std::shared_ptr<meta::DBMetaImpl> Build();
+    static std::shared_ptr<meta::Meta> Build(const DBMetaOptions& metaOptions);
 };
 
 struct DBFactory {

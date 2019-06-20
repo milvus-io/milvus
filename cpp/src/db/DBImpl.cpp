@@ -8,6 +8,7 @@
 #include "Env.h"
 #include "Log.h"
 #include "EngineFactory.h"
+#include "Factories.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SearchScheduler.h"
 #include "utils/TimeRecorder.h"
@@ -130,8 +131,9 @@ DBImpl::DBImpl(const Options& options)
       bg_compaction_scheduled_(false),
       shutting_down_(false),
       bg_build_index_started_(false),
-      pMeta_(new meta::DBMetaImpl(options_.meta)),
+//      pMeta_(new meta::DBMetaImpl(options_.meta)),
       pMemMgr_(new MemManager(pMeta_, options_)) {
+    pMeta_ = DBMetaImplFactory::Build(options.meta);
     StartTimerTasks(options_.memory_sync_interval);
 }
 
