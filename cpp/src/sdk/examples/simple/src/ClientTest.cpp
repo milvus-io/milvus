@@ -20,7 +20,7 @@ namespace {
     static constexpr int64_t TOTAL_ROW_COUNT = 100000;
     static constexpr int64_t TOP_K = 10;
     static constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    static constexpr int64_t ADD_VECTOR_LOOP = 2;
+    static constexpr int64_t ADD_VECTOR_LOOP = 10;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
@@ -195,10 +195,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         PrintSearchResult(topk_query_result_array);
     }
 
-//    {//delete table
-//        Status stat = conn->DeleteTable(TABLE_NAME);
-//        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
-//    }
+    {//delete table
+        Status stat = conn->DeleteTable(TABLE_NAME);
+        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
+    }
 
     {//server status
         std::string status = conn->ServerStatus();

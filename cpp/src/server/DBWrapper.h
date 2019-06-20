@@ -5,21 +5,29 @@
  ******************************************************************************/
 #pragma once
 
-#include "IndexLoaderQueue.h"
-#include "SearchContext.h"
+#include "db/DB.h"
+#include "db/Meta.h"
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace server {
 
-class IScheduleStrategy {
+class DBWrapper {
+private:
+    DBWrapper();
+    ~DBWrapper();
+
 public:
-    virtual ~IScheduleStrategy() {}
+    static zilliz::milvus::engine::DB* DB() {
+        static DBWrapper db_wrapper;
+        return db_wrapper.db();
+    }
 
-    virtual bool Schedule(const SearchContextPtr &search_context, IndexLoaderQueue::LoaderQueue& loader_list) = 0;
+    zilliz::milvus::engine::DB* db() { return db_; }
+
+private:
+    zilliz::milvus::engine::DB* db_ = nullptr;
 };
-
-using ScheduleStrategyPtr = std::shared_ptr<IScheduleStrategy>;
 
 }
 }

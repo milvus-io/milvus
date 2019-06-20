@@ -8,7 +8,9 @@
 #include "Log.h"
 #include "EngineFactory.h"
 #include "metrics/Metrics.h"
-#include "scheduler/SearchScheduler.h"
+#include "scheduler/TaskScheduler.h"
+#include "scheduler/context/SearchContext.h"
+#include "scheduler/context/DeleteContext.h"
 #include "utils/TimeRecorder.h"
 
 #include <assert.h>
@@ -130,48 +132,52 @@ void CalcScore(uint64_t vector_count,
 DBImpl::DBImpl(const Options& options)
     : options_(options),
       shutting_down_(false),
-      pMeta_(new meta::DBMetaImpl(options_.meta)),
-      pMemMgr_(new MemManager(pMeta_, options_)),
+      meta_ptr_(new meta::DBMetaImpl(options_.meta)),
+      mem_mgr_(new MemManager(meta_ptr_, options_)),
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
     StartTimerTasks();
 }
 
 Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
-    return pMeta_->CreateTable(table_schema);
+    return meta_ptr_->CreateTable(table_schema);
 }
 
 Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& dates) {
-    //dates empty means delete all files of the table
-    if(dates.empty()) {
-        pMemMgr_->EraseMemVector(table_id); //not allow insert
-        pMeta_->DeleteTable(table_id); //soft delete
-    }
+    //dates partly delete files of the table but currently we don't support
+
+    mem_mgr_->EraseMemVector(table_id); //not allow insert
+    meta_ptr_->DeleteTable(table_id); //soft delete table
+
+    //scheduler will determine when to delete table files
+    TaskScheduler& scheduler = TaskScheduler::GetInstance();
+    DeleteContextPtr context = std::make_shared<DeleteContext>(table_id, meta_ptr_);
+    scheduler.Schedule(context);
 
     return Status::OK();
 }
 
 Status DBImpl::DescribeTable(meta::TableSchema& table_schema) {
-    return pMeta_->DescribeTable(table_schema);
+    return meta_ptr_->DescribeTable(table_schema);
 }
 
 Status DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
-    return pMeta_->HasTable(table_id, has_or_not);
+    return meta_ptr_->HasTable(table_id, has_or_not);
 }
 
 Status DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
-    return pMeta_->AllTables(table_schema_array);
+    return meta_ptr_->AllTables(table_schema_array);
 }
 
 Status DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
-    return pMeta_->Count(table_id, row_count);
+    return meta_ptr_->Count(table_id, row_count);
 }
 
 Status DBImpl::InsertVectors(const std::string& table_id_,
         uint64_t n, const float* vectors, IDNumbers& vector_ids_) {
 
     auto start_time = METRICS_NOW_TIME;
-    Status status = pMemMgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
+    Status status = mem_mgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
     auto end_time = METRICS_NOW_TIME;
     double total_time = METRICS_MICROSECONDS(start_time,end_time);
 //    std::chrono::microseconds time_span = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
@@ -203,7 +209,7 @@ Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq,
 
     //get all table files from table
     meta::DatePartionedTableFilesSchema files;
-    auto status = pMeta_->FilesToSearch(table_id, dates, files);
+    auto status = meta_ptr_->FilesToSearch(table_id, dates, files);
     if (!status.ok()) { return status; }
 
     meta::TableFilesSchema file_id_array;
@@ -225,7 +231,7 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
     for (auto &id : file_ids) {
         meta::TableFileSchema table_file;
         table_file.table_id_ = id;
-        auto status = pMeta_->GetTableFile(table_file);
+        auto status = meta_ptr_->GetTableFile(table_file);
         if (!status.ok()) {
             return status;
         }
@@ -238,7 +244,7 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
 Status DBImpl::QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
                  const float* vectors, const meta::DatesT& dates, QueryResults& results) {
     meta::DatePartionedTableFilesSchema files;
-    auto status = pMeta_->FilesToSearch(table_id, dates, files);
+    auto status = meta_ptr_->FilesToSearch(table_id, dates, files);
     if (!status.ok()) { return status; }
 
     ENGINE_LOG_DEBUG << "Search DateT Size = " << files.size();
@@ -387,8 +393,8 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
     }
 
     //step 2: put search task to scheduler
-    SearchScheduler& scheduler = SearchScheduler::GetInstance();
-    scheduler.ScheduleSearchTask(context);
+    TaskScheduler& scheduler = TaskScheduler::GetInstance();
+    scheduler.Schedule(context);
 
     context->WaitResult();
 
@@ -396,7 +402,7 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
     auto& context_result = context->GetResult();
     meta::TableSchema table_schema;
     table_schema.table_id_ = table_id;
-    pMeta_->DescribeTable(table_schema);
+    meta_ptr_->DescribeTable(table_schema);
 
     CalcScore(context->nq(), context->vectors(), table_schema.dimension_, context_result, results);
 
@@ -460,7 +466,7 @@ void DBImpl::StartCompactionTask() {
 
     //serialize memory data
     std::vector<std::string> temp_table_ids;
-    pMemMgr_->Serialize(temp_table_ids);
+    mem_mgr_->Serialize(temp_table_ids);
     for(auto& id : temp_table_ids) {
         compact_table_ids_.insert(id);
     }
@@ -486,10 +492,10 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     meta::TableFileSchema table_file;
     table_file.table_id_ = table_id;
     table_file.date_ = date;
-    Status status = pMeta_->CreateTableFile(table_file);
+    Status status = meta_ptr_->CreateTableFile(table_file);
 
     if (!status.ok()) {
-        LOG(INFO) << status.ToString() << std::endl;
+        ENGINE_LOG_INFO << status.ToString() << std::endl;
         return status;
     }
 
@@ -510,7 +516,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
 
         file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);
-        LOG(DEBUG) << "Merging file " << file_schema.file_id_;
+        ENGINE_LOG_DEBUG << "Merging file " << file_schema.file_id_;
         index_size = index->Size();
 
         if (index_size >= options_.index_trigger_size) break;
@@ -526,8 +532,8 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     }
     table_file.size_ = index_size;
     updated.push_back(table_file);
-    status = pMeta_->UpdateTableFiles(updated);
-    LOG(DEBUG) << "New merged file " << table_file.file_id_ <<
+    status = meta_ptr_->UpdateTableFiles(updated);
+    ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ <<
         " of size=" << index->PhysicalSize()/(1024*1024) << " M";
 
     index->Cache();
@@ -537,7 +543,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
 
 Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
     meta::DatePartionedTableFilesSchema raw_files;
-    auto status = pMeta_->FilesToMerge(table_id, raw_files);
+    auto status = meta_ptr_->FilesToMerge(table_id, raw_files);
     if (!status.ok()) {
         return status;
     }
@@ -569,8 +575,8 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
         }
     }
 
-    pMeta_->Archive();
-    pMeta_->CleanUpFilesWithTTL(1);
+    meta_ptr_->Archive();
+    meta_ptr_->CleanUpFilesWithTTL(1);
 }
 
 void DBImpl::StartBuildIndexTask() {
@@ -596,27 +602,43 @@ void DBImpl::StartBuildIndexTask() {
 }
 
 Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
-    meta::TableFileSchema table_file;
-    table_file.table_id_ = file.table_id_;
-    table_file.date_ = file.date_;
-    Status status = pMeta_->CreateTableFile(table_file);
-    if (!status.ok()) {
-        return status;
-    }
-
     ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
     if(to_index == nullptr) {
         return Status::Error("Invalid engine type");
     }
 
     try {
+        //step 1: load index
         to_index->Load();
+
+        //step 2: create table file
+        meta::TableFileSchema table_file;
+        table_file.table_id_ = file.table_id_;
+        table_file.date_ = file.date_;
+        Status status = meta_ptr_->CreateTableFile(table_file);
+        if (!status.ok()) {
+            return status;
+        }
+
+        //step 3: build index
         auto start_time = METRICS_NOW_TIME;
         auto index = to_index->BuildIndex(table_file.location_);
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time, end_time);
         server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
 
+        //step 4: if table has been deleted, dont save index file
+        bool has_table = false;
+        meta_ptr_->HasTable(file.table_id_, has_table);
+        if(!has_table) {
+            meta_ptr_->DeleteTableFiles(file.table_id_);
+            return Status::OK();
+        }
+
+        //step 5: save index file
+        index->Serialize();
+
+        //step 6: update meta
         table_file.file_type_ = meta::TableFileSchema::INDEX;
         table_file.size_ = index->Size();
 
@@ -624,13 +646,13 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
 
         meta::TableFilesSchema update_files = {to_remove, table_file};
-        pMeta_->UpdateTableFiles(update_files);
+        meta_ptr_->UpdateTableFiles(update_files);
 
-        LOG(DEBUG) << "New index file " << table_file.file_id_ << " of size "
+        ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size "
                    << index->PhysicalSize()/(1024*1024) << " M"
                    << " from file " << to_remove.file_id_;
 
-        index->Cache();
+        //index->Cache();
 
     } catch (std::exception& ex) {
         return Status::Error("Build index encounter exception", ex.what());
@@ -641,10 +663,10 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
 void DBImpl::BackgroundBuildIndex() {
     meta::TableFilesSchema to_index_files;
-    pMeta_->FilesToIndex(to_index_files);
+    meta_ptr_->FilesToIndex(to_index_files);
     Status status;
     for (auto& file : to_index_files) {
-        /* LOG(DEBUG) << "Buiding index for " << file.location; */
+        /* ENGINE_LOG_DEBUG << "Buiding index for " << file.location; */
         status = BuildIndex(file);
         if (!status.ok()) {
             bg_error_ = status;
@@ -655,22 +677,22 @@ void DBImpl::BackgroundBuildIndex() {
             break;
         }
     }
-    /* LOG(DEBUG) << "All Buiding index Done"; */
+    /* ENGINE_LOG_DEBUG << "All Buiding index Done"; */
 }
 
 Status DBImpl::DropAll() {
-    return pMeta_->DropAll();
+    return meta_ptr_->DropAll();
 }
 
 Status DBImpl::Size(uint64_t& result) {
-    return  pMeta_->Size(result);
+    return  meta_ptr_->Size(result);
 }
 
 DBImpl::~DBImpl() {
     shutting_down_.store(true, std::memory_order_release);
     bg_timer_thread_.join();
     std::vector<std::string> ids;
-    pMemMgr_->Serialize(ids);
+    mem_mgr_->Serialize(ids);
 }
 
 } // namespace engine

@@ -5,7 +5,8 @@
  ******************************************************************************/
 #pragma once
 
-#include "SearchContext.h"
+#include "context/IScheduleContext.h"
+#include "task/IScheduleTask.h"
 
 #include <condition_variable>
 #include <iostream>
@@ -17,31 +18,23 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-
-class IndexLoaderContext {
+class TaskDispatchQueue {
 public:
-    TableFileSchemaPtr file_;
-    std::vector<SearchContextPtr> search_contexts_;
-};
-using IndexLoaderContextPtr = std::shared_ptr<IndexLoaderContext>;
+    TaskDispatchQueue() : mtx(), full_(), empty_() {}
 
-class IndexLoaderQueue {
-public:
-    IndexLoaderQueue() : mtx(), full_(), empty_() {}
+    TaskDispatchQueue(const TaskDispatchQueue &rhs) = delete;
 
-    IndexLoaderQueue(const IndexLoaderQueue &rhs) = delete;
+    TaskDispatchQueue &operator=(const TaskDispatchQueue &rhs) = delete;
 
-    IndexLoaderQueue &operator=(const IndexLoaderQueue &rhs) = delete;
+    using TaskList = std::list<ScheduleTaskPtr>;
 
-    using LoaderQueue = std::list<IndexLoaderContextPtr>;
+    void Put(const ScheduleContextPtr &context);
 
-    void Put(const SearchContextPtr &search_context);
+    ScheduleTaskPtr Take();
 
-    IndexLoaderContextPtr Take();
+    ScheduleTaskPtr Front();
 
-    IndexLoaderContextPtr Front();
-
-    IndexLoaderContextPtr Back();
+    ScheduleTaskPtr Back();
 
     size_t Size();
 
@@ -54,7 +47,7 @@ private:
     std::condition_variable full_;
     std::condition_variable empty_;
 
-    LoaderQueue queue_;
+    TaskList queue_;
     size_t capacity_ = 1000000;
 };
 
