@@ -3,15 +3,15 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-namespace cpp megasearch.thrift
-namespace py megasearch.thrift
-namespace d megasearch.thrift
-namespace dart megasearch.thrift
-namespace java megasearch.thrift
-namespace perl megasearch.thrift
-namespace php megasearch.thrift
-namespace haxe megasearch.thrift
-namespace netcore megasearch.thrift
+namespace cpp milvus.thrift
+namespace py milvus.thrift
+namespace d milvus.thrift
+namespace dart milvus.thrift
+namespace java milvus.thrift
+namespace perl milvus.thrift
+namespace php milvus.thrift
+namespace haxe milvus.thrift
+namespace netcore milvus.thrift
 
 enum ErrorCode {
     SUCCESS = 0,
@@ -69,7 +69,7 @@ struct TopKQueryResult {
     1: list<QueryResult> query_result_arrays;        ///< TopK query result
 }
 
-service MegasearchService {
+service MilvusService {
     /**
      * @brief Create table method
      *
@@ -123,6 +123,23 @@ service MegasearchService {
                                        4: list<Range> query_range_array,
                                        5: i64 topk) throws(1: Exception e);
 
+    /**
+     * @brief Internal use query interface
+     *
+     * This method is used to query vector in specified files.
+     *
+     * @param file_id_array, specified files id array, queried.
+     * @param query_record_array, all vector are going to be queried.
+     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+     * @param topk, how many similarity vectors will be searched.
+     *
+     * @return query result array.
+     */
+    list<TopKQueryResult> SearchVectorInFiles(2: string table_name,
+                                              3: list<string> file_id_array,
+                                              4: list<RowRecord> query_record_array,
+                                              5: list<Range> query_range_array,
+                                              6: i64 topk) throws(1: Exception e);
 
     /**
      * @brief Get table schema

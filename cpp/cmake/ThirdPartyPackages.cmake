@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-set(MEGASEARCH_THIRDPARTY_DEPENDENCIES
+set(MILVUS_THIRDPARTY_DEPENDENCIES
 
         ARROW
         BOOST
@@ -35,14 +35,15 @@ set(MEGASEARCH_THIRDPARTY_DEPENDENCIES
         Thrift
         yaml-cpp
         ZLIB
-        ZSTD)
+        ZSTD
+        AWS)
 
-message(STATUS "Using ${MEGASEARCH_DEPENDENCY_SOURCE} approach to find dependencies")
+message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
 # For each dependency, set dependency source to global default, if unset
-foreach(DEPENDENCY ${MEGASEARCH_THIRDPARTY_DEPENDENCIES})
+foreach(DEPENDENCY ${MILVUS_THIRDPARTY_DEPENDENCIES})
     if("${${DEPENDENCY}_SOURCE}" STREQUAL "")
-        set(${DEPENDENCY}_SOURCE ${MEGASEARCH_DEPENDENCY_SOURCE})
+        set(${DEPENDENCY}_SOURCE ${MILVUS_DEPENDENCY_SOURCE})
     endif()
 endforeach()
 
@@ -83,6 +84,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_zlib()
     elseif("${DEPENDENCY_NAME}" STREQUAL "ZSTD")
         build_zstd()
+    elseif("${DEPENDENCY_NAME}" STREQUAL "AWS")
+        build_aws()
     else()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -145,7 +148,7 @@ set(EP_COMMON_CMAKE_ARGS
         -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS}
         -DCMAKE_CXX_FLAGS_${UPPERCASE_BUILD_TYPE}=${EP_CXX_FLAGS})
 
-if(NOT MEGASEARCH_VERBOSE_THIRDPARTY_BUILD)
+if(NOT MILVUS_VERBOSE_THIRDPARTY_BUILD)
     set(EP_LOG_OPTIONS LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1 LOG_DOWNLOAD 1)
 else()
     set(EP_LOG_OPTIONS)
@@ -158,10 +161,9 @@ if("${MAKE}" STREQUAL "")
     endif()
 endif()
 
-set(MAKE_BUILD_ARGS "-j4")
+set(MAKE_BUILD_ARGS "-j2")
 
 ## Using make -j in sub-make is fragile
-## see discussion https://github.com/apache/MEGASEARCH/pull/2779
 #if(${CMAKE_GENERATOR} MATCHES "Makefiles")
 #    set(MAKE_BUILD_ARGS "")
 #else()
@@ -180,7 +182,7 @@ find_package(Threads REQUIRED)
 # offline builds
 
 # Read toolchain versions from cpp/thirdparty/versions.txt
-set(THIRDPARTY_DIR "${MEGASEARCH_SOURCE_DIR}/thirdparty")
+set(THIRDPARTY_DIR "${MILVUS_SOURCE_DIR}/thirdparty")
 file(STRINGS "${THIRDPARTY_DIR}/versions.txt" TOOLCHAIN_VERSIONS_TXT)
 foreach(_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     # Exclude comments
@@ -202,16 +204,16 @@ foreach(_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     set(${_LIB_NAME} "${_LIB_VERSION}")
 endforeach()
 
-if(DEFINED ENV{MEGASEARCH_ARROW_URL})
-    set(ARROW_SOURCE_URL "$ENV{MEGASEARCH_ARROW_URL}")
+if(DEFINED ENV{MILVUS_ARROW_URL})
+    set(ARROW_SOURCE_URL "$ENV{MILVUS_ARROW_URL}")
 else()
     set(ARROW_SOURCE_URL
             "https://github.com/youny626/arrow.git"
             )
 endif()
 
-if(DEFINED ENV{MEGASEARCH_BOOST_URL})
-    set(BOOST_SOURCE_URL "$ENV{MEGASEARCH_BOOST_URL}")
+if(DEFINED ENV{MILVUS_BOOST_URL})
+    set(BOOST_SOURCE_URL "$ENV{MILVUS_BOOST_URL}")
 else()
     string(REPLACE "." "_" BOOST_VERSION_UNDERSCORES ${BOOST_VERSION})
     set(BOOST_SOURCE_URL
@@ -219,58 +221,58 @@ else()
     )
 endif()
 
-if(DEFINED ENV{MEGASEARCH_BZIP2_URL})
-    set(BZIP2_SOURCE_URL "$ENV{MEGASEARCH_BZIP2_URL}")
+if(DEFINED ENV{MILVUS_BZIP2_URL})
+    set(BZIP2_SOURCE_URL "$ENV{MILVUS_BZIP2_URL}")
 else()
     set(BZIP2_SOURCE_URL "https://fossies.org/linux/misc/bzip2-${BZIP2_VERSION}.tar.gz")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_EASYLOGGINGPP_URL})
-    set(EASYLOGGINGPP_SOURCE_URL "$ENV{MEGASEARCH_EASYLOGGINGPP_URL}")
+if(DEFINED ENV{MILVUS_EASYLOGGINGPP_URL})
+    set(EASYLOGGINGPP_SOURCE_URL "$ENV{MILVUS_EASYLOGGINGPP_URL}")
 else()
     set(EASYLOGGINGPP_SOURCE_URL "https://github.com/zuhd-org/easyloggingpp/archive/${EASYLOGGINGPP_VERSION}.tar.gz")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_FAISS_URL})
-    set(FAISS_SOURCE_URL "$ENV{MEGASEARCH_FAISS_URL}")
+if(DEFINED ENV{MILVUS_FAISS_URL})
+    set(FAISS_SOURCE_URL "$ENV{MILVUS_FAISS_URL}")
 else()
     set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
 endif()
 
-if (DEFINED ENV{MEGASEARCH_GTEST_URL})
-    set(GTEST_SOURCE_URL "$ENV{MEGASEARCH_GTEST_URL}")
+if (DEFINED ENV{MILVUS_GTEST_URL})
+    set(GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}")
 else ()
     set(GTEST_SOURCE_URL
             "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
 endif()
 
-if (DEFINED ENV{MEGASEARCH_JSONCONS_URL})
-    set(JSONCONS_SOURCE_URL "$ENV{MEGASEARCH_JSONCONS_URL}")
+if (DEFINED ENV{MILVUS_JSONCONS_URL})
+    set(JSONCONS_SOURCE_URL "$ENV{MILVUS_JSONCONS_URL}")
 else ()
     set(JSONCONS_SOURCE_URL
             "https://github.com/danielaparker/jsoncons/archive/v${JSONCONS_VERSION}.tar.gz")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_LAPACK_URL})
-    set(LAPACK_SOURCE_URL "$ENV{MEGASEARCH_LAPACK_URL}")
+if(DEFINED ENV{MILVUS_LAPACK_URL})
+    set(LAPACK_SOURCE_URL "$ENV{MILVUS_LAPACK_URL}")
 else()
     set(LAPACK_SOURCE_URL "https://github.com/Reference-LAPACK/lapack/archive/${LAPACK_VERSION}.tar.gz")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_LZ4_URL})
-    set(LZ4_SOURCE_URL "$ENV{MEGASEARCH_LZ4_URL}")
+if(DEFINED ENV{MILVUS_LZ4_URL})
+    set(LZ4_SOURCE_URL "$ENV{MILVUS_LZ4_URL}")
 else()
     set(LZ4_SOURCE_URL "https://github.com/lz4/lz4/archive/${LZ4_VERSION}.tar.gz")
 endif()
 
-if (DEFINED ENV{MEGASEARCH_OPENBLAS_URL})
-    set(OPENBLAS_SOURCE_URL "$ENV{MEGASEARCH_OPENBLAS_URL}")
+if (DEFINED ENV{MILVUS_OPENBLAS_URL})
+    set(OPENBLAS_SOURCE_URL "$ENV{MILVUS_OPENBLAS_URL}")
 else ()
     set(OPENBLAS_SOURCE_URL
             "https://github.com/xianyi/OpenBLAS/archive/${OPENBLAS_VERSION}.tar.gz")
 endif()
 
-if (DEFINED ENV{MEGASEARCH_PROMETHEUS_URL})
+if (DEFINED ENV{MILVUS_PROMETHEUS_URL})
     set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
 else ()
     set(PROMETHEUS_SOURCE_URL
@@ -278,59 +280,64 @@ else ()
             https://github.com/jupp0r/prometheus-cpp.git)
 endif()
 
-if (DEFINED ENV{MEGASEARCH_ROCKSDB_URL})
-    set(ROCKSDB_SOURCE_URL "$ENV{MEGASEARCH_ROCKSDB_URL}")
+if (DEFINED ENV{MILVUS_ROCKSDB_URL})
+    set(ROCKSDB_SOURCE_URL "$ENV{MILVUS_ROCKSDB_URL}")
 else ()
     set(ROCKSDB_SOURCE_URL
             "https://github.com/facebook/rocksdb/archive/${ROCKSDB_VERSION}.tar.gz")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_SNAPPY_URL})
-    set(SNAPPY_SOURCE_URL "$ENV{MEGASEARCH_SNAPPY_URL}")
+if(DEFINED ENV{MILVUS_SNAPPY_URL})
+    set(SNAPPY_SOURCE_URL "$ENV{MILVUS_SNAPPY_URL}")
 else()
     set(SNAPPY_SOURCE_URL
             "https://github.com/google/snappy/archive/${SNAPPY_VERSION}.tar.gz")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_SQLITE_URL})
-    set(SQLITE_SOURCE_URL "$ENV{MEGASEARCH_SQLITE_URL}")
+if(DEFINED ENV{MILVUS_SQLITE_URL})
+    set(SQLITE_SOURCE_URL "$ENV{MILVUS_SQLITE_URL}")
 else()
     set(SQLITE_SOURCE_URL
             "https://www.sqlite.org/2019/sqlite-autoconf-${SQLITE_VERSION}.tar.gz")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_SQLITE_ORM_URL})
-    set(SQLITE_ORM_SOURCE_URL "$ENV{MEGASEARCH_SQLITE_ORM_URL}")
+if(DEFINED ENV{MILVUS_SQLITE_ORM_URL})
+    set(SQLITE_ORM_SOURCE_URL "$ENV{MILVUS_SQLITE_ORM_URL}")
 else()
     set(SQLITE_ORM_SOURCE_URL
             "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_THRIFT_URL})
-    set(THRIFT_SOURCE_URL "$ENV{MEGASEARCH_THRIFT_URL}")
+if(DEFINED ENV{MILVUS_THRIFT_URL})
+    set(THRIFT_SOURCE_URL "$ENV{MILVUS_THRIFT_URL}")
 else()
     set(THRIFT_SOURCE_URL
             "https://github.com/apache/thrift/archive/${THRIFT_VERSION}.tar.gz")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_YAMLCPP_URL})
-    set(YAMLCPP_SOURCE_URL "$ENV{MEGASEARCH_YAMLCPP_URL}")
+if(DEFINED ENV{MILVUS_YAMLCPP_URL})
+    set(YAMLCPP_SOURCE_URL "$ENV{MILVUS_YAMLCPP_URL}")
 else()
     set(YAMLCPP_SOURCE_URL "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_ZLIB_URL})
-    set(ZLIB_SOURCE_URL "$ENV{MEGASEARCH_ZLIB_URL}")
+if(DEFINED ENV{MILVUS_ZLIB_URL})
+    set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
 else()
     set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz")
 endif()
 
-if(DEFINED ENV{MEGASEARCH_ZSTD_URL})
-    set(ZSTD_SOURCE_URL "$ENV{MEGASEARCH_ZSTD_URL}")
+if(DEFINED ENV{MILVUS_ZSTD_URL})
+    set(ZSTD_SOURCE_URL "$ENV{MILVUS_ZSTD_URL}")
 else()
     set(ZSTD_SOURCE_URL "https://github.com/facebook/zstd/archive/${ZSTD_VERSION}.tar.gz")
 endif()
 
+if(DEFINED ENV{MILVUS_AWS_URL})
+    set(AWS_SOURCE_URL "$ENV{MILVUS_AWS_URL}")
+else()
+    set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
+endif()
 # ----------------------------------------------------------------------
 # ARROW
 
@@ -410,7 +417,7 @@ macro(build_arrow)
 
 endmacro()
 
-if(MEGASEARCH_WITH_ARROW)
+if(MILVUS_WITH_ARROW)
 
     resolve_dependency(ARROW)
 
@@ -422,7 +429,7 @@ endif()
 # Add Boost dependencies (code adapted from Apache Kudu (incubating))
 
 set(Boost_USE_MULTITHREADED ON)
-if(MSVC AND MEGASEARCH_USE_STATIC_CRT)
+if(MSVC AND MILVUS_USE_STATIC_CRT)
     set(Boost_USE_STATIC_RUNTIME ON)
 endif()
 set(Boost_ADDITIONAL_VERSIONS
@@ -449,7 +456,7 @@ set(Boost_ADDITIONAL_VERSIONS
         "1.60.0"
         "1.60")
 
-if(MEGASEARCH_BOOST_VENDORED)
+if(MILVUS_BOOST_VENDORED)
     set(BOOST_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/boost_ep-prefix/src/boost_ep")
     set(BOOST_LIB_DIR "${BOOST_PREFIX}/stage/lib")
     set(BOOST_BUILD_LINK "static")
@@ -466,7 +473,7 @@ if(MEGASEARCH_BOOST_VENDORED)
     set(BOOST_FILESYSTEM_LIBRARY boost_filesystem_static)
     set(BOOST_SERIALIZATION_LIBRARY boost_serialization_static)
 
-    if(MEGASEARCH_BOOST_HEADER_ONLY)
+    if(MILVUS_BOOST_HEADER_ONLY)
         set(BOOST_BUILD_PRODUCTS)
         set(BOOST_CONFIGURE_COMMAND "")
         set(BOOST_BUILD_COMMAND "")
@@ -492,7 +499,7 @@ if(MEGASEARCH_BOOST_VENDORED)
 
         add_thirdparty_lib(boost_serialization STATIC_LIB "${BOOST_STATIC_SERIALIZATION_LIBRARY}")
 
-        set(MEGASEARCH_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY} ${BOOST_STATIC_SERIALIZATION_LIBRARY})
+        set(MILVUS_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY} ${BOOST_STATIC_SERIALIZATION_LIBRARY})
     endif()
     externalproject_add(boost_ep
             URL
@@ -526,7 +533,7 @@ else()
 #        set(Boost_NO_SYSTEM_PATHS ON)
 #    endif()
 
-    if(MEGASEARCH_BOOST_USE_SHARED)
+    if(MILVUS_BOOST_USE_SHARED)
         # Find shared Boost libraries.
         set(Boost_USE_STATIC_LIBS OFF)
         set(BUILD_SHARED_LIBS_KEEP ${BUILD_SHARED_LIBS})
@@ -537,14 +544,14 @@ else()
             add_definitions(-DBOOST_ALL_DYN_LINK)
         endif()
 
-        if(MEGASEARCH_BOOST_HEADER_ONLY)
+        if(MILVUS_BOOST_HEADER_ONLY)
             find_package(Boost REQUIRED)
         else()
             find_package(Boost COMPONENTS serialization system filesystem REQUIRED)
             set(BOOST_SYSTEM_LIBRARY Boost::system)
             set(BOOST_FILESYSTEM_LIBRARY Boost::filesystem)
             set(BOOST_SERIALIZATION_LIBRARY Boost::serialization)
-            set(MEGASEARCH_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY})
+            set(MILVUS_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY})
         endif()
         set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_KEEP})
         unset(BUILD_SHARED_LIBS_KEEP)
@@ -552,14 +559,14 @@ else()
         # Find static boost headers and libs
         # TODO Differentiate here between release and debug builds
         set(Boost_USE_STATIC_LIBS ON)
-        if(MEGASEARCH_BOOST_HEADER_ONLY)
+        if(MILVUS_BOOST_HEADER_ONLY)
             find_package(Boost REQUIRED)
         else()
             find_package(Boost COMPONENTS serialization system filesystem REQUIRED)
             set(BOOST_SYSTEM_LIBRARY Boost::system)
             set(BOOST_FILESYSTEM_LIBRARY Boost::filesystem)
             set(BOOST_SERIALIZATION_LIBRARY Boost::serialization)
-            set(MEGASEARCH_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY})
+            set(MILVUS_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY})
         endif()
     endif()
 endif()
@@ -612,7 +619,7 @@ macro(build_bzip2)
     add_dependencies(bzip2 bzip2_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_BZ2)
+if(MILVUS_WITH_BZ2)
     resolve_dependency(BZip2)
 
     if(NOT TARGET bzip2)
@@ -664,7 +671,7 @@ macro(build_easyloggingpp)
     add_dependencies(easyloggingpp easyloggingpp_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_EASYLOGGINGPP)
+if(MILVUS_WITH_EASYLOGGINGPP)
     resolve_dependency(Easylogging++)
 
     get_target_property(EASYLOGGINGPP_INCLUDE_DIR easyloggingpp INTERFACE_INCLUDE_DIRECTORIES)
@@ -710,7 +717,7 @@ macro(build_openblas)
     add_dependencies(openblas openblas_ep)
 endmacro()
 
-#if(MEGASEARCH_WITH_OPENBLAS)
+#if(MILVUS_WITH_OPENBLAS)
 #    resolve_dependency(OpenBLAS)
 #
 #    get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
@@ -754,7 +761,7 @@ macro(build_lapack)
     add_dependencies(lapack lapack_ep)
 endmacro()
 
-#if(MEGASEARCH_WITH_LAPACK)
+#if(MILVUS_WITH_LAPACK)
 #    resolve_dependency(LAPACK)
 #
 #    get_target_property(LAPACK_INCLUDE_DIR lapack INTERFACE_INCLUDE_DIRECTORIES)
@@ -791,7 +798,7 @@ macro(build_faiss)
 #    endif()
 #    set(FAISS_DEPENDENCIES ${FAISS_DEPENDENCIES} ${OPENBLAS_LIBRARY})
 
-    if(${MEGASEARCH_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
+    if(${MILVUS_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
 #                "with_cuda_arch=\"-gencode=arch=compute_35,code=compute_35 \\
@@ -821,14 +828,17 @@ macro(build_faiss)
 #            BUILD_COMMAND
 #            ${MAKE} ${MAKE_BUILD_ARGS}
             BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS} all
+            ${MAKE} ${MAKE_BUILD_ARGS} all
+	    COMMAND
+	    cd gpu && make ${MAKE_BUILD_ARGS}
             BUILD_IN_SOURCE
             1
 #            INSTALL_DIR
 #            ${FAISS_PREFIX}
-#            INSTALL_COMMAND
-#            ""
+            INSTALL_COMMAND
+            ${MAKE} install
+            COMMAND
+            ln -s faiss_ep ../faiss
             BUILD_BYPRODUCTS
             ${FAISS_STATIC_LIB})
 #            DEPENDS
@@ -852,7 +862,7 @@ macro(build_faiss)
 
 endmacro()
 
-if(MEGASEARCH_WITH_FAISS)
+if(MILVUS_WITH_FAISS)
 
     resolve_dependency(OpenBLAS)
     get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
@@ -867,7 +877,10 @@ if(MEGASEARCH_WITH_FAISS)
     resolve_dependency(FAISS)
     get_target_property(FAISS_INCLUDE_DIR faiss INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM "${FAISS_INCLUDE_DIR}")
+    include_directories(SYSTEM "${CMAKE_CURRENT_BINARY_DIR}/faiss_ep-prefix/src/")
+    link_directories(SYSTEM ${FAISS_PREFIX}/)
     link_directories(SYSTEM ${FAISS_PREFIX}/lib/)
+    link_directories(SYSTEM ${FAISS_PREFIX}/gpu/)
 endif()
 
 # ----------------------------------------------------------------------
@@ -944,7 +957,7 @@ macro(build_gtest)
 
 endmacro()
 
-if (MEGASEARCH_BUILD_TESTS)
+if (MILVUS_BUILD_TESTS)
     #message(STATUS "Resolving gtest dependency")
     resolve_dependency(GTest)
 
@@ -976,7 +989,7 @@ macro(build_jsoncons)
     endif ()
 endmacro()
 
-if(MEGASEARCH_WITH_JSONCONS)
+if(MILVUS_WITH_JSONCONS)
     resolve_dependency(JSONCONS)
     include_directories(SYSTEM "${JSONCONS_INCLUDE_DIR}")
 endif()
@@ -990,7 +1003,7 @@ macro(build_lz4)
     set(LZ4_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/lz4_ep-prefix/")
 
     if(MSVC)
-        if(MEGASEARCH_USE_STATIC_CRT)
+        if(MILVUS_USE_STATIC_CRT)
             if(${UPPERCASE_BUILD_TYPE} STREQUAL "DEBUG")
                 set(LZ4_RUNTIME_LIBRARY_LINKAGE "/p:RuntimeLibrary=MultiThreadedDebug")
             else()
@@ -1046,7 +1059,7 @@ macro(build_lz4)
     add_dependencies(lz4 lz4_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_LZ4)
+if(MILVUS_WITH_LZ4)
     resolve_dependency(Lz4)
 
     # TODO: Don't use global includes but rather target_include_directories
@@ -1129,7 +1142,7 @@ macro(build_prometheus)
     add_dependencies(prometheus-cpp-core prometheus_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_PROMETHEUS)
+if(MILVUS_WITH_PROMETHEUS)
 
     resolve_dependency(Prometheus)
 
@@ -1191,7 +1204,7 @@ macro(build_rocksdb)
     add_dependencies(rocksdb rocksdb_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_ROCKSDB)
+if(MILVUS_WITH_ROCKSDB)
 
     resolve_dependency(RocksDB)
 
@@ -1244,7 +1257,7 @@ macro(build_snappy)
     add_dependencies(snappy snappy_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_SNAPPY)
+if(MILVUS_WITH_SNAPPY)
 #    if(Snappy_SOURCE STREQUAL "AUTO")
 #        # Normally *Config.cmake files reside in /usr/lib/cmake but Snappy
 #        # errornously places them in ${CMAKE_ROOT}/Modules/
@@ -1320,7 +1333,7 @@ macro(build_sqlite)
     add_dependencies(sqlite sqlite_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_SQLITE)
+if(MILVUS_WITH_SQLITE)
     resolve_dependency(SQLite)
     include_directories(SYSTEM "${SQLITE_INCLUDE_DIR}")
     link_directories(SYSTEM ${SQLITE_PREFIX}/lib/)
@@ -1407,7 +1420,7 @@ macro(build_sqlite_orm)
 #    add_dependencies(sqlite_orm sqlite_orm_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_SQLITE_ORM)
+if(MILVUS_WITH_SQLITE_ORM)
     resolve_dependency(SQLite_ORM)
 #    ExternalProject_Get_Property(sqlite_orm_ep source_dir)
 #    set(SQLITE_ORM_INCLUDE_DIR ${source_dir}/sqlite_orm_ep)
@@ -1427,17 +1440,19 @@ macro(build_thrift)
             ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${THRIFT_PREFIX}"
             "-DCMAKE_INSTALL_RPATH=${THRIFT_PREFIX}/lib"
-            -DBUILD_SHARED_LIBS=OFF
-            -DBUILD_TESTING=OFF
-            -DBUILD_EXAMPLES=OFF
+	    -DBOOST_ROOT=${BOOST_PREFIX}
+            -DWITH_CPP=ON
+            -DWITH_STATIC_LIB=ON
+	    -DBUILD_SHARED_LIBS=OFF
+	    -DBUILD_TESTING=OFF
+	    -DBUILD_EXAMPLES=OFF
             -DBUILD_TUTORIALS=OFF
             -DWITH_QT4=OFF
+            -DWITH_QT5=OFF
             -DWITH_C_GLIB=OFF
             -DWITH_JAVA=OFF
             -DWITH_PYTHON=OFF
             -DWITH_HASKELL=OFF
-            -DWITH_CPP=ON
-            -DWITH_STATIC_LIB=ON
             -DWITH_LIBEVENT=OFF
             -DCMAKE_BUILD_TYPE=Release)
 
@@ -1451,7 +1466,7 @@ macro(build_thrift)
 
     set(THRIFT_STATIC_LIB_NAME "${CMAKE_STATIC_LIBRARY_PREFIX}thrift")
     if(MSVC)
-        if(MEGASEARCH_USE_STATIC_CRT)
+        if(MILVUS_USE_STATIC_CRT)
             set(THRIFT_STATIC_LIB_NAME "${THRIFT_STATIC_LIB_NAME}")
             set(THRIFT_CMAKE_ARGS ${THRIFT_CMAKE_ARGS} "-DWITH_MT=ON")
         else()
@@ -1537,6 +1552,8 @@ macro(build_thrift)
             ${MAKE_BUILD_ARGS}
             CMAKE_ARGS
             ${THRIFT_CMAKE_ARGS}
+	    INSTALL_COMMAND
+	    ${MAKE} install
             DEPENDS
             ${THRIFT_DEPENDENCIES}
             ${EP_LOG_OPTIONS})
@@ -1550,12 +1567,15 @@ macro(build_thrift)
     add_dependencies(thrift thrift_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_THRIFT)
+if(MILVUS_WITH_THRIFT)
     resolve_dependency(Thrift)
     # TODO: Don't use global includes but rather target_include_directories
 #    MESSAGE(STATUS ${THRIFT_PREFIX}/lib/)
     link_directories(SYSTEM ${THRIFT_PREFIX}/lib/)
+    link_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix/src/thrift_ep-build/lib)
     include_directories(SYSTEM ${THRIFT_INCLUDE_DIR})
+    include_directories(SYSTEM ${THRIFT_PREFIX}/lib/cpp/src)
+    include_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix/src/thrift_ep-build)
 endif()
 
 # ----------------------------------------------------------------------
@@ -1594,7 +1614,7 @@ macro(build_yamlcpp)
     add_dependencies(yaml-cpp yaml-cpp_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_YAMLCPP)
+if(MILVUS_WITH_YAMLCPP)
     resolve_dependency(yaml-cpp)
 
     # TODO: Don't use global includes but rather target_include_directories
@@ -1644,7 +1664,7 @@ macro(build_zlib)
     add_dependencies(zlib zlib_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_ZLIB)
+if(MILVUS_WITH_ZLIB)
     resolve_dependency(ZLIB)
 
     # TODO: Don't use global includes but rather target_include_directories
@@ -1671,7 +1691,7 @@ macro(build_zstd)
 
     if(MSVC)
         set(ZSTD_STATIC_LIB "${ZSTD_PREFIX}/lib/zstd_static.lib")
-        if(MEGASEARCH_USE_STATIC_CRT)
+        if(MILVUS_USE_STATIC_CRT)
             set(ZSTD_CMAKE_ARGS ${ZSTD_CMAKE_ARGS} "-DZSTD_USE_STATIC_RUNTIME=on")
         endif()
     else()
@@ -1716,11 +1736,95 @@ macro(build_zstd)
     add_dependencies(zstd zstd_ep)
 endmacro()
 
-if(MEGASEARCH_WITH_ZSTD)
+if(MILVUS_WITH_ZSTD)
     resolve_dependency(ZSTD)
 
     # TODO: Don't use global includes but rather target_include_directories
     get_target_property(ZSTD_INCLUDE_DIR zstd INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${ZSTD_PREFIX}/lib)
     include_directories(SYSTEM ${ZSTD_INCLUDE_DIR})
+endif()
+
+# ----------------------------------------------------------------------
+# aws
+macro(build_aws)
+    message(STATUS "Building aws-${AWS_VERSION} from source")
+    set(AWS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/aws_ep-prefix/src/aws_ep")
+
+    set(AWS_CMAKE_ARGS
+            ${EP_COMMON_TOOLCHAIN}
+            "-DCMAKE_INSTALL_PREFIX=${AWS_PREFIX}"
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DCMAKE_INSTALL_LIBDIR=lib #${CMAKE_INSTALL_LIBDIR}
+            -DBUILD_ONLY=s3
+            -DBUILD_SHARED_LIBS=off
+            -DENABLE_TESTING=off
+            -DENABLE_UNITY_BUILD=on
+            -DNO_ENCRYPTION=off)
+
+    set(AWS_CPP_SDK_CORE_STATIC_LIB
+            "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-core${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(AWS_CPP_SDK_S3_STATIC_LIB
+            "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-s3${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    # Only pass our C flags on Unix as on MSVC it leads to a
+    # "incompatible command-line options" error
+    set(AWS_CMAKE_ARGS
+            ${AWS_CMAKE_ARGS}
+            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+            -DCMAKE_C_FLAGS=${EP_C_FLAGS}
+            -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
+
+    if(CMAKE_VERSION VERSION_LESS 3.7)
+        message(FATAL_ERROR "Building AWS using ExternalProject requires at least CMake 3.7")
+    endif()
+
+    externalproject_add(aws_ep
+            ${EP_LOG_OPTIONS}
+            CMAKE_ARGS
+            ${AWS_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
+            INSTALL_DIR
+            ${AWS_PREFIX}
+            URL
+            ${AWS_SOURCE_URL}
+            BUILD_BYPRODUCTS
+            "${AWS_CPP_SDK_S3_STATIC_LIB}"
+            "${AWS_CPP_SDK_CORE_STATIC_LIB}")
+
+
+    file(MAKE_DIRECTORY "${AWS_PREFIX}/include")
+
+    add_library(aws-cpp-sdk-s3 STATIC IMPORTED)
+    set_target_properties(aws-cpp-sdk-s3
+            PROPERTIES
+            IMPORTED_LOCATION "${AWS_CPP_SDK_S3_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${AWS_PREFIX}/include"
+            INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
+
+    add_library(aws-cpp-sdk-core STATIC IMPORTED)
+    set_target_properties(aws-cpp-sdk-core
+            PROPERTIES IMPORTED_LOCATION "${AWS_CPP_SDK_CORE_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${AWS_PREFIX}/include"
+            INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
+
+    add_dependencies(aws-cpp-sdk-s3 aws_ep)
+    add_dependencies(aws-cpp-sdk-core aws_ep)
+
+endmacro()
+
+if(MILVUS_WITH_AWS)
+    resolve_dependency(AWS)
+
+    # TODO: Don't use global includes but rather target_include_directories
+    link_directories(SYSTEM ${AWS_PREFIX}/lib)
+
+    get_target_property(AWS_CPP_SDK_S3_INCLUDE_DIR aws-cpp-sdk-s3 INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${AWS_CPP_SDK_S3_INCLUDE_DIR})
+
+    get_target_property(AWS_CPP_SDK_CORE_INCLUDE_DIR aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${AWS_CPP_SDK_CORE_INCLUDE_DIR})
+
 endif()

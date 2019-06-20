@@ -318,7 +318,7 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
     file_schema.updated_time_ = file_schema.created_on_;
     file_schema.engine_type_ = table_schema.engine_type_;
     GetTableFilePath(file_schema);
-
+    ENGINE_LOG_DEBUG << "CreateTableFile " << file_schema.file_id_;
     {
         try {
             server::Metrics::GetInstance().MetaAccessTotalIncrement();
@@ -455,7 +455,8 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
                                                          &TableFileSchema::file_id_,
                                                          &TableFileSchema::file_type_,
                                                          &TableFileSchema::size_,
-                                                         &TableFileSchema::date_),
+                                                         &TableFileSchema::date_,
+                                                         &TableFileSchema::engine_type_),
                                                  where(c(&TableFileSchema::table_id_) == table_id and
                                                      in(&TableFileSchema::date_, partition) and
                                                      (c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW or
@@ -482,6 +483,7 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
                 table_file.file_type_ = std::get<3>(file);
                 table_file.size_ = std::get<4>(file);
                 table_file.date_ = std::get<5>(file);
+                table_file.engine_type_ = std::get<6>(file);
                 table_file.dimension_ = table_schema.dimension_;
                 GetTableFilePath(table_file);
                 auto dateItr = files.find(table_file.date_);
@@ -513,7 +515,8 @@ Status DBMetaImpl::FilesToMerge(const std::string &table_id,
                                                      &TableFileSchema::size_,
                                                      &TableFileSchema::date_),
                                              where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW and
-                                                 c(&TableFileSchema::table_id_) == table_id));
+                                                 c(&TableFileSchema::table_id_) == table_id),
+                                             order_by(&TableFileSchema::size_).desc());
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time, end_time);
         server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);

@@ -5,8 +5,8 @@
  ******************************************************************************/
 #include "ThriftClient.h"
 
-#include "megasearch_types.h"
-#include "megasearch_constants.h"
+#include "milvus_types.h"
+#include "milvus_constants.h"
 
 #include <exception>
 
@@ -21,7 +21,7 @@
 #include <thrift/transport/TBufferTransports.h>
 #include <thrift/concurrency/PosixThreadFactory.h>
 
-namespace megasearch {
+namespace milvus {
 
 using namespace ::apache::thrift;
 using namespace ::apache::thrift::protocol;
@@ -36,7 +36,7 @@ ThriftClient::~ThriftClient() {
 
 }
 
-MegasearchServiceClientPtr
+ServiceClientPtr
 ThriftClient::interface() {
     if(client_ == nullptr) {
         throw std::exception();
@@ -62,10 +62,10 @@ ThriftClient::Connect(const std::string& address, int32_t port, const std::strin
         }
 
         transport_ptr->open();
-        client_ = std::make_shared<thrift::MegasearchServiceClient>(protocol_ptr);
+        client_ = std::make_shared<thrift::MilvusServiceClient>(protocol_ptr);
     } catch ( std::exception& ex) {
         //CLIENT_LOG_ERROR << "connect encounter exception: " << ex.what();
-        return Status(StatusCode::NotConnected, "failed to connect megasearch server" + std::string(ex.what()));
+        return Status(StatusCode::NotConnected, "failed to connect server" + std::string(ex.what()));
     }
 
     return Status::OK();

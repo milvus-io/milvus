@@ -50,10 +50,10 @@ using TaskQueue = BlockingQueue<BaseTaskPtr>;
 using TaskQueuePtr = std::shared_ptr<TaskQueue>;
 using ThreadPtr = std::shared_ptr<std::thread>;
 
-class MegasearchScheduler {
+class RequestScheduler {
 public:
-    static MegasearchScheduler& GetInstance() {
-        static MegasearchScheduler scheduler;
+    static RequestScheduler& GetInstance() {
+        static RequestScheduler scheduler;
         return scheduler;
     }
 
@@ -65,8 +65,8 @@ public:
     static void ExecTask(BaseTaskPtr& task_ptr);
 
 protected:
-    MegasearchScheduler();
-    virtual ~MegasearchScheduler();
+    RequestScheduler();
+    virtual ~RequestScheduler();
 
     ServerError PutTaskToQueue(const BaseTaskPtr& task_ptr);
 

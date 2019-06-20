@@ -4,13 +4,13 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "ClientTest.h"
-#include "MegaSearch.h"
+#include "MilvusApi.h"
 
 #include <iostream>
 #include <time.h>
 #include <unistd.h>
 
-using namespace megasearch;
+using namespace ::milvus;
 
 namespace {
     std::string GetTableName();
@@ -20,10 +20,11 @@ namespace {
     static constexpr int64_t TOTAL_ROW_COUNT = 100000;
     static constexpr int64_t TOP_K = 10;
     static constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
+    static constexpr int64_t ADD_VECTOR_LOOP = 1;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
-    void PrintTableSchema(const megasearch::TableSchema& tb_schema) {
+    void PrintTableSchema(const TableSchema& tb_schema) {
         BLOCK_SPLITER
         std::cout << "Table name: " << tb_schema.table_name << std::endl;
         std::cout << "Table index type: " << (int)tb_schema.index_type << std::endl;
@@ -134,7 +135,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//server version
         std::string version = conn->ServerVersion();
-        std::cout << "MegaSearch server version: " << version << std::endl;
+        std::cout << "Server version: " << version << std::endl;
     }
 
     {//sdk version
@@ -156,9 +157,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//create table
         TableSchema tb_schema = BuildTableSchema();
-        PrintTableSchema(tb_schema);
         Status stat = conn->CreateTable(tb_schema);
         std::cout << "CreateTable function call status: " << stat.ToString() << std::endl;
+        PrintTableSchema(tb_schema);
     }
 
     {//describe table
@@ -168,9 +169,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         PrintTableSchema(tb_schema);
     }
 
-    {//add vectors
+    for(int i = 0; i < ADD_VECTOR_LOOP; i++){//add vectors
         std::vector<RowRecord> record_array;
-        BuildVectors(0, TOTAL_ROW_COUNT, record_array);
+        BuildVectors(i*TOTAL_ROW_COUNT, (i+1)*TOTAL_ROW_COUNT, record_array);
         std::vector<int64_t> record_ids;
         Status stat = conn->AddVector(TABLE_NAME, record_array, record_ids);
         std::cout << "AddVector function call status: " << stat.ToString() << std::endl;
@@ -194,10 +195,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         PrintSearchResult(topk_query_result_array);
     }
 
-    {//delete table
-        Status stat = conn->DeleteTable(TABLE_NAME);
-        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
-    }
+//    {//delete table
+//        Status stat = conn->DeleteTable(TABLE_NAME);
+//        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
+//    }
 
     {//server status
         std::string status = conn->ServerStatus();

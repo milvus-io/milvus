@@ -6,7 +6,7 @@
 #include "ConnectionImpl.h"
 #include "version.h"
 
-namespace megasearch {
+namespace milvus {
 
 std::shared_ptr<Connection>
 Connection::Create() {
@@ -14,7 +14,7 @@ Connection::Create() {
 }
 
 Status
-Connection::Destroy(std::shared_ptr<megasearch::Connection> connection_ptr) {
+Connection::Destroy(std::shared_ptr<milvus::Connection> connection_ptr) {
     if(connection_ptr != nullptr) {
         return connection_ptr->Disconnect();
     }
@@ -48,7 +48,7 @@ ConnectionImpl::Disconnect() {
 
 std::string
 ConnectionImpl::ClientVersion() const {
-    return MEGASEARCH_VERSION;
+    return MILVUS_VERSION;
 }
 
 Status
