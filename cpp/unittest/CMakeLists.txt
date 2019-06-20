@@ -6,10 +6,10 @@
 link_directories(
         "${CMAKE_BINARY_DIR}/lib"
         #"${VECWISE_THIRD_PARTY_BUILD}/lib"
-        "${GTEST_PREFIX}/lib/"
+#        "${GTEST_PREFIX}/lib/"
 
 )
-message(STATUS "GTEST LIB: ${GTEST_PREFIX}/lib")
+#message(STATUS "GTEST LIB: ${GTEST_PREFIX}/lib")
 
 set(unittest_srcs
         ${CMAKE_CURRENT_SOURCE_DIR}/vecwise_test.cpp)

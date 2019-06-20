@@ -24,7 +24,7 @@ struct TableSchema {
     size_t id_;
     std::string table_id_;
     size_t files_cnt_ = 0;
-    uint16_t dimension_;
+    uint16_t dimension_ = 0;
     std::string location_;
     long created_on_;
     int engine_type_ = (int)EngineType::FAISS_IDMAP;

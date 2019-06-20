@@ -164,7 +164,7 @@ Status DBMetaImpl::DropPartitionsByDates(const std::string &table_id,
 
 Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
     server::Metrics::GetInstance().MetaAccessTotalIncrement();
-    if (table_schema.table_id_ == "") {
+    if (table_schema.table_id_.empty()) {
         NextTableId(table_schema.table_id_);
     }
     table_schema.files_cnt_ = 0;
