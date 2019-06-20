@@ -1762,7 +1762,10 @@ macro(build_aws)
             -DENABLE_UNITY_BUILD=on
             -DNO_ENCRYPTION=off)
 
-    set(AWS_STATIC_LIB "${AWS_PREFIX}/lib/libs3.a")
+    set(AWS_CPP_SDK_CORE_STATIC_LIB
+            "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-core${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(AWS_CPP_SDK_S3_STATIC_LIB
+            "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-s3${CMAKE_STATIC_LIBRARY_SUFFIX}")
     # Only pass our C flags on Unix as on MSVC it leads to a
     # "incompatible command-line options" error
     set(AWS_CMAKE_ARGS
@@ -1788,24 +1791,40 @@ macro(build_aws)
             URL
             ${AWS_SOURCE_URL}
             BUILD_BYPRODUCTS
-            "${AWS_STATIC_LIB}")
+            "${AWS_CPP_SDK_S3_STATIC_LIB}"
+            "${AWS_CPP_SDK_CORE_STATIC_LIB}")
 
 
     file(MAKE_DIRECTORY "${AWS_PREFIX}/include")
 
-    add_library(aws STATIC IMPORTED)
-    set_target_properties(aws
-            PROPERTIES IMPORTED_LOCATION "${AWS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${AWS_PREFIX}/include")
+    add_library(aws-cpp-sdk-s3 STATIC IMPORTED)
+    set_target_properties(aws-cpp-sdk-s3
+            PROPERTIES
+            IMPORTED_LOCATION "${AWS_CPP_SDK_S3_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${AWS_PREFIX}/include"
+            INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
 
-    add_dependencies(aws aws_ep)
+    add_library(aws-cpp-sdk-core STATIC IMPORTED)
+    set_target_properties(aws-cpp-sdk-core
+            PROPERTIES IMPORTED_LOCATION "${AWS_CPP_SDK_CORE_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${AWS_PREFIX}/include"
+            INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
+
+    add_dependencies(aws-cpp-sdk-s3 aws_ep)
+    add_dependencies(aws-cpp-sdk-core aws_ep)
+
 endmacro()
 
 if(MILVUS_WITH_AWS)
     resolve_dependency(AWS)
 
     # TODO: Don't use global includes but rather target_include_directories
-    get_target_property(AWS_INCLUDE_DIR aws INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${AWS_PREFIX}/lib)
-    include_directories(SYSTEM ${AWS_INCLUDE_DIR})
+
+    get_target_property(AWS_CPP_SDK_S3_INCLUDE_DIR aws-cpp-sdk-s3 INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${AWS_CPP_SDK_S3_INCLUDE_DIR})
+
+    get_target_property(AWS_CPP_SDK_CORE_INCLUDE_DIR aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${AWS_CPP_SDK_CORE_INCLUDE_DIR})
+
 endif()
