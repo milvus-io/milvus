@@ -57,7 +57,7 @@ protected:
     virtual void TearDown() override;
 };
 
-class MySQLTest : public DBTest {
+class MySQLTest : public ::testing::Test {
 protected:
-    //std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
+//    std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
 };
