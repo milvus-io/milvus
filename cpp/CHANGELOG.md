@@ -8,6 +8,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-80 - Fix server hang issue
 - MS-89 - Fix compile failed, libgpufaiss.a link missing
 - MS-90 - Fix arch match incorrect on ARM
+- MS-99 - Fix compilation bug
 
 ## Improvement
 - MS-82 - Update server startup welcome message
@@ -15,6 +16,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-77 - Performance issue of post-search action
 - MS-22 - Enhancement for MemVector size control 
 - MS-92 - Unify behavior of debug and release build
+- MS-98 - Install all unit test to installation directory
 
 ## New Feature
 
@@ -49,6 +51,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-34 - Fix prometheus-cpp thirdparty
 - MS-67 - Fix license check bug
 - MS-76 - Fix pipeline crash bug
+- MS-100 - cmake: fix AWS build issue
 
 ## Improvement
 

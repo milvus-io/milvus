@@ -20,3 +20,5 @@ target_link_libraries(sdk_simple
         milvus_sdk
         pthread
         )
+
+install(TARGETS sdk_simple DESTINATION bin)
