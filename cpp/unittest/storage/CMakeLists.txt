@@ -6,8 +6,8 @@
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 s3_client_src)
 
 # Make sure that your call to link_directories takes place before your call to the relevant add_executable.
-include_directories(/usr/local/cuda/include)
-link_directories("/usr/local/cuda/lib64")
+include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
+link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 set(s3_client_test_src
         ${unittest_srcs}
@@ -23,11 +23,8 @@ add_executable(s3_test
 
 set(s3_client_libs
         stdc++
-        libaws-cpp-sdk-s3.a
-        libaws-cpp-sdk-core.a
-        libaws-c-event-stream.a
-        libaws-checksums.a
-        libaws-c-common.a
+        aws-cpp-sdk-s3
+        aws-cpp-sdk-core
         boost_filesystem
         )
 target_link_libraries(s3_test
