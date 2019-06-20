@@ -51,6 +51,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-34 - Fix prometheus-cpp thirdparty
 - MS-67 - Fix license check bug
 - MS-76 - Fix pipeline crash bug
+- MS-100 - cmake: fix AWS build issue
 
 ## Improvement
 
