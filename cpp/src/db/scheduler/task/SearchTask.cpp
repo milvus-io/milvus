@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "SearchTask.h"
+#include "metrics/Metrics.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -110,14 +111,41 @@ void TopkResult(SearchContext::ResultSet &result_src,
     }
 }
 
+void CollectDurationMetrics(int index_type, double total_time) {
+    switch(index_type) {
+        case meta::TableFileSchema::RAW: {
+            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+            break;
+        }
+        case meta::TableFileSchema::TO_INDEX: {
+            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+            break;
+        }
+        default: {
+            server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
+            break;
+        }
+    }
 }
 
-bool SearchTask::DoSearch() {
+}
+
+SearchTask::SearchTask()
+: IScheduleTask(ScheduleTaskType::kSearch) {
+
+}
+
+std::shared_ptr<IScheduleTask> SearchTask::Execute() {
     if(index_engine_ == nullptr) {
-        return false;
+        return nullptr;
     }
 
+    SERVER_LOG_INFO << "Searching in index(" << index_id_<< ") with "
+                    << search_contexts_.size() << " tasks";
+
     server::TimeRecorder rc("DoSearch index(" + std::to_string(index_id_) + ")");
+
+    auto start_time = METRICS_NOW_TIME;
 
     std::vector<long> output_ids;
     std::vector<float> output_distence;
@@ -153,9 +181,13 @@ bool SearchTask::DoSearch() {
         context->IndexSearchDone(index_id_);
     }
 
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    CollectDurationMetrics(index_type_, total_time);
+
     rc.Elapse("totally cost");
 
-    return true;
+    return nullptr;
 }
 
 }

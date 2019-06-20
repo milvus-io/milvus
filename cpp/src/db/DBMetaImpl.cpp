@@ -258,6 +258,28 @@ Status DBMetaImpl::DeleteTable(const std::string& table_id) {
     return Status::OK();
 }
 
+Status DBMetaImpl::DeleteTableFiles(const std::string& table_id) {
+    try {
+        MetricCollector metric;
+
+        //soft delete table files
+        ConnectorPtr->update_all(
+                set(
+                        c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_DELETE,
+                        c(&TableFileSchema::updated_time_) = utils::GetMicroSecTimeStamp()
+                ),
+                where(
+                        c(&TableFileSchema::table_id_) == table_id and
+                        c(&TableFileSchema::file_type_) != (int) TableFileSchema::TO_DELETE
+                ));
+
+    } catch (std::exception &e) {
+        return HandleException("Encounter exception when delete table files", e);
+    }
+
+    return Status::OK();
+}
+
 Status DBMetaImpl::DescribeTable(TableSchema &table_schema) {
     try {
         MetricCollector metric;
@@ -582,74 +604,6 @@ Status DBMetaImpl::FilesToMerge(const std::string &table_id,
     return Status::OK();
 }
 
-Status DBMetaImpl::FilesToDelete(const std::string& table_id,
-        const DatesT& partition,
-        DatePartionedTableFilesSchema& files) {
-    auto now = utils::GetMicroSecTimeStamp();
-    try {
-        if(partition.empty()) {
-            //step 1: get table files by dates
-            auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
-                                                         &TableFileSchema::table_id_,
-                                                         &TableFileSchema::file_id_,
-                                                         &TableFileSchema::size_,
-                                                         &TableFileSchema::date_),
-                                                 where(c(&TableFileSchema::table_id_) == table_id));
-
-            //step 2: erase table files from meta
-            for (auto &file : selected) {
-                TableFileSchema table_file;
-                table_file.id_ = std::get<0>(file);
-                table_file.table_id_ = std::get<1>(file);
-                table_file.file_id_ = std::get<2>(file);
-                table_file.size_ = std::get<3>(file);
-                table_file.date_ = std::get<4>(file);
-                GetTableFilePath(table_file);
-                auto dateItr = files.find(table_file.date_);
-                if (dateItr == files.end()) {
-                    files[table_file.date_] = TableFilesSchema();
-                }
-                files[table_file.date_].push_back(table_file);
-
-                ConnectorPtr->remove<TableFileSchema>(std::get<0>(file));
-            }
-
-        } else {
-            //step 1: get all table files
-            auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
-                                                         &TableFileSchema::table_id_,
-                                                         &TableFileSchema::file_id_,
-                                                         &TableFileSchema::size_,
-                                                         &TableFileSchema::date_),
-                                                 where(in(&TableFileSchema::date_, partition)
-                                                       and c(&TableFileSchema::table_id_) == table_id));
-
-            //step 2: erase table files from meta
-            for (auto &file : selected) {
-                TableFileSchema table_file;
-                table_file.id_ = std::get<0>(file);
-                table_file.table_id_ = std::get<1>(file);
-                table_file.file_id_ = std::get<2>(file);
-                table_file.size_ = std::get<3>(file);
-                table_file.date_ = std::get<4>(file);
-                GetTableFilePath(table_file);
-                auto dateItr = files.find(table_file.date_);
-                if (dateItr == files.end()) {
-                    files[table_file.date_] = TableFilesSchema();
-                }
-                files[table_file.date_].push_back(table_file);
-
-                ConnectorPtr->remove<TableFileSchema>(std::get<0>(file));
-            }
-        }
-
-    } catch (std::exception &e) {
-        return HandleException("Encounter exception when iterate delete files", e);
-    }
-
-    return Status::OK();
-}
-
 Status DBMetaImpl::GetTableFile(TableFileSchema &file_schema) {
 
     try {
@@ -745,40 +699,51 @@ Status DBMetaImpl::DiscardFiles(long to_discard_size) {
         return Status::OK();
     }
 
-    LOG(DEBUG) << "About to discard size=" << to_discard_size;
+    ENGINE_LOG_DEBUG << "About to discard size=" << to_discard_size;
 
     try {
-        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
-                                                     &TableFileSchema::size_),
-                                             where(c(&TableFileSchema::file_type_)
+        MetricCollector metric;
+
+        auto commited = ConnectorPtr->transaction([&]() mutable {
+            auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
+                                                         &TableFileSchema::size_),
+                                                 where(c(&TableFileSchema::file_type_)
                                                        != (int) TableFileSchema::TO_DELETE),
-                                             order_by(&TableFileSchema::id_),
-                                             limit(10));
+                                                 order_by(&TableFileSchema::id_),
+                                                 limit(10));
 
-        std::vector<int> ids;
-        TableFileSchema table_file;
+            std::vector<int> ids;
+            TableFileSchema table_file;
 
-        for (auto &file : selected) {
-            if (to_discard_size <= 0) break;
-            table_file.id_ = std::get<0>(file);
-            table_file.size_ = std::get<1>(file);
-            ids.push_back(table_file.id_);
-            ENGINE_LOG_DEBUG << "Discard table_file.id=" << table_file.file_id_
-                << " table_file.size=" << table_file.size_;
-            to_discard_size -= table_file.size_;
+            for (auto &file : selected) {
+                if (to_discard_size <= 0) break;
+                table_file.id_ = std::get<0>(file);
+                table_file.size_ = std::get<1>(file);
+                ids.push_back(table_file.id_);
+                ENGINE_LOG_DEBUG << "Discard table_file.id=" << table_file.file_id_
+                                 << " table_file.size=" << table_file.size_;
+                to_discard_size -= table_file.size_;
+            }
+
+            if (ids.size() == 0) {
+                return true;
+            }
+
+            ConnectorPtr->update_all(
+                    set(
+                            c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_DELETE,
+                            c(&TableFileSchema::updated_time_) = utils::GetMicroSecTimeStamp()
+                    ),
+                    where(
+                            in(&TableFileSchema::id_, ids)
+                    ));
+
+            return true;
+        });
+
+        if (!commited) {
+            return Status::DBTransactionError("Update table file error");
         }
-
-        if (ids.size() == 0) {
-            return Status::OK();
-        }
-
-        ConnectorPtr->update_all(
-            set(
-                c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_DELETE
-            ),
-            where(
-                in(&TableFileSchema::id_, ids)
-            ));
 
     } catch (std::exception &e) {
         return HandleException("Encounter exception when discard table file", e);
@@ -792,11 +757,21 @@ Status DBMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     try {
         MetricCollector metric;
 
+        auto tables = ConnectorPtr->select(columns(&TableSchema::state_),
+                                           where(c(&TableSchema::table_id_) == file_schema.table_id_));
+
+        //if the table has been deleted, just mark the table file as TO_DELETE
+        //clean thread will delete the file later
+        if(tables.size() < 1 || std::get<0>(tables[0]) == (int)TableSchema::TO_DELETE) {
+            file_schema.file_type_ = TableFileSchema::TO_DELETE;
+        }
+
         ConnectorPtr->update(file_schema);
 
     } catch (std::exception &e) {
-        ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
-        return HandleException("Encounter exception when update table file", e);
+        std::string msg = "Exception update table file: table_id = " + file_schema.table_id_
+            + " file_id = " + file_schema.file_id_;
+        return HandleException(msg, e);
     }
     return Status::OK();
 }
@@ -805,16 +780,37 @@ Status DBMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
     try {
         MetricCollector metric;
 
+        std::map<std::string, bool> has_tables;
+        for (auto &file : files) {
+            if(has_tables.find(file.table_id_) != has_tables.end()) {
+                continue;
+            }
+            auto tables = ConnectorPtr->select(columns(&TableSchema::id_),
+                                               where(c(&TableSchema::table_id_) == file.table_id_
+                                                     and c(&TableSchema::state_) != (int) TableSchema::TO_DELETE));
+            if(tables.size() >= 1) {
+                has_tables[file.table_id_] = true;
+            } else {
+                has_tables[file.table_id_] = false;
+            }
+        }
+
         auto commited = ConnectorPtr->transaction([&]() mutable {
             for (auto &file : files) {
+                if(!has_tables[file.table_id_]) {
+                    file.file_type_ = TableFileSchema::TO_DELETE;
+                }
+
                 file.updated_time_ = utils::GetMicroSecTimeStamp();
                 ConnectorPtr->update(file);
             }
             return true;
         });
+
         if (!commited) {
-            return Status::DBTransactionError("Update files Error");
+            return Status::DBTransactionError("Update table files error");
         }
+
     } catch (std::exception &e) {
         return HandleException("Encounter exception when update table files", e);
     }
@@ -824,35 +820,67 @@ Status DBMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
 Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
     auto now = utils::GetMicroSecTimeStamp();
     try {
-        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
-                                                     &TableFileSchema::table_id_,
-                                                     &TableFileSchema::file_id_,
-                                                     &TableFileSchema::file_type_,
-                                                     &TableFileSchema::size_,
-                                                     &TableFileSchema::date_),
-                                             where(
-                                                 c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_DELETE
-                                                     and
-                                                         c(&TableFileSchema::updated_time_)
-                                                             > now - seconds * US_PS));
+        MetricCollector metric;
 
-        TableFilesSchema updated;
-        TableFileSchema table_file;
+        auto files = ConnectorPtr->select(columns(&TableFileSchema::id_,
+                                                  &TableFileSchema::table_id_,
+                                                  &TableFileSchema::file_id_,
+                                                  &TableFileSchema::date_),
+                                          where(
+                                                  c(&TableFileSchema::file_type_) ==
+                                                  (int) TableFileSchema::TO_DELETE
+                                                  and
+                                                  c(&TableFileSchema::updated_time_)
+                                                  < now - seconds * US_PS));
 
-        for (auto &file : selected) {
-            table_file.id_ = std::get<0>(file);
-            table_file.table_id_ = std::get<1>(file);
-            table_file.file_id_ = std::get<2>(file);
-            table_file.file_type_ = std::get<3>(file);
-            table_file.size_ = std::get<4>(file);
-            table_file.date_ = std::get<5>(file);
-            GetTableFilePath(table_file);
-            if (table_file.file_type_ == TableFileSchema::TO_DELETE) {
+        auto commited = ConnectorPtr->transaction([&]() mutable {
+            TableFileSchema table_file;
+            for (auto &file : files) {
+                table_file.id_ = std::get<0>(file);
+                table_file.table_id_ = std::get<1>(file);
+                table_file.file_id_ = std::get<2>(file);
+                table_file.date_ = std::get<3>(file);
+                GetTableFilePath(table_file);
+
+                ENGINE_LOG_DEBUG << "Removing deleted id =" << table_file.id_ << " location = " << table_file.location_ << std::endl;
                 boost::filesystem::remove(table_file.location_);
+                ConnectorPtr->remove<TableFileSchema>(table_file.id_);
+
             }
-            ConnectorPtr->remove<TableFileSchema>(table_file.id_);
-            /* LOG(DEBUG) << "Removing deleted id=" << table_file.id << " location=" << table_file.location << std::endl; */
+            return true;
+        });
+
+        if (!commited) {
+            return Status::DBTransactionError("Clean files error");
         }
+
+    } catch (std::exception &e) {
+        return HandleException("Encounter exception when clean table files", e);
+    }
+
+    try {
+        MetricCollector metric;
+
+        auto tables = ConnectorPtr->select(columns(&TableSchema::id_,
+                                                   &TableSchema::table_id_),
+                                           where(c(&TableSchema::state_) == (int) TableSchema::TO_DELETE));
+
+        auto commited = ConnectorPtr->transaction([&]() mutable {
+            for (auto &table : tables) {
+                auto table_path = GetTablePath(std::get<1>(table));
+
+                ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+                boost::filesystem::remove_all(table_path);
+                ConnectorPtr->remove<TableSchema>(std::get<0>(table));
+            }
+
+            return true;
+        });
+
+        if (!commited) {
+            return Status::DBTransactionError("Clean files error");
+        }
+
     } catch (std::exception &e) {
         return HandleException("Encounter exception when clean table files", e);
     }
@@ -862,35 +890,21 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
 Status DBMetaImpl::CleanUp() {
     try {
-        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
-                                                     &TableFileSchema::table_id_,
-                                                     &TableFileSchema::file_id_,
-                                                     &TableFileSchema::file_type_,
-                                                     &TableFileSchema::size_,
-                                                     &TableFileSchema::date_),
-                                             where(
-                                                 c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_DELETE
-                                                     or
-                                                         c(&TableFileSchema::file_type_)
-                                                             == (int) TableFileSchema::NEW));
+        auto files = ConnectorPtr->select(columns(&TableFileSchema::id_),
+                                             where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::NEW));
 
-        TableFilesSchema updated;
-        TableFileSchema table_file;
-
-        for (auto &file : selected) {
-            table_file.id_ = std::get<0>(file);
-            table_file.table_id_ = std::get<1>(file);
-            table_file.file_id_ = std::get<2>(file);
-            table_file.file_type_ = std::get<3>(file);
-            table_file.size_ = std::get<4>(file);
-            table_file.date_ = std::get<5>(file);
-            GetTableFilePath(table_file);
-            if (table_file.file_type_ == TableFileSchema::TO_DELETE) {
-                boost::filesystem::remove(table_file.location_);
+        auto commited = ConnectorPtr->transaction([&]() mutable {
+            for (auto &file : files) {
+                ENGINE_LOG_DEBUG << "Remove table file type as NEW";
+                ConnectorPtr->remove<TableFileSchema>(std::get<0>(file));
             }
-            ConnectorPtr->remove<TableFileSchema>(table_file.id_);
-            /* LOG(DEBUG) << "Removing id=" << table_file.id << " location=" << table_file.location << std::endl; */
+            return true;
+        });
+
+        if (!commited) {
+            return Status::DBTransactionError("Clean files error");
         }
+
     } catch (std::exception &e) {
         return HandleException("Encounter exception when clean table file", e);
     }
@@ -903,14 +917,12 @@ Status DBMetaImpl::Count(const std::string &table_id, uint64_t &result) {
     try {
         MetricCollector metric;
 
-        auto selected = ConnectorPtr->select(columns(&TableFileSchema::size_,
-                                                     &TableFileSchema::date_),
-                                             where((c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW or
-                                                 c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_INDEX
-                                                 or
-                                                     c(&TableFileSchema::file_type_) == (int) TableFileSchema::INDEX)
-                                                       and
-                                                           c(&TableFileSchema::table_id_) == table_id));
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::size_),
+                                             where((c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW
+                                                    or
+                                                    c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_INDEX
+                                                    or c(&TableFileSchema::file_type_) == (int) TableFileSchema::INDEX)
+                                                   and c(&TableFileSchema::table_id_) == table_id));
 
         TableSchema table_schema;
         table_schema.table_id_ = table_id;

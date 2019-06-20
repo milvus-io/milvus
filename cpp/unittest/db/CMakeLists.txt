@@ -4,10 +4,18 @@
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler db_scheduler_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_src)
+
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task scheduler_task_files)
+set(db_scheduler_srcs
+        ${scheduler_files}
+        ${scheduler_context_files}
+        ${scheduler_task_files}
+        )
 
 include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")

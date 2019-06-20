@@ -5,19 +5,24 @@
  ******************************************************************************/
 #pragma once
 
-#include "IScheduleStrategy.h"
+#include "IScheduleTask.h"
+#include "db/scheduler/context/DeleteContext.h"
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-class StrategyFactory {
-private:
-    StrategyFactory() {}
-
+class DeleteTask : public IScheduleTask {
 public:
-    static ScheduleStrategyPtr CreateMemStrategy();
+    DeleteTask(const DeleteContextPtr& context);
+
+    virtual std::shared_ptr<IScheduleTask> Execute() override;
+
+private:
+    DeleteContextPtr context_;
 };
+
+using DeleteTaskPtr = std::shared_ptr<DeleteTask>;
 
 }
 }

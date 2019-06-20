@@ -7,6 +7,7 @@
 #include "RequestHandler.h"
 #include "ServerConfig.h"
 #include "ThreadPoolServer.h"
+#include "DBWrapper.h"
 
 #include "milvus_types.h"
 #include "milvus_constants.h"
@@ -51,6 +52,8 @@ MilvusServer::StartService() {
     std::string mode = server_config.GetValue(CONFIG_SERVER_MODE, "thread_pool");
 
     try {
+        DBWrapper::DB();//initialize db
+
         stdcxx::shared_ptr<RequestHandler> handler(new RequestHandler());
         stdcxx::shared_ptr<TProcessor> processor(new MilvusServiceProcessor(handler));
         stdcxx::shared_ptr<TServerTransport> server_transport(new TServerSocket(address, port));

@@ -93,8 +93,8 @@ private:
 
     std::thread bg_timer_thread_;
 
-    MetaPtr pMeta_;
-    MemManagerPtr pMemMgr_;
+    MetaPtr meta_ptr_;
+    MemManagerPtr mem_mgr_;
 
     server::ThreadPool compact_thread_pool_;
     std::list<std::future<void>> compact_thread_results_;

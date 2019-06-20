@@ -4,8 +4,8 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "FaissExecutionEngine.h"
+#include "Log.h"
 
-#include <easylogging++.h>
 #include <faiss/AutoTune.h>
 #include <faiss/MetaIndexes.h>
 #include <faiss/IndexFlat.h>
@@ -74,7 +74,7 @@ Status FaissExecutionEngine::Load() {
     if (!index) {
         index = read_index(location_);
         to_cache = true;
-        LOG(DEBUG) << "Disk io from: " << location_;
+        ENGINE_LOG_DEBUG << "Disk io from: " << location_;
     }
 
     pIndex_ = index->data();
@@ -98,6 +98,8 @@ Status FaissExecutionEngine::Merge(const std::string& location) {
     if (location == location_) {
         return Status::Error("Cannot Merge Self");
     }
+    ENGINE_LOG_DEBUG << "Merge index file: " << location << " to: " << location_;
+
     auto to_merge = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
     if (!to_merge) {
         to_merge = read_index(location);
@@ -110,6 +112,8 @@ Status FaissExecutionEngine::Merge(const std::string& location) {
 
 ExecutionEnginePtr
 FaissExecutionEngine::BuildIndex(const std::string& location) {
+    ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
+
     auto opd = std::make_shared<Operand>();
     opd->d = pIndex_->d;
     opd->index_type = build_index_type_;
@@ -122,7 +126,6 @@ FaissExecutionEngine::BuildIndex(const std::string& location) {
             from_index->id_map.data());
 
     ExecutionEnginePtr new_ee(new FaissExecutionEngine(index->data(), location, build_index_type_, raw_index_type_));
-    new_ee->Serialize();
     return new_ee;
 }
 
