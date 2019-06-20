@@ -11,6 +11,7 @@
 
 #include "utils.h"
 #include "db/Factories.h"
+#include "db/Options.h"
 
 using namespace zilliz::milvus;
 
@@ -60,4 +61,12 @@ void MetaTest::SetUp() {
 
 void MetaTest::TearDown() {
     impl_->DropAll();
+}
+
+zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
+    engine::DBMetaOptions options;
+    options.backend_uri = "mysql://root:1234@:/test";
+    options.path = "/tmp/milvus_test";
+    return options;
+
 }

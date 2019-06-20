@@ -8,10 +8,11 @@
 
 #include <gtest/gtest.h>
 #include <chrono>
-#include <src/db/MySQLMetaImpl.h>
+//#include <src/db/MySQLMetaImpl.h>
 
 #include "db/DB.h"
 #include "db/DBMetaImpl.h"
+#include "db/MySQLMetaImpl.h"
 
 
 #define TIMING
@@ -60,4 +61,9 @@ protected:
 class MySQLTest : public ::testing::Test {
 protected:
 //    std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
+    zilliz::milvus::engine::DBMetaOptions getDBMetaOptions();
+};
+
+class MySQLDBTest : public  ::testing::Test {
+
 };
