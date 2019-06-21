@@ -3,10 +3,10 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
+#include <stdlib.h>
 #include "Factories.h"
 #include "DBImpl.h"
 
-#include <stdlib.h>
 #include <time.h>
 #include <sstream>
 #include <iostream>
@@ -28,8 +28,16 @@ DBMetaOptions DBMetaOptionsFactory::Build(const std::string& path) {
         ss << "/tmp/" << rand();
         p = ss.str();
     }
+
+//    std::string uri;
+//    const char* uri_p = getenv("MILVUS_DB_META_URI");
+//    if (uri_p) {
+//        uri = uri_p;
+//    }
+
     DBMetaOptions meta;
     meta.path = p;
+//    meta.backend_uri = uri;
     return meta;
 }
 

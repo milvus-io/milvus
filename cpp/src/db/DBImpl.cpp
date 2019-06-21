@@ -130,10 +130,10 @@ DBImpl::DBImpl(const Options& options)
       options_(options),
       bg_compaction_scheduled_(false),
       shutting_down_(false),
-      bg_build_index_started_(false),
-//      pMeta_(new meta::DBMetaImpl(options_.meta)),
-      pMemMgr_(new MemManager(pMeta_, options_)) {
+      bg_build_index_started_(false)
+      {
     pMeta_ = DBMetaImplFactory::Build(options.meta);
+    pMemMgr_ = (MemManagerPtr)(new MemManager(pMeta_, options_));
     StartTimerTasks(options_.memory_sync_interval);
 }
 

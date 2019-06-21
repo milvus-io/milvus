@@ -22,6 +22,7 @@ void ASSERT_STATS(engine::Status& stat) {
     }
 }
 
+
 void DBTest::InitLog() {
     el::Configurations defaultConf;
     defaultConf.setToDefault();
@@ -64,9 +65,18 @@ void MetaTest::TearDown() {
 }
 
 zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
-    engine::DBMetaOptions options;
-    options.backend_uri = "mysql://root:1234@:/test";
+//    std::string path = "/tmp/milvus_test";
+//    engine::DBMetaOptions options = engine::DBMetaOptionsFactory::Build(path);
+    zilliz::milvus::engine::DBMetaOptions options;
     options.path = "/tmp/milvus_test";
+    options.backend_uri = "mysql://root:1234@:/test";
     return options;
 
+}
+
+zilliz::milvus::engine::Options MySQLDBTest::GetOptions() {
+    auto options = engine::OptionsFactory::Build();
+    options.meta.path = "/tmp/milvus_test";
+    options.meta.backend_uri = "mysql://root:1234@:/test";
+    return options;
 }
