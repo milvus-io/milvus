@@ -3,22 +3,22 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#pragma once
 
-#include "DBImpl.h"
-#include "DBMetaImpl.h"
-#include "Factories.h"
+#include "context/IScheduleContext.h"
+#include "task/IScheduleTask.h"
+
+#include <list>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-DB::~DB() {}
+class TaskDispatchStrategy {
+public:
+    static bool Schedule(const ScheduleContextPtr &context_ptr, std::list<ScheduleTaskPtr>& task_list);
+};
 
-void DB::Open(const Options& options, DB** dbptr) {
-    *dbptr = DBFactory::Build(options);
-    return;
 }
-
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}
+}

@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <thread>
 #include <easylogging++.h>
+#include <boost/filesystem.hpp>
 
 #include "utils.h"
 #include "db/DB.h"
@@ -13,6 +14,31 @@
 #include "db/MetaConsts.h"
 
 using namespace zilliz::milvus;
+
+namespace {
+
+static const std::string TABLE_NAME = "test_group";
+static constexpr int64_t TABLE_DIM = 256;
+
+engine::meta::TableSchema BuildTableSchema() {
+    engine::meta::TableSchema table_info;
+    table_info.dimension_ = TABLE_DIM;
+    table_info.table_id_ = TABLE_NAME;
+    table_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
+    return table_info;
+}
+
+void BuildVectors(int64_t n, std::vector<float>& vectors) {
+    vectors.clear();
+    vectors.resize(n*TABLE_DIM);
+    float* data = vectors.data();
+    for(int i = 0; i < n; i++) {
+        for(int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
+        data[TABLE_DIM * i] += i / 2000.;
+    }
+}
+
+}
 
 TEST_F(DBTest, CONFIG_TEST) {
     {
@@ -60,89 +86,33 @@ TEST_F(DBTest, CONFIG_TEST) {
     }
 }
 
-TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
-
-    static const std::string group_name = "test_group";
-    static const int group_dim = 256;
-    uint64_t size;
-
-    engine::meta::TableSchema group_info;
-    group_info.dimension_ = group_dim;
-    group_info.table_id_ = group_name;
-    group_info.engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
-    engine::Status stat = db_->CreateTable(group_info);
-
-    engine::meta::TableSchema group_info_get;
-    group_info_get.table_id_ = group_name;
-    stat = db_->DescribeTable(group_info_get);
-    ASSERT_STATS(stat);
-    ASSERT_EQ(group_info_get.dimension_, group_dim);
-
-    engine::IDNumbers vector_ids;
-    engine::IDNumbers target_ids;
-
-    db_->Size(size);
-    int d = 256;
-    int nb = 20;
-    float *xb = new float[d * nb];
-    for(int i = 0; i < nb; i++) {
-        for(int j = 0; j < d; j++) xb[d * i + j] = drand48();
-        xb[d * i] += i / 2000.;
-    }
-
-    int loop = 100000;
-
-    for (auto i=0; i<loop; ++i) {
-        db_->InsertVectors(group_name, nb, xb, vector_ids);
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
-    }
-
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-
-    db_->Size(size);
-    LOG(DEBUG) << "size=" << size;
-    ASSERT_TRUE(size < 1 * engine::meta::G);
-
-    delete [] xb;
-};
-
 
 TEST_F(DBTest, DB_TEST) {
+    static const std::string table_name = "test_group";
+    static const int table_dim = 256;
 
+    engine::meta::TableSchema table_info;
+    table_info.dimension_ = table_dim;
+    table_info.table_id_ = table_name;
+    table_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
+    engine::Status stat = db_->CreateTable(table_info);
 
-
-    static const std::string group_name = "test_group";
-    static const int group_dim = 256;
-
-    engine::meta::TableSchema group_info;
-    group_info.dimension_ = group_dim;
-    group_info.table_id_ = group_name;
-    group_info.engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
-    engine::Status stat = db_->CreateTable(group_info);
-
-    engine::meta::TableSchema group_info_get;
-    group_info_get.table_id_ = group_name;
-    stat = db_->DescribeTable(group_info_get);
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = table_name;
+    stat = db_->DescribeTable(table_info_get);
     ASSERT_STATS(stat);
-    ASSERT_EQ(group_info_get.dimension_, group_dim);
+    ASSERT_EQ(table_info_get.dimension_, table_dim);
 
     engine::IDNumbers vector_ids;
     engine::IDNumbers target_ids;
 
-    int d = 256;
-    int nb = 50;
-    float *xb = new float[d * nb];
-    for(int i = 0; i < nb; i++) {
-        for(int j = 0; j < d; j++) xb[d * i + j] = drand48();
-        xb[d * i] += i / 2000.;
-    }
+    int64_t nb = 50;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
 
-    int qb = 5;
-    float *qxb = new float[d * qb];
-    for(int i = 0; i < qb; i++) {
-        for(int j = 0; j < d; j++) qxb[d * i + j] = drand48();
-        qxb[d * i] += i / 2000.;
-    }
+    int64_t qb = 5;
+    std::vector<float> qxb;
+    BuildVectors(qb, qxb);
 
     std::thread search([&]() {
         engine::QueryResults results;
@@ -160,7 +130,7 @@ TEST_F(DBTest, DB_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(group_name, k, qb, qxb, results);
+            stat = db_->Query(table_name, k, qb, qxb.data(), results);
             ss << "Search " << j << " With Size " << count/engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
@@ -183,54 +153,45 @@ TEST_F(DBTest, DB_TEST) {
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
-            db_->InsertVectors(group_name, qb, qxb, target_ids);
+            db_->InsertVectors(table_name, qb, qxb.data(), target_ids);
             ASSERT_EQ(target_ids.size(), qb);
         } else {
-            db_->InsertVectors(group_name, nb, xb, vector_ids);
+            db_->InsertVectors(table_name, nb, xb.data(), vector_ids);
         }
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
     search.join();
-
-    delete [] xb;
-    delete [] qxb;
 };
 
 TEST_F(DBTest, SEARCH_TEST) {
-    static const std::string group_name = "test_group";
-    static const int group_dim = 256;
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
 
-    engine::meta::TableSchema group_info;
-    group_info.dimension_ = group_dim;
-    group_info.table_id_ = group_name;
-    group_info.engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
-    engine::Status stat = db_->CreateTable(group_info);
-
-    engine::meta::TableSchema group_info_get;
-    group_info_get.table_id_ = group_name;
-    stat = db_->DescribeTable(group_info_get);
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = TABLE_NAME;
+    stat = db_->DescribeTable(table_info_get);
     ASSERT_STATS(stat);
-    ASSERT_EQ(group_info_get.dimension_, group_dim);
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     // prepare raw data
     size_t nb = 250000;
     size_t nq = 10;
     size_t k = 5;
-    std::vector<float> xb(nb*group_dim);
-    std::vector<float> xq(nq*group_dim);
+    std::vector<float> xb(nb*TABLE_DIM);
+    std::vector<float> xq(nq*TABLE_DIM);
     std::vector<long> ids(nb);
 
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis_xt(-1.0, 1.0);
-    for (size_t i = 0; i < nb*group_dim; i++) {
+    for (size_t i = 0; i < nb*TABLE_DIM; i++) {
         xb[i] = dis_xt(gen);
         if (i < nb){
             ids[i] = i;
         }
     }
-    for (size_t i = 0; i < nq*group_dim; i++) {
+    for (size_t i = 0; i < nq*TABLE_DIM; i++) {
         xq[i] = dis_xt(gen);
     }
 
@@ -243,7 +204,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     // insert data
     const int batch_size = 100;
     for (int j = 0; j < nb / batch_size; ++j) {
-        stat = db_->InsertVectors(group_name, batch_size, xb.data()+batch_size*j*group_dim, ids);
+        stat = db_->InsertVectors(TABLE_NAME, batch_size, xb.data()+batch_size*j*TABLE_DIM, ids);
         if (j == 200){ sleep(1);}
         ASSERT_STATS(stat);
     }
@@ -251,9 +212,77 @@ TEST_F(DBTest, SEARCH_TEST) {
     sleep(2); // wait until build index finish
 
     engine::QueryResults results;
-    stat = db_->Query(group_name, k, nq, xq.data(), results);
+    stat = db_->Query(TABLE_NAME, k, nq, xq.data(), results);
     ASSERT_STATS(stat);
 
     // TODO(linxj): add groundTruth assert
 };
 
+TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
+
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
+
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = TABLE_NAME;
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_STATS(stat);
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    engine::IDNumbers vector_ids;
+    engine::IDNumbers target_ids;
+
+    uint64_t size;
+    db_->Size(size);
+
+    int64_t nb = 10;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
+
+    int loop = 100000;
+    for (auto i=0; i<loop; ++i) {
+        db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    db_->Size(size);
+    LOG(DEBUG) << "size=" << size;
+    ASSERT_LE(size, 1 * engine::meta::G);
+};
+
+TEST_F(DBTest2, DELETE_TEST) {
+
+
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
+
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = TABLE_NAME;
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_STATS(stat);
+
+    ASSERT_TRUE(boost::filesystem::exists(table_info_get.location_));
+
+    engine::IDNumbers vector_ids;
+
+    uint64_t size;
+    db_->Size(size);
+
+    int64_t nb = 100000;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
+
+    int loop = 20;
+    for (auto i=0; i<loop; ++i) {
+        db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+
+    std::vector<engine::meta::DateT> dates;
+    stat = db_->DeleteTable(TABLE_NAME, dates);
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    ASSERT_TRUE(stat.ok());
+    ASSERT_FALSE(boost::filesystem::exists(table_info_get.location_));
+};
