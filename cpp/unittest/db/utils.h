@@ -30,9 +30,28 @@
 #define STOP_TIMER(name)
 #endif
 
-
 void ASSERT_STATS(zilliz::milvus::engine::Status& stat);
 
+//class TestEnv : public ::testing::Environment {
+//public:
+//
+//    static std::string getURI() {
+//        if (const char* uri = std::getenv("MILVUS_DBMETA_URI")) {
+//            return uri;
+//        }
+//        else {
+//            return "";
+//        }
+//    }
+//
+//    void SetUp() override {
+//        getURI();
+//    }
+//
+//};
+//
+//::testing::Environment* const test_env =
+//        ::testing::AddGlobalTestEnvironment(new TestEnv);
 
 class DBTest : public ::testing::Test {
 protected:
@@ -65,5 +84,6 @@ protected:
 };
 
 class MySQLDBTest : public  ::testing::Test {
-
+protected:
+    zilliz::milvus::engine::Options GetOptions();
 };

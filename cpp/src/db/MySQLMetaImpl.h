@@ -8,12 +8,16 @@
 #include "Meta.h"
 #include "Options.h"
 
+#include "mysql++/mysql++.h"
+#include <mutex>
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
 
 //    auto StoragePrototype(const std::string& path);
+    using namespace mysqlpp;
 
     class MySQLMetaImpl : public Meta {
     public:
@@ -65,13 +69,16 @@ namespace meta {
     private:
         Status NextFileId(std::string& file_id);
         Status NextTableId(std::string& table_id);
-        Status DiscardFiles(long to_discard_size);
+        Status DiscardFiles(long long to_discard_size);
         std::string GetTablePath(const std::string& table_id);
         std::string GetTableDatePartitionPath(const std::string& table_id, DateT& date);
         void GetTableFilePath(TableFileSchema& group_file);
         Status Initialize();
+        std::unique_ptr<Connection>& getConnectionPtr();
 
         const DBMetaOptions options_;
+
+//        std::mutex connectionMutex_;
     }; // DBMetaImpl
 
 } // namespace meta
