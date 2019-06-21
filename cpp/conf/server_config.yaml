@@ -4,6 +4,7 @@ server_config:
   transfer_protocol: binary   #optional: binary, compact, json
   server_mode: thread_pool    #optional: simple, thread_pool
   gpu_index: 0                #which gpu to be used
+  mode: single                 #optional: single, cluster
 
 db_config:
   db_path: /tmp/milvus

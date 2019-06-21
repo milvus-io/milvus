@@ -604,32 +604,41 @@ Status DBMetaImpl::FilesToMerge(const std::string &table_id,
     return Status::OK();
 }
 
-Status DBMetaImpl::GetTableFile(TableFileSchema &file_schema) {
-
+Status DBMetaImpl::GetTableFiles(const std::string& table_id,
+                                 const std::vector<size_t>& ids,
+                                 TableFilesSchema& table_files) {
     try {
-        auto files = ConnectorPtr->select(columns(&TableFileSchema::id_,
-                                                  &TableFileSchema::table_id_,
-                                                  &TableFileSchema::file_id_,
+        table_files.clear();
+        auto files = ConnectorPtr->select(columns(&TableFileSchema::file_id_,
                                                   &TableFileSchema::file_type_,
                                                   &TableFileSchema::size_,
-                                                  &TableFileSchema::date_),
-                                          where(c(&TableFileSchema::file_id_) == file_schema.file_id_ and
-                                              c(&TableFileSchema::table_id_) == file_schema.table_id_
+                                                  &TableFileSchema::date_,
+                                                  &TableFileSchema::engine_type_),
+                                          where(c(&TableFileSchema::table_id_) == table_id and
+                                                  in(&TableFileSchema::id_, ids)
                                           ));
-        assert(files.size() <= 1);
-        if (files.size() == 1) {
-            file_schema.id_ = std::get<0>(files[0]);
-            file_schema.table_id_ = std::get<1>(files[0]);
-            file_schema.file_id_ = std::get<2>(files[0]);
-            file_schema.file_type_ = std::get<3>(files[0]);
-            file_schema.size_ = std::get<4>(files[0]);
-            file_schema.date_ = std::get<5>(files[0]);
-        } else {
-            return Status::NotFound("Table:" + file_schema.table_id_ +
-                " File:" + file_schema.file_id_ + " not found");
+
+        TableSchema table_schema;
+        table_schema.table_id_ = table_id;
+        auto status = DescribeTable(table_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
+        for (auto &file : files) {
+            TableFileSchema file_schema;
+            file_schema.file_id_ = std::get<0>(file);
+            file_schema.file_type_ = std::get<1>(file);
+            file_schema.size_ = std::get<2>(file);
+            file_schema.date_ = std::get<3>(file);
+            file_schema.engine_type_ = std::get<4>(file);
+            file_schema.dimension_ = table_schema.dimension_;
+            GetTableFilePath(file_schema);
+
+            table_files.emplace_back(file_schema);
         }
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when lookup table file", e);
+        return HandleException("Encounter exception when lookup table files", e);
     }
 
     return Status::OK();
