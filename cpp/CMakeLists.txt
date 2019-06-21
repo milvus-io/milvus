@@ -99,8 +99,6 @@ else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
 endif()
 
-
-
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(ExternalProject)
@@ -131,6 +129,11 @@ link_directories(${CMAKE_CURRRENT_BINARY_DIR})
 #                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 add_subdirectory(src)
+
+if (BUILD_COVERAGE STREQUAL "ON")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+endif()
+
 
 if (BUILD_UNIT_TEST)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
