@@ -227,15 +227,18 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
         uint64_t k, uint64_t nq, const float* vectors,
         const meta::DatesT& dates, QueryResults& results) {
     //get specified files
-    meta::TableFilesSchema files_array;
+    std::vector<size_t> ids;
     for (auto &id : file_ids) {
         meta::TableFileSchema table_file;
-        table_file.table_id_ = id;
-        auto status = meta_ptr_->GetTableFile(table_file);
-        if (!status.ok()) {
-            return status;
-        }
-        files_array.emplace_back(table_file);
+        table_file.table_id_ = table_id;
+        std::string::size_type sz;
+        ids.push_back(std::stol(id, &sz));
+    }
+
+    meta::TableFilesSchema files_array;
+    auto status = meta_ptr_->GetTableFiles(table_id, ids, files_array);
+    if (!status.ok()) {
+        return status;
     }
 
     return QueryAsync(table_id, files_array, k, nq, vectors, dates, results);
