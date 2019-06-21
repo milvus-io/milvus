@@ -69,7 +69,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     engine::meta::TableSchema group_info;
     group_info.dimension_ = group_dim;
     group_info.table_id_ = group_name;
-    group_info.engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
+    group_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
     engine::Status stat = db_->CreateTable(group_info);
 
     engine::meta::TableSchema group_info_get;
@@ -101,30 +101,27 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     db_->Size(size);
     LOG(DEBUG) << "size=" << size;
-    ASSERT_TRUE(size < 1 * engine::meta::G);
+    ASSERT_LT(size, 1 * engine::meta::G);
 
     delete [] xb;
 };
 
 
 TEST_F(DBTest, DB_TEST) {
+    static const std::string table_name = "test_group";
+    static const int table_dim = 256;
 
+    engine::meta::TableSchema table_info;
+    table_info.dimension_ = table_dim;
+    table_info.table_id_ = table_name;
+    table_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
+    engine::Status stat = db_->CreateTable(table_info);
 
-
-    static const std::string group_name = "test_group";
-    static const int group_dim = 256;
-
-    engine::meta::TableSchema group_info;
-    group_info.dimension_ = group_dim;
-    group_info.table_id_ = group_name;
-    group_info.engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
-    engine::Status stat = db_->CreateTable(group_info);
-
-    engine::meta::TableSchema group_info_get;
-    group_info_get.table_id_ = group_name;
-    stat = db_->DescribeTable(group_info_get);
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = table_name;
+    stat = db_->DescribeTable(table_info_get);
     ASSERT_STATS(stat);
-    ASSERT_EQ(group_info_get.dimension_, group_dim);
+    ASSERT_EQ(table_info_get.dimension_, table_dim);
 
     engine::IDNumbers vector_ids;
     engine::IDNumbers target_ids;
@@ -160,7 +157,7 @@ TEST_F(DBTest, DB_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(group_name, k, qb, qxb, results);
+            stat = db_->Query(table_name, k, qb, qxb, results);
             ss << "Search " << j << " With Size " << count/engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
@@ -183,10 +180,10 @@ TEST_F(DBTest, DB_TEST) {
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
-            db_->InsertVectors(group_name, qb, qxb, target_ids);
+            db_->InsertVectors(table_name, qb, qxb, target_ids);
             ASSERT_EQ(target_ids.size(), qb);
         } else {
-            db_->InsertVectors(group_name, nb, xb, vector_ids);
+            db_->InsertVectors(table_name, nb, xb, vector_ids);
         }
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
@@ -198,20 +195,20 @@ TEST_F(DBTest, DB_TEST) {
 };
 
 TEST_F(DBTest, SEARCH_TEST) {
-    static const std::string group_name = "test_group";
+    static const std::string table_name = "test_group";
     static const int group_dim = 256;
 
-    engine::meta::TableSchema group_info;
-    group_info.dimension_ = group_dim;
-    group_info.table_id_ = group_name;
-    group_info.engine_type_ = (int)engine::EngineType::FAISS_IVFFLAT;
-    engine::Status stat = db_->CreateTable(group_info);
+    engine::meta::TableSchema table_info;
+    table_info.dimension_ = group_dim;
+    table_info.table_id_ = table_name;
+    table_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
+    engine::Status stat = db_->CreateTable(table_info);
 
-    engine::meta::TableSchema group_info_get;
-    group_info_get.table_id_ = group_name;
-    stat = db_->DescribeTable(group_info_get);
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = table_name;
+    stat = db_->DescribeTable(table_info_get);
     ASSERT_STATS(stat);
-    ASSERT_EQ(group_info_get.dimension_, group_dim);
+    ASSERT_EQ(table_info_get.dimension_, group_dim);
 
     // prepare raw data
     size_t nb = 250000;
@@ -243,7 +240,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     // insert data
     const int batch_size = 100;
     for (int j = 0; j < nb / batch_size; ++j) {
-        stat = db_->InsertVectors(group_name, batch_size, xb.data()+batch_size*j*group_dim, ids);
+        stat = db_->InsertVectors(table_name, batch_size, xb.data()+batch_size*j*group_dim, ids);
         if (j == 200){ sleep(1);}
         ASSERT_STATS(stat);
     }
@@ -251,7 +248,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     sleep(2); // wait until build index finish
 
     engine::QueryResults results;
-    stat = db_->Query(group_name, k, nq, xq.data(), results);
+    stat = db_->Query(table_name, k, nq, xq.data(), results);
     ASSERT_STATS(stat);
 
     // TODO(linxj): add groundTruth assert

@@ -55,7 +55,7 @@ void MergeResult(SearchContext::Id2ScoreMap &score_src,
     while(true) {
         //all score_src items are merged, if score_merged.size() still less than topk
         //move items from score_target to score_merged until score_merged.size() equal topk
-        if(src_index >= src_count - 1) {
+        if(src_index >= src_count) {
             for(size_t i = target_index; i < target_count && score_merged.size() < topk; ++i) {
                 score_merged.push_back(score_target[i]);
             }
@@ -64,7 +64,7 @@ void MergeResult(SearchContext::Id2ScoreMap &score_src,
 
         //all score_target items are merged, if score_merged.size() still less than topk
         //move items from score_src to score_merged until score_merged.size() equal topk
-        if(target_index >= target_count - 1) {
+        if(target_index >= target_count) {
             for(size_t i = src_index; i < src_count && score_merged.size() < topk; ++i) {
                 score_merged.push_back(score_src[i]);
             }

@@ -652,7 +652,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
                    << index->PhysicalSize()/(1024*1024) << " M"
                    << " from file " << to_remove.file_id_;
 
-        //index->Cache();
+        index->Cache();
 
     } catch (std::exception& ex) {
         return Status::Error("Build index encounter exception", ex.what());
