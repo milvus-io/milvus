@@ -75,6 +75,8 @@ public:
 
     Status Serialize(std::vector<std::string>& table_ids);
 
+    Status EraseMemVector(const std::string& table_id);
+
 private:
     Status InsertVectorsNoLock(const std::string& table_id,
             size_t n, const float* vectors, IDNumbers& vector_ids);

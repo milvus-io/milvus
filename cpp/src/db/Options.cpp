@@ -9,7 +9,6 @@
 #include <boost/algorithm/string.hpp>
 
 #include "Options.h"
-#include "Env.h"
 #include "DBMetaImpl.h"
 #include "Exception.h"
 
@@ -17,8 +16,7 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-Options::Options()
-    : env(Env::Default()) {
+Options::Options() {
 }
 
 ArchiveConf::ArchiveConf(const std::string& type, const std::string& criterias) {
