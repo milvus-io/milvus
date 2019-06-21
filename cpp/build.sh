@@ -5,8 +5,9 @@ BUILD_UNITTEST="off"
 LICENSE_CHECK="OFF"
 INSTALL_PREFIX=$(pwd)/milvus
 MAKE_CLEAN="OFF"
+BUILD_COVERAGE="OFF"
 
-while getopts "p:t:uhlr" arg
+while getopts "p:t:uhlrc" arg
 do
         case $arg in
              t)
@@ -28,6 +29,9 @@ do
                     MAKE_CLEAN="ON"
                 fi
                 ;;
+             c)
+                BUILD_COVERAGE="ON"
+                ;;
              h) # help
                 echo "
 
@@ -37,9 +41,10 @@ parameter:
 -p: install prefix
 -l: build license version
 -r: remove previous build directory
+-c: code coverage
 
 usage:
-./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r]
+./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c]
                 "
                 exit 0
                 ;;
@@ -65,6 +70,7 @@ if [[ ${MAKE_CLEAN} = "ON" ]]; then
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
     -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
     -DCMAKE_LICENSE_CHECK=${LICENSE_CHECK} \
+    -DBUILD_COVERAGE=${BUILD_COVERAGE} \
     $@ ../"
     echo ${CMAKE_CMD}
 
@@ -78,5 +84,8 @@ if [[ ${BUILD_TYPE} != "Debug" ]]; then
     strip src/milvus_server
 fi
 
-make install
+if [[ ${BUILD_COVERAGE} = "ON" ]]; then
+    bash coverage.sh
+fi
 
+make install
