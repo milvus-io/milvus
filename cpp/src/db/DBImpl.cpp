@@ -241,6 +241,10 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
         return status;
     }
 
+    if(files_array.empty()) {
+        return Status::Error("Invalid file id");
+    }
+
     return QueryAsync(table_id, files_array, k, nq, vectors, dates, results);
 }
 
