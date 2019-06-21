@@ -64,7 +64,7 @@ cd cmake_build
 
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-if [[ ${MAKE_CLEAN} = "ON" ]]; then
+if [[ ${MAKE_CLEAN} == "ON" ]]; then
     CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
     -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
@@ -84,8 +84,10 @@ if [[ ${BUILD_TYPE} != "Debug" ]]; then
     strip src/milvus_server
 fi
 
-if [[ ${BUILD_COVERAGE} = "ON" ]]; then
-    bash coverage.sh
+if [[ ${BUILD_COVERAGE} == "ON" ]]; then
+    cd -
+    bash `pwd`/coverage.sh
+    cd -
 fi
 
 make install
