@@ -62,7 +62,7 @@ Status MemVectors::Serialize(std::string& table_id) {
     auto status = pMeta_->UpdateTableFile(schema_);
 
     LOG(DEBUG) << "New " << ((schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-        << " file " << schema_.file_id_ << " of size " << pEE_->Size() / meta::M << " M";
+        << " file " << schema_.file_id_ << " of size " << (double)(pEE_->Size()) / (double)meta::M << " M";
 
     pEE_->Cache();
 
