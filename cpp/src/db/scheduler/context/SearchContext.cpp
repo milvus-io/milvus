@@ -14,7 +14,8 @@ namespace milvus {
 namespace engine {
 
 SearchContext::SearchContext(uint64_t topk, uint64_t nq, const float* vectors)
-    : topk_(topk),
+    : IScheduleContext(ScheduleContextType::kSearch),
+      topk_(topk),
       nq_(nq),
       vectors_(vectors) {
     //use current time to identify this context

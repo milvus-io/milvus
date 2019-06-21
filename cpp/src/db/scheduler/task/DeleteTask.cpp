@@ -4,21 +4,27 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
-#include "DBImpl.h"
-#include "DBMetaImpl.h"
-#include "Factories.h"
+#include "DeleteTask.h"
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-DB::~DB() {}
+DeleteTask::DeleteTask(const DeleteContextPtr& context)
+    : IScheduleTask(ScheduleTaskType::kDelete),
+      context_(context) {
 
-void DB::Open(const Options& options, DB** dbptr) {
-    *dbptr = DBFactory::Build(options);
-    return;
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+std::shared_ptr<IScheduleTask> DeleteTask::Execute() {
+
+    if(context_ != nullptr && context_->meta() != nullptr) {
+        context_->meta()->DeleteTableFiles(context_->table_id());
+    }
+
+    return nullptr;
+}
+
+}
+}
+}

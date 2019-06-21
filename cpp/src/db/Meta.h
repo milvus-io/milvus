@@ -24,10 +24,12 @@ public:
     using Ptr = std::shared_ptr<Meta>;
 
     virtual Status CreateTable(TableSchema& table_schema) = 0;
-    virtual Status DeleteTable(const std::string& table_id) = 0;
     virtual Status DescribeTable(TableSchema& table_schema) = 0;
     virtual Status HasTable(const std::string& table_id, bool& has_or_not) = 0;
     virtual Status AllTables(std::vector<TableSchema>& table_schema_array) = 0;
+
+    virtual Status DeleteTable(const std::string& table_id) = 0;
+    virtual Status DeleteTableFiles(const std::string& table_id) = 0;
 
     virtual Status CreateTableFile(TableFileSchema& file_schema) = 0;
     virtual Status DropPartitionsByDates(const std::string& table_id,
@@ -44,10 +46,6 @@ public:
 
     virtual Status FilesToMerge(const std::string& table_id,
             DatePartionedTableFilesSchema& files) = 0;
-
-    virtual Status FilesToDelete(const std::string& table_id,
-                                 const DatesT& partition,
-                                 DatePartionedTableFilesSchema& files) = 0;
 
     virtual Status Size(uint64_t& result) = 0;
 
