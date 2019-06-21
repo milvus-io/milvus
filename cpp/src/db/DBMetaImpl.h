@@ -31,7 +31,9 @@ public:
     virtual Status DropPartitionsByDates(const std::string& table_id,
             const DatesT& dates) override;
 
-    virtual Status GetTableFile(TableFileSchema& file_schema) override;
+    virtual Status GetTableFiles(const std::string& table_id,
+                                 const std::vector<size_t>& ids,
+                                 TableFilesSchema& table_files) override;
 
     virtual Status UpdateTableFile(TableFileSchema& file_schema) override;
 
