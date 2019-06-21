@@ -8,9 +8,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "db/DB.h"
-#include "db/Env.h"
-#include "db/Meta.h"
+#include "DBWrapper.h"
 #include "version.h"
 
 namespace zilliz {
@@ -27,44 +25,6 @@ using DB_META = zilliz::milvus::engine::meta::Meta;
 using DB_DATE = zilliz::milvus::engine::meta::DateT;
 
 namespace {
-    class DBWrapper {
-    public:
-        DBWrapper() {
-            zilliz::milvus::engine::Options opt;
-            ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
-            opt.meta.backend_uri = config.GetValue(CONFIG_DB_URL);
-            std::string db_path = config.GetValue(CONFIG_DB_PATH);
-            opt.memory_sync_interval = (uint16_t)config.GetInt32Value(CONFIG_DB_FLUSH_INTERVAL, 10);
-            opt.meta.path = db_path + "/db";
-            int64_t index_size = config.GetInt64Value(CONFIG_DB_INDEX_TRIGGER_SIZE);
-            if(index_size > 0) {//ensure larger than zero, unit is MB
-                opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
-            }
-
-            CommonUtil::CreateDirectory(opt.meta.path);
-
-            zilliz::milvus::engine::DB::Open(opt, &db_);
-            if(db_ == nullptr) {
-                SERVER_LOG_ERROR << "Failed to open db";
-                throw ServerException(SERVER_NULL_POINTER, "Failed to open db");
-            }
-        }
-
-        ~DBWrapper() {
-            delete db_;
-        }
-
-        zilliz::milvus::engine::DB* DB() { return db_; }
-
-    private:
-        zilliz::milvus::engine::DB* db_ = nullptr;
-    };
-
-    zilliz::milvus::engine::DB* DB() {
-        static DBWrapper db_wrapper;
-        return db_wrapper.DB();
-    }
-
     engine::EngineType EngineType(int type) {
         static std::map<int, engine::EngineType> map_type = {
                 {0, engine::EngineType::INVALID},
@@ -201,7 +161,7 @@ ServerError CreateTableTask::OnExecute() {
         table_info.store_raw_data_ = schema_.store_raw_vector;
 
         //step 3: create table
-        engine::Status stat = DB()->CreateTable(table_info);
+        engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
         if(!stat.ok()) {//table could exist
             error_code_ = SERVER_UNEXPECTED_ERROR;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -223,7 +183,7 @@ ServerError CreateTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DescribeTableTask::DescribeTableTask(const std::string &table_name, thrift::TableSchema &schema)
-    : BaseTask(PING_TASK_GROUP),
+    : BaseTask(DDL_DML_TASK_GROUP),
       table_name_(table_name),
       schema_(schema) {
     schema_.table_name = table_name_;
@@ -248,7 +208,7 @@ ServerError DescribeTableTask::OnExecute() {
         //step 2: get table info
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
-        engine::Status stat = DB()->DescribeTable(table_info);
+        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_TABLE_NOT_EXIST;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -299,7 +259,7 @@ ServerError DeleteTableTask::OnExecute() {
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
-        engine::Status stat = DB()->DescribeTable(table_info);
+        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_TABLE_NOT_EXIST;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -311,7 +271,7 @@ ServerError DeleteTableTask::OnExecute() {
 
         //step 3: delete table
         std::vector<DB_DATE> dates;
-        stat = DB()->DeleteTable(table_name_, dates);
+        stat = DBWrapper::DB()->DeleteTable(table_name_, dates);
         if(!stat.ok()) {
             SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
             return SERVER_UNEXPECTED_ERROR;
@@ -331,7 +291,7 @@ ServerError DeleteTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ShowTablesTask::ShowTablesTask(std::vector<std::string>& tables)
-    : BaseTask(DQL_TASK_GROUP),
+    : BaseTask(DDL_DML_TASK_GROUP),
       tables_(tables) {
 
 }
@@ -342,7 +302,7 @@ BaseTaskPtr ShowTablesTask::Create(std::vector<std::string>& tables) {
 
 ServerError ShowTablesTask::OnExecute() {
     std::vector<engine::meta::TableSchema> schema_array;
-    engine::Status stat = DB()->AllTables(schema_array);
+    engine::Status stat = DBWrapper::DB()->AllTables(schema_array);
     if(!stat.ok()) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = "Engine failed: " + stat.ToString();
@@ -397,7 +357,7 @@ ServerError AddVectorTask::OnExecute() {
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
-        engine::Status stat = DB()->DescribeTable(table_info);
+        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_TABLE_NOT_EXIST;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -419,7 +379,7 @@ ServerError AddVectorTask::OnExecute() {
 
         //step 4: insert vectors
         uint64_t vec_count = (uint64_t)record_array_.size();
-        stat = DB()->InsertVectors(table_name_, vec_count, vec_f.data(), record_ids_);
+        stat = DBWrapper::DB()->InsertVectors(table_name_, vec_count, vec_f.data(), record_ids_);
         rc.Record("add vectors to engine");
         if(!stat.ok()) {
             error_code_ = SERVER_UNEXPECTED_ERROR;
@@ -453,13 +413,13 @@ SearchVectorTask::SearchVectorTask(const std::string &table_name,
                                    const std::vector<thrift::Range> &query_range_array,
                                    const int64_t top_k,
                                    std::vector<thrift::TopKQueryResult> &result_array)
-        : BaseTask(DQL_TASK_GROUP),
-          table_name_(table_name),
-          file_id_array_(file_id_array),
-          record_array_(query_record_array),
-          range_array_(query_range_array),
-          top_k_(top_k),
-          result_array_(result_array) {
+    : BaseTask(DQL_TASK_GROUP),
+      table_name_(table_name),
+      file_id_array_(file_id_array),
+      record_array_(query_record_array),
+      range_array_(query_range_array),
+      top_k_(top_k),
+      result_array_(result_array) {
 
 }
 
@@ -495,7 +455,7 @@ ServerError SearchVectorTask::OnExecute() {
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
-        engine::Status stat = DB()->DescribeTable(table_info);
+        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_TABLE_NOT_EXIST;
             error_msg_ = "Engine failed: " + stat.ToString();
@@ -528,9 +488,9 @@ ServerError SearchVectorTask::OnExecute() {
         uint64_t record_count = (uint64_t)record_array_.size();
 
         if(file_id_array_.empty()) {
-            stat = DB()->Query(table_name_, (size_t) top_k_, record_count, vec_f.data(), dates, results);
+            stat = DBWrapper::DB()->Query(table_name_, (size_t) top_k_, record_count, vec_f.data(), dates, results);
         } else {
-            stat = DB()->Query(table_name_, file_id_array_, (size_t) top_k_, record_count, vec_f.data(), dates, results);
+            stat = DBWrapper::DB()->Query(table_name_, file_id_array_, (size_t) top_k_, record_count, vec_f.data(), dates, results);
         }
 
         rc.Record("search vectors from engine");
@@ -577,7 +537,7 @@ ServerError SearchVectorTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 GetTableRowCountTask::GetTableRowCountTask(const std::string& table_name, int64_t& row_count)
-: BaseTask(DQL_TASK_GROUP),
+: BaseTask(DDL_DML_TASK_GROUP),
   table_name_(table_name),
   row_count_(row_count) {
 
@@ -601,7 +561,7 @@ ServerError GetTableRowCountTask::OnExecute() {
 
         //step 2: get row count
         uint64_t row_count = 0;
-        engine::Status stat = DB()->GetTableRowCount(table_name_, row_count);
+        engine::Status stat = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
         if (!stat.ok()) {
             error_code_ = SERVER_UNEXPECTED_ERROR;
             error_msg_ = "Engine failed: " + stat.ToString();

@@ -23,7 +23,6 @@ static const std::string CONFIG_SERVER_MODE = "server_mode";
 static const std::string CONFIG_DB = "db_config";
 static const std::string CONFIG_DB_URL = "db_backend_url";
 static const std::string CONFIG_DB_PATH = "db_path";
-static const std::string CONFIG_DB_FLUSH_INTERVAL = "db_flush_interval";
 static const std::string CONFIG_DB_INDEX_TRIGGER_SIZE = "index_building_threshold";
 
 static const std::string CONFIG_LOG = "log_config";

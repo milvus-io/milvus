@@ -4,8 +4,8 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
-#include "IndexLoaderQueue.h"
-#include "ScheduleStrategy.h"
+#include "TaskDispatchQueue.h"
+#include "TaskDispatchStrategy.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
 
@@ -14,12 +14,12 @@ namespace milvus {
 namespace engine {
 
 void
-IndexLoaderQueue::Put(const SearchContextPtr &search_context) {
+TaskDispatchQueue::Put(const ScheduleContextPtr &context) {
     std::unique_lock <std::mutex> lock(mtx);
     full_.wait(lock, [this] { return (queue_.size() < capacity_); });
 
-    if(search_context == nullptr) {
-        queue_.push_back(nullptr);
+    if(context == nullptr) {
+        queue_.push_front(nullptr);
         empty_.notify_all();
         return;
     }
@@ -32,14 +32,13 @@ IndexLoaderQueue::Put(const SearchContextPtr &search_context) {
         throw server::ServerException(server::SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
 
-    ScheduleStrategyPtr strategy = StrategyFactory::CreateMemStrategy();
-    strategy->Schedule(search_context, queue_);
+    TaskDispatchStrategy::Schedule(context, queue_);
 
     empty_.notify_all();
 }
 
-IndexLoaderContextPtr
-IndexLoaderQueue::Take() {
+ScheduleTaskPtr
+TaskDispatchQueue::Take() {
     std::unique_lock <std::mutex> lock(mtx);
     empty_.wait(lock, [this] { return !queue_.empty(); });
 
@@ -49,20 +48,20 @@ IndexLoaderQueue::Take() {
         throw server::ServerException(server::SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
 
-    IndexLoaderContextPtr front(queue_.front());
+    ScheduleTaskPtr front(queue_.front());
     queue_.pop_front();
     full_.notify_all();
     return front;
 }
 
 size_t
-IndexLoaderQueue::Size() {
+TaskDispatchQueue::Size() {
     std::lock_guard <std::mutex> lock(mtx);
     return queue_.size();
 }
 
-IndexLoaderContextPtr
-IndexLoaderQueue::Front() {
+ScheduleTaskPtr
+TaskDispatchQueue::Front() {
     std::unique_lock <std::mutex> lock(mtx);
     empty_.wait(lock, [this] { return !queue_.empty(); });
     if (queue_.empty()) {
@@ -70,12 +69,12 @@ IndexLoaderQueue::Front() {
         SERVER_LOG_ERROR << error_msg;
         throw server::ServerException(server::SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
-    IndexLoaderContextPtr front(queue_.front());
+    ScheduleTaskPtr front(queue_.front());
     return front;
 }
 
-IndexLoaderContextPtr
-IndexLoaderQueue::Back() {
+ScheduleTaskPtr
+TaskDispatchQueue::Back() {
     std::unique_lock <std::mutex> lock(mtx);
     empty_.wait(lock, [this] { return !queue_.empty(); });
 
@@ -85,18 +84,18 @@ IndexLoaderQueue::Back() {
         throw server::ServerException(server::SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
 
-    IndexLoaderContextPtr back(queue_.back());
+    ScheduleTaskPtr back(queue_.back());
     return back;
 }
 
 bool
-IndexLoaderQueue::Empty() {
+TaskDispatchQueue::Empty() {
     std::unique_lock <std::mutex> lock(mtx);
     return queue_.empty();
 }
 
 void
-IndexLoaderQueue::SetCapacity(const size_t capacity) {
+TaskDispatchQueue::SetCapacity(const size_t capacity) {
     capacity_ = (capacity > 0 ? capacity : capacity_);
 }
 

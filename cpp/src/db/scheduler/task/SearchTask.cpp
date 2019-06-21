@@ -3,7 +3,8 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "SearchTaskQueue.h"
+#include "SearchTask.h"
+#include "metrics/Metrics.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -54,7 +55,7 @@ void MergeResult(SearchContext::Id2ScoreMap &score_src,
     while(true) {
         //all score_src items are merged, if score_merged.size() still less than topk
         //move items from score_target to score_merged until score_merged.size() equal topk
-        if(src_index >= src_count - 1) {
+        if(src_index >= src_count) {
             for(size_t i = target_index; i < target_count && score_merged.size() < topk; ++i) {
                 score_merged.push_back(score_target[i]);
             }
@@ -63,7 +64,7 @@ void MergeResult(SearchContext::Id2ScoreMap &score_src,
 
         //all score_target items are merged, if score_merged.size() still less than topk
         //move items from score_src to score_merged until score_merged.size() equal topk
-        if(target_index >= target_count - 1) {
+        if(target_index >= target_count) {
             for(size_t i = src_index; i < src_count && score_merged.size() < topk; ++i) {
                 score_merged.push_back(score_src[i]);
             }
@@ -110,14 +111,41 @@ void TopkResult(SearchContext::ResultSet &result_src,
     }
 }
 
+void CollectDurationMetrics(int index_type, double total_time) {
+    switch(index_type) {
+        case meta::TableFileSchema::RAW: {
+            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+            break;
+        }
+        case meta::TableFileSchema::TO_INDEX: {
+            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
+            break;
+        }
+        default: {
+            server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
+            break;
+        }
+    }
 }
 
-bool SearchTask::DoSearch() {
+}
+
+SearchTask::SearchTask()
+: IScheduleTask(ScheduleTaskType::kSearch) {
+
+}
+
+std::shared_ptr<IScheduleTask> SearchTask::Execute() {
     if(index_engine_ == nullptr) {
-        return false;
+        return nullptr;
     }
 
+    SERVER_LOG_INFO << "Searching in index(" << index_id_<< ") with "
+                    << search_contexts_.size() << " tasks";
+
     server::TimeRecorder rc("DoSearch index(" + std::to_string(index_id_) + ")");
+
+    auto start_time = METRICS_NOW_TIME;
 
     std::vector<long> output_ids;
     std::vector<float> output_distence;
@@ -153,9 +181,13 @@ bool SearchTask::DoSearch() {
         context->IndexSearchDone(index_id_);
     }
 
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    CollectDurationMetrics(index_type_, total_time);
+
     rc.Elapse("totally cost");
 
-    return true;
+    return nullptr;
 }
 
 }

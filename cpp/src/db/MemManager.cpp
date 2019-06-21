@@ -62,7 +62,7 @@ Status MemVectors::Serialize(std::string& table_id) {
     auto status = pMeta_->UpdateTableFile(schema_);
 
     LOG(DEBUG) << "New " << ((schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-        << " file " << schema_.file_id_ << " of size " << pEE_->Size() / meta::M << " M";
+        << " file " << schema_.file_id_ << " of size " << (double)(pEE_->Size()) / (double)meta::M << " M";
 
     pEE_->Cache();
 
@@ -139,6 +139,13 @@ Status MemManager::Serialize(std::vector<std::string>& table_ids) {
         table_ids.push_back(table_id);
     }
     immMems_.clear();
+    return Status::OK();
+}
+
+Status MemManager::EraseMemVector(const std::string& table_id) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    memMap_.erase(table_id);
+
     return Status::OK();
 }
 

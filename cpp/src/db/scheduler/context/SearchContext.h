@@ -5,6 +5,7 @@
  ******************************************************************************/
 #pragma once
 
+#include "IScheduleContext.h"
 #include "db/MetaTypes.h"
 
 #include <unordered_map>
@@ -18,7 +19,7 @@ namespace engine {
 
 using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
 
-class SearchContext {
+class SearchContext : public IScheduleContext {
 public:
     SearchContext(uint64_t topk, uint64_t nq, const float* vectors);
 
