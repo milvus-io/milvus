@@ -20,16 +20,20 @@ public:
     DBMetaImpl(const DBMetaOptions& options_);
 
     virtual Status CreateTable(TableSchema& table_schema) override;
-    virtual Status DeleteTable(const std::string& table_id) override;
     virtual Status DescribeTable(TableSchema& group_info_) override;
     virtual Status HasTable(const std::string& table_id, bool& has_or_not) override;
     virtual Status AllTables(std::vector<TableSchema>& table_schema_array) override;
+
+    virtual Status DeleteTable(const std::string& table_id) override;
+    virtual Status DeleteTableFiles(const std::string& table_id) override;
 
     virtual Status CreateTableFile(TableFileSchema& file_schema) override;
     virtual Status DropPartitionsByDates(const std::string& table_id,
             const DatesT& dates) override;
 
-    virtual Status GetTableFile(TableFileSchema& file_schema) override;
+    virtual Status GetTableFiles(const std::string& table_id,
+                                 const std::vector<size_t>& ids,
+                                 TableFilesSchema& table_files) override;
 
     virtual Status UpdateTableFile(TableFileSchema& file_schema) override;
 
@@ -41,10 +45,6 @@ public:
 
     virtual Status FilesToMerge(const std::string& table_id,
             DatePartionedTableFilesSchema& files) override;
-
-    virtual Status FilesToDelete(const std::string& table_id,
-                                 const DatesT& partition,
-                                 DatePartionedTableFilesSchema& files) override;
 
     virtual Status FilesToIndex(TableFilesSchema&) override;
 

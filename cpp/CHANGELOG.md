@@ -5,6 +5,7 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.3.0 (TBD)
 
 ## Bug
+- MS-102 - Fix build script file condition error
 - MS-80 - Fix server hang issue
 - MS-89 - Fix compile failed, libgpufaiss.a link missing
 - MS-90 - Fix arch match incorrect on ARM
@@ -52,6 +53,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-67 - Fix license check bug
 - MS-76 - Fix pipeline crash bug
 - MS-100 - cmake: fix AWS build issue
+- MS-101 - change AWS build type to Release
 
 ## Improvement
 

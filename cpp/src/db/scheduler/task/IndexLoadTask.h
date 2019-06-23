@@ -3,22 +3,28 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#pragma once
 
-#include "DBImpl.h"
-#include "DBMetaImpl.h"
-#include "Factories.h"
+#include "IScheduleTask.h"
+#include "db/scheduler/context/SearchContext.h"
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-DB::~DB() {}
+class IndexLoadTask : public IScheduleTask {
+public:
+    IndexLoadTask();
 
-void DB::Open(const Options& options, DB** dbptr) {
-    *dbptr = DBFactory::Build(options);
-    return;
+    virtual std::shared_ptr<IScheduleTask> Execute() override;
+
+public:
+    TableFileSchemaPtr file_;
+    std::vector<SearchContextPtr> search_contexts_;
+};
+
+using IndexLoadTaskPtr = std::shared_ptr<IndexLoadTask>;
+
 }
-
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}
+}

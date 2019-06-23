@@ -5,19 +5,19 @@
  ******************************************************************************/
 #pragma once
 
-#include "SearchContext.h"
-#include "utils/BlockingQueue.h"
+#include "IScheduleTask.h"
+#include "db/scheduler/context/SearchContext.h"
 #include "db/ExecutionEngine.h"
-
-#include <memory>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-class SearchTask {
+class SearchTask : public IScheduleTask {
 public:
-    bool DoSearch();
+    SearchTask();
+
+    virtual std::shared_ptr<IScheduleTask> Execute() override;
 
 public:
     size_t index_id_ = 0;
@@ -27,7 +27,6 @@ public:
 };
 
 using SearchTaskPtr = std::shared_ptr<SearchTask>;
-using SearchTaskQueue = server::BlockingQueue<SearchTaskPtr>;
 
 
 }
