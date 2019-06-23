@@ -84,10 +84,10 @@ if [[ ${BUILD_TYPE} != "Debug" ]]; then
     strip src/milvus_server
 fi
 
+make install || exit 1
+
 if [[ ${BUILD_COVERAGE} == "ON" ]]; then
     cd -
     bash `pwd`/coverage.sh
     cd -
 fi
-
-make install
