@@ -25,7 +25,7 @@ main(int argc, char *argv[]) {
                                            {NULL, 0, 0, 0}};
 
     int option_index = 0;
-    std::string address = "127.0.0.1", port = "33001";
+    std::string address = "127.0.0.1", port = "19530";
     app_name = argv[0];
 
     int value;
@@ -62,7 +62,7 @@ print_help(const std::string &app_name) {
     printf("\n Usage: %s [OPTIONS]\n\n", app_name.c_str());
     printf("  Options:\n");
     printf("   -s --server   Server address, default 127.0.0.1\n");
-    printf("   -p --port     Server port, default 33001\n");
+    printf("   -p --port     Server port, default 19530\n");
     printf("   -h --help     Print help information\n");
     printf("\n");
 }
