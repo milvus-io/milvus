@@ -5,6 +5,7 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.3.0 (TBD)
 
 ## Bug
+- MS-104 - Fix unittest lcov execution error
 - MS-102 - Fix build script file condition error
 - MS-80 - Fix server hang issue
 - MS-89 - Fix compile failed, libgpufaiss.a link missing
