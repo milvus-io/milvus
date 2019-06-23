@@ -10,9 +10,17 @@ aux_source_directory(config config_files)
 aux_source_directory(server server_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
-aux_source_directory(db/scheduler db_scheduler_files)
 aux_source_directory(wrapper wrapper_files)
 aux_source_directory(metrics metrics_files)
+
+aux_source_directory(db/scheduler scheduler_files)
+aux_source_directory(db/scheduler/context scheduler_context_files)
+aux_source_directory(db/scheduler/task scheduler_task_files)
+set(db_scheduler_files
+        ${scheduler_files}
+        ${scheduler_context_files}
+        ${scheduler_task_files}
+        )
 
 set(license_check_files
         license/LicenseLibrary.cpp

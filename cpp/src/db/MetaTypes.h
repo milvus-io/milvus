@@ -21,12 +21,18 @@ const DateT EmptyDate = -1;
 typedef std::vector<DateT> DatesT;
 
 struct TableSchema {
-    size_t id_;
+    typedef enum {
+        NORMAL,
+        TO_DELETE,
+    } TABLE_STATE;
+
+    size_t id_ = 0;
     std::string table_id_;
+    int state_ = (int)NORMAL;
     size_t files_cnt_ = 0;
     uint16_t dimension_ = 0;
     std::string location_;
-    long created_on_;
+    long created_on_ = 0;
     int engine_type_ = (int)EngineType::FAISS_IDMAP;
     bool store_raw_data_ = false;
 }; // TableSchema
@@ -40,17 +46,17 @@ struct TableFileSchema {
         TO_DELETE,
     } FILE_TYPE;
 
-    size_t id_;
+    size_t id_ = 0;
     std::string table_id_;
     int engine_type_ = (int)EngineType::FAISS_IDMAP;
     std::string file_id_;
     int file_type_ = NEW;
-    size_t size_;
+    size_t size_ = 0;
     DateT date_ = EmptyDate;
-    uint16_t dimension_;
+    uint16_t dimension_ = 0;
     std::string location_;
-    long updated_time_;
-    long created_on_;
+    long updated_time_ = 0;
+    long created_on_ = 0;
 }; // TableFileSchema
 
 typedef std::vector<TableFileSchema> TableFilesSchema;

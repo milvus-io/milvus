@@ -13,12 +13,19 @@ include_directories(../../src)
 
 
 aux_source_directory(../../src/db db_srcs)
-aux_source_directory(../../src/db/scheduler db_scheduler_srcs)
 aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(../../src/wrapper wrapper_src)
 aux_source_directory(../../src/metrics metrics_src)
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task scheduler_task_files)
+set(db_scheduler_srcs
+        ${scheduler_files}
+        ${scheduler_context_files}
+        ${scheduler_task_files}
+        )
 
 include_directories(/usr/include)
 include_directories(../../third_party/build/include)
