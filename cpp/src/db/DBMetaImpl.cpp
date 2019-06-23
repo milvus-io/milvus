@@ -194,7 +194,7 @@ Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
                                                where(c(&TableSchema::table_id_) == table_schema.table_id_));
             if (table.size() == 1) {
                 std::string msg = (TableSchema::TO_DELETE == std::get<0>(table[0])) ?
-                        "Table already exists" : "Table already exists and it is in delete state, please wait a second";
+                          "Table already exists and it is in delete state, please wait a second" : "Table already exists";
                 return Status::Error(msg);
             }
         }
