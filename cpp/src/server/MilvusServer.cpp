@@ -47,7 +47,7 @@ MilvusServer::StartService() {
     ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
 
     std::string address = server_config.GetValue(CONFIG_SERVER_ADDRESS, "127.0.0.1");
-    int32_t port = server_config.GetInt32Value(CONFIG_SERVER_PORT, 33001);
+    int32_t port = server_config.GetInt32Value(CONFIG_SERVER_PORT, 19530);
     std::string protocol = server_config.GetValue(CONFIG_SERVER_PROTOCOL, "binary");
     std::string mode = server_config.GetValue(CONFIG_SERVER_MODE, "thread_pool");
 

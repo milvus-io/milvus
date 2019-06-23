@@ -51,8 +51,8 @@ set(MILVUS_VERSION_PATCH "${milvus_VERSION_PATCH}")
 if(MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_MINOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
-    message(WARNING "Failed to determine Milvus version from '${MILVUS_VERSION}'")
-    set(MILVUS_VERSION "unknown")
+    message(WARNING "Failed to determine Milvus version from git branch name")
+    set(MILVUS_VERSION "0.3.0")
 endif()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
