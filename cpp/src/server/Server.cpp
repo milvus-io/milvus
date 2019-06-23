@@ -171,7 +171,7 @@ Server::Start() {
             signal(SIGTERM, SignalUtil::HandleSignal);
             server::Metrics::GetInstance().Init();
             server::SystemInfo::GetInstance().Init();
-            printf("Milvus server start successfully.\n");
+            std::cout << "Milvus server start successfully." << std::endl;
             StartService();
 
         } catch(std::exception& ex){
@@ -187,18 +187,18 @@ Server::Start() {
 
 void
 Server::Stop() {
-    printf("Milvus server is going to shutdown ...\n");
+    std::cout << "Milvus server is going to shutdown ..." << std::endl;
 
     // Unlock and close lockfile
     if (pid_fd != -1) {
         int ret = lockf(pid_fd, F_ULOCK, 0);
         if(ret != 0){
-            printf("Can't lock file: %s\n", strerror(errno));
+            std::cout << "Can't lock file: " << strerror(errno) << std::endl;
             exit(0);
         }
         ret = close(pid_fd);
         if(ret != 0){
-            printf("Can't close file: %s\n", strerror(errno));
+            std::cout << "Can't close file: " << strerror(errno) << std::endl;
             exit(0);
         }
     }
@@ -207,7 +207,7 @@ Server::Stop() {
     if (!pid_filename_.empty()) {
         int ret = unlink(pid_filename_.c_str());
         if(ret != 0){
-            printf("Can't unlink file: %s\n", strerror(errno));
+            std::cout << "Can't unlink file: " << strerror(errno) << std::endl;
             exit(0);
         }
     }
@@ -219,7 +219,7 @@ Server::Stop() {
 #ifdef ENABLE_LICENSE
     server::LicenseCheck::GetInstance().StopCountingDown();
 #endif
-    printf("Milvus server is closed!\n");
+    std::cout << "Milvus server is closed!" << std::endl;
 }
 
 

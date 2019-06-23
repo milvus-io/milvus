@@ -47,27 +47,27 @@ LicenseCheck::LegalityCheck(const std::string &license_file_path) {
                                                end_time);
     if(err !=SERVER_SUCCESS)
     {
-        printf("License check error: 01\n");
+        std::cout << "License check error: 01" << std::endl;
         return SERVER_UNEXPECTED_ERROR;
     }
     time_t system_time;
     LicenseLibrary::GetSystemTime(system_time);
 
     if (device_count != output_device_count) {
-        printf("License check error: 02\n");
+        std::cout << "License check error: 02" << std::endl;
         return SERVER_UNEXPECTED_ERROR;
     }
     for (int i = 0; i < device_count; ++i) {
         if (sha_array[i] != uuid_encryption_map[i]) {
-            printf("License check error: 03\n");
+            std::cout << "License check error: 03" << std::endl;
             return SERVER_UNEXPECTED_ERROR;
         }
     }
     if (system_time < starting_time || system_time > end_time) {
-        printf("License check error: 04\n");
+        std::cout << "License check error: 04" << std::endl;
         return SERVER_UNEXPECTED_ERROR;
     }
-    printf("Legality Check Success\n");
+    std::cout << "Legality Check Success" << std::endl;
     return SERVER_SUCCESS;
 }
 
@@ -80,11 +80,11 @@ LicenseCheck::AlterFile(const std::string &license_file_path,
 
     ServerError err = LicenseCheck::LegalityCheck(license_file_path);
     if(err!=SERVER_SUCCESS) {
-        printf("license file check error\n");
+        std::cout << "license file check error" << std::endl;
         exit(1);
     }
 
-    printf("---runing---\n");
+    std::cout << "---runing---" << std::endl;
     pt->expires_at(pt->expires_at() + boost::posix_time::hours(1));
     pt->async_wait(boost::bind(LicenseCheck::AlterFile, license_file_path, boost::asio::placeholders::error, pt));
 
@@ -96,7 +96,7 @@ ServerError
 LicenseCheck::StartCountingDown(const std::string &license_file_path) {
 
     if (!LicenseLibrary::IsFileExistent(license_file_path)) {
-        printf("license file not exist\n");
+        std::cout << "license file not exist" << std::endl;
         exit(1);
     }
 
