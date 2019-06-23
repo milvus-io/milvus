@@ -286,6 +286,9 @@ TEST_F(DBTest2, DELETE_TEST) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());
     ASSERT_FALSE(boost::filesystem::exists(table_info_get.location_));
+
+    stat = db_->DropAll();
+    ASSERT_TRUE(stat.ok());
 };
 
 TEST_F(MySQLDBTest, DB_TEST) {
@@ -367,6 +370,9 @@ TEST_F(MySQLDBTest, DB_TEST) {
     }
 
     search.join();
+
+    stat = db_->DropAll();
+    ASSERT_TRUE(stat.ok());
 };
 
 TEST_F(MySQLDBTest, SEARCH_TEST) {
@@ -423,6 +429,9 @@ TEST_F(MySQLDBTest, SEARCH_TEST) {
     stat = db_->Query(TABLE_NAME, k, nq, xq.data(), results);
     ASSERT_STATS(stat);
 
+    stat = db_->DropAll();
+    ASSERT_TRUE(stat.ok());
+
     // TODO(linxj): add groundTruth assert
 };
 
@@ -462,6 +471,9 @@ TEST_F(MySQLDBTest, ARHIVE_DISK_CHECK) {
     db_->Size(size);
     LOG(DEBUG) << "size=" << size;
     ASSERT_LE(size, 1 * engine::meta::G);
+
+    stat = db_->DropAll();
+    ASSERT_TRUE(stat.ok());
 };
 
 TEST_F(MySQLDBTest, DELETE_TEST) {
@@ -497,7 +509,13 @@ TEST_F(MySQLDBTest, DELETE_TEST) {
 
     std::vector<engine::meta::DateT> dates;
     stat = db_->DeleteTable(TABLE_NAME, dates);
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    std::this_thread::sleep_for(std::chrono::seconds(10)); //change to 10 to make sure files are discarded
+
     ASSERT_TRUE(stat.ok());
+//    std::cout << table_info_get.location_ << std::endl;
     ASSERT_FALSE(boost::filesystem::exists(table_info_get.location_));
+
+    stat = db_->DropAll();
+    ASSERT_TRUE(stat.ok());
 };
