@@ -628,6 +628,7 @@ Status DBMetaImpl::GetTableFiles(const std::string& table_id,
 
         for (auto &file : files) {
             TableFileSchema file_schema;
+            file_schema.table_id_ = table_id;
             file_schema.file_id_ = std::get<0>(file);
             file_schema.file_type_ = std::get<1>(file);
             file_schema.size_ = std::get<2>(file);
