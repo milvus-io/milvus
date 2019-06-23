@@ -142,23 +142,30 @@ TEST_F(MySQLTest, core) {
     ASSERT_EQ(fileToMerge.table_id_, "test1");
     ASSERT_EQ(fileToMerge.dimension_, 123);
 
-    meta::TableFileSchema resultTableFileSchema;
-    resultTableFileSchema.table_id_ = tableFileSchema.table_id_;
-    resultTableFileSchema.file_id_ = tableFileSchema.file_id_;
-    status = impl.GetTableFile(resultTableFileSchema);
+    meta::TableFilesSchema resultTableFilesSchema;
+    std::vector<size_t> ids;
+    ids.push_back(tableFileSchema.id_);
+    status = impl.GetTableFiles(tableFileSchema.table_id_, ids, resultTableFilesSchema);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(resultTableFileSchema.id_, tableFileSchema.id_);
+    ASSERT_EQ(resultTableFilesSchema.size(), 1);
+    meta::TableFileSchema resultTableFileSchema = resultTableFilesSchema[0];
+//    ASSERT_EQ(resultTableFileSchema.id_, tableFileSchema.id_);
     ASSERT_EQ(resultTableFileSchema.table_id_, tableFileSchema.table_id_);
     ASSERT_EQ(resultTableFileSchema.file_id_, tableFileSchema.file_id_);
     ASSERT_EQ(resultTableFileSchema.file_type_, tableFileSchema.file_type_);
     ASSERT_EQ(resultTableFileSchema.size_, tableFileSchema.size_);
     ASSERT_EQ(resultTableFileSchema.date_, tableFileSchema.date_);
+    ASSERT_EQ(resultTableFileSchema.engine_type_, tableFileSchema.engine_type_);
+    ASSERT_EQ(resultTableFileSchema.dimension_, tableFileSchema.dimension_);
 
     tableFileSchema.size_ = 234;
-    status = impl.CreateTable(schema2);
+    meta::TableSchema schema3;
+    schema3.table_id_ = "test3";
+    schema3.dimension_ = 321;
+    status = impl.CreateTable(schema3);
     ASSERT_TRUE(status.ok());
     meta::TableFileSchema tableFileSchema2;
-    tableFileSchema2.table_id_ = "test2";
+    tableFileSchema2.table_id_ = "test3";
     tableFileSchema2.size_ = 345;
     status = impl.CreateTableFile(tableFileSchema2);
     ASSERT_TRUE(status.ok());
@@ -184,18 +191,14 @@ TEST_F(MySQLTest, core) {
 }
 
 TEST_F(MySQLTest, GROUP_TEST) {
-
-//    DBMetaOptions options;
-//    options.backend_uri = "mysql://root:1234@:/test";
-//    options.path = "/tmp/vecwise_test";
-    meta::MySQLMetaImpl impl(getDBMetaOptions());
     
+    meta::MySQLMetaImpl impl(getDBMetaOptions());
+
     auto table_id = "meta_test_group";
 
     meta::TableSchema group;
     group.table_id_ = table_id;
     auto status = impl.CreateTable(group);
-//    std::cout << status.ToString() << std::endl;
     ASSERT_TRUE(status.ok());
 
     auto gid = group.id_;
@@ -219,9 +222,6 @@ TEST_F(MySQLTest, GROUP_TEST) {
 
 TEST_F(MySQLTest, table_file_TEST) {
 
-//    DBMetaOptions options;
-//    options.backend_uri = "mysql://root:1234@:/test";
-//    options.path = "/tmp/vecwise_test";
     meta::MySQLMetaImpl impl(getDBMetaOptions());
 
     auto table_id = "meta_test_group";
@@ -267,9 +267,13 @@ TEST_F(MySQLTest, table_file_TEST) {
     dates.push_back(table_file.date_);
     status = impl.DropPartitionsByDates(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
-    status = impl.GetTableFile(table_file);
+
+    std::vector<size_t> ids = {table_file.id_};
+    meta::TableFilesSchema files;
+    status = impl.GetTableFiles(table_file.table_id_, ids, files);
     ASSERT_TRUE(status.ok());
-    ASSERT_TRUE(table_file.file_type_ == meta::TableFileSchema::TO_DELETE);
+    ASSERT_EQ(files.size(), 1UL);
+    ASSERT_TRUE(files[0].file_type_ == meta::TableFileSchema::TO_DELETE);
 
     status = impl.DropAll();
     ASSERT_TRUE(status.ok());
@@ -278,12 +282,10 @@ TEST_F(MySQLTest, table_file_TEST) {
 TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
     DBMetaOptions options = getDBMetaOptions();
-//    options.path = "/tmp/vecwise_test";
     int days_num = rand() % 100;
     std::stringstream ss;
     ss << "days:" << days_num;
     options.archive_conf = ArchiveConf("delete", ss.str());
-//    options.backend_uri = "mysql://root:1234@:/test";
 
     meta::MySQLMetaImpl impl(options);
 
@@ -300,6 +302,7 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
     auto cnt = 100;
     long ts = utils::GetMicroSecTimeStamp();
     std::vector<int> days;
+    std::vector<size_t> ids;
     for (auto i=0; i<cnt; ++i) {
         status = impl.CreateTableFile(table_file);
         table_file.file_type_ = meta::TableFileSchema::NEW;
@@ -308,14 +311,17 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
         days.push_back(day);
+        ids.push_back(table_file.id_);
     }
 
     impl.Archive();
     int i = 0;
 
-    for (auto file : files) {
-        status = impl.GetTableFile(file);
-        ASSERT_TRUE(status.ok());
+    meta::TableFilesSchema files_get;
+    status = impl.GetTableFiles(table_file.table_id_, ids, files_get);
+    ASSERT_TRUE(status.ok());
+
+    for(auto& file : files_get) {
         if (days[i] < days_num) {
             ASSERT_EQ(file.file_type_, meta::TableFileSchema::NEW);
         } else {
@@ -329,13 +335,11 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
 }
 
 TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
-    DBMetaOptions options = getDBMetaOptions();
-//    options.path = "/tmp/vecwise_test";
+    DBMetaOptions options;
+    options.path = "/tmp/milvus_test";
     options.archive_conf = ArchiveConf("delete", "disk:11");
-//    options.backend_uri = "mysql://root:1234@:/test";
 
-    meta::MySQLMetaImpl impl(options);
-
+    auto impl = meta::DBMetaImpl(options);
     auto table_id = "meta_test_group";
 
     meta::TableSchema group;
@@ -348,20 +352,24 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
 
     auto cnt = 10;
     auto each_size = 2UL;
+    std::vector<size_t> ids;
     for (auto i=0; i<cnt; ++i) {
         status = impl.CreateTableFile(table_file);
         table_file.file_type_ = meta::TableFileSchema::NEW;
         table_file.size_ = each_size * meta::G;
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
+        ids.push_back(table_file.id_);
     }
 
     impl.Archive();
     int i = 0;
 
-    for (auto file : files) {
-        status = impl.GetTableFile(file);
-        ASSERT_TRUE(status.ok());
+    meta::TableFilesSchema files_get;
+    status = impl.GetTableFiles(table_file.table_id_, ids, files_get);
+    ASSERT_TRUE(status.ok());
+
+    for(auto& file : files_get) {
         if (i < 5) {
             ASSERT_TRUE(file.file_type_ == meta::TableFileSchema::TO_DELETE);
         } else {
@@ -376,10 +384,7 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
 
 TEST_F(MySQLTest, TABLE_FILES_TEST) {
 
-//    DBMetaOptions options;
-//    options.backend_uri = "mysql://root:1234@:/test";
-//    options.path = "/tmp/vecwise_test";
-    meta::MySQLMetaImpl impl(getDBMetaOptions());
+    auto impl = meta::DBMetaImpl(getDBMetaOptions());
 
     auto table_id = "meta_test_group";
 
