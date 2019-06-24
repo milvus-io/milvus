@@ -9,7 +9,7 @@
 class LogTest: public testing::Test {
 protected:
     void SetUp() override {
-        el::Configurations conf("../../../conf/vecwise_engine_log.conf");
+        el::Configurations conf("../../../conf/log_config.conf");
         el::Loggers::reconfigureAllLoggers(conf);
     }
 };

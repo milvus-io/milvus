@@ -2,14 +2,23 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
-# MegaSearch 0.3.0 (TBD)
+# Milvus 0.3.0 (TBD)
 
 ## Bug
+- MS-104 - Fix unittest lcov execution error
+- MS-102 - Fix build script file condition error
 - MS-80 - Fix server hang issue
+- MS-89 - Fix compile failed, libgpufaiss.a link missing
+- MS-90 - Fix arch match incorrect on ARM
+- MS-99 - Fix compilation bug
 
 ## Improvement
 - MS-82 - Update server startup welcome message
 - MS-83 - Update vecwise to Milvus
+- MS-77 - Performance issue of post-search action
+- MS-22 - Enhancement for MemVector size control 
+- MS-92 - Unify behavior of debug and release build
+- MS-98 - Install all unit test to installation directory
 
 ## New Feature
 
@@ -29,11 +38,14 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-81 - fix faiss ptx issue; change cuda gencode
 - MS-84 - cmake: add arrow, jemalloc and jsoncons third party; default build option OFF
 - MS-85 - add NetIO metric
+- MS-96 - add new query interface for specified files
+- MS-97 - Add S3 SDK for MinIO Storage
 
 ## Task
 - MS-74 - Change README.md in cpp
+- MS-88 - Add support for arm architecture
 
-# MegaSearch 0.2.0 (2019-05-31)
+# Milvus 0.2.0 (2019-05-31)
 
 ## Bug
 
@@ -41,6 +53,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-34 - Fix prometheus-cpp thirdparty
 - MS-67 - Fix license check bug
 - MS-76 - Fix pipeline crash bug
+- MS-100 - cmake: fix AWS build issue
+- MS-101 - change AWS build type to Release
 
 ## Improvement
 

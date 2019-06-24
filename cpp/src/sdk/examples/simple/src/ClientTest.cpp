@@ -4,26 +4,28 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "ClientTest.h"
-#include "MegaSearch.h"
+#include "MilvusApi.h"
 
 #include <iostream>
 #include <time.h>
 #include <unistd.h>
 
-using namespace megasearch;
+using namespace ::milvus;
 
 namespace {
     std::string GetTableName();
 
     static const std::string TABLE_NAME = GetTableName();
     static constexpr int64_t TABLE_DIMENSION = 512;
-    static constexpr int64_t TOTAL_ROW_COUNT = 100000;
+    static constexpr int64_t BATCH_ROW_COUNT = 100000;
+    static constexpr int64_t NQ = 10;
     static constexpr int64_t TOP_K = 10;
     static constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
+    static constexpr int64_t ADD_VECTOR_LOOP = 5;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
-    void PrintTableSchema(const megasearch::TableSchema& tb_schema) {
+    void PrintTableSchema(const TableSchema& tb_schema) {
         BLOCK_SPLITER
         std::cout << "Table name: " << tb_schema.table_name << std::endl;
         std::cout << "Table index type: " << (int)tb_schema.index_type << std::endl;
@@ -95,7 +97,7 @@ namespace {
     TableSchema BuildTableSchema() {
         TableSchema tb_schema;
         tb_schema.table_name = TABLE_NAME;
-        tb_schema.index_type = IndexType::gpu_ivfflat;
+        tb_schema.index_type = IndexType::cpu_idmap;
         tb_schema.dimension = TABLE_DIMENSION;
         tb_schema.store_raw_vector = true;
 
@@ -109,16 +111,20 @@ namespace {
         }
 
         vector_record_array.clear();
-
         for (int64_t k = from; k < to; k++) {
             RowRecord record;
             record.data.resize(TABLE_DIMENSION);
             for(int64_t i = 0; i < TABLE_DIMENSION; i++) {
-                record.data[i] = (float)(i + k);
+                record.data[i] = (float)(k%(i+1));
             }
 
             vector_record_array.emplace_back(record);
         }
+    }
+
+    void Sleep(int seconds) {
+        std::cout << "Waiting " << seconds << " seconds ..." << std::endl;
+        sleep(seconds);
     }
 }
 
@@ -134,7 +140,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//server version
         std::string version = conn->ServerVersion();
-        std::cout << "MegaSearch server version: " << version << std::endl;
+        std::cout << "Server version: " << version << std::endl;
     }
 
     {//sdk version
@@ -156,9 +162,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//create table
         TableSchema tb_schema = BuildTableSchema();
-        PrintTableSchema(tb_schema);
         Status stat = conn->CreateTable(tb_schema);
         std::cout << "CreateTable function call status: " << stat.ToString() << std::endl;
+        PrintTableSchema(tb_schema);
     }
 
     {//describe table
@@ -168,9 +174,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         PrintTableSchema(tb_schema);
     }
 
-    {//add vectors
+    for(int i = 0; i < ADD_VECTOR_LOOP; i++){//add vectors
         std::vector<RowRecord> record_array;
-        BuildVectors(0, TOTAL_ROW_COUNT, record_array);
+        BuildVectors(i*BATCH_ROW_COUNT, (i+1)*BATCH_ROW_COUNT, record_array);
         std::vector<int64_t> record_ids;
         Status stat = conn->AddVector(TABLE_NAME, record_array, record_ids);
         std::cout << "AddVector function call status: " << stat.ToString() << std::endl;
@@ -178,10 +184,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//search vectors
-        std::cout << "Waiting data persist. Sleep 10 seconds ..." << std::endl;
-        sleep(10);
+        Sleep(2);
+
         std::vector<RowRecord> record_array;
-        BuildVectors(SEARCH_TARGET, SEARCH_TARGET + 10, record_array);
+        BuildVectors(SEARCH_TARGET, SEARCH_TARGET + NQ, record_array);
 
         std::vector<Range> query_range_array;
         Range rg;

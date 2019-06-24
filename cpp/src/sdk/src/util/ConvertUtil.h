@@ -5,14 +5,14 @@
  ******************************************************************************/
 #pragma once
 
-#include "MegaSearch.h"
+#include "MilvusApi.h"
 
-namespace megasearch {
+namespace milvus {
 
 class ConvertUtil {
 public:
-    static std::string IndexType2Str(megasearch::IndexType index);
-    static megasearch::IndexType Str2IndexType(const std::string& type);
+    static std::string IndexType2Str(IndexType index);
+    static IndexType Str2IndexType(const std::string& type);
 };
 
 }

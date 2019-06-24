@@ -6,7 +6,7 @@
 #include "ClientProxy.h"
 #include "util/ConvertUtil.h"
 
-namespace megasearch {
+namespace milvus {
 
 std::shared_ptr<ThriftClient>&
 ClientProxy::ClientPtr() const {

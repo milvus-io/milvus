@@ -2,11 +2,12 @@
 
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="off"
-BUILD_GPU="OFF"
-INSTALL_PREFIX=$(pwd)/megasearch
+LICENSE_CHECK="OFF"
+INSTALL_PREFIX=$(pwd)/milvus
 MAKE_CLEAN="OFF"
+BUILD_COVERAGE="OFF"
 
-while getopts "p:t:uhgr" arg
+while getopts "p:t:uhlrc" arg
 do
         case $arg in
              t)
@@ -19,14 +20,17 @@ do
              p)
                 INSTALL_PREFIX=$OPTARG
                 ;;
-             g)
-                BUILD_GPU="ON"
+             l)
+                LICENSE_CHECK="ON"
                 ;;
              r)
                 if [[ -d cmake_build ]]; then
                     rm ./cmake_build -r
                     MAKE_CLEAN="ON"
                 fi
+                ;;
+             c)
+                BUILD_COVERAGE="ON"
                 ;;
              h) # help
                 echo "
@@ -35,11 +39,12 @@ parameter:
 -t: build type
 -u: building unit test options
 -p: install prefix
--g: build GPU version
+-l: build license version
 -r: remove previous build directory
+-c: code coverage
 
 usage:
-./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r]
+./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c]
                 "
                 exit 0
                 ;;
@@ -59,12 +64,13 @@ cd cmake_build
 
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-if [[ ${MAKE_CLEAN} = "ON" ]]; then
+if [[ ${MAKE_CLEAN} == "ON" ]]; then
     CMAKE_CMD="cmake -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
     -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
     -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
-    -DGPU_VERSION=${BUILD_GPU} \
+    -DCMAKE_LICENSE_CHECK=${LICENSE_CHECK} \
+    -DBUILD_COVERAGE=${BUILD_COVERAGE} \
     $@ ../"
     echo ${CMAKE_CMD}
 
@@ -75,8 +81,13 @@ fi
 make -j 4 || exit 1
 
 if [[ ${BUILD_TYPE} != "Debug" ]]; then
-    strip src/vecwise_server
+    strip src/milvus_server
 fi
 
-make install
+make install || exit 1
 
+if [[ ${BUILD_COVERAGE} == "ON" ]]; then
+    cd -
+    bash `pwd`/coverage.sh
+    cd -
+fi

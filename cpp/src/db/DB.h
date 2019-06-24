@@ -38,6 +38,10 @@ public:
     virtual Status Query(const std::string& table_id, uint64_t k, uint64_t nq,
             const float* vectors, const meta::DatesT& dates, QueryResults& results) = 0;
 
+    virtual Status Query(const std::string& table_id, const std::vector<std::string>& file_ids,
+            uint64_t k, uint64_t nq, const float* vectors,
+            const meta::DatesT& dates, QueryResults& results) = 0;
+
     virtual Status Size(uint64_t& result) = 0;
 
     virtual Status DropAll() = 0;

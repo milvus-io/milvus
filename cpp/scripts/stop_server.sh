@@ -7,7 +7,7 @@ function kill_progress()
   sleep 2
 }
 
-STATUS=$(kill_progress "vecwise_server" )
+STATUS=$(kill_progress "milvus_server" )
 
 if [[ ${STATUS} == "false" ]];then
   echo "Milvus server closed abnormally!"

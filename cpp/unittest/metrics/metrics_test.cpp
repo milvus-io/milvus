@@ -102,7 +102,7 @@ TEST_F(DBTest, Metric_Tes) {
         }
     });
 
-    int loop = 100000;
+    int loop = 10;
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {

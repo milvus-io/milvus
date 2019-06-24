@@ -85,15 +85,19 @@ TEST_F(MetaTest, table_file_TEST) {
     dates.push_back(table_file.date_);
     status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
-    status = impl_->GetTableFile(table_file);
+
+    std::vector<size_t> ids = {table_file.id_};
+    meta::TableFilesSchema files;
+    status = impl_->GetTableFiles(table_file.table_id_, ids, files);
     ASSERT_TRUE(status.ok());
-    ASSERT_TRUE(table_file.file_type_ == meta::TableFileSchema::TO_DELETE);
+    ASSERT_EQ(files.size(), 1UL);
+    ASSERT_TRUE(files[0].file_type_ == meta::TableFileSchema::TO_DELETE);
 }
 
 TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
     DBMetaOptions options;
-    options.path = "/tmp/vecwise_test";
+    options.path = "/tmp/milvus_test";
     int days_num = rand() % 100;
     std::stringstream ss;
     ss << "days:" << days_num;
@@ -113,6 +117,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     auto cnt = 100;
     long ts = utils::GetMicroSecTimeStamp();
     std::vector<int> days;
+    std::vector<size_t> ids;
     for (auto i=0; i<cnt; ++i) {
         status = impl.CreateTableFile(table_file);
         table_file.file_type_ = meta::TableFileSchema::NEW;
@@ -121,14 +126,17 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
         days.push_back(day);
+        ids.push_back(table_file.id_);
     }
 
     impl.Archive();
     int i = 0;
 
-    for (auto file : files) {
-        status = impl.GetTableFile(file);
-        ASSERT_TRUE(status.ok());
+    meta::TableFilesSchema files_get;
+    status = impl.GetTableFiles(table_file.table_id_, ids, files_get);
+    ASSERT_TRUE(status.ok());
+
+    for(auto& file : files_get) {
         if (days[i] < days_num) {
             ASSERT_EQ(file.file_type_, meta::TableFileSchema::NEW);
         } else {
@@ -142,7 +150,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
 
 TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     DBMetaOptions options;
-    options.path = "/tmp/vecwise_test";
+    options.path = "/tmp/milvus_test";
     options.archive_conf = ArchiveConf("delete", "disk:11");
 
     auto impl = meta::DBMetaImpl(options);
@@ -158,20 +166,24 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
 
     auto cnt = 10;
     auto each_size = 2UL;
+    std::vector<size_t> ids;
     for (auto i=0; i<cnt; ++i) {
         status = impl.CreateTableFile(table_file);
         table_file.file_type_ = meta::TableFileSchema::NEW;
         table_file.size_ = each_size * meta::G;
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
+        ids.push_back(table_file.id_);
     }
 
     impl.Archive();
     int i = 0;
 
-    for (auto file : files) {
-        status = impl.GetTableFile(file);
-        ASSERT_TRUE(status.ok());
+    meta::TableFilesSchema files_get;
+    status = impl.GetTableFiles(table_file.table_id_, ids, files_get);
+    ASSERT_TRUE(status.ok());
+
+    for(auto& file : files_get) {
         if (i < 5) {
             ASSERT_TRUE(file.file_type_ == meta::TableFileSchema::TO_DELETE);
         } else {

@@ -1,7 +1,4 @@
-third_party/thrift-0.12.0/
-third_party/faiss-1.5.1/
-third_party/bzip2-1.0.6/
-third_party/sqlite3/
-megasearch/
+milvus/
 conf/server_config.yaml
 version.h
+megasearch/
