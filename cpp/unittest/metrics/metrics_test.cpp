@@ -33,7 +33,7 @@ TEST_F(DBTest, Metric_Tes) {
     server::Metrics::GetInstance().Init();
 
 //    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
-    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(2UL*1024*1024*1024);
+    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL*1024*1024*1024);
     std::cout<<zilliz::milvus::cache::CpuCacheMgr::GetInstance()->CacheCapacity()<<std::endl;
 
     static const std::string group_name = "test_group";
