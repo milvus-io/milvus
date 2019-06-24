@@ -32,7 +32,7 @@ for test in `ls ${DIR_UNITTEST}`; do
 done
 
 # gen test converage
-${LCOV_CMD} -d ${DIR_GCNO} -o "${FILE_INFO_MILVUS}" -c -b
+${LCOV_CMD} -d ${DIR_GCNO} -o "${FILE_INFO_MILVUS}" -c
 # merge coverage
 ${LCOV_CMD} -a ${FILE_INFO_BASE} -a ${FILE_INFO_MILVUS} -o "${FILE_INFO_OUTPUT}"
 
