@@ -26,8 +26,8 @@ using namespace zilliz::milvus;
 
 int
 main(int argc, char *argv[]) {
-    printf("\nWelcome to use Milvus by Zillz!\n");
-    printf("Milvus %s version: v%s built at %s\n", BUILD_TYPE, MILVUS_VERSION, BUILD_TIME);
+    std::cout << std::endl << "Welcome to use Milvus by Zillz!" << std::endl;
+    std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << " built at " << BUILD_TIME << std::endl;
 
     signal(SIGINT, server::SignalUtil::HandleSignal);
     signal(SIGSEGV, server::SignalUtil::HandleSignal);
@@ -53,7 +53,7 @@ main(int argc, char *argv[]) {
 
     if(argc < 2) {
         print_help(app_name);
-        printf("Milvus server exit...\n");
+        std::cout << "Milvus server exit..." << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -64,14 +64,14 @@ main(int argc, char *argv[]) {
                 char *config_filename_ptr = strdup(optarg);
                 config_filename = config_filename_ptr;
                 free(config_filename_ptr);
-                printf("Loading configuration from: %s\n", config_filename.c_str());
+                std::cout << "Loading configuration from: " << config_filename << std::endl;
                 break;
             }
             case 'l': {
                 char *log_filename_ptr = strdup(optarg);
                 log_config_file = log_filename_ptr;
                 free(log_filename_ptr);
-                printf("Initial log config from: %s\n", log_config_file.c_str());
+                std::cout << "Initial log config from: " << log_config_file << std::endl;
                 break;
             }
 
@@ -79,7 +79,7 @@ main(int argc, char *argv[]) {
                 char *pid_filename_ptr = strdup(optarg);
                 pid_filename = pid_filename_ptr;
                 free(pid_filename_ptr);
-                printf("%s\n", pid_filename.c_str());
+                std::cout << pid_filename << std::endl;
                 break;
             }
 
@@ -107,11 +107,11 @@ main(int argc, char *argv[]) {
 
 void
 print_help(const std::string &app_name) {
-    printf("\n Usage: %s [OPTIONS]\n\n", app_name.c_str());
-    printf("  Options:\n");
-    printf("   -h --help                 Print this help\n");
-    printf("   -c --conf_file filename   Read configuration from the file\n");
-    printf("   -d --daemon               Daemonize this application\n");
-    printf("   -p --pid_file  filename   PID file used by daemonized app\n");
-    printf("\n");
+    std::cout << std::endl<< "Usage: " << app_name << " [OPTIONS]" << std::endl << std::endl;
+    std::cout << "  Options:" << std::endl;
+    std::cout << "   -h --help                 Print this help" << std::endl;
+    std::cout << "   -c --conf_file filename   Read configuration from the file" << std::endl;
+    std::cout << "   -d --daemon               Daemonize this application" << std::endl;
+    std::cout << "   -p --pid_file  filename   PID file used by daemonized app" << std::endl;
+    std::cout << std::endl;
 }
