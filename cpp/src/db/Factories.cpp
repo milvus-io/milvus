@@ -56,11 +56,11 @@ std::shared_ptr<meta::DBMetaImpl> DBMetaImplFactory::Build() {
 std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOptions) {
 
     std::string uri = metaOptions.backend_uri;
-    if (uri.empty()) {
-        //Default to sqlite if uri is empty
-//        return std::make_shared<meta::DBMetaImpl>(new meta::DBMetaImpl(metaOptions));
-        return std::shared_ptr<meta::DBMetaImpl>(new meta::DBMetaImpl(metaOptions));
-    }
+//    if (uri.empty()) {
+//        //Default to sqlite if uri is empty
+////        return std::make_shared<meta::DBMetaImpl>(new meta::DBMetaImpl(metaOptions));
+//        return std::shared_ptr<meta::DBMetaImpl>(new meta::DBMetaImpl(metaOptions));
+//    }
 
     std::string dialectRegex = "(.*)";
     std::string usernameRegex = "(.*)";
@@ -81,12 +81,10 @@ std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOp
         std::string dialect = pieces_match[1].str();
         std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
         if (dialect.find("mysql") != std::string::npos) {
-//            return std::make_shared<meta::MySQLMetaImpl>(new meta::MySQLMetaImpl(metaOptions));
-            return std::shared_ptr<meta::MySQLMetaImpl>(new meta::MySQLMetaImpl(metaOptions));
+            return std::make_shared<meta::MySQLMetaImpl>(meta::MySQLMetaImpl(metaOptions));
         }
         else if (dialect.find("sqlite") != std::string::npos) {
-//            return std::make_shared<meta::DBMetaImpl>(new meta::DBMetaImpl(metaOptions));
-            return std::shared_ptr<meta::DBMetaImpl>(new meta::DBMetaImpl(metaOptions));
+            return std::make_shared<meta::DBMetaImpl>(meta::DBMetaImpl(metaOptions));
         }
         else {
             LOG(ERROR) << "Invalid dialect in URI: dialect = " << dialect;

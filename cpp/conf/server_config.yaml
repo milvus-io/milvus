@@ -8,7 +8,9 @@ server_config:
 
 db_config:
   db_path: /tmp/milvus
-  db_backend_url: http://127.0.0.1
+  #URI format: dialect://username:password@host:port/database
+  #All parts except dialect are optional, but you MUST include the delimiters
+  db_backend_url: sqlite://:@:/
   index_building_threshold: 1024          #build index file when raw data file size larger than this value, unit: MB
 
 metric_config:

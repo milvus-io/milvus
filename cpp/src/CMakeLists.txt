@@ -62,6 +62,7 @@ set(s3_client_files
 include_directories(/usr/include)
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 include_directories(thrift/gen-cpp)
+include_directories(/usr/include/mysql)
 
 set(third_party_libs
         easyloggingpp
@@ -83,6 +84,7 @@ set(third_party_libs
         snappy
         zlib
         zstd
+        mysqlpp
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
 if (MEGASEARCH_WITH_ARROW STREQUAL "ON")

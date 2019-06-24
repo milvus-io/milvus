@@ -136,7 +136,8 @@ DBImpl::DBImpl(const Options& options)
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
     meta_ptr_ = DBMetaImplFactory::Build(options.meta);
-    mem_mgr_ = (MemManagerPtr)(new MemManager(meta_ptr_, options_));
+    mem_mgr_ = std::make_shared<MemManager>(meta_ptr_, options_);
+    // mem_mgr_ = (MemManagerPtr)(new MemManager(meta_ptr_, options_));
     StartTimerTasks();
 }
 
@@ -466,9 +467,14 @@ void DBImpl::StartMetricTask() {
 }
 
 void DBImpl::StartCompactionTask() {
+//    static int count = 0;
+//    count++;
+//    std::cout << "StartCompactionTask: " << count << std::endl;
+//    std::cout <<  "c: " << count++ << std::endl;
     static uint64_t compact_clock_tick = 0;
     compact_clock_tick++;
     if(compact_clock_tick%COMPACT_ACTION_INTERVAL != 0) {
+//        std::cout <<  "c r: " << count++ << std::endl;
         return;
     }
 
@@ -574,6 +580,10 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
+//    static int b_count = 0;
+//    b_count++;
+//    std::cout << "BackgroundCompaction: " << b_count << std::endl;
+
     Status status;
     for (auto table_id : table_ids) {
         status = BackgroundMergeFiles(table_id);
