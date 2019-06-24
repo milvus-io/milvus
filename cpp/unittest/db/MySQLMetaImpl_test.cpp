@@ -233,6 +233,7 @@ TEST_F(MySQLTest, table_file_TEST) {
     meta::TableFileSchema table_file;
     table_file.table_id_ = group.table_id_;
     status = impl.CreateTableFile(table_file);
+//    std::cout << status.ToString() << std::endl;
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, meta::TableFileSchema::NEW);
 

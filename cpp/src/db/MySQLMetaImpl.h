@@ -7,6 +7,7 @@
 
 #include "Meta.h"
 #include "Options.h"
+#include "MySQLConnectionPool.h"
 
 #include "mysql++/mysql++.h"
 #include <mutex>
@@ -76,6 +77,9 @@ namespace meta {
         Status Initialize();
 
         const DBMetaOptions options_;
+
+        std::shared_ptr<MySQLConnectionPool> mySQLConnectionPool_;
+        bool safe_grab = false;
 
 //        std::mutex connectionMutex_;
     }; // DBMetaImpl

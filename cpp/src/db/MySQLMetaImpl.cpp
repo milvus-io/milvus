@@ -20,6 +20,7 @@
 #include <regex>
 #include <string>
 #include <mutex>
+#include <thread>
 
 #include "mysql++/mysql++.h"
 
@@ -30,8 +31,8 @@ namespace meta {
 
     using namespace mysqlpp;
 
-    static std::unique_ptr<Connection> connectionPtr(new Connection());
-    std::recursive_mutex mysql_mutex;
+//    static std::unique_ptr<Connection> connectionPtr(new Connection());
+//    std::recursive_mutex mysql_mutex;
 //
 //    std::unique_ptr<Connection>& MySQLMetaImpl::getConnectionPtr() {
 ////        static std::recursive_mutex connectionMutex_;
@@ -109,7 +110,7 @@ namespace meta {
 
     Status MySQLMetaImpl::Initialize() {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         if (!boost::filesystem::is_directory(options_.path)) {
             auto ret = boost::filesystem::create_directory(options_.path);
@@ -153,12 +154,19 @@ namespace meta {
             //std::cout << dbName << " " << serverAddress << " " << username << " " << password << " " << port << std::endl;
 //            connectionPtr->set_option(new MultiStatementsOption(true));
 //            connectionPtr->set_option(new mysqlpp::ReconnectOption(true));
-            connectionPtr->set_option(new mysqlpp::ReconnectOption(true));
-            std::cout << "MySQL++ thread aware:" << std::to_string(connectionPtr->thread_aware()) << std::endl;
+            int threadHint = std::thread::hardware_concurrency();
+            int maxPoolSize = threadHint == 0 ? 8 : threadHint;
+            mySQLConnectionPool_ = std::make_shared<MySQLConnectionPool>(dbName, username, password, serverAddress, port, maxPoolSize);
+//            std::cout << "MySQL++ thread aware:" << std::to_string(connectionPtr->thread_aware()) << std::endl;
 
             try {
-                if (!connectionPtr->connect(dbName, serverAddress, username, password, port)) {
-                    return Status::Error("DB connection failed: ", connectionPtr->error());
+                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+//                if (!connectionPtr->connect(dbName, serverAddress, username, password, port)) {
+//                    return Status::Error("DB connection failed: ", connectionPtr->error());
+//                }
+                if (!connectionPtr->thread_aware()) {
+                    ENGINE_LOG_ERROR << "MySQL++ wasn't built with thread awareness! Can't run without it.";
+                    return Status::Error("MySQL++ wasn't built with thread awareness! Can't run without it.");
                 }
 
                 CleanUp();
@@ -220,9 +228,12 @@ namespace meta {
             } catch (const Exception& er) {
                 // Catch-all for any other MySQL++ exceptions
                 return Status::DBTransactionError("GENERAL ERROR DURING INITIALIZATION", er.what());
+            } catch (std::exception &e) {
+                return HandleException("Encounter exception during initialization", e);
             }
         }
         else {
+            ENGINE_LOG_ERROR << "Wrong URI format. URI = " << uri;
             return Status::Error("Wrong URI format");
         }
     }
@@ -231,7 +242,7 @@ namespace meta {
     Status MySQLMetaImpl::DropPartitionsByDates(const std::string &table_id,
                                              const DatesT &dates) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         if (dates.size() == 0) {
             return Status::OK();
@@ -245,6 +256,8 @@ namespace meta {
         }
 
         try {
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             auto yesterday = GetDateWithDelta(-1);
 
@@ -284,12 +297,14 @@ namespace meta {
 
     Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
 //        server::Metrics::GetInstance().MetaAccessTotalIncrement();
         try {
 
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query createTableQuery = connectionPtr->query();
 
@@ -304,7 +319,7 @@ namespace meta {
                 if (res.num_rows() == 1) {
                     int state = res[0]["state"];
                     std::string msg = (TableSchema::TO_DELETE == state) ?
-                                      "Table already exists" : "Table already exists and it is in delete state, please wait a second";
+                                      "Table already exists and it is in delete state, please wait a second" : "Table already exists";
                     return Status::Error(msg);
                 }
             }
@@ -360,6 +375,8 @@ namespace meta {
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
             return Status::DBTransactionError("GENERAL ERROR WHEN ADDING TABLE", er.what());
+        } catch (std::exception &e) {
+            return HandleException("Encounter exception when create table", e);
         }
 
         return Status::OK();
@@ -367,11 +384,13 @@ namespace meta {
 
     Status MySQLMetaImpl::DeleteTable(const std::string& table_id) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         try {
 
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             //soft delete table
             Query deleteTableQuery = connectionPtr->query();
@@ -398,6 +417,8 @@ namespace meta {
         try {
             MetricCollector metric;
 
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+
             //soft delete table files
             Query deleteTableFilesQuery = connectionPtr->query();
     //
@@ -423,11 +444,13 @@ namespace meta {
 
     Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         try {
 
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query describeTableQuery = connectionPtr->query();
             describeTableQuery << "SELECT id, dimension, files_cnt, engine_type, store_raw_data " <<
@@ -470,13 +493,13 @@ namespace meta {
 
     Status MySQLMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         try {
 
             MetricCollector metric;
 
-
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query hasTableQuery = connectionPtr->query();
             //since table_id is a unique column we just need to check whether it exists or not
@@ -504,11 +527,13 @@ namespace meta {
 
     Status MySQLMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         try {
 
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query allTablesQuery = connectionPtr->query();
             allTablesQuery << "SELECT id, table_id, dimension, files_cnt, engine_type, store_raw_data " <<
@@ -548,7 +573,7 @@ namespace meta {
 
     Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         if (file_schema.date_ == EmptyDate) {
             file_schema.date_ = Meta::GetDate();
@@ -563,6 +588,8 @@ namespace meta {
         try {
 
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             NextFileId(file_schema.file_id_);
             file_schema.file_type_ = TableFileSchema::NEW;
@@ -617,6 +644,8 @@ namespace meta {
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
             return Status::DBTransactionError("GENERAL ERROR WHEN ADDING TABLE FILE", er.what());
+        } catch (std::exception& ex) {
+            return HandleException("Encounter exception when create table file", ex);
         }
 
         return Status::OK();
@@ -624,13 +653,15 @@ namespace meta {
 
     Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         files.clear();
 
         try {
 
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query filesToIndexQuery = connectionPtr->query();
             filesToIndexQuery << "SELECT id, table_id, engine_type, file_id, file_type, size, date " <<
@@ -692,13 +723,15 @@ namespace meta {
                                      const DatesT &partition,
                                      DatePartionedTableFilesSchema &files) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         files.clear();
 
         try {
 
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             StoreQueryResult res;
 
@@ -789,12 +822,14 @@ namespace meta {
     Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
                                     DatePartionedTableFilesSchema &files) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         files.clear();
 
         try {
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query filesToMergeQuery = connectionPtr->query();
             filesToMergeQuery << "SELECT id, table_id, file_id, file_type, size, date " <<
@@ -858,7 +893,7 @@ namespace meta {
                                         const std::vector<size_t>& ids,
                                         TableFilesSchema& table_files) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         std::stringstream idSS;
         for (auto& id : ids) {
@@ -868,6 +903,8 @@ namespace meta {
         idStr = idStr.substr(0, idStr.size() - 4); //remove the last " OR "
 
         try {
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query getTableFileQuery = connectionPtr->query();
             getTableFileQuery << "SELECT engine_type, file_id, file_type, size, date " <<
@@ -923,7 +960,7 @@ namespace meta {
 // PXU TODO: Support Swap
     Status MySQLMetaImpl::Archive() {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         auto &criterias = options_.archive_conf.GetCriterias();
         if (criterias.empty()) {
@@ -936,7 +973,10 @@ namespace meta {
             if (criteria == "days") {
                 size_t usecs = limit * D_SEC * US_PS;
                 long now = utils::GetMicroSecTimeStamp();
+
                 try {
+
+                    ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
                     Query archiveQuery = connectionPtr->query();
                     archiveQuery << "UPDATE metaFile " <<
@@ -969,10 +1009,12 @@ namespace meta {
 
     Status MySQLMetaImpl::Size(uint64_t &result) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         result = 0;
         try {
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query getSizeQuery = connectionPtr->query();
             getSizeQuery << "SELECT SUM(size) AS sum " <<
@@ -1007,7 +1049,7 @@ namespace meta {
 
     Status MySQLMetaImpl::DiscardFiles(long long to_discard_size) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         if (to_discard_size <= 0) {
 //            std::cout << "in" << std::endl;
@@ -1018,6 +1060,8 @@ namespace meta {
         try {
 
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query discardFilesQuery = connectionPtr->query();
             discardFilesQuery << "SELECT id, size " <<
@@ -1074,12 +1118,14 @@ namespace meta {
     //ZR: this function assumes all fields in file_schema have value
     Status MySQLMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         file_schema.updated_time_ = utils::GetMicroSecTimeStamp();
         try {
 
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query updateTableFileQuery = connectionPtr->query();
 
@@ -1141,10 +1187,12 @@ namespace meta {
 
     Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         try {
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query updateTableFilesQuery = connectionPtr->query();
 
@@ -1212,12 +1260,16 @@ namespace meta {
     }
 
     Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
-
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        static int b_count = 0;
+//        b_count++;
+//        std::cout << "CleanUpFilesWithTTL: " << b_count << std::endl;
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         auto now = utils::GetMicroSecTimeStamp();
         try {
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query cleanUpFilesWithTTLQuery = connectionPtr->query();
             cleanUpFilesWithTTLQuery << "SELECT id, table_id, file_id, date " <<
@@ -1276,12 +1328,15 @@ namespace meta {
         try {
             MetricCollector metric;
 
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+
             Query cleanUpFilesWithTTLQuery = connectionPtr->query();
             cleanUpFilesWithTTLQuery << "SELECT id, table_id " <<
                                         "FROM meta " <<
                                         "WHERE state = " << std::to_string(TableSchema::TO_DELETE) << ";";
             StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
             assert(res);
+//            std::cout << res.num_rows() << std::endl;
             std::stringstream idsToDeleteSS;
             for (auto& resRow : res) {
                 size_t id = resRow["id"];
@@ -1317,9 +1372,11 @@ namespace meta {
 
     Status MySQLMetaImpl::CleanUp() {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         try {
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+
             ENGINE_LOG_DEBUG << "Remove table file type as NEW";
             Query cleanUpQuery = connectionPtr->query();
             cleanUpQuery << "DELETE FROM metaFile WHERE file_type = " << std::to_string(TableFileSchema::NEW) << ";";
@@ -1341,10 +1398,12 @@ namespace meta {
 
     Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         try {
             MetricCollector metric;
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
             Query countQuery = connectionPtr->query();
             countQuery << "SELECT size " <<
@@ -1385,12 +1444,15 @@ namespace meta {
 
     Status MySQLMetaImpl::DropAll() {
 
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         if (boost::filesystem::is_directory(options_.path)) {
             boost::filesystem::remove_all(options_.path);
         }
         try {
+
+            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+
             Query dropTableQuery = connectionPtr->query();
             dropTableQuery << "DROP TABLE IF EXISTS meta, metaFile;";
             if (dropTableQuery.exec()) {
@@ -1406,10 +1468,11 @@ namespace meta {
             // Catch-all for any other MySQL++ exceptions
             return Status::DBTransactionError("GENERAL ERROR WHEN DROPPING TABLE", er.what());
         }
+        return Status::OK();
     }
 
     MySQLMetaImpl::~MySQLMetaImpl() {
-        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
+//        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
         CleanUp();
     }
 

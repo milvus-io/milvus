@@ -13,7 +13,26 @@
 #include "db/Factories.h"
 #include "db/Options.h"
 
+INITIALIZE_EASYLOGGINGPP
+
 using namespace zilliz::milvus;
+
+static std::string uri;
+
+class DBTestEnvironment : public ::testing::Environment {
+public:
+
+//    explicit DBTestEnvironment(std::string uri) : uri_(uri) {}
+
+    static std::string getURI() {
+        return uri;
+    }
+
+    void SetUp() override {
+        getURI();
+    }
+
+};
 
 void ASSERT_STATS(engine::Status& stat) {
     ASSERT_TRUE(stat.ok());
@@ -69,14 +88,23 @@ zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
 //    engine::DBMetaOptions options = engine::DBMetaOptionsFactory::Build(path);
     zilliz::milvus::engine::DBMetaOptions options;
     options.path = "/tmp/milvus_test";
-    options.backend_uri = "mysql://root:1234@:/test";
+    options.backend_uri = DBTestEnvironment::getURI();
     return options;
-
 }
 
 zilliz::milvus::engine::Options MySQLDBTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = "mysql://root:1234@:/test";
+    options.meta.backend_uri = DBTestEnvironment::getURI();
     return options;
+}
+
+int main(int argc, char **argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    if (argc > 1) {
+        uri = argv[1];
+    }
+//    std::cout << uri << std::endl;
+    ::testing::AddGlobalTestEnvironment(new DBTestEnvironment);
+    return RUN_ALL_TESTS();
 }

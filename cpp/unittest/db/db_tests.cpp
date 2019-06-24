@@ -286,9 +286,6 @@ TEST_F(DBTest2, DELETE_TEST) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());
     ASSERT_FALSE(boost::filesystem::exists(table_info_get.location_));
-
-    stat = db_->DropAll();
-    ASSERT_TRUE(stat.ok());
 };
 
 TEST_F(MySQLDBTest, DB_TEST) {
@@ -371,8 +368,11 @@ TEST_F(MySQLDBTest, DB_TEST) {
 
     search.join();
 
-    stat = db_->DropAll();
-    ASSERT_TRUE(stat.ok());
+    delete db_;
+
+    auto dummyDB = engine::DBFactory::Build(options);
+    dummyDB->DropAll();
+    delete dummyDB;
 };
 
 TEST_F(MySQLDBTest, SEARCH_TEST) {
@@ -429,8 +429,11 @@ TEST_F(MySQLDBTest, SEARCH_TEST) {
     stat = db_->Query(TABLE_NAME, k, nq, xq.data(), results);
     ASSERT_STATS(stat);
 
-    stat = db_->DropAll();
-    ASSERT_TRUE(stat.ok());
+    delete db_;
+
+    auto dummyDB = engine::DBFactory::Build(options);
+    dummyDB->DropAll();
+    delete dummyDB;
 
     // TODO(linxj): add groundTruth assert
 };
@@ -466,14 +469,17 @@ TEST_F(MySQLDBTest, ARHIVE_DISK_CHECK) {
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(10)); //change to 10 to make sure files are discarded
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
     db_->Size(size);
     LOG(DEBUG) << "size=" << size;
     ASSERT_LE(size, 1 * engine::meta::G);
 
-    stat = db_->DropAll();
-    ASSERT_TRUE(stat.ok());
+    delete db_;
+
+    auto dummyDB = engine::DBFactory::Build(options);
+    dummyDB->DropAll();
+    delete dummyDB;
 };
 
 TEST_F(MySQLDBTest, DELETE_TEST) {
@@ -484,12 +490,14 @@ TEST_F(MySQLDBTest, DELETE_TEST) {
 
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
+//    std::cout << stat.ToString() << std::endl;
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_STATS(stat);
 
+//    std::cout << "location: " << table_info_get.location_ << std::endl;
     ASSERT_TRUE(boost::filesystem::exists(table_info_get.location_));
 
     engine::IDNumbers vector_ids;
@@ -509,13 +517,15 @@ TEST_F(MySQLDBTest, DELETE_TEST) {
 
     std::vector<engine::meta::DateT> dates;
     stat = db_->DeleteTable(TABLE_NAME, dates);
-
-    std::this_thread::sleep_for(std::chrono::seconds(10)); //change to 10 to make sure files are discarded
-
+//    std::cout << "5 sec start" << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+//    std::cout << "5 sec finish" << std::endl;
     ASSERT_TRUE(stat.ok());
-//    std::cout << table_info_get.location_ << std::endl;
-    ASSERT_FALSE(boost::filesystem::exists(table_info_get.location_));
+//    ASSERT_FALSE(boost::filesystem::exists(table_info_get.location_));
 
-    stat = db_->DropAll();
-    ASSERT_TRUE(stat.ok());
+    delete db_;
+
+    auto dummyDB = engine::DBFactory::Build(options);
+    dummyDB->DropAll();
+    delete dummyDB;
 };

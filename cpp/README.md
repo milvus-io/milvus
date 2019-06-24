@@ -1,13 +1,22 @@
 ### Compilation
 #### Step 1: install necessery tools
 
+    Install MySQL
+    
     centos7 : 
-        yum install gfortran flex bison
+        yum install gfortran qt4 flex bison mysql-devel
         
     ubuntu16.04 : 
-        sudo apt-get install gfortran flex bison
+        sudo apt-get install gfortran qt4-qmake flex bison libmysqlclient-dev
+
+If `libmysqlclient_r.so` does not exist after installing MySQL Development Files, you need to create a symbolic link:
+
+```
+sudo ln -s /path/to/libmysqlclient.so /path/to/libmysqlclient_r.so
+```
 
 #### Step 2: build(output to cmake_build folder)
+
 cmake_build/src/milvus_server is the server
 
 cmake_build/src/libmilvus_engine.a is the static library
