@@ -5,10 +5,10 @@
  ******************************************************************************/
 #pragma once
 
-#include "MegaSearch.h"
+#include "MilvusApi.h"
 #include "ThriftClient.h"
 
-namespace megasearch {
+namespace milvus {
 
 class ClientProxy : public Connection {
 public:

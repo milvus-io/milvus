@@ -6,7 +6,7 @@
 #include "Status.h"
 
 
-namespace megasearch {
+namespace milvus {
 
 Status::~Status() noexcept {
     if (state_ != nullptr) {

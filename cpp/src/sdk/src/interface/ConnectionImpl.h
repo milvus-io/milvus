@@ -5,10 +5,10 @@
  ******************************************************************************/
 #pragma once
 
-#include "MegaSearch.h"
+#include "MilvusApi.h"
 #include "client/ClientProxy.h"
 
-namespace megasearch {
+namespace milvus {
 
 class ConnectionImpl : public Connection {
 public:
