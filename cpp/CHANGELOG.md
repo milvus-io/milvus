@@ -11,6 +11,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-89 - Fix compile failed, libgpufaiss.a link missing
 - MS-90 - Fix arch match incorrect on ARM
 - MS-99 - Fix compilation bug
+- MS-110 - Avoid huge file size
 
 ## Improvement
 - MS-82 - Update server startup welcome message
