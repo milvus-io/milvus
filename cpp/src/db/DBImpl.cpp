@@ -479,7 +479,7 @@ void DBImpl::StartCompactionTask() {
     }
 
     //serialize memory data
-    std::vector<std::string> temp_table_ids;
+    std::set<std::string> temp_table_ids;
     mem_mgr_->Serialize(temp_table_ids);
     for(auto& id : temp_table_ids) {
         compact_table_ids_.insert(id);
@@ -550,7 +550,8 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ <<
         " of size=" << index->PhysicalSize()/(1024*1024) << " M";
 
-    index->Cache();
+    //current disable this line to avoid memory
+    //index->Cache();
 
     return status;
 }
@@ -670,7 +671,8 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
                    << index->PhysicalSize()/(1024*1024) << " M"
                    << " from file " << to_remove.file_id_;
 
-        index->Cache();
+        //current disable this line to avoid memory
+        //index->Cache();
 
     } catch (std::exception& ex) {
         return Status::Error("Build index encounter exception", ex.what());
@@ -709,7 +711,7 @@ Status DBImpl::Size(uint64_t& result) {
 DBImpl::~DBImpl() {
     shutting_down_.store(true, std::memory_order_release);
     bg_timer_thread_.join();
-    std::vector<std::string> ids;
+    std::set<std::string> ids;
     mem_mgr_->Serialize(ids);
 }
 
