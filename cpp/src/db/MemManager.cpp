@@ -20,36 +20,54 @@ namespace engine {
 
 MemVectors::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
         const meta::TableFileSchema& schema, const Options& options)
-  : pMeta_(meta_ptr),
+  : meta_(meta_ptr),
     options_(options),
     schema_(schema),
-    pIdGenerator_(new SimpleIDGenerator()),
-    pEE_(EngineFactory::Build(schema_.dimension_, schema_.location_, (EngineType)schema_.engine_type_)) {
+    id_generator_(new SimpleIDGenerator()),
+    active_engine_(EngineFactory::Build(schema_.dimension_, schema_.location_, (EngineType)schema_.engine_type_)) {
 }
 
 
-void MemVectors::Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
+Status MemVectors::Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
+    if(active_engine_ == nullptr) {
+        return Status::Error("index engine is null");
+    }
+
     auto start_time = METRICS_NOW_TIME;
-    pIdGenerator_->GetNextIDNumbers(n_, vector_ids_);
-    pEE_->AddWithIds(n_, vectors_, vector_ids_.data());
+    id_generator_->GetNextIDNumbers(n_, vector_ids_);
+    Status status = active_engine_->AddWithIds(n_, vectors_, vector_ids_.data());
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_), static_cast<int>(schema_.dimension_), total_time);
+
+    return status;
 }
 
-size_t MemVectors::Total() const {
-    return pEE_->Count();
+size_t MemVectors::RowCount() const {
+    if(active_engine_ == nullptr) {
+        return 0;
+    }
+
+    return active_engine_->Count();
 }
 
-size_t MemVectors::ApproximateSize() const {
-    return pEE_->Size();
+size_t MemVectors::Size() const {
+    if(active_engine_ == nullptr) {
+        return 0;
+    }
+
+    return active_engine_->Size();
 }
 
 Status MemVectors::Serialize(std::string& table_id) {
+    if(active_engine_ == nullptr) {
+        return Status::Error("index engine is null");
+    }
+
     table_id = schema_.table_id_;
-    auto size = ApproximateSize();
+    auto size = Size();
     auto start_time = METRICS_NOW_TIME;
-    pEE_->Serialize();
+    active_engine_->Serialize();
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     schema_.size_ = size;
@@ -59,20 +77,20 @@ Status MemVectors::Serialize(std::string& table_id) {
     schema_.file_type_ = (size >= options_.index_trigger_size) ?
         meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
 
-    auto status = pMeta_->UpdateTableFile(schema_);
+    auto status = meta_->UpdateTableFile(schema_);
 
     LOG(DEBUG) << "New " << ((schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-        << " file " << schema_.file_id_ << " of size " << (double)(pEE_->Size()) / (double)meta::M << " M";
+        << " file " << schema_.file_id_ << " of size " << (double)(active_engine_->Size()) / (double)meta::M << " M";
 
-    pEE_->Cache();
+    active_engine_->Cache();
 
     return status;
 }
 
 MemVectors::~MemVectors() {
-    if (pIdGenerator_ != nullptr) {
-        delete pIdGenerator_;
-        pIdGenerator_ = nullptr;
+    if (id_generator_ != nullptr) {
+        delete id_generator_;
+        id_generator_ = nullptr;
     }
 }
 
@@ -81,20 +99,20 @@ MemVectors::~MemVectors() {
  */
 MemManager::MemVectorsPtr MemManager::GetMemByTable(
         const std::string& table_id) {
-    auto memIt = memMap_.find(table_id);
-    if (memIt != memMap_.end()) {
+    auto memIt = mem_id_map_.find(table_id);
+    if (memIt != mem_id_map_.end()) {
         return memIt->second;
     }
 
     meta::TableFileSchema table_file;
     table_file.table_id_ = table_id;
-    auto status = pMeta_->CreateTableFile(table_file);
+    auto status = meta_->CreateTableFile(table_file);
     if (!status.ok()) {
         return nullptr;
     }
 
-    memMap_[table_id] = MemVectorsPtr(new MemVectors(pMeta_, table_file, options_));
-    return memMap_[table_id];
+    mem_id_map_[table_id] = MemVectorsPtr(new MemVectors(meta_, table_file, options_));
+    return mem_id_map_[table_id];
 }
 
 Status MemManager::InsertVectors(const std::string& table_id_,
@@ -114,37 +132,44 @@ Status MemManager::InsertVectorsNoLock(const std::string& table_id,
     if (mem == nullptr) {
         return Status::NotFound("Group " + table_id + " not found!");
     }
-    mem->Add(n, vectors, vector_ids);
 
-    return Status::OK();
+    //makesure each file size less than index_trigger_size
+    if(mem->Size() > options_.index_trigger_size) {
+        std::unique_lock<std::mutex> lock(serialization_mtx_);
+        immu_mem_list_.push_back(mem);
+        mem_id_map_.erase(table_id);
+        return InsertVectorsNoLock(table_id, n, vectors, vector_ids);
+    } else {
+        return mem->Add(n, vectors, vector_ids);
+    }
 }
 
 Status MemManager::ToImmutable() {
     std::unique_lock<std::mutex> lock(mutex_);
-    for (auto& kv: memMap_) {
-        immMems_.push_back(kv.second);
+    for (auto& kv: mem_id_map_) {
+        immu_mem_list_.push_back(kv.second);
     }
 
-    memMap_.clear();
+    mem_id_map_.clear();
     return Status::OK();
 }
 
-Status MemManager::Serialize(std::vector<std::string>& table_ids) {
+Status MemManager::Serialize(std::set<std::string>& table_ids) {
     ToImmutable();
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     std::string table_id;
     table_ids.clear();
-    for (auto& mem : immMems_) {
+    for (auto& mem : immu_mem_list_) {
         mem->Serialize(table_id);
-        table_ids.push_back(table_id);
+        table_ids.insert(table_id);
     }
-    immMems_.clear();
+    immu_mem_list_.clear();
     return Status::OK();
 }
 
 Status MemManager::EraseMemVector(const std::string& table_id) {
     std::unique_lock<std::mutex> lock(mutex_);
-    memMap_.erase(table_id);
+    mem_id_map_.erase(table_id);
 
     return Status::OK();
 }
