@@ -183,4 +183,7 @@ endif ()
 
 install(TARGETS milvus_server DESTINATION bin)
 
+install(FILES ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}
+        DESTINATION bin) #need to copy libmysqlpp.so
+
 add_subdirectory(sdk)
