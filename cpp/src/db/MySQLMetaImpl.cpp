@@ -221,12 +221,15 @@ namespace meta {
 //                    return Status::DBTransactionError("Initialization Error", InitializeQuery.error());
 //                }
             } catch (const ConnectionFailed& er) {
+                ENGINE_LOG_ERROR << "Failed to connect to database server" << ": " << er.what();
                 return Status::DBTransactionError("Failed to connect to database server", er.what());
             } catch (const BadQuery& er) {
                 // Handle any query errors
+                ENGINE_LOG_ERROR << "QUERY ERROR DURING INITIALIZATION" << ": " << er.what();
                 return Status::DBTransactionError("QUERY ERROR DURING INITIALIZATION", er.what());
             } catch (const Exception& er) {
                 // Catch-all for any other MySQL++ exceptions
+                ENGINE_LOG_ERROR << "GENERAL ERROR DURING INITIALIZATION" << ": " << er.what();
                 return Status::DBTransactionError("GENERAL ERROR DURING INITIALIZATION", er.what());
             } catch (std::exception &e) {
                 return HandleException("Encounter exception during initialization", e);
@@ -282,14 +285,17 @@ namespace meta {
                                           "date in (" << dateListStr << ");";
 
             if (!dropPartitionsByDatesQuery.exec()) {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROPPING PARTITIONS BY DATES";
                 return Status::DBTransactionError("QUERY ERROR WHEN DROPPING PARTITIONS BY DATES", dropPartitionsByDatesQuery.error());
             }
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROPPING PARTITIONS BY DATES" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN DROPPING PARTITIONS BY DATES", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES", er.what());
         }
         return Status::OK();
@@ -353,6 +359,7 @@ namespace meta {
 //                }
             }
             else {
+                ENGINE_LOG_ERROR << "Add Table Error";
                 return Status::DBTransactionError("Add Table Error", createTableQuery.error());
             }
 
@@ -371,9 +378,11 @@ namespace meta {
             }
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN ADDING TABLE" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN ADDING TABLE", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN ADDING TABLE" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN ADDING TABLE", er.what());
         } catch (std::exception &e) {
             return HandleException("Encounter exception when create table", e);
@@ -400,13 +409,16 @@ namespace meta {
                                 "WHERE table_id = " << quote << table_id << ";";
 
             if (!deleteTableQuery.exec()) {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE";
                 return Status::DBTransactionError("QUERY ERROR WHEN DELETING TABLE", deleteTableQuery.error());
             }
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DELETING TABLE" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN DELETING TABLE", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DELETING TABLE" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN DELETING TABLE", er.what());
         }
 
@@ -428,14 +440,17 @@ namespace meta {
                                      "WHERE table_id = " << quote << table_id << ";";
 
             if (!deleteTableFilesQuery.exec()) {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE FILES";
                 return Status::DBTransactionError("QUERY ERROR WHEN DELETING TABLE", deleteTableFilesQuery.error());
             }
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE FILES" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN DELETING TABLE FILES", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DELETING TABLE FILES" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN DELETING TABLE FILES", er.what());
         }
 
@@ -482,9 +497,11 @@ namespace meta {
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN DESCRIBING TABLE" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN DESCRIBING TABLE", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DESCRIBING TABLE" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN DESCRIBING TABLE", er.what());
         }
 
@@ -516,9 +533,11 @@ namespace meta {
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN CHECKING IF TABLE EXISTS" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN CHECKING IF TABLE EXISTS", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CHECKING IF TABLE EXISTS" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN CHECKING IF TABLE EXISTS", er.what());
         }
 
@@ -562,9 +581,11 @@ namespace meta {
             }
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN DESCRIBING ALL TABLES" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN DESCRIBING ALL TABLES", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DESCRIBING ALL TABLES" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN DESCRIBING ALL TABLES", er.what());
         }
 
@@ -625,6 +646,7 @@ namespace meta {
 //                }
             }
             else {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN ADDING TABLE FILE";
                 return Status::DBTransactionError("Add file Error", createTableFileQuery.error());
             }
 
@@ -640,9 +662,11 @@ namespace meta {
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN ADDING TABLE FILE" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN ADDING TABLE FILE", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN ADDING TABLE FILE" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN ADDING TABLE FILE", er.what());
         } catch (std::exception& ex) {
             return HandleException("Encounter exception when create table file", ex);
@@ -710,9 +734,11 @@ namespace meta {
             }
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN FINDING TABLE FILES TO INDEX" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN FINDING TABLE FILES TO INDEX", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", er.what());
         }
 
@@ -810,9 +836,11 @@ namespace meta {
             }
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN FINDING TABLE FILES TO SEARCH" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN FINDING TABLE FILES TO SEARCH", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", er.what());
         }
 
@@ -880,9 +908,11 @@ namespace meta {
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN FINDING TABLE FILES TO MERGE" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN FINDING TABLE FILES TO MERGE", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE", er.what());
         }
 
@@ -948,9 +978,11 @@ namespace meta {
             }
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN RETRIEVING TABLE FILES" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN RETRIEVING TABLE FILES", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN RETRIEVING TABLE FILES" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN RETRIEVING TABLE FILES", er.what());
         }
 
@@ -989,9 +1021,11 @@ namespace meta {
 
                 } catch (const BadQuery& er) {
                     // Handle any query errors
+                    ENGINE_LOG_ERROR << "QUERY ERROR WHEN DURING ARCHIVE" << ": " << er.what();
                     return Status::DBTransactionError("QUERY ERROR WHEN DURING ARCHIVE", er.what());
                 } catch (const Exception& er) {
                     // Catch-all for any other MySQL++ exceptions
+                    ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DURING ARCHIVE" << ": " << er.what();
                     return Status::DBTransactionError("GENERAL ERROR WHEN DURING ARCHIVE", er.what());
                 }
             }
@@ -1038,9 +1072,11 @@ namespace meta {
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN RETRIEVING SIZE" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN RETRIEVING SIZE", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN RETRIEVING SIZE" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN RETRIEVING SIZE", er.what());
         }
 
@@ -1103,14 +1139,17 @@ namespace meta {
                 return DiscardFiles(to_discard_size);
             }
             else {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DISCARDING FILES";
                 return Status::DBTransactionError("QUERY ERROR WHEN DISCARDING FILES", discardFilesQuery.error());
             }
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN DISCARDING FILES" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN DISCARDING FILES", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DISCARDING FILES" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN DISCARDING FILES", er.what());
         }
     }
@@ -1170,16 +1209,19 @@ namespace meta {
 
             if (!updateTableFileQuery.exec()) {
                 ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILE";
                 return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILE", updateTableFileQuery.error());
             }
 
         } catch (const BadQuery& er) {
             // Handle any query errors
             ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILE" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILE", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
             ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN UPDATING TABLE FILE" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN UPDATING TABLE FILE", er.what());
         }
         return Status::OK();
@@ -1246,14 +1288,17 @@ namespace meta {
             }
 
             if (!updateTableFilesQuery.exec()) {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILES";
                 return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILES", updateTableFilesQuery.error());
             }
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILES" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILES", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN UPDATING TABLE FILES" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN UPDATING TABLE FILES", er.what());
         }
         return Status::OK();
@@ -1314,14 +1359,17 @@ namespace meta {
             cleanUpFilesWithTTLQuery << "DELETE FROM metaFile WHERE " <<
                                         idsToDeleteStr << ";";
             if (!cleanUpFilesWithTTLQuery.exec()) {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
                 return Status::DBTransactionError("CleanUpFilesWithTTL Error", cleanUpFilesWithTTLQuery.error());
             }
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
         }
 
@@ -1355,15 +1403,18 @@ namespace meta {
             cleanUpFilesWithTTLQuery << "DELETE FROM meta WHERE " <<
                                         idsToDeleteStr << ";";
             if (!cleanUpFilesWithTTLQuery.exec()) {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
                 return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", cleanUpFilesWithTTLQuery.error());
             }
 
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
         }
 
@@ -1382,14 +1433,17 @@ namespace meta {
             cleanUpQuery << "DELETE FROM metaFile WHERE file_type = " << std::to_string(TableFileSchema::NEW) << ";";
 
             if (!cleanUpQuery.exec()) {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES";
                 return Status::DBTransactionError("Clean up Error", cleanUpQuery.error());
             }
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CLEANING UP FILES" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP FILES", er.what());
         }
 
@@ -1434,9 +1488,11 @@ namespace meta {
 
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN RETRIEVING COUNT" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN RETRIEVING COUNT", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN RETRIEVING COUNT" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN RETRIEVING COUNT", er.what());
         }
         return Status::OK();
@@ -1459,13 +1515,16 @@ namespace meta {
                 return Status::OK();
             }
             else {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROPPING TABLE";
                 return Status::DBTransactionError("DROP TABLE ERROR", dropTableQuery.error());
             }
         } catch (const BadQuery& er) {
             // Handle any query errors
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROPPING TABLE" << ": " << er.what();
             return Status::DBTransactionError("QUERY ERROR WHEN DROPPING TABLE", er.what());
         } catch (const Exception& er) {
             // Catch-all for any other MySQL++ exceptions
+            ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DROPPING TABLE" << ": " << er.what();
             return Status::DBTransactionError("GENERAL ERROR WHEN DROPPING TABLE", er.what());
         }
         return Status::OK();

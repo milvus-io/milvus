@@ -120,6 +120,7 @@ add_compile_definitions(PROFILER=${PROFILER})
 
 include_directories(${MILVUS_ENGINE_INCLUDE})
 include_directories(${MILVUS_ENGINE_SRC})
+include_directories(/usr/local/cuda/include)
 #include_directories(${MILVUS_THIRD_PARTY_BUILD}/include)
 
 link_directories(${CMAKE_CURRRENT_BINARY_DIR})
