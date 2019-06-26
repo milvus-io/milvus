@@ -12,6 +12,7 @@ aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
 aux_source_directory(metrics metrics_files)
+aux_source_directory(wrapper/knowhere knowhere_files)
 
 aux_source_directory(db/scheduler scheduler_files)
 aux_source_directory(db/scheduler/context scheduler_context_files)
@@ -50,6 +51,7 @@ set(engine_files
         ${wrapper_files}
 #        metrics/Metrics.cpp
         ${metrics_files}
+        ${knowhere_files}
         )
 
 set(get_sys_info_files
@@ -64,14 +66,18 @@ include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 include_directories(thrift/gen-cpp)
 
 set(third_party_libs
+        knowhere
+        SPTAGLibStatic
+        arrow
+        jemalloc_pic
+        faiss
+#        libgpufaiss.a
+        openblas
+        lapack
         easyloggingpp
         sqlite
         thrift
         yaml-cpp
-        libgpufaiss.a
-        faiss
-        lapack
-        openblas
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
@@ -83,6 +89,8 @@ set(third_party_libs
         snappy
         zlib
         zstd
+        cudart
+        cublas
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
 if (MEGASEARCH_WITH_ARROW STREQUAL "ON")
@@ -95,8 +103,8 @@ if (GPU_VERSION STREQUAL "ON")
             pthread
             libgomp.a
             libgfortran.a
-            cudart
-            cublas
+#            cudart
+#            cublas
             ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
 else()
@@ -130,6 +138,7 @@ endif ()
 
 
 cuda_add_library(milvus_engine STATIC ${engine_files})
+#cuda_add_library(milvus_engine SHARED ${engine_files})
 target_link_libraries(milvus_engine ${engine_libs} ${third_party_libs})
 
 add_library(metrics STATIC ${metrics_files})
