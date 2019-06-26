@@ -45,7 +45,7 @@ public:
             sleep(1);
         }
 
-        ENGINE_LOG_DEBUG << "conns_in_use_ in grab: " << conns_in_use_ << std::endl;
+//        ENGINE_LOG_DEBUG << "conns_in_use_ in grab: " << conns_in_use_ << std::endl;
         ++conns_in_use_;
         return mysqlpp::ConnectionPool::grab();
     }
@@ -53,10 +53,10 @@ public:
     // Other half of in-use conn count limit
     void release(const mysqlpp::Connection* pc) override {
         mysqlpp::ConnectionPool::release(pc);
-        ENGINE_LOG_DEBUG << "conns_in_use_ in release: " << conns_in_use_ << std::endl;
+//        ENGINE_LOG_DEBUG << "conns_in_use_ in release: " << conns_in_use_ << std::endl;
         --conns_in_use_;
         if (conns_in_use_ < 0) {
-            ENGINE_LOG_DEBUG << "conns_in_use_ in release < 0: " << conns_in_use_ << std::endl;
+            ENGINE_LOG_ERROR << "conns_in_use_ in release less than zero: " << conns_in_use_ << std::endl;
         }
     }
 
