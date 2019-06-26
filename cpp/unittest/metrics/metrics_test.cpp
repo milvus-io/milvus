@@ -30,6 +30,7 @@ TEST_F(DBTest, Metric_Tes) {
     server::SystemInfo::GetInstance().Init();
 //    server::Metrics::GetInstance().Init();
 //    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
+    
     server::Metrics::GetInstance().Init();
 
 //    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
