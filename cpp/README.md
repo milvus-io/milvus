@@ -12,6 +12,9 @@ cmake_build/src/milvus_server is the server
 
 cmake_build/src/libmilvus_engine.a is the static library
 
+    git submodule init
+    git submodule update
+    
     cd [sourcecode path]/cpp
     ./build.sh -t Debug
     ./build.sh -t Release
