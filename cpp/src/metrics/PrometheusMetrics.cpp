@@ -17,7 +17,8 @@ ServerError
 PrometheusMetrics::Init() {
     try {
         ConfigNode &configNode = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);
-        startup_ = configNode.GetValue(CONFIG_METRIC_IS_STARTUP) == "true" ? true : false;
+        startup_ = configNode.GetValue(CONFIG_METRIC_IS_STARTUP) == "on";
+        if(!startup_) return SERVER_SUCCESS;
         // Following should be read from config file.
         const std::string bind_address = configNode.GetChild(CONFIG_PROMETHEUS).GetValue(CONFIG_METRIC_PROMETHEUS_PORT);
         const std::string uri = std::string("/metrics");
