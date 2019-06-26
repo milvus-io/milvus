@@ -3,6 +3,8 @@
 #include <string>
 #include <unistd.h>
 
+#include "Log.h"
+
 class MySQLConnectionPool : public mysqlpp::ConnectionPool {
 
 public:
@@ -43,6 +45,7 @@ public:
             sleep(1);
         }
 
+        ENGINE_LOG_DEBUG << "conns_in_use_ in grab: " << conns_in_use_ << std::endl;
         ++conns_in_use_;
         return mysqlpp::ConnectionPool::grab();
     }
@@ -50,7 +53,11 @@ public:
     // Other half of in-use conn count limit
     void release(const mysqlpp::Connection* pc) override {
         mysqlpp::ConnectionPool::release(pc);
+        ENGINE_LOG_DEBUG << "conns_in_use_ in release: " << conns_in_use_ << std::endl;
         --conns_in_use_;
+        if (conns_in_use_ < 0) {
+            ENGINE_LOG_DEBUG << "conns_in_use_ in release < 0: " << conns_in_use_ << std::endl;
+        }
     }
 
     void set_max_idle_time(int max_idle) {
