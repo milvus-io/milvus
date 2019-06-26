@@ -326,7 +326,7 @@ namespace meta {
                 } else {
                     createTableQuery << "SELECT state FROM Tables " <<
                                         "WHERE table_id = " << quote << table_schema.table_id_ << ";";
-                    ENGINE_LOG_DEBUG << "Create Table : " << createTableQuery.str();
+//                    ENGINE_LOG_DEBUG << "Create Table : " << createTableQuery.str();
                     StoreQueryResult res = createTableQuery.store();
                     assert(res && res.num_rows() <= 1);
                     if (res.num_rows() == 1) {
@@ -338,7 +338,7 @@ namespace meta {
                         return Status::Error(msg);
                     }
                 }
-                ENGINE_LOG_DEBUG << "Create Table start";
+//                ENGINE_LOG_DEBUG << "Create Table start";
 
                 table_schema.files_cnt_ = 0;
                 table_schema.id_ = -1;
@@ -358,7 +358,7 @@ namespace meta {
                 createTableQuery << "INSERT INTO Tables VALUES" <<
                                  "(" << id << ", " << quote << table_id << ", " << state << ", " << dimension << ", " <<
                                  created_on << ", " << files_cnt << ", " << engine_type << ", " << store_raw_data << ");";
-                ENGINE_LOG_DEBUG << "Create Table : " << createTableQuery.str();
+//                ENGINE_LOG_DEBUG << "Create Table : " << createTableQuery.str();
                 if (SimpleResult res = createTableQuery.execute()) {
                     table_schema.id_ = res.insert_id(); //Might need to use SELECT LAST_INSERT_ID()?
 //                    std::cout << table_schema.id_ << std::endl;
