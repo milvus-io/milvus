@@ -12,7 +12,7 @@ db_config:
   index_building_threshold: 1024          #build index file when raw data file size larger than this value, unit: MB
 
 metric_config:
-  is_startup: true      # if monitoring start: on, off
+  is_startup: off      # if monitoring start: on, off
   collector: prometheus # metrics collector: prometheus
   prometheus_config:    # following are prometheus configure
     collect_type: pull  # prometheus collect data method
