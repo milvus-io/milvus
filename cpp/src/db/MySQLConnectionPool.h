@@ -94,7 +94,7 @@ protected:
 
 private:
     // Number of connections currently in use
-    unsigned int conns_in_use_;
+    int conns_in_use_;
 
     // Our connection parameters
     std::string db_, user_, password_, server_;
