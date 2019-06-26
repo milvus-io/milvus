@@ -271,7 +271,7 @@ endif()
 if(DEFINED ENV{MILVUS_MYSQLPP_URL})
     set(MYSQLPP_SOURCE_URL "$ENV{MILVUS_MYSQLPP_URL}")
 else()
-    set(MYSQLPP_SOURCE_URL "https://github.com/youny626/mysqlpp.git")
+    set(MYSQLPP_SOURCE_URL "https://tangentsoft.com/mysqlpp/releases/mysql++-${MYSQLPP_VERSION}.tar.gz")
 endif()
 
 if (DEFINED ENV{MILVUS_OPENBLAS_URL})
@@ -1095,18 +1095,18 @@ macro(build_mysqlpp)
             "LDFLAGS=-pthread")
 
     externalproject_add(mysqlpp_ep
-#            URL
-#            ${MYSQLPP_SOURCE_URL}
-            GIT_REPOSITORY
+            URL
             ${MYSQLPP_SOURCE_URL}
-            GIT_TAG
-            ${MYSQLPP_VERSION}
-            GIT_SHALLOW
-            TRUE
+#            GIT_REPOSITORY
+#            ${MYSQLPP_SOURCE_URL}
+#            GIT_TAG
+#            ${MYSQLPP_VERSION}
+#            GIT_SHALLOW
+#            TRUE
             ${EP_LOG_OPTIONS}
             CONFIGURE_COMMAND
-            "./bootstrap"
-            COMMAND
+#            "./bootstrap"
+#            COMMAND
             "./configure"
             ${MYSQLPP_CONFIGURE_ARGS}
             BUILD_COMMAND
