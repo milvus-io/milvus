@@ -24,6 +24,7 @@
 #include <thrift/concurrency/PosixThreadFactory.h>
 
 #include <thread>
+#include <iostream>
 
 namespace zilliz {
 namespace milvus {
@@ -93,7 +94,8 @@ MilvusServer::StartService() {
             return;
         }
     } catch (apache::thrift::TException& ex) {
-        SERVER_LOG_ERROR << "Server encounter exception: " << ex.what();
+        std::cout << "ERROR! " << ex.what() << std::endl;
+        kill(0, SIGUSR1);
     }
 }
 
