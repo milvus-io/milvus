@@ -13,6 +13,7 @@
 #include "scheduler/context/SearchContext.h"
 #include "scheduler/context/DeleteContext.h"
 #include "utils/TimeRecorder.h"
+#include "MetaConsts.h"
 
 #include <assert.h>
 #include <chrono>
@@ -595,7 +596,12 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     }
 
     meta_ptr_->Archive();
-    meta_ptr_->CleanUpFilesWithTTL(1);
+
+    int ttl = 1;
+    if (options_.mode == "cluster") {
+        ttl = meta::D_SEC;
+    }
+    meta_ptr_->CleanUpFilesWithTTL(ttl);
 }
 
 void DBImpl::StartBuildIndexTask() {

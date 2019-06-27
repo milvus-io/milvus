@@ -47,6 +47,7 @@ struct Options {
     uint16_t  merge_trigger_number = 2;
     size_t  index_trigger_size = ONE_GB;            //unit: byte
     DBMetaOptions meta;
+    std::string mode;
 }; // Options
 
 
