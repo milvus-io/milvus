@@ -165,6 +165,11 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         Status stat = conn->CreateTable(tb_schema);
         std::cout << "CreateTable function call status: " << stat.ToString() << std::endl;
         PrintTableSchema(tb_schema);
+
+        bool has_table = conn->HasTable(tb_schema.table_name);
+        if(has_table) {
+            std::cout << "Table is created" << std::endl;
+        }
     }
 
     {//describe table

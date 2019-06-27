@@ -19,16 +19,28 @@ public:
     RequestHandler();
 
     /**
-   * @brief Create table method
-   *
-   * This method is used to create table
-   *
-   * @param param, use to provide table information to be created.
-   *
-   *
-   * @param param
-   */
-    void CreateTable(const ::milvus::thrift::TableSchema& param);
+     * @brief Create table method
+     *
+     * This method is used to create table
+     *
+     * @param param, use to provide table information to be created.
+     *
+     *
+     * @param param
+     */
+    void CreateTable(const ::milvus::thrift::TableSchema &param);
+
+    /**
+     * @brief Test table existence method
+     *
+     * This method is used to test table existence.
+     *
+     * @param table_name, table name is going to be tested.
+     *
+     *
+     * @param table_name
+     */
+    bool HasTable(const std::string &table_name);
 
     /**
      * @brief Delete table method
