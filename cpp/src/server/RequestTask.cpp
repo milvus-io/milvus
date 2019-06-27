@@ -70,7 +70,7 @@ namespace {
             uint64_t vec_dim = record.vector_data.size()/sizeof(double);//how many double value?
             if(vec_dim != dimension) {
                 SERVER_LOG_ERROR << "Invalid vector dimension: " << vec_dim
-                                 << " vs. group dimension:" << dimension;
+                                 << " vs. table dimension:" << dimension;
                 error_code = SERVER_INVALID_VECTOR_DIMENSION;
                 return error_code;
             }
@@ -236,14 +236,52 @@ ServerError DescribeTableTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+HasTableTask::HasTableTask(const std::string& table_name, bool& has_table)
+    : BaseTask(DDL_DML_TASK_GROUP),
+      table_name_(table_name),
+      has_table_(has_table) {
+
+}
+
+BaseTaskPtr HasTableTask::Create(const std::string& table_name, bool& has_table) {
+    return std::shared_ptr<BaseTask>(new HasTableTask(table_name, has_table));
+}
+
+ServerError HasTableTask::OnExecute() {
+    try {
+        TimeRecorder rc("HasTableTask");
+
+        //step 1: check arguments
+        if (table_name_.empty()) {
+            error_code_ = SERVER_INVALID_ARGUMENT;
+            error_msg_ = "Table name cannot be empty";
+            SERVER_LOG_ERROR << error_msg_;
+            return error_code_;
+        }
+
+        //step 2: check table existence
+        engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table_);
+
+        rc.Elapse("totally cost");
+    } catch (std::exception& ex) {
+        error_code_ = SERVER_UNEXPECTED_ERROR;
+        error_msg_ = ex.what();
+        SERVER_LOG_ERROR << error_msg_;
+        return error_code_;
+    }
+
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DeleteTableTask::DeleteTableTask(const std::string& table_name)
     : BaseTask(DDL_DML_TASK_GROUP),
       table_name_(table_name) {
 
 }
 
-BaseTaskPtr DeleteTableTask::Create(const std::string& group_id) {
-    return std::shared_ptr<BaseTask>(new DeleteTableTask(group_id));
+BaseTaskPtr DeleteTableTask::Create(const std::string& table_name) {
+    return std::shared_ptr<BaseTask>(new DeleteTableTask(table_name));
 }
 
 ServerError DeleteTableTask::OnExecute() {

@@ -80,6 +80,16 @@ service MilvusService {
      */
     void CreateTable(2: TableSchema param) throws(1: Exception e);
 
+    /**
+     * @brief Test table existence method
+     *
+     * This method is used to test table existence.
+     *
+     * @param table_name, table name is going to be tested.
+     *
+     */
+    bool HasTable(2: string table_name) throws(1: Exception e);
+
 
     /**
      * @brief Delete table method
