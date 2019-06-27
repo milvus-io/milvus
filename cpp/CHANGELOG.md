@@ -2,7 +2,20 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
-# Milvus 0.3.0 (TBD)
+
+# Milvus 0.3.1 (2019-07-10)
+
+## Bug
+
+## Improvement
+
+## New Feature
+
+## Task
+
+- MS-125 - Create 0.3.1 release branch
+
+# Milvus 0.3.0 (2019-06-30)
 
 ## Bug
 - MS-104 - Fix unittest lcov execution error
