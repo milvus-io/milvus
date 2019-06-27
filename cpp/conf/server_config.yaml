@@ -1,29 +1,29 @@
 server_config:
   address: 0.0.0.0
-  port: 19530
-  transfer_protocol: binary   #optional: binary, compact, json
-  server_mode: thread_pool    #optional: simple, thread_pool
-  gpu_index: 0                #which gpu to be used
-  mode: single                #optional: single, cluster
+  port: 19530                 # the port milvus listen to, default: 19530, range: 1025 ~ 65534
+  gpu_index: 0                # the gpu milvus use, default: 0, range: 0 ~ gpu number - 1
+  mode: single                # milvus deployment type: single, cluster
 
 db_config:
-  db_path: /tmp/milvus
+  db_path: /tmp/milvus             # milvus data storage path
   #URI format: dialect://username:password@host:port/database
   #All parts except dialect are optional, but you MUST include the delimiters
-  db_backend_url: mysql://root:1234@:/test
-  index_building_threshold: 1024          #build index file when raw data file size larger than this value, unit: MB
+  #Currently supports mysql or sqlite
+  db_backend_url: dialect://username:password@host:port/database # meta database uri
+  index_building_threshold: 1024   # index building trigger threshold, default: 1024, unit: MB
 
 metric_config:
-  is_startup: true # true is on, false is off
-  collector: prometheus # prometheus, now we only have prometheus
-  prometheus_config:
-    collect_type: pull # pull means prometheus pull the message from server, push means server push metric to push gateway
-    port: 8080
-    push_gateway_ip_address: 127.0.0.1
-    push_gateway_port: 9091
+  is_startup: off      # if monitoring start: on, off
+  collector: prometheus # metrics collector: prometheus
+  prometheus_config:    # following are prometheus configure
+    collect_type: pull  # prometheus collect data method
+    port: 8080          # the port prometheus use to fetch metrics
+    push_gateway_ip_address: 127.0.0.1 # push method configure: push gateway ip address
+    push_gateway_port: 9091            # push method configure: push gateway port
 
-license_config:
-  license_path: "/tmp/system.license"
 
-cache_config:
-    cpu_cache_capacity: 16   # memory pool to hold index data, unit: GB
+license_config:         # license configure
+  license_path: "/tmp/system.license" # license file path
+
+cache_config:           # cache configure
+  cpu_cache_capacity: 16   # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory

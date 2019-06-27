@@ -11,6 +11,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-89 - Fix compile failed, libgpufaiss.a link missing
 - MS-90 - Fix arch match incorrect on ARM
 - MS-99 - Fix compilation bug
+- MS-110 - Avoid huge file size
 
 ## Improvement
 - MS-82 - Update server startup welcome message
@@ -19,7 +20,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-22 - Enhancement for MemVector size control 
 - MS-92 - Unify behavior of debug and release build
 - MS-98 - Install all unit test to installation directory
-
+- MS-115 - Change is_startup of metric_config switch from true to on
 ## New Feature
 
 - MS-57 - Implement index load/search pipeline

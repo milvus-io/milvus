@@ -320,7 +320,7 @@ namespace meta {
                 ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
 
                 Query createTableQuery = connectionPtr->query();
-                ENGINE_LOG_DEBUG << "Create Table in";
+//                ENGINE_LOG_DEBUG << "Create Table in";
                 if (table_schema.table_id_.empty()) {
                     NextTableId(table_schema.table_id_);
                 } else {
