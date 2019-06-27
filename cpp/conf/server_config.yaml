@@ -12,13 +12,14 @@ db_config:
   archive_days_threshold: 30       # files older than x days will be archived, unit: day
 
 metric_config:
-  is_startup: true      # if monitoring start: on, off
+  is_startup: off      # if monitoring start: on, off
   collector: prometheus # metrics collector: prometheus
   prometheus_config:    # following are prometheus configure
     collect_type: pull  # prometheus collect data method
     port: 8080          # the port prometheus use to fetch metrics
     push_gateway_ip_address: 127.0.0.1 # push method configure: push gateway ip address
     push_gateway_port: 9091            # push method configure: push gateway port
+
 
 license_config:         # license configure
   license_path: "/tmp/system.license" # license file path
