@@ -34,6 +34,22 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class HasTableTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(const std::string& table_name, bool& has_table);
+
+protected:
+    HasTableTask(const std::string& table_name, bool& has_table);
+
+    ServerError OnExecute() override;
+
+
+private:
+    std::string table_name_;
+    bool& has_table_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class DescribeTableTask : public BaseTask {
 public:
     static BaseTaskPtr Create(const std::string& table_name, ::milvus::thrift::TableSchema& schema);
