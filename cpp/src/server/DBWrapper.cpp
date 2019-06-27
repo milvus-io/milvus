@@ -23,7 +23,9 @@ DBWrapper::DBWrapper() {
     if(index_size > 0) {//ensure larger than zero, unit is MB
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
-    opt.mode = config.GetValue(CONFIG_CLUSTER_MODE, "single");
+    ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
+    opt.mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
+//    std::cout << "mode = " << opt.mode << std::endl;
 
     CommonUtil::CreateDirectory(opt.meta.path);
 

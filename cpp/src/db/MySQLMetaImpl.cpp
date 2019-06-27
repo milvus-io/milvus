@@ -448,9 +448,10 @@ namespace meta {
                 Query deleteTableFilesQuery = connectionPtr->query();
                 //
                 deleteTableFilesQuery << "UPDATE TableFiles " <<
-                                      "SET state = " << std::to_string(TableSchema::TO_DELETE) << ", " <<
+                                      "SET file_type = " << std::to_string(TableSchema::TO_DELETE) << ", " <<
                                       "updated_time = " << std::to_string(utils::GetMicroSecTimeStamp()) << " " <<
-                                      "WHERE table_id = " << quote << table_id << ";";
+                                      "WHERE table_id = " << quote << table_id << " AND " <<
+                                      "file_type <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
                 if (!deleteTableFilesQuery.exec()) {
                     ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE FILES";
