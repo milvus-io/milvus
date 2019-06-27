@@ -18,34 +18,34 @@ using namespace ::milvus;
 namespace {
     const std::map<ServerError, thrift::ErrorCode::type> &ErrorMap() {
         static const std::map<ServerError, thrift::ErrorCode::type> code_map = {
-                {SERVER_UNEXPECTED_ERROR,         thrift::ErrorCode::ILLEGAL_ARGUMENT},
-                {SERVER_NULL_POINTER,             thrift::ErrorCode::ILLEGAL_ARGUMENT},
+                {SERVER_UNEXPECTED_ERROR,         thrift::ErrorCode::UNEXPECTED_ERROR},
+                {SERVER_UNSUPPORTED_ERROR,        thrift::ErrorCode::UNEXPECTED_ERROR},
+                {SERVER_NULL_POINTER,             thrift::ErrorCode::UNEXPECTED_ERROR},
                 {SERVER_INVALID_ARGUMENT,         thrift::ErrorCode::ILLEGAL_ARGUMENT},
-                {SERVER_FILE_NOT_FOUND,           thrift::ErrorCode::ILLEGAL_ARGUMENT},
-                {SERVER_NOT_IMPLEMENT,            thrift::ErrorCode::ILLEGAL_ARGUMENT},
-                {SERVER_BLOCKING_QUEUE_EMPTY,     thrift::ErrorCode::ILLEGAL_ARGUMENT},
+                {SERVER_FILE_NOT_FOUND,           thrift::ErrorCode::FILE_NOT_FOUND},
+                {SERVER_NOT_IMPLEMENT,            thrift::ErrorCode::UNEXPECTED_ERROR},
+                {SERVER_BLOCKING_QUEUE_EMPTY,     thrift::ErrorCode::UNEXPECTED_ERROR},
+                {SERVER_CANNOT_CREATE_FOLDER,     thrift::ErrorCode::CANNOT_CREATE_FOLDER},
+                {SERVER_CANNOT_CREATE_FILE,       thrift::ErrorCode::CANNOT_CREATE_FILE},
+                {SERVER_CANNOT_DELETE_FOLDER,     thrift::ErrorCode::CANNOT_DELETE_FOLDER},
+                {SERVER_CANNOT_DELETE_FILE,       thrift::ErrorCode::CANNOT_DELETE_FILE},
                 {SERVER_TABLE_NOT_EXIST,          thrift::ErrorCode::TABLE_NOT_EXISTS},
+                {SERVER_INVALID_TABLE_NAME,       thrift::ErrorCode::ILLEGAL_TABLE_NAME},
+                {SERVER_INVALID_TABLE_DIMENSION,  thrift::ErrorCode::ILLEGAL_DIMENSION},
                 {SERVER_INVALID_TIME_RANGE,       thrift::ErrorCode::ILLEGAL_RANGE},
                 {SERVER_INVALID_VECTOR_DIMENSION, thrift::ErrorCode::ILLEGAL_DIMENSION},
+
+                {SERVER_INVALID_INDEX_TYPE,       thrift::ErrorCode::ILLEGAL_INDEX_TYPE},
+                {SERVER_INVALID_ROWRECORD,        thrift::ErrorCode::ILLEGAL_ROWRECORD},
+                {SERVER_INVALID_ROWRECORD_ARRAY,  thrift::ErrorCode::ILLEGAL_ROWRECORD},
+                {SERVER_INVALID_TOPK,             thrift::ErrorCode::ILLEGAL_TOPK},
+                {SERVER_ILLEGAL_VECTOR_ID,        thrift::ErrorCode::ILLEGAL_VECTOR_ID},
+                {SERVER_ILLEGAL_SEARCH_RESULT,    thrift::ErrorCode::ILLEGAL_SEARCH_RESULT},
+                {SERVER_CACHE_ERROR,              thrift::ErrorCode::CACHE_FAILED},
+                {DB_META_TRANSACTION_FAILED,      thrift::ErrorCode::META_FAILED},
         };
 
         return code_map;
-    }
-
-    const std::map<ServerError, std::string> &ErrorMessage() {
-        static const std::map<ServerError, std::string> msg_map = {
-                {SERVER_UNEXPECTED_ERROR,         "unexpected error occurs"},
-                {SERVER_NULL_POINTER,             "null pointer error"},
-                {SERVER_INVALID_ARGUMENT,         "invalid argument"},
-                {SERVER_FILE_NOT_FOUND,           "file not found"},
-                {SERVER_NOT_IMPLEMENT,            "not implemented"},
-                {SERVER_BLOCKING_QUEUE_EMPTY,     "queue empty"},
-                {SERVER_TABLE_NOT_EXIST,          "table not exist"},
-                {SERVER_INVALID_TIME_RANGE,       "invalid time range"},
-                {SERVER_INVALID_VECTOR_DIMENSION, "invalid vector dimension"},
-        };
-
-        return msg_map;
     }
 }
 
@@ -66,6 +66,14 @@ ServerError BaseTask::Execute() {
     error_code_ = OnExecute();
     done_ = true;
     finish_cond_.notify_all();
+    return error_code_;
+}
+
+ServerError BaseTask::SetError(ServerError error_code, const std::string& error_msg) {
+    error_code_ = error_code;
+    error_msg_ = error_msg;
+
+    SERVER_LOG_ERROR << error_msg_;
     return error_code_;
 }
 
@@ -102,7 +110,7 @@ void RequestScheduler::ExecTask(BaseTaskPtr& task_ptr) {
             ex.__set_code(ErrorMap().at(err));
             std::string msg = task_ptr->ErrorMsg();
             if(msg.empty()){
-                msg = ErrorMessage().at(err);
+                msg = "Error message not set";
             }
             ex.__set_reason(msg);
             throw ex;

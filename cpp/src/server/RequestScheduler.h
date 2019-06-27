@@ -34,6 +34,8 @@ public:
 protected:
     virtual ServerError OnExecute() = 0;
 
+    ServerError SetError(ServerError error_code, const std::string& msg);
+
 protected:
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;

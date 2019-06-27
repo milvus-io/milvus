@@ -56,6 +56,11 @@ ConnectionImpl::CreateTable(const TableSchema &param) {
     return client_proxy_->CreateTable(param);
 }
 
+bool
+ConnectionImpl::HasTable(const std::string &table_name) {
+    return client_proxy_->HasTable(table_name);
+}
+
 Status
 ConnectionImpl::DeleteTable(const std::string &table_name) {
     return client_proxy_->DeleteTable(table_name);
