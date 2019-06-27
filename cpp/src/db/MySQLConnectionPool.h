@@ -54,9 +54,11 @@ public:
     void release(const mysqlpp::Connection* pc) override {
         mysqlpp::ConnectionPool::release(pc);
 //        ENGINE_LOG_DEBUG << "conns_in_use_ in release: " << conns_in_use_ << std::endl;
-        --conns_in_use_;
-        if (conns_in_use_ < 0) {
+        if (conns_in_use_ <= 0) {
             ENGINE_LOG_WARNING << "MySQLConnetionPool::release: conns_in_use_ is less than zero.  conns_in_use_ = " << conns_in_use_ << std::endl;
+        }
+        else {
+            --conns_in_use_;
         }
     }
 
