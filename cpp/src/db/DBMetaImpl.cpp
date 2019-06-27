@@ -656,7 +656,7 @@ Status DBMetaImpl::Archive() {
     for (auto kv : criterias) {
         auto &criteria = kv.first;
         auto &limit = kv.second;
-        if (criteria == "days") {
+        if (criteria == engine::ARCHIVE_CONF_DAYS) {
             long usecs = limit * D_SEC * US_PS;
             long now = utils::GetMicroSecTimeStamp();
             try {
@@ -672,11 +672,11 @@ Status DBMetaImpl::Archive() {
                 return HandleException("Encounter exception when update table files", e);
             }
         }
-        if (criteria == "disk") {
+        if (criteria == engine::ARCHIVE_CONF_DISK) {
             uint64_t sum = 0;
             Size(sum);
 
-            auto to_delete = (sum - limit * G);
+            int64_t to_delete = (int64_t)sum - limit * G;
             DiscardFiles(to_delete);
         }
     }
