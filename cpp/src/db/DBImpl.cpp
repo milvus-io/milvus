@@ -600,6 +600,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     int ttl = 1;
     if (options_.mode == "cluster") {
         ttl = meta::D_SEC;
+        ENGINE_LOG_DEBUG << "Server mode is cluster. Clean up files with ttl = " << std::to_string(ttl) << "seconds.";
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
 }
