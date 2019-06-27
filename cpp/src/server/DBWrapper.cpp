@@ -23,6 +23,7 @@ DBWrapper::DBWrapper() {
     if(index_size > 0) {//ensure larger than zero, unit is MB
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
+    opt.mode = config.GetValue(CONFIG_CLUSTER_MODE, "single");
 
     CommonUtil::CreateDirectory(opt.meta.path);
 
