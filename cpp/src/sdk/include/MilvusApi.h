@@ -157,6 +157,18 @@ public:
 
 
     /**
+     * @brief Test table existence method
+     *
+     * This method is used to create table
+     *
+     * @param table_name, table name is going to be tested.
+     *
+     * @return Indicate if table is cexist
+     */
+    virtual bool HasTable(const std::string &table_name) = 0;
+
+
+    /**
      * @brief Delete table method
      *
      * This method is used to delete table.
