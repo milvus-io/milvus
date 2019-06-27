@@ -22,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-98 - Install all unit test to installation directory
 - MS-115 - Change is_startup of metric_config switch from true to on
 - MS-122 - Archive criteria config 
+- MS-124 - HasTable interface
 
 ## New Feature
 
