@@ -28,7 +28,7 @@ DBWrapper::DBWrapper() {
 
     zilliz::milvus::engine::DB::Open(opt, &db_);
     if(db_ == nullptr) {
-        SERVER_LOG_ERROR << "Failed to open db";
+        SERVER_LOG_ERROR << "Failed to open db. Provided database uri = " << opt.meta.backend_uri;
         throw ServerException(SERVER_NULL_POINTER, "Failed to open db");
     }
 }

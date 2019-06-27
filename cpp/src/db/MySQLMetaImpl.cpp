@@ -961,6 +961,10 @@ namespace meta {
 
 //        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
+        if (ids.empty()) {
+            return Status::OK();
+        }
+
         std::stringstream idSS;
         for (auto& id : ids) {
             idSS << "id = " << std::to_string(id) << " OR ";
@@ -1405,17 +1409,22 @@ namespace meta {
                     idsToDelete.emplace_back(std::to_string(table_file.id_));
                 }
 
-                std::stringstream idsToDeleteSS;
-                for (auto &id : idsToDelete) {
-                    idsToDeleteSS << "id = " << id << " OR ";
-                }
-                std::string idsToDeleteStr = idsToDeleteSS.str();
-                idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4); //remove the last " OR "
-                cleanUpFilesWithTTLQuery << "DELETE FROM TableFiles WHERE " <<
-                                         idsToDeleteStr << ";";
-                if (!cleanUpFilesWithTTLQuery.exec()) {
-                    ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
-                    return Status::DBTransactionError("CleanUpFilesWithTTL Error", cleanUpFilesWithTTLQuery.error());
+                if (!idsToDelete.empty()) {
+
+                    std::stringstream idsToDeleteSS;
+                    for (auto &id : idsToDelete) {
+                        idsToDeleteSS << "id = " << id << " OR ";
+                    }
+
+                    std::string idsToDeleteStr = idsToDeleteSS.str();
+                    idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4); //remove the last " OR "
+                    cleanUpFilesWithTTLQuery << "DELETE FROM TableFiles WHERE " <<
+                                             idsToDeleteStr << ";";
+                    if (!cleanUpFilesWithTTLQuery.exec()) {
+                        ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
+                        return Status::DBTransactionError("CleanUpFilesWithTTL Error",
+                                                          cleanUpFilesWithTTLQuery.error());
+                    }
                 }
             } //Scoped Connection
 
@@ -1442,29 +1451,33 @@ namespace meta {
                 StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
                 assert(res);
 //            std::cout << res.num_rows() << std::endl;
-                std::stringstream idsToDeleteSS;
-                for (auto &resRow : res) {
-                    size_t id = resRow["id"];
-                    std::string table_id;
-                    resRow["table_id"].to_string(table_id);
 
-                    auto table_path = GetTablePath(table_id);
+                if (!res.empty()) {
 
-                    ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
-                    boost::filesystem::remove_all(table_path);
+                    std::stringstream idsToDeleteSS;
+                    for (auto &resRow : res) {
+                        size_t id = resRow["id"];
+                        std::string table_id;
+                        resRow["table_id"].to_string(table_id);
 
-                    idsToDeleteSS << "id = " << std::to_string(id) << " OR ";
+                        auto table_path = GetTablePath(table_id);
+
+                        ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+                        boost::filesystem::remove_all(table_path);
+
+                        idsToDeleteSS << "id = " << std::to_string(id) << " OR ";
+                    }
+                    std::string idsToDeleteStr = idsToDeleteSS.str();
+                    idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4); //remove the last " OR "
+                    cleanUpFilesWithTTLQuery << "DELETE FROM Tables WHERE " <<
+                                             idsToDeleteStr << ";";
+                    if (!cleanUpFilesWithTTLQuery.exec()) {
+                        ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
+                        return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL",
+                                                          cleanUpFilesWithTTLQuery.error());
+                    }
                 }
-                std::string idsToDeleteStr = idsToDeleteSS.str();
-                idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4); //remove the last " OR "
-                cleanUpFilesWithTTLQuery << "DELETE FROM Tables WHERE " <<
-                                         idsToDeleteStr << ";";
-                if (!cleanUpFilesWithTTLQuery.exec()) {
-                    ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
-                    return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL",
-                                                      cleanUpFilesWithTTLQuery.error());
-                }
-            } //Scoped Connection
+           } //Scoped Connection
 
         } catch (const BadQuery& er) {
             // Handle any query errors
