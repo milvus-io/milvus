@@ -25,7 +25,7 @@ public:
 
         conns_in_use_ = 0;
 
-        maxIdleTime_ = 300; //300ms
+        maxIdleTime_ = 10; //10 seconds
     }
 
     // The destructor.  We _must_ call ConnectionPool::clear() here,
@@ -56,7 +56,7 @@ public:
 //        ENGINE_LOG_DEBUG << "conns_in_use_ in release: " << conns_in_use_ << std::endl;
         --conns_in_use_;
         if (conns_in_use_ < 0) {
-            ENGINE_LOG_ERROR << "conns_in_use_ in release less than zero: " << conns_in_use_ << std::endl;
+            ENGINE_LOG_ERROR << "MySQLConnetionPool::release: conns_in_use_ is less than zero.  conns_in_use_ = " << conns_in_use_ << std::endl;
         }
     }
 
