@@ -25,7 +25,6 @@ DBWrapper::DBWrapper() {
     }
     ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
     opt.mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
-//    std::cout << "mode = " << opt.mode << std::endl;
 
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
