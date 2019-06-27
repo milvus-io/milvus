@@ -102,6 +102,15 @@ ClientProxy::CreateTable(const TableSchema &param) {
     return Status::OK();
 }
 
+bool
+ClientProxy::HasTable(const std::string &table_name) {
+    if(!IsConnected()) {
+        return false;
+    }
+
+    return ClientPtr()->interface()->HasTable(table_name);
+}
+
 Status
 ClientProxy::DeleteTable(const std::string &table_name) {
     if(!IsConnected()) {

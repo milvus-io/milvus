@@ -25,6 +25,8 @@ public:
 
     virtual Status CreateTable(const TableSchema &param) override;
 
+    virtual bool HasTable(const std::string &table_name) override;
+
     virtual Status DeleteTable(const std::string &table_name) override;
 
     virtual Status AddVector(const std::string &table_name,
