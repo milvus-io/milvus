@@ -19,13 +19,19 @@ static constexpr uint64_t ONE_KB = 1024;
 static constexpr uint64_t ONE_MB = ONE_KB*ONE_KB;
 static constexpr uint64_t ONE_GB = ONE_KB*ONE_MB;
 
+static const std::string ARCHIVE_CONF_DISK = "disk";
+static const std::string ARCHIVE_CONF_DAYS = "days";
+static const std::string ARCHIVE_CONF_DEFAULT = ARCHIVE_CONF_DISK + ":512";
+
 struct ArchiveConf {
     using CriteriaT = std::map<std::string, int>;
 
-    ArchiveConf(const std::string& type, const std::string& criterias = "disk:512");
+    ArchiveConf(const std::string& type, const std::string& criterias = ARCHIVE_CONF_DEFAULT);
 
     const std::string& GetType() const { return type_; }
     const CriteriaT GetCriterias() const { return criterias_; }
+
+    void SetCriterias(const ArchiveConf::CriteriaT& criterial);
 
 private:
     void ParseCritirias(const std::string& type);
