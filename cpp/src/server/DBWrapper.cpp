@@ -23,6 +23,9 @@ DBWrapper::DBWrapper() {
     if(index_size > 0) {//ensure larger than zero, unit is MB
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
+    ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
+    opt.mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
+
 
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
