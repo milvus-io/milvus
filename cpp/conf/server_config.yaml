@@ -8,6 +8,8 @@ db_config:
   db_path: /tmp/milvus             # milvus data storage path
   db_backend_url: http://127.0.0.1 # meta database uri
   index_building_threshold: 1024   # index building trigger threshold, default: 1024, unit: MB
+  archive_disk_threshold: 512      # triger archive action if storage size exceed this value, unit: GB
+  archive_days_threshold: 30       # files older than x days will be archived, unit: day
 
 metric_config:
   is_startup: true      # if monitoring start: on, off

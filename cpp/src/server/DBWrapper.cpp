@@ -24,6 +24,19 @@ DBWrapper::DBWrapper() {
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
 
+    //set archive config
+    engine::ArchiveConf::CriteriaT criterial;
+    int64_t disk = config.GetInt64Value(CONFIG_DB_ARCHIVE_DISK, 0);
+    int64_t days = config.GetInt64Value(CONFIG_DB_ARCHIVE_DAYS, 0);
+    if(disk > 0) {
+        criterial[engine::ARCHIVE_CONF_DISK] = disk;
+    }
+    if(days > 0) {
+        criterial[engine::ARCHIVE_CONF_DAYS] = days;
+    }
+    opt.meta.archive_conf.SetCriterias(criterial);
+
+    //create db root folder
     CommonUtil::CreateDirectory(opt.meta.path);
 
     zilliz::milvus::engine::DB::Open(opt, &db_);
