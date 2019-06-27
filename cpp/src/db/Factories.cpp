@@ -81,11 +81,11 @@ std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOp
         std::string dialect = pieces_match[1].str();
         std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
         if (dialect.find("mysql") != std::string::npos) {
-            ENGINE_LOG_DEBUG << "Using MySQL";
+            ENGINE_LOG_INFO << "Using MySQL";
             return std::make_shared<meta::MySQLMetaImpl>(meta::MySQLMetaImpl(metaOptions));
         }
         else if (dialect.find("sqlite") != std::string::npos) {
-            ENGINE_LOG_DEBUG << "Using SQLite";
+            ENGINE_LOG_INFO << "Using SQLite";
             return std::make_shared<meta::DBMetaImpl>(meta::DBMetaImpl(metaOptions));
         }
         else {

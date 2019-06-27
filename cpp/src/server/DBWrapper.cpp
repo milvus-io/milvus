@@ -23,16 +23,30 @@ DBWrapper::DBWrapper() {
     if(index_size > 0) {//ensure larger than zero, unit is MB
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
-    ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
-    opt.mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
-//    std::cout << "mode = " << opt.mode << std::endl;
 
-    CommonUtil::CreateDirectory(opt.meta.path);
+    //set archive config
+    engine::ArchiveConf::CriteriaT criterial;
+    int64_t disk = config.GetInt64Value(CONFIG_DB_ARCHIVE_DISK, 0);
+    int64_t days = config.GetInt64Value(CONFIG_DB_ARCHIVE_DAYS, 0);
+    if(disk > 0) {
+        criterial[engine::ARCHIVE_CONF_DISK] = disk;
+    }
+    if(days > 0) {
+        criterial[engine::ARCHIVE_CONF_DAYS] = days;
+    }
+    opt.meta.archive_conf.SetCriterias(criterial);
+
+    //create db root folder
+    ServerError err = CommonUtil::CreateDirectory(opt.meta.path);
+    if(err != SERVER_SUCCESS) {
+        std::cout << "ERROR! Failed to create database root path: " << opt.meta.path << std::endl;
+        kill(0, SIGUSR1);
+    }
 
     zilliz::milvus::engine::DB::Open(opt, &db_);
     if(db_ == nullptr) {
-        SERVER_LOG_ERROR << "Failed to open db. Provided database uri = " << opt.meta.backend_uri;
-        throw ServerException(SERVER_NULL_POINTER, "Failed to open db");
+        std::cout << "ERROR! Failed to open database" << std::endl;
+        kill(0, SIGUSR1);
     }
 }
 

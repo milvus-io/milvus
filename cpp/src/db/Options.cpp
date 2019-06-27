@@ -24,6 +24,12 @@ ArchiveConf::ArchiveConf(const std::string& type, const std::string& criterias) 
     ParseCritirias(criterias);
 }
 
+void ArchiveConf::SetCriterias(const ArchiveConf::CriteriaT& criterial) {
+    for(auto& pair : criterial) {
+        criterias_[pair.first] = pair.second;
+    }
+}
+
 void ArchiveConf::ParseCritirias(const std::string& criterias) {
     std::stringstream ss(criterias);
     std::vector<std::string> tokens;

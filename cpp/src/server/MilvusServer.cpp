@@ -8,7 +8,6 @@
 #include "ServerConfig.h"
 #include "ThreadPoolServer.h"
 #include "DBWrapper.h"
-#include "utils/Log.h"
 
 #include "milvus_types.h"
 #include "milvus_constants.h"
@@ -24,6 +23,7 @@
 #include <thrift/concurrency/PosixThreadFactory.h>
 
 #include <thread>
+#include <iostream>
 
 namespace zilliz {
 namespace milvus {
@@ -68,7 +68,7 @@ MilvusServer::StartService() {
         } else if (protocol == "compact") {
             protocol_factory.reset(new TCompactProtocolFactory());
         } else {
-            SERVER_LOG_ERROR << "Service protocol: " << protocol << " is not supported currently";
+            //SERVER_LOG_INFO << "Service protocol: " << protocol << " is not supported currently";
             return;
         }
 
@@ -89,11 +89,12 @@ MilvusServer::StartService() {
                                                  threadManager));
             s_server->serve();
         } else {
-            SERVER_LOG_ERROR << "Service mode: " << mode << " is not supported currently";
+            //SERVER_LOG_INFO << "Service mode: " << mode << " is not supported currently";
             return;
         }
     } catch (apache::thrift::TException& ex) {
-        SERVER_LOG_ERROR << "Server encounter exception: " << ex.what();
+        std::cout << "ERROR! " << ex.what() << std::endl;
+        kill(0, SIGUSR1);
     }
 }
 

@@ -15,12 +15,26 @@ namespace netcore milvus.thrift
 
 enum ErrorCode {
     SUCCESS = 0,
+    UNEXPECTED_ERROR,
     CONNECT_FAILED,
     PERMISSION_DENIED,
     TABLE_NOT_EXISTS,
     ILLEGAL_ARGUMENT,
     ILLEGAL_RANGE,
     ILLEGAL_DIMENSION,
+    ILLEGAL_INDEX_TYPE,
+    ILLEGAL_TABLE_NAME,
+    ILLEGAL_TOPK,
+    ILLEGAL_ROWRECORD,
+    ILLEGAL_VECTOR_ID,
+    ILLEGAL_SEARCH_RESULT,
+    FILE_NOT_FOUND,
+    META_FAILED,
+    CACHE_FAILED,
+    CANNOT_CREATE_FOLDER,
+    CANNOT_CREATE_FILE,
+    CANNOT_DELETE_FOLDER,
+    CANNOT_DELETE_FILE,
 }
 
 exception Exception {
@@ -79,6 +93,16 @@ service MilvusService {
      *
      */
     void CreateTable(2: TableSchema param) throws(1: Exception e);
+
+    /**
+     * @brief Test table existence method
+     *
+     * This method is used to test table existence.
+     *
+     * @param table_name, table name is going to be tested.
+     *
+     */
+    bool HasTable(2: string table_name) throws(1: Exception e);
 
 
     /**

@@ -2,6 +2,7 @@
 
 #include <string>
 #include <unistd.h>
+#include <atomic>
 
 #include "Log.h"
 
@@ -53,13 +54,17 @@ public:
     // Other half of in-use conn count limit
     void release(const mysqlpp::Connection* pc) override {
         mysqlpp::ConnectionPool::release(pc);
-//        ENGINE_LOG_DEBUG << "conns_in_use_ in release: " << conns_in_use_ << std::endl;
+
         if (conns_in_use_ <= 0) {
             ENGINE_LOG_WARNING << "MySQLConnetionPool::release: conns_in_use_ is less than zero.  conns_in_use_ = " << conns_in_use_ << std::endl;
         }
         else {
             --conns_in_use_;
         }
+    }
+
+    int getConnectionsInUse() {
+        return conns_in_use_;
     }
 
     void set_max_idle_time(int max_idle) {
@@ -96,7 +101,7 @@ protected:
 
 private:
     // Number of connections currently in use
-    int conns_in_use_;
+    std::atomic<int> conns_in_use_;
 
     // Our connection parameters
     std::string db_, user_, password_, server_;

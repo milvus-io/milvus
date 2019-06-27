@@ -24,6 +24,15 @@ RequestHandler::CreateTable(const thrift::TableSchema &param) {
     RequestScheduler::ExecTask(task_ptr);
 }
 
+bool
+RequestHandler::HasTable(const std::string &table_name) {
+    bool has_table = false;
+    BaseTaskPtr task_ptr = HasTableTask::Create(table_name, has_table);
+    RequestScheduler::ExecTask(task_ptr);
+
+    return has_table;
+}
+
 void
 RequestHandler::DeleteTable(const std::string &table_name) {
     BaseTaskPtr task_ptr = DeleteTableTask::Create(table_name);
