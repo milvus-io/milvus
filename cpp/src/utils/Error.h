@@ -24,18 +24,35 @@ ToGlobalServerErrorCode(const ServerError error_code) {
     return SERVER_ERROR_CODE_BASE + error_code;
 }
 
-constexpr ServerError SERVER_UNEXPECTED_ERROR = ToGlobalServerErrorCode(0x001);
-constexpr ServerError SERVER_UNSUPPORTED_ERROR = ToGlobalServerErrorCode(0x002);
-constexpr ServerError SERVER_NULL_POINTER = ToGlobalServerErrorCode(0x003);
-constexpr ServerError SERVER_INVALID_ARGUMENT = ToGlobalServerErrorCode(0x004);
-constexpr ServerError SERVER_FILE_NOT_FOUND = ToGlobalServerErrorCode(0x005);
-constexpr ServerError SERVER_NOT_IMPLEMENT = ToGlobalServerErrorCode(0x006);
-constexpr ServerError SERVER_BLOCKING_QUEUE_EMPTY = ToGlobalServerErrorCode(0x007);
-constexpr ServerError SERVER_TABLE_NOT_EXIST = ToGlobalServerErrorCode(0x008);
-constexpr ServerError SERVER_INVALID_TIME_RANGE = ToGlobalServerErrorCode(0x009);
-constexpr ServerError SERVER_INVALID_VECTOR_DIMENSION = ToGlobalServerErrorCode(0x00a);
-constexpr ServerError SERVER_LICENSE_VALIDATION_FAIL = ToGlobalServerErrorCode(0x00b);
-constexpr ServerError SERVER_LICENSE_FILE_NOT_EXIST = ToGlobalServerErrorCode(0x00c);
+constexpr ServerError SERVER_UNEXPECTED_ERROR = ToGlobalServerErrorCode(1);
+constexpr ServerError SERVER_UNSUPPORTED_ERROR = ToGlobalServerErrorCode(2);
+constexpr ServerError SERVER_NULL_POINTER = ToGlobalServerErrorCode(3);
+constexpr ServerError SERVER_INVALID_ARGUMENT = ToGlobalServerErrorCode(4);
+constexpr ServerError SERVER_FILE_NOT_FOUND = ToGlobalServerErrorCode(5);
+constexpr ServerError SERVER_NOT_IMPLEMENT = ToGlobalServerErrorCode(6);
+constexpr ServerError SERVER_BLOCKING_QUEUE_EMPTY = ToGlobalServerErrorCode(7);
+constexpr ServerError SERVER_CANNOT_CREATE_FOLDER = ToGlobalServerErrorCode(8);
+constexpr ServerError SERVER_CANNOT_CREATE_FILE = ToGlobalServerErrorCode(9);
+constexpr ServerError SERVER_CANNOT_DELETE_FOLDER = ToGlobalServerErrorCode(10);
+constexpr ServerError SERVER_CANNOT_DELETE_FILE = ToGlobalServerErrorCode(11);
+
+constexpr ServerError SERVER_TABLE_NOT_EXIST = ToGlobalServerErrorCode(100);
+constexpr ServerError SERVER_INVALID_TABLE_NAME = ToGlobalServerErrorCode(101);
+constexpr ServerError SERVER_INVALID_TABLE_DIMENSION = ToGlobalServerErrorCode(102);
+constexpr ServerError SERVER_INVALID_TIME_RANGE = ToGlobalServerErrorCode(103);
+constexpr ServerError SERVER_INVALID_VECTOR_DIMENSION = ToGlobalServerErrorCode(104);
+constexpr ServerError SERVER_INVALID_INDEX_TYPE = ToGlobalServerErrorCode(105);
+constexpr ServerError SERVER_INVALID_ROWRECORD = ToGlobalServerErrorCode(106);
+constexpr ServerError SERVER_INVALID_ROWRECORD_ARRAY = ToGlobalServerErrorCode(107);
+constexpr ServerError SERVER_INVALID_TOPK = ToGlobalServerErrorCode(108);
+constexpr ServerError SERVER_ILLEGAL_VECTOR_ID = ToGlobalServerErrorCode(109);
+constexpr ServerError SERVER_ILLEGAL_SEARCH_RESULT = ToGlobalServerErrorCode(110);
+constexpr ServerError SERVER_CACHE_ERROR = ToGlobalServerErrorCode(111);
+
+constexpr ServerError SERVER_LICENSE_FILE_NOT_EXIST = ToGlobalServerErrorCode(500);
+constexpr ServerError SERVER_LICENSE_VALIDATION_FAIL = ToGlobalServerErrorCode(501);
+
+constexpr ServerError DB_META_TRANSACTION_FAILED = ToGlobalServerErrorCode(1000);
 
 class ServerException : public std::exception {
 public:
