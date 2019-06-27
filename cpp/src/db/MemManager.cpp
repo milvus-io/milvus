@@ -146,11 +146,16 @@ Status MemManager::InsertVectorsNoLock(const std::string& table_id,
 
 Status MemManager::ToImmutable() {
     std::unique_lock<std::mutex> lock(mutex_);
+    MemIdMap temp_map;
     for (auto& kv: mem_id_map_) {
+        if(kv.second->RowCount() == 0) {
+            temp_map.insert(kv);
+            continue;//empty vector, no need to serialize
+        }
         immu_mem_list_.push_back(kv.second);
     }
 
-    mem_id_map_.clear();
+    mem_id_map_.swap(temp_map);
     return Status::OK();
 }
 
@@ -168,8 +173,21 @@ Status MemManager::Serialize(std::set<std::string>& table_ids) {
 }
 
 Status MemManager::EraseMemVector(const std::string& table_id) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    mem_id_map_.erase(table_id);
+    {//erase MemVector from rapid-insert cache
+        std::unique_lock<std::mutex> lock(mutex_);
+        mem_id_map_.erase(table_id);
+    }
+
+    {//erase MemVector from serialize cache
+        std::unique_lock<std::mutex> lock(serialization_mtx_);
+        MemList temp_list;
+        for (auto& mem : immu_mem_list_) {
+            if(mem->TableId() != table_id) {
+                temp_list.push_back(mem);
+            }
+        }
+        immu_mem_list_.swap(temp_list);
+    }
 
     return Status::OK();
 }

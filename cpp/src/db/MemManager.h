@@ -45,6 +45,8 @@ public:
 
     const std::string& Location() const { return schema_.location_; }
 
+    std::string TableId() const { return schema_.table_id_; }
+
 private:
     MemVectors() = delete;
     MemVectors(const MemVectors&) = delete;
