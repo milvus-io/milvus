@@ -140,7 +140,9 @@ ServerError CreateTableTask::OnExecute() {
         //step 1: check arguments
         if(schema_.table_name.empty() || schema_.dimension <= 0) {
             error_code_ = SERVER_INVALID_ARGUMENT;
-            error_msg_ = "Invalid table name or dimension";
+//            error_msg_ = schema_.table_name.empty() ?
+            error_msg_ = "CreateTableTask: Invalid table name or dimension. table name = " + schema_.table_name
+                        + "dimension = " + std::to_string(schema_.dimension);
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -148,7 +150,7 @@ ServerError CreateTableTask::OnExecute() {
         engine::EngineType engine_type = EngineType(schema_.index_type);
         if(engine_type == engine::EngineType::INVALID) {
             error_code_ = SERVER_INVALID_ARGUMENT;
-            error_msg_ = "Invalid index type";
+            error_msg_ = "CreateTableTask: Invalid index type. type = " + std::to_string(schema_.index_type);
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -164,7 +166,7 @@ ServerError CreateTableTask::OnExecute() {
         engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
         if(!stat.ok()) {//table could exist
             error_code_ = SERVER_UNEXPECTED_ERROR;
-            error_msg_ = "Engine failed: " + stat.ToString();
+            error_msg_ = "CreateTableTask: Engine failed: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -172,7 +174,7 @@ ServerError CreateTableTask::OnExecute() {
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
-        SERVER_LOG_ERROR << error_msg_;
+        SERVER_LOG_ERROR << "CreateTableTask: " << error_msg_;
         return error_code_;
     }
 
@@ -200,7 +202,7 @@ ServerError DescribeTableTask::OnExecute() {
         //step 1: check arguments
         if(table_name_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
-            error_msg_ = "Table name cannot be empty";
+            error_msg_ = "DescribeTableTask: Table name cannot be empty";
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -211,7 +213,7 @@ ServerError DescribeTableTask::OnExecute() {
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_TABLE_NOT_EXIST;
-            error_msg_ = "Engine failed: " + stat.ToString();
+            error_msg_ = "DescribeTableTask: Engine failed: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -224,7 +226,7 @@ ServerError DescribeTableTask::OnExecute() {
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
-        SERVER_LOG_ERROR << error_msg_;
+        SERVER_LOG_ERROR << "DescribeTableTask: " << error_msg_;
         return SERVER_UNEXPECTED_ERROR;
     }
 
@@ -251,7 +253,7 @@ ServerError DeleteTableTask::OnExecute() {
         //step 1: check arguments
         if (table_name_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
-            error_msg_ = "Table name cannot be empty";
+            error_msg_ = "DeleteTableTask: Table name cannot be empty";
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -262,7 +264,7 @@ ServerError DeleteTableTask::OnExecute() {
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_TABLE_NOT_EXIST;
-            error_msg_ = "Engine failed: " + stat.ToString();
+            error_msg_ = "DeleteTableTask: Engine failed: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -273,16 +275,16 @@ ServerError DeleteTableTask::OnExecute() {
         std::vector<DB_DATE> dates;
         stat = DBWrapper::DB()->DeleteTable(table_name_, dates);
         if(!stat.ok()) {
-            SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+            SERVER_LOG_ERROR << "DeleteTableTask: Engine failed: " << stat.ToString();
             return SERVER_UNEXPECTED_ERROR;
         }
 
         rc.Record("deleta table");
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
-        SERVER_LOG_ERROR << error_msg_;
+        SERVER_LOG_ERROR << "DeleteTableTask: " << error_msg_;
         return error_code_;
     }
 
@@ -305,7 +307,7 @@ ServerError ShowTablesTask::OnExecute() {
     engine::Status stat = DBWrapper::DB()->AllTables(schema_array);
     if(!stat.ok()) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
-        error_msg_ = "Engine failed: " + stat.ToString();
+        error_msg_ = "ShowTablesTask: Engine failed: " + stat.ToString();
         SERVER_LOG_ERROR << error_msg_;
         return error_code_;
     }
@@ -342,14 +344,14 @@ ServerError AddVectorTask::OnExecute() {
         //step 1: check arguments
         if (table_name_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
-            error_msg_ = "Table name cannot be empty";
+            error_msg_ = "AddVectorTask: Table name cannot be empty";
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
 
         if(record_array_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
-            error_msg_ = "Row record array is empty";
+            error_msg_ = "AddVectorTask: Row record array is empty";
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -360,7 +362,7 @@ ServerError AddVectorTask::OnExecute() {
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_TABLE_NOT_EXIST;
-            error_msg_ = "Engine failed: " + stat.ToString();
+            error_msg_ = "AddVectorTask: Engine failed when DescribeTable: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -371,7 +373,7 @@ ServerError AddVectorTask::OnExecute() {
         std::vector<float> vec_f;
         error_code_ = ConvertRowRecordToFloatArray(record_array_, table_info.dimension_, vec_f);
         if(error_code_ != SERVER_SUCCESS) {
-            error_msg_ = "Invalid row record data";
+            error_msg_ = "AddVectorTask when ConvertRowRecordToFloatArray: Invalid row record data";
             return error_code_;
         }
 
@@ -383,23 +385,23 @@ ServerError AddVectorTask::OnExecute() {
         rc.Record("add vectors to engine");
         if(!stat.ok()) {
             error_code_ = SERVER_UNEXPECTED_ERROR;
-            error_msg_ = "Engine failed: " + stat.ToString();
+            error_msg_ = "AddVectorTask: Engine failed when InsertVectors: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
 
         if(record_ids_.size() != vec_count) {
-            SERVER_LOG_ERROR << "Vector ID not returned";
+            SERVER_LOG_ERROR << "AddVectorTask: Vector ID not returned";
             return SERVER_UNEXPECTED_ERROR;
         }
 
         rc.Record("do insert");
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
 
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
-        SERVER_LOG_ERROR << error_msg_;
+        SERVER_LOG_ERROR << "AddVectorTask: " << error_msg_;
         return error_code_;
     }
 
@@ -440,14 +442,14 @@ ServerError SearchVectorTask::OnExecute() {
         //step 1: check arguments
         if (table_name_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
-            error_msg_ = "Table name cannot be empty";
+            error_msg_ = "SearchVectorTask: Table name cannot be empty";
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
 
         if(top_k_ <= 0 || record_array_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
-            error_msg_ = "Invalid topk value, or query record array is empty";
+            error_msg_ = "SearchVectorTask: Invalid topk value, or query record array is empty";
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -458,7 +460,7 @@ ServerError SearchVectorTask::OnExecute() {
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if(!stat.ok()) {
             error_code_ = SERVER_TABLE_NOT_EXIST;
-            error_msg_ = "Engine failed: " + stat.ToString();
+            error_msg_ = "SearchVectorTask: Engine failed when DescribeTable: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -467,7 +469,7 @@ ServerError SearchVectorTask::OnExecute() {
         std::vector<DB_DATE> dates;
         error_code_ = ConvertTimeRangeToDBDates(range_array_, dates);
         if(error_code_ != SERVER_SUCCESS) {
-            error_msg_ = "Invalid query range";
+            error_msg_ = "SearchVectorTask: Invalid query range when ConvertTimeRangeToDBDates";
             return error_code_;
         }
 
@@ -477,7 +479,7 @@ ServerError SearchVectorTask::OnExecute() {
         std::vector<float> vec_f;
         error_code_ = ConvertRowRecordToFloatArray(record_array_, table_info.dimension_, vec_f);
         if(error_code_ != SERVER_SUCCESS) {
-            error_msg_ = "Invalid row record data";
+            error_msg_ = "Invalid row record data when ConvertRowRecordToFloatArray";
             return error_code_;
         }
 
@@ -495,12 +497,12 @@ ServerError SearchVectorTask::OnExecute() {
 
         rc.Record("search vectors from engine");
         if(!stat.ok()) {
-            SERVER_LOG_ERROR << "Engine failed: " << stat.ToString();
+            SERVER_LOG_ERROR << "SearchVectorTask: Engine failed: " << stat.ToString();
             return SERVER_UNEXPECTED_ERROR;
         }
 
         if(results.size() != record_count) {
-            SERVER_LOG_ERROR << "Search result not returned";
+            SERVER_LOG_ERROR << "SearchVectorTask: Search result not returned";
             return SERVER_UNEXPECTED_ERROR;
         }
 
@@ -523,12 +525,12 @@ ServerError SearchVectorTask::OnExecute() {
             result_array_.emplace_back(thrift_topk_result);
         }
         rc.Record("construct result");
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
 
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
-        SERVER_LOG_ERROR << error_msg_;
+        SERVER_LOG_ERROR << "SearchVectorTask: " << error_msg_;
         return error_code_;
     }
 
@@ -554,7 +556,7 @@ ServerError GetTableRowCountTask::OnExecute() {
         //step 1: check arguments
         if (table_name_.empty()) {
             error_code_ = SERVER_INVALID_ARGUMENT;
-            error_msg_ = "Table name cannot be empty";
+            error_msg_ = "GetTableRowCountTask: Table name cannot be empty";
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
@@ -564,19 +566,19 @@ ServerError GetTableRowCountTask::OnExecute() {
         engine::Status stat = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
         if (!stat.ok()) {
             error_code_ = SERVER_UNEXPECTED_ERROR;
-            error_msg_ = "Engine failed: " + stat.ToString();
+            error_msg_ = "GetTableRowCountTask: Engine failed: " + stat.ToString();
             SERVER_LOG_ERROR << error_msg_;
             return error_code_;
         }
 
         row_count_ = (int64_t) row_count;
 
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
 
     } catch (std::exception& ex) {
         error_code_ = SERVER_UNEXPECTED_ERROR;
         error_msg_ = ex.what();
-        SERVER_LOG_ERROR << error_msg_;
+        SERVER_LOG_ERROR << "GetTableRowCountTask: " << error_msg_;
         return error_code_;
     }
 
