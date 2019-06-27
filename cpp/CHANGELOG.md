@@ -23,6 +23,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-115 - Change is_startup of metric_config switch from true to on
 - MS-122 - Archive criteria config 
 - MS-124 - HasTable interface
+- MS-126 - Add more error code
 
 ## New Feature
 
