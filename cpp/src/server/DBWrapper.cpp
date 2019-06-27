@@ -37,12 +37,16 @@ DBWrapper::DBWrapper() {
     opt.meta.archive_conf.SetCriterias(criterial);
 
     //create db root folder
-    CommonUtil::CreateDirectory(opt.meta.path);
+    ServerError err = CommonUtil::CreateDirectory(opt.meta.path);
+    if(err != SERVER_SUCCESS) {
+        std::cout << "ERROR! Failed to create database root path: " << opt.meta.path << std::endl;
+        kill(0, SIGUSR1);
+    }
 
     zilliz::milvus::engine::DB::Open(opt, &db_);
     if(db_ == nullptr) {
-        SERVER_LOG_ERROR << "Failed to open db";
-        throw ServerException(SERVER_NULL_POINTER, "Failed to open db");
+        std::cout << "ERROR! Failed to open database" << std::endl;
+        kill(0, SIGUSR1);
     }
 }
 
