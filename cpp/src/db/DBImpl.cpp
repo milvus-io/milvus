@@ -139,7 +139,9 @@ DBImpl::DBImpl(const Options& options)
     meta_ptr_ = DBMetaImplFactory::Build(options.meta);
     mem_mgr_ = std::make_shared<MemManager>(meta_ptr_, options_);
     // mem_mgr_ = (MemManagerPtr)(new MemManager(meta_ptr_, options_));
-    StartTimerTasks();
+    if (options.mode != "read_only") {
+        StartTimerTasks();
+    }
 }
 
 Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
