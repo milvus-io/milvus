@@ -6,6 +6,7 @@ LICENSE_CHECK="OFF"
 INSTALL_PREFIX=$(pwd)/milvus
 MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
+DB_PATH="/opt/milvus"
 
 while getopts "p:t:uhlrc" arg
 do
@@ -71,6 +72,7 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
     -DCMAKE_LICENSE_CHECK=${LICENSE_CHECK} \
     -DBUILD_COVERAGE=${BUILD_COVERAGE} \
+    -DMILVUS_DB_PATHE=${DB_PATH} \
     $@ ../"
     echo ${CMAKE_CMD}
 

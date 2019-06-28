@@ -142,7 +142,12 @@ endif(BUILD_UNIT_TEST)
 
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 
-set(MILVUS_PATH "/tmp/milvus")
+
+if("${MILVUS_DB_PATHE}" STREQUAL "")
+    set(MILVUS_PATH "/tmp/milvus")
+else()
+    set(MILVUS_PATH ${MILVUS_DB_PATHE})
+endif()
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
 
