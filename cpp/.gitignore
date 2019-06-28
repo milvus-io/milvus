@@ -3,3 +3,8 @@ conf/server_config.yaml
 conf/log_config.conf
 version.h
 megasearch/
+lcov_out/
+base.info
+output.info
+output_new.info
+server.info
