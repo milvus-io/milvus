@@ -24,7 +24,7 @@ metric_config:
     push_gateway_port: 9091            # push method configure: push gateway port
 
 license_config:         # license configure
-  license_path: "/tmp/milvus/system.license" # license file path
+  license_path: "/opt/milvus/system.license" # license file path
 
 cache_config:           # cache configure
   cpu_cache_capacity: 16   # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory
