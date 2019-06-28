@@ -59,8 +59,6 @@ class SystemInfo {
     double MemoryPercent();
     double CPUPercent();
     std::pair<unsigned long long , unsigned long long > Octets();
-//    std::unordered_map<int,std::vector<double>> GetGPUMemPercent() {};
-//    std::vector<std::string> split(std::string input) {};
     std::vector<unsigned int> GPUPercent();
     std::vector<unsigned long long> GPUMemoryUsed();
 
