@@ -141,6 +141,10 @@ endif(BUILD_UNIT_TEST)
 
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
 
+set(MILVUS_PATH "/tmp/milvus")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
+
 #install
 install(FILES
         scripts/start_server.sh
@@ -152,5 +156,7 @@ install(FILES
         conf/log_config.conf
         DESTINATION
         conf)
+
+
 
 config_summary()
