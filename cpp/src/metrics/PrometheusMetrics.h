@@ -46,7 +46,7 @@ class PrometheusMetrics: public MetricsBase {
     std::shared_ptr<prometheus::Registry> registry_ = std::make_shared<prometheus::Registry>();
     bool startup_ = false;
  public:
-
+    void SetStartup(bool startup) {startup_ = startup;};
     void AddVectorsSuccessTotalIncrement(double value = 1.0) override { if(startup_) add_vectors_success_total_.Increment(value);};
     void AddVectorsFailTotalIncrement(double value = 1.0) override { if(startup_) add_vectors_fail_total_.Increment(value);};
     void AddVectorsDurationHistogramOberve(double value) override { if(startup_) add_vectors_duration_histogram_.Observe(value);};
