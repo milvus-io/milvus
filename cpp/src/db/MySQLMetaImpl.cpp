@@ -438,6 +438,9 @@ namespace meta {
                 }
 
             } //Scoped Connection
+
+            DeleteTableFiles(table_id);
+
         } catch (const BadQuery& er) {
             // Handle any query errors
             ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DELETING TABLE" << ": " << er.what();

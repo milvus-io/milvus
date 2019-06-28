@@ -9,13 +9,6 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-void StringHelpFunctions::TrimStringLineBreak(std::string &string) {
-    if (!string.empty()) {
-        static std::string s_format("\n\r");
-        string.erase(string.find_last_not_of(s_format) + 1);
-    }
-}
-
 void StringHelpFunctions::TrimStringBlank(std::string &string) {
     if (!string.empty()) {
         static std::string s_format(" \n\r\t");
