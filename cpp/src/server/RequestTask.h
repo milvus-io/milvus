@@ -7,7 +7,6 @@
 
 #include "RequestScheduler.h"
 #include "utils/Error.h"
-#include "utils/AttributeSerializer.h"
 #include "db/Types.h"
 
 #include "milvus_types.h"

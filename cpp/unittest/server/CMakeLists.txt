@@ -14,9 +14,10 @@ aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(../../src/wrapper wrapper_src)
 aux_source_directory(./ test_srcs)
 
-set(server_src_files
+set(utils_srcs
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
-        ${MILVUS_ENGINE_SRC}/utils/AttributeSerializer.cpp
+        ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
+        ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
         )
 
 cuda_add_executable(server_test
@@ -25,7 +26,7 @@ cuda_add_executable(server_test
         ${cache_srcs}
         ${wrapper_src}
         ${test_srcs}
-        ${server_src_files}
+        ${utils_srcs}
         ${require_files}
         )
 
