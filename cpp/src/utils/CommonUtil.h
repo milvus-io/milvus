@@ -20,7 +20,7 @@ class CommonUtil {
     static bool GetSystemAvailableThreads(unsigned int &threadCnt);
 
     static bool IsFileExist(const std::string &path);
-    static bool IsDirectoryExit(const std::string &path);
+    static bool IsDirectoryExist(const std::string &path);
     static ServerError CreateDirectory(const std::string &path);
     static ServerError DeleteDirectory(const std::string &path);
 
