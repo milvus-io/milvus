@@ -1,13 +1,14 @@
 #!/bin/bash
 
 BUILD_TYPE="Debug"
-BUILD_UNITTEST="off"
+BUILD_UNITTEST="OFF"
 LICENSE_CHECK="OFF"
 INSTALL_PREFIX=$(pwd)/milvus
 MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
+DB_PATH="/opt/milvus"
 
-while getopts "p:t:uhlrc" arg
+while getopts "p:d:t:uhlrc" arg
 do
         case $arg in
              t)
@@ -15,10 +16,13 @@ do
                 ;;
              u)
                 echo "Build and run unittest cases" ;
-                BUILD_UNITTEST="on";
+                BUILD_UNITTEST="ON";
                 ;;
              p)
                 INSTALL_PREFIX=$OPTARG
+                ;;
+             d)
+                DB_PATH=$OPTARG
                 ;;
              l)
                 LICENSE_CHECK="ON"
@@ -36,12 +40,13 @@ do
                 echo "
 
 parameter:
--t: build type
--u: building unit test options
--p: install prefix
--l: build license version
--r: remove previous build directory
--c: code coverage
+-t: build type(default: Debug)
+-u: building unit test options(default: OFF)
+-p: install prefix(default: $(pwd)/milvus)
+-d: db path(default: /opt/milvus)
+-l: build license version(default: OFF)
+-r: remove previous build directory(default: OFF)
+-c: code coverage(default: OFF)
 
 usage:
 ./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c]
@@ -71,6 +76,7 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
     -DCMAKE_LICENSE_CHECK=${LICENSE_CHECK} \
     -DBUILD_COVERAGE=${BUILD_COVERAGE} \
+    -DMILVUS_DB_PATH=${DB_PATH} \
     $@ ../"
     echo ${CMAKE_CMD}
 
