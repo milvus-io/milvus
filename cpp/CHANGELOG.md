@@ -24,6 +24,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-122 - Archive criteria config 
 - MS-124 - HasTable interface
 - MS-126 - Add more error code
+- MS-128 - Change default db path
 
 ## New Feature
 
