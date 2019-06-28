@@ -135,46 +135,6 @@ SystemInfo::CPUPercent() {
     return percent;
 }
 
-//std::unordered_map<int,std::vector<double>>
-//SystemInfo::GetGPUMemPercent(){
-//    // return GPUID: MEM%
-//
-//    //write GPU info to a file
-//    system("nvidia-smi pmon -c 1 > GPUInfo.txt");
-//    int pid = (int)getpid();
-//
-//    //parse line
-//    std::ifstream read_file;
-//    read_file.open("GPUInfo.txt");
-//    std::string line;
-//    while(getline(read_file, line)){
-//        std::vector<std::string> words = split(line);
-//        //                    0      1     2    3   4    5    6      7
-//        //words stand for gpuindex, pid, type, sm, mem, enc, dec, command respectively
-//        if(std::stoi(words[1]) != pid) continue;
-//        int GPUindex = std::stoi(words[0]);
-//        double sm_percent = std::stod(words[3]);
-//        double mem_percent = std::stod(words[4]);
-//
-//    }
-//
-//}
-
-//std::vector<std::string>
-//SystemInfo::split(std::string input) {
-//    std::vector<std::string> words;
-//    input += " ";
-//    int word_start = 0;
-//    for (int i = 0; i < input.size(); ++i) {
-//        if(input[i] != ' ') continue;
-//        if(input[i] == ' ') {
-//            word_start = i + 1;
-//            continue;
-//        }
-//        words.push_back(input.substr(word_start,i-word_start));
-//    }
-//    return words;
-//}
 
 std::vector<unsigned int>
 SystemInfo::GPUPercent() {
