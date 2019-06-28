@@ -60,9 +60,6 @@ PrometheusMetrics::GPUPercentGaugeSet() {
     if(!startup_) return;
     int numDevide = server::SystemInfo::GetInstance().num_device();
     std::vector<unsigned int> values = server::SystemInfo::GetInstance().GPUPercent();
-//    for (int i = 0; i < numDevide; ++i) {
-//        GPU_percent_gauges_[i].Set(static_cast<double>(values[i]));
-//    }
     if(numDevide >= 1) GPU0_percent_gauge_.Set(static_cast<double>(values[0]));
     if(numDevide >= 2) GPU1_percent_gauge_.Set(static_cast<double>(values[1]));
     if(numDevide >= 3) GPU2_percent_gauge_.Set(static_cast<double>(values[2]));
@@ -77,13 +74,10 @@ PrometheusMetrics::GPUPercentGaugeSet() {
 
 void PrometheusMetrics::GPUMemoryUsageGaugeSet() {
     if(!startup_) return;
-    int numDevide = server::SystemInfo::GetInstance().num_device();
     std::vector<unsigned long long> values = server::SystemInfo::GetInstance().GPUMemoryUsed();
     constexpr unsigned long long MtoB = 1024*1024;
     int numDevice = values.size();
-//    for (int i = 0; i < numDevice; ++i) {
-//        GPU_memory_usage_gauges_[i].Set(values[i]/MtoB);
-//    }
+
     if(numDevice >=1) GPU0_memory_usage_gauge_.Set(values[0]/MtoB);
     if(numDevice >=2) GPU1_memory_usage_gauge_.Set(values[1]/MtoB);
     if(numDevice >=3) GPU2_memory_usage_gauge_.Set(values[2]/MtoB);
@@ -146,21 +140,6 @@ void PrometheusMetrics::OctetsSet() {
     outoctets_gauge_.Set((in_and_out_octets.second-old_outoctets)/total_second);
 }
 
-//void PrometheusMetrics::GpuPercentInit() {
-//    int num_device = SystemInfo::GetInstance().num_device();
-//    constexpr char device_number[] = "DeviceNum";
-//    for(int i = 0; i < num_device; ++ i) {
-//        GPU_percent_gauges_.emplace_back(GPU_percent_.Add({{device_number,std::to_string(i)}}));
-//    }
-//
-//}
-//void PrometheusMetrics::GpuMemoryInit() {
-//    int num_device = SystemInfo::GetInstance().num_device();
-//    constexpr char device_number[] = "DeviceNum";
-//    for(int i = 0; i < num_device; ++ i) {
-//        GPU_memory_usage_gauges_.emplace_back(GPU_memory_usage_.Add({{device_number,std::to_string(i)}}));
-//    }
-//}
 
 
 }
