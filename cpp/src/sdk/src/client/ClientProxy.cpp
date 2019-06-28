@@ -4,7 +4,6 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "ClientProxy.h"
-#include "util/ConvertUtil.h"
 
 namespace milvus {
 
