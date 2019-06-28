@@ -55,6 +55,7 @@ set(count_test_src
         ${wrapper_src}
         ${metrics_src}
         metrics_test.cpp
+        prometheus_test.cpp
         ../db/utils.cpp
         )
 
