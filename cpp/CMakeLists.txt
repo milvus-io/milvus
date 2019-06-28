@@ -135,11 +135,18 @@ if (BUILD_COVERAGE STREQUAL "ON")
 endif()
 
 
-if (BUILD_UNIT_TEST)
+if ("${BUILD_UNIT_TEST}" STREQUAL "ON")
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
 endif(BUILD_UNIT_TEST)
 
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
+
+
+if("${MILVUS_DB_PATH}" STREQUAL "")
+    set(MILVUS_DB_PATH "/tmp/milvus")
+endif()
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
 
 #install
 install(FILES
@@ -152,5 +159,7 @@ install(FILES
         conf/log_config.conf
         DESTINATION
         conf)
+
+
 
 config_summary()
