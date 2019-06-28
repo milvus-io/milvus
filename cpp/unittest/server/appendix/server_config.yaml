@@ -2,7 +2,7 @@ server_config:
   address: 0.0.0.0
   port: 19530                 # the port milvus listen to, default: 19530, range: 1025 ~ 65534
   gpu_index: 0                # the gpu milvus use, default: 0, range: 0 ~ gpu number - 1
-  mode: single                # milvus deployment type: single, cluster, read_only
+  mode: single                # milvus deployment type: single, cluster
 
 db_config:
   db_path: /tmp/milvus             # milvus data storage path
@@ -19,6 +19,7 @@ metric_config:
     port: 8080          # the port prometheus use to fetch metrics
     push_gateway_ip_address: 127.0.0.1 # push method configure: push gateway ip address
     push_gateway_port: 9091            # push method configure: push gateway port
+
 
 license_config:         # license configure
   license_path: "/tmp/milvus/system.license" # license file path
