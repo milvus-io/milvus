@@ -53,6 +53,12 @@ If you encounter the following error when building:
 ### Launch server
 Set config in cpp/conf/server_config.yaml
 
+Add milvus/bin/lib to LD_LIBRARY_PATH
+
+```
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/milvus/bin/lib
+```
+
 Then launch server with config:
     cd [build output path]
     start_server.sh
