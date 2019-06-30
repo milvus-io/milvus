@@ -11,7 +11,7 @@
 
 using namespace zilliz::milvus;
 
-TEST(PrometheusTest, Prometheus_Test){
+TEST(PrometheusTest, PROMETHEUS_TEST){
     server::PrometheusMetrics instance = server::PrometheusMetrics::GetInstance();
     instance.Init();
     instance.SetStartup(true);
