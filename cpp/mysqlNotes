@@ -1,8 +1,0 @@
-sudo apt-get install mysql-server
-sudo apt-get install libmysqlclient-dev
-sudo ln -s libmysqlclient.so libmysqlclient_r.so
-
-Install MySQL++
-./configure --enable-thread-check LDFLAGS='-pthread'
-make
-sudo make install

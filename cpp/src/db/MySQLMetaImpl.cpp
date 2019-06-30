@@ -103,7 +103,7 @@ namespace meta {
         return Status::OK();
     }
 
-    MySQLMetaImpl::MySQLMetaImpl(const DBMetaOptions &options_, const std::string& mode)
+    MySQLMetaImpl::MySQLMetaImpl(const DBMetaOptions &options_, const int& mode)
             : options_(options_),
               mode_(mode) {
         Initialize();
@@ -157,7 +157,7 @@ namespace meta {
 //            connectionPtr->set_option(new mysqlpp::ReconnectOption(true));
             int threadHint = std::thread::hardware_concurrency();
             int maxPoolSize = threadHint == 0 ? 8 : threadHint;
-            mySQLConnectionPool_ = std::make_shared<MySQLConnectionPool>(dbName, username, password, serverAddress, port, maxPoolSize);
+            mysql_connection_pool_ = std::make_shared<MySQLConnectionPool>(dbName, username, password, serverAddress, port, maxPoolSize);
 //            std::cout << "MySQL++ thread aware:" << std::to_string(connectionPtr->thread_aware()) << std::endl;
             ENGINE_LOG_DEBUG << "MySQL connection pool: maximum pool size = " << std::to_string(maxPoolSize);
             try {
@@ -165,9 +165,9 @@ namespace meta {
                 CleanUp();
 
                 {
-                    ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                    ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: connections in use = " << mySQLConnectionPool_->getConnectionsInUse();
+//                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: connections in use = " << mysql_connection_pool_->getConnectionsInUse();
 //                if (!connectionPtr->connect(dbName, serverAddress, username, password, port)) {
 //                    return Status::Error("DB connection failed: ", connectionPtr->error());
 //                }
@@ -192,6 +192,11 @@ namespace meta {
                                     "files_cnt BIGINT DEFAULT 0 NOT NULL, " <<
                                     "engine_type INT DEFAULT 1 NOT NULL, " <<
                                     "store_raw_data BOOL DEFAULT false NOT NULL);";
+
+                    if (options_.sql_echo) {
+                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+                    }
+
                     if (!InitializeQuery.exec()) {
                         return Status::DBTransactionError("Initialization Error", InitializeQuery.error());
                     }
@@ -206,6 +211,11 @@ namespace meta {
                                     "updated_time BIGINT NOT NULL, " <<
                                     "created_on BIGINT NOT NULL, " <<
                                     "date INT DEFAULT -1 NOT NULL);";
+
+                    if (options_.sql_echo) {
+                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
+                    }
+
                     if (!InitializeQuery.exec()) {
                         return Status::DBTransactionError("Initialization Error", InitializeQuery.error());
                     }
@@ -282,10 +292,10 @@ namespace meta {
             dateListStr = dateListStr.substr(0, dateListStr.size() - 2); //remove the last ", "
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DropPartitionsByDates connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DropPartitionsByDates connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query dropPartitionsByDatesQuery = connectionPtr->query();
@@ -294,6 +304,10 @@ namespace meta {
                                             "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << " " <<
                                             "WHERE table_id = " << quote << table_id << " AND " <<
                                             "date in (" << dateListStr << ");";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropPartitionsByDates: " << dropPartitionsByDatesQuery.str();
+                }
 
                 if (!dropPartitionsByDatesQuery.exec()) {
                     ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROPPING PARTITIONS BY DATES";
@@ -323,10 +337,10 @@ namespace meta {
             MetricCollector metric;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::CreateTable connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::CreateTable connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query createTableQuery = connectionPtr->query();
@@ -337,6 +351,11 @@ namespace meta {
                     createTableQuery << "SELECT state FROM Tables " <<
                                         "WHERE table_id = " << quote << table_schema.table_id_ << ";";
 //                    ENGINE_LOG_DEBUG << "Create Table : " << createTableQuery.str();
+
+                    if (options_.sql_echo) {
+                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
+                    }
+
                     StoreQueryResult res = createTableQuery.store();
                     assert(res && res.num_rows() <= 1);
                     if (res.num_rows() == 1) {
@@ -370,6 +389,11 @@ namespace meta {
                                  "(" << id << ", " << quote << table_id << ", " << state << ", " << dimension << ", " <<
                                  created_on << ", " << files_cnt << ", " << engine_type << ", " << store_raw_data << ");";
 //                ENGINE_LOG_DEBUG << "Create Table : " << createTableQuery.str();
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
+                }
+
                 if (SimpleResult res = createTableQuery.execute()) {
                     table_schema.id_ = res.insert_id(); //Might need to use SELECT LAST_INSERT_ID()?
 //                    std::cout << table_schema.id_ << std::endl;
@@ -420,10 +444,10 @@ namespace meta {
             MetricCollector metric;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DeleteTable connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DeleteTable connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 //soft delete table
@@ -433,6 +457,10 @@ namespace meta {
                                     "SET state = " << std::to_string(TableSchema::TO_DELETE) << " " <<
                                     "WHERE table_id = " << quote << table_id << ";";
 
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DeleteTable: " << deleteTableQuery.str();
+                }
+
                 if (!deleteTableQuery.exec()) {
                     ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE";
                     return Status::DBTransactionError("QUERY ERROR WHEN DELETING TABLE", deleteTableQuery.error());
@@ -441,9 +469,7 @@ namespace meta {
             } //Scoped Connection
 
 
-//            ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
-//            opt.mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
-            if (mode_ != "single") {
+            if (mode_ != Options::MODE::SINGLE) {
                 DeleteTableFiles(table_id);
             }
 
@@ -465,10 +491,10 @@ namespace meta {
             MetricCollector metric;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DeleteTableFiles connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DeleteTableFiles connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 //soft delete table files
@@ -479,6 +505,10 @@ namespace meta {
                                       "updated_time = " << std::to_string(utils::GetMicroSecTimeStamp()) << " " <<
                                       "WHERE table_id = " << quote << table_id << " AND " <<
                                       "file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DeleteTableFiles: " << deleteTableFilesQuery.str();
+                }
 
                 if (!deleteTableFilesQuery.exec()) {
                     ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE FILES";
@@ -509,10 +539,10 @@ namespace meta {
             StoreQueryResult res;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DescribeTable connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DescribeTable connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query describeTableQuery = connectionPtr->query();
@@ -520,6 +550,11 @@ namespace meta {
                                       "FROM Tables " <<
                                       "WHERE table_id = " << quote << table_schema.table_id_ << " " <<
                                       "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeTable: " << describeTableQuery.str();
+                }
+
                 res = describeTableQuery.store();
             } //Scoped Connection
 
@@ -535,7 +570,7 @@ namespace meta {
 
                 table_schema.engine_type_ = resRow["engine_type"];
 
-                table_schema.store_raw_data_ = (resRow["store_raw_data"].compare("true") == 0);
+                table_schema.store_raw_data_ = (resRow["store_raw_data"] == 1);
             }
             else {
                 return Status::NotFound("Table " + table_schema.table_id_ + " not found");
@@ -568,10 +603,10 @@ namespace meta {
             StoreQueryResult res;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::HasTable connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::HasTable connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query hasTableQuery = connectionPtr->query();
@@ -581,6 +616,11 @@ namespace meta {
                               "WHERE table_id = " << quote << table_id << " " <<
                               "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ") " <<
                               "AS " << quote << "check" << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasTable: " << hasTableQuery.str();
+                }
+
                 res = hasTableQuery.store();
             } //Scoped Connection
 
@@ -612,16 +652,21 @@ namespace meta {
             StoreQueryResult res;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::AllTables connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::AllTables connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query allTablesQuery = connectionPtr->query();
                 allTablesQuery << "SELECT id, table_id, dimension, files_cnt, engine_type, store_raw_data " <<
                                "FROM Tables " <<
                                "WHERE state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allTablesQuery.str();
+                }
+
                 res = allTablesQuery.store();
             } //Scoped Connection
 
@@ -640,7 +685,7 @@ namespace meta {
 
                 table_schema.engine_type_ = resRow["engine_type"];
 
-                table_schema.store_raw_data_ = (resRow["store_raw_data"].compare("true") == 0);
+                table_schema.store_raw_data_ = (resRow["store_raw_data"] == 1);
 
                 table_schema_array.emplace_back(table_schema);
             }
@@ -695,10 +740,10 @@ namespace meta {
             std::string date = std::to_string(file_schema.date_);
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::CreateTableFile connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::CreateTableFile connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query createTableFileQuery = connectionPtr->query();
@@ -707,6 +752,10 @@ namespace meta {
                                      "(" << id << ", " << quote << table_id << ", " << engine_type << ", " <<
                                      quote << file_id << ", " << file_type << ", " << size << ", " <<
                                      updated_time << ", " << created_on << ", " << date << ");";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTableFile: " << createTableFileQuery.str();
+                }
 
                 if (SimpleResult res = createTableFileQuery.execute()) {
                     file_schema.id_ = res.insert_id(); //Might need to use SELECT LAST_INSERT_ID()?
@@ -759,16 +808,21 @@ namespace meta {
             StoreQueryResult res;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::FilesToIndex connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::FilesToIndex connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query filesToIndexQuery = connectionPtr->query();
                 filesToIndexQuery << "SELECT id, table_id, engine_type, file_id, file_type, size, date " <<
                                      "FROM TableFiles " <<
                                      "WHERE file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToIndex: " << filesToIndexQuery.str();
+                }
+
                 res = filesToIndexQuery.store();
             } //Scoped Connection
 
@@ -839,10 +893,10 @@ namespace meta {
             StoreQueryResult res;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::FilesToSearch connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::FilesToSearch connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 if (partition.empty()) {
@@ -854,6 +908,11 @@ namespace meta {
                                        "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
                                        "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " OR " <<
                                        "file_type = " << std::to_string(TableFileSchema::INDEX) << ");";
+
+                    if (options_.sql_echo) {
+                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
+                    }
+
                     res = filesToSearchQuery.store();
 
                 } else {
@@ -874,6 +933,11 @@ namespace meta {
                                        "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
                                        "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " OR " <<
                                        "file_type = " << std::to_string(TableFileSchema::INDEX) << ");";
+
+                    if (options_.sql_echo) {
+                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
+                    }
+
                     res = filesToSearchQuery.store();
 
                 }
@@ -944,10 +1008,10 @@ namespace meta {
             StoreQueryResult res;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::FilesToMerge connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::FilesToMerge connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query filesToMergeQuery = connectionPtr->query();
@@ -956,6 +1020,11 @@ namespace meta {
                                   "WHERE table_id = " << quote << table_id << " AND " <<
                                   "file_type = " << std::to_string(TableFileSchema::RAW) << " " <<
                                   "ORDER BY size DESC" << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToMerge: " << filesToMergeQuery.str();
+                }
+
                 res = filesToMergeQuery.store();
             } //Scoped Connection
 
@@ -1033,10 +1102,10 @@ namespace meta {
             StoreQueryResult res;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::GetTableFiles connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::GetTableFiles connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query getTableFileQuery = connectionPtr->query();
@@ -1044,6 +1113,11 @@ namespace meta {
                                   "FROM TableFiles " <<
                                   "WHERE table_id = " << quote << table_id << " AND " <<
                                   "(" << idStr << ");";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFiles: " << getTableFileQuery.str();
+                }
+
                 res = getTableFileQuery.store();
             } //Scoped Connection
 
@@ -1112,10 +1186,10 @@ namespace meta {
 
                 try {
 
-                    ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                    ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                    if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                        ENGINE_LOG_WARNING << "MySQLMetaImpl::Archive connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                    if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                        ENGINE_LOG_WARNING << "MySQLMetaImpl::Archive connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                    }
 
                     Query archiveQuery = connectionPtr->query();
@@ -1123,6 +1197,11 @@ namespace meta {
                                     "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << " " <<
                                     "WHERE created_on < " << std::to_string(now - usecs) << " AND " <<
                                     "file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
+
+                    if (options_.sql_echo) {
+                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::Archive: " << archiveQuery.str();
+                    }
+
                     if (!archiveQuery.exec()) {
                         return Status::DBTransactionError("QUERY ERROR DURING ARCHIVE", archiveQuery.error());
                     }
@@ -1159,16 +1238,21 @@ namespace meta {
             StoreQueryResult res;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::Size connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::Size connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query getSizeQuery = connectionPtr->query();
                 getSizeQuery << "SELECT SUM(size) AS sum " <<
                              "FROM TableFiles " <<
                              "WHERE file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Size: " << getSizeQuery.str();
+                }
+
                 res = getSizeQuery.store();
             } //Scoped Connection
 
@@ -1216,10 +1300,10 @@ namespace meta {
             bool status;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DiscardFiles connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DiscardFiles connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query discardFilesQuery = connectionPtr->query();
@@ -1228,7 +1312,12 @@ namespace meta {
                                   "WHERE file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << " " <<
                                   "ORDER BY id ASC " <<
                                   "LIMIT 10;";
-//            std::cout << discardFilesQuery.str() << std::endl;
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DiscardFiles: " << discardFilesQuery.str();
+                }
+
+                //            std::cout << discardFilesQuery.str() << std::endl;
                 StoreQueryResult res = discardFilesQuery.store();
 
                 assert(res);
@@ -1257,6 +1346,10 @@ namespace meta {
                                   "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << ", " <<
                                   "updated_time = " << std::to_string(utils::GetMicroSecTimeStamp()) << " " <<
                                   "WHERE " << idsToDiscardStr << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DiscardFiles: " << discardFilesQuery.str();
+                }
 
                 status = discardFilesQuery.exec();
                 if (!status) {
@@ -1289,10 +1382,10 @@ namespace meta {
             MetricCollector metric;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::UpdateTableFile connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::UpdateTableFile connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query updateTableFileQuery = connectionPtr->query();
@@ -1301,6 +1394,11 @@ namespace meta {
                 //clean thread will delete the file later
                 updateTableFileQuery << "SELECT state FROM Tables " <<
                                      "WHERE table_id = " << quote << file_schema.table_id_ << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
+                }
+
                 StoreQueryResult res = updateTableFileQuery.store();
 
                 assert(res && res.num_rows() <= 1);
@@ -1334,7 +1432,11 @@ namespace meta {
                                      "date = " << date << " " <<
                                      "WHERE id = " << id << ";";
 
-//            std::cout << updateTableFileQuery.str() << std::endl;
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
+                }
+
+                //            std::cout << updateTableFileQuery.str() << std::endl;
 
                 if (!updateTableFileQuery.exec()) {
                     ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
@@ -1366,10 +1468,10 @@ namespace meta {
             MetricCollector metric;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::UpdateTableFiles connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::UpdateTableFiles connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query updateTableFilesQuery = connectionPtr->query();
@@ -1386,6 +1488,11 @@ namespace meta {
                                           "WHERE table_id = " << quote << file_schema.table_id_ << " " <<
                                           "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ") " <<
                                           "AS " << quote << "check" << ";";
+
+                    if (options_.sql_echo) {
+                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFiles: " << updateTableFilesQuery.str();
+                    }
+
                     StoreQueryResult res = updateTableFilesQuery.store();
 
                     assert(res && res.num_rows() == 1);
@@ -1421,6 +1528,10 @@ namespace meta {
                                           "date = " << date << " " <<
                                           "WHERE id = " << id << ";";
 
+                    if (options_.sql_echo) {
+                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFiles: " << updateTableFilesQuery.str();
+                    }
+
                     if (!updateTableFilesQuery.exec()) {
                         ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILES";
                         return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILES",
@@ -1454,13 +1565,13 @@ namespace meta {
             {
 
 //                ENGINE_LOG_WARNING << "MySQLMetaImpl::CleanUpFilesWithTTL: clean table files: connection in use before creating ScopedConnection = "
-//                << mySQLConnectionPool_->getConnectionsInUse();
+//                << mysql_connection_pool_->getConnectionsInUse();
 
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::CleanUpFilesWithTTL: clean table files: connection in use after creating ScopedConnection = "
-//                    << mySQLConnectionPool_->getConnectionsInUse();
+//                    << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query cleanUpFilesWithTTLQuery = connectionPtr->query();
@@ -1468,6 +1579,11 @@ namespace meta {
                                          "FROM TableFiles " <<
                                          "WHERE file_type = " << std::to_string(TableFileSchema::TO_DELETE) << " AND " <<
                                          "updated_time < " << std::to_string(now - seconds * US_PS) << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
+                }
+
                 StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
 
                 assert(res);
@@ -1509,6 +1625,11 @@ namespace meta {
                     idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4); //remove the last " OR "
                     cleanUpFilesWithTTLQuery << "DELETE FROM TableFiles WHERE " <<
                                              idsToDeleteStr << ";";
+
+                    if (options_.sql_echo) {
+                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
+                    }
+
                     if (!cleanUpFilesWithTTLQuery.exec()) {
                         ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
                         return Status::DBTransactionError("CleanUpFilesWithTTL Error",
@@ -1532,19 +1653,24 @@ namespace meta {
 
             {
 //                ENGINE_LOG_WARNING << "MySQLMetaImpl::CleanUpFilesWithTTL: clean tables: connection in use before creating ScopedConnection = "
-//                                   << mySQLConnectionPool_->getConnectionsInUse();
+//                                   << mysql_connection_pool_->getConnectionsInUse();
 
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::CleanUpFilesWithTTL: clean tables: connection in use after creating ScopedConnection = "
-//                    << mySQLConnectionPool_->getConnectionsInUse();
+//                    << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query cleanUpFilesWithTTLQuery = connectionPtr->query();
                 cleanUpFilesWithTTLQuery << "SELECT id, table_id " <<
                                          "FROM Tables " <<
                                          "WHERE state = " << std::to_string(TableSchema::TO_DELETE) << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
+                }
+
                 StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
                 assert(res);
 //            std::cout << res.num_rows() << std::endl;
@@ -1568,6 +1694,11 @@ namespace meta {
                     idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4); //remove the last " OR "
                     cleanUpFilesWithTTLQuery << "DELETE FROM Tables WHERE " <<
                                              idsToDeleteStr << ";";
+
+                    if (options_.sql_echo) {
+                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
+                    }
+
                     if (!cleanUpFilesWithTTLQuery.exec()) {
                         ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
                         return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL",
@@ -1594,15 +1725,19 @@ namespace meta {
 //        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
 
         try {
-            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//            if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                ENGINE_LOG_WARNING << "MySQLMetaImpl::CleanUp: connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//            if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                ENGINE_LOG_WARNING << "MySQLMetaImpl::CleanUp: connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //            }
 
             ENGINE_LOG_DEBUG << "Remove table file type as NEW";
             Query cleanUpQuery = connectionPtr->query();
             cleanUpQuery << "DELETE FROM TableFiles WHERE file_type = " << std::to_string(TableFileSchema::NEW) << ";";
+
+            if (options_.sql_echo) {
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
+            }
 
             if (!cleanUpQuery.exec()) {
                 ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES";
@@ -1640,10 +1775,10 @@ namespace meta {
             StoreQueryResult res;
 
             {
-                ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//                if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::Count: connection in use = " << mySQLConnectionPool_->getConnectionsInUse();
+//                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                    ENGINE_LOG_WARNING << "MySQLMetaImpl::Count: connection in use = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
 
                 Query countQuery = connectionPtr->query();
@@ -1653,6 +1788,11 @@ namespace meta {
                            "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
                            "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " OR " <<
                            "file_type = " << std::to_string(TableFileSchema::INDEX) << ");";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Count: " << countQuery.str();
+                }
+
                 res = countQuery.store();
             } //Scoped Connection
 
@@ -1687,14 +1827,19 @@ namespace meta {
         }
         try {
 
-            ScopedConnection connectionPtr(*mySQLConnectionPool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
-//            if (mySQLConnectionPool_->getConnectionsInUse() <= 0) {
-//                ENGINE_LOG_WARNING << "MySQLMetaImpl::DropAll: connection in use  = " << mySQLConnectionPool_->getConnectionsInUse();
+//            if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
+//                ENGINE_LOG_WARNING << "MySQLMetaImpl::DropAll: connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //            }
 
             Query dropTableQuery = connectionPtr->query();
             dropTableQuery << "DROP TABLE IF EXISTS Tables, TableFiles;";
+
+            if (options_.sql_echo) {
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropAll: " << dropTableQuery.str();
+            }
+
             if (dropTableQuery.exec()) {
                 return Status::OK();
             }
