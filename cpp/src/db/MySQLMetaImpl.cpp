@@ -1247,7 +1247,7 @@ namespace meta {
 //                }
 
                 Query getSizeQuery = connectionPtr->query();
-                getSizeQuery << "SELECT SUM(size) AS sum " <<
+                getSizeQuery << "SELECT IFNULL(SUM(size),0) AS sum " <<
                              "FROM TableFiles " <<
                              "WHERE file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
