@@ -18,79 +18,37 @@ using namespace zilliz::milvus;
 
 namespace {
 
-    static const std::string TABLE_NAME = "test_group";
-    static constexpr int64_t TABLE_DIM = 256;
-    static constexpr int64_t VECTOR_COUNT = 250000;
-    static constexpr int64_t INSERT_LOOP = 100000;
+static const std::string TABLE_NAME = "test_group";
+static constexpr int64_t TABLE_DIM = 256;
+static constexpr int64_t VECTOR_COUNT = 250000;
+static constexpr int64_t INSERT_LOOP = 100000;
 
-    engine::meta::TableSchema BuildTableSchema() {
-        engine::meta::TableSchema table_info;
-        table_info.dimension_ = TABLE_DIM;
-        table_info.table_id_ = TABLE_NAME;
-        table_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
-        return table_info;
-    }
-
-    void BuildVectors(int64_t n, std::vector<float>& vectors) {
-        vectors.clear();
-        vectors.resize(n*TABLE_DIM);
-        float* data = vectors.data();
-        for(int i = 0; i < n; i++) {
-            for(int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
-            data[TABLE_DIM * i] += i / 2000.;
-        }
-    }
-
+engine::meta::TableSchema BuildTableSchema() {
+    engine::meta::TableSchema table_info;
+    table_info.dimension_ = TABLE_DIM;
+    table_info.table_id_ = TABLE_NAME;
+    table_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
+    return table_info;
 }
 
-TEST_F(DBTest, CONFIG_TEST) {
-    {
-        ASSERT_ANY_THROW(engine::ArchiveConf conf("wrong"));
-        /* EXPECT_DEATH(engine::ArchiveConf conf("wrong"), ""); */
-    }
-    {
-        engine::ArchiveConf conf("delete");
-        ASSERT_EQ(conf.GetType(), "delete");
-        auto criterias = conf.GetCriterias();
-        ASSERT_TRUE(criterias.size() == 1);
-        ASSERT_TRUE(criterias["disk"] == 512);
-    }
-    {
-        engine::ArchiveConf conf("swap");
-        ASSERT_EQ(conf.GetType(), "swap");
-        auto criterias = conf.GetCriterias();
-        ASSERT_TRUE(criterias.size() == 1);
-        ASSERT_TRUE(criterias["disk"] == 512);
-    }
-    {
-        ASSERT_ANY_THROW(engine::ArchiveConf conf1("swap", "disk:"));
-        ASSERT_ANY_THROW(engine::ArchiveConf conf2("swap", "disk:a"));
-        engine::ArchiveConf conf("swap", "disk:1024");
-        auto criterias = conf.GetCriterias();
-        ASSERT_TRUE(criterias.size() == 1);
-        ASSERT_TRUE(criterias["disk"] == 1024);
-    }
-    {
-        ASSERT_ANY_THROW(engine::ArchiveConf conf1("swap", "days:"));
-        ASSERT_ANY_THROW(engine::ArchiveConf conf2("swap", "days:a"));
-        engine::ArchiveConf conf("swap", "days:100");
-        auto criterias = conf.GetCriterias();
-        ASSERT_TRUE(criterias.size() == 1);
-        ASSERT_TRUE(criterias["days"] == 100);
-    }
-    {
-        ASSERT_ANY_THROW(engine::ArchiveConf conf1("swap", "days:"));
-        ASSERT_ANY_THROW(engine::ArchiveConf conf2("swap", "days:a"));
-        engine::ArchiveConf conf("swap", "days:100;disk:200");
-        auto criterias = conf.GetCriterias();
-        ASSERT_TRUE(criterias.size() == 2);
-        ASSERT_TRUE(criterias["days"] == 100);
-        ASSERT_TRUE(criterias["disk"] == 200);
+void BuildVectors(int64_t n, std::vector<float>& vectors) {
+    vectors.clear();
+    vectors.resize(n*TABLE_DIM);
+    float* data = vectors.data();
+    for(int i = 0; i < n; i++) {
+        for(int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
+        data[TABLE_DIM * i] += i / 2000.;
     }
 }
 
+}
 
-TEST_F(DBTest, DB_TEST) {
+
+TEST_F(MySQLDBTest, DB_TEST) {
+
+    auto options = GetOptions();
+    auto db_ = engine::DBFactory::Build(options);
+
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -159,9 +117,18 @@ TEST_F(DBTest, DB_TEST) {
     }
 
     search.join();
+
+    delete db_;
+
+    auto dummyDB = engine::DBFactory::Build(options);
+    dummyDB->DropAll();
+    delete dummyDB;
 };
 
-TEST_F(DBTest, SEARCH_TEST) {
+TEST_F(MySQLDBTest, SEARCH_TEST) {
+    auto options = GetOptions();
+    auto db_ = engine::DBFactory::Build(options);
+
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -212,10 +179,20 @@ TEST_F(DBTest, SEARCH_TEST) {
     stat = db_->Query(TABLE_NAME, k, nq, xq.data(), results);
     ASSERT_STATS(stat);
 
+    delete db_;
+
+    auto dummyDB = engine::DBFactory::Build(options);
+    dummyDB->DropAll();
+    delete dummyDB;
+
     // TODO(linxj): add groundTruth assert
 };
 
-TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
+TEST_F(MySQLDBTest, ARHIVE_DISK_CHECK) {
+
+    auto options = GetOptions();
+    options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
+    auto db_ = engine::DBFactory::Build(options);
 
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
@@ -259,19 +236,30 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     db_->Size(size);
     LOG(DEBUG) << "size=" << size;
     ASSERT_LE(size, 1 * engine::meta::G);
+
+    delete db_;
+
+    auto dummyDB = engine::DBFactory::Build(options);
+    dummyDB->DropAll();
+    delete dummyDB;
 };
 
-TEST_F(DBTest2, DELETE_TEST) {
+TEST_F(MySQLDBTest, DELETE_TEST) {
 
+    auto options = GetOptions();
+    options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
+    auto db_ = engine::DBFactory::Build(options);
 
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
+//    std::cout << stat.ToString() << std::endl;
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_STATS(stat);
 
+//    std::cout << "location: " << table_info_get.location_ << std::endl;
     ASSERT_TRUE(boost::filesystem::exists(table_info_get.location_));
 
     engine::IDNumbers vector_ids;
@@ -291,7 +279,15 @@ TEST_F(DBTest2, DELETE_TEST) {
 
     std::vector<engine::meta::DateT> dates;
     stat = db_->DeleteTable(TABLE_NAME, dates);
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+//    std::cout << "5 sec start" << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+//    std::cout << "5 sec finish" << std::endl;
     ASSERT_TRUE(stat.ok());
-    ASSERT_FALSE(boost::filesystem::exists(table_info_get.location_));
+//    ASSERT_FALSE(boost::filesystem::exists(table_info_get.location_));
+
+    delete db_;
+
+    auto dummyDB = engine::DBFactory::Build(options);
+    dummyDB->DropAll();
+    delete dummyDB;
 };
