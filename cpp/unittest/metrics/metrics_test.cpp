@@ -15,7 +15,7 @@
 #include <cache/CpuCacheMgr.h>
 
 #include "metrics/Metrics.h"
-#include "../db/utils.h"
+#include "utils.h"
 #include "db/DB.h"
 #include "db/DBMetaImpl.h"
 #include "db/Factories.h"
@@ -24,7 +24,7 @@
 using namespace zilliz::milvus;
 
 
-TEST_F(DBTest, Metric_Tes) {
+TEST_F(MetricTest, Metric_Tes) {
 
     server::SystemInfo::GetInstance().Init();
 //    server::Metrics::GetInstance().Init();
