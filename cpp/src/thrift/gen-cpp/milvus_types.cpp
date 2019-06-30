@@ -15,23 +15,51 @@ namespace milvus { namespace thrift {
 
 int _kErrorCodeValues[] = {
   ErrorCode::SUCCESS,
+  ErrorCode::UNEXPECTED_ERROR,
   ErrorCode::CONNECT_FAILED,
   ErrorCode::PERMISSION_DENIED,
   ErrorCode::TABLE_NOT_EXISTS,
   ErrorCode::ILLEGAL_ARGUMENT,
   ErrorCode::ILLEGAL_RANGE,
-  ErrorCode::ILLEGAL_DIMENSION
+  ErrorCode::ILLEGAL_DIMENSION,
+  ErrorCode::ILLEGAL_INDEX_TYPE,
+  ErrorCode::ILLEGAL_TABLE_NAME,
+  ErrorCode::ILLEGAL_TOPK,
+  ErrorCode::ILLEGAL_ROWRECORD,
+  ErrorCode::ILLEGAL_VECTOR_ID,
+  ErrorCode::ILLEGAL_SEARCH_RESULT,
+  ErrorCode::FILE_NOT_FOUND,
+  ErrorCode::META_FAILED,
+  ErrorCode::CACHE_FAILED,
+  ErrorCode::CANNOT_CREATE_FOLDER,
+  ErrorCode::CANNOT_CREATE_FILE,
+  ErrorCode::CANNOT_DELETE_FOLDER,
+  ErrorCode::CANNOT_DELETE_FILE
 };
 const char* _kErrorCodeNames[] = {
   "SUCCESS",
+  "UNEXPECTED_ERROR",
   "CONNECT_FAILED",
   "PERMISSION_DENIED",
   "TABLE_NOT_EXISTS",
   "ILLEGAL_ARGUMENT",
   "ILLEGAL_RANGE",
-  "ILLEGAL_DIMENSION"
+  "ILLEGAL_DIMENSION",
+  "ILLEGAL_INDEX_TYPE",
+  "ILLEGAL_TABLE_NAME",
+  "ILLEGAL_TOPK",
+  "ILLEGAL_ROWRECORD",
+  "ILLEGAL_VECTOR_ID",
+  "ILLEGAL_SEARCH_RESULT",
+  "FILE_NOT_FOUND",
+  "META_FAILED",
+  "CACHE_FAILED",
+  "CANNOT_CREATE_FOLDER",
+  "CANNOT_CREATE_FILE",
+  "CANNOT_DELETE_FOLDER",
+  "CANNOT_DELETE_FILE"
 };
-const std::map<int, const char*> _ErrorCode_VALUES_TO_NAMES(::apache::thrift::TEnumIterator(7, _kErrorCodeValues, _kErrorCodeNames), ::apache::thrift::TEnumIterator(-1, NULL, NULL));
+const std::map<int, const char*> _ErrorCode_VALUES_TO_NAMES(::apache::thrift::TEnumIterator(21, _kErrorCodeValues, _kErrorCodeNames), ::apache::thrift::TEnumIterator(-1, NULL, NULL));
 
 std::ostream& operator<<(std::ostream& out, const ErrorCode::type& val) {
   std::map<int, const char*>::const_iterator it = _ErrorCode_VALUES_TO_NAMES.find(val);

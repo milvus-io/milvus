@@ -5,7 +5,7 @@ server_config:
   mode: single                # milvus deployment type: single, cluster
 
 db_config:
-  db_path: /tmp/milvus             # milvus data storage path
+  db_path: @MILVUS_DB_PATH@             # milvus data storage path
   db_backend_url: http://127.0.0.1 # meta database uri
   index_building_threshold: 1024   # index building trigger threshold, default: 1024, unit: MB
   archive_disk_threshold: 512      # triger archive action if storage size exceed this value, unit: GB
@@ -22,7 +22,7 @@ metric_config:
 
 
 license_config:         # license configure
-  license_path: "/tmp/system.license" # license file path
+  license_path: "@MILVUS_DB_PATH@/system.license" # license file path
 
 cache_config:           # cache configure
   cpu_cache_capacity: 16   # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory

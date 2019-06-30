@@ -36,6 +36,11 @@ If you encounter the following error when building:
     or
     ./build.sh --unittest
 
+#### To run code coverage
+
+    apt-get install lcov
+    ./build.sh -u -c
+
 ### Launch server
 Set config in cpp/conf/server_config.yaml
 

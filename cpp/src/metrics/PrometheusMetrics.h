@@ -34,10 +34,6 @@ class PrometheusMetrics: public MetricsBase {
  public:
     static PrometheusMetrics &
     GetInstance() {
-//        switch(MetricCollectorType) {
-//            case: prometheus::
-//                static
-//        }
         static PrometheusMetrics instance;
         return instance;
     }
@@ -49,46 +45,21 @@ class PrometheusMetrics: public MetricsBase {
     std::shared_ptr<prometheus::Exposer> exposer_ptr_;
     std::shared_ptr<prometheus::Registry> registry_ = std::make_shared<prometheus::Registry>();
     bool startup_ = false;
-//    void GpuPercentInit();
-//    void GpuMemoryInit();
  public:
-
-    void AddGroupSuccessTotalIncrement(double value = 1.0) override { if(startup_) add_group_success_total_.Increment(value);};
-    void AddGroupFailTotalIncrement(double value = 1.0) override { if(startup_) add_group_fail_total_.Increment(value);};
-    void HasGroupSuccessTotalIncrement(double value = 1.0) override { if(startup_) has_group_success_total_.Increment(value);};
-    void HasGroupFailTotalIncrement(double value = 1.0) override { if(startup_) has_group_fail_total_.Increment(value);};
-    void GetGroupSuccessTotalIncrement(double value = 1.0) override { if(startup_) get_group_success_total_.Increment(value);};
-    void GetGroupFailTotalIncrement(double value = 1.0) override { if(startup_) get_group_fail_total_.Increment(value);};
-    void GetGroupFilesSuccessTotalIncrement(double value = 1.0) override { if(startup_) get_group_files_success_total_.Increment(value);};
-    void GetGroupFilesFailTotalIncrement(double value = 1.0) override { if(startup_) get_group_files_fail_total_.Increment(value);};
+    void SetStartup(bool startup) {startup_ = startup;};
     void AddVectorsSuccessTotalIncrement(double value = 1.0) override { if(startup_) add_vectors_success_total_.Increment(value);};
     void AddVectorsFailTotalIncrement(double value = 1.0) override { if(startup_) add_vectors_fail_total_.Increment(value);};
     void AddVectorsDurationHistogramOberve(double value) override { if(startup_) add_vectors_duration_histogram_.Observe(value);};
-    void SearchSuccessTotalIncrement(double value = 1.0) override { if(startup_) search_success_total_.Increment(value);};
-    void SearchFailTotalIncrement(double value = 1.0) override { if(startup_) search_fail_total_.Increment(value); };
-    void SearchDurationHistogramObserve(double value) override { if(startup_) search_duration_histogram_.Observe(value);};
     void RawFileSizeHistogramObserve(double value) override { if(startup_) raw_files_size_histogram_.Observe(value);};
     void IndexFileSizeHistogramObserve(double value) override { if(startup_) index_files_size_histogram_.Observe(value);};
     void BuildIndexDurationSecondsHistogramObserve(double value) override { if(startup_) build_index_duration_seconds_histogram_.Observe(value);};
-    void AllBuildIndexDurationSecondsHistogramObserve(double value) override { if(startup_) all_build_index_duration_seconds_histogram_.Observe(value);};
-    void CacheUsageGaugeIncrement(double value = 1.0) override { if(startup_) cache_usage_gauge_.Increment(value);};
-    void CacheUsageGaugeDecrement(double value = 1.0) override { if(startup_) cache_usage_gauge_.Decrement(value);};
     void CacheUsageGaugeSet(double value) override { if(startup_) cache_usage_gauge_.Set(value);};
-//    void MetaVisitTotalIncrement(double value = 1.0) override { meta_visit_total_.Increment(value);};
-//    void MetaVisitDurationSecondsHistogramObserve(double value) override { meta_visit_duration_seconds_histogram_.Observe(value);};
-    void MemUsagePercentGaugeSet(double value) override { if(startup_) mem_usage_percent_gauge_.Set(value);};
-    void MemUsagePercentGaugeIncrement(double value = 1.0) override { if(startup_) mem_usage_percent_gauge_.Increment(value);};
-    void MemUsagePercentGaugeDecrement(double value = 1.0) override { if(startup_) mem_usage_percent_gauge_.Decrement(value);};
-    void MemUsageTotalGaugeSet(double value) override { if(startup_) mem_usage_total_gauge_.Set(value);};
-    void MemUsageTotalGaugeIncrement(double value = 1.0) override { if(startup_) mem_usage_total_gauge_.Increment(value);};
-    void MemUsageTotalGaugeDecrement(double value = 1.0) override { if(startup_) mem_usage_total_gauge_.Decrement(value);};
 
     void MetaAccessTotalIncrement(double value = 1) override { if(startup_) meta_access_total_.Increment(value);};
     void MetaAccessDurationSecondsHistogramObserve(double value) override { if(startup_) meta_access_duration_seconds_histogram_.Observe(value);};
 
     void FaissDiskLoadDurationSecondsHistogramObserve(double value) override { if(startup_) faiss_disk_load_duration_seconds_histogram_.Observe(value);};
     void FaissDiskLoadSizeBytesHistogramObserve(double value) override { if(startup_) faiss_disk_load_size_bytes_histogram_.Observe(value);};
-//    void FaissDiskLoadIOSpeedHistogramObserve(double value) { if(startup_) faiss_disk_load_IO_speed_histogram_.Observe(value);};
     void FaissDiskLoadIOSpeedGaugeSet(double value) override { if(startup_) faiss_disk_load_IO_speed_gauge_.Set(value);};
 
     void CacheAccessTotalIncrement(double value = 1) override { if(startup_) cache_access_total_.Increment(value);};
