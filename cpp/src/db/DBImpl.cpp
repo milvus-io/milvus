@@ -136,7 +136,7 @@ DBImpl::DBImpl(const Options& options)
       shutting_down_(false),
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
-    meta_ptr_ = DBMetaImplFactory::Build(options.meta);
+    meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
     mem_mgr_ = std::make_shared<MemManager>(meta_ptr_, options_);
     // mem_mgr_ = (MemManagerPtr)(new MemManager(meta_ptr_, options_));
     if (options.mode != "read_only") {

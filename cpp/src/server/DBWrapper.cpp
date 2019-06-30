@@ -25,6 +25,10 @@ DBWrapper::DBWrapper() {
     }
     ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
     opt.mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
+    if (opt.mode != "single" && opt.mode != "cluster" && opt.mode != "read_only") {
+        std::cout << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
+        kill(0, SIGUSR1);
+    }
 
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
