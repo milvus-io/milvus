@@ -242,9 +242,9 @@ void swap(RowRecord &a, RowRecord &b);
 std::ostream& operator<<(std::ostream& out, const RowRecord& obj);
 
 typedef struct _QueryResult__isset {
-  _QueryResult__isset() : id(false), score(false) {}
+  _QueryResult__isset() : id(false), distance(false) {}
   bool id :1;
-  bool score :1;
+  bool distance :1;
 } _QueryResult__isset;
 
 class QueryResult : public virtual ::apache::thrift::TBase {
@@ -252,24 +252,24 @@ class QueryResult : public virtual ::apache::thrift::TBase {
 
   QueryResult(const QueryResult&);
   QueryResult& operator=(const QueryResult&);
-  QueryResult() : id(0), score(0) {
+  QueryResult() : id(0), distance(0) {
   }
 
   virtual ~QueryResult() throw();
   int64_t id;
-  double score;
+  double distance;
 
   _QueryResult__isset __isset;
 
   void __set_id(const int64_t val);
 
-  void __set_score(const double val);
+  void __set_distance(const double val);
 
   bool operator == (const QueryResult & rhs) const
   {
     if (!(id == rhs.id))
       return false;
-    if (!(score == rhs.score))
+    if (!(distance == rhs.distance))
       return false;
     return true;
   }

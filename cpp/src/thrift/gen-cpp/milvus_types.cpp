@@ -536,8 +536,8 @@ void QueryResult::__set_id(const int64_t val) {
   this->id = val;
 }
 
-void QueryResult::__set_score(const double val) {
-  this->score = val;
+void QueryResult::__set_distance(const double val) {
+  this->distance = val;
 }
 std::ostream& operator<<(std::ostream& out, const QueryResult& obj)
 {
@@ -577,8 +577,8 @@ uint32_t QueryResult::read(::apache::thrift::protocol::TProtocol* iprot) {
         break;
       case 2:
         if (ftype == ::apache::thrift::protocol::T_DOUBLE) {
-          xfer += iprot->readDouble(this->score);
-          this->__isset.score = true;
+          xfer += iprot->readDouble(this->distance);
+          this->__isset.distance = true;
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -604,8 +604,8 @@ uint32_t QueryResult::write(::apache::thrift::protocol::TProtocol* oprot) const 
   xfer += oprot->writeI64(this->id);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("score", ::apache::thrift::protocol::T_DOUBLE, 2);
-  xfer += oprot->writeDouble(this->score);
+  xfer += oprot->writeFieldBegin("distance", ::apache::thrift::protocol::T_DOUBLE, 2);
+  xfer += oprot->writeDouble(this->distance);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -616,18 +616,18 @@ uint32_t QueryResult::write(::apache::thrift::protocol::TProtocol* oprot) const 
 void swap(QueryResult &a, QueryResult &b) {
   using ::std::swap;
   swap(a.id, b.id);
-  swap(a.score, b.score);
+  swap(a.distance, b.distance);
   swap(a.__isset, b.__isset);
 }
 
 QueryResult::QueryResult(const QueryResult& other9) {
   id = other9.id;
-  score = other9.score;
+  distance = other9.distance;
   __isset = other9.__isset;
 }
 QueryResult& QueryResult::operator=(const QueryResult& other10) {
   id = other10.id;
-  score = other10.score;
+  distance = other10.distance;
   __isset = other10.__isset;
   return *this;
 }
@@ -635,7 +635,7 @@ void QueryResult::printTo(std::ostream& out) const {
   using ::apache::thrift::to_string;
   out << "QueryResult(";
   out << "id=" << to_string(id);
-  out << ", " << "score=" << to_string(score);
+  out << ", " << "distance=" << to_string(distance);
   out << ")";
 }
 

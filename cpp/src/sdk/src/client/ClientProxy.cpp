@@ -204,7 +204,7 @@ ClientProxy::SearchVector(const std::string &table_name,
             for(auto& thrift_query_result : thrift_topk_result.query_result_arrays) {
                 QueryResult query_result;
                 query_result.id = thrift_query_result.id;
-                query_result.score = thrift_query_result.score;
+                query_result.distance = thrift_query_result.distance;
                 result.query_result_arrays.emplace_back(query_result);
             }
 
