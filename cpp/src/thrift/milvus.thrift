@@ -73,7 +73,7 @@ struct RowRecord {
  */
 struct QueryResult {
     1: i64 id;                                       ///< Output result
-    2: double score;                                 ///< Vector similarity score: 0 ~ 100
+    2: double distance;                              ///< Vector similarity distance
 }
 
 /**
