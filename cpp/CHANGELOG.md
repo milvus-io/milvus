@@ -47,6 +47,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-96 - add new query interface for specified files
 - MS-97 - Add S3 SDK for MinIO Storage
 - MS-105 - Add MySQL
+- MS-130 - Add prometheus_test
 
 ## Task
 - MS-74 - Change README.md in cpp

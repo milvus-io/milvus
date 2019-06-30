@@ -55,8 +55,9 @@ set(count_test_src
         ${wrapper_src}
         ${metrics_src}
         metrics_test.cpp
+        prometheus_test.cpp
         ../db/utils.cpp
-        )
+        metricbase_test.cpp)
 
 
 add_executable(metrics_test ${count_test_src} ${require_files} )
