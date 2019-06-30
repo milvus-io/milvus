@@ -70,9 +70,15 @@ DBWrapper::DBWrapper() {
         kill(0, SIGUSR1);
     }
 
-    zilliz::milvus::engine::DB::Open(opt, &db_);
+    std::string msg = opt.meta.path;
+    try {
+        zilliz::milvus::engine::DB::Open(opt, &db_);
+    } catch(std::exception& ex) {
+        msg = ex.what();
+    }
+
     if(db_ == nullptr) {
-        std::cout << "ERROR! Failed to open database" << std::endl;
+        std::cout << "ERROR! Failed to open database: " << msg << std::endl;
         kill(0, SIGUSR1);
     }
 }
