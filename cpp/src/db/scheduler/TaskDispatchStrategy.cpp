@@ -74,20 +74,26 @@ public:
         }
 
         std::string table_id = context->table_id();
-        for(auto iter = task_list.begin(); iter != task_list.end(); ++iter) {
+
+        //put delete task to proper position
+        //for example: task_list has 10 IndexLoadTask, only the No.5 IndexLoadTask is for table1
+        //if user want to delete table1, the DeleteTask will be insert into No.6 position
+        for(std::list<ScheduleTaskPtr>::reverse_iterator iter = task_list.rbegin(); iter != task_list.rend(); ++iter) {
             if((*iter)->type() != ScheduleTaskType::kIndexLoad) {
                 continue;
             }
 
-            //put delete task to proper position
             IndexLoadTaskPtr loader = std::static_pointer_cast<IndexLoadTask>(*iter);
-            if(loader->file_->table_id_ == table_id) {
-
-                task_list.insert(++iter, delete_task);
-                break;
+            if(loader->file_->table_id_ != table_id) {
+                continue;
             }
+
+            task_list.insert(iter.base(), delete_task);
+            return true;
         }
 
+        //no task is searching this table, put DeleteTask to front of list so that the table will be delete asap
+        task_list.push_front(delete_task);
         return true;
     }
 };
