@@ -103,8 +103,9 @@ namespace meta {
         return Status::OK();
     }
 
-    MySQLMetaImpl::MySQLMetaImpl(const DBMetaOptions &options_)
-            : options_(options_) {
+    MySQLMetaImpl::MySQLMetaImpl(const DBMetaOptions &options_, const std::string& mode)
+            : options_(options_),
+              mode_(mode) {
         Initialize();
     }
 
@@ -439,7 +440,12 @@ namespace meta {
 
             } //Scoped Connection
 
-            DeleteTableFiles(table_id);
+
+//            ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
+//            opt.mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
+            if (mode_ != "single") {
+                DeleteTableFiles(table_id);
+            }
 
         } catch (const BadQuery& er) {
             // Handle any query errors
@@ -469,10 +475,10 @@ namespace meta {
                 Query deleteTableFilesQuery = connectionPtr->query();
                 //
                 deleteTableFilesQuery << "UPDATE TableFiles " <<
-                                      "SET file_type = " << std::to_string(TableSchema::TO_DELETE) << ", " <<
+                                      "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << ", " <<
                                       "updated_time = " << std::to_string(utils::GetMicroSecTimeStamp()) << " " <<
                                       "WHERE table_id = " << quote << table_id << " AND " <<
-                                      "file_type <> " << std::to_string(TableSchema::TO_DELETE) << ";";
+                                      "file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
                 if (!deleteTableFilesQuery.exec()) {
                     ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE FILES";
