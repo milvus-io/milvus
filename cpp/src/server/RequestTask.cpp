@@ -514,7 +514,7 @@ ServerError SearchVectorTask::OnExecute() {
             for(auto& pair : result) {
                 thrift::QueryResult thrift_result;
                 thrift_result.__set_id(pair.first);
-                thrift_result.__set_score(pair.second);
+                thrift_result.__set_distance(pair.second);
 
                 thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
             }
