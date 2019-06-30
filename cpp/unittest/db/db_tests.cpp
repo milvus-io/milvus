@@ -293,20 +293,14 @@ TEST_F(MySQLDBTest, DB_TEST) {
     auto options = GetOptions();
     auto db_ = engine::DBFactory::Build(options);
 
-    static const std::string table_name = "test_group";
-    static const int table_dim = 256;
-
-    engine::meta::TableSchema table_info;
-    table_info.dimension_ = table_dim;
-    table_info.table_id_ = table_name;
-    table_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
+    engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = table_name;
+    table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_STATS(stat);
-    ASSERT_EQ(table_info_get.dimension_, table_dim);
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     engine::IDNumbers vector_ids;
     engine::IDNumbers target_ids;
@@ -335,7 +329,7 @@ TEST_F(MySQLDBTest, DB_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(table_name, k, qb, qxb.data(), results);
+            stat = db_->Query(TABLE_NAME, k, qb, qxb.data(), results);
             ss << "Search " << j << " With Size " << count/engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
@@ -358,10 +352,10 @@ TEST_F(MySQLDBTest, DB_TEST) {
 
     for (auto i=0; i<loop; ++i) {
         if (i==40) {
-            db_->InsertVectors(table_name, qb, qxb.data(), target_ids);
+            db_->InsertVectors(TABLE_NAME, qb, qxb.data(), target_ids);
             ASSERT_EQ(target_ids.size(), qb);
         } else {
-            db_->InsertVectors(table_name, nb, xb.data(), vector_ids);
+            db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
         }
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
@@ -446,6 +440,18 @@ TEST_F(MySQLDBTest, ARHIVE_DISK_CHECK) {
 
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
+
+    std::vector<engine::meta::TableSchema> table_schema_array;
+    stat = db_->AllTables(table_schema_array);
+    ASSERT_STATS(stat);
+    bool bfound = false;
+    for(auto& schema : table_schema_array) {
+        if(schema.table_id_ == TABLE_NAME) {
+            bfound = true;
+            break;
+        }
+    }
+    ASSERT_TRUE(bfound);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
