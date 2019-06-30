@@ -28,7 +28,7 @@ struct OptionsFactory {
 
 struct DBMetaImplFactory {
     static std::shared_ptr<meta::DBMetaImpl> Build();
-    static std::shared_ptr<meta::Meta> Build(const DBMetaOptions& metaOptions);
+    static std::shared_ptr<meta::Meta> Build(const DBMetaOptions& metaOptions, const std::string& mode);
 };
 
 struct DBFactory {
