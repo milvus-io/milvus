@@ -264,4 +264,9 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
             to_index_files_cnt+raw_files_cnt+index_files_cnt);
+
+    status = impl_->FilesToSearch(table_id, meta::DatesT(), dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[table_file.date_].size(),
+              to_index_files_cnt+raw_files_cnt+index_files_cnt);
 }
