@@ -51,7 +51,7 @@ bool CommonUtil::GetSystemAvailableThreads(unsigned int &threadCnt) {
     return true;
 }
 
-bool CommonUtil::IsDirectoryExit(const std::string &path)
+bool CommonUtil::IsDirectoryExist(const std::string &path)
 {
     DIR *dp = nullptr;
     if ((dp = opendir(path.c_str())) == nullptr) {
@@ -182,7 +182,7 @@ void CommonUtil::ConvertTime(time_t time_integer, tm &time_struct) {
     memcpy(&time_struct, t_m, sizeof(tm));
 }
 
-void ConvertTime(tm time_struct, time_t &time_integer) {
+void CommonUtil::ConvertTime(tm time_struct, time_t &time_integer) {
     time_integer = mktime(&time_struct);
 }
 

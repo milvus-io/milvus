@@ -1,0 +1,28 @@
+server_config:
+  address: 0.0.0.0
+  port: 19530                 # the port milvus listen to, default: 19530, range: 1025 ~ 65534
+  gpu_index: 0                # the gpu milvus use, default: 0, range: 0 ~ gpu number - 1
+  mode: single                # milvus deployment type: single, cluster
+
+db_config:
+  db_path: /tmp/milvus             # milvus data storage path
+  db_backend_url: http://127.0.0.1 # meta database uri
+  index_building_threshold: 1024   # index building trigger threshold, default: 1024, unit: MB
+  archive_disk_threshold: 512      # triger archive action if storage size exceed this value, unit: GB
+  archive_days_threshold: 30       # files older than x days will be archived, unit: day
+
+metric_config:
+  is_startup: off      # if monitoring start: on, off
+  collector: prometheus # metrics collector: prometheus
+  prometheus_config:    # following are prometheus configure
+    collect_type: pull  # prometheus collect data method
+    port: 8080          # the port prometheus use to fetch metrics
+    push_gateway_ip_address: 127.0.0.1 # push method configure: push gateway ip address
+    push_gateway_port: 9091            # push method configure: push gateway port
+
+
+license_config:         # license configure
+  license_path: "/tmp/milvus/system.license" # license file path
+
+cache_config:           # cache configure
+  cpu_cache_capacity: 16   # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory
