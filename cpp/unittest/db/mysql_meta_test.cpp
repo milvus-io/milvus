@@ -32,12 +32,19 @@ using namespace zilliz::milvus::engine;
 //}
 
 TEST_F(MySQLTest, core) {
-//    DBMetaOptions options;
+    DBMetaOptions options;
 //    //dialect+driver://username:password@host:port/database
 //    options.backend_uri = "mysql://root:1234@:/test";
 //    options.path = "/tmp/vecwise_test";
+    try {
+        options = getDBMetaOptions();
+    } catch(std::exception& ex) {
+        ASSERT_TRUE(false);
+        return;
+    }
+
     int mode = Options::MODE::SINGLE;
-    meta::MySQLMetaImpl impl(getDBMetaOptions(), mode);
+    meta::MySQLMetaImpl impl(options, mode);
 //    auto status = impl.Initialize();
 //    ASSERT_TRUE(status.ok());
 
@@ -192,9 +199,16 @@ TEST_F(MySQLTest, core) {
 }
 
 TEST_F(MySQLTest, GROUP_TEST) {
+    DBMetaOptions options;
+    try {
+        options = getDBMetaOptions();
+    } catch(std::exception& ex) {
+        ASSERT_TRUE(false);
+        return;
+    }
 
     int mode = Options::MODE::SINGLE;
-    meta::MySQLMetaImpl impl(getDBMetaOptions(), mode);
+    meta::MySQLMetaImpl impl(options, mode);
 
     auto table_id = "meta_test_group";
 
@@ -228,9 +242,16 @@ TEST_F(MySQLTest, GROUP_TEST) {
 }
 
 TEST_F(MySQLTest, table_file_TEST) {
+    DBMetaOptions options;
+    try {
+        options = getDBMetaOptions();
+    } catch(std::exception& ex) {
+        ASSERT_TRUE(false);
+        return;
+    }
 
     int mode = Options::MODE::SINGLE;
-    meta::MySQLMetaImpl impl(getDBMetaOptions(), mode);
+    meta::MySQLMetaImpl impl(options, mode);
 
     auto table_id = "meta_test_group";
 
@@ -296,7 +317,14 @@ TEST_F(MySQLTest, table_file_TEST) {
 
 TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
-    DBMetaOptions options = getDBMetaOptions();
+    DBMetaOptions options;
+    try {
+        options = getDBMetaOptions();
+    } catch(std::exception& ex) {
+        ASSERT_TRUE(false);
+        return;
+    }
+
     int days_num = rand() % 100;
     std::stringstream ss;
     ss << "days:" << days_num;
@@ -350,7 +378,14 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
 }
 
 TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
-    DBMetaOptions options = getDBMetaOptions();
+    DBMetaOptions options;
+    try {
+        options = getDBMetaOptions();
+    } catch(std::exception& ex) {
+        ASSERT_TRUE(false);
+        return;
+    }
+
     options.archive_conf = ArchiveConf("delete", "disk:11");
     int mode = Options::MODE::SINGLE;
     auto impl = meta::MySQLMetaImpl(options, mode);
@@ -397,9 +432,16 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
 }
 
 TEST_F(MySQLTest, TABLE_FILES_TEST) {
+    DBMetaOptions options;
+    try {
+        options = getDBMetaOptions();
+    } catch(std::exception& ex) {
+        ASSERT_TRUE(false);
+        return;
+    }
 
     int mode = Options::MODE::SINGLE;
-    auto impl = meta::MySQLMetaImpl(getDBMetaOptions(), mode);
+    auto impl = meta::MySQLMetaImpl(options, mode);
 
     auto table_id = "meta_test_group";
 
@@ -456,6 +498,11 @@ TEST_F(MySQLTest, TABLE_FILES_TEST) {
 
     meta::DatesT dates = {table_file.date_};
     status = impl.FilesToSearch(table_id, dates, dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[table_file.date_].size(),
+              to_index_files_cnt+raw_files_cnt+index_files_cnt);
+
+    status = impl.FilesToSearch(table_id, meta::DatesT(), dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);

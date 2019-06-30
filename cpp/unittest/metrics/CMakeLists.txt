@@ -17,6 +17,7 @@ aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
 aux_source_directory(../../src/wrapper wrapper_src)
 aux_source_directory(../../src/metrics metrics_src)
+aux_source_directory(./ test_srcs)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
@@ -35,6 +36,7 @@ link_directories("/usr/local/cuda/lib64")
 #include_directories(../db/utils.h)
 include_directories(../../src/metrics)
 
+include_directories(/usr/include/mysql)
 
 #set(metrics_src_files
 #        ../../src/metrics/Metrics.cpp
@@ -47,17 +49,14 @@ include_directories(../../src/metrics)
 #        )
 
 set(count_test_src
-        ${unittest_srcs}
         ${config_files}
         ${cache_srcs}
         ${db_srcs}
         ${db_scheduler_srcs}
         ${wrapper_src}
         ${metrics_src}
-        metrics_test.cpp
-        prometheus_test.cpp
-        ../db/utils.cpp
-        metricbase_test.cpp)
+        ${test_srcs}
+        )
 
 
 add_executable(metrics_test ${count_test_src} ${require_files} )
@@ -75,6 +74,7 @@ target_link_libraries(metrics_test
         gtest
         pthread
         z
+        mysqlpp
         ${unittest_libs}
         )
 

@@ -42,7 +42,7 @@ void ASSERT_STATS(engine::Status& stat) {
 }
 
 
-void DBTest::InitLog() {
+void MetricTest::InitLog() {
     el::Configurations defaultConf;
     defaultConf.setToDefault();
     defaultConf.set(el::Level::Debug,
@@ -50,60 +50,22 @@ void DBTest::InitLog() {
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
-engine::Options DBTest::GetOptions() {
+engine::Options MetricTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = "sqlite://:@:/";
     return options;
 }
 
-void DBTest::SetUp() {
+void MetricTest::SetUp() {
     InitLog();
     auto options = GetOptions();
     db_ = engine::DBFactory::Build(options);
 }
 
-void DBTest::TearDown() {
+void MetricTest::TearDown() {
     delete db_;
     boost::filesystem::remove_all("/tmp/milvus_test");
-}
-
-engine::Options DBTest2::GetOptions() {
-    auto options = engine::OptionsFactory::Build();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
-    options.meta.backend_uri = "sqlite://:@:/";
-    return options;
-}
-
-void MetaTest::SetUp() {
-    InitLog();
-    impl_ = engine::DBMetaImplFactory::Build();
-}
-
-void MetaTest::TearDown() {
-    impl_->DropAll();
-}
-
-zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
-//    std::string path = "/tmp/milvus_test";
-//    engine::DBMetaOptions options = engine::DBMetaOptionsFactory::Build(path);
-    zilliz::milvus::engine::DBMetaOptions options;
-    options.path = "/tmp/milvus_test";
-    options.backend_uri = DBTestEnvironment::getURI();
-    
-    if(options.backend_uri.empty()) {
-        throw std::exception();
-    }
-
-    return options;
-}
-
-zilliz::milvus::engine::Options MySQLDBTest::GetOptions() {
-    auto options = engine::OptionsFactory::Build();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = DBTestEnvironment::getURI();
-    return options;
 }
 
 int main(int argc, char **argv) {
