@@ -11,8 +11,28 @@
 
 #include "utils.h"
 #include "db/Factories.h"
+#include "db/Options.h"
+
+INITIALIZE_EASYLOGGINGPP
 
 using namespace zilliz::milvus;
+
+static std::string uri;
+
+class DBTestEnvironment : public ::testing::Environment {
+public:
+
+//    explicit DBTestEnvironment(std::string uri) : uri_(uri) {}
+
+    static std::string getURI() {
+        return uri;
+    }
+
+    void SetUp() override {
+        getURI();
+    }
+
+};
 
 void ASSERT_STATS(engine::Status& stat) {
     ASSERT_TRUE(stat.ok());
@@ -20,6 +40,7 @@ void ASSERT_STATS(engine::Status& stat) {
         std::cout << stat.ToString() << std::endl;
     }
 }
+
 
 void DBTest::InitLog() {
     el::Configurations defaultConf;
@@ -32,6 +53,7 @@ void DBTest::InitLog() {
 engine::Options DBTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
+    options.meta.backend_uri = "sqlite://:@:/";
     return options;
 }
 
@@ -50,6 +72,7 @@ engine::Options DBTest2::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
     options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
+    options.meta.backend_uri = "sqlite://:@:/";
     return options;
 }
 
@@ -60,4 +83,30 @@ void MetaTest::SetUp() {
 
 void MetaTest::TearDown() {
     impl_->DropAll();
+}
+
+zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
+//    std::string path = "/tmp/milvus_test";
+//    engine::DBMetaOptions options = engine::DBMetaOptionsFactory::Build(path);
+    zilliz::milvus::engine::DBMetaOptions options;
+    options.path = "/tmp/milvus_test";
+    options.backend_uri = DBTestEnvironment::getURI();
+    return options;
+}
+
+zilliz::milvus::engine::Options MySQLDBTest::GetOptions() {
+    auto options = engine::OptionsFactory::Build();
+    options.meta.path = "/tmp/milvus_test";
+    options.meta.backend_uri = DBTestEnvironment::getURI();
+    return options;
+}
+
+int main(int argc, char **argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    if (argc > 1) {
+        uri = argv[1];
+    }
+//    std::cout << uri << std::endl;
+    ::testing::AddGlobalTestEnvironment(new DBTestEnvironment);
+    return RUN_ALL_TESTS();
 }
