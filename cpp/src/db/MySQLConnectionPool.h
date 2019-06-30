@@ -20,12 +20,12 @@ public:
                         password_(passWord),
                         server_(serverIp),
                         port_(port),
-                        maxPoolSize_(maxPoolSize)
+                        max_pool_size_(maxPoolSize)
                         {
 
         conns_in_use_ = 0;
 
-        maxIdleTime_ = 300; //300ms
+        max_idle_time_ = 10; //10 seconds
     }
 
     // The destructor.  We _must_ call ConnectionPool::clear() here,
@@ -40,12 +40,10 @@ public:
     // connections actually in use, not those created.  Also note that
     // we keep our own count; ConnectionPool::size() isn't the same!
     mysqlpp::Connection* grab() override {
-        while (conns_in_use_ > maxPoolSize_) {
-//            cout.put('R'); cout.flush(); // indicate waiting for release
+        while (conns_in_use_ > max_pool_size_) {
             sleep(1);
         }
 
-//        ENGINE_LOG_DEBUG << "conns_in_use_ in grab: " << conns_in_use_ << std::endl;
         ++conns_in_use_;
         return mysqlpp::ConnectionPool::grab();
     }
@@ -63,7 +61,7 @@ public:
     }
 
     void set_max_idle_time(int max_idle) {
-        maxIdleTime_ = max_idle;
+        max_idle_time_ = max_idle;
     }
 
 protected:
@@ -72,7 +70,6 @@ protected:
     mysqlpp::Connection* create() override {
         // Create connection using the parameters we were passed upon
         // creation.
-//        cout.put('C'); cout.flush(); // indicate connection creation
         mysqlpp::Connection* conn = new mysqlpp::Connection();
         conn->set_option(new mysqlpp::ReconnectOption(true));
         conn->connect(db_.empty() ? 0 : db_.c_str(),
@@ -86,12 +83,11 @@ protected:
     void destroy(mysqlpp::Connection* cp) override {
         // Our superclass can't know how we created the Connection, so
         // it delegates destruction to us, to be safe.
-//        cout.put('D'); cout.flush(); // indicate connection destruction
         delete cp;
     }
 
     unsigned int max_idle_time() override {
-        return maxIdleTime_;
+        return max_idle_time_;
     }
 
 private:
@@ -102,7 +98,7 @@ private:
     std::string db_, user_, password_, server_;
     int port_;
 
-    int maxPoolSize_;
+    int max_pool_size_;
 
-    unsigned int maxIdleTime_;
+    unsigned int max_idle_time_;
 };

@@ -139,7 +139,7 @@ DBImpl::DBImpl(const Options& options)
     meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
     mem_mgr_ = std::make_shared<MemManager>(meta_ptr_, options_);
     // mem_mgr_ = (MemManagerPtr)(new MemManager(meta_ptr_, options_));
-    if (options.mode != "read_only") {
+    if (options.mode != Options::MODE::READ_ONLY) {
         StartTimerTasks();
     }
 }
@@ -600,7 +600,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     meta_ptr_->Archive();
 
     int ttl = 1;
-    if (options_.mode == "cluster") {
+    if (options_.mode == Options::MODE::CLUSTER) {
         ttl = meta::D_SEC;
 //        ENGINE_LOG_DEBUG << "Server mode is cluster. Clean up files with ttl = " << std::to_string(ttl) << "seconds.";
     }

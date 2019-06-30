@@ -45,15 +45,23 @@ struct DBMetaOptions {
     std::string path;
     std::string backend_uri;
     ArchiveConf archive_conf = ArchiveConf("delete");
+    bool sql_echo = false;
 }; // DBMetaOptions
 
 struct Options {
+
+    typedef enum {
+        SINGLE,
+        CLUSTER,
+        READ_ONLY
+    } MODE;
+
     Options();
     uint16_t  memory_sync_interval = 1;             //unit: second
     uint16_t  merge_trigger_number = 2;
     size_t  index_trigger_size = ONE_GB;            //unit: byte
     DBMetaOptions meta;
-    std::string mode;
+    int mode = MODE::SINGLE;
 }; // Options
 
 
