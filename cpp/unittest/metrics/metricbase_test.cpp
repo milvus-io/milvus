@@ -11,7 +11,7 @@
 
 using namespace zilliz::milvus;
 
-TEST(MetricbaseTest, Metricbase_Test){
+TEST(MetricbaseTest, METRICBASE_TEST){
     server::MetricsBase instance = server::MetricsBase::GetInstance();
     instance.Init();
     server::SystemInfo::GetInstance().Init();

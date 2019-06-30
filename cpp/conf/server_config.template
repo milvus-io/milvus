@@ -6,7 +6,7 @@ server_config:
 
 db_config:
   db_path: @MILVUS_DB_PATH@             # milvus data storage path
-  db_backend_url: http://127.0.0.1 # meta database uri
+  db_backend_url: sqlite://:@:/         # meta database uri
   index_building_threshold: 1024   # index building trigger threshold, default: 1024, unit: MB
   archive_disk_threshold: 512      # triger archive action if storage size exceed this value, unit: GB
   archive_days_threshold: 30       # files older than x days will be archived, unit: day
