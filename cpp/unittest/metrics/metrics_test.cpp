@@ -24,7 +24,6 @@
 using namespace zilliz::milvus;
 
 
-
 TEST_F(DBTest, Metric_Tes) {
 
     server::SystemInfo::GetInstance().Init();
