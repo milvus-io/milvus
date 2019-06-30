@@ -36,7 +36,8 @@ TEST_F(MySQLTest, core) {
 //    //dialect+driver://username:password@host:port/database
 //    options.backend_uri = "mysql://root:1234@:/test";
 //    options.path = "/tmp/vecwise_test";
-    meta::MySQLMetaImpl impl(getDBMetaOptions());
+    int mode = Options::MODE::SINGLE;
+    meta::MySQLMetaImpl impl(getDBMetaOptions(), mode);
 //    auto status = impl.Initialize();
 //    ASSERT_TRUE(status.ok());
 
@@ -58,7 +59,7 @@ TEST_F(MySQLTest, core) {
     status = impl.CreateTable(schema2);
 //    std::cout << status.ToString() << std::endl;
 //    ASSERT_THROW(impl.CreateTable(schema), mysqlpp::BadQuery);
-    ASSERT_FALSE(status.ok());
+    ASSERT_TRUE(status.ok());
 
     status = impl.DeleteTable(schema2.table_id_);
 //    std::cout << status.ToString() << std::endl;
@@ -191,8 +192,9 @@ TEST_F(MySQLTest, core) {
 }
 
 TEST_F(MySQLTest, GROUP_TEST) {
-    
-    meta::MySQLMetaImpl impl(getDBMetaOptions());
+
+    int mode = Options::MODE::SINGLE;
+    meta::MySQLMetaImpl impl(getDBMetaOptions(), mode);
 
     auto table_id = "meta_test_group";
 
@@ -214,7 +216,12 @@ TEST_F(MySQLTest, GROUP_TEST) {
 
     group.table_id_ = table_id;
     status = impl.CreateTable(group);
-    ASSERT_TRUE(!status.ok());
+    ASSERT_TRUE(status.ok());
+
+    group.table_id_ = "";
+    status = impl.CreateTable(group);
+    ASSERT_TRUE(status.ok());
+
 
     status = impl.DropAll();
     ASSERT_TRUE(status.ok());
@@ -222,12 +229,14 @@ TEST_F(MySQLTest, GROUP_TEST) {
 
 TEST_F(MySQLTest, table_file_TEST) {
 
-    meta::MySQLMetaImpl impl(getDBMetaOptions());
+    int mode = Options::MODE::SINGLE;
+    meta::MySQLMetaImpl impl(getDBMetaOptions(), mode);
 
     auto table_id = "meta_test_group";
 
     meta::TableSchema group;
     group.table_id_ = table_id;
+    group.dimension_ = 256;
     auto status = impl.CreateTable(group);
 
     meta::TableFileSchema table_file;
@@ -236,6 +245,11 @@ TEST_F(MySQLTest, table_file_TEST) {
 //    std::cout << status.ToString() << std::endl;
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, meta::TableFileSchema::NEW);
+
+    uint64_t cnt = 0;
+    status = impl.Count(table_id, cnt);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(cnt, 0UL);
 
     auto file_id = table_file.file_id_;
 
@@ -287,8 +301,8 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
     std::stringstream ss;
     ss << "days:" << days_num;
     options.archive_conf = ArchiveConf("delete", ss.str());
-
-    meta::MySQLMetaImpl impl(options);
+    int mode = Options::MODE::SINGLE;
+    meta::MySQLMetaImpl impl(options, mode);
 
     auto table_id = "meta_test_group";
 
@@ -336,11 +350,10 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
 }
 
 TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
-    DBMetaOptions options;
-    options.path = "/tmp/milvus_test";
+    DBMetaOptions options = getDBMetaOptions();
     options.archive_conf = ArchiveConf("delete", "disk:11");
-
-    auto impl = meta::DBMetaImpl(options);
+    int mode = Options::MODE::SINGLE;
+    auto impl = meta::MySQLMetaImpl(options, mode);
     auto table_id = "meta_test_group";
 
     meta::TableSchema group;
@@ -385,7 +398,8 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
 
 TEST_F(MySQLTest, TABLE_FILES_TEST) {
 
-    auto impl = meta::DBMetaImpl(getDBMetaOptions());
+    int mode = Options::MODE::SINGLE;
+    auto impl = meta::MySQLMetaImpl(getDBMetaOptions(), mode);
 
     auto table_id = "meta_test_group";
 
