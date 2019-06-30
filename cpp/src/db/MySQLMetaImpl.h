@@ -22,7 +22,7 @@ namespace meta {
 
     class MySQLMetaImpl : public Meta {
     public:
-        MySQLMetaImpl(const DBMetaOptions& options_, const std::string& mode);
+        MySQLMetaImpl(const DBMetaOptions& options_, const int& mode);
 
         virtual Status CreateTable(TableSchema& table_schema) override;
         virtual Status DescribeTable(TableSchema& group_info_) override;
@@ -77,9 +77,9 @@ namespace meta {
         Status Initialize();
 
         const DBMetaOptions options_;
-        const std::string mode_;
+        const int mode_;
 
-        std::shared_ptr<MySQLConnectionPool> mySQLConnectionPool_;
+        std::shared_ptr<MySQLConnectionPool> mysql_connection_pool_;
         bool safe_grab = false;
 
 //        std::mutex connectionMutex_;
