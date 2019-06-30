@@ -62,8 +62,8 @@ public:
     virtual ~DBImpl();
 
 private:
-    Status QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
-            const float* vectors, const meta::DatesT& dates, QueryResults& results);
+//    Status QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
+//            const float* vectors, const meta::DatesT& dates, QueryResults& results);
 
     Status QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
             uint64_t k, uint64_t nq, const float* vectors,
