@@ -91,6 +91,11 @@ zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
     zilliz::milvus::engine::DBMetaOptions options;
     options.path = "/tmp/milvus_test";
     options.backend_uri = DBTestEnvironment::getURI();
+    
+    if(options.backend_uri.empty()) {
+        throw std::exception();
+    }
+
     return options;
 }
 
