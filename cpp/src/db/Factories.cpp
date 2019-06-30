@@ -29,15 +29,8 @@ DBMetaOptions DBMetaOptionsFactory::Build(const std::string& path) {
         p = ss.str();
     }
 
-//    std::string uri;
-//    const char* uri_p = getenv("MILVUS_DB_META_URI");
-//    if (uri_p) {
-//        uri = uri_p;
-//    }
-
     DBMetaOptions meta;
     meta.path = p;
-//    meta.backend_uri = uri;
     return meta;
 }
 
@@ -54,14 +47,9 @@ std::shared_ptr<meta::DBMetaImpl> DBMetaImplFactory::Build() {
 }
 
 std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOptions,
-                                                     const std::string& mode) {
+                                                     const int& mode) {
 
     std::string uri = metaOptions.backend_uri;
-//    if (uri.empty()) {
-//        //Default to sqlite if uri is empty
-////        return std::make_shared<meta::DBMetaImpl>(new meta::DBMetaImpl(metaOptions));
-//        return std::shared_ptr<meta::DBMetaImpl>(new meta::DBMetaImpl(metaOptions));
-//    }
 
     std::string dialectRegex = "(.*)";
     std::string usernameRegex = "(.*)";
