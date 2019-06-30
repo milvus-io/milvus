@@ -24,14 +24,6 @@ TaskDispatchQueue::Put(const ScheduleContextPtr &context) {
         return;
     }
 
-    if (queue_.size() >= capacity_) {
-        std::string error_msg =
-                "blocking queue is full, capacity: " + std::to_string(capacity_) + " queue_size: " +
-                std::to_string(queue_.size());
-        SERVER_LOG_ERROR << error_msg;
-        throw server::ServerException(server::SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
-    }
-
     TaskDispatchStrategy::Schedule(context, queue_);
 
     empty_.notify_all();
@@ -41,12 +33,6 @@ ScheduleTaskPtr
 TaskDispatchQueue::Take() {
     std::unique_lock <std::mutex> lock(mtx);
     empty_.wait(lock, [this] { return !queue_.empty(); });
-
-    if (queue_.empty()) {
-        std::string error_msg = "blocking queue empty";
-        SERVER_LOG_ERROR << error_msg;
-        throw server::ServerException(server::SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
-    }
 
     ScheduleTaskPtr front(queue_.front());
     queue_.pop_front();
