@@ -6,7 +6,12 @@ server_config:
 
 db_config:
   db_path: @MILVUS_DB_PATH@             # milvus data storage path
-  db_backend_url: http://127.0.0.1 # meta database uri
+
+  # URI format: dialect://username:password@host:port/database
+  # All parts except dialect are optional, but you MUST include the delimiters
+  # Currently dialect supports mysql or sqlite
+  db_backend_url: dialect://username:password@host:port/database # meta database uri
+
   index_building_threshold: 1024   # index building trigger threshold, default: 1024, unit: MB
   archive_disk_threshold: 512      # triger archive action if storage size exceed this value, unit: GB
   archive_days_threshold: 30       # files older than x days will be archived, unit: day
