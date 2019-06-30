@@ -53,6 +53,7 @@ void DBTest::InitLog() {
 engine::Options DBTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
+    options.meta.backend_uri = "sqlite://:@:/";
     return options;
 }
 
@@ -71,6 +72,7 @@ engine::Options DBTest2::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
     options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
+    options.meta.backend_uri = "sqlite://:@:/";
     return options;
 }
 
