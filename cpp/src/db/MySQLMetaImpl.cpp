@@ -570,7 +570,8 @@ namespace meta {
 
                 table_schema.engine_type_ = resRow["engine_type"];
 
-                table_schema.store_raw_data_ = (resRow["store_raw_data"] == 1);
+                int store_raw_data = resRow["store_raw_data"];
+                table_schema.store_raw_data_ = (store_raw_data == 1);
             }
             else {
                 return Status::NotFound("Table " + table_schema.table_id_ + " not found");
@@ -685,7 +686,8 @@ namespace meta {
 
                 table_schema.engine_type_ = resRow["engine_type"];
 
-                table_schema.store_raw_data_ = (resRow["store_raw_data"] == 1);
+                int store_raw_data = resRow["store_raw_data"];
+                table_schema.store_raw_data_ = (store_raw_data == 1);
 
                 table_schema_array.emplace_back(table_schema);
             }
