@@ -7,11 +7,13 @@
 #include "DBMetaImpl.h"
 #include "Log.h"
 #include "EngineFactory.h"
+#include "Factories.h"
 #include "metrics/Metrics.h"
 #include "scheduler/TaskScheduler.h"
 #include "scheduler/context/SearchContext.h"
 #include "scheduler/context/DeleteContext.h"
 #include "utils/TimeRecorder.h"
+#include "MetaConsts.h"
 
 #include <assert.h>
 #include <chrono>
@@ -132,11 +134,14 @@ void CalcScore(uint64_t vector_count,
 DBImpl::DBImpl(const Options& options)
     : options_(options),
       shutting_down_(false),
-      meta_ptr_(new meta::DBMetaImpl(options_.meta)),
-      mem_mgr_(new MemManager(meta_ptr_, options_)),
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
-    StartTimerTasks();
+    meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
+    mem_mgr_ = std::make_shared<MemManager>(meta_ptr_, options_);
+    // mem_mgr_ = (MemManagerPtr)(new MemManager(meta_ptr_, options_));
+    if (options.mode != Options::MODE::READ_ONLY) {
+        StartTimerTasks();
+    }
 }
 
 Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
@@ -465,9 +470,14 @@ void DBImpl::StartMetricTask() {
 }
 
 void DBImpl::StartCompactionTask() {
+//    static int count = 0;
+//    count++;
+//    std::cout << "StartCompactionTask: " << count << std::endl;
+//    std::cout <<  "c: " << count++ << std::endl;
     static uint64_t compact_clock_tick = 0;
     compact_clock_tick++;
     if(compact_clock_tick%COMPACT_ACTION_INTERVAL != 0) {
+//        std::cout <<  "c r: " << count++ << std::endl;
         return;
     }
 
@@ -574,6 +584,10 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
+//    static int b_count = 0;
+//    b_count++;
+//    std::cout << "BackgroundCompaction: " << b_count << std::endl;
+
     Status status;
     for (auto table_id : table_ids) {
         status = BackgroundMergeFiles(table_id);
@@ -584,7 +598,13 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     }
 
     meta_ptr_->Archive();
-    meta_ptr_->CleanUpFilesWithTTL(1);
+
+    int ttl = 1;
+    if (options_.mode == Options::MODE::CLUSTER) {
+        ttl = meta::D_SEC;
+//        ENGINE_LOG_DEBUG << "Server mode is cluster. Clean up files with ttl = " << std::to_string(ttl) << "seconds.";
+    }
+    meta_ptr_->CleanUpFilesWithTTL(ttl);
 }
 
 void DBImpl::StartBuildIndexTask() {

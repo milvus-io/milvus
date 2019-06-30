@@ -23,6 +23,33 @@ DBWrapper::DBWrapper() {
     if(index_size > 0) {//ensure larger than zero, unit is MB
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
+    std::string sql_echo = config.GetValue(CONFIG_DB_SQL_ECHO, "off");
+    if (sql_echo == "on") {
+        opt.meta.sql_echo = true;
+    }
+    else if (sql_echo == "off") {
+        opt.meta.sql_echo = false;
+    }
+    else {
+        std::cout << "ERROR: sql_echo specified in db_config is not one of ['on', 'off']" << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
+    std::string mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
+    if (mode == "single") {
+        opt.mode = zilliz::milvus::engine::Options::MODE::SINGLE;
+    }
+    else if (mode == "cluster") {
+        opt.mode = zilliz::milvus::engine::Options::MODE::CLUSTER;
+    }
+    else if (mode == "read_only") {
+        opt.mode = zilliz::milvus::engine::Options::MODE::READ_ONLY;
+    }
+    else {
+        std::cout << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
+        kill(0, SIGUSR1);
+    }
 
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;

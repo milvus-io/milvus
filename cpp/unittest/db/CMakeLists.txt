@@ -21,10 +21,10 @@ set(db_scheduler_srcs
 include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
 
-
+include_directories(/usr/include/mysql)
 
 set(db_test_src
-    ${unittest_srcs}
+    #${unittest_srcs}
     ${config_files}
     ${cache_srcs}
     ${db_srcs}
@@ -44,6 +44,7 @@ set(db_libs
         boost_system
         boost_filesystem
         lz4
+        mysqlpp
         )
 
 target_link_libraries(db_test ${db_libs} ${unittest_libs})
