@@ -502,6 +502,11 @@ TEST_F(MySQLTest, TABLE_FILES_TEST) {
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);
 
+    status = impl.FilesToSearch(table_id, meta::DatesT(), dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[table_file.date_].size(),
+              to_index_files_cnt+raw_files_cnt+index_files_cnt);
+
     status = impl.DropAll();
     ASSERT_TRUE(status.ok());
 }
