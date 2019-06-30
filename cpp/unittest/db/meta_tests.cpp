@@ -39,6 +39,10 @@ TEST_F(MetaTest, TABLE_TEST) {
     table.table_id_ = table_id;
     status = impl_->CreateTable(table);
     ASSERT_TRUE(status.ok());
+
+    table.table_id_ = "";
+    status = impl_->CreateTable(table);
+    ASSERT_TRUE(status.ok());
 }
 
 TEST_F(MetaTest, TABLE_FILE_TEST) {
@@ -46,6 +50,7 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
 
     meta::TableSchema table;
     table.table_id_ = table_id;
+    table.dimension_ = 256;
     auto status = impl_->CreateTable(table);
 
     meta::TableFileSchema table_file;
@@ -53,6 +58,11 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
     status = impl_->CreateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, meta::TableFileSchema::NEW);
+
+    uint64_t cnt = 0;
+    status = impl_->Count(table_id, cnt);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(cnt, 0UL);
 
     auto file_id = table_file.file_id_;
 
