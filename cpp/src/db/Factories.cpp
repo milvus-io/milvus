@@ -53,7 +53,8 @@ std::shared_ptr<meta::DBMetaImpl> DBMetaImplFactory::Build() {
     return std::shared_ptr<meta::DBMetaImpl>(new meta::DBMetaImpl(options));
 }
 
-std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOptions) {
+std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOptions,
+                                                     const std::string& mode) {
 
     std::string uri = metaOptions.backend_uri;
 //    if (uri.empty()) {
@@ -81,21 +82,21 @@ std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOp
         std::string dialect = pieces_match[1].str();
         std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
         if (dialect.find("mysql") != std::string::npos) {
-            ENGINE_LOG_DEBUG << "Using MySQL";
-            return std::make_shared<meta::MySQLMetaImpl>(meta::MySQLMetaImpl(metaOptions));
+            ENGINE_LOG_INFO << "Using MySQL";
+            return std::make_shared<meta::MySQLMetaImpl>(meta::MySQLMetaImpl(metaOptions, mode));
         }
         else if (dialect.find("sqlite") != std::string::npos) {
             ENGINE_LOG_DEBUG << "Using SQLite";
             return std::make_shared<meta::DBMetaImpl>(meta::DBMetaImpl(metaOptions));
         }
         else {
-            LOG(ERROR) << "Invalid dialect in URI: dialect = " << dialect;
+            ENGINE_LOG_ERROR << "Invalid dialect in URI: dialect = " << dialect;
             throw InvalidArgumentException("URI dialect is not mysql / sqlite");
         }
     }
     else {
-        LOG(ERROR) << "Wrong URI format: URI = " << uri;
-        throw InvalidArgumentException("Wrong URI format");
+        ENGINE_LOG_ERROR << "Wrong URI format: URI = " << uri;
+        throw InvalidArgumentException("Wrong URI format ");
     }
 }
 
