@@ -13,10 +13,18 @@
 #include "db/Status.h"
 #include "db/Options.h"
 #include "db/DBMetaImpl.h"
+#include "db/EngineFactory.h"
 
 #include <vector>
 
 using namespace zilliz::milvus;
+
+namespace {
+    void CopyStatus(engine::Status& st1, engine::Status& st2) {
+        st1 = st2;
+    }
+
+}
 
 TEST(DBMiscTest, ENGINE_API_TEST) {
     //engine api AddWithIdArray
@@ -34,6 +42,15 @@ TEST(DBMiscTest, ENGINE_API_TEST) {
 
     auto status = engine.AddWithIdArray(vectors, ids);
     ASSERT_TRUE(status.ok());
+
+    auto engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::INVALID);
+    ASSERT_EQ(engine_ptr, nullptr);
+
+    engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::FAISS_IVFFLAT);
+    ASSERT_NE(engine_ptr, nullptr);
+
+    engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::FAISS_IDMAP);
+    ASSERT_NE(engine_ptr, nullptr);
 }
 
 TEST(DBMiscTest, EXCEPTION_TEST) {
@@ -65,6 +82,10 @@ TEST(DBMiscTest, STATUS_TEST) {
     ASSERT_TRUE(status.IsDBTransactionError());
     str = status.ToString();
     ASSERT_FALSE(str.empty());
+
+    engine::Status status_copy = engine::Status::OK();
+    CopyStatus(status_copy, status);
+    ASSERT_TRUE(status.IsDBTransactionError());
 }
 
 TEST(DBMiscTest, OPTIONS_TEST) {
@@ -87,6 +108,19 @@ TEST(DBMiscTest, OPTIONS_TEST) {
     {
         engine::ArchiveConf archive("delete", "1:2:3");
         ASSERT_TRUE(archive.GetCriterias().empty());
+    }
+
+    {
+        engine::ArchiveConf archive("delete");
+        engine::ArchiveConf::CriteriaT criterial = {
+            {"disk", 1024},
+            {"days", 100}
+        };
+        archive.SetCriterias(criterial);
+
+        auto crit = archive.GetCriterias();
+        ASSERT_EQ(criterial["disk"], 1024);
+        ASSERT_EQ(criterial["days"], 100);
     }
 }
 
