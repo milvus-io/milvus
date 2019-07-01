@@ -183,6 +183,7 @@ Status DBMetaImpl::DropPartitionsByDates(const std::string &table_id,
 }
 
 Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
+
     try {
         MetricCollector metric;
 

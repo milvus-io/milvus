@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/milvus/lib
+
 LCOV_CMD="lcov"
 LCOV_GEN_CMD="genhtml"
 
@@ -20,15 +22,20 @@ if [ $? -ne 0 ]; then
 fi
 
 for test in `ls ${DIR_UNITTEST}`; do
-    echo $test
-    case ${test} in 
+    case ${test} in
+        db_test)
+            # set run args for db_test
+            args="mysql://root:Fantast1c@192.168.1.194:3306/test"
+            ;;
         *_test)
-            # run unittest
-            ./${DIR_UNITTEST}/${test}
-            if [ $? -ne 0 ]; then
-                echo ${DIR_UNITTEST}/${test} "run failed"
-            fi
+            args=""
+            ;;
     esac
+    # run unittest
+    ./${DIR_UNITTEST}/${test} "${args}"
+    if [ $? -ne 0 ]; then
+        echo ${DIR_UNITTEST}/${test} "run failed"
+    fi
 done
 
 # gen test converage
