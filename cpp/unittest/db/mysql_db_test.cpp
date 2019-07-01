@@ -18,28 +18,28 @@ using namespace zilliz::milvus;
 
 namespace {
 
-static const std::string TABLE_NAME = "test_group";
-static constexpr int64_t TABLE_DIM = 256;
-static constexpr int64_t VECTOR_COUNT = 250000;
-static constexpr int64_t INSERT_LOOP = 100000;
+    static const std::string TABLE_NAME = "test_group";
+    static constexpr int64_t TABLE_DIM = 256;
+    static constexpr int64_t VECTOR_COUNT = 250000;
+    static constexpr int64_t INSERT_LOOP = 100000;
 
-engine::meta::TableSchema BuildTableSchema() {
-    engine::meta::TableSchema table_info;
-    table_info.dimension_ = TABLE_DIM;
-    table_info.table_id_ = TABLE_NAME;
-    table_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
-    return table_info;
-}
-
-void BuildVectors(int64_t n, std::vector<float>& vectors) {
-    vectors.clear();
-    vectors.resize(n*TABLE_DIM);
-    float* data = vectors.data();
-    for(int i = 0; i < n; i++) {
-        for(int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
-        data[TABLE_DIM * i] += i / 2000.;
+    engine::meta::TableSchema BuildTableSchema() {
+        engine::meta::TableSchema table_info;
+        table_info.dimension_ = TABLE_DIM;
+        table_info.table_id_ = TABLE_NAME;
+        table_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
+        return table_info;
     }
-}
+
+    void BuildVectors(int64_t n, std::vector<float>& vectors) {
+        vectors.clear();
+        vectors.resize(n*TABLE_DIM);
+        float* data = vectors.data();
+        for(int i = 0; i < n; i++) {
+            for(int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
+            data[TABLE_DIM * i] += i / 2000.;
+        }
+    }
 
 }
 
@@ -72,7 +72,7 @@ TEST_F(MySQLDBTest, DB_TEST) {
     std::thread search([&]() {
         engine::QueryResults results;
         int k = 10;
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::seconds(3));
 
         INIT_TIMER;
         std::stringstream ss;
@@ -91,6 +91,7 @@ TEST_F(MySQLDBTest, DB_TEST) {
 
             ASSERT_STATS(stat);
             for (auto k=0; k<qb; ++k) {
+//                std::cout << results[k][0].first << " " << target_ids[k] << std::endl;
                 ASSERT_EQ(results[k][0].first, target_ids[k]);
                 ss.str("");
                 ss << "Result [" << k << "]:";
@@ -100,7 +101,7 @@ TEST_F(MySQLDBTest, DB_TEST) {
                 /* LOG(DEBUG) << ss.str(); */
             }
             ASSERT_TRUE(count >= prev_count);
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::seconds(3));
         }
     });
 
@@ -117,6 +118,8 @@ TEST_F(MySQLDBTest, DB_TEST) {
     }
 
     search.join();
+
+//    db_->DropAll();
 
     delete db_;
 
