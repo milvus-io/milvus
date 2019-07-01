@@ -10,7 +10,7 @@
 #include "Factories.h"
 #include "metrics/Metrics.h"
 #include "scheduler/TaskScheduler.h"
-#include "scheduler/context/SearchContext.h"
+
 #include "scheduler/context/DeleteContext.h"
 #include "utils/TimeRecorder.h"
 #include "MetaConsts.h"
@@ -29,9 +29,9 @@ namespace engine {
 
 namespace {
 
-static constexpr uint64_t METRIC_ACTION_INTERVAL = 1;
-static constexpr uint64_t COMPACT_ACTION_INTERVAL = 1;
-static constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
+constexpr uint64_t METRIC_ACTION_INTERVAL = 1;
+constexpr uint64_t COMPACT_ACTION_INTERVAL = 1;
+constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
 
 void CollectInsertMetrics(double total_time, size_t n, bool succeed) {
     double avg_time = total_time / n;
@@ -78,56 +78,6 @@ void CollectFileMetrics(int file_type, size_t file_size, double total_time) {
         }
     }
 }
-
-void CalcScore(uint64_t vector_count,
-               const float *vectors_data,
-               uint64_t dimension,
-               const SearchContext::ResultSet &result_src,
-               SearchContext::ResultSet &result_target) {
-    result_target.clear();
-    if(result_src.empty()){
-        return;
-    }
-
-    server::TimeRecorder rc("Calculate Score");
-    int vec_index = 0;
-    for(auto& result : result_src) {
-        const float * vec_data = vectors_data + vec_index*dimension;
-        double vec_len = 0;
-        for(uint64_t i = 0; i < dimension; i++) {
-            vec_len += vec_data[i]*vec_data[i];
-        }
-        vec_index++;
-
-        double max_score = 0.0;
-        for(auto& pair : result) {
-            if(max_score < pair.second) {
-                max_score = pair.second;
-            }
-        }
-
-        //makesure socre is less than 100
-        if(max_score > vec_len) {
-            vec_len = max_score;
-        }
-
-        //avoid divided by zero
-        static constexpr double TOLERANCE = std::numeric_limits<float>::epsilon();
-        if(vec_len < TOLERANCE) {
-            vec_len = TOLERANCE;
-        }
-
-        SearchContext::Id2ScoreMap score_array;
-        double vec_len_inverse = 1.0/vec_len;
-        for(auto& pair : result) {
-            score_array.push_back(std::make_pair(pair.first, (1 - pair.second*vec_len_inverse)*100.0));
-        }
-        result_target.emplace_back(score_array);
-    }
-
-    rc.Elapse("totally cost");
-}
-
 }
 
 
@@ -237,7 +187,7 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
         meta::TableFileSchema table_file;
         table_file.table_id_ = table_id;
         std::string::size_type sz;
-        ids.push_back(std::stol(id, &sz));
+        ids.push_back(std::stoul(id, &sz));
     }
 
     meta::TableFilesSchema files_array;
@@ -253,144 +203,140 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
     return QueryAsync(table_id, files_array, k, nq, vectors, dates, results);
 }
 
-//Status DBImpl::QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
-//                 const float* vectors, const meta::DatesT& dates, QueryResults& results) {
-//    meta::DatePartionedTableFilesSchema files;
-//    auto status = meta_ptr_->FilesToSearch(table_id, dates, files);
-//    if (!status.ok()) { return status; }
-//
-//    ENGINE_LOG_DEBUG << "Search DateT Size = " << files.size();
-//
-//    meta::TableFilesSchema index_files;
-//    meta::TableFilesSchema raw_files;
-//    for (auto &day_files : files) {
-//        for (auto &file : day_files.second) {
-//            file.file_type_ == meta::TableFileSchema::INDEX ?
-//            index_files.push_back(file) : raw_files.push_back(file);
-//        }
-//    }
-//
-//    int dim = 0;
-//    if (!index_files.empty()) {
-//        dim = index_files[0].dimension_;
-//    } else if (!raw_files.empty()) {
-//        dim = raw_files[0].dimension_;
-//    } else {
-//        ENGINE_LOG_DEBUG << "no files to search";
-//        return Status::OK();
-//    }
-//
-//    {
-//        // [{ids, distence}, ...]
-//        using SearchResult = std::pair<std::vector<long>, std::vector<float>>;
-//        std::vector<SearchResult> batchresult(nq); // allocate nq cells.
-//
-//        auto cluster = [&](long *nns, float *dis, const int& k) -> void {
-//            for (int i = 0; i < nq; ++i) {
-//                auto f_begin = batchresult[i].first.cbegin();
-//                auto s_begin = batchresult[i].second.cbegin();
-//                batchresult[i].first.insert(f_begin, nns + i * k, nns + i * k + k);
-//                batchresult[i].second.insert(s_begin, dis + i * k, dis + i * k + k);
-//            }
-//        };
-//
-//        // Allocate Memory
-//        float *output_distence;
-//        long *output_ids;
-//        output_distence = (float *) malloc(k * nq * sizeof(float));
-//        output_ids = (long *) malloc(k * nq * sizeof(long));
-//        memset(output_distence, 0, k * nq * sizeof(float));
-//        memset(output_ids, 0, k * nq * sizeof(long));
-//
-//        long search_set_size = 0;
-//
-//        auto search_in_index = [&](meta::TableFilesSchema& file_vec) -> void {
-//            for (auto &file : file_vec) {
-//
-//                ExecutionEnginePtr index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
-//                index->Load();
-//                auto file_size = index->PhysicalSize();
-//                search_set_size += file_size;
-//
-//                ENGINE_LOG_DEBUG << "Search file_type " << file.file_type_ << " Of Size: "
-//                    << file_size/(1024*1024) << " M";
-//
-//                int inner_k = index->Count() < k ? index->Count() : k;
-//                auto start_time = METRICS_NOW_TIME;
-//                index->Search(nq, vectors, inner_k, output_distence, output_ids);
-//                auto end_time = METRICS_NOW_TIME;
-//                auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-//                CollectFileMetrics(file.file_type_, file_size, total_time);
-//                cluster(output_ids, output_distence, inner_k); // cluster to each query
-//                memset(output_distence, 0, k * nq * sizeof(float));
-//                memset(output_ids, 0, k * nq * sizeof(long));
-//            }
-//        };
-//
-//        auto topk_cpu = [](const std::vector<float> &input_data,
-//                           const int &k,
-//                           float *output_distence,
-//                           long *output_ids) -> void {
-//            std::map<float, std::vector<int>> inverted_table;
-//            for (int i = 0; i < input_data.size(); ++i) {
-//                if (inverted_table.count(input_data[i]) == 1) {
-//                    auto& ori_vec = inverted_table[input_data[i]];
-//                    ori_vec.push_back(i);
-//                }
-//                else {
-//                    inverted_table[input_data[i]] = std::vector<int>{i};
-//                }
-//            }
-//
-//            int count = 0;
-//            for (auto &item : inverted_table){
-//                if (count == k) break;
-//                for (auto &id : item.second){
-//                    output_distence[count] = item.first;
-//                    output_ids[count] = id;
-//                    if (++count == k) break;
-//                }
-//            }
-//        };
-//        auto cluster_topk = [&]() -> void {
-//            QueryResult res;
-//            for (auto &result_pair : batchresult) {
-//                auto &dis = result_pair.second;
-//                auto &nns = result_pair.first;
-//
-//                topk_cpu(dis, k, output_distence, output_ids);
-//
-//                int inner_k = dis.size() < k ? dis.size() : k;
-//                for (int i = 0; i < inner_k; ++i) {
-//                    res.emplace_back(std::make_pair(nns[output_ids[i]], output_distence[i])); // mapping
-//                }
-//                results.push_back(res); // append to result list
-//                res.clear();
-//                memset(output_distence, 0, k * nq * sizeof(float));
-//                memset(output_ids, 0, k * nq * sizeof(long));
-//            }
-//        };
-//
-//        search_in_index(raw_files);
-//        search_in_index(index_files);
-//
-//        ENGINE_LOG_DEBUG << "Search Overall Set Size = " << search_set_size << " M";
-//        cluster_topk();
-//
-//        free(output_distence);
-//        free(output_ids);
-//    }
-//
-//    if (results.empty()) {
-//        return Status::NotFound("Group " + table_id + ", search result not found!");
-//    }
-//
-//    QueryResults temp_results;
-//    CalcScore(nq, vectors, dim, results, temp_results);
-//    results.swap(temp_results);
-//
-//    return Status::OK();
-//}
+Status DBImpl::QuerySync(const std::string& table_id, uint64_t k, uint64_t nq,
+                 const float* vectors, const meta::DatesT& dates, QueryResults& results) {
+    meta::DatePartionedTableFilesSchema files;
+    auto status = meta_ptr_->FilesToSearch(table_id, dates, files);
+    if (!status.ok()) { return status; }
+
+    ENGINE_LOG_DEBUG << "Search DateT Size = " << files.size();
+
+    meta::TableFilesSchema index_files;
+    meta::TableFilesSchema raw_files;
+    for (auto &day_files : files) {
+        for (auto &file : day_files.second) {
+            file.file_type_ == meta::TableFileSchema::INDEX ?
+            index_files.push_back(file) : raw_files.push_back(file);
+        }
+    }
+
+    int dim = 0;
+    if (!index_files.empty()) {
+        dim = index_files[0].dimension_;
+    } else if (!raw_files.empty()) {
+        dim = raw_files[0].dimension_;
+    } else {
+        ENGINE_LOG_DEBUG << "no files to search";
+        return Status::OK();
+    }
+
+    {
+        // [{ids, distence}, ...]
+        using SearchResult = std::pair<std::vector<long>, std::vector<float>>;
+        std::vector<SearchResult> batchresult(nq); // allocate nq cells.
+
+        auto cluster = [&](long *nns, float *dis, const int& k) -> void {
+            for (int i = 0; i < nq; ++i) {
+                auto f_begin = batchresult[i].first.cbegin();
+                auto s_begin = batchresult[i].second.cbegin();
+                batchresult[i].first.insert(f_begin, nns + i * k, nns + i * k + k);
+                batchresult[i].second.insert(s_begin, dis + i * k, dis + i * k + k);
+            }
+        };
+
+        // Allocate Memory
+        float *output_distence;
+        long *output_ids;
+        output_distence = (float *) malloc(k * nq * sizeof(float));
+        output_ids = (long *) malloc(k * nq * sizeof(long));
+        memset(output_distence, 0, k * nq * sizeof(float));
+        memset(output_ids, 0, k * nq * sizeof(long));
+
+        long search_set_size = 0;
+
+        auto search_in_index = [&](meta::TableFilesSchema& file_vec) -> void {
+            for (auto &file : file_vec) {
+
+                ExecutionEnginePtr index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
+                index->Load();
+                auto file_size = index->PhysicalSize();
+                search_set_size += file_size;
+
+                ENGINE_LOG_DEBUG << "Search file_type " << file.file_type_ << " Of Size: "
+                    << file_size/(1024*1024) << " M";
+
+                int inner_k = index->Count() < k ? index->Count() : k;
+                auto start_time = METRICS_NOW_TIME;
+                index->Search(nq, vectors, inner_k, output_distence, output_ids);
+                auto end_time = METRICS_NOW_TIME;
+                auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+                CollectFileMetrics(file.file_type_, file_size, total_time);
+                cluster(output_ids, output_distence, inner_k); // cluster to each query
+                memset(output_distence, 0, k * nq * sizeof(float));
+                memset(output_ids, 0, k * nq * sizeof(long));
+            }
+        };
+
+        auto topk_cpu = [](const std::vector<float> &input_data,
+                           const int &k,
+                           float *output_distence,
+                           long *output_ids) -> void {
+            std::map<float, std::vector<int>> inverted_table;
+            for (int i = 0; i < input_data.size(); ++i) {
+                if (inverted_table.count(input_data[i]) == 1) {
+                    auto& ori_vec = inverted_table[input_data[i]];
+                    ori_vec.push_back(i);
+                }
+                else {
+                    inverted_table[input_data[i]] = std::vector<int>{i};
+                }
+            }
+
+            int count = 0;
+            for (auto &item : inverted_table){
+                if (count == k) break;
+                for (auto &id : item.second){
+                    output_distence[count] = item.first;
+                    output_ids[count] = id;
+                    if (++count == k) break;
+                }
+            }
+        };
+        auto cluster_topk = [&]() -> void {
+            QueryResult res;
+            for (auto &result_pair : batchresult) {
+                auto &dis = result_pair.second;
+                auto &nns = result_pair.first;
+
+                topk_cpu(dis, k, output_distence, output_ids);
+
+                int inner_k = dis.size() < k ? dis.size() : k;
+                for (int i = 0; i < inner_k; ++i) {
+                    res.emplace_back(std::make_pair(nns[output_ids[i]], output_distence[i])); // mapping
+                }
+                results.push_back(res); // append to result list
+                res.clear();
+                memset(output_distence, 0, k * nq * sizeof(float));
+                memset(output_ids, 0, k * nq * sizeof(long));
+            }
+        };
+
+        search_in_index(raw_files);
+        search_in_index(index_files);
+
+        ENGINE_LOG_DEBUG << "Search Overall Set Size = " << search_set_size << " M";
+        cluster_topk();
+
+        free(output_distence);
+        free(output_ids);
+    }
+
+    if (results.empty()) {
+        return Status::NotFound("Group " + table_id + ", search result not found!");
+    }
+
+    return Status::OK();
+}
 
 Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
                           uint64_t k, uint64_t nq, const float* vectors,
@@ -410,13 +356,8 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
 
     context->WaitResult();
 
-    //step 3: construct results, calculate score between 0 ~ 100
-    auto& context_result = context->GetResult();
-    meta::TableSchema table_schema;
-    table_schema.table_id_ = table_id;
-    meta_ptr_->DescribeTable(table_schema);
-
-    CalcScore(context->nq(), context->vectors(), table_schema.dimension_, context_result, results);
+    //step 3: construct results
+    results = context->GetResult();
 
     return Status::OK();
 }
@@ -589,7 +530,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
 //    std::cout << "BackgroundCompaction: " << b_count << std::endl;
 
     Status status;
-    for (auto table_id : table_ids) {
+    for (auto& table_id : table_ids) {
         status = BackgroundMergeFiles(table_id);
         if (!status.ok()) {
             bg_error_ = status;
