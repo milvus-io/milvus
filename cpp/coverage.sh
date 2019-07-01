@@ -11,7 +11,7 @@ DIR_LCOV_OUTPUT="lcov_out"
 
 DIR_GCNO="cmake_build"
 DIR_UNITTEST="milvus/bin"
- 
+
 MYSQL_USER_NAME=root
 MYSQL_PASSWORD=Fantast1c
 MYSQL_HOST='192.168.1.194'
