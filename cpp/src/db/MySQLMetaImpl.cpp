@@ -193,9 +193,7 @@ namespace meta {
                                     "engine_type INT DEFAULT 1 NOT NULL, " <<
                                     "store_raw_data BOOL DEFAULT false NOT NULL);";
 
-                    if (options_.sql_echo) {
-                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
-                    }
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
                     if (!InitializeQuery.exec()) {
                         return Status::DBTransactionError("Initialization Error", InitializeQuery.error());
@@ -212,9 +210,7 @@ namespace meta {
                                     "created_on BIGINT NOT NULL, " <<
                                     "date INT DEFAULT -1 NOT NULL);";
 
-                    if (options_.sql_echo) {
-                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
-                    }
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
                     if (!InitializeQuery.exec()) {
                         return Status::DBTransactionError("Initialization Error", InitializeQuery.error());
@@ -305,9 +301,7 @@ namespace meta {
                                             "WHERE table_id = " << quote << table_id << " AND " <<
                                             "date in (" << dateListStr << ");";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropPartitionsByDates: " << dropPartitionsByDatesQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropPartitionsByDates: " << dropPartitionsByDatesQuery.str();
 
                 if (!dropPartitionsByDatesQuery.exec()) {
                     ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROPPING PARTITIONS BY DATES";
@@ -353,9 +347,7 @@ namespace meta {
                                         "WHERE table_id = " << quote << table_schema.table_id_ << ";";
 //                    ENGINE_LOG_DEBUG << "Create Table : " << createTableQuery.str();
 
-                    if (options_.sql_echo) {
-                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
-                    }
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
 
                     StoreQueryResult res = createTableQuery.store();
                     assert(res && res.num_rows() <= 1);
@@ -390,9 +382,7 @@ namespace meta {
                                  created_on << ", " << files_cnt << ", " << engine_type << ", " << store_raw_data << ");";
 //                ENGINE_LOG_DEBUG << "Create Table : " << createTableQuery.str();
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
 
                 if (SimpleResult res = createTableQuery.execute()) {
                     table_schema.id_ = res.insert_id(); //Might need to use SELECT LAST_INSERT_ID()?
@@ -457,9 +447,7 @@ namespace meta {
                                     "SET state = " << std::to_string(TableSchema::TO_DELETE) << " " <<
                                     "WHERE table_id = " << quote << table_id << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DeleteTable: " << deleteTableQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::DeleteTable: " << deleteTableQuery.str();
 
                 if (!deleteTableQuery.exec()) {
                     ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE";
@@ -506,9 +494,7 @@ namespace meta {
                                       "WHERE table_id = " << quote << table_id << " AND " <<
                                       "file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DeleteTableFiles: " << deleteTableFilesQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::DeleteTableFiles: " << deleteTableFilesQuery.str();
 
                 if (!deleteTableFilesQuery.exec()) {
                     ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE FILES";
@@ -551,9 +537,7 @@ namespace meta {
                                       "WHERE table_id = " << quote << table_schema.table_id_ << " " <<
                                       "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeTable: " << describeTableQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::DescribeTable: " << describeTableQuery.str();
 
                 res = describeTableQuery.store();
             } //Scoped Connection
@@ -618,9 +602,7 @@ namespace meta {
                               "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ") " <<
                               "AS " << quote << "check" << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasTable: " << hasTableQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasTable: " << hasTableQuery.str();
 
                 res = hasTableQuery.store();
             } //Scoped Connection
@@ -664,9 +646,7 @@ namespace meta {
                                "FROM Tables " <<
                                "WHERE state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allTablesQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allTablesQuery.str();
 
                 res = allTablesQuery.store();
             } //Scoped Connection
@@ -755,9 +735,7 @@ namespace meta {
                                      quote << file_id << ", " << file_type << ", " << size << ", " <<
                                      updated_time << ", " << created_on << ", " << date << ");";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTableFile: " << createTableFileQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTableFile: " << createTableFileQuery.str();
 
                 if (SimpleResult res = createTableFileQuery.execute()) {
                     file_schema.id_ = res.insert_id(); //Might need to use SELECT LAST_INSERT_ID()?
@@ -821,9 +799,7 @@ namespace meta {
                                      "FROM TableFiles " <<
                                      "WHERE file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToIndex: " << filesToIndexQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToIndex: " << filesToIndexQuery.str();
 
                 res = filesToIndexQuery.store();
             } //Scoped Connection
@@ -911,9 +887,7 @@ namespace meta {
                                        "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " OR " <<
                                        "file_type = " << std::to_string(TableFileSchema::INDEX) << ");";
 
-                    if (options_.sql_echo) {
-                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
-                    }
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
 
                     res = filesToSearchQuery.store();
 
@@ -936,9 +910,7 @@ namespace meta {
                                        "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " OR " <<
                                        "file_type = " << std::to_string(TableFileSchema::INDEX) << ");";
 
-                    if (options_.sql_echo) {
-                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
-                    }
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
 
                     res = filesToSearchQuery.store();
 
@@ -1023,9 +995,7 @@ namespace meta {
                                   "file_type = " << std::to_string(TableFileSchema::RAW) << " " <<
                                   "ORDER BY size DESC" << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToMerge: " << filesToMergeQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToMerge: " << filesToMergeQuery.str();
 
                 res = filesToMergeQuery.store();
             } //Scoped Connection
@@ -1116,9 +1086,7 @@ namespace meta {
                                   "WHERE table_id = " << quote << table_id << " AND " <<
                                   "(" << idStr << ");";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFiles: " << getTableFileQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFiles: " << getTableFileQuery.str();
 
                 res = getTableFileQuery.store();
             } //Scoped Connection
@@ -1200,9 +1168,7 @@ namespace meta {
                                     "WHERE created_on < " << std::to_string(now - usecs) << " AND " <<
                                     "file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
-                    if (options_.sql_echo) {
-                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::Archive: " << archiveQuery.str();
-                    }
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Archive: " << archiveQuery.str();
 
                     if (!archiveQuery.exec()) {
                         return Status::DBTransactionError("QUERY ERROR DURING ARCHIVE", archiveQuery.error());
@@ -1251,9 +1217,7 @@ namespace meta {
                              "FROM TableFiles " <<
                              "WHERE file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Size: " << getSizeQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::Size: " << getSizeQuery.str();
 
                 res = getSizeQuery.store();
             } //Scoped Connection
@@ -1315,9 +1279,7 @@ namespace meta {
                                   "ORDER BY id ASC " <<
                                   "LIMIT 10;";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DiscardFiles: " << discardFilesQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::DiscardFiles: " << discardFilesQuery.str();
 
                 //            std::cout << discardFilesQuery.str() << std::endl;
                 StoreQueryResult res = discardFilesQuery.store();
@@ -1349,9 +1311,7 @@ namespace meta {
                                   "updated_time = " << std::to_string(utils::GetMicroSecTimeStamp()) << " " <<
                                   "WHERE " << idsToDiscardStr << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::DiscardFiles: " << discardFilesQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::DiscardFiles: " << discardFilesQuery.str();
 
                 status = discardFilesQuery.exec();
                 if (!status) {
@@ -1397,9 +1357,7 @@ namespace meta {
                 updateTableFileQuery << "SELECT state FROM Tables " <<
                                      "WHERE table_id = " << quote << file_schema.table_id_ << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
 
                 StoreQueryResult res = updateTableFileQuery.store();
 
@@ -1434,9 +1392,7 @@ namespace meta {
                                      "date = " << date << " " <<
                                      "WHERE id = " << id << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
 
                 //            std::cout << updateTableFileQuery.str() << std::endl;
 
@@ -1491,9 +1447,7 @@ namespace meta {
                                           "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ") " <<
                                           "AS " << quote << "check" << ";";
 
-                    if (options_.sql_echo) {
-                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFiles: " << updateTableFilesQuery.str();
-                    }
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFiles: " << updateTableFilesQuery.str();
 
                     StoreQueryResult res = updateTableFilesQuery.store();
 
@@ -1530,9 +1484,7 @@ namespace meta {
                                           "date = " << date << " " <<
                                           "WHERE id = " << id << ";";
 
-                    if (options_.sql_echo) {
-                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFiles: " << updateTableFilesQuery.str();
-                    }
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFiles: " << updateTableFilesQuery.str();
 
                     if (!updateTableFilesQuery.exec()) {
                         ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILES";
@@ -1582,9 +1534,7 @@ namespace meta {
                                          "WHERE file_type = " << std::to_string(TableFileSchema::TO_DELETE) << " AND " <<
                                          "updated_time < " << std::to_string(now - seconds * US_PS) << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
                 StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
 
@@ -1628,9 +1578,7 @@ namespace meta {
                     cleanUpFilesWithTTLQuery << "DELETE FROM TableFiles WHERE " <<
                                              idsToDeleteStr << ";";
 
-                    if (options_.sql_echo) {
-                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
-                    }
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
                     if (!cleanUpFilesWithTTLQuery.exec()) {
                         ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
@@ -1669,9 +1617,7 @@ namespace meta {
                                          "FROM Tables " <<
                                          "WHERE state = " << std::to_string(TableSchema::TO_DELETE) << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
                 StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
                 assert(res);
@@ -1697,9 +1643,7 @@ namespace meta {
                     cleanUpFilesWithTTLQuery << "DELETE FROM Tables WHERE " <<
                                              idsToDeleteStr << ";";
 
-                    if (options_.sql_echo) {
-                        ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
-                    }
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
                     if (!cleanUpFilesWithTTLQuery.exec()) {
                         ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
@@ -1739,9 +1683,7 @@ namespace meta {
                          "WHERE table_schema = " << quote << mysql_connection_pool_->getDB() << quote << " " <<
                          "AND table_name = " << quote << "TableFiles" << quote << ";";
 
-            if (options_.sql_echo) {
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
-            }
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
 
             StoreQueryResult res = cleanUpQuery.store();
             assert(res);
@@ -1749,9 +1691,7 @@ namespace meta {
                 ENGINE_LOG_DEBUG << "Remove table file type as NEW";
                 cleanUpQuery << "DELETE FROM TableFiles WHERE file_type = " << std::to_string(TableFileSchema::NEW) << ";";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
 
                 if (!cleanUpQuery.exec()) {
                     ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES";
@@ -1804,9 +1744,7 @@ namespace meta {
                            "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " OR " <<
                            "file_type = " << std::to_string(TableFileSchema::INDEX) << ");";
 
-                if (options_.sql_echo) {
-                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Count: " << countQuery.str();
-                }
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::Count: " << countQuery.str();
 
                 res = countQuery.store();
             } //Scoped Connection
@@ -1851,9 +1789,7 @@ namespace meta {
             Query dropTableQuery = connectionPtr->query();
             dropTableQuery << "DROP TABLE IF EXISTS Tables, TableFiles;";
 
-            if (options_.sql_echo) {
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropAll: " << dropTableQuery.str();
-            }
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropAll: " << dropTableQuery.str();
 
             if (dropTableQuery.exec()) {
                 return Status::OK();
