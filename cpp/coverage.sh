@@ -11,13 +11,13 @@ DIR_LCOV_OUTPUT="lcov_out"
 
 DIR_GCNO="cmake_build"
 DIR_UNITTEST="milvus/bin"
-
+ 
 MYSQL_USER_NAME=root
 MYSQL_PASSWORD=Fantast1c
 MYSQL_HOST='192.168.1.194'
 MYSQL_PORT='3306'
 
-MYSQL_DB_NAME=`date +%s%N`
+MYSQL_DB_NAME=milvus_`date +%s%N`
 
 function mysql_exc()
 {
@@ -45,8 +45,10 @@ for test in `ls ${DIR_UNITTEST}`; do
         db_test)
             # set run args for db_test
             args="mysql://${MYSQL_USER_NAME}:${MYSQL_PASSWORD}@${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DB_NAME}"
+            ;;
         *_test)
             args=""
+            ;;
     esac
     # run unittest
     ./${DIR_UNITTEST}/${test} "${args}"
