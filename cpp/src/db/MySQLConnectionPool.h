@@ -69,6 +69,10 @@ public:
         max_idle_time_ = max_idle;
     }
 
+    std::string getDB() {
+        return db_;
+    }
+
 protected:
 
     // Superclass overrides

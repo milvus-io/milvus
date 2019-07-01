@@ -45,7 +45,6 @@ struct DBMetaOptions {
     std::string path;
     std::string backend_uri;
     ArchiveConf archive_conf = ArchiveConf("delete");
-    bool sql_echo = false;
 }; // DBMetaOptions
 
 struct Options {
