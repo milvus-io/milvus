@@ -72,7 +72,7 @@ TEST_F(MySQLDBTest, DB_TEST) {
     std::thread search([&]() {
         engine::QueryResults results;
         int k = 10;
-        std::this_thread::sleep_for(std::chrono::seconds(3));
+        std::this_thread::sleep_for(std::chrono::seconds(5));
 
         INIT_TIMER;
         std::stringstream ss;
@@ -118,8 +118,6 @@ TEST_F(MySQLDBTest, DB_TEST) {
     }
 
     search.join();
-
-//    db_->DropAll();
 
     delete db_;
 
