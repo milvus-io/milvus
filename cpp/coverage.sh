@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/milvus/lib
+
 LCOV_CMD="lcov"
 LCOV_GEN_CMD="genhtml"
 
