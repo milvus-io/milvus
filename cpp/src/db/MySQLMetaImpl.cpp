@@ -1733,17 +1733,30 @@ namespace meta {
 //                ENGINE_LOG_WARNING << "MySQLMetaImpl::CleanUp: connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //            }
 
-            ENGINE_LOG_DEBUG << "Remove table file type as NEW";
             Query cleanUpQuery = connectionPtr->query();
-            cleanUpQuery << "DELETE FROM TableFiles WHERE file_type = " << std::to_string(TableFileSchema::NEW) << ";";
+            cleanUpQuery << "SELECT table_name " <<
+                            "FROM information_schema.tables " <<
+                            "WHERE table_schema = " << quote << mysql_connection_pool_->getDB() << quote << " " <<
+                            "AND table_name = " << quote << "TableFiles" << quote << ";";
 
             if (options_.sql_echo) {
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
             }
 
-            if (!cleanUpQuery.exec()) {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES";
-                return Status::DBTransactionError("Clean up Error", cleanUpQuery.error());
+            StoreQueryResult res = cleanUpQuery.store();
+            assert(res);
+            if (!res.empty()) {
+                ENGINE_LOG_DEBUG << "Remove table file type as NEW";
+                cleanUpQuery << "DELETE FROM TableFiles WHERE file_type = " << std::to_string(TableFileSchema::NEW) << ";";
+
+                if (options_.sql_echo) {
+                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
+                }
+
+                if (!cleanUpQuery.exec()) {
+                    ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES";
+                    return Status::DBTransactionError("Clean up Error", cleanUpQuery.error());
+                }
             }
 
         } catch (const BadQuery& er) {
