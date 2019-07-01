@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/milvus/lib
+
 LCOV_CMD="lcov"
 LCOV_GEN_CMD="genhtml"
 
@@ -40,7 +42,6 @@ if [ $? -ne 0 ]; then
 fi
 
 for test in `ls ${DIR_UNITTEST}`; do
-    echo $test
     case ${test} in
         db_test)
             # set run args for db_test
@@ -56,8 +57,6 @@ for test in `ls ${DIR_UNITTEST}`; do
         echo ${DIR_UNITTEST}/${test} "run failed"
     fi
 done
-
-mysql_exc "DROP DATABASE IF EXISTS ${MYSQL_DB_NAME};"
 
 # gen test converage
 ${LCOV_CMD} -d ${DIR_GCNO} -o "${FILE_INFO_MILVUS}" -c
