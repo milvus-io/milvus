@@ -5,14 +5,10 @@
 #-------------------------------------------------------------------------------
 link_directories(
         "${CMAKE_BINARY_DIR}/lib"
-        "${GTEST_PREFIX}/lib/"
-
 )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
-
-message(STATUS "GTEST LIB: ${GTEST_PREFIX}/lib")
 
 set(unittest_srcs
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)

@@ -3,16 +3,18 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
+#include <stdlib.h>
 #include "Factories.h"
 #include "DBImpl.h"
 
-#include <stdlib.h>
 #include <time.h>
 #include <sstream>
 #include <iostream>
 #include <vector>
 #include <assert.h>
 #include <easylogging++.h>
+#include <regex>
+#include "Exception.h"
 
 namespace zilliz {
 namespace milvus {
@@ -26,6 +28,7 @@ DBMetaOptions DBMetaOptionsFactory::Build(const std::string& path) {
         ss << "/tmp/" << rand();
         p = ss.str();
     }
+
     DBMetaOptions meta;
     meta.path = p;
     return meta;
@@ -41,6 +44,48 @@ Options OptionsFactory::Build() {
 std::shared_ptr<meta::DBMetaImpl> DBMetaImplFactory::Build() {
     DBMetaOptions options = DBMetaOptionsFactory::Build();
     return std::shared_ptr<meta::DBMetaImpl>(new meta::DBMetaImpl(options));
+}
+
+std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOptions,
+                                                     const int& mode) {
+
+    std::string uri = metaOptions.backend_uri;
+
+    std::string dialectRegex = "(.*)";
+    std::string usernameRegex = "(.*)";
+    std::string passwordRegex = "(.*)";
+    std::string hostRegex = "(.*)";
+    std::string portRegex = "(.*)";
+    std::string dbNameRegex = "(.*)";
+    std::string uriRegexStr = dialectRegex + "\\:\\/\\/" +
+                              usernameRegex + "\\:" +
+                              passwordRegex + "\\@" +
+                              hostRegex + "\\:" +
+                              portRegex + "\\/" +
+                              dbNameRegex;
+    std::regex uriRegex(uriRegexStr);
+    std::smatch pieces_match;
+
+    if (std::regex_match(uri, pieces_match, uriRegex)) {
+        std::string dialect = pieces_match[1].str();
+        std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
+        if (dialect.find("mysql") != std::string::npos) {
+            ENGINE_LOG_INFO << "Using MySQL";
+            return std::make_shared<meta::MySQLMetaImpl>(meta::MySQLMetaImpl(metaOptions, mode));
+        }
+        else if (dialect.find("sqlite") != std::string::npos) {
+            ENGINE_LOG_INFO << "Using SQLite";
+            return std::make_shared<meta::DBMetaImpl>(meta::DBMetaImpl(metaOptions));
+        }
+        else {
+            ENGINE_LOG_ERROR << "Invalid dialect in URI: dialect = " << dialect;
+            throw InvalidArgumentException("URI dialect is not mysql / sqlite");
+        }
+    }
+    else {
+        ENGINE_LOG_ERROR << "Wrong URI format: URI = " << uri;
+        throw InvalidArgumentException("Wrong URI format ");
+    }
 }
 
 std::shared_ptr<DB> DBFactory::Build() {

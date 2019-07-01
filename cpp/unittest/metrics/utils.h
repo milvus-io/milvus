@@ -53,7 +53,7 @@ void ASSERT_STATS(zilliz::milvus::engine::Status& stat);
 //::testing::Environment* const test_env =
 //        ::testing::AddGlobalTestEnvironment(new TestEnv);
 
-class DBTest : public ::testing::Test {
+class MetricTest : public ::testing::Test {
 protected:
     zilliz::milvus::engine::DB* db_;
 
@@ -61,29 +61,4 @@ protected:
     virtual void SetUp() override;
     virtual void TearDown() override;
     virtual zilliz::milvus::engine::Options GetOptions();
-};
-
-class DBTest2 : public DBTest {
-protected:
-    virtual zilliz::milvus::engine::Options GetOptions() override;
-};
-
-
-class MetaTest : public DBTest {
-protected:
-    std::shared_ptr<zilliz::milvus::engine::meta::DBMetaImpl> impl_;
-
-    virtual void SetUp() override;
-    virtual void TearDown() override;
-};
-
-class MySQLTest : public ::testing::Test {
-protected:
-//    std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
-    zilliz::milvus::engine::DBMetaOptions getDBMetaOptions();
-};
-
-class MySQLDBTest : public  ::testing::Test {
-protected:
-    zilliz::milvus::engine::Options GetOptions();
 };

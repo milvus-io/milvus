@@ -23,8 +23,7 @@ enum class EngineType {
 class ExecutionEngine {
 public:
 
-    virtual Status AddWithIds(const std::vector<float>& vectors,
-            const std::vector<long>& vector_ids);
+    virtual Status AddWithIdArray(const std::vector<float>& vectors, const std::vector<long>& vector_ids);
 
     virtual Status AddWithIds(long n, const float *xdata, const long *xids) = 0;
 
