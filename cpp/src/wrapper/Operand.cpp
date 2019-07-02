@@ -39,7 +39,7 @@ string Operand::get_index_type(const int &nb) {
         }
         case IVF: {
             index_str += (ncent != 0 ? index_type + std::to_string(ncent) :
-                          index_type + std::to_string(int(nb / 1000000.0 * 16384)));
+                          index_type + std::to_string(int(nb / 1000000.0 * 1638)));
             break;
         }
         case IDMAP: {
