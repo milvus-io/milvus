@@ -13,6 +13,7 @@
 
 #include "Index.h"
 #include "faiss/index_io.h"
+#include "faiss/IndexIVF.h"
 
 namespace zilliz {
 namespace milvus {
@@ -55,6 +56,9 @@ bool Index::add_with_ids(idx_t n, const float *xdata, const long *xids) {
 
 bool Index::search(idx_t n, const float *data, idx_t k, float *distances, long *labels) const {
     try {
+        if(auto ivf_index = std::dynamic_pointer_cast<faiss::IndexIVF>(index_)) {
+            ivf_index->nprobe = 100;
+        }
         index_->search(n, data, k, distances, labels);
     }
     catch (std::exception &e) {
