@@ -14,6 +14,8 @@
 #include "Index.h"
 #include "faiss/index_io.h"
 #include "faiss/IndexIVF.h"
+#include <faiss/IVFlib.h>
+#include "server/ServerConfig.h"
 
 namespace zilliz {
 namespace milvus {
@@ -22,6 +24,32 @@ namespace engine {
 using std::string;
 using std::unordered_map;
 using std::vector;
+
+class Nprobe {
+ public:
+    static Nprobe &GetInstance() {
+        static Nprobe instance;
+        return instance;
+    }
+
+    void SelectNprobe() {
+        using namespace zilliz::milvus::server;
+        ServerConfig &config = ServerConfig::GetInstance();
+        ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
+        nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1000);
+    }
+
+    size_t GetNprobe() {
+        return nprobe_;
+    }
+
+ private:
+    Nprobe() : nprobe_(1000) { SelectNprobe(); }
+
+ private:
+    size_t nprobe_;
+};
+
 
 Index::Index(const std::shared_ptr<faiss::Index> &raw_index) {
     index_ = raw_index;
@@ -57,7 +85,8 @@ bool Index::add_with_ids(idx_t n, const float *xdata, const long *xids) {
 bool Index::search(idx_t n, const float *data, idx_t k, float *distances, long *labels) const {
     try {
         if(auto ivf_index = std::dynamic_pointer_cast<faiss::IndexIVF>(index_)) {
-            ivf_index->nprobe = 100;
+            ivf_index->nprobe = Nprobe::GetInstance().GetNprobe();
+            std::cout << "nprobe = " << ivf_index->nprobe << std::endl;
         }
         index_->search(n, data, k, distances, labels);
     }
