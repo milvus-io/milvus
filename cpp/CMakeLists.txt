@@ -152,7 +152,12 @@ install(FILES
         conf/log_config.conf
         DESTINATION
         conf)
-
+install(FILES
+        ./Milvus-EULA-cn.md
+        ./Milvus-EULA-en.md
+        DESTINATION
+        license
+        )
 
 
 config_summary()
