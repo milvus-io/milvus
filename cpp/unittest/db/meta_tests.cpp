@@ -17,42 +17,52 @@
 
 using namespace zilliz::milvus::engine;
 
-TEST_F(MetaTest, GROUP_TEST) {
-    auto table_id = "meta_test_group";
+TEST_F(MetaTest, TABLE_TEST) {
+    auto table_id = "meta_test_table";
 
-    meta::TableSchema group;
-    group.table_id_ = table_id;
-    auto status = impl_->CreateTable(group);
+    meta::TableSchema table;
+    table.table_id_ = table_id;
+    auto status = impl_->CreateTable(table);
     ASSERT_TRUE(status.ok());
 
-    auto gid = group.id_;
-    group.id_ = -1;
-    status = impl_->DescribeTable(group);
+    auto gid = table.id_;
+    table.id_ = -1;
+    status = impl_->DescribeTable(table);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(group.id_, gid);
-    ASSERT_EQ(group.table_id_, table_id);
+    ASSERT_EQ(table.id_, gid);
+    ASSERT_EQ(table.table_id_, table_id);
 
-    group.table_id_ = "not_found";
-    status = impl_->DescribeTable(group);
+    table.table_id_ = "not_found";
+    status = impl_->DescribeTable(table);
     ASSERT_TRUE(!status.ok());
 
-    group.table_id_ = table_id;
-    status = impl_->CreateTable(group);
-    ASSERT_TRUE(!status.ok());
+    table.table_id_ = table_id;
+    status = impl_->CreateTable(table);
+    ASSERT_TRUE(status.ok());
+
+    table.table_id_ = "";
+    status = impl_->CreateTable(table);
+    ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MetaTest, table_file_TEST) {
-    auto table_id = "meta_test_group";
+TEST_F(MetaTest, TABLE_FILE_TEST) {
+    auto table_id = "meta_test_table";
 
-    meta::TableSchema group;
-    group.table_id_ = table_id;
-    auto status = impl_->CreateTable(group);
+    meta::TableSchema table;
+    table.table_id_ = table_id;
+    table.dimension_ = 256;
+    auto status = impl_->CreateTable(table);
 
     meta::TableFileSchema table_file;
-    table_file.table_id_ = group.table_id_;
+    table_file.table_id_ = table.table_id_;
     status = impl_->CreateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, meta::TableFileSchema::NEW);
+
+    uint64_t cnt = 0;
+    status = impl_->Count(table_id, cnt);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(cnt, 0UL);
 
     auto file_id = table_file.file_id_;
 
@@ -104,15 +114,15 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     options.archive_conf = ArchiveConf("delete", ss.str());
 
     auto impl = meta::DBMetaImpl(options);
-    auto table_id = "meta_test_group";
+    auto table_id = "meta_test_table";
 
-    meta::TableSchema group;
-    group.table_id_ = table_id;
-    auto status = impl.CreateTable(group);
+    meta::TableSchema table;
+    table.table_id_ = table_id;
+    auto status = impl.CreateTable(table);
 
     meta::TableFilesSchema files;
     meta::TableFileSchema table_file;
-    table_file.table_id_ = group.table_id_;
+    table_file.table_id_ = table.table_id_;
 
     auto cnt = 100;
     long ts = utils::GetMicroSecTimeStamp();
@@ -156,13 +166,13 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     auto impl = meta::DBMetaImpl(options);
     auto table_id = "meta_test_group";
 
-    meta::TableSchema group;
-    group.table_id_ = table_id;
-    auto status = impl.CreateTable(group);
+    meta::TableSchema table;
+    table.table_id_ = table_id;
+    auto status = impl.CreateTable(table);
 
     meta::TableFilesSchema files;
     meta::TableFileSchema table_file;
-    table_file.table_id_ = group.table_id_;
+    table_file.table_id_ = table.table_id_;
 
     auto cnt = 10;
     auto each_size = 2UL;
@@ -198,9 +208,9 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
 TEST_F(MetaTest, TABLE_FILES_TEST) {
     auto table_id = "meta_test_group";
 
-    meta::TableSchema group;
-    group.table_id_ = table_id;
-    auto status = impl_->CreateTable(group);
+    meta::TableSchema table;
+    table.table_id_ = table_id;
+    auto status = impl_->CreateTable(table);
 
     int new_files_cnt = 4;
     int raw_files_cnt = 5;
@@ -208,7 +218,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     int index_files_cnt = 7;
 
     meta::TableFileSchema table_file;
-    table_file.table_id_ = group.table_id_;
+    table_file.table_id_ = table.table_id_;
 
     for (auto i=0; i<new_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
@@ -241,7 +251,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     meta::DatePartionedTableFilesSchema dated_files;
-    status = impl_->FilesToMerge(group.table_id_, dated_files);
+    status = impl_->FilesToMerge(table.table_id_, dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(), raw_files_cnt);
 
@@ -254,4 +264,9 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
             to_index_files_cnt+raw_files_cnt+index_files_cnt);
+
+    status = impl_->FilesToSearch(table_id, meta::DatesT(), dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[table_file.date_].size(),
+              to_index_files_cnt+raw_files_cnt+index_files_cnt);
 }

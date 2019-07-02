@@ -24,12 +24,51 @@ DBWrapper::DBWrapper() {
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
 
-    CommonUtil::CreateDirectory(opt.meta.path);
+    ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
+    std::string mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
+    if (mode == "single") {
+        opt.mode = zilliz::milvus::engine::Options::MODE::SINGLE;
+    }
+    else if (mode == "cluster") {
+        opt.mode = zilliz::milvus::engine::Options::MODE::CLUSTER;
+    }
+    else if (mode == "read_only") {
+        opt.mode = zilliz::milvus::engine::Options::MODE::READ_ONLY;
+    }
+    else {
+        std::cout << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
+        kill(0, SIGUSR1);
+    }
 
-    zilliz::milvus::engine::DB::Open(opt, &db_);
+    //set archive config
+    engine::ArchiveConf::CriteriaT criterial;
+    int64_t disk = config.GetInt64Value(CONFIG_DB_ARCHIVE_DISK, 0);
+    int64_t days = config.GetInt64Value(CONFIG_DB_ARCHIVE_DAYS, 0);
+    if(disk > 0) {
+        criterial[engine::ARCHIVE_CONF_DISK] = disk;
+    }
+    if(days > 0) {
+        criterial[engine::ARCHIVE_CONF_DAYS] = days;
+    }
+    opt.meta.archive_conf.SetCriterias(criterial);
+
+    //create db root folder
+    ServerError err = CommonUtil::CreateDirectory(opt.meta.path);
+    if(err != SERVER_SUCCESS) {
+        std::cout << "ERROR! Failed to create database root path: " << opt.meta.path << std::endl;
+        kill(0, SIGUSR1);
+    }
+
+    std::string msg = opt.meta.path;
+    try {
+        zilliz::milvus::engine::DB::Open(opt, &db_);
+    } catch(std::exception& ex) {
+        msg = ex.what();
+    }
+
     if(db_ == nullptr) {
-        SERVER_LOG_ERROR << "Failed to open db";
-        throw ServerException(SERVER_NULL_POINTER, "Failed to open db");
+        std::cout << "ERROR! Failed to open database: " << msg << std::endl;
+        kill(0, SIGUSR1);
     }
 }
 

@@ -8,9 +8,11 @@
 
 #include <gtest/gtest.h>
 #include <chrono>
+//#include <src/db/MySQLMetaImpl.h>
 
 #include "db/DB.h"
 #include "db/DBMetaImpl.h"
+#include "db/MySQLMetaImpl.h"
 
 
 #define TIMING
@@ -28,9 +30,28 @@
 #define STOP_TIMER(name)
 #endif
 
-
 void ASSERT_STATS(zilliz::milvus::engine::Status& stat);
 
+//class TestEnv : public ::testing::Environment {
+//public:
+//
+//    static std::string getURI() {
+//        if (const char* uri = std::getenv("MILVUS_DBMETA_URI")) {
+//            return uri;
+//        }
+//        else {
+//            return "";
+//        }
+//    }
+//
+//    void SetUp() override {
+//        getURI();
+//    }
+//
+//};
+//
+//::testing::Environment* const test_env =
+//        ::testing::AddGlobalTestEnvironment(new TestEnv);
 
 class DBTest : public ::testing::Test {
 protected:
@@ -54,4 +75,15 @@ protected:
 
     virtual void SetUp() override;
     virtual void TearDown() override;
+};
+
+class MySQLTest : public ::testing::Test {
+protected:
+//    std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
+    zilliz::milvus::engine::DBMetaOptions getDBMetaOptions();
+};
+
+class MySQLDBTest : public  ::testing::Test {
+protected:
+    zilliz::milvus::engine::Options GetOptions();
 };

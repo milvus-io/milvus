@@ -183,6 +183,7 @@ Status DBMetaImpl::DropPartitionsByDates(const std::string &table_id,
 }
 
 Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
+
     try {
         MetricCollector metric;
 
@@ -192,9 +193,11 @@ Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
             auto table = ConnectorPtr->select(columns(&TableSchema::state_),
                                                where(c(&TableSchema::table_id_) == table_schema.table_id_));
             if (table.size() == 1) {
-                std::string msg = (TableSchema::TO_DELETE == std::get<0>(table[0])) ?
-                          "Table already exists and it is in delete state, please wait a second" : "Table already exists";
-                return Status::Error(msg);
+                if(TableSchema::TO_DELETE == std::get<0>(table[0])) {
+                    return Status::Error("Table already exists and it is in delete state, please wait a second");
+                } else {
+                    return Status::OK();//table already exists, no error
+                }
             }
         }
 
@@ -328,7 +331,7 @@ Status DBMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
         }
 
     } catch (std::exception &e) {
-        HandleException("Encounter exception when lookup table", e);
+        return HandleException("Encounter exception when lookup table", e);
     }
 
     return Status::OK();
@@ -358,7 +361,7 @@ Status DBMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
         }
 
     } catch (std::exception &e) {
-        HandleException("Encounter exception when lookup all tables", e);
+        return HandleException("Encounter exception when lookup all tables", e);
     }
 
     return Status::OK();
@@ -655,7 +658,7 @@ Status DBMetaImpl::Archive() {
     for (auto kv : criterias) {
         auto &criteria = kv.first;
         auto &limit = kv.second;
-        if (criteria == "days") {
+        if (criteria == engine::ARCHIVE_CONF_DAYS) {
             long usecs = limit * D_SEC * US_PS;
             long now = utils::GetMicroSecTimeStamp();
             try {
@@ -671,11 +674,11 @@ Status DBMetaImpl::Archive() {
                 return HandleException("Encounter exception when update table files", e);
             }
         }
-        if (criteria == "disk") {
+        if (criteria == engine::ARCHIVE_CONF_DISK) {
             uint64_t sum = 0;
             Size(sum);
 
-            auto to_delete = (sum - limit * G);
+            int64_t to_delete = (int64_t)sum - limit * G;
             DiscardFiles(to_delete);
         }
     }

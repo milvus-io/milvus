@@ -64,6 +64,7 @@ set(s3_client_files
 include_directories(/usr/include)
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 include_directories(thrift/gen-cpp)
+include_directories(/usr/include/mysql)
 
 set(third_party_libs
         knowhere
@@ -91,6 +92,7 @@ set(third_party_libs
         zstd
         cudart
         cublas
+        mysqlpp
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
 if (MEGASEARCH_WITH_ARROW STREQUAL "ON")
@@ -190,4 +192,10 @@ endif ()
 
 install(TARGETS milvus_server DESTINATION bin)
 
-add_subdirectory(sdk)
+install(FILES
+        ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}
+        ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3
+        ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4
+        DESTINATION lib) #need to copy libmysqlpp.so
+
+#add_subdirectory(sdk)

@@ -18,8 +18,6 @@ private:
     StringHelpFunctions() = default;
 
 public:
-    static void TrimStringLineBreak(std::string &string);
-
     static void TrimStringBlank(std::string &string);
 
     static void TrimStringQuote(std::string &string, const std::string &qoute);

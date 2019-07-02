@@ -52,7 +52,7 @@ if(MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_MINOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
-    set(MILVUS_VERSION "0.3.0")
+    set(MILVUS_VERSION "0.3.1")
 endif()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
@@ -113,20 +113,13 @@ link_directories(${MILVUS_BINARY_DIR})
 
 set(MILVUS_ENGINE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
 set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
-#set(MILVUS_THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
-#set(MILVUS_THIRD_PARTY_BUILD ${CMAKE_CURRENT_SOURCE_DIR}/third_party/build)
 
 add_compile_definitions(PROFILER=${PROFILER})
 
 include_directories(${MILVUS_ENGINE_INCLUDE})
 include_directories(${MILVUS_ENGINE_SRC})
-#include_directories(${MILVUS_THIRD_PARTY_BUILD}/include)
 
 link_directories(${CMAKE_CURRRENT_BINARY_DIR})
-#link_directories(${MILVUS_THIRD_PARTY_BUILD}/lib)
-#link_directories(${MILVUS_THIRD_PARTY_BUILD}/lib64)
-#execute_process(COMMAND bash build.sh
-#                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 add_subdirectory(src)
 
@@ -135,11 +128,18 @@ if (BUILD_COVERAGE STREQUAL "ON")
 endif()
 
 
-if (BUILD_UNIT_TEST)
+if (BUILD_UNIT_TEST STREQUAL "ON")
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
-endif(BUILD_UNIT_TEST)
+endif()
 
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
+
+
+if("${MILVUS_DB_PATH}" STREQUAL "")
+    set(MILVUS_DB_PATH "/tmp/milvus")
+endif()
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
 
 #install
 install(FILES
@@ -152,5 +152,12 @@ install(FILES
         conf/log_config.conf
         DESTINATION
         conf)
+install(FILES
+        ./Milvus-EULA-cn.md
+        ./Milvus-EULA-en.md
+        DESTINATION
+        license
+        )
+
 
 config_summary()

@@ -2,7 +2,20 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
-# Milvus 0.3.0 (TBD)
+
+# Milvus 0.3.1 (2019-07-10)
+
+## Bug
+
+## Improvement
+
+## New Feature
+
+## Task
+
+- MS-125 - Create 0.3.1 release branch
+
+# Milvus 0.3.0 (2019-06-30)
 
 ## Bug
 - MS-104 - Fix unittest lcov execution error
@@ -11,6 +24,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-89 - Fix compile failed, libgpufaiss.a link missing
 - MS-90 - Fix arch match incorrect on ARM
 - MS-99 - Fix compilation bug
+- MS-110 - Avoid huge file size
 
 ## Improvement
 - MS-82 - Update server startup welcome message
@@ -19,6 +33,11 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-22 - Enhancement for MemVector size control 
 - MS-92 - Unify behavior of debug and release build
 - MS-98 - Install all unit test to installation directory
+- MS-115 - Change is_startup of metric_config switch from true to on
+- MS-122 - Archive criteria config 
+- MS-124 - HasTable interface
+- MS-126 - Add more error code
+- MS-128 - Change default db path
 
 ## New Feature
 
@@ -40,6 +59,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-85 - add NetIO metric
 - MS-96 - add new query interface for specified files
 - MS-97 - Add S3 SDK for MinIO Storage
+- MS-105 - Add MySQL
+- MS-130 - Add prometheus_test
+- MS-143 - Intergrate Knowhere but not activate
 
 ## Task
 - MS-74 - Change README.md in cpp

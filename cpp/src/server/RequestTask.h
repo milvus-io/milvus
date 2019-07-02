@@ -7,7 +7,6 @@
 
 #include "RequestScheduler.h"
 #include "utils/Error.h"
-#include "utils/AttributeSerializer.h"
 #include "db/Types.h"
 
 #include "milvus_types.h"
@@ -31,6 +30,22 @@ protected:
 
 private:
     const ::milvus::thrift::TableSchema& schema_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class HasTableTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(const std::string& table_name, bool& has_table);
+
+protected:
+    HasTableTask(const std::string& table_name, bool& has_table);
+
+    ServerError OnExecute() override;
+
+
+private:
+    std::string table_name_;
+    bool& has_table_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

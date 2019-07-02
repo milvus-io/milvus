@@ -15,23 +15,51 @@ namespace milvus { namespace thrift {
 
 int _kErrorCodeValues[] = {
   ErrorCode::SUCCESS,
+  ErrorCode::UNEXPECTED_ERROR,
   ErrorCode::CONNECT_FAILED,
   ErrorCode::PERMISSION_DENIED,
   ErrorCode::TABLE_NOT_EXISTS,
   ErrorCode::ILLEGAL_ARGUMENT,
   ErrorCode::ILLEGAL_RANGE,
-  ErrorCode::ILLEGAL_DIMENSION
+  ErrorCode::ILLEGAL_DIMENSION,
+  ErrorCode::ILLEGAL_INDEX_TYPE,
+  ErrorCode::ILLEGAL_TABLE_NAME,
+  ErrorCode::ILLEGAL_TOPK,
+  ErrorCode::ILLEGAL_ROWRECORD,
+  ErrorCode::ILLEGAL_VECTOR_ID,
+  ErrorCode::ILLEGAL_SEARCH_RESULT,
+  ErrorCode::FILE_NOT_FOUND,
+  ErrorCode::META_FAILED,
+  ErrorCode::CACHE_FAILED,
+  ErrorCode::CANNOT_CREATE_FOLDER,
+  ErrorCode::CANNOT_CREATE_FILE,
+  ErrorCode::CANNOT_DELETE_FOLDER,
+  ErrorCode::CANNOT_DELETE_FILE
 };
 const char* _kErrorCodeNames[] = {
   "SUCCESS",
+  "UNEXPECTED_ERROR",
   "CONNECT_FAILED",
   "PERMISSION_DENIED",
   "TABLE_NOT_EXISTS",
   "ILLEGAL_ARGUMENT",
   "ILLEGAL_RANGE",
-  "ILLEGAL_DIMENSION"
+  "ILLEGAL_DIMENSION",
+  "ILLEGAL_INDEX_TYPE",
+  "ILLEGAL_TABLE_NAME",
+  "ILLEGAL_TOPK",
+  "ILLEGAL_ROWRECORD",
+  "ILLEGAL_VECTOR_ID",
+  "ILLEGAL_SEARCH_RESULT",
+  "FILE_NOT_FOUND",
+  "META_FAILED",
+  "CACHE_FAILED",
+  "CANNOT_CREATE_FOLDER",
+  "CANNOT_CREATE_FILE",
+  "CANNOT_DELETE_FOLDER",
+  "CANNOT_DELETE_FILE"
 };
-const std::map<int, const char*> _ErrorCode_VALUES_TO_NAMES(::apache::thrift::TEnumIterator(7, _kErrorCodeValues, _kErrorCodeNames), ::apache::thrift::TEnumIterator(-1, NULL, NULL));
+const std::map<int, const char*> _ErrorCode_VALUES_TO_NAMES(::apache::thrift::TEnumIterator(21, _kErrorCodeValues, _kErrorCodeNames), ::apache::thrift::TEnumIterator(-1, NULL, NULL));
 
 std::ostream& operator<<(std::ostream& out, const ErrorCode::type& val) {
   std::map<int, const char*>::const_iterator it = _ErrorCode_VALUES_TO_NAMES.find(val);
@@ -536,8 +564,8 @@ void QueryResult::__set_id(const int64_t val) {
   this->id = val;
 }
 
-void QueryResult::__set_score(const double val) {
-  this->score = val;
+void QueryResult::__set_distance(const double val) {
+  this->distance = val;
 }
 std::ostream& operator<<(std::ostream& out, const QueryResult& obj)
 {
@@ -577,8 +605,8 @@ uint32_t QueryResult::read(::apache::thrift::protocol::TProtocol* iprot) {
         break;
       case 2:
         if (ftype == ::apache::thrift::protocol::T_DOUBLE) {
-          xfer += iprot->readDouble(this->score);
-          this->__isset.score = true;
+          xfer += iprot->readDouble(this->distance);
+          this->__isset.distance = true;
         } else {
           xfer += iprot->skip(ftype);
         }
@@ -604,8 +632,8 @@ uint32_t QueryResult::write(::apache::thrift::protocol::TProtocol* oprot) const 
   xfer += oprot->writeI64(this->id);
   xfer += oprot->writeFieldEnd();
 
-  xfer += oprot->writeFieldBegin("score", ::apache::thrift::protocol::T_DOUBLE, 2);
-  xfer += oprot->writeDouble(this->score);
+  xfer += oprot->writeFieldBegin("distance", ::apache::thrift::protocol::T_DOUBLE, 2);
+  xfer += oprot->writeDouble(this->distance);
   xfer += oprot->writeFieldEnd();
 
   xfer += oprot->writeFieldStop();
@@ -616,18 +644,18 @@ uint32_t QueryResult::write(::apache::thrift::protocol::TProtocol* oprot) const 
 void swap(QueryResult &a, QueryResult &b) {
   using ::std::swap;
   swap(a.id, b.id);
-  swap(a.score, b.score);
+  swap(a.distance, b.distance);
   swap(a.__isset, b.__isset);
 }
 
 QueryResult::QueryResult(const QueryResult& other9) {
   id = other9.id;
-  score = other9.score;
+  distance = other9.distance;
   __isset = other9.__isset;
 }
 QueryResult& QueryResult::operator=(const QueryResult& other10) {
   id = other10.id;
-  score = other10.score;
+  distance = other10.distance;
   __isset = other10.__isset;
   return *this;
 }
@@ -635,7 +663,7 @@ void QueryResult::printTo(std::ostream& out) const {
   using ::apache::thrift::to_string;
   out << "QueryResult(";
   out << "id=" << to_string(id);
-  out << ", " << "score=" << to_string(score);
+  out << ", " << "distance=" << to_string(distance);
   out << ")";
 }
 

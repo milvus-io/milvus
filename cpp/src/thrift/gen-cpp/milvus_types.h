@@ -23,12 +23,26 @@ namespace milvus { namespace thrift {
 struct ErrorCode {
   enum type {
     SUCCESS = 0,
-    CONNECT_FAILED = 1,
-    PERMISSION_DENIED = 2,
-    TABLE_NOT_EXISTS = 3,
-    ILLEGAL_ARGUMENT = 4,
-    ILLEGAL_RANGE = 5,
-    ILLEGAL_DIMENSION = 6
+    UNEXPECTED_ERROR = 1,
+    CONNECT_FAILED = 2,
+    PERMISSION_DENIED = 3,
+    TABLE_NOT_EXISTS = 4,
+    ILLEGAL_ARGUMENT = 5,
+    ILLEGAL_RANGE = 6,
+    ILLEGAL_DIMENSION = 7,
+    ILLEGAL_INDEX_TYPE = 8,
+    ILLEGAL_TABLE_NAME = 9,
+    ILLEGAL_TOPK = 10,
+    ILLEGAL_ROWRECORD = 11,
+    ILLEGAL_VECTOR_ID = 12,
+    ILLEGAL_SEARCH_RESULT = 13,
+    FILE_NOT_FOUND = 14,
+    META_FAILED = 15,
+    CACHE_FAILED = 16,
+    CANNOT_CREATE_FOLDER = 17,
+    CANNOT_CREATE_FILE = 18,
+    CANNOT_DELETE_FOLDER = 19,
+    CANNOT_DELETE_FILE = 20
   };
 };
 
@@ -242,9 +256,9 @@ void swap(RowRecord &a, RowRecord &b);
 std::ostream& operator<<(std::ostream& out, const RowRecord& obj);
 
 typedef struct _QueryResult__isset {
-  _QueryResult__isset() : id(false), score(false) {}
+  _QueryResult__isset() : id(false), distance(false) {}
   bool id :1;
-  bool score :1;
+  bool distance :1;
 } _QueryResult__isset;
 
 class QueryResult : public virtual ::apache::thrift::TBase {
@@ -252,24 +266,24 @@ class QueryResult : public virtual ::apache::thrift::TBase {
 
   QueryResult(const QueryResult&);
   QueryResult& operator=(const QueryResult&);
-  QueryResult() : id(0), score(0) {
+  QueryResult() : id(0), distance(0) {
   }
 
   virtual ~QueryResult() throw();
   int64_t id;
-  double score;
+  double distance;
 
   _QueryResult__isset __isset;
 
   void __set_id(const int64_t val);
 
-  void __set_score(const double val);
+  void __set_distance(const double val);
 
   bool operator == (const QueryResult & rhs) const
   {
     if (!(id == rhs.id))
       return false;
-    if (!(score == rhs.score))
+    if (!(distance == rhs.distance))
       return false;
     return true;
   }

@@ -15,6 +15,7 @@
 #include <ctime>
 #include <memory>
 #include <mutex>
+#include <set>
 
 namespace zilliz {
 namespace milvus {
@@ -32,11 +33,11 @@ public:
     explicit MemVectors(const std::shared_ptr<meta::Meta>&,
             const meta::TableFileSchema&, const Options&);
 
-    void Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_);
+    Status Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_);
 
-    size_t Total() const;
+    size_t RowCount() const;
 
-    size_t ApproximateSize() const;
+    size_t Size() const;
 
     Status Serialize(std::string& table_id);
 
@@ -44,16 +45,18 @@ public:
 
     const std::string& Location() const { return schema_.location_; }
 
+    std::string TableId() const { return schema_.table_id_; }
+
 private:
     MemVectors() = delete;
     MemVectors(const MemVectors&) = delete;
     MemVectors& operator=(const MemVectors&) = delete;
 
-    MetaPtr pMeta_;
+    MetaPtr meta_;
     Options options_;
     meta::TableFileSchema schema_;
-    IDGenerator* pIdGenerator_;
-    ExecutionEnginePtr pEE_;
+    IDGenerator* id_generator_;
+    ExecutionEnginePtr active_engine_;
 
 }; // MemVectors
 
@@ -66,14 +69,14 @@ public:
     using Ptr = std::shared_ptr<MemManager>;
 
     MemManager(const std::shared_ptr<meta::Meta>& meta, const Options& options)
-        : pMeta_(meta), options_(options) {}
+        : meta_(meta), options_(options) {}
 
     MemVectorsPtr GetMemByTable(const std::string& table_id);
 
     Status InsertVectors(const std::string& table_id,
             size_t n, const float* vectors, IDNumbers& vector_ids);
 
-    Status Serialize(std::vector<std::string>& table_ids);
+    Status Serialize(std::set<std::string>& table_ids);
 
     Status EraseMemVector(const std::string& table_id);
 
@@ -82,11 +85,11 @@ private:
             size_t n, const float* vectors, IDNumbers& vector_ids);
     Status ToImmutable();
 
-    using MemMap = std::map<std::string, MemVectorsPtr>;
-    using ImmMemPool = std::vector<MemVectorsPtr>;
-    MemMap memMap_;
-    ImmMemPool immMems_;
-    MetaPtr pMeta_;
+    using MemIdMap = std::map<std::string, MemVectorsPtr>;
+    using MemList = std::vector<MemVectorsPtr>;
+    MemIdMap mem_id_map_;
+    MemList immu_mem_list_;
+    MetaPtr meta_;
     Options options_;
     std::mutex mutex_;
     std::mutex serialization_mtx_;
