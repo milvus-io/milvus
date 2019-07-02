@@ -14,7 +14,7 @@
 #include "Index.h"
 #include "faiss/index_io.h"
 #include "faiss/IndexIVF.h"
-#include <faiss/IVFlib.h>
+#include "faiss/IVFlib.h"
 #include "server/ServerConfig.h"
 
 namespace zilliz {
@@ -86,7 +86,6 @@ bool Index::search(idx_t n, const float *data, idx_t k, float *distances, long *
     try {
         if(auto ivf_index = std::dynamic_pointer_cast<faiss::IndexIVF>(index_)) {
             ivf_index->nprobe = Nprobe::GetInstance().GetNprobe();
-            std::cout << "nprobe = " << ivf_index->nprobe << std::endl;
         }
         index_->search(n, data, k, distances, labels);
     }
