@@ -24,6 +24,22 @@ DBWrapper::DBWrapper() {
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
 
+    ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
+    std::string mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
+    if (mode == "single") {
+        opt.mode = zilliz::milvus::engine::Options::MODE::SINGLE;
+    }
+    else if (mode == "cluster") {
+        opt.mode = zilliz::milvus::engine::Options::MODE::CLUSTER;
+    }
+    else if (mode == "read_only") {
+        opt.mode = zilliz::milvus::engine::Options::MODE::READ_ONLY;
+    }
+    else {
+        std::cout << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
+        kill(0, SIGUSR1);
+    }
+
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
     int64_t disk = config.GetInt64Value(CONFIG_DB_ARCHIVE_DISK, 0);
@@ -43,9 +59,15 @@ DBWrapper::DBWrapper() {
         kill(0, SIGUSR1);
     }
 
-    zilliz::milvus::engine::DB::Open(opt, &db_);
+    std::string msg = opt.meta.path;
+    try {
+        zilliz::milvus::engine::DB::Open(opt, &db_);
+    } catch(std::exception& ex) {
+        msg = ex.what();
+    }
+
     if(db_ == nullptr) {
-        std::cout << "ERROR! Failed to open database" << std::endl;
+        std::cout << "ERROR! Failed to open database: " << msg << std::endl;
         kill(0, SIGUSR1);
     }
 }

@@ -19,6 +19,7 @@ static const std::string CONFIG_SERVER_ADDRESS = "address";
 static const std::string CONFIG_SERVER_PORT = "port";
 static const std::string CONFIG_SERVER_PROTOCOL = "transfer_protocol";
 static const std::string CONFIG_SERVER_MODE = "server_mode";
+static const std::string CONFIG_CLUSTER_MODE = "mode";
 
 static const std::string CONFIG_DB = "db_config";
 static const std::string CONFIG_DB_URL = "db_backend_url";
