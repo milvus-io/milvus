@@ -26,7 +26,7 @@ using namespace zilliz::milvus;
 
 int
 main(int argc, char *argv[]) {
-    std::cout << std::endl << "Welcome to use Milvus by Zillz!" << std::endl;
+    std::cout << std::endl << "Welcome to use Milvus by Zilliz!" << std::endl;
     std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << " built at " << BUILD_TIME << std::endl;
 
     signal(SIGINT, server::SignalUtil::HandleSignal);
