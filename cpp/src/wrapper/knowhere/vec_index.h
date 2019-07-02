@@ -17,6 +17,7 @@ namespace zilliz {
 namespace vecwise {
 namespace engine {
 
+// TODO(linxj): jsoncons => rapidjson or other.
 using Config = zilliz::knowhere::Config;
 
 class VecIndex {
@@ -31,13 +32,13 @@ class VecIndex {
     virtual void Add(const long &nb,
                      const float *xb,
                      const long *ids,
-                     const Config &cfg) = 0;
+                     const Config &cfg = Config()) = 0;
 
     virtual void Search(const long &nq,
                         const float *xq,
                         float *dist,
                         long *ids,
-                        const Config &cfg) = 0;
+                        const Config &cfg = Config()) = 0;
 
     virtual zilliz::knowhere::BinarySet Serialize() = 0;
 
@@ -48,8 +49,7 @@ using VecIndexPtr = std::shared_ptr<VecIndex>;
 
 extern VecIndexPtr GetVecIndexFactory(const std::string &index_type);
 
-// TODO
-extern VecIndexPtr LoadVecIndex(const zilliz::knowhere::BinarySet &index_binary);
+extern VecIndexPtr LoadVecIndex(const std::string &index_type, const zilliz::knowhere::BinarySet &index_binary);
 
 }
 }

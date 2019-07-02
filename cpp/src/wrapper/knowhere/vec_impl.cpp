@@ -13,11 +13,6 @@
 #include "vec_impl.h"
 #include "data_transfer.h"
 
-//using Index = zilliz::knowhere::Index;
-//using IndexModel = zilliz::knowhere::IndexModel;
-//using IndexType = zilliz::knowhere::IndexType;
-//using IndexPtr = std::shared_ptr<Index>;
-//using IndexModelPtr = std::shared_ptr<IndexModel>;
 
 namespace zilliz {
 namespace vecwise {
@@ -31,24 +26,21 @@ void VecIndexImpl::BuildAll(const long &nb,
                             const Config &cfg,
                             const long &nt,
                             const float *xt) {
-    using namespace zilliz::knowhere;
-
     auto d = cfg["dim"].as<int>();
-    GENDATASET(nb, d, xb, ids)
+    auto dataset = GenDatasetWithIds(nb, d, xb, ids);
 
-    Config train_cfg;
-    Config add_cfg;
-    Config search_cfg;
+    auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
+    index_->set_preprocessor(preprocessor);
     auto model = index_->Train(dataset, cfg);
     index_->set_index_model(model);
-    index_->Add(dataset, add_cfg);
+    index_->Add(dataset, cfg);
 }
 
 void VecIndexImpl::Add(const long &nb, const float *xb, const long *ids, const Config &cfg) {
-    // TODO: Assert index is trained;
+    // TODO(linxj): Assert index is trained;
 
     auto d = cfg["dim"].as<int>();
-    GENDATASET(nb, d, xb, ids)
+    auto dataset = GenDatasetWithIds(nb, d, xb, ids);
 
     index_->Add(dataset, cfg);
 }
@@ -58,12 +50,13 @@ void VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *id
 
     auto d = cfg["dim"].as<int>();
     auto k = cfg["k"].as<int>();
-    GENQUERYDATASET(nq, d, xq)
+    auto dataset = GenDataset(nq, d, xq);
 
     Config search_cfg;
     auto res = index_->Search(dataset, cfg);
     auto ids_array = res->array()[0];
     auto dis_array = res->array()[1];
+
     //{
     //    auto& ids = ids_array;
     //    auto& dists = dis_array;
@@ -81,10 +74,10 @@ void VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *id
     //    std::cout << "dist\n" << ss_dist.str() << std::endl;
     //}
 
-    // TODO: deep copy here.
     auto p_ids = ids_array->data()->GetValues<int64_t>(1, 0);
     auto p_dist = ids_array->data()->GetValues<float>(1, 0);
 
+    // TODO(linxj): avoid copy here.
     memcpy(ids, p_ids, sizeof(int64_t) * nq * k);
     memcpy(dist, p_dist, sizeof(float) * nq * k);
 }
