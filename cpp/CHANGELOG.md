@@ -2,7 +2,20 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
-# Milvus 0.3.0 (TBD)
+
+# Milvus 0.3.1 (2019-07-10)
+
+## Bug
+
+## Improvement
+
+## New Feature
+
+## Task
+
+- MS-125 - Create 0.3.1 release branch
+
+# Milvus 0.3.0 (2019-06-30)
 
 ## Bug
 - MS-104 - Fix unittest lcov execution error
@@ -46,7 +59,10 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-85 - add NetIO metric
 - MS-96 - add new query interface for specified files
 - MS-97 - Add S3 SDK for MinIO Storage
+- MS-105 - Add MySQL
 - MS-130 - Add prometheus_test
+- MS-144 - Add nprobe config
+
 ## Task
 - MS-74 - Change README.md in cpp
 - MS-88 - Add support for arm architecture

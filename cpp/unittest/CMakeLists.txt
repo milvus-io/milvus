@@ -5,14 +5,10 @@
 #-------------------------------------------------------------------------------
 link_directories(
         "${CMAKE_BINARY_DIR}/lib"
-        "${GTEST_PREFIX}/lib/"
-
 )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
-
-message(STATUS "GTEST LIB: ${GTEST_PREFIX}/lib")
 
 set(unittest_srcs
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
@@ -46,6 +42,6 @@ set(unittest_libs
 add_subdirectory(server)
 add_subdirectory(db)
 add_subdirectory(faiss_wrapper)
-add_subdirectory(license)
+#add_subdirectory(license)
 add_subdirectory(metrics)
 add_subdirectory(storage)

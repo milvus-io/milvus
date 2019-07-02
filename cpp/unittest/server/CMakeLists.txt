@@ -18,6 +18,7 @@ set(utils_srcs
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
+        ${MILVUS_ENGINE_SRC}/utils/LogUtil.cpp
         )
 
 cuda_add_executable(server_test
@@ -54,3 +55,11 @@ target_link_libraries(server_test
         )
 
 install(TARGETS server_test DESTINATION bin)
+
+configure_file(appendix/server_config.yaml
+        "${CMAKE_CURRENT_BINARY_DIR}/milvus/conf/server_config.yaml"
+        COPYONLY)
+
+configure_file(appendix/log_config.conf
+        "${CMAKE_CURRENT_BINARY_DIR}/milvus/conf/log_config.conf"
+        COPYONLY)
