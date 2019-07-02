@@ -35,6 +35,18 @@ class MilvusServiceIf {
   virtual void CreateTable(const TableSchema& param) = 0;
 
   /**
+   * @brief Test table existence method
+   * 
+   * This method is used to test table existence.
+   * 
+   * @param table_name, table name is going to be tested.
+   * 
+   * 
+   * @param table_name
+   */
+  virtual bool HasTable(const std::string& table_name) = 0;
+
+  /**
    * @brief Delete table method
    * 
    * This method is used to delete table.
@@ -178,6 +190,10 @@ class MilvusServiceNull : virtual public MilvusServiceIf {
   void CreateTable(const TableSchema& /* param */) {
     return;
   }
+  bool HasTable(const std::string& /* table_name */) {
+    bool _return = false;
+    return _return;
+  }
   void DeleteTable(const std::string& /* table_name */) {
     return;
   }
@@ -304,6 +320,118 @@ class MilvusService_CreateTable_presult {
   Exception e;
 
   _MilvusService_CreateTable_presult__isset __isset;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+
+};
+
+typedef struct _MilvusService_HasTable_args__isset {
+  _MilvusService_HasTable_args__isset() : table_name(false) {}
+  bool table_name :1;
+} _MilvusService_HasTable_args__isset;
+
+class MilvusService_HasTable_args {
+ public:
+
+  MilvusService_HasTable_args(const MilvusService_HasTable_args&);
+  MilvusService_HasTable_args& operator=(const MilvusService_HasTable_args&);
+  MilvusService_HasTable_args() : table_name() {
+  }
+
+  virtual ~MilvusService_HasTable_args() throw();
+  std::string table_name;
+
+  _MilvusService_HasTable_args__isset __isset;
+
+  void __set_table_name(const std::string& val);
+
+  bool operator == (const MilvusService_HasTable_args & rhs) const
+  {
+    if (!(table_name == rhs.table_name))
+      return false;
+    return true;
+  }
+  bool operator != (const MilvusService_HasTable_args &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MilvusService_HasTable_args & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+
+class MilvusService_HasTable_pargs {
+ public:
+
+
+  virtual ~MilvusService_HasTable_pargs() throw();
+  const std::string* table_name;
+
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MilvusService_HasTable_result__isset {
+  _MilvusService_HasTable_result__isset() : success(false), e(false) {}
+  bool success :1;
+  bool e :1;
+} _MilvusService_HasTable_result__isset;
+
+class MilvusService_HasTable_result {
+ public:
+
+  MilvusService_HasTable_result(const MilvusService_HasTable_result&);
+  MilvusService_HasTable_result& operator=(const MilvusService_HasTable_result&);
+  MilvusService_HasTable_result() : success(0) {
+  }
+
+  virtual ~MilvusService_HasTable_result() throw();
+  bool success;
+  Exception e;
+
+  _MilvusService_HasTable_result__isset __isset;
+
+  void __set_success(const bool val);
+
+  void __set_e(const Exception& val);
+
+  bool operator == (const MilvusService_HasTable_result & rhs) const
+  {
+    if (!(success == rhs.success))
+      return false;
+    if (!(e == rhs.e))
+      return false;
+    return true;
+  }
+  bool operator != (const MilvusService_HasTable_result &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MilvusService_HasTable_result & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MilvusService_HasTable_presult__isset {
+  _MilvusService_HasTable_presult__isset() : success(false), e(false) {}
+  bool success :1;
+  bool e :1;
+} _MilvusService_HasTable_presult__isset;
+
+class MilvusService_HasTable_presult {
+ public:
+
+
+  virtual ~MilvusService_HasTable_presult() throw();
+  bool* success;
+  Exception e;
+
+  _MilvusService_HasTable_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
@@ -1269,6 +1397,9 @@ class MilvusServiceClient : virtual public MilvusServiceIf {
   void CreateTable(const TableSchema& param);
   void send_CreateTable(const TableSchema& param);
   void recv_CreateTable();
+  bool HasTable(const std::string& table_name);
+  void send_HasTable(const std::string& table_name);
+  bool recv_HasTable();
   void DeleteTable(const std::string& table_name);
   void send_DeleteTable(const std::string& table_name);
   void recv_DeleteTable();
@@ -1309,6 +1440,7 @@ class MilvusServiceProcessor : public ::apache::thrift::TDispatchProcessor {
   typedef std::map<std::string, ProcessFunction> ProcessMap;
   ProcessMap processMap_;
   void process_CreateTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  void process_HasTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_DeleteTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_AddVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_SearchVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
@@ -1321,6 +1453,7 @@ class MilvusServiceProcessor : public ::apache::thrift::TDispatchProcessor {
   MilvusServiceProcessor(::apache::thrift::stdcxx::shared_ptr<MilvusServiceIf> iface) :
     iface_(iface) {
     processMap_["CreateTable"] = &MilvusServiceProcessor::process_CreateTable;
+    processMap_["HasTable"] = &MilvusServiceProcessor::process_HasTable;
     processMap_["DeleteTable"] = &MilvusServiceProcessor::process_DeleteTable;
     processMap_["AddVector"] = &MilvusServiceProcessor::process_AddVector;
     processMap_["SearchVector"] = &MilvusServiceProcessor::process_SearchVector;
@@ -1364,6 +1497,15 @@ class MilvusServiceMultiface : virtual public MilvusServiceIf {
       ifaces_[i]->CreateTable(param);
     }
     ifaces_[i]->CreateTable(param);
+  }
+
+  bool HasTable(const std::string& table_name) {
+    size_t sz = ifaces_.size();
+    size_t i = 0;
+    for (; i < (sz - 1); ++i) {
+      ifaces_[i]->HasTable(table_name);
+    }
+    return ifaces_[i]->HasTable(table_name);
   }
 
   void DeleteTable(const std::string& table_name) {
@@ -1477,6 +1619,9 @@ class MilvusServiceConcurrentClient : virtual public MilvusServiceIf {
   void CreateTable(const TableSchema& param);
   int32_t send_CreateTable(const TableSchema& param);
   void recv_CreateTable(const int32_t seqid);
+  bool HasTable(const std::string& table_name);
+  int32_t send_HasTable(const std::string& table_name);
+  bool recv_HasTable(const int32_t seqid);
   void DeleteTable(const std::string& table_name);
   int32_t send_DeleteTable(const std::string& table_name);
   void recv_DeleteTable(const int32_t seqid);

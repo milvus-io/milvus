@@ -56,7 +56,7 @@ namespace {
                 << std::to_string(result.query_result_arrays.size())
                 << " search result:" << std::endl;
             for(auto& item : result.query_result_arrays) {
-                std::cout << "\t" << std::to_string(item.id) << "\tscore:" << std::to_string(item.score);
+                std::cout << "\t" << std::to_string(item.id) << "\tdistance:" << std::to_string(item.distance);
                 std::cout << std::endl;
             }
         }
@@ -165,6 +165,11 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         Status stat = conn->CreateTable(tb_schema);
         std::cout << "CreateTable function call status: " << stat.ToString() << std::endl;
         PrintTableSchema(tb_schema);
+
+        bool has_table = conn->HasTable(tb_schema.table_name);
+        if(has_table) {
+            std::cout << "Table is created" << std::endl;
+        }
     }
 
     {//describe table

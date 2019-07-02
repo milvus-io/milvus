@@ -59,7 +59,7 @@ struct RowRecord {
  */
 struct QueryResult {
     int64_t id;                                             ///< Output result
-    double score;                                           ///< Vector similarity score: 0 ~ 100
+    double distance;                                        ///< Vector similarity distance
 };
 
 /**
@@ -154,6 +154,18 @@ public:
      * @return Indicate if table is created successfully
      */
     virtual Status CreateTable(const TableSchema &param) = 0;
+
+
+    /**
+     * @brief Test table existence method
+     *
+     * This method is used to create table
+     *
+     * @param table_name, table name is going to be tested.
+     *
+     * @return Indicate if table is cexist
+     */
+    virtual bool HasTable(const std::string &table_name) = 0;
 
 
     /**

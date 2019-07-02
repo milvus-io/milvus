@@ -27,6 +27,7 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         JSONCONS
         LAPACK
         Lz4
+        MySQLPP
         OpenBLAS
         Prometheus
         RocksDB
@@ -57,14 +58,16 @@ macro(build_dependency DEPENDENCY_NAME)
         build_easyloggingpp()
     elseif("${DEPENDENCY_NAME}" STREQUAL "FAISS")
         build_faiss()
+    elseif ("${DEPENDENCY_NAME}" STREQUAL "GTest")
+        build_gtest()
     elseif("${DEPENDENCY_NAME}" STREQUAL "LAPACK")
         build_lapack()
     elseif("${DEPENDENCY_NAME}" STREQUAL "Knowhere")
         build_knowhere()
     elseif("${DEPENDENCY_NAME}" STREQUAL "Lz4")
         build_lz4()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "GTest")
-        build_gtest()
+    elseif ("${DEPENDENCY_NAME}" STREQUAL "MySQLPP")
+        build_mysqlpp()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "JSONCONS")
         build_jsoncons()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "OpenBLAS")
@@ -272,6 +275,12 @@ if(DEFINED ENV{MILVUS_LZ4_URL})
     set(LZ4_SOURCE_URL "$ENV{MILVUS_LZ4_URL}")
 else()
     set(LZ4_SOURCE_URL "https://github.com/lz4/lz4/archive/${LZ4_VERSION}.tar.gz")
+endif()
+
+if(DEFINED ENV{MILVUS_MYSQLPP_URL})
+    set(MYSQLPP_SOURCE_URL "$ENV{MILVUS_MYSQLPP_URL}")
+else()
+    set(MYSQLPP_SOURCE_URL "https://tangentsoft.com/mysqlpp/releases/mysql++-${MYSQLPP_VERSION}.tar.gz")
 endif()
 
 if (DEFINED ENV{MILVUS_OPENBLAS_URL})
@@ -886,8 +895,8 @@ macro(build_faiss)
 #            ${MAKE} ${MAKE_BUILD_ARGS}
             BUILD_COMMAND
             ${MAKE} ${MAKE_BUILD_ARGS} all
-	    COMMAND
-	    cd gpu && make ${MAKE_BUILD_ARGS}
+            COMMAND
+            cd gpu && ${MAKE} ${MAKE_BUILD_ARGS}
             BUILD_IN_SOURCE
             1
 #            INSTALL_DIR
@@ -1123,6 +1132,65 @@ if(MILVUS_WITH_LZ4)
     get_target_property(LZ4_INCLUDE_DIR lz4 INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${LZ4_BUILD_DIR}/lib/)
     include_directories(SYSTEM ${LZ4_INCLUDE_DIR})
+endif()
+
+# ----------------------------------------------------------------------
+# MySQL++
+
+macro(build_mysqlpp)
+    message(STATUS "Building MySQL++-${MYSQLPP_VERSION} from source")
+    set(MYSQLPP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep")
+    set(MYSQLPP_INCLUDE_DIR "${MYSQLPP_PREFIX}/include")
+    set(MYSQLPP_SHARED_LIB
+            "${MYSQLPP_PREFIX}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}")
+
+    set(MYSQLPP_CONFIGURE_ARGS
+            "--prefix=${MYSQLPP_PREFIX}"
+            "--enable-thread-check"
+            "CFLAGS=${EP_C_FLAGS}"
+            "CXXFLAGS=${EP_CXX_FLAGS}"
+            "LDFLAGS=-pthread")
+
+    externalproject_add(mysqlpp_ep
+            URL
+            ${MYSQLPP_SOURCE_URL}
+#            GIT_REPOSITORY
+#            ${MYSQLPP_SOURCE_URL}
+#            GIT_TAG
+#            ${MYSQLPP_VERSION}
+#            GIT_SHALLOW
+#            TRUE
+            ${EP_LOG_OPTIONS}
+            CONFIGURE_COMMAND
+#            "./bootstrap"
+#            COMMAND
+            "./configure"
+            ${MYSQLPP_CONFIGURE_ARGS}
+            BUILD_COMMAND
+            ${MAKE} ${MAKE_BUILD_ARGS}
+            BUILD_IN_SOURCE
+            1
+            BUILD_BYPRODUCTS
+            ${MYSQLPP_SHARED_LIB})
+
+    file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
+    add_library(mysqlpp SHARED IMPORTED)
+    set_target_properties(
+            mysqlpp
+            PROPERTIES
+            IMPORTED_LOCATION "${MYSQLPP_SHARED_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${MYSQLPP_INCLUDE_DIR}")
+
+    add_dependencies(mysqlpp mysqlpp_ep)
+
+endmacro()
+
+if(MILVUS_WITH_MYSQLPP)
+
+    resolve_dependency(MySQLPP)
+    get_target_property(MYSQLPP_INCLUDE_DIR mysqlpp INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM "${MYSQLPP_INCLUDE_DIR}")
+    link_directories(SYSTEM ${MYSQLPP_PREFIX}/lib)
 endif()
 
 # ----------------------------------------------------------------------

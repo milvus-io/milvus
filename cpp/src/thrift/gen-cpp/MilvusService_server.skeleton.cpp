@@ -36,6 +36,21 @@ class MilvusServiceHandler : virtual public MilvusServiceIf {
   }
 
   /**
+   * @brief Test table existence method
+   * 
+   * This method is used to test table existence.
+   * 
+   * @param table_name, table name is going to be tested.
+   * 
+   * 
+   * @param table_name
+   */
+  bool HasTable(const std::string& table_name) {
+    // Your implementation goes here
+    printf("HasTable\n");
+  }
+
+  /**
    * @brief Delete table method
    * 
    * This method is used to delete table.
