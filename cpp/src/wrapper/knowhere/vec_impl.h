@@ -7,6 +7,7 @@
 #pragma once
 
 #include "knowhere/index/vector_index/vector_index.h"
+
 #include "vec_index.h"
 
 
@@ -16,7 +17,7 @@ namespace engine {
 
 class VecIndexImpl : public VecIndex {
  public:
-    explicit VecIndexImpl(std::shared_ptr<zilliz::knowhere::VectorIndex> index):index_(std::move(index)){};
+    explicit VecIndexImpl(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : index_(std::move(index)) {};
     void BuildAll(const long &nb,
                   const float *xb,
                   const long *ids,
