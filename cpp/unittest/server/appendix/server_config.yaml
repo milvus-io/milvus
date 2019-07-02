@@ -29,3 +29,6 @@ license_config:         # license configure
 
 cache_config:           # cache configure
   cpu_cache_capacity: 16   # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory
+
+engine_config:
+  nprobe: 3000
