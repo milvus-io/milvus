@@ -502,6 +502,7 @@ ServerError SearchVectorTask::OnExecute() {
         engine::QueryResults results;
         uint64_t record_count = (uint64_t)record_array_.size();
 
+        SERVER_LOG_DEBUG << file_id_array_ << std::endl;
         if(file_id_array_.empty()) {
             stat = DBWrapper::DB()->Query(table_name_, (size_t) top_k_, record_count, vec_f.data(), dates, results);
         } else {
