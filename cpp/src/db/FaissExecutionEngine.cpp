@@ -13,6 +13,7 @@
 #include <wrapper/Index.h>
 #include <wrapper/IndexBuilder.h>
 #include <cache/CpuCacheMgr.h>
+#include "faiss/IndexIVF.h"
 #include "metrics/Metrics.h"
 
 
@@ -135,7 +136,16 @@ Status FaissExecutionEngine::Search(long n,
                                     float *distances,
                                     long *labels) const {
     auto start_time = METRICS_NOW_TIME;
-    pIndex_->search(n, data, k, distances, labels);
+
+    std::shared_ptr<faiss::IndexIVF> ivf_index = std::dynamic_pointer_cast<faiss::IndexIVF>(pIndex_);
+    if(ivf_index) {
+        ENGINE_LOG_DEBUG << "Index type: IVFFLAT nProbe: " << nprobe_;
+        ivf_index->nprobe = nprobe_;
+        ivf_index->search(n, data, k, distances, labels);
+    } else {
+        pIndex_->search(n, data, k, distances, labels);
+    }
+
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time,end_time);
     server::Metrics::GetInstance().QueryIndexTypePerSecondSet(build_index_type_, double(n)/double(total_time));
@@ -145,6 +155,24 @@ Status FaissExecutionEngine::Search(long n,
 Status FaissExecutionEngine::Cache() {
     zilliz::milvus::cache::CpuCacheMgr::GetInstance(
             )->InsertItem(location_, std::make_shared<Index>(pIndex_));
+
+    return Status::OK();
+}
+
+Status FaissExecutionEngine::Init() {
+
+    if(build_index_type_ == "IVF") {
+
+        using namespace zilliz::milvus::server;
+        ServerConfig &config = ServerConfig::GetInstance();
+        ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
+        nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1000);
+
+    } else if(build_index_type_ == "IDMap") {
+        ;
+    } else {
+        return Status::Error("Wrong index type: ", build_index_type_);
+    }
 
     return Status::OK();
 }
