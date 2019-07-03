@@ -1,4 +1,0 @@
-[submodule "cpp/thirdparty/knowhere"]
-	path = cpp/thirdparty/knowhere
-	url = git@192.168.1.105:xiaojun.lin/knowhere.git
-	branch = develop
