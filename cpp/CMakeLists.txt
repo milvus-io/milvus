@@ -142,17 +142,23 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_C
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
 
 #install
-install(FILES
-        scripts/start_server.sh
-        scripts/stop_server.sh
-        DESTINATION
-        scripts)
+install(DIRECTORY scripts/
+        DESTINATION scripts
+        FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+        GROUP_EXECUTE GROUP_READ
+        WORLD_EXECUTE WORLD_READ
+        FILES_MATCHING PATTERN "*.sh")
 install(FILES
         conf/server_config.yaml
         conf/log_config.conf
         DESTINATION
         conf)
-
+install(FILES
+        ./Milvus-EULA-cn.md
+        ./Milvus-EULA-en.md
+        DESTINATION
+        license
+        )
 
 
 config_summary()

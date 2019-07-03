@@ -13,6 +13,9 @@
 
 #include "Index.h"
 #include "faiss/index_io.h"
+#include "faiss/IndexIVF.h"
+#include "faiss/IVFlib.h"
+#include "server/ServerConfig.h"
 
 namespace zilliz {
 namespace milvus {
