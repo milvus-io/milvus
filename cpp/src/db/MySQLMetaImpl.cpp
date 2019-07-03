@@ -1083,10 +1083,10 @@ namespace meta {
 //                }
 
                 Query getTableFileQuery = connectionPtr->query();
-                getTableFileQuery << "SELECT engine_type, file_id, file_type, size, date " <<
-                                  "FROM TableFiles " <<
-                                  "WHERE table_id = " << quote << table_id << " AND " <<
-                                  "(" << idStr << ");";
+                getTableFileQuery << "SELECT id, engine_type, file_id, file_type, size, date " <<
+                                      "FROM TableFiles " <<
+                                      "WHERE table_id = " << quote << table_id << " AND " <<
+                                      "(" << idStr << ");";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFiles: " << getTableFileQuery.str();
 
@@ -1105,6 +1105,8 @@ namespace meta {
             for (auto& resRow : res) {
 
                 TableFileSchema file_schema;
+
+                file_schema.id_ = resRow["id"];
 
                 file_schema.table_id_ = table_id;
 
