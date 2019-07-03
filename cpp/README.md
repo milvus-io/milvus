@@ -1,12 +1,13 @@
 ### Compilation
 #### Step 1: install necessery tools
 
+    Install MySQL
     
     centos7 : 
-        yum install gfortran qt4 flex bison mysql-devel mysql
+        yum install gfortran qt4 flex bison mysql-devel
         
     ubuntu16.04 : 
-        sudo apt-get install gfortran qt4-qmake flex bison libmysqlclient-dev mysql-client
+        sudo apt-get install gfortran qt4-qmake flex bison libmysqlclient-dev
 
 If `libmysqlclient_r.so` does not exist after installing MySQL Development Files, you need to create a symbolic link:
 
@@ -52,10 +53,10 @@ If you encounter the following error when building:
 ### Launch server
 Set config in cpp/conf/server_config.yaml
 
-Add milvus/lib to LD_LIBRARY_PATH
+Add milvus/bin/lib to LD_LIBRARY_PATH
 
 ```
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/milvus/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/milvus/bin/lib
 ```
 
 Then launch server with config:
