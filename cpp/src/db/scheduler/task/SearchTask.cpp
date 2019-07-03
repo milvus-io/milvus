@@ -70,6 +70,14 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
             SearchTask::ClusterResult(output_ids, output_distence, context->nq(), spec_k, result_set);
             rc.Record("cluster result");
 
+
+            SERVER_LOG_DEBUG << "Query Result: ";
+            for(auto& id2score_vector: result_set) {
+                for(auto& pair: id2score_vector) {
+                    SERVER_LOG_DEBUG << "id: " << pair.first << ", distance: " << pair.second;
+                }
+            }
+
             //step 4: pick up topk result
             SearchTask::TopkResult(result_set, inner_k, context->GetResult());
             rc.Record("reduce topk");
