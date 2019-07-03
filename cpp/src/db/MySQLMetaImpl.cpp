@@ -162,7 +162,9 @@ namespace meta {
             ENGINE_LOG_DEBUG << "MySQL connection pool: maximum pool size = " << std::to_string(maxPoolSize);
             try {
 
-                CleanUp();
+                if (mode_ != Options::MODE::READ_ONLY) {
+                    CleanUp();
+                }
 
                 {
                     ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -457,7 +459,7 @@ namespace meta {
             } //Scoped Connection
 
 
-            if (mode_ != Options::MODE::SINGLE) {
+            if (mode_ == Options::MODE::CLUSTER) {
                 DeleteTableFiles(table_id);
             }
 
