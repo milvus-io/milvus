@@ -72,7 +72,6 @@ set(third_party_libs
         arrow
         jemalloc_pic
         faiss
-#        libgpufaiss.a
         openblas
         lapack
         easyloggingpp
@@ -105,8 +104,6 @@ if (GPU_VERSION STREQUAL "ON")
             pthread
             libgomp.a
             libgfortran.a
-#            cudart
-#            cublas
             ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
 else()
