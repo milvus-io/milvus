@@ -162,7 +162,9 @@ namespace meta {
             ENGINE_LOG_DEBUG << "MySQL connection pool: maximum pool size = " << std::to_string(maxPoolSize);
             try {
 
-                CleanUp();
+                if (mode_ != Options::MODE::READ_ONLY) {
+                    CleanUp();
+                }
 
                 {
                     ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -457,7 +459,7 @@ namespace meta {
             } //Scoped Connection
 
 
-            if (mode_ != Options::MODE::SINGLE) {
+            if (mode_ == Options::MODE::CLUSTER) {
                 DeleteTableFiles(table_id);
             }
 
@@ -1081,10 +1083,10 @@ namespace meta {
 //                }
 
                 Query getTableFileQuery = connectionPtr->query();
-                getTableFileQuery << "SELECT engine_type, file_id, file_type, size, date " <<
-                                  "FROM TableFiles " <<
-                                  "WHERE table_id = " << quote << table_id << " AND " <<
-                                  "(" << idStr << ");";
+                getTableFileQuery << "SELECT id, engine_type, file_id, file_type, size, date " <<
+                                      "FROM TableFiles " <<
+                                      "WHERE table_id = " << quote << table_id << " AND " <<
+                                      "(" << idStr << ");";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFiles: " << getTableFileQuery.str();
 
@@ -1103,6 +1105,8 @@ namespace meta {
             for (auto& resRow : res) {
 
                 TableFileSchema file_schema;
+
+                file_schema.id_ = resRow["id"];
 
                 file_schema.table_id_ = table_id;
 
@@ -1812,7 +1816,9 @@ namespace meta {
 
     MySQLMetaImpl::~MySQLMetaImpl() {
 //        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
-        CleanUp();
+        if (mode_ != Options::MODE::READ_ONLY) {
+            CleanUp();
+        }
     }
 
 } // namespace meta
