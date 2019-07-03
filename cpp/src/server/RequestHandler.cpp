@@ -53,6 +53,7 @@ RequestHandler::SearchVector(std::vector<thrift::TopKQueryResult> &_return,
                              const std::vector<thrift::RowRecord> &query_record_array,
                              const std::vector<thrift::Range> &query_range_array,
                              const int64_t topk) {
+//    SERVER_LOG_DEBUG << "Entering RequestHandler::SearchVector";
     BaseTaskPtr task_ptr = SearchVectorTask::Create(table_name, std::vector<std::string>(), query_record_array,
             query_range_array, topk, _return);
     RequestScheduler::ExecTask(task_ptr);
@@ -65,6 +66,7 @@ RequestHandler::SearchVectorInFiles(std::vector<::milvus::thrift::TopKQueryResul
                                     const std::vector<::milvus::thrift::RowRecord> &query_record_array,
                                     const std::vector<::milvus::thrift::Range> &query_range_array,
                                     const int64_t topk) {
+//    SERVER_LOG_DEBUG << "Entering RequestHandler::SearchVectorInFiles. file_id_array size = " << std::to_string(file_id_array.size());
     BaseTaskPtr task_ptr = SearchVectorTask::Create(table_name, file_id_array, query_record_array,
             query_range_array, topk, _return);
     RequestScheduler::ExecTask(task_ptr);
