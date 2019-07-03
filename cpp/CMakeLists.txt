@@ -145,6 +145,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURR
 install(FILES
         scripts/start_server.sh
         scripts/stop_server.sh
+        FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
         DESTINATION
         scripts)
 install(FILES
