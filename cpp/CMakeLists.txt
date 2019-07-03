@@ -142,7 +142,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_C
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
 
 #install
-install(DIRECTORY scripts
+install(DIRECTORY scripts/
         DESTINATION scripts
         FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
         GROUP_EXECUTE GROUP_READ
