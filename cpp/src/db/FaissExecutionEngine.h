@@ -6,13 +6,10 @@
 #pragma once
 
 #include "ExecutionEngine.h"
+#include "faiss/Index.h"
 
 #include <memory>
 #include <string>
-
-namespace faiss {
-    class Index;
-}
 
 namespace zilliz {
 namespace milvus {
@@ -58,12 +55,16 @@ public:
 
     Status Cache() override;
 
+    Status Init() override;
+
 protected:
     std::shared_ptr<faiss::Index> pIndex_;
     std::string location_;
 
     std::string build_index_type_;
     std::string raw_index_type_;
+
+    size_t nprobe_ = 0;
 };
 
 
