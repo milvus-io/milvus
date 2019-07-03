@@ -72,9 +72,6 @@ define_option(MILVUS_WITH_FAISS "Build with FAISS library" OFF)
 
 define_option(MILVUS_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" OFF)
 
-#define_option_string(MILVUS_FAISS_GPU_ARCH "Specifying which GPU architectures to build against"
-#        "-gencode=arch=compute_35,code=compute_35 -gencode=arch=compute_52,code=compute_52 -gencode=arch=compute_60,code=compute_60 -gencode=arch=compute_61,code=compute_61")
-
 define_option(MILVUS_WITH_LAPACK "Build with LAPACK library" OFF)
 
 define_option(MILVUS_WITH_LZ4 "Build with lz4 compression" ON)
