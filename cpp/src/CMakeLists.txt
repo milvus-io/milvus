@@ -137,7 +137,6 @@ endif ()
 
 
 cuda_add_library(milvus_engine STATIC ${engine_files})
-#cuda_add_library(milvus_engine SHARED ${engine_files})
 target_link_libraries(milvus_engine ${engine_libs} ${third_party_libs})
 
 add_library(metrics STATIC ${metrics_files})
