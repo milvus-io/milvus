@@ -612,7 +612,8 @@ Status DBMetaImpl::GetTableFiles(const std::string& table_id,
                                  TableFilesSchema& table_files) {
     try {
         table_files.clear();
-        auto files = ConnectorPtr->select(columns(&TableFileSchema::file_id_,
+        auto files = ConnectorPtr->select(columns(&TableFileSchema::id_,
+                                                  &TableFileSchema::file_id_,
                                                   &TableFileSchema::file_type_,
                                                   &TableFileSchema::size_,
                                                   &TableFileSchema::date_,
@@ -631,11 +632,12 @@ Status DBMetaImpl::GetTableFiles(const std::string& table_id,
         for (auto &file : files) {
             TableFileSchema file_schema;
             file_schema.table_id_ = table_id;
-            file_schema.file_id_ = std::get<0>(file);
-            file_schema.file_type_ = std::get<1>(file);
-            file_schema.size_ = std::get<2>(file);
-            file_schema.date_ = std::get<3>(file);
-            file_schema.engine_type_ = std::get<4>(file);
+            file_schema.id_ = std::get<0>(file);
+            file_schema.file_id_ = std::get<1>(file);
+            file_schema.file_type_ = std::get<2>(file);
+            file_schema.size_ = std::get<3>(file);
+            file_schema.date_ = std::get<4>(file);
+            file_schema.engine_type_ = std::get<5>(file);
             file_schema.dimension_ = table_schema.dimension_;
             GetTableFilePath(file_schema);
 
