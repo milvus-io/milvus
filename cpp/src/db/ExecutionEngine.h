@@ -50,6 +50,8 @@ public:
     virtual std::shared_ptr<ExecutionEngine> BuildIndex(const std::string&) = 0;
 
     virtual Status Cache() = 0;
+
+    virtual Status Init() = 0;
 };
 
 using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
