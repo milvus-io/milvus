@@ -68,20 +68,17 @@ define_option(MILVUS_WITH_BZ2 "Build with BZ2 compression" ON)
 
 define_option(MILVUS_WITH_EASYLOGGINGPP "Build with Easylogging++ library" ON)
 
-define_option(MILVUS_WITH_FAISS "Build with FAISS library" ON)
+define_option(MILVUS_WITH_FAISS "Build with FAISS library" OFF)
 
-define_option(MILVUS_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
+define_option(MILVUS_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" OFF)
 
-#define_option_string(MILVUS_FAISS_GPU_ARCH "Specifying which GPU architectures to build against"
-#        "-gencode=arch=compute_35,code=compute_35 -gencode=arch=compute_52,code=compute_52 -gencode=arch=compute_60,code=compute_60 -gencode=arch=compute_61,code=compute_61")
-
-define_option(MILVUS_WITH_LAPACK "Build with LAPACK library" ON)
+define_option(MILVUS_WITH_LAPACK "Build with LAPACK library" OFF)
 
 define_option(MILVUS_WITH_LZ4 "Build with lz4 compression" ON)
 
 define_option(MILVUS_WITH_JSONCONS "Build with JSONCONS" OFF)
 
-define_option(MILVUS_WITH_OPENBLAS "Build with OpenBLAS library" ON)
+define_option(MILVUS_WITH_OPENBLAS "Build with OpenBLAS library" OFF)
 
 define_option(MILVUS_WITH_PROMETHEUS "Build with PROMETHEUS library" ON)
 
@@ -100,6 +97,8 @@ define_option(MILVUS_WITH_THRIFT "Build with Apache Thrift library" ON)
 define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)
 
 define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
+
+define_option(MILVUS_WITH_KNOWHERE "Build with Knowhere" ON)
 
 if(CMAKE_VERSION VERSION_LESS 3.7)
     set(MILVUS_WITH_ZSTD_DEFAULT OFF)
