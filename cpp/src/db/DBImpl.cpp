@@ -195,6 +195,10 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
         return status;
     }
 
+    for (auto& file_schema : files_array) {
+        ENGINE_LOG_DEBUG << "file_id: " << file_schema.file_id_;
+    }
+
     if(files_array.empty()) {
         return Status::Error("Invalid file id");
     }
