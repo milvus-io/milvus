@@ -12,7 +12,6 @@ aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
 aux_source_directory(metrics metrics_files)
-aux_source_directory(wrapper/knowhere knowhere_files)
 
 aux_source_directory(db/scheduler scheduler_files)
 aux_source_directory(db/scheduler/context scheduler_context_files)
@@ -51,7 +50,6 @@ set(engine_files
         ${wrapper_files}
 #        metrics/Metrics.cpp
         ${metrics_files}
-        ${knowhere_files}
         )
 
 set(get_sys_info_files
@@ -67,17 +65,14 @@ include_directories(thrift/gen-cpp)
 include_directories(/usr/include/mysql)
 
 set(third_party_libs
-        knowhere
-        SPTAGLibStatic
-        arrow
-        jemalloc_pic
-        faiss
-        openblas
-        lapack
         easyloggingpp
         sqlite
         thrift
         yaml-cpp
+        libgpufaiss.a
+        faiss
+        lapack
+        openblas
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
@@ -89,8 +84,6 @@ set(third_party_libs
         snappy
         zlib
         zstd
-        cudart
-        cublas
         mysqlpp
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
@@ -104,6 +97,8 @@ if (GPU_VERSION STREQUAL "ON")
             pthread
             libgomp.a
             libgfortran.a
+            cudart
+            cublas
             ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
 else()
