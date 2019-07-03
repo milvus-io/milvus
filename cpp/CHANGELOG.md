@@ -61,7 +61,6 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-97 - Add S3 SDK for MinIO Storage
 - MS-105 - Add MySQL
 - MS-130 - Add prometheus_test
-- MS-143 - Intergrate Knowhere but not activate
 - MS-144 - Add nprobe config
 - MS-147 - Enable IVF
 
