@@ -1814,7 +1814,9 @@ namespace meta {
 
     MySQLMetaImpl::~MySQLMetaImpl() {
 //        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
-        CleanUp();
+        if (mode_ != Options::MODE::READ_ONLY) {
+            CleanUp();
+        }
     }
 
 } // namespace meta
