@@ -36,6 +36,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-99 - Fix compilation bug
 - MS-110 - Avoid huge file size
 - MS-148 - Disable cleanup if mode is read only
+- MS-149 - Fixed searching only one index file issue in distributed mode
 
 ## Improvement
 - MS-82 - Update server startup welcome message
