@@ -60,6 +60,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-96 - add new query interface for specified files
 - MS-97 - Add S3 SDK for MinIO Storage
 - MS-105 - Add MySQL
+- MS-130 - Add prometheus_test
+- MS-144 - Add nprobe config
+- MS-147 - Enable IVF
 
 - MS-130 - Add prometheus_test
 ## Task
