@@ -35,6 +35,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-90 - Fix arch match incorrect on ARM
 - MS-99 - Fix compilation bug
 - MS-110 - Avoid huge file size
+- MS-148 - Disable cleanup if mode is read only
 
 ## Improvement
 - MS-82 - Update server startup welcome message
