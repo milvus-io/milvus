@@ -139,7 +139,6 @@ Status FaissExecutionEngine::Search(long n,
     auto start_time = METRICS_NOW_TIME;
 
     std::shared_ptr<faiss::IndexIVF> ivf_index = std::dynamic_pointer_cast<faiss::IndexIVF>(pIndex_);
-    //ENGINE_LOG_DEBUG << "Index nlist: " << ivf_index->nlist << ", ntotal: "<< ivf_index->ntotal;
     if(ivf_index) {
         ENGINE_LOG_DEBUG << "Index type: IVFFLAT nProbe: " << nprobe_;
         ivf_index->nprobe = nprobe_;
