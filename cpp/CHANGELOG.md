@@ -40,6 +40,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-124 - HasTable interface
 - MS-126 - Add more error code
 - MS-128 - Change default db path
+- MS-152 - Delete assert in MySQLMetaImpl and change MySQLConnectionPool impl
 
 ## New Feature
 
