@@ -4,9 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include "db/scheduler/task/SearchTask.h"
-
 #include <gtest/gtest.h>
-
 #include <cmath>
 #include <vector>
 
