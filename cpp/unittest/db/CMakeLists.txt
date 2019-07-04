@@ -36,8 +36,10 @@ set(db_test_src
 cuda_add_executable(db_test ${db_test_src})
 
 set(db_libs
-        libgpufaiss.a
+        knowhere
         faiss
+        openblas
+        lapack
         cudart
         cublas
         sqlite3

@@ -29,7 +29,6 @@ set(unittest_libs
         easyloggingpp
         pthread
         metrics
-        openblas
         gfortran
         prometheus-cpp-pull
         prometheus-cpp-push
@@ -41,7 +40,8 @@ set(unittest_libs
 
 add_subdirectory(server)
 add_subdirectory(db)
-add_subdirectory(faiss_wrapper)
+add_subdirectory(index_wrapper)
+#add_subdirectory(faiss_wrapper)
 #add_subdirectory(license)
 add_subdirectory(metrics)
 add_subdirectory(storage)
