@@ -8,6 +8,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Bug
 
 ## Improvement
+- MS-156 - Add unittest for merge result functions
 
 ## New Feature
 - MS-137 - Integrate knowhere
