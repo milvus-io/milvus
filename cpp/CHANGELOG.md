@@ -3,6 +3,17 @@
 Please mark all change in change log and use the ticket from JIRA.
 
 
+# Milvus 0.3.2 (2019-07-10)
+
+## Bug
+
+## Improvement
+
+## New Feature
+- MS-154 - Integrate knowhere
+
+## Task
+
 # Milvus 0.3.1 (2019-07-10)
 
 ## Bug

@@ -23,6 +23,7 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         Easylogging++
         FAISS
         GTest
+        Knowhere
         JSONCONS
         LAPACK
         Lz4
@@ -61,6 +62,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_gtest()
     elseif("${DEPENDENCY_NAME}" STREQUAL "LAPACK")
         build_lapack()
+    elseif("${DEPENDENCY_NAME}" STREQUAL "Knowhere")
+        build_knowhere()
     elseif("${DEPENDENCY_NAME}" STREQUAL "Lz4")
         build_lz4()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "MySQLPP")
@@ -240,6 +243,12 @@ if(DEFINED ENV{MILVUS_FAISS_URL})
     set(FAISS_SOURCE_URL "$ENV{MILVUS_FAISS_URL}")
 else()
     set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
+endif()
+
+if(DEFINED ENV{MILVUS_KNOWHERE_URL})
+    set(KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}")
+else()
+    set(KNOWHERE_SOURCE_URL "${CMAKE_SOURCE_DIR}/thirdparty/knowhere")
 endif()
 
 if (DEFINED ENV{MILVUS_GTEST_URL})
@@ -639,6 +648,54 @@ if(MILVUS_WITH_BZ2)
     endif()
     link_directories(SYSTEM ${BZIP2_PREFIX}/lib/)
     include_directories(SYSTEM "${BZIP2_INCLUDE_DIR}")
+endif()
+
+# ----------------------------------------------------------------------
+# Knowhere
+
+macro(build_knowhere)
+    message(STATUS "Building knowhere from source")
+    set(KNOWHERE_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/knowhere_ep-prefix/src/knowhere_ep")
+    set(KNOWHERE_INCLUDE_DIR "${KNOWHERE_PREFIX}/include")
+    set(KNOWHERE_STATIC_LIB
+            "${KNOWHERE_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}knowhere${CMAKE_STATIC_LIBRARY_SUFFIX}")
+
+    set(KNOWHERE_CMAKE_ARGS
+            ${EP_COMMON_CMAKE_ARGS}
+            "-DCMAKE_INSTALL_PREFIX=${KNOWHERE_PREFIX}"
+            -DCMAKE_INSTALL_LIBDIR=lib
+            -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+            -DCMAKE_BUILD_TYPE=Release)
+
+    externalproject_add(knowhere_ep
+            URL
+            ${KNOWHERE_SOURCE_URL}
+            ${EP_LOG_OPTIONS}
+            CMAKE_ARGS
+            ${KNOWHERE_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
+            BUILD_BYPRODUCTS
+            ${KNOWHERE_STATIC_LIB})
+
+    file(MAKE_DIRECTORY "${KNOWHERE_INCLUDE_DIR}")
+    add_library(knowhere STATIC IMPORTED)
+    set_target_properties(
+            knowhere
+            PROPERTIES IMPORTED_LOCATION "${KNOWHERE_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${KNOWHERE_INCLUDE_DIR}")
+
+    add_dependencies(knowhere knowhere_ep)
+endmacro()
+
+if(MILVUS_WITH_KNOWHERE)
+    resolve_dependency(Knowhere)
+
+    get_target_property(KNOWHERE_INCLUDE_DIR knowhere INTERFACE_INCLUDE_DIRECTORIES)
+    link_directories(SYSTEM "${KNOWHERE_PREFIX}/lib")
+    include_directories(SYSTEM "${KNOWHERE_INCLUDE_DIR}")
+    include_directories(SYSTEM "${KNOWHERE_INCLUDE_DIR}/SPTAG/AnnService")
 endif()
 
 # ----------------------------------------------------------------------
