@@ -10,6 +10,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-148 - Disable cleanup if mode is read only
 - MS-149 - Fixed searching only one index file issue in distributed mode
 - MS-153 - fix c_str error when connecting to MySQL
+- MS-157 - fix changelog
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
