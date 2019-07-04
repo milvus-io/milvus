@@ -169,6 +169,10 @@ namespace meta {
                 {
                     ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                    if (connectionPtr == nullptr) {
+                        return Status::Error("Failed to connect to database server");
+                    }
+
 //                    ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: connections in use = " << mysql_connection_pool_->getConnectionsInUse();
 //                if (!connectionPtr->connect(dbName, serverAddress, username, password, port)) {
 //                    return Status::Error("DB connection failed: ", connectionPtr->error());
@@ -234,9 +238,6 @@ namespace meta {
 //                } else {
 //                    return Status::DBTransactionError("Initialization Error", InitializeQuery.error());
 //                }
-            } catch (const ConnectionFailed& er) {
-                ENGINE_LOG_ERROR << "Failed to connect to database server" << ": " << er.what();
-                return Status::DBTransactionError("Failed to connect to database server", er.what());
             } catch (const BadQuery& er) {
                 // Handle any query errors
                 ENGINE_LOG_ERROR << "QUERY ERROR DURING INITIALIZATION" << ": " << er.what();
@@ -292,6 +293,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DropPartitionsByDates connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -335,6 +340,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::CreateTable connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -351,7 +360,7 @@ namespace meta {
                     ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
 
                     StoreQueryResult res = createTableQuery.store();
-                    assert(res && res.num_rows() <= 1);
+
                     if (res.num_rows() == 1) {
                         int state = res[0]["state"];
                         if (TableSchema::TO_DELETE == state) {
@@ -438,6 +447,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DeleteTable connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -482,6 +495,10 @@ namespace meta {
 
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
 
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DeleteTableFiles connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
@@ -529,6 +546,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DescribeTable connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -544,7 +565,6 @@ namespace meta {
                 res = describeTableQuery.store();
             } //Scoped Connection
 
-            assert(res && res.num_rows() <= 1);
             if (res.num_rows() == 1) {
                 const Row& resRow = res[0];
 
@@ -592,6 +612,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::HasTable connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -609,7 +633,6 @@ namespace meta {
                 res = hasTableQuery.store();
             } //Scoped Connection
 
-            assert(res && res.num_rows() == 1);
             int check = res[0]["check"];
             has_or_not = (check == 1);
 
@@ -638,6 +661,10 @@ namespace meta {
 
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
 
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::AllTables connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
@@ -726,6 +753,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::CreateTableFile connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -791,6 +822,10 @@ namespace meta {
 
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
 
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::FilesToIndex connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
@@ -875,6 +910,9 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::FilesToSearch connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -986,6 +1024,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::FilesToMerge connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -1078,6 +1120,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::GetTableFiles connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -1092,8 +1138,6 @@ namespace meta {
 
                 res = getTableFileQuery.store();
             } //Scoped Connection
-
-            assert(res);
 
             TableSchema table_schema;
             table_schema.table_id_ = table_id;
@@ -1162,6 +1206,10 @@ namespace meta {
 
                     ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                    if (connectionPtr == nullptr) {
+                        return Status::Error("Failed to connect to database server");
+                    }
+
 //                    if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                        ENGINE_LOG_WARNING << "MySQLMetaImpl::Archive connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                    }
@@ -1212,6 +1260,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::Size connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -1226,7 +1278,6 @@ namespace meta {
                 res = getSizeQuery.store();
             } //Scoped Connection
 
-            assert(res && res.num_rows() == 1);
 //            if (!res) {
 ////                std::cout << "result is NULL" << std::endl;
 //                return Status::DBTransactionError("QUERY ERROR WHEN RETRIEVING SIZE", getSizeQuery.error());
@@ -1272,6 +1323,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::DiscardFiles connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -1288,7 +1343,6 @@ namespace meta {
                 //            std::cout << discardFilesQuery.str() << std::endl;
                 StoreQueryResult res = discardFilesQuery.store();
 
-                assert(res);
                 if (res.num_rows() == 0) {
                     return Status::OK();
                 }
@@ -1350,6 +1404,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::UpdateTableFile connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -1365,7 +1423,6 @@ namespace meta {
 
                 StoreQueryResult res = updateTableFileQuery.store();
 
-                assert(res && res.num_rows() <= 1);
                 if (res.num_rows() == 1) {
                     int state = res[0]["state"];
                     if (state == TableSchema::TO_DELETE) {
@@ -1432,6 +1489,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::UpdateTableFiles connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -1455,7 +1516,6 @@ namespace meta {
 
                     StoreQueryResult res = updateTableFilesQuery.store();
 
-                    assert(res && res.num_rows() == 1);
                     int check = res[0]["check"];
                     has_tables[file_schema.table_id_] = (check == 1);
                 }
@@ -1527,6 +1587,10 @@ namespace meta {
 
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::CleanUpFilesWithTTL: clean table files: connection in use after creating ScopedConnection = "
 //                    << mysql_connection_pool_->getConnectionsInUse();
@@ -1541,8 +1605,6 @@ namespace meta {
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
                 StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
-
-                assert(res);
 
                 TableFileSchema table_file;
                 std::vector<std::string> idsToDelete;
@@ -1611,6 +1673,10 @@ namespace meta {
 
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::CleanUpFilesWithTTL: clean tables: connection in use after creating ScopedConnection = "
 //                    << mysql_connection_pool_->getConnectionsInUse();
@@ -1624,7 +1690,6 @@ namespace meta {
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
                 StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
-                assert(res);
 //            std::cout << res.num_rows() << std::endl;
 
                 if (!res.empty()) {
@@ -1677,6 +1742,10 @@ namespace meta {
         try {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+            if (connectionPtr == nullptr) {
+                return Status::Error("Failed to connect to database server");
+            }
+
 //            if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                ENGINE_LOG_WARNING << "MySQLMetaImpl::CleanUp: connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
 //            }
@@ -1690,7 +1759,7 @@ namespace meta {
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
 
             StoreQueryResult res = cleanUpQuery.store();
-            assert(res);
+
             if (!res.empty()) {
                 ENGINE_LOG_DEBUG << "Remove table file type as NEW";
                 cleanUpQuery << "DELETE FROM TableFiles WHERE file_type = " << std::to_string(TableFileSchema::NEW) << ";";
@@ -1736,6 +1805,10 @@ namespace meta {
             {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
+                if (connectionPtr == nullptr) {
+                    return Status::Error("Failed to connect to database server");
+                }
+
 //                if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                    ENGINE_LOG_WARNING << "MySQLMetaImpl::Count: connection in use = " << mysql_connection_pool_->getConnectionsInUse();
 //                }
@@ -1759,7 +1832,12 @@ namespace meta {
                 result += size;
             }
 
-            assert(table_schema.dimension_ != 0);
+            if (table_schema.dimension_ <= 0) {
+                std::stringstream errorMsg;
+                errorMsg << "MySQLMetaImpl::Count: " << "table dimension = " << std::to_string(table_schema.dimension_) << ", table_id = " << table_id;
+                ENGINE_LOG_ERROR << errorMsg.str();
+                return Status::Error(errorMsg.str());
+            }
             result /= table_schema.dimension_;
             result /= sizeof(float);
 
@@ -1785,6 +1863,10 @@ namespace meta {
         try {
 
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+
+            if (connectionPtr == nullptr) {
+                return Status::Error("Failed to connect to database server");
+            }
 
 //            if (mysql_connection_pool_->getConnectionsInUse() <= 0) {
 //                ENGINE_LOG_WARNING << "MySQLMetaImpl::DropAll: connection in use  = " << mysql_connection_pool_->getConnectionsInUse();
