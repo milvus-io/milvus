@@ -33,6 +33,7 @@ function mysql_exc()
 mysql_exc "CREATE DATABASE IF NOT EXISTS ${MYSQL_DB_NAME};"
 mysql_exc "GRANT ALL PRIVILEGES ON ${MYSQL_DB_NAME}.* TO '${MYSQL_USER_NAME}'@'%';"
 mysql_exc "FLUSH PRIVILEGES;"
+mysql_exc "USE ${MYSQL_DB_NAME};"
 
 # get baseline
 ${LCOV_CMD} -c -i -d ${DIR_GCNO} -o "${FILE_INFO_BASE}"
