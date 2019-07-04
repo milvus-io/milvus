@@ -144,15 +144,15 @@ namespace meta {
             if (dialect.find("mysql") == std::string::npos) {
                 return Status::Error("URI's dialect is not MySQL");
             }
-            const char* username = pieces_match[2].str().c_str();
-            const char* password = pieces_match[3].str().c_str();
-            const char* serverAddress = pieces_match[4].str().c_str();
+            std::string username = pieces_match[2].str();
+            std::string password = pieces_match[3].str();
+            std::string serverAddress = pieces_match[4].str();
             unsigned int port = 0;
             if (!pieces_match[5].str().empty()) {
                 port = std::stoi(pieces_match[5].str());
             }
-            const char* dbName = pieces_match[6].str().c_str();
-            //std::cout << dbName << " " << serverAddress << " " << username << " " << password << " " << port << std::endl;
+            std::string dbName = pieces_match[6].str();
+//            std::cout << dbName << " " << serverAddress << " " << username << " " << password << " " << port << std::endl;
 //            connectionPtr->set_option(new MultiStatementsOption(true));
 //            connectionPtr->set_option(new mysqlpp::ReconnectOption(true));
             int threadHint = std::thread::hardware_concurrency();
@@ -1753,8 +1753,8 @@ namespace meta {
             Query cleanUpQuery = connectionPtr->query();
             cleanUpQuery << "SELECT table_name " <<
                          "FROM information_schema.tables " <<
-                         "WHERE table_schema = " << quote << mysql_connection_pool_->getDB() << quote << " " <<
-                         "AND table_name = " << quote << "TableFiles" << quote << ";";
+                         "WHERE table_schema = " << quote << mysql_connection_pool_->getDB() << " " <<
+                         "AND table_name = " << quote << "TableFiles" << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
 
