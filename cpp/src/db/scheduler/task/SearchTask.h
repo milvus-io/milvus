@@ -19,6 +19,20 @@ public:
 
     virtual std::shared_ptr<IScheduleTask> Execute() override;
 
+    static Status ClusterResult(const std::vector<long> &output_ids,
+                                const std::vector<float> &output_distence,
+                                uint64_t nq,
+                                uint64_t topk,
+                                SearchContext::ResultSet &result_set);
+
+    static Status MergeResult(SearchContext::Id2DistanceMap &distance_src,
+                              SearchContext::Id2DistanceMap &distance_target,
+                              uint64_t topk);
+
+    static Status TopkResult(SearchContext::ResultSet &result_src,
+                             uint64_t topk,
+                             SearchContext::ResultSet &result_target);
+
 public:
     size_t index_id_ = 0;
     int index_type_ = 0; //for metrics
