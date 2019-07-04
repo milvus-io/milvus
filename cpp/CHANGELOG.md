@@ -14,9 +14,6 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
-
-- MS-152 - Delete assert in MySQLMetaImpl and change MySQLConnectionPool impl
-
 - MS-152 - Delete assert in MySQLMetaImpl and change MySQLConnectionPool impl
 
 ## New Feature

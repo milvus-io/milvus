@@ -67,7 +67,7 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
             //step 3: cluster result
             SearchContext::ResultSet result_set;
             auto spec_k = index_engine_->Count() < context->topk() ? index_engine_->Count() : context->topk();
-            ClusterResult(output_ids, output_distence, context->nq(), spec_k, result_set);
+            SearchTask::ClusterResult(output_ids, output_distence, context->nq(), spec_k, result_set);
             rc.Record("cluster result");
 
             //step 4: pick up topk result
