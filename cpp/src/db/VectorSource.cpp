@@ -4,7 +4,6 @@
 #include "Log.h"
 #include "metrics/Metrics.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace engine {

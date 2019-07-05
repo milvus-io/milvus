@@ -103,6 +103,32 @@ Status MemTableFile::Serialize() {
     return status;
 }
 
+Status MemTableFile::Serialize() {
+
+    auto start_time = METRICS_NOW_TIME;
+
+    auto size = GetCurrentMem();
+
+    execution_engine_->Serialize();
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    table_file_schema_.size_ = size;
+
+    server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double)size/total_time);
+
+    table_file_schema_.file_type_ = (size >= options_.index_trigger_size) ?
+                         meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
+
+    auto status = meta_->UpdateTableFile(table_file_schema_);
+
+    LOG(DEBUG) << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
+               << " file " << table_file_schema_.file_id_ << " of size " << (double)size / (double)M << " M";
+
+    execution_engine_->Cache();
+
+    return status;
+}
+
 } // namespace engine
 } // namespace milvus
 } // namespace zilliz
