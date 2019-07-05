@@ -6,6 +6,7 @@
 #include "utils.h"
 #include "db/Factories.h"
 #include "db/Constants.h"
+#include "db/EngineFactory.h"
 
 using namespace zilliz::milvus;
 
@@ -55,7 +56,10 @@ TEST(MEM_TEST, VECTOR_SOURCE_TEST) {
     engine::VectorSource source(n, vectors.data());
 
     size_t num_vectors_added;
-    status = source.Add(table_file_schema, 50, num_vectors_added);
+    engine::ExecutionEnginePtr execution_engine_ = engine::EngineFactory::Build(table_file_schema.dimension_,
+                                                                                table_file_schema.location_,
+                                                                                (engine::EngineType)table_file_schema.engine_type_);
+    status = source.Add(execution_engine_, table_file_schema, 50, num_vectors_added);
     ASSERT_TRUE(status.ok());
 
     ASSERT_EQ(num_vectors_added, 50);
@@ -63,7 +67,7 @@ TEST(MEM_TEST, VECTOR_SOURCE_TEST) {
     engine::IDNumbers vector_ids = source.GetVectorIds();
     ASSERT_EQ(vector_ids.size(), 50);
 
-    status = source.Add(table_file_schema, 60, num_vectors_added);
+    status = source.Add(execution_engine_, table_file_schema, 60, num_vectors_added);
     ASSERT_TRUE(status.ok());
 
     ASSERT_EQ(num_vectors_added, 50);
