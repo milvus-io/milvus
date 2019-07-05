@@ -28,8 +28,6 @@ public:
 
     IDNumbers GetVectorIds();
 
-//    Status Serialize();
-
 private:
 
     const size_t n_;
