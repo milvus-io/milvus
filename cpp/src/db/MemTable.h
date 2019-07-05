@@ -15,10 +15,10 @@ class MemTable {
 public:
 
     using Ptr = std::shared_ptr<MemTable>;
-    using MemTableFileStack = std::stack<MemTableFile::Ptr>;
+    using MemTableFileList = std::vector<MemTableFile::Ptr>;
     using MetaPtr = meta::Meta::Ptr;
 
-    MemTable(const std::string& table_id, const std::shared_ptr<meta::Meta>& meta);
+    MemTable(const std::string& table_id, const std::shared_ptr<meta::Meta>& meta, const Options& options);
 
     Status Add(VectorSource::Ptr& source);
 
@@ -26,12 +26,16 @@ public:
 
     size_t GetStackSize();
 
+    Status Serialize();
+
 private:
     const std::string table_id_;
 
-    MemTableFileStack mem_table_file_stack_;
+    MemTableFileList mem_table_file_list_;
 
     MetaPtr meta_;
+
+    Options options_;
 
 }; //MemTable
 
