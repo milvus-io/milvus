@@ -7,8 +7,15 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 
+- MS-148 - Disable cleanup if mode is read only
+- MS-149 - Fixed searching only one index file issue in distributed mode
+- MS-153 - fix c_str error when connecting to MySQL
+- MS-157 - fix changelog
+
 ## Improvement
 - MS-156 - Add unittest for merge result functions
+
+- MS-152 - Delete assert in MySQLMetaImpl and change MySQLConnectionPool impl
 
 ## New Feature
 
@@ -26,9 +33,6 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-90 - Fix arch match incorrect on ARM
 - MS-99 - Fix compilation bug
 - MS-110 - Avoid huge file size
-- MS-148 - Disable cleanup if mode is read only
-- MS-149 - Fixed searching only one index file issue in distributed mode
-- MS-153 - fix c_str error when connecting to MySQL
 
 ## Improvement
 - MS-82 - Update server startup welcome message
@@ -42,7 +46,6 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-124 - HasTable interface
 - MS-126 - Add more error code
 - MS-128 - Change default db path
-- MS-152 - Delete assert in MySQLMetaImpl and change MySQLConnectionPool impl
 
 ## New Feature
 
