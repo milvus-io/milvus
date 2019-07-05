@@ -1,6 +1,7 @@
 #include "MemTableFile.h"
 #include "Constants.h"
 #include "Log.h"
+#include "EngineFactory.h"
 
 #include <cmath>
 
@@ -14,7 +15,12 @@ MemTableFile::MemTableFile(const std::string& table_id,
                            meta_(meta) {
 
     current_mem_ = 0;
-    CreateTableFile();
+    auto status = CreateTableFile();
+    if (status.ok()) {
+        execution_engine_ = EngineFactory::Build(table_file_schema_.dimension_,
+                                                 table_file_schema_.location_,
+                                                 (EngineType)table_file_schema_.engine_type_);
+    }
 }
 
 Status MemTableFile::CreateTableFile() {
@@ -39,7 +45,7 @@ Status MemTableFile::Add(const VectorSource::Ptr& source) {
     if (memLeft >= singleVectorMemSize) {
         size_t numVectorsToAdd = std::ceil(memLeft / singleVectorMemSize);
         size_t numVectorsAdded;
-        auto status = source->Add(table_file_schema_, numVectorsToAdd, numVectorsAdded);
+        auto status = source->Add(execution_engine_, table_file_schema_, numVectorsToAdd, numVectorsAdded);
         if (status.ok()) {
             current_mem_ += (numVectorsAdded * singleVectorMemSize);
         }
