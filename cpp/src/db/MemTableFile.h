@@ -3,6 +3,7 @@
 #include "Status.h"
 #include "Meta.h"
 #include "VectorSource.h"
+#include "ExecutionEngine.h"
 
 namespace zilliz {
 namespace milvus {
@@ -36,6 +37,8 @@ private:
     MetaPtr meta_;
 
     size_t current_mem_;
+
+    ExecutionEnginePtr execution_engine_;
 
 }; //MemTableFile
 

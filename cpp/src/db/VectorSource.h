@@ -3,6 +3,7 @@
 #include "Status.h"
 #include "Meta.h"
 #include "IDGenerator.h"
+#include "ExecutionEngine.h"
 
 namespace zilliz {
 namespace milvus {
@@ -16,13 +17,18 @@ public:
 
     VectorSource(const size_t& n, const float* vectors);
 
-    Status Add(const meta::TableFileSchema& table_file_schema, const size_t& num_vectors_to_add, size_t& num_vectors_added);
+    Status Add(const ExecutionEnginePtr& execution_engine,
+               const meta::TableFileSchema& table_file_schema,
+               const size_t& num_vectors_to_add,
+               size_t& num_vectors_added);
 
     size_t GetNumVectorsAdded();
 
     bool AllAdded();
 
     IDNumbers GetVectorIds();
+
+//    Status Serialize();
 
 private:
 
