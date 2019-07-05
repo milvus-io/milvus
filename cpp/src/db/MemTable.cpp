@@ -1,7 +1,6 @@
 #include "MemTable.h"
 #include "Log.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace engine {
