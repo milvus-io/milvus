@@ -2,6 +2,7 @@
 #include "Constants.h"
 #include "Log.h"
 #include "EngineFactory.h"
+#include "metrics/Metrics.h"
 
 #include <cmath>
 
@@ -10,9 +11,11 @@ namespace milvus {
 namespace engine {
 
 MemTableFile::MemTableFile(const std::string& table_id,
-                           const std::shared_ptr<meta::Meta>& meta) :
+                           const std::shared_ptr<meta::Meta>& meta,
+                           const Options& options) :
                            table_id_(table_id),
-                           meta_(meta) {
+                           meta_(meta),
+                           options_(options) {
 
     current_mem_ = 0;
     auto status = CreateTableFile();
@@ -40,6 +43,13 @@ Status MemTableFile::CreateTableFile() {
 
 Status MemTableFile::Add(const VectorSource::Ptr& source) {
 
+    if (table_file_schema_.dimension_ <= 0) {
+        std::string errMsg = "MemTableFile::Add: table_file_schema dimension = " +
+                             std::to_string(table_file_schema_.dimension_) + ", table_id = " + table_file_schema_.table_id_;
+        ENGINE_LOG_ERROR << errMsg;
+        return Status::Error(errMsg);
+    }
+
     size_t singleVectorMemSize = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
     size_t memLeft = GetMemLeft();
     if (memLeft >= singleVectorMemSize) {
@@ -62,9 +72,35 @@ size_t MemTableFile::GetMemLeft() {
     return (MAX_TABLE_FILE_MEM - current_mem_);
 }
 
-bool MemTableFile::isFull() {
+bool MemTableFile::IsFull() {
     size_t singleVectorMemSize = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
     return (GetMemLeft() < singleVectorMemSize);
+}
+
+Status MemTableFile::Serialize() {
+
+    auto start_time = METRICS_NOW_TIME;
+
+    auto size = GetCurrentMem();
+
+    execution_engine_->Serialize();
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    table_file_schema_.size_ = size;
+
+    server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double)size/total_time);
+
+    table_file_schema_.file_type_ = (size >= options_.index_trigger_size) ?
+                         meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
+
+    auto status = meta_->UpdateTableFile(table_file_schema_);
+
+    LOG(DEBUG) << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
+               << " file " << table_file_schema_.file_id_ << " of size " << (double)size / (double)M << " M";
+
+    execution_engine_->Cache();
+
+    return status;
 }
 
 } // namespace engine

@@ -6,24 +6,26 @@ namespace milvus {
 namespace engine {
 
 MemTable::MemTable(const std::string& table_id,
-                   const std::shared_ptr<meta::Meta>& meta) :
+                   const std::shared_ptr<meta::Meta>& meta,
+                   const Options& options) :
                    table_id_(table_id),
-                   meta_(meta) {
+                   meta_(meta),
+                   options_(options) {
 
 }
 
 Status MemTable::Add(VectorSource::Ptr& source) {
     while (!source->AllAdded()) {
         MemTableFile::Ptr currentMemTableFile;
-        if (!mem_table_file_stack_.empty()) {
-            currentMemTableFile = mem_table_file_stack_.top();
+        if (!mem_table_file_list_.empty()) {
+            currentMemTableFile = mem_table_file_list_.back();
         }
         Status status;
-        if (mem_table_file_stack_.empty() || currentMemTableFile->isFull()) {
-            MemTableFile::Ptr newMemTableFile = std::make_shared<MemTableFile>(table_id_, meta_);
+        if (mem_table_file_list_.empty() || currentMemTableFile->IsFull()) {
+            MemTableFile::Ptr newMemTableFile = std::make_shared<MemTableFile>(table_id_, meta_, options_);
             status = newMemTableFile->Add(source);
             if (status.ok()) {
-                mem_table_file_stack_.push(newMemTableFile);
+                mem_table_file_list_.emplace_back(newMemTableFile);
             }
         }
         else {
@@ -39,11 +41,23 @@ Status MemTable::Add(VectorSource::Ptr& source) {
 }
 
 void MemTable::GetCurrentMemTableFile(MemTableFile::Ptr& mem_table_file) {
-    mem_table_file = mem_table_file_stack_.top();
+    mem_table_file = mem_table_file_list_.back();
 }
 
 size_t MemTable::GetStackSize() {
-    return mem_table_file_stack_.size();
+    return mem_table_file_list_.size();
+}
+
+Status MemTable::Serialize() {
+    for (auto& memTableFile : mem_table_file_list_) {
+        auto status = memTableFile->Serialize();
+        if (!status.ok()) {
+            std::string errMsg = "MemTable::Serialize failed: " + status.ToString();
+            ENGINE_LOG_ERROR << errMsg;
+            return Status::Error(errMsg);
+        }
+    }
+    return Status::OK();
 }
 
 } // namespace engine

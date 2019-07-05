@@ -86,12 +86,13 @@ TEST(MEM_TEST, VECTOR_SOURCE_TEST) {
 TEST(MEM_TEST, MEM_TABLE_FILE_TEST) {
 
     std::shared_ptr<engine::meta::DBMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
+    auto options = engine::OptionsFactory::Build();
 
     engine::meta::TableSchema table_schema = BuildTableSchema();
     auto status = impl_->CreateTable(table_schema);
     ASSERT_TRUE(status.ok());
 
-    engine::MemTableFile memTableFile(TABLE_NAME, impl_);
+    engine::MemTableFile memTableFile(TABLE_NAME, impl_, options);
 
     int64_t n_100 = 100;
     std::vector<float> vectors_100;
@@ -120,7 +121,7 @@ TEST(MEM_TEST, MEM_TABLE_FILE_TEST) {
     vector_ids = source_128M->GetVectorIds();
     ASSERT_EQ(vector_ids.size(), n_max - n_100);
 
-    ASSERT_TRUE(memTableFile.isFull());
+    ASSERT_TRUE(memTableFile.IsFull());
 
     status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
@@ -129,6 +130,7 @@ TEST(MEM_TEST, MEM_TABLE_FILE_TEST) {
 TEST(MEM_TEST, MEM_TABLE_TEST) {
 
     std::shared_ptr<engine::meta::DBMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
+    auto options = engine::OptionsFactory::Build();
 
     engine::meta::TableSchema table_schema = BuildTableSchema();
     auto status = impl_->CreateTable(table_schema);
@@ -140,7 +142,7 @@ TEST(MEM_TEST, MEM_TABLE_TEST) {
 
     engine::VectorSource::Ptr source_100 = std::make_shared<engine::VectorSource>(n_100, vectors_100.data());
 
-    engine::MemTable memTable(TABLE_NAME, impl_);
+    engine::MemTable memTable(TABLE_NAME, impl_, options);
 
     status = memTable.Add(source_100);
     ASSERT_TRUE(status.ok());
@@ -183,6 +185,9 @@ TEST(MEM_TEST, MEM_TABLE_TEST) {
 
     int expectedStackSize = 2 + std::ceil((n_1G - n_100) * singleVectorMem / engine::MAX_TABLE_FILE_MEM);
     ASSERT_EQ(memTable.GetStackSize(), expectedStackSize);
+
+    status = memTable.Serialize();
+    ASSERT_TRUE(status.ok());
 
     status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
