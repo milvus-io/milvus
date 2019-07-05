@@ -16,7 +16,7 @@ public:
     using Ptr = std::shared_ptr<MemTableFile>;
     using MetaPtr = meta::Meta::Ptr;
 
-    MemTableFile(const std::string& table_id, const std::shared_ptr<meta::Meta>& meta);
+    MemTableFile(const std::string& table_id, const std::shared_ptr<meta::Meta>& meta, const Options& options);
 
     Status Add(const VectorSource::Ptr& source);
 
@@ -24,7 +24,9 @@ public:
 
     size_t GetMemLeft();
 
-    bool isFull();
+    bool IsFull();
+
+    Status Serialize();
 
 private:
 
@@ -35,6 +37,8 @@ private:
     meta::TableFileSchema table_file_schema_;
 
     MetaPtr meta_;
+
+    Options options_;
 
     size_t current_mem_;
 

@@ -2,6 +2,7 @@
 #include "ExecutionEngine.h"
 #include "EngineFactory.h"
 #include "Log.h"
+#include "metrics/Metrics.h"
 
 namespace zilliz {
 namespace milvus {
@@ -21,12 +22,7 @@ Status VectorSource::Add(const ExecutionEnginePtr& execution_engine,
                          const size_t& num_vectors_to_add,
                          size_t& num_vectors_added) {
 
-    if (table_file_schema.dimension_ <= 0) {
-        std::string errMsg = "VectorSource::Add: table_file_schema dimension = " +
-                             std::to_string(table_file_schema.dimension_) + ", table_id = " + table_file_schema.table_id_;
-        ENGINE_LOG_ERROR << errMsg;
-        return Status::Error(errMsg);
-    }
+    auto start_time = METRICS_NOW_TIME;
 
     num_vectors_added = current_num_vectors_added + num_vectors_to_add <= n_ ? num_vectors_to_add : n_ - current_num_vectors_added;
     IDNumbers vector_ids_to_add;
@@ -39,6 +35,10 @@ Status VectorSource::Add(const ExecutionEnginePtr& execution_engine,
     else {
         ENGINE_LOG_ERROR << "VectorSource::Add failed: " + status.ToString();
     }
+
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_), static_cast<int>(table_file_schema.dimension_), total_time);
 
     return status;
 }
