@@ -109,7 +109,13 @@ namespace {
             }
 
             long days = (tt_end > tt_start) ? (tt_end - tt_start)/DAY_SECONDS : (tt_start - tt_end)/DAY_SECONDS;
-            for(long i = 0; i <= days; i++) {
+            if(days == 0) {
+                error_code = SERVER_INVALID_TIME_RANGE;
+                error_msg = "Invalid time range: " + range.start_value + " to " + range.end_value;
+                return ;
+            }
+
+            for(long i = 0; i < days; i++) {
                 time_t tt_day = tt_start + DAY_SECONDS*i;
                 tm tm_day;
                 CommonUtil::ConvertTime(tt_day, tm_day);
