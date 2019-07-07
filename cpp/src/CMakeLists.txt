@@ -161,6 +161,17 @@ set(server_libs
         metrics
         )
 
+set(knowhere_libs
+        knowhere
+        SPTAGLibStatic
+        arrow
+        jemalloc_pic
+        faiss
+        openblas
+        lapack
+        tbb
+        )
+
 add_executable(milvus_server
         ${config_files}
         ${server_files}
@@ -170,9 +181,17 @@ add_executable(milvus_server
         )
 
 if (ENABLE_LICENSE STREQUAL "ON")
-        target_link_libraries(milvus_server ${server_libs} license_check ${third_party_libs})
+        target_link_libraries(milvus_server
+                ${server_libs}
+                license_check
+                ${third_party_libs}
+                ${knowhere_libs})
 else ()
-        target_link_libraries(milvus_server ${server_libs} ${third_party_libs})
+        target_link_libraries(milvus_server
+                ${server_libs}
+                ${third_party_libs}
+                ${knowhere_libs}
+                )
 endif()
 
 if (ENABLE_LICENSE STREQUAL "ON")

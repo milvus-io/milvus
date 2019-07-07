@@ -49,6 +49,17 @@ set(db_libs
         mysqlpp
         )
 
-target_link_libraries(db_test ${db_libs} ${unittest_libs})
+set(knowhere_libs
+        knowhere
+        SPTAGLibStatic
+        arrow
+        jemalloc_pic
+        faiss
+        openblas
+        lapack
+        tbb
+        )
+
+target_link_libraries(db_test ${db_libs} ${unittest_libs} ${knowhere_libs})
 
 install(TARGETS db_test DESTINATION bin)
