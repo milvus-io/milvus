@@ -17,7 +17,9 @@ namespace engine {
 enum class EngineType {
     INVALID = 0,
     FAISS_IDMAP = 1,
-    FAISS_IVFFLAT,
+    FAISS_IVFFLAT_GPU,
+    FAISS_IVFFLAT_CPU,
+    SPTAG_KDT_RNT_CPU,
 };
 
 class ExecutionEngine {

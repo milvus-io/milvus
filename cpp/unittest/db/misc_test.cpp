@@ -46,7 +46,7 @@ TEST(DBMiscTest, ENGINE_API_TEST) {
     auto engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::INVALID);
     ASSERT_EQ(engine_ptr, nullptr);
 
-    engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::FAISS_IVFFLAT);
+    engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::FAISS_IVFFLAT_GPU);
     ASSERT_NE(engine_ptr, nullptr);
 
     engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::FAISS_IDMAP);
