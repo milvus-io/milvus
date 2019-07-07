@@ -87,8 +87,7 @@ DBImpl::DBImpl(const Options& options)
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
     meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
-    mem_mgr_ = std::make_shared<MemManager>(meta_ptr_, options_);
-    // mem_mgr_ = (MemManagerPtr)(new MemManager(meta_ptr_, options_));
+    mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
     if (options.mode != Options::MODE::READ_ONLY) {
         StartTimerTasks();
     }
