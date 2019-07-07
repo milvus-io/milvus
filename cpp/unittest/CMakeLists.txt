@@ -12,7 +12,6 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 
 set(unittest_srcs
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
-        #${EASYLOGGINGPP_INCLUDE_DIR}/easylogging++.cc)
 
 set(require_files
         ${MILVUS_ENGINE_SRC}/server/ServerConfig.cpp
@@ -45,3 +44,4 @@ add_subdirectory(index_wrapper)
 #add_subdirectory(license)
 add_subdirectory(metrics)
 add_subdirectory(storage)
+add_subdirectory(utils)
