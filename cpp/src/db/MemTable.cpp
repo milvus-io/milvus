@@ -44,7 +44,7 @@ void MemTable::GetCurrentMemTableFile(MemTableFile::Ptr& mem_table_file) {
     mem_table_file = mem_table_file_list_.back();
 }
 
-size_t MemTable::GetStackSize() {
+size_t MemTable::GetTableFileCount() {
     return mem_table_file_list_.size();
 }
 
@@ -58,6 +58,14 @@ Status MemTable::Serialize() {
         }
     }
     return Status::OK();
+}
+
+bool MemTable::Empty() {
+    return mem_table_file_list_.empty();
+}
+
+std::string MemTable::GetTableId() {
+    return table_id_;
 }
 
 } // namespace engine
