@@ -3,10 +3,11 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
-#include <gtest/gtest.h>
-
 #include "db/scheduler/task/SearchTask.h"
 
+#include <gtest/gtest.h>
+
+#include <cmath>
 #include <vector>
 
 using namespace zilliz::milvus;
