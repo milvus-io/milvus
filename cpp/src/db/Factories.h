@@ -10,6 +10,7 @@
 #include "MySQLMetaImpl.h"
 #include "Options.h"
 #include "ExecutionEngine.h"
+#include "MemManagerAbstract.h"
 
 #include <string>
 #include <memory>
@@ -34,6 +35,10 @@ struct DBMetaImplFactory {
 struct DBFactory {
     static std::shared_ptr<DB> Build();
     static DB* Build(const Options&);
+};
+
+struct MemManagerFactory {
+    static MemManagerAbstractPtr Build(const std::shared_ptr<meta::Meta>& meta, const Options& options);
 };
 
 } // namespace engine
