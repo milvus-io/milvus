@@ -9,13 +9,13 @@
 #include "IDGenerator.h"
 #include "Status.h"
 #include "Meta.h"
+#include "MemManagerAbstract.h"
 
 #include <map>
 #include <string>
 #include <ctime>
 #include <memory>
 #include <mutex>
-#include <set>
 
 namespace zilliz {
 namespace milvus {
@@ -62,7 +62,7 @@ private:
 
 
 
-class MemManager {
+class MemManager : public MemManagerAbstract {
 public:
     using MetaPtr = meta::Meta::Ptr;
     using MemVectorsPtr = typename MemVectors::Ptr;
@@ -71,16 +71,16 @@ public:
     MemManager(const std::shared_ptr<meta::Meta>& meta, const Options& options)
         : meta_(meta), options_(options) {}
 
-    MemVectorsPtr GetMemByTable(const std::string& table_id);
-
     Status InsertVectors(const std::string& table_id,
-            size_t n, const float* vectors, IDNumbers& vector_ids);
+            size_t n, const float* vectors, IDNumbers& vector_ids) override;
 
-    Status Serialize(std::set<std::string>& table_ids);
+    Status Serialize(std::set<std::string>& table_ids) override;
 
-    Status EraseMemVector(const std::string& table_id);
+    Status EraseMemVector(const std::string& table_id) override;
 
 private:
+    MemVectorsPtr GetMemByTable(const std::string& table_id);
+
     Status InsertVectorsNoLock(const std::string& table_id,
             size_t n, const float* vectors, IDNumbers& vector_ids);
     Status ToImmutable();

@@ -24,13 +24,18 @@ Status VectorSource::Add(const ExecutionEnginePtr& execution_engine,
 
     auto start_time = METRICS_NOW_TIME;
 
-    num_vectors_added = current_num_vectors_added + num_vectors_to_add <= n_ ? num_vectors_to_add : n_ - current_num_vectors_added;
+    num_vectors_added = current_num_vectors_added + num_vectors_to_add <= n_ ?
+                        num_vectors_to_add : n_ - current_num_vectors_added;
     IDNumbers vector_ids_to_add;
     id_generator_->GetNextIDNumbers(num_vectors_added, vector_ids_to_add);
-    Status status = execution_engine->AddWithIds(num_vectors_added, vectors_ + current_num_vectors_added, vector_ids_to_add.data());
+    Status status = execution_engine->AddWithIds(num_vectors_added,
+                                                 vectors_ + current_num_vectors_added * table_file_schema.dimension_,
+                                                 vector_ids_to_add.data());
     if (status.ok()) {
         current_num_vectors_added += num_vectors_added;
-        vector_ids_.insert(vector_ids_.end(), vector_ids_to_add.begin(), vector_ids_to_add.end());
+        vector_ids_.insert(vector_ids_.end(),
+                           std::make_move_iterator(vector_ids_to_add.begin()),
+                           std::make_move_iterator(vector_ids_to_add.end()));
     }
     else {
         ENGINE_LOG_ERROR << "VectorSource::Add failed: " + status.ToString();
@@ -38,7 +43,9 @@ Status VectorSource::Add(const ExecutionEnginePtr& execution_engine,
 
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_), static_cast<int>(table_file_schema.dimension_), total_time);
+    server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_),
+                                                               static_cast<int>(table_file_schema.dimension_),
+                                                               total_time);
 
     return status;
 }

@@ -24,9 +24,13 @@ public:
 
     void GetCurrentMemTableFile(MemTableFile::Ptr& mem_table_file);
 
-    size_t GetStackSize();
+    size_t GetTableFileCount();
 
     Status Serialize();
+
+    bool Empty();
+
+    std::string GetTableId();
 
 private:
     const std::string table_id_;
