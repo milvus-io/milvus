@@ -15,7 +15,6 @@
 #include <fstream>
 #include <iostream>
 
-
 using namespace zilliz::milvus;
 
 namespace {
