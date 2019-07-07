@@ -11,7 +11,6 @@
 #include <memory>
 #include <mutex>
 
-
 namespace zilliz {
 namespace milvus {
 namespace engine {
