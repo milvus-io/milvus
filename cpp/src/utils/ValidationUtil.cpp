@@ -7,7 +7,7 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-constexpr size_t table_name_size_limit = 16384;
+constexpr size_t table_name_size_limit = 255;
 constexpr int64_t table_dimension_limit = 16384;
 
 ServerError
