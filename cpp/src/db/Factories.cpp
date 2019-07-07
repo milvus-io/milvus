@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include "Factories.h"
 #include "DBImpl.h"
+#include "MemManager.h"
+#include "NewMemManager.h"
 
 #include <time.h>
 #include <sstream>
@@ -96,6 +98,15 @@ std::shared_ptr<DB> DBFactory::Build() {
 
 DB* DBFactory::Build(const Options& options) {
     return new DBImpl(options);
+}
+
+MemManagerAbstractPtr MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta,
+                                               const Options& options) {
+    bool useNew = true;
+    if (useNew) {
+        return std::make_shared<NewMemManager>(meta, options);
+    }
+    return std::make_shared<MemManager>(meta, options);
 }
 
 } // namespace engine
