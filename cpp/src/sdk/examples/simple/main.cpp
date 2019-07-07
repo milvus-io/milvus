@@ -51,7 +51,7 @@ main(int argc, char *argv[]) {
     }
 
     ClientTest test;
-    test.Test(address, port);
+    test.Test("", port);
 
     printf("Client stop...\n");
     return 0;
