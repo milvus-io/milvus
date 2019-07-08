@@ -5,22 +5,23 @@
 #include "IDGenerator.h"
 #include "ExecutionEngine.h"
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class VectorSource {
 
-public:
+ public:
 
     using Ptr = std::shared_ptr<VectorSource>;
 
-    VectorSource(const size_t& n, const float* vectors);
+    VectorSource(const size_t &n, const float *vectors);
 
-    Status Add(const ExecutionEnginePtr& execution_engine,
-               const meta::TableFileSchema& table_file_schema,
-               const size_t& num_vectors_to_add,
-               size_t& num_vectors_added);
+    Status Add(const ExecutionEnginePtr &execution_engine,
+               const meta::TableFileSchema &table_file_schema,
+               const size_t &num_vectors_to_add,
+               size_t &num_vectors_added);
 
     size_t GetNumVectorsAdded();
 
@@ -28,15 +29,15 @@ public:
 
     IDNumbers GetVectorIds();
 
-private:
+ private:
 
     const size_t n_;
-    const float* vectors_;
+    const float *vectors_;
     IDNumbers vector_ids_;
 
     size_t current_num_vectors_added;
 
-    IDGenerator* id_generator_;
+    IDGenerator *id_generator_;
 
 }; //VectorSource
 
