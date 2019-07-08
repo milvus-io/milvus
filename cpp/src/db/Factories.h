@@ -42,10 +42,6 @@ struct MemManagerFactory {
     static MemManagerAbstractPtr Build(const std::shared_ptr<meta::Meta> &meta, const Options &options);
 };
 
-struct MemManagerFactory {
-    static MemManagerAbstractPtr Build(const std::shared_ptr<meta::Meta>& meta, const Options& options);
-};
-
 } // namespace engine
 } // namespace milvus
 } // namespace zilliz

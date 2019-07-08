@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iostream>
 
+
 using namespace zilliz::milvus;
 
 namespace {
@@ -145,6 +146,9 @@ TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
 
     engine::VectorSource::Ptr source_100 = std::make_shared<engine::VectorSource>(n_100, vectors_100.data());
 
+    engine::MemTable mem_table(TABLE_NAME, impl_, options);
+
+    status = mem_table.Add(source_100);
     ASSERT_TRUE(status.ok());
     engine::IDNumbers vector_ids = source_100->GetVectorIds();
     ASSERT_EQ(vector_ids.size(), 100);
@@ -186,9 +190,6 @@ TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
     ASSERT_EQ(mem_table.GetTableFileCount(), expectedTableFileCount);
 
     status = mem_table.Serialize();
-    ASSERT_TRUE(status.ok());
-
-    status = memTable.Serialize();
     ASSERT_TRUE(status.ok());
 
     status = impl_->DropAll();
