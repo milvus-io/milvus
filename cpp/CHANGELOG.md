@@ -19,6 +19,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## New Feature
 - MS-137 - Integrate knowhere
+- MS-180 - Add new mem manager
 
 ## Task
 

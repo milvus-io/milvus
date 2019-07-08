@@ -11,6 +11,9 @@ namespace engine {
 
 const size_t K = 1024UL;
 const size_t M = K*K;
+const size_t G = K*M;
+const size_t T = K*G;
+
 const size_t MAX_TABLE_FILE_MEM = 128 * M;
 
 const int VECTOR_TYPE_SIZE = sizeof(float);
