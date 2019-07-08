@@ -64,6 +64,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
  protected:
     VecIndexPtr index_ = nullptr;
     EngineType build_type;
+    EngineType current_type;
 
     int64_t dim;
     std::string location_;
