@@ -3,13 +3,14 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "ExecutionEngineImpl.h"
+#include <src/server/ServerConfig.h>
 #include "Log.h"
 
+#include "src/cache/CpuCacheMgr.h"
+#include "ExecutionEngineImpl.h"
+#include "wrapper/knowhere/vec_index.h"
 #include "wrapper/knowhere/vec_impl.h"
-#include "knowhere/index/vector_index/ivf.h"
-#include "knowhere/index/vector_index/gpu_ivf.h"
-#include "knowhere/index/vector_index/cpu_kdt_rng.h"
+
 
 namespace zilliz {
 namespace milvus {
@@ -17,95 +18,151 @@ namespace engine {
 
 
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
-        const std::string& location,
-        EngineType type)
-    : location_(location) {
-    index_ = CreatetVecIndex(type);
+                                         const std::string &location,
+                                         EngineType type)
+    : location_(location), dim(dimension), build_type(type) {
+    index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
+    std::static_pointer_cast<BFIndex>(index_)->Build(dimension);
 }
 
-vecwise::engine::VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
-    std::shared_ptr<zilliz::knowhere::VectorIndex> index;
-    switch(type) {
-        case EngineType::FAISS_IDMAP: {
+ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index,
+                                         const std::string &location,
+                                         EngineType type)
+    : index_(std::move(index)), location_(location), build_type(type) {
+}
 
+VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
+    std::shared_ptr<VecIndex> index;
+    switch (type) {
+        case EngineType::FAISS_IDMAP: {
+            index = GetVecIndexFactory(IndexType::FAISS_IDMAP);
             break;
         }
         case EngineType::FAISS_IVFFLAT_GPU: {
-            index = std::make_shared<zilliz::knowhere::GPUIVF>(0);
+            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_GPU);
             break;
         }
         case EngineType::FAISS_IVFFLAT_CPU: {
-            index = std::make_shared<zilliz::knowhere::IVF>();
+            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
             break;
         }
         case EngineType::SPTAG_KDT_RNT_CPU: {
-            index = std::make_shared<zilliz::knowhere::CPUKDTRNG>();
+            index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU);
             break;
         }
-        default:{
+        default: {
             ENGINE_LOG_ERROR << "Invalid engine type";
             return nullptr;
         }
     }
-
-    return std::make_shared<vecwise::engine::VecIndexImpl>(index);
+    return index;
 }
 
 Status ExecutionEngineImpl::AddWithIds(long n, const float *xdata, const long *xids) {
-
+    index_->Add(n, xdata, xids, Config::object{{"dim", dim}});
     return Status::OK();
 }
 
 size_t ExecutionEngineImpl::Count() const {
-    return 0;
+    return index_->Count();
 }
 
 size_t ExecutionEngineImpl::Size() const {
-    return 0;
+    return (size_t) (Count() * Dimension()) * sizeof(float);
 }
 
 size_t ExecutionEngineImpl::Dimension() const {
-    return 0;
+    return index_->Dimension();
 }
 
 size_t ExecutionEngineImpl::PhysicalSize() const {
-    return 0;
+    return (size_t) (Count() * Dimension()) * sizeof(float);
 }
 
 Status ExecutionEngineImpl::Serialize() {
+    // TODO(groot):
+    auto binaryset = index_->Serialize();
     return Status::OK();
 }
 
 Status ExecutionEngineImpl::Load() {
-
+    // TODO(groot):
     return Status::OK();
 }
 
-Status ExecutionEngineImpl::Merge(const std::string& location) {
+VecIndexPtr ExecutionEngineImpl::Load(const std::string &location) {
+    // TODO(groot): dev func in Fake code
+    // pseude code
+    //auto data = read_file(location);
+    //auto index_type = get_index_type(data);
+    //auto binaryset = get_index_binary(data);
+    /////
 
-    return Status::OK();
-}
-
-ExecutionEnginePtr
-ExecutionEngineImpl::BuildIndex(const std::string& location) {
+    //return LoadVecIndex(index_type, binaryset);
     return nullptr;
 }
 
-Status ExecutionEngineImpl::Search(long n,
-                                    const float *data,
-                                    long k,
-                                    float *distances,
-                                    long *labels) const {
+Status ExecutionEngineImpl::Merge(const std::string &location) {
+    if (location == location_) {
+        return Status::Error("Cannot Merge Self");
+    }
+    ENGINE_LOG_DEBUG << "Merge index file: " << location << " to: " << location_;
 
+    auto to_merge = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
+    if (!to_merge) {
+        to_merge = Load(location);
+    }
+
+    auto file_index = std::dynamic_pointer_cast<BFIndex>(index_);
+    index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
+    return Status::OK();
+}
+
+// TODO(linxj): add config
+ExecutionEnginePtr
+ExecutionEngineImpl::BuildIndex(const std::string &location) {
+    ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
+
+    auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
+    auto to_index = CreatetVecIndex(build_type);
+    to_index->BuildAll(Count(),
+                       from_index->GetRawVectors(),
+                       from_index->GetRawIds(),
+                       Config::object{{"dim", Dimension()}, {"gpu_id", gpu_num}});
+
+    return std::make_shared<ExecutionEngineImpl>(to_index, location, build_type);
+}
+
+Status ExecutionEngineImpl::Search(long n,
+                                   const float *data,
+                                   long k,
+                                   float *distances,
+                                   long *labels) const {
+    index_->Search(n, data, distances, labels, Config::object{{"k", k}, {"nprobe", nprobe_}});
     return Status::OK();
 }
 
 Status ExecutionEngineImpl::Cache() {
+    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, index_);
 
     return Status::OK();
 }
 
 Status ExecutionEngineImpl::Init() {
+    using namespace zilliz::milvus::server;
+    ServerConfig &config = ServerConfig::GetInstance();
+    ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
+    gpu_num = server_config.GetInt32Value("gpu_index", 0);
+
+    switch (build_type) {
+        case EngineType::FAISS_IVFFLAT_GPU: {
+        }
+        case EngineType::FAISS_IVFFLAT_CPU: {
+            ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
+            nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1000);
+            break;
+        }
+    }
 
     return Status::OK();
 }
