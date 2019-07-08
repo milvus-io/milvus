@@ -31,6 +31,12 @@ public:
 
     Status EraseMemVector(const std::string& table_id) override;
 
+    size_t GetCurrentMutableMem() override;
+
+    size_t GetCurrentImmutableMem() override;
+
+    size_t GetCurrentMem() override;
+
 private:
     MemTablePtr GetMemByTable(const std::string& table_id);
 

@@ -4,7 +4,7 @@
 #include "MemTableFile.h"
 #include "VectorSource.h"
 
-#include <stack>
+#include <mutex>
 
 namespace zilliz {
 namespace milvus {
@@ -30,7 +30,9 @@ public:
 
     bool Empty();
 
-    std::string GetTableId();
+    const std::string& GetTableId() const;
+
+    size_t GetCurrentMem();
 
 private:
     const std::string table_id_;
@@ -40,6 +42,8 @@ private:
     MetaPtr meta_;
 
     Options options_;
+
+    std::mutex mutex_;
 
 }; //MemTable
 
