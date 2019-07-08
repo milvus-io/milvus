@@ -6,23 +6,24 @@
 
 #include <cmath>
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-MemTableFile::MemTableFile(const std::string& table_id,
-                           const std::shared_ptr<meta::Meta>& meta,
-                           const Options& options) :
-                           table_id_(table_id),
-                           meta_(meta),
-                           options_(options) {
+MemTableFile::MemTableFile(const std::string &table_id,
+                           const std::shared_ptr<meta::Meta> &meta,
+                           const Options &options) :
+    table_id_(table_id),
+    meta_(meta),
+    options_(options) {
 
     current_mem_ = 0;
     auto status = CreateTableFile();
     if (status.ok()) {
         execution_engine_ = EngineFactory::Build(table_file_schema_.dimension_,
                                                  table_file_schema_.location_,
-                                                 (EngineType)table_file_schema_.engine_type_);
+                                                 (EngineType) table_file_schema_.engine_type_);
     }
 }
 
@@ -33,31 +34,30 @@ Status MemTableFile::CreateTableFile() {
     auto status = meta_->CreateTableFile(table_file_schema);
     if (status.ok()) {
         table_file_schema_ = table_file_schema;
-    }
-    else {
-        std::string errMsg = "MemTableFile::CreateTableFile failed: " + status.ToString();
-        ENGINE_LOG_ERROR << errMsg;
+    } else {
+        std::string err_msg = "MemTableFile::CreateTableFile failed: " + status.ToString();
+        ENGINE_LOG_ERROR << err_msg;
     }
     return status;
 }
 
-Status MemTableFile::Add(const VectorSource::Ptr& source) {
+Status MemTableFile::Add(const VectorSource::Ptr &source) {
 
     if (table_file_schema_.dimension_ <= 0) {
-        std::string errMsg = "MemTableFile::Add: table_file_schema dimension = " +
-                             std::to_string(table_file_schema_.dimension_) + ", table_id = " + table_file_schema_.table_id_;
-        ENGINE_LOG_ERROR << errMsg;
-        return Status::Error(errMsg);
+        std::string err_msg = "MemTableFile::Add: table_file_schema dimension = " +
+            std::to_string(table_file_schema_.dimension_) + ", table_id = " + table_file_schema_.table_id_;
+        ENGINE_LOG_ERROR << err_msg;
+        return Status::Error(err_msg);
     }
 
-    size_t singleVectorMemSize = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
-    size_t memLeft = GetMemLeft();
-    if (memLeft >= singleVectorMemSize) {
-        size_t numVectorsToAdd = std::ceil(memLeft / singleVectorMemSize);
-        size_t numVectorsAdded;
-        auto status = source->Add(execution_engine_, table_file_schema_, numVectorsToAdd, numVectorsAdded);
+    size_t single_vector_mem_size = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
+    size_t mem_left = GetMemLeft();
+    if (mem_left >= single_vector_mem_size) {
+        size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
+        size_t num_vectors_added;
+        auto status = source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added);
         if (status.ok()) {
-            current_mem_ += (numVectorsAdded * singleVectorMemSize);
+            current_mem_ += (num_vectors_added * single_vector_mem_size);
         }
         return status;
     }
@@ -73,8 +73,8 @@ size_t MemTableFile::GetMemLeft() {
 }
 
 bool MemTableFile::IsFull() {
-    size_t singleVectorMemSize = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
-    return (GetMemLeft() < singleVectorMemSize);
+    size_t single_vector_mem_size = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
+    return (GetMemLeft() < single_vector_mem_size);
 }
 
 Status MemTableFile::Serialize() {
@@ -88,15 +88,15 @@ Status MemTableFile::Serialize() {
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     table_file_schema_.size_ = size;
 
-    server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double)size/total_time);
+    server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double) size / total_time);
 
     table_file_schema_.file_type_ = (size >= options_.index_trigger_size) ?
-                         meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
+                                    meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
 
     auto status = meta_->UpdateTableFile(table_file_schema_);
 
     LOG(DEBUG) << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-               << " file " << table_file_schema_.file_id_ << " of size " << (double)size / (double)M << " M";
+               << " file " << table_file_schema_.file_id_ << " of size " << (double) size / (double) M << " M";
 
     execution_engine_->Cache();
 
