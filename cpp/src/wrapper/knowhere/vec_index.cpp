@@ -32,15 +32,22 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type) {
             index = std::make_shared<zilliz::knowhere::GPUIVF>(0);
             break;
         }
+        case IndexType::FAISS_IVFPQ_CPU: {
+            index = std::make_shared<zilliz::knowhere::IVFPQ>();
+            break;
+        }
+        case IndexType::FAISS_IVFPQ_GPU: {
+            index = std::make_shared<zilliz::knowhere::GPUIVFPQ>(0);
+            break;
+        }
         case IndexType::SPTAG_KDT_RNT_CPU: {
             index = std::make_shared<zilliz::knowhere::CPUKDTRNG>();
             break;
         }
-            //// TODO(linxj): Support NSG
-            //case IndexType ::NSG: {
-            //    index = std::make_shared<zilliz::knowhere::NSG>();
-            //    break;
-            //}
+        //case IndexType::NSG: { // TODO(linxj): bug.
+        //    index = std::make_shared<zilliz::knowhere::NSG>();
+        //    break;
+        //}
         default: {
             return nullptr;
         }
