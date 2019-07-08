@@ -11,25 +11,26 @@
 #include <memory>
 #include <mutex>
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class NewMemManager : public MemManagerAbstract {
-public:
+ public:
     using MetaPtr = meta::Meta::Ptr;
     using Ptr = std::shared_ptr<NewMemManager>;
     using MemTablePtr = typename MemTable::Ptr;
 
-    NewMemManager(const std::shared_ptr<meta::Meta>& meta, const Options& options)
-                    : meta_(meta), options_(options) {}
+    NewMemManager(const std::shared_ptr<meta::Meta> &meta, const Options &options)
+        : meta_(meta), options_(options) {}
 
-    Status InsertVectors(const std::string& table_id,
-                         size_t n, const float* vectors, IDNumbers& vector_ids) override;
+    Status InsertVectors(const std::string &table_id,
+                         size_t n, const float *vectors, IDNumbers &vector_ids) override;
 
-    Status Serialize(std::set<std::string>& table_ids) override;
+    Status Serialize(std::set<std::string> &table_ids) override;
 
-    Status EraseMemVector(const std::string& table_id) override;
+    Status EraseMemVector(const std::string &table_id) override;
 
     size_t GetCurrentMutableMem() override;
 
@@ -37,11 +38,11 @@ public:
 
     size_t GetCurrentMem() override;
 
-private:
-    MemTablePtr GetMemByTable(const std::string& table_id);
+ private:
+    MemTablePtr GetMemByTable(const std::string &table_id);
 
-    Status InsertVectorsNoLock(const std::string& table_id,
-                               size_t n, const float* vectors, IDNumbers& vector_ids);
+    Status InsertVectorsNoLock(const std::string &table_id,
+                               size_t n, const float *vectors, IDNumbers &vector_ids);
     Status ToImmutable();
 
     using MemIdMap = std::map<std::string, MemTablePtr>;
