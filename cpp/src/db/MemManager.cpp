@@ -15,22 +15,23 @@
 #include <thread>
 #include <easylogging++.h>
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-MemVectors::MemVectors(const std::shared_ptr<meta::Meta>& meta_ptr,
-        const meta::TableFileSchema& schema, const Options& options)
-  : meta_(meta_ptr),
-    options_(options),
-    schema_(schema),
-    id_generator_(new SimpleIDGenerator()),
-    active_engine_(EngineFactory::Build(schema_.dimension_, schema_.location_, (EngineType)schema_.engine_type_)) {
+MemVectors::MemVectors(const std::shared_ptr<meta::Meta> &meta_ptr,
+                       const meta::TableFileSchema &schema, const Options &options)
+    : meta_(meta_ptr),
+      options_(options),
+      schema_(schema),
+      id_generator_(new SimpleIDGenerator()),
+      active_engine_(EngineFactory::Build(schema_.dimension_, schema_.location_, (EngineType) schema_.engine_type_)) {
 }
 
 
-Status MemVectors::Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
-    if(active_engine_ == nullptr) {
+Status MemVectors::Add(size_t n_, const float *vectors_, IDNumbers &vector_ids_) {
+    if (active_engine_ == nullptr) {
         return Status::Error("index engine is null");
     }
 
@@ -39,13 +40,15 @@ Status MemVectors::Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_)
     Status status = active_engine_->AddWithIds(n_, vectors_, vector_ids_.data());
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_), static_cast<int>(schema_.dimension_), total_time);
+    server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_),
+                                                               static_cast<int>(schema_.dimension_),
+                                                               total_time);
 
     return status;
 }
 
 size_t MemVectors::RowCount() const {
-    if(active_engine_ == nullptr) {
+    if (active_engine_ == nullptr) {
         return 0;
     }
 
@@ -53,15 +56,15 @@ size_t MemVectors::RowCount() const {
 }
 
 size_t MemVectors::Size() const {
-    if(active_engine_ == nullptr) {
+    if (active_engine_ == nullptr) {
         return 0;
     }
 
     return active_engine_->Size();
 }
 
-Status MemVectors::Serialize(std::string& table_id) {
-    if(active_engine_ == nullptr) {
+Status MemVectors::Serialize(std::string &table_id) {
+    if (active_engine_ == nullptr) {
         return Status::Error("index engine is null");
     }
 
@@ -73,15 +76,16 @@ Status MemVectors::Serialize(std::string& table_id) {
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     schema_.size_ = size;
 
-    server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet(size/total_time);
+    server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet(size / total_time);
 
     schema_.file_type_ = (size >= options_.index_trigger_size) ?
-        meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
+                         meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
 
     auto status = meta_->UpdateTableFile(schema_);
 
     LOG(DEBUG) << "New " << ((schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-        << " file " << schema_.file_id_ << " of size " << (double)(active_engine_->Size()) / (double)meta::M << " M";
+               << " file " << schema_.file_id_ << " of size " << (double) (active_engine_->Size()) / (double) meta::M
+               << " M";
 
     active_engine_->Cache();
 
@@ -99,7 +103,7 @@ MemVectors::~MemVectors() {
  * MemManager
  */
 MemManager::MemVectorsPtr MemManager::GetMemByTable(
-        const std::string& table_id) {
+    const std::string &table_id) {
     auto memIt = mem_id_map_.find(table_id);
     if (memIt != mem_id_map_.end()) {
         return memIt->second;
@@ -116,22 +120,23 @@ MemManager::MemVectorsPtr MemManager::GetMemByTable(
     return mem_id_map_[table_id];
 }
 
-Status MemManager::InsertVectors(const std::string& table_id_,
-        size_t n_,
-        const float* vectors_,
-        IDNumbers& vector_ids_) {
+Status MemManager::InsertVectors(const std::string &table_id_,
+                                 size_t n_,
+                                 const float *vectors_,
+                                 IDNumbers &vector_ids_) {
+
+    LOG(DEBUG) << "MemManager::InsertVectors: mutable mem = " << GetCurrentMutableMem() <<
+               ", immutable mem = " << GetCurrentImmutableMem() << ", total mem = " << GetCurrentMem();
+
     std::unique_lock<std::mutex> lock(mutex_);
 
     return InsertVectorsNoLock(table_id_, n_, vectors_, vector_ids_);
 }
 
-Status MemManager::InsertVectorsNoLock(const std::string& table_id,
-        size_t n,
-        const float* vectors,
-        IDNumbers& vector_ids) {
-
-    LOG(DEBUG) << "MemManager::InsertVectorsNoLock: mutable mem = " << GetCurrentMutableMem() <<
-                     ", immutable mem = " << GetCurrentImmutableMem() << ", total mem = " << GetCurrentMem();
+Status MemManager::InsertVectorsNoLock(const std::string &table_id,
+                                       size_t n,
+                                       const float *vectors,
+                                       IDNumbers &vector_ids) {
 
     MemVectorsPtr mem = GetMemByTable(table_id);
     if (mem == nullptr) {
@@ -139,7 +144,7 @@ Status MemManager::InsertVectorsNoLock(const std::string& table_id,
     }
 
     //makesure each file size less than index_trigger_size
-    if(mem->Size() > options_.index_trigger_size) {
+    if (mem->Size() > options_.index_trigger_size) {
         std::unique_lock<std::mutex> lock(serialization_mtx_);
         immu_mem_list_.push_back(mem);
         mem_id_map_.erase(table_id);
@@ -152,8 +157,8 @@ Status MemManager::InsertVectorsNoLock(const std::string& table_id,
 Status MemManager::ToImmutable() {
     std::unique_lock<std::mutex> lock(mutex_);
     MemIdMap temp_map;
-    for (auto& kv: mem_id_map_) {
-        if(kv.second->RowCount() == 0) {
+    for (auto &kv: mem_id_map_) {
+        if (kv.second->RowCount() == 0) {
             temp_map.insert(kv);
             continue;//empty vector, no need to serialize
         }
@@ -164,12 +169,12 @@ Status MemManager::ToImmutable() {
     return Status::OK();
 }
 
-Status MemManager::Serialize(std::set<std::string>& table_ids) {
+Status MemManager::Serialize(std::set<std::string> &table_ids) {
     ToImmutable();
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     std::string table_id;
     table_ids.clear();
-    for (auto& mem : immu_mem_list_) {
+    for (auto &mem : immu_mem_list_) {
         mem->Serialize(table_id);
         table_ids.insert(table_id);
     }
@@ -177,7 +182,7 @@ Status MemManager::Serialize(std::set<std::string>& table_ids) {
     return Status::OK();
 }
 
-Status MemManager::EraseMemVector(const std::string& table_id) {
+Status MemManager::EraseMemVector(const std::string &table_id) {
     {//erase MemVector from rapid-insert cache
         std::unique_lock<std::mutex> lock(mutex_);
         mem_id_map_.erase(table_id);
@@ -186,8 +191,8 @@ Status MemManager::EraseMemVector(const std::string& table_id) {
     {//erase MemVector from serialize cache
         std::unique_lock<std::mutex> lock(serialization_mtx_);
         MemList temp_list;
-        for (auto& mem : immu_mem_list_) {
-            if(mem->TableId() != table_id) {
+        for (auto &mem : immu_mem_list_) {
+            if (mem->TableId() != table_id) {
                 temp_list.push_back(mem);
             }
         }
@@ -199,7 +204,7 @@ Status MemManager::EraseMemVector(const std::string& table_id) {
 
 size_t MemManager::GetCurrentMutableMem() {
     size_t totalMem = 0;
-    for (auto& kv : mem_id_map_) {
+    for (auto &kv : mem_id_map_) {
         auto memVector = kv.second;
         totalMem += memVector->Size();
     }
@@ -208,7 +213,7 @@ size_t MemManager::GetCurrentMutableMem() {
 
 size_t MemManager::GetCurrentImmutableMem() {
     size_t totalMem = 0;
-    for (auto& memVector : immu_mem_list_) {
+    for (auto &memVector : immu_mem_list_) {
         totalMem += memVector->Size();
     }
     return totalMem;
