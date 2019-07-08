@@ -106,6 +106,18 @@ zilliz::milvus::engine::Options MySQLDBTest::GetOptions() {
     return options;
 }
 
+void NewMemManagerTest::InitLog() {
+    el::Configurations defaultConf;
+    defaultConf.setToDefault();
+    defaultConf.set(el::Level::Debug,
+                    el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
+    el::Loggers::reconfigureLogger("default", defaultConf);
+}
+
+void NewMemManagerTest::SetUp() {
+    InitLog();
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     if (argc > 1) {
