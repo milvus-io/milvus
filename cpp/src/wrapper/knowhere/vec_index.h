@@ -54,10 +54,12 @@ using VecIndexPtr = std::shared_ptr<VecIndex>;
 enum class IndexType {
     INVALID = 0,
     FAISS_IDMAP = 1,
-    FAISS_IVFFLAT_GPU,
     FAISS_IVFFLAT_CPU,
+    FAISS_IVFFLAT_GPU,
+    FAISS_IVFPQ_CPU,
+    FAISS_IVFPQ_GPU,
     SPTAG_KDT_RNT_CPU,
-    NSG,
+    //NSG,
 };
 
 extern VecIndexPtr GetVecIndexFactory(const IndexType &type);

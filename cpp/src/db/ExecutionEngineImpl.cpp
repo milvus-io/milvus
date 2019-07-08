@@ -183,9 +183,9 @@ VecIndexPtr ExecutionEngineImpl::Load(const std::string &location) {
         reader(bin, bin_length);
         rp += bin_length;
 
-        auto xx = std::make_shared<uint8_t>();
-        xx.reset(bin);
-        load_data_list.Append(std::string(meta, meta_length), xx, bin_length);
+        auto binptr = std::make_shared<uint8_t>();
+        binptr.reset(bin);
+        load_data_list.Append(std::string(meta, meta_length), binptr, bin_length);
     }
 
     auto index_type = IndexType::INVALID;
@@ -205,6 +205,10 @@ VecIndexPtr ExecutionEngineImpl::Load(const std::string &location) {
         case EngineType::SPTAG_KDT_RNT_CPU: {
             index_type = IndexType::SPTAG_KDT_RNT_CPU;
             break;
+        }
+        default: {
+            ENGINE_LOG_ERROR << "wrong index_type";
+            return nullptr;
         }
     }
 
