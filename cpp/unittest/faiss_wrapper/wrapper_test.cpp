@@ -4,11 +4,14 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
-#include <gtest/gtest.h>
+
 
 #include "wrapper/Operand.h"
 #include "wrapper/Index.h"
 #include "wrapper/IndexBuilder.h"
+
+#include <gtest/gtest.h>
+#include <random>
 
 using namespace zilliz::milvus::engine;
 
