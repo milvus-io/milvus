@@ -22,6 +22,12 @@ class MemManagerAbstract {
 
     virtual size_t GetCurrentMem() = 0;
 
+    virtual size_t GetCurrentMutableMem() = 0;
+
+    virtual size_t GetCurrentImmutableMem() = 0;
+
+    virtual size_t GetCurrentMem() = 0;
+
 }; // MemManagerAbstract
 
 using MemManagerAbstractPtr = std::shared_ptr<MemManagerAbstract>;

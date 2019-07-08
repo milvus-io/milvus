@@ -5,7 +5,6 @@
 
 #include <thread>
 
-
 namespace zilliz {
 namespace milvus {
 namespace engine {
@@ -77,7 +76,6 @@ Status NewMemManager::Serialize(std::set<std::string> &table_ids) {
         table_ids.insert(mem->GetTableId());
     }
     immu_mem_list_.clear();
-
     return Status::OK();
 }
 
