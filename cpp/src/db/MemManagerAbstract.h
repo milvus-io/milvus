@@ -2,6 +2,7 @@
 
 #include <set>
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
@@ -15,12 +16,6 @@ class MemManagerAbstract {
     virtual Status Serialize(std::set<std::string> &table_ids) = 0;
 
     virtual Status EraseMemVector(const std::string &table_id) = 0;
-
-    virtual size_t GetCurrentMutableMem() = 0;
-
-    virtual size_t GetCurrentImmutableMem() = 0;
-
-    virtual size_t GetCurrentMem() = 0;
 
     virtual size_t GetCurrentMutableMem() = 0;
 
