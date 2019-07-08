@@ -8,6 +8,8 @@
 #include "db/Constants.h"
 #include "db/EngineFactory.h"
 #include "metrics/Metrics.h"
+#include "db/MetaConsts.h"
+#include "boost/filesystem.hpp"
 
 #include <thread>
 #include <fstream>
@@ -34,9 +36,6 @@ namespace {
         vectors.clear();
         vectors.resize(n*TABLE_DIM);
         float* data = vectors.data();
-//        std::random_device rd;
-//        std::mt19937 gen(rd());
-//        std::uniform_real_distribution<> dis(0.0, 1.0);
         for(int i = 0; i < n; i++) {
             for(int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
             data[TABLE_DIM * i] += i / 2000.;
@@ -44,7 +43,7 @@ namespace {
     }
 }
 
-TEST(MEM_TEST, VECTOR_SOURCE_TEST) {
+TEST_F(NewMemManagerTest, VECTOR_SOURCE_TEST) {
 
     std::shared_ptr<engine::meta::DBMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
 
@@ -91,7 +90,7 @@ TEST(MEM_TEST, VECTOR_SOURCE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST(MEM_TEST, MEM_TABLE_FILE_TEST) {
+TEST_F(NewMemManagerTest, MEM_TABLE_FILE_TEST) {
 
     std::shared_ptr<engine::meta::DBMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
     auto options = engine::OptionsFactory::Build();
@@ -135,7 +134,7 @@ TEST(MEM_TEST, MEM_TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST(MEM_TEST, MEM_TABLE_TEST) {
+TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
 
     std::shared_ptr<engine::meta::DBMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
     auto options = engine::OptionsFactory::Build();
@@ -201,7 +200,7 @@ TEST(MEM_TEST, MEM_TABLE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST(MEM_TEST, MEM_MANAGER_TEST) {
+TEST_F(NewMemManagerTest, SERIAL_INSERT_SEARCH_TEST) {
 
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
@@ -218,7 +217,6 @@ TEST(MEM_TEST, MEM_MANAGER_TEST) {
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     std::map<int64_t , std::vector<float>> search_vectors;
-//    std::map<int64_t , std::vector<float>> vectors_ids_map;
     {
         engine::IDNumbers vector_ids;
         int64_t nb = 1024000;
@@ -227,24 +225,13 @@ TEST(MEM_TEST, MEM_MANAGER_TEST) {
         engine::Status status = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
         ASSERT_TRUE(status.ok());
 
-//        std::ofstream myfile("mem_test.txt");
-//        for (int64_t i = 0; i < nb; ++i) {
-//            int64_t vector_id = vector_ids[i];
-//            std::vector<float> vectors;
-//            for (int64_t j = 0; j < TABLE_DIM; j++) {
-//                vectors.emplace_back(xb[i*TABLE_DIM + j]);
-////                std::cout << xb[i*TABLE_DIM + j] << std::endl;
-//            }
-//            vectors_ids_map[vector_id] = vectors;
-//        }
-
         std::this_thread::sleep_for(std::chrono::seconds(3));
 
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_int_distribution<int64_t> dis(0, nb - 1);
 
-        int64_t numQuery = 1000;
+        int64_t numQuery = 20;
         for (int64_t i = 0; i < numQuery; ++i) {
             int64_t index = dis(gen);
             std::vector<float> search;
@@ -252,17 +239,7 @@ TEST(MEM_TEST, MEM_MANAGER_TEST) {
                 search.push_back(xb[index * TABLE_DIM + j]);
             }
             search_vectors.insert(std::make_pair(vector_ids[index], search));
-//            std::cout << "index: " << index << " vector_ids[index]: " << vector_ids[index] << std::endl;
         }
-
-//        for (int64_t i = 0; i < nb; i += 100000) {
-//            std::vector<float> search;
-//            for (int64_t j = 0; j < TABLE_DIM; j++) {
-//                search.push_back(xb[i * TABLE_DIM + j]);
-//            }
-//            search_vectors.insert(std::make_pair(vector_ids[i], search));
-//        }
-
     }
 
     int k = 10;
@@ -270,26 +247,16 @@ TEST(MEM_TEST, MEM_MANAGER_TEST) {
         auto& search = pair.second;
         engine::QueryResults results;
         stat = db_->Query(TABLE_NAME, k, 1, search.data(), results);
-        for(int t = 0; t < k; t++) {
-//            std::cout << "ID=" << results[0][t].first << " DISTANCE=" << results[0][t].second << std::endl;
-
-//            std::cout << vectors_ids_map[results[0][t].first].size() << std::endl;
-//            for (auto& data : vectors_ids_map[results[0][t].first]) {
-//                std::cout << data << " ";
-//            }
-//            std::cout << std::endl;
-        }
-    //        std::cout << "results[0][0].first: " << results[0][0].first << " pair.first: " << pair.first << " results[0][0].second: " << results[0][0].second << std::endl;
         ASSERT_EQ(results[0][0].first, pair.first);
         ASSERT_LT(results[0][0].second, 0.00001);
     }
 
-    stat = db_->DropAll();
-    ASSERT_TRUE(stat.ok());
+    delete db_;
+    boost::filesystem::remove_all(options.meta.path);
 
 }
 
-TEST(MEM_TEST, INSERT_TEST) {
+TEST_F(NewMemManagerTest, INSERT_TEST) {
 
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
@@ -307,9 +274,9 @@ TEST(MEM_TEST, INSERT_TEST) {
 
     auto start_time = METRICS_NOW_TIME;
 
-    int insert_loop = 1000;
+    int insert_loop = 20;
     for (int i = 0; i < insert_loop; ++i) {
-        int64_t nb = 204800;
+        int64_t nb = 409600;
         std::vector<float> xb;
         BuildVectors(nb, xb);
         engine::IDNumbers vector_ids;
@@ -318,10 +285,91 @@ TEST(MEM_TEST, INSERT_TEST) {
     }
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    std::cout << "total_time(ms) : " << total_time << std::endl;
+    LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
 
-    stat = db_->DropAll();
-    ASSERT_TRUE(stat.ok());
+    delete db_;
+    boost::filesystem::remove_all(options.meta.path);
 
 }
+
+TEST_F(NewMemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
+
+    auto options = engine::OptionsFactory::Build();
+    options.meta.path = "/tmp/milvus_test";
+    options.meta.backend_uri = "sqlite://:@:/";
+    auto db_ = engine::DBFactory::Build(options);
+
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
+
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = TABLE_NAME;
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_STATS(stat);
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    engine::IDNumbers vector_ids;
+    engine::IDNumbers target_ids;
+
+    int64_t nb = 409600;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
+
+    int64_t qb = 5;
+    std::vector<float> qxb;
+    BuildVectors(qb, qxb);
+
+    std::thread search([&]() {
+        engine::QueryResults results;
+        int k = 10;
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        INIT_TIMER;
+        std::stringstream ss;
+        uint64_t count = 0;
+        uint64_t prev_count = 0;
+
+        for (auto j=0; j<10; ++j) {
+            ss.str("");
+            db_->Size(count);
+            prev_count = count;
+
+            START_TIMER;
+            stat = db_->Query(TABLE_NAME, k, qb, qxb.data(), results);
+            ss << "Search " << j << " With Size " << count/engine::meta::M << " M";
+            STOP_TIMER(ss.str());
+
+            ASSERT_STATS(stat);
+            for (auto k=0; k<qb; ++k) {
+                ASSERT_EQ(results[k][0].first, target_ids[k]);
+                ss.str("");
+                ss << "Result [" << k << "]:";
+                for (auto result : results[k]) {
+                    ss << result.first << " ";
+                }
+                /* LOG(DEBUG) << ss.str(); */
+            }
+            ASSERT_TRUE(count >= prev_count);
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    });
+
+    int loop = 20;
+
+    for (auto i=0; i<loop; ++i) {
+        if (i==0) {
+            db_->InsertVectors(TABLE_NAME, qb, qxb.data(), target_ids);
+            ASSERT_EQ(target_ids.size(), qb);
+        } else {
+            db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+
+    search.join();
+
+    delete db_;
+    boost::filesystem::remove_all(options.meta.path);
+
+};
 

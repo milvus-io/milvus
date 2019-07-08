@@ -2,7 +2,7 @@ server_config:
   address: 0.0.0.0
   port: 19530                 # the port milvus listen to, default: 19530, range: 1025 ~ 65534
   gpu_index: 0                # the gpu milvus use, default: 0, range: 0 ~ gpu number - 1
-  mode: single                # milvus deployment type: single, cluster
+  mode: single                # milvus deployment type: single, cluster, read_only
 
 db_config:
   db_path: @MILVUS_DB_PATH@             # milvus data storage path
@@ -15,6 +15,8 @@ db_config:
   index_building_threshold: 1024   # index building trigger threshold, default: 1024, unit: MB
   archive_disk_threshold: 512      # triger archive action if storage size exceed this value, unit: GB
   archive_days_threshold: 30       # files older than x days will be archived, unit: day
+  maximum_memory: 4                # maximum memory allowed, default: 4, unit: GB, should be at least 1 GB.
+                                   # the sum of maximum_memory and cpu_cache_capacity should be less than total memory
 
 metric_config:
   is_startup: off      # if monitoring start: on, off
