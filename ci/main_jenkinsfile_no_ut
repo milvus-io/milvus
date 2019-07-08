@@ -1,0 +1,256 @@
+pipeline {
+    agent none
+
+    options {
+        timestamps()
+    }
+
+    environment {
+        PROJECT_NAME = "milvus"
+        LOWER_BUILD_TYPE = BUILD_TYPE.toLowerCase()
+        SEMVER = "${env.gitlabSourceBranch == null ? params.ENGINE_BRANCH.substring(params.ENGINE_BRANCH.lastIndexOf('/') + 1) : env.gitlabSourceBranch}"
+        GITLAB_AFTER_COMMIT = "${env.gitlabAfter == null ? null : env.gitlabAfter}"
+        SUFFIX_VERSION_NAME = "${env.gitlabAfter == null ? null : env.gitlabAfter.substring(0, 6)}"
+        DOCKER_VERSION_STR = "${env.gitlabAfter == null ? "${SEMVER}-${LOWER_BUILD_TYPE}" : "${SEMVER}-${LOWER_BUILD_TYPE}-${SUFFIX_VERSION_NAME}"}"
+    }
+
+    stages {
+        stage("Ubuntu 16.04") {
+            environment {
+                PACKAGE_VERSION = VersionNumber([
+                    versionNumberString : '${SEMVER}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, "yyyyMMdd"}'
+                ]);
+
+                DOCKER_VERSION = VersionNumber([
+                    versionNumberString : '${DOCKER_VERSION_STR}'
+                ]);
+            }
+
+            stages {
+                stage("Run Build") {
+                    agent {
+                        kubernetes {
+                            cloud 'build-kubernetes'
+                            label 'build'
+                            defaultContainer 'jnlp'
+                            containerTemplate {
+                                name 'milvus-build-env'
+                                image 'registry.zilliz.com/milvus/milvus-build-env:v0.10'
+                                ttyEnabled true
+                                command 'cat'
+                            }
+                        }
+                    }
+                    stages {
+                        stage('Build') {
+                            steps {
+                                gitlabCommitStatus(name: 'Build') {
+                                    script {
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/milvus_build_no_ut.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/packaged_milvus_no_ut.groovy"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    post {
+                        aborted {
+                            script {
+                                updateGitlabCommitStatus name: 'Build', state: 'canceled'
+                                echo "Milvus Build aborted !"
+                            }
+                        }
+
+                        failure {
+                            script {
+                                updateGitlabCommitStatus name: 'Build', state: 'failed'
+                                echo "Milvus Build failure !"
+                            }
+                        }
+                    }
+                }
+
+                stage("Publish docker and helm") {
+                    agent {
+                        kubernetes {
+                            label 'publish'
+                            defaultContainer 'jnlp'
+                            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: publish
+    componet: docker
+spec:
+  containers:
+  - name: publish-docker
+    image: registry.zilliz.com/library/zilliz_docker:v1.0.0
+    securityContext:
+      privileged: true
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: docker-sock
+      mountPath: /var/run/docker.sock
+  volumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+"""
+                        }
+                    }
+                    stages {
+                        stage('Publish Docker') {
+                            steps {
+                                gitlabCommitStatus(name: 'Publish Docker') {
+                                    script {
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/publish_docker.groovy"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    post {
+                        aborted {
+                            script {
+                                updateGitlabCommitStatus name: 'Publish Docker', state: 'canceled'
+                                echo "Milvus Publish Docker aborted !"
+                            }
+                        }
+
+                        failure {
+                            script {
+                                updateGitlabCommitStatus name: 'Publish Docker', state: 'failed'
+                                echo "Milvus Publish Docker failure !"
+                            }
+                        }
+                    }
+                }
+
+                stage("Deploy to Development") {
+                    stages {
+                        stage("Deploy to Dev") {
+                            agent {
+                                kubernetes {
+                                    label 'jenkins-slave'
+                                    defaultContainer 'jnlp'
+                                }
+                            }
+                            stages {
+                                stage('Deploy') {
+                                    steps {
+                                        gitlabCommitStatus(name: 'Deloy to Dev') {
+                                            script {
+                                                load "${env.WORKSPACE}/ci/jenkinsfile/deploy2dev.groovy"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            post {
+                                aborted {
+                                    script {
+                                        updateGitlabCommitStatus name: 'Deloy to Dev', state: 'canceled'
+                                        echo "Milvus Deloy to Dev aborted !"
+                                    }
+                                }
+
+                                failure {
+                                    script {
+                                        updateGitlabCommitStatus name: 'Deloy to Dev', state: 'failed'
+                                        echo "Milvus Deloy to Dev failure !"
+                                    }
+                                }
+                            }
+                        }
+
+                        stage("Dev Test") {
+                            agent {
+                                kubernetes {
+                                    label 'test'
+                                    defaultContainer 'jnlp'
+                                    containerTemplate {
+                                        name 'milvus-testframework'
+                                        image 'registry.zilliz.com/milvus/milvus-test:v0.1'
+                                        ttyEnabled true
+                                        command 'cat'
+                                    }
+                                }
+                            }
+                            stages {
+                                stage('Test') {
+                                    steps {
+                                        script {
+                                            load "${env.WORKSPACE}/ci/jenkinsfile/dev_test.groovy"
+                                            load "${env.WORKSPACE}/ci/jenkinsfile/upload_dev_test_out.groovy"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        stage ("Cleanup Dev") {
+                            agent {
+                                kubernetes {
+                                    label 'jenkins-slave'
+                                    defaultContainer 'jnlp'
+                                }
+                            }
+                            stages {
+                                stage('Cleanup') {
+                                    steps {
+                                        gitlabCommitStatus(name: 'Cleanup Dev') {
+                                            script {
+                                                load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            post {
+                                aborted {
+                                    script {
+                                        updateGitlabCommitStatus name: 'Cleanup Dev', state: 'canceled'
+                                        echo "Milvus Cleanup Dev aborted !"
+                                    }
+                                }
+
+                                failure {
+                                    script {
+                                        updateGitlabCommitStatus name: 'Cleanup Dev', state: 'failed'
+                                        echo "Milvus Cleanup Dev failure !"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            script {
+                updateGitlabCommitStatus name: 'CI/CD', state: 'success'
+                echo "Milvus CI/CD success !"
+            }
+        }
+
+        aborted {
+            script {
+                updateGitlabCommitStatus name: 'CI/CD', state: 'canceled'
+                echo "Milvus CI/CD aborted !"
+            }
+        }
+
+        failure {
+            script {
+                updateGitlabCommitStatus name: 'CI/CD', state: 'failed'
+                echo "Milvus CI/CD failure !"
+            }
+        }
+    }
+}
