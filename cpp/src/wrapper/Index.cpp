@@ -4,6 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
+#if 0
 // TODO: maybe support static search
 #ifdef GPU_VERSION
 #include "faiss/gpu/GpuAutoTune.h"
@@ -80,3 +81,4 @@ Index_ptr read_index(const std::string &file_name) {
 }
 }
 }
+#endif

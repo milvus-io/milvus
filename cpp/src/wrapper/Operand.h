@@ -4,6 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
+#if 0
 #pragma once
 
 #include <string>
@@ -42,3 +43,4 @@ extern Operand_ptr str_to_operand(const std::string &input);
 }
 }
 }
+#endif

@@ -12,7 +12,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 class VecIndexImpl : public VecIndex {
@@ -24,13 +24,30 @@ class VecIndexImpl : public VecIndex {
                   const Config &cfg,
                   const long &nt,
                   const float *xt) override;
+    int64_t Dimension() override;
+    int64_t Count() override;
     void Add(const long &nb, const float *xb, const long *ids, const Config &cfg) override;
     zilliz::knowhere::BinarySet Serialize() override;
     void Load(const zilliz::knowhere::BinarySet &index_binary) override;
     void Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) override;
 
- private:
+ protected:
+    int64_t dim = 0;
     std::shared_ptr<zilliz::knowhere::VectorIndex> index_ = nullptr;
+};
+
+class BFIndex : public VecIndexImpl {
+ public:
+    explicit BFIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : VecIndexImpl(std::move(index)) {};
+    void Build(const int64_t& d);
+    float* GetRawVectors();
+    void BuildAll(const long &nb,
+                  const float *xb,
+                  const long *ids,
+                  const Config &cfg,
+                  const long &nt,
+                  const float *xt) override;
+    int64_t* GetRawIds();
 };
 
 }
