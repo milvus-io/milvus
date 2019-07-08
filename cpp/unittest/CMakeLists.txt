@@ -38,7 +38,7 @@ set(unittest_libs
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
 
-add_subdirectory(server)
+#add_subdirectory(server)
 add_subdirectory(db)
 add_subdirectory(index_wrapper)
 #add_subdirectory(faiss_wrapper)

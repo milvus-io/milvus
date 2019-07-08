@@ -4,6 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
+#if 0
 #include "Operand.h"
 
 
@@ -90,3 +91,4 @@ Operand_ptr str_to_operand(const std::string &input) {
 }
 }
 }
+#endif

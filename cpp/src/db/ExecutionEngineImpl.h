@@ -5,30 +5,28 @@
  ******************************************************************************/
 #pragma once
 
-#if 0
 #include "ExecutionEngine.h"
-#include "faiss/Index.h"
+#include "wrapper/knowhere/vec_index.h"
 
 #include <memory>
 #include <string>
+
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 
-class FaissExecutionEngine : public ExecutionEngine {
-public:
+class ExecutionEngineImpl : public ExecutionEngine {
+ public:
 
-    FaissExecutionEngine(uint16_t dimension,
-            const std::string& location,
-            const std::string& build_index_type,
-            const std::string& raw_index_type);
+    ExecutionEngineImpl(uint16_t dimension,
+                        const std::string &location,
+                        EngineType type);
 
-    FaissExecutionEngine(std::shared_ptr<faiss::Index> index,
-            const std::string& location,
-            const std::string& build_index_type,
-            const std::string& raw_index_type);
+    ExecutionEngineImpl(VecIndexPtr index,
+                        const std::string &location,
+                        EngineType type);
 
     Status AddWithIds(long n, const float *xdata, const long *xids) override;
 
@@ -44,7 +42,7 @@ public:
 
     Status Load() override;
 
-    Status Merge(const std::string& location) override;
+    Status Merge(const std::string &location) override;
 
     Status Search(long n,
                   const float *data,
@@ -52,24 +50,30 @@ public:
                   float *distances,
                   long *labels) const override;
 
-    ExecutionEnginePtr BuildIndex(const std::string&) override;
+    ExecutionEnginePtr BuildIndex(const std::string &) override;
 
     Status Cache() override;
 
     Status Init() override;
 
-protected:
-    std::shared_ptr<faiss::Index> pIndex_;
+ private:
+    VecIndexPtr CreatetVecIndex(EngineType type);
+
+    VecIndexPtr Load(const std::string &location);
+
+ protected:
+    VecIndexPtr index_ = nullptr;
+    EngineType build_type;
+    EngineType current_type;
+
+    int64_t dim;
     std::string location_;
 
-    std::string build_index_type_;
-    std::string raw_index_type_;
-
     size_t nprobe_ = 0;
+    int64_t gpu_num = 0;
 };
 
 
 } // namespace engine
 } // namespace milvus
 } // namespace zilliz
-#endif

@@ -12,11 +12,12 @@ include_directories(../../src)
 
 
 
-aux_source_directory(../../src/db db_srcs)
-aux_source_directory(../../src/config config_files)
-aux_source_directory(../../src/cache cache_srcs)
-aux_source_directory(../../src/wrapper wrapper_src)
-aux_source_directory(../../src/metrics metrics_src)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db db_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_src)
+aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere knowhere_src)
+aux_source_directory(${MILVUS_ENGINE_SRC}/src/metrics metrics_src)
 aux_source_directory(./ test_srcs)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
@@ -54,18 +55,26 @@ set(count_test_src
         ${db_srcs}
         ${db_scheduler_srcs}
         ${wrapper_src}
+        ${knowhere_src}
         ${metrics_src}
         ${test_srcs}
         )
 
-
 add_executable(metrics_test ${count_test_src} ${require_files} )
 
-target_link_libraries(metrics_test
+set(knowhere_libs
         knowhere
+        SPTAGLibStatic
+        arrow
+        jemalloc_pic
         faiss
         openblas
         lapack
+        tbb
+        )
+
+target_link_libraries(metrics_test
+        ${knowhere_libs}
         cudart
         cublas
         sqlite3

@@ -3,6 +3,7 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#if 0
 #include "FaissExecutionEngine.h"
 #include "Log.h"
 
@@ -181,3 +182,4 @@ Status FaissExecutionEngine::Init() {
 } // namespace engine
 } // namespace milvus
 } // namespace zilliz
+#endif

@@ -29,7 +29,7 @@ namespace {
         static std::map<int, engine::EngineType> map_type = {
                 {0, engine::EngineType::INVALID},
                 {1, engine::EngineType::FAISS_IDMAP},
-                {2, engine::EngineType::FAISS_IVFFLAT},
+                {2, engine::EngineType::FAISS_IVFFLAT_GPU},
         };
 
         if(map_type.find(type) == map_type.end()) {
@@ -43,7 +43,7 @@ namespace {
         static std::map<engine::EngineType, int> map_type = {
                 {engine::EngineType::INVALID, 0},
                 {engine::EngineType::FAISS_IDMAP, 1},
-                {engine::EngineType::FAISS_IVFFLAT, 2},
+                {engine::EngineType::FAISS_IVFFLAT_GPU, 2},
         };
 
         if(map_type.find(type) == map_type.end()) {
