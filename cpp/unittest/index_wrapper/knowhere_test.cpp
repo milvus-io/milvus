@@ -11,7 +11,7 @@
 #include "utils.h"
 
 
-using namespace zilliz::vecwise::engine;
+using namespace zilliz::milvus::engine;
 using namespace zilliz::knowhere;
 
 using ::testing::TestWithParam;
@@ -20,7 +20,7 @@ using ::testing::Combine;
 
 
 class KnowhereWrapperTest
-    : public TestWithParam<::std::tuple<std::string, std::string, int, int, int, int, Config, Config>> {
+    : public TestWithParam<::std::tuple<IndexType, std::string, int, int, int, int, Config, Config>> {
  protected:
     void SetUp() override {
         std::string generator_type;
@@ -34,7 +34,7 @@ class KnowhereWrapperTest
     }
 
  protected:
-    std::string index_type;
+    IndexType index_type;
     Config train_cfg;
     Config search_cfg;
 
@@ -55,12 +55,12 @@ class KnowhereWrapperTest
 INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
                         Values(
                             // ["Index type", "Generator type", "dim", "nb", "nq", "k", "build config", "search config"]
-                            std::make_tuple("IVF", "Default",
+                            std::make_tuple(IndexType::FAISS_IVFFLAT_CPU, "Default",
                                             64, 10000, 10, 10,
                                             Config::object{{"nlist", 100}, {"dim", 64}},
                                             Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 20}}
                             ),
-                            std::make_tuple("SPTAG", "Default",
+                            std::make_tuple(IndexType::SPTAG_KDT_RNT_CPU, "Default",
                                             64, 10000, 10, 10,
                                             Config::object{{"TPTNumber", 1}, {"dim", 64}},
                                             Config::object{{"dim", 64}, {"k", 10}}
@@ -113,16 +113,39 @@ TEST_P(KnowhereWrapperTest, serialize_test) {
 
     {
         auto binaryset = index_->Serialize();
+        //int fileno = 0;
+        //const std::string &base_name = "/tmp/wrapper_serialize_test_bin_";
+        //std::vector<std::string> filename_list;
+        //std::vector<std::pair<std::string, size_t >> meta_list;
+        //for (auto &iter: binaryset.binary_map_) {
+        //    const std::string &filename = base_name + std::to_string(fileno);
+        //    FileIOWriter writer(filename);
+        //    writer(iter.second->data.get(), iter.second->size);
+        //
+        //    meta_list.push_back(std::make_pair(iter.first, iter.second.size));
+        //    filename_list.push_back(filename);
+        //    ++fileno;
+        //}
+        //
+        //BinarySet load_data_list;
+        //for (int i = 0; i < filename_list.size() && i < meta_list.size(); ++i) {
+        //    auto bin_size = meta_list[i].second;
+        //    FileIOReader reader(filename_list[i]);
+        //    std::vector<uint8_t> load_data(bin_size);
+        //    reader(load_data.data(), bin_size);
+        //    load_data_list.Append(meta_list[i].first, load_data);
+        //}
+
         int fileno = 0;
-        const std::string &base_name = "/tmp/wrapper_serialize_test_bin_";
         std::vector<std::string> filename_list;
+        const std::string &base_name = "/tmp/wrapper_serialize_test_bin_";
         std::vector<std::pair<std::string, size_t >> meta_list;
         for (auto &iter: binaryset.binary_map_) {
             const std::string &filename = base_name + std::to_string(fileno);
             FileIOWriter writer(filename);
-            writer(iter.second.data, iter.second.size);
+            writer(iter.second->data.get(), iter.second->size);
 
-            meta_list.push_back(std::make_pair(iter.first, iter.second.size));
+            meta_list.emplace_back(std::make_pair(iter.first, iter.second->size));
             filename_list.push_back(filename);
             ++fileno;
         }
@@ -131,9 +154,12 @@ TEST_P(KnowhereWrapperTest, serialize_test) {
         for (int i = 0; i < filename_list.size() && i < meta_list.size(); ++i) {
             auto bin_size = meta_list[i].second;
             FileIOReader reader(filename_list[i]);
-            std::vector<uint8_t> load_data(bin_size);
-            reader(load_data.data(), bin_size);
-            load_data_list.Append(meta_list[i].first, load_data);
+
+            auto load_data = new uint8_t[bin_size];
+            reader(load_data, bin_size);
+            auto data = std::make_shared<uint8_t>();
+            data.reset(load_data);
+            load_data_list.Append(meta_list[i].first, data, bin_size);
         }
 
 
