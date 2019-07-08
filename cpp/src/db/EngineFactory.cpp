@@ -4,7 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "EngineFactory.h"
-#include "FaissExecutionEngine.h"
+//#include "FaissExecutionEngine.h"
 #include "ExecutionEngineImpl.h"
 #include "Log.h"
 

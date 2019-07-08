@@ -5,6 +5,7 @@
  ******************************************************************************/
 #pragma once
 
+#if 0
 #include "ExecutionEngine.h"
 #include "faiss/Index.h"
 
@@ -71,3 +72,4 @@ protected:
 } // namespace engine
 } // namespace milvus
 } // namespace zilliz
+#endif

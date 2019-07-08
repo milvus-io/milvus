@@ -14,7 +14,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 // TODO(linxj): jsoncons => rapidjson or other.
@@ -40,6 +40,10 @@ class VecIndex {
                         long *ids,
                         const Config &cfg = Config()) = 0;
 
+    virtual int64_t Dimension() = 0;
+
+    virtual int64_t Count() = 0;
+
     virtual zilliz::knowhere::BinarySet Serialize() = 0;
 
     virtual void Load(const zilliz::knowhere::BinarySet &index_binary) = 0;
@@ -47,9 +51,18 @@ class VecIndex {
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;
 
-extern VecIndexPtr GetVecIndexFactory(const std::string &index_type);
+enum class IndexType {
+    INVALID = 0,
+    FAISS_IDMAP = 1,
+    FAISS_IVFFLAT_GPU,
+    FAISS_IVFFLAT_CPU,
+    SPTAG_KDT_RNT_CPU,
+    NSG,
+};
 
-extern VecIndexPtr LoadVecIndex(const std::string &index_type, const zilliz::knowhere::BinarySet &index_binary);
+extern VecIndexPtr GetVecIndexFactory(const IndexType &type);
+
+extern VecIndexPtr LoadVecIndex(const IndexType &index_type, const zilliz::knowhere::BinarySet &index_binary);
 
 }
 }

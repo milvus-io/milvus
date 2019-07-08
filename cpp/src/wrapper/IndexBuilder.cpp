@@ -4,6 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
+#if 0
 #include "mutex"
 
 
@@ -128,10 +129,8 @@ Index_ptr BgCpuBuilder::build_all(const long &nb, const float *xb, const long *i
     return std::make_shared<Index>(index);
 }
 
-// TODO: Be Factory pattern later
 IndexBuilderPtr GetIndexBuilder(const Operand_ptr &opd) {
     if (opd->index_type == "IDMap") {
-        // TODO: fix hardcode
         IndexBuilderPtr index = nullptr;
         return std::make_shared<BgCpuBuilder>(opd);
     }
@@ -142,3 +141,4 @@ IndexBuilderPtr GetIndexBuilder(const Operand_ptr &opd) {
 }
 }
 }
+#endif
