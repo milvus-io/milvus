@@ -5,11 +5,12 @@
 
 #include <thread>
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-NewMemManager::MemTablePtr NewMemManager::GetMemByTable(const std::string& table_id) {
+NewMemManager::MemTablePtr NewMemManager::GetMemByTable(const std::string &table_id) {
     auto memIt = mem_id_map_.find(table_id);
     if (memIt != mem_id_map_.end()) {
         return memIt->second;
@@ -19,27 +20,27 @@ NewMemManager::MemTablePtr NewMemManager::GetMemByTable(const std::string& table
     return mem_id_map_[table_id];
 }
 
-Status NewMemManager::InsertVectors(const std::string& table_id_,
+Status NewMemManager::InsertVectors(const std::string &table_id_,
                                     size_t n_,
-                                    const float* vectors_,
-                                    IDNumbers& vector_ids_) {
+                                    const float *vectors_,
+                                    IDNumbers &vector_ids_) {
 
     while (GetCurrentMem() > options_.maximum_memory) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+
+    LOG(DEBUG) << "NewMemManager::InsertVectors: mutable mem = " << GetCurrentMutableMem() <<
+               ", immutable mem = " << GetCurrentImmutableMem() << ", total mem = " << GetCurrentMem();
 
     std::unique_lock<std::mutex> lock(mutex_);
 
     return InsertVectorsNoLock(table_id_, n_, vectors_, vector_ids_);
 }
 
-Status NewMemManager::InsertVectorsNoLock(const std::string& table_id,
+Status NewMemManager::InsertVectorsNoLock(const std::string &table_id,
                                           size_t n,
-                                          const float* vectors,
-                                          IDNumbers& vector_ids) {
-
-    LOG(DEBUG) << "NewMemManager::InsertVectorsNoLock: mutable mem = " << GetCurrentMutableMem() <<
-    ", immutable mem = " << GetCurrentImmutableMem() << ", total mem = " << GetCurrentMem();
+                                          const float *vectors,
+                                          IDNumbers &vector_ids) {
 
     MemTablePtr mem = GetMemByTable(table_id);
     VectorSource::Ptr source = std::make_shared<VectorSource>(n, vectors);
@@ -54,37 +55,33 @@ Status NewMemManager::InsertVectorsNoLock(const std::string& table_id,
 Status NewMemManager::ToImmutable() {
     std::unique_lock<std::mutex> lock(mutex_);
     MemIdMap temp_map;
-    for (auto& kv: mem_id_map_) {
-        if(kv.second->Empty()) {
+    for (auto &kv: mem_id_map_) {
+        if (kv.second->Empty()) {
+            //empty table, no need to serialize
             temp_map.insert(kv);
-            continue;//empty table, no need to serialize
+        } else {
+            immu_mem_list_.push_back(kv.second);
         }
-        immu_mem_list_.push_back(kv.second);
     }
 
     mem_id_map_.swap(temp_map);
     return Status::OK();
 }
 
-Status NewMemManager::Serialize(std::set<std::string>& table_ids) {
+Status NewMemManager::Serialize(std::set<std::string> &table_ids) {
     ToImmutable();
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     table_ids.clear();
-    for (auto& mem : immu_mem_list_) {
+    for (auto &mem : immu_mem_list_) {
         mem->Serialize();
         table_ids.insert(mem->GetTableId());
     }
     immu_mem_list_.clear();
-//    for (auto mem = immu_mem_list_.begin(); mem != immu_mem_list_.end(); ) {
-//        (*mem)->Serialize();
-//        table_ids.insert((*mem)->GetTableId());
-//        mem = immu_mem_list_.erase(mem);
-//        LOG(DEBUG) << "immu_mem_list_ size = " << immu_mem_list_.size();
-//    }
+
     return Status::OK();
 }
 
-Status NewMemManager::EraseMemVector(const std::string& table_id) {
+Status NewMemManager::EraseMemVector(const std::string &table_id) {
     {//erase MemVector from rapid-insert cache
         std::unique_lock<std::mutex> lock(mutex_);
         mem_id_map_.erase(table_id);
@@ -93,8 +90,8 @@ Status NewMemManager::EraseMemVector(const std::string& table_id) {
     {//erase MemVector from serialize cache
         std::unique_lock<std::mutex> lock(serialization_mtx_);
         MemList temp_list;
-        for (auto& mem : immu_mem_list_) {
-            if(mem->GetTableId() != table_id) {
+        for (auto &mem : immu_mem_list_) {
+            if (mem->GetTableId() != table_id) {
                 temp_list.push_back(mem);
             }
         }
@@ -105,20 +102,20 @@ Status NewMemManager::EraseMemVector(const std::string& table_id) {
 }
 
 size_t NewMemManager::GetCurrentMutableMem() {
-    size_t totalMem = 0;
-    for (auto& kv : mem_id_map_) {
+    size_t total_mem = 0;
+    for (auto &kv : mem_id_map_) {
         auto memTable = kv.second;
-        totalMem += memTable->GetCurrentMem();
+        total_mem += memTable->GetCurrentMem();
     }
-    return totalMem;
+    return total_mem;
 }
 
 size_t NewMemManager::GetCurrentImmutableMem() {
-    size_t totalMem = 0;
-    for (auto& memTable : immu_mem_list_) {
-        totalMem += memTable->GetCurrentMem();
+    size_t total_mem = 0;
+    for (auto &mem_table : immu_mem_list_) {
+        total_mem += mem_table->GetCurrentMem();
     }
-    return totalMem;
+    return total_mem;
 }
 
 size_t NewMemManager::GetCurrentMem() {
