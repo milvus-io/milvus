@@ -49,13 +49,15 @@ size_t MemTable::GetTableFileCount() {
 }
 
 Status MemTable::Serialize() {
-    for (auto& memTableFile : mem_table_file_list_) {
-        auto status = memTableFile->Serialize();
+    for (auto memTableFile = mem_table_file_list_.begin(); memTableFile != mem_table_file_list_.end(); ) {
+        auto status = (*memTableFile)->Serialize();
         if (!status.ok()) {
             std::string errMsg = "MemTable::Serialize failed: " + status.ToString();
             ENGINE_LOG_ERROR << errMsg;
             return Status::Error(errMsg);
         }
+        std::lock_guard<std::mutex> lock(mutex_);
+        memTableFile = mem_table_file_list_.erase(memTableFile);
     }
     return Status::OK();
 }
@@ -64,8 +66,17 @@ bool MemTable::Empty() {
     return mem_table_file_list_.empty();
 }
 
-std::string MemTable::GetTableId() {
+const std::string& MemTable::GetTableId() const {
     return table_id_;
+}
+
+size_t MemTable::GetCurrentMem() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    size_t totalMem = 0;
+    for (auto& memTableFile : mem_table_file_list_) {
+        totalMem += memTableFile->GetCurrentMem();
+    }
+    return totalMem;
 }
 
 } // namespace engine

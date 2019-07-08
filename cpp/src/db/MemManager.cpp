@@ -8,6 +8,7 @@
 #include "MetaConsts.h"
 #include "EngineFactory.h"
 #include "metrics/Metrics.h"
+#include "Log.h"
 
 #include <iostream>
 #include <sstream>
@@ -128,6 +129,10 @@ Status MemManager::InsertVectorsNoLock(const std::string& table_id,
         size_t n,
         const float* vectors,
         IDNumbers& vector_ids) {
+
+    LOG(DEBUG) << "MemManager::InsertVectorsNoLock: mutable mem = " << GetCurrentMutableMem() <<
+                     ", immutable mem = " << GetCurrentImmutableMem() << ", total mem = " << GetCurrentMem();
+
     MemVectorsPtr mem = GetMemByTable(table_id);
     if (mem == nullptr) {
         return Status::NotFound("Group " + table_id + " not found!");
@@ -192,6 +197,26 @@ Status MemManager::EraseMemVector(const std::string& table_id) {
     return Status::OK();
 }
 
+size_t MemManager::GetCurrentMutableMem() {
+    size_t totalMem = 0;
+    for (auto& kv : mem_id_map_) {
+        auto memVector = kv.second;
+        totalMem += memVector->Size();
+    }
+    return totalMem;
+}
+
+size_t MemManager::GetCurrentImmutableMem() {
+    size_t totalMem = 0;
+    for (auto& memVector : immu_mem_list_) {
+        totalMem += memVector->Size();
+    }
+    return totalMem;
+}
+
+size_t MemManager::GetCurrentMem() {
+    return GetCurrentMutableMem() + GetCurrentImmutableMem();
+}
 
 } // namespace engine
 } // namespace milvus
