@@ -87,3 +87,8 @@ class MySQLDBTest : public  ::testing::Test {
 protected:
     zilliz::milvus::engine::Options GetOptions();
 };
+
+class NewMemManagerTest : public  ::testing::Test {
+    void InitLog();
+    virtual void SetUp() override;
+};
