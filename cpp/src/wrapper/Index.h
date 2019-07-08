@@ -6,23 +6,29 @@
 
 #pragma once
 
-#include <vector>
-#include <string>
-#include <unordered_map>
-#include <memory>
-#include <fstream>
+//#include <vector>
+//#include <string>
+//#include <unordered_map>
+//#include <memory>
+//#include <fstream>
+//
+//#include "faiss/AutoTune.h"
+//#include "faiss/index_io.h"
+//
+//#include "Operand.h"
 
-#include "faiss/AutoTune.h"
-#include "faiss/index_io.h"
+#include "knowhere/vec_index.h"
 
-#include "Operand.h"
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-class Index;
-using Index_ptr = std::shared_ptr<Index>;
+using Index_ptr = VecIndexPtr;
+
+#if 0
+//class Index;
+//using Index_ptr = std::shared_ptr<Index>;
 
 class Index {
     typedef long idx_t;
@@ -75,6 +81,7 @@ private:
 void write_index(const Index_ptr &index, const std::string &file_name);
 
 extern Index_ptr read_index(const std::string &file_name);
+#endif
 
 
 }

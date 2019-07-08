@@ -10,7 +10,7 @@ aux_source_directory(config config_files)
 aux_source_directory(server server_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
-aux_source_directory(wrapper wrapper_files)
+#aux_source_directory(wrapper wrapper_files)
 aux_source_directory(metrics metrics_files)
 aux_source_directory(wrapper/knowhere knowhere_files)
 

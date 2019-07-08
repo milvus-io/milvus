@@ -10,7 +10,7 @@
 
 
 namespace zilliz {
-namespace vecwise {
+namespace milvus {
 namespace engine {
 
 extern zilliz::knowhere::DatasetPtr
