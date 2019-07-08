@@ -9,80 +9,87 @@
 #include "IDGenerator.h"
 #include "Status.h"
 #include "Meta.h"
+#include "MemManagerAbstract.h"
 
 #include <map>
 #include <string>
 #include <ctime>
 #include <memory>
 #include <mutex>
-#include <set>
+
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 namespace meta {
-    class Meta;
+class Meta;
 }
 
 class MemVectors {
-public:
+ public:
     using MetaPtr = meta::Meta::Ptr;
     using Ptr = std::shared_ptr<MemVectors>;
 
-    explicit MemVectors(const std::shared_ptr<meta::Meta>&,
-            const meta::TableFileSchema&, const Options&);
+    explicit MemVectors(const std::shared_ptr<meta::Meta> &,
+                        const meta::TableFileSchema &, const Options &);
 
-    Status Add(size_t n_, const float* vectors_, IDNumbers& vector_ids_);
+    Status Add(size_t n_, const float *vectors_, IDNumbers &vector_ids_);
 
     size_t RowCount() const;
 
     size_t Size() const;
 
-    Status Serialize(std::string& table_id);
+    Status Serialize(std::string &table_id);
 
     ~MemVectors();
 
-    const std::string& Location() const { return schema_.location_; }
+    const std::string &Location() const { return schema_.location_; }
 
     std::string TableId() const { return schema_.table_id_; }
 
-private:
+ private:
     MemVectors() = delete;
-    MemVectors(const MemVectors&) = delete;
-    MemVectors& operator=(const MemVectors&) = delete;
+    MemVectors(const MemVectors &) = delete;
+    MemVectors &operator=(const MemVectors &) = delete;
 
     MetaPtr meta_;
     Options options_;
     meta::TableFileSchema schema_;
-    IDGenerator* id_generator_;
+    IDGenerator *id_generator_;
     ExecutionEnginePtr active_engine_;
 
 }; // MemVectors
 
 
 
-class MemManager {
-public:
+class MemManager : public MemManagerAbstract {
+ public:
     using MetaPtr = meta::Meta::Ptr;
     using MemVectorsPtr = typename MemVectors::Ptr;
     using Ptr = std::shared_ptr<MemManager>;
 
-    MemManager(const std::shared_ptr<meta::Meta>& meta, const Options& options)
+    MemManager(const std::shared_ptr<meta::Meta> &meta, const Options &options)
         : meta_(meta), options_(options) {}
 
-    MemVectorsPtr GetMemByTable(const std::string& table_id);
+    Status InsertVectors(const std::string &table_id,
+                         size_t n, const float *vectors, IDNumbers &vector_ids) override;
 
-    Status InsertVectors(const std::string& table_id,
-            size_t n, const float* vectors, IDNumbers& vector_ids);
+    Status Serialize(std::set<std::string> &table_ids) override;
 
-    Status Serialize(std::set<std::string>& table_ids);
+    Status EraseMemVector(const std::string &table_id) override;
 
-    Status EraseMemVector(const std::string& table_id);
+    size_t GetCurrentMutableMem() override;
 
-private:
-    Status InsertVectorsNoLock(const std::string& table_id,
-            size_t n, const float* vectors, IDNumbers& vector_ids);
+    size_t GetCurrentImmutableMem() override;
+
+    size_t GetCurrentMem() override;
+
+ private:
+    MemVectorsPtr GetMemByTable(const std::string &table_id);
+
+    Status InsertVectorsNoLock(const std::string &table_id,
+                               size_t n, const float *vectors, IDNumbers &vector_ids);
     Status ToImmutable();
 
     using MemIdMap = std::map<std::string, MemVectorsPtr>;
