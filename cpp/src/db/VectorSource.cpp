@@ -4,6 +4,7 @@
 #include "Log.h"
 #include "metrics/Metrics.h"
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
@@ -11,16 +12,16 @@ namespace engine {
 
 VectorSource::VectorSource(const size_t &n,
                            const float *vectors) :
-                           n_(n),
-                           vectors_(vectors),
-                           id_generator_(new SimpleIDGenerator()) {
+    n_(n),
+    vectors_(vectors),
+    id_generator_(new SimpleIDGenerator()) {
     current_num_vectors_added = 0;
 }
 
-Status VectorSource::Add(const ExecutionEnginePtr& execution_engine,
-                         const meta::TableFileSchema& table_file_schema,
-                         const size_t& num_vectors_to_add,
-                         size_t& num_vectors_added) {
+Status VectorSource::Add(const ExecutionEnginePtr &execution_engine,
+                         const meta::TableFileSchema &table_file_schema,
+                         const size_t &num_vectors_to_add,
+                         size_t &num_vectors_added) {
 
     auto start_time = METRICS_NOW_TIME;
 
@@ -36,8 +37,7 @@ Status VectorSource::Add(const ExecutionEnginePtr& execution_engine,
         vector_ids_.insert(vector_ids_.end(),
                            std::make_move_iterator(vector_ids_to_add.begin()),
                            std::make_move_iterator(vector_ids_to_add.end()));
-    }
-    else {
+    } else {
         ENGINE_LOG_ERROR << "VectorSource::Add failed: " + status.ToString();
     }
 

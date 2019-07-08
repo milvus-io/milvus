@@ -15,12 +15,13 @@
 #include <string>
 #include <memory>
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 struct DBMetaOptionsFactory {
-    static DBMetaOptions Build(const std::string& path = "");
+    static DBMetaOptions Build(const std::string &path = "");
 };
 
 struct OptionsFactory {
@@ -29,16 +30,16 @@ struct OptionsFactory {
 
 struct DBMetaImplFactory {
     static std::shared_ptr<meta::DBMetaImpl> Build();
-    static std::shared_ptr<meta::Meta> Build(const DBMetaOptions& metaOptions, const int& mode);
+    static std::shared_ptr<meta::Meta> Build(const DBMetaOptions &metaOptions, const int &mode);
 };
 
 struct DBFactory {
     static std::shared_ptr<DB> Build();
-    static DB* Build(const Options&);
+    static DB *Build(const Options &);
 };
 
 struct MemManagerFactory {
-    static MemManagerAbstractPtr Build(const std::shared_ptr<meta::Meta>& meta, const Options& options);
+    static MemManagerAbstractPtr Build(const std::shared_ptr<meta::Meta> &meta, const Options &options);
 };
 
 } // namespace engine

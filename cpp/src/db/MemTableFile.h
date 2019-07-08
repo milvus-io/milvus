@@ -5,20 +5,21 @@
 #include "VectorSource.h"
 #include "ExecutionEngine.h"
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class MemTableFile {
 
-public:
+ public:
 
     using Ptr = std::shared_ptr<MemTableFile>;
     using MetaPtr = meta::Meta::Ptr;
 
-    MemTableFile(const std::string& table_id, const std::shared_ptr<meta::Meta>& meta, const Options& options);
+    MemTableFile(const std::string &table_id, const std::shared_ptr<meta::Meta> &meta, const Options &options);
 
-    Status Add(const VectorSource::Ptr& source);
+    Status Add(const VectorSource::Ptr &source);
 
     size_t GetCurrentMem();
 
@@ -28,7 +29,7 @@ public:
 
     Status Serialize();
 
-private:
+ private:
 
     Status CreateTableFile();
 

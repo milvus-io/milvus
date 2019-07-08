@@ -22,6 +22,8 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+#define USE_NEW_MEM_MANAGER 1
+
 DBMetaOptions DBMetaOptionsFactory::Build(const std::string& path) {
     auto p = path;
     if(p == "") {
@@ -74,17 +76,14 @@ std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOp
         if (dialect.find("mysql") != std::string::npos) {
             ENGINE_LOG_INFO << "Using MySQL";
             return std::make_shared<meta::MySQLMetaImpl>(meta::MySQLMetaImpl(metaOptions, mode));
-        }
-        else if (dialect.find("sqlite") != std::string::npos) {
-            ENGINE_LOG_DEBUG << "Using SQLite";
+        } else if (dialect.find("sqlite") != std::string::npos) {
+            ENGINE_LOG_INFO << "Using SQLite";
             return std::make_shared<meta::DBMetaImpl>(meta::DBMetaImpl(metaOptions));
-        }
-        else {
+        } else {
             ENGINE_LOG_ERROR << "Invalid dialect in URI: dialect = " << dialect;
             throw InvalidArgumentException("URI dialect is not mysql / sqlite");
         }
-    }
-    else {
+    } else {
         ENGINE_LOG_ERROR << "Wrong URI format: URI = " << uri;
         throw InvalidArgumentException("Wrong URI format ");
     }
@@ -102,11 +101,11 @@ DB* DBFactory::Build(const Options& options) {
 
 MemManagerAbstractPtr MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta,
                                                const Options& options) {
-    bool useNew = true;
-    if (useNew) {
-        return std::make_shared<NewMemManager>(meta, options);
-    }
+#ifdef USE_NEW_MEM_MANAGER
+    return std::make_shared<NewMemManager>(meta, options);
+#else
     return std::make_shared<MemManager>(meta, options);
+#endif
 }
 
 } // namespace engine
