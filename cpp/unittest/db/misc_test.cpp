@@ -26,32 +26,32 @@ namespace {
 
 }
 
-TEST(DBMiscTest, ENGINE_API_TEST) {
-    //engine api AddWithIdArray
-    const uint16_t dim = 512;
-    const long n = 10;
-    engine::FaissExecutionEngine engine(512, "/tmp/1", "IDMap", "IDMap,Flat");
-    std::vector<float> vectors;
-    std::vector<long> ids;
-    for (long i = 0; i < n; i++) {
-        for (uint16_t k = 0; k < dim; k++) {
-            vectors.push_back((float) k);
-        }
-        ids.push_back(i);
-    }
-
-    auto status = engine.AddWithIdArray(vectors, ids);
-    ASSERT_TRUE(status.ok());
-
-    auto engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::INVALID);
-    ASSERT_EQ(engine_ptr, nullptr);
-
-    engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::FAISS_IVFFLAT_GPU);
-    ASSERT_NE(engine_ptr, nullptr);
-
-    engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::FAISS_IDMAP);
-    ASSERT_NE(engine_ptr, nullptr);
-}
+//TEST(DBMiscTest, ENGINE_API_TEST) {
+//    //engine api AddWithIdArray
+//    const uint16_t dim = 512;
+//    const long n = 10;
+//    engine::FaissExecutionEngine engine(512, "/tmp/1", "IDMap", "IDMap,Flat");
+//    std::vector<float> vectors;
+//    std::vector<long> ids;
+//    for (long i = 0; i < n; i++) {
+//        for (uint16_t k = 0; k < dim; k++) {
+//            vectors.push_back((float) k);
+//        }
+//        ids.push_back(i);
+//    }
+//
+//    auto status = engine.AddWithIdArray(vectors, ids);
+//    ASSERT_TRUE(status.ok());
+//
+//    auto engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::INVALID);
+//    ASSERT_EQ(engine_ptr, nullptr);
+//
+//    engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::FAISS_IVFFLAT_GPU);
+//    ASSERT_NE(engine_ptr, nullptr);
+//
+//    engine_ptr = engine::EngineFactory::Build(128, "/tmp", engine::EngineType::FAISS_IDMAP);
+//    ASSERT_NE(engine_ptr, nullptr);
+//}
 
 TEST(DBMiscTest, EXCEPTION_TEST) {
     engine::Exception ex1("");

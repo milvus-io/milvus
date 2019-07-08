@@ -6,7 +6,7 @@
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_src)
+#aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_src)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere knowhere_src)
 aux_source_directory(./ test_srcs)
 

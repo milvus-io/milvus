@@ -4,6 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <src/utils/Log.h>
 #include "knowhere/index/vector_index/idmap.h"
 
 #include "vec_impl.h"
@@ -27,7 +28,9 @@ void VecIndexImpl::BuildAll(const long &nb,
 
     auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
     index_->set_preprocessor(preprocessor);
-    auto model = index_->Train(dataset, cfg);
+    auto nlist = int(nb / 1000000.0 * 16384);
+    auto cfg_t = Config::object{{"nlist", nlist}, {"dim", dim}};
+    auto model = index_->Train(dataset, cfg_t);
     index_->set_index_model(model);
     index_->Add(dataset, cfg);
 }
@@ -71,7 +74,7 @@ void VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *id
     //}
 
     auto p_ids = ids_array->data()->GetValues<int64_t>(1, 0);
-    auto p_dist = ids_array->data()->GetValues<float>(1, 0);
+    auto p_dist = dis_array->data()->GetValues<float>(1, 0);
 
     // TODO(linxj): avoid copy here.
     memcpy(ids, p_ids, sizeof(int64_t) * nq * k);
@@ -84,6 +87,7 @@ zilliz::knowhere::BinarySet VecIndexImpl::Serialize() {
 
 void VecIndexImpl::Load(const zilliz::knowhere::BinarySet &index_binary) {
     index_->Load(index_binary);
+    dim = Dimension();
 }
 
 int64_t VecIndexImpl::Dimension() {
@@ -95,7 +99,9 @@ int64_t VecIndexImpl::Count() {
 }
 
 float *BFIndex::GetRawVectors() {
-    return std::static_pointer_cast<IDMAP>(index_)->GetRawVectors();
+    auto raw_index = std::dynamic_pointer_cast<IDMAP>(index_);
+    if (raw_index) { return raw_index->GetRawVectors(); }
+    return nullptr;
 }
 
 int64_t *BFIndex::GetRawIds() {
@@ -105,6 +111,19 @@ int64_t *BFIndex::GetRawIds() {
 void BFIndex::Build(const int64_t &d) {
     dim = d;
     std::static_pointer_cast<IDMAP>(index_)->Train(dim);
+}
+
+void BFIndex::BuildAll(const long &nb,
+                       const float *xb,
+                       const long *ids,
+                       const Config &cfg,
+                       const long &nt,
+                       const float *xt) {
+    dim = cfg["dim"].as<int>();
+    auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
+
+    std::static_pointer_cast<IDMAP>(index_)->Train(dim);
+    index_->Add(dataset, cfg);
 }
 
 }
