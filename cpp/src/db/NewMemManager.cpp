@@ -1,5 +1,9 @@
 #include "NewMemManager.h"
 #include "VectorSource.h"
+#include "Log.h"
+#include "Constants.h"
+
+#include <thread>
 
 namespace zilliz {
 namespace milvus {
@@ -20,6 +24,9 @@ Status NewMemManager::InsertVectors(const std::string& table_id_,
                                     const float* vectors_,
                                     IDNumbers& vector_ids_) {
 
+    while (GetCurrentMem() > options_.maximum_memory) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 
     std::unique_lock<std::mutex> lock(mutex_);
 
@@ -30,6 +37,10 @@ Status NewMemManager::InsertVectorsNoLock(const std::string& table_id,
                                           size_t n,
                                           const float* vectors,
                                           IDNumbers& vector_ids) {
+
+    LOG(DEBUG) << "NewMemManager::InsertVectorsNoLock: mutable mem = " << GetCurrentMutableMem() <<
+    ", immutable mem = " << GetCurrentImmutableMem() << ", total mem = " << GetCurrentMem();
+
     MemTablePtr mem = GetMemByTable(table_id);
     VectorSource::Ptr source = std::make_shared<VectorSource>(n, vectors);
 
@@ -64,6 +75,12 @@ Status NewMemManager::Serialize(std::set<std::string>& table_ids) {
         table_ids.insert(mem->GetTableId());
     }
     immu_mem_list_.clear();
+//    for (auto mem = immu_mem_list_.begin(); mem != immu_mem_list_.end(); ) {
+//        (*mem)->Serialize();
+//        table_ids.insert((*mem)->GetTableId());
+//        mem = immu_mem_list_.erase(mem);
+//        LOG(DEBUG) << "immu_mem_list_ size = " << immu_mem_list_.size();
+//    }
     return Status::OK();
 }
 
@@ -85,6 +102,27 @@ Status NewMemManager::EraseMemVector(const std::string& table_id) {
     }
 
     return Status::OK();
+}
+
+size_t NewMemManager::GetCurrentMutableMem() {
+    size_t totalMem = 0;
+    for (auto& kv : mem_id_map_) {
+        auto memTable = kv.second;
+        totalMem += memTable->GetCurrentMem();
+    }
+    return totalMem;
+}
+
+size_t NewMemManager::GetCurrentImmutableMem() {
+    size_t totalMem = 0;
+    for (auto& memTable : immu_mem_list_) {
+        totalMem += memTable->GetCurrentMem();
+    }
+    return totalMem;
+}
+
+size_t NewMemManager::GetCurrentMem() {
+    return GetCurrentMutableMem() + GetCurrentImmutableMem();
 }
 
 } // namespace engine
