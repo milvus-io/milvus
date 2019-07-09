@@ -11,7 +11,7 @@ pipeline {
         SEMVER = "${env.gitlabSourceBranch == null ? params.ENGINE_BRANCH.substring(params.ENGINE_BRANCH.lastIndexOf('/') + 1) : env.gitlabSourceBranch}"
         GITLAB_AFTER_COMMIT = "${env.gitlabAfter == null ? null : env.gitlabAfter}"
         SUFFIX_VERSION_NAME = "${env.gitlabAfter == null ? null : env.gitlabAfter.substring(0, 6)}"
-        DOCKER_VERSION_STR = "${env.gitlabAfter == null ? "${SEMVER}-${LOWER_BUILD_TYPE}-\$\{BUILD_DATE_FORMATTED\, \"yyyyMMdd\"\}" : "${SEMVER}-${LOWER_BUILD_TYPE}-${SUFFIX_VERSION_NAME}"}"
+        DOCKER_VERSION_STR = "${env.gitlabAfter == null ? '${SEMVER}-${LOWER_BUILD_TYPE}-${BUILD_DATE_FORMATTED, \"yyyyMMdd\"}' : '${SEMVER}-${LOWER_BUILD_TYPE}-${SUFFIX_VERSION_NAME}'}"
     }
 
     stages {
