@@ -42,8 +42,8 @@ cuda_add_executable(db_test ${db_test_src})
 
 set(db_libs
         sqlite
-        boost_filesystem_static
         boost_system_static
+        boost_filesystem_static
         lz4
         mysqlpp
         )
