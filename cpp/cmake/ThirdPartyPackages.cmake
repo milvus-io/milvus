@@ -664,7 +664,8 @@ macro(build_knowhere)
             ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${KNOWHERE_PREFIX}"
             -DCMAKE_INSTALL_LIBDIR=lib
-            -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+            "-DCMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER}"
+            "-DCUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}"
             -DCMAKE_BUILD_TYPE=Release)
 
     externalproject_add(knowhere_ep
