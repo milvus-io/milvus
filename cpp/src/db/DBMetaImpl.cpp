@@ -791,6 +791,23 @@ Status DBMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     return Status::OK();
 }
 
+Status DBMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
+    try {
+        ConnectorPtr->update_all(
+            set(
+                c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_INDEX
+            ),
+            where(
+                c(&TableFileSchema::table_id_) == table_id and
+                c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW
+            ));
+    } catch (std::exception &e) {
+        return HandleException("Encounter exception when update table files to to_index", e);
+    }
+
+    return Status::OK();
+}
+
 Status DBMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
     try {
         MetricCollector metric;

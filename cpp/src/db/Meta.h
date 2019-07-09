@@ -39,6 +39,8 @@ public:
             const std::vector<size_t>& ids,
             TableFilesSchema& table_files) = 0;
 
+    virtual Status UpdateTableFilesToIndex(const std::string& table_id) = 0;
+
     virtual Status UpdateTableFile(TableFileSchema& file_schema) = 0;
 
     virtual Status UpdateTableFiles(TableFilesSchema& files) = 0;
