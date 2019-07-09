@@ -43,8 +43,8 @@ set(db_libs
         cudart
         cublas
         sqlite
-        boost_filesystem_static
         boost_system_static
+        boost_filesystem_static
         lz4
         mysqlpp
         )
