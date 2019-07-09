@@ -77,7 +77,7 @@ target_link_libraries(metrics_test
         ${knowhere_libs}
         cudart
         cublas
-        sqlite3
+        sqlite
         boost_system
         boost_filesystem
         lz4
