@@ -59,7 +59,7 @@ ValidateTableIndexType(int32_t index_type) {
     auto engine_type = engine::EngineType(index_type);
     switch (engine_type) {
         case engine::EngineType::FAISS_IDMAP:
-        case engine::EngineType::FAISS_IVFFLAT: {
+        case engine::EngineType::FAISS_IVFFLAT_GPU: {
             SERVER_LOG_DEBUG << "Index type: " << index_type;
             return SERVER_SUCCESS;
         }
