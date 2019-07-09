@@ -317,6 +317,28 @@ Status DBMetaImpl::DescribeTable(TableSchema &table_schema) {
     return Status::OK();
 }
 
+Status DBMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) {
+    has = false;
+    try {
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_),
+                                             where((c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW
+                                                    or
+                                                    c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_INDEX)
+                                                   and c(&TableFileSchema::table_id_) == table_id
+                                             ));
+
+        if (selected.size() >= 1) {
+            has = true;
+        } else {
+            has = false;
+        }
+
+    } catch (std::exception &e) {
+        return HandleException("Encounter exception when check non index files", e);
+    }
+    return Status::OK();
+}
+
 Status DBMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
     has_or_not = false;
 
