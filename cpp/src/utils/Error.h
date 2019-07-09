@@ -35,6 +35,7 @@ constexpr ServerError SERVER_CANNOT_CREATE_FOLDER = ToGlobalServerErrorCode(8);
 constexpr ServerError SERVER_CANNOT_CREATE_FILE = ToGlobalServerErrorCode(9);
 constexpr ServerError SERVER_CANNOT_DELETE_FOLDER = ToGlobalServerErrorCode(10);
 constexpr ServerError SERVER_CANNOT_DELETE_FILE = ToGlobalServerErrorCode(11);
+constexpr ServerError SERVER_BUILD_INDEX_ERROR = ToGlobalServerErrorCode(12);
 
 constexpr ServerError SERVER_TABLE_NOT_EXIST = ToGlobalServerErrorCode(100);
 constexpr ServerError SERVER_INVALID_TABLE_NAME = ToGlobalServerErrorCode(101);
@@ -53,6 +54,7 @@ constexpr ServerError SERVER_LICENSE_FILE_NOT_EXIST = ToGlobalServerErrorCode(50
 constexpr ServerError SERVER_LICENSE_VALIDATION_FAIL = ToGlobalServerErrorCode(501);
 
 constexpr ServerError DB_META_TRANSACTION_FAILED = ToGlobalServerErrorCode(1000);
+
 
 class ServerException : public std::exception {
 public:
@@ -77,4 +79,3 @@ private:
 }  // namespace server
 }  // namespace milvus
 }  // namespace zilliz
-

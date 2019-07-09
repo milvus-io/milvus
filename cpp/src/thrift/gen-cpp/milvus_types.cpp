@@ -34,7 +34,8 @@ int _kErrorCodeValues[] = {
   ErrorCode::CANNOT_CREATE_FOLDER,
   ErrorCode::CANNOT_CREATE_FILE,
   ErrorCode::CANNOT_DELETE_FOLDER,
-  ErrorCode::CANNOT_DELETE_FILE
+  ErrorCode::CANNOT_DELETE_FILE,
+  ErrorCode::BUILD_INDEX_ERROR
 };
 const char* _kErrorCodeNames[] = {
   "SUCCESS",
@@ -57,9 +58,10 @@ const char* _kErrorCodeNames[] = {
   "CANNOT_CREATE_FOLDER",
   "CANNOT_CREATE_FILE",
   "CANNOT_DELETE_FOLDER",
-  "CANNOT_DELETE_FILE"
+  "CANNOT_DELETE_FILE",
+  "BUILD_INDEX_ERROR"
 };
-const std::map<int, const char*> _ErrorCode_VALUES_TO_NAMES(::apache::thrift::TEnumIterator(21, _kErrorCodeValues, _kErrorCodeNames), ::apache::thrift::TEnumIterator(-1, NULL, NULL));
+const std::map<int, const char*> _ErrorCode_VALUES_TO_NAMES(::apache::thrift::TEnumIterator(22, _kErrorCodeValues, _kErrorCodeNames), ::apache::thrift::TEnumIterator(-1, NULL, NULL));
 
 std::ostream& operator<<(std::ostream& out, const ErrorCode::type& val) {
   std::map<int, const char*>::const_iterator it = _ErrorCode_VALUES_TO_NAMES.find(val);
