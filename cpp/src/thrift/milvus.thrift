@@ -35,6 +35,7 @@ enum ErrorCode {
     CANNOT_CREATE_FILE,
     CANNOT_DELETE_FOLDER,
     CANNOT_DELETE_FILE,
+    BUILD_INDEX_ERROR,
 }
 
 exception Exception {
@@ -114,6 +115,16 @@ service MilvusService {
      *
      */
     void DeleteTable(2: string table_name) throws(1: Exception e);
+
+    /**
+     * @brief Build index by table method
+     *
+     * This method is used to build index by table in sync mode.
+     *
+     * @param table_name, table is going to be built index.
+     *
+     */
+    void BuildIndex(2: string table_name) throws(1: Exception e);
 
 
     /**

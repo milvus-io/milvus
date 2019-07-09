@@ -12,7 +12,7 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
-    
+
 using namespace ::milvus;
 
 namespace {
@@ -43,6 +43,7 @@ namespace {
                 {SERVER_ILLEGAL_SEARCH_RESULT,    thrift::ErrorCode::ILLEGAL_SEARCH_RESULT},
                 {SERVER_CACHE_ERROR,              thrift::ErrorCode::CACHE_FAILED},
                 {DB_META_TRANSACTION_FAILED,      thrift::ErrorCode::META_FAILED},
+                {SERVER_BUILD_INDEX_ERROR,        thrift::ErrorCode::BUILD_INDEX_ERROR},
         };
 
         return code_map;

@@ -55,6 +55,18 @@ public:
     void DeleteTable(const std::string& table_name);
 
     /**
+     * @brief build index by table method
+     *
+     * This method is used to build index by table in sync.
+     *
+     * @param table_name, table name is going to be built index.
+     *
+     *
+     * @param table_name
+     */
+    void BuildIndex(const std::string &table_name);
+
+    /**
      * @brief Add vector array to table
      *
      * This method is used to add vector array to table.

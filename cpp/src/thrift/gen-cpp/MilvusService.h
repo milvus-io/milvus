@@ -59,6 +59,18 @@ class MilvusServiceIf {
   virtual void DeleteTable(const std::string& table_name) = 0;
 
   /**
+   * @brief Build index by table method
+   * 
+   * This method is used to build index by table in sync mode.
+   * 
+   * @param table_name, table is going to be built index.
+   * 
+   * 
+   * @param table_name
+   */
+  virtual void BuildIndex(const std::string& table_name) = 0;
+
+  /**
    * @brief Add vector array to table
    * 
    * This method is used to add vector array to table.
@@ -195,6 +207,9 @@ class MilvusServiceNull : virtual public MilvusServiceIf {
     return _return;
   }
   void DeleteTable(const std::string& /* table_name */) {
+    return;
+  }
+  void BuildIndex(const std::string& /* table_name */) {
     return;
   }
   void AddVector(std::vector<int64_t> & /* _return */, const std::string& /* table_name */, const std::vector<RowRecord> & /* record_array */) {
@@ -536,6 +551,110 @@ class MilvusService_DeleteTable_presult {
   Exception e;
 
   _MilvusService_DeleteTable_presult__isset __isset;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+
+};
+
+typedef struct _MilvusService_BuildIndex_args__isset {
+  _MilvusService_BuildIndex_args__isset() : table_name(false) {}
+  bool table_name :1;
+} _MilvusService_BuildIndex_args__isset;
+
+class MilvusService_BuildIndex_args {
+ public:
+
+  MilvusService_BuildIndex_args(const MilvusService_BuildIndex_args&);
+  MilvusService_BuildIndex_args& operator=(const MilvusService_BuildIndex_args&);
+  MilvusService_BuildIndex_args() : table_name() {
+  }
+
+  virtual ~MilvusService_BuildIndex_args() throw();
+  std::string table_name;
+
+  _MilvusService_BuildIndex_args__isset __isset;
+
+  void __set_table_name(const std::string& val);
+
+  bool operator == (const MilvusService_BuildIndex_args & rhs) const
+  {
+    if (!(table_name == rhs.table_name))
+      return false;
+    return true;
+  }
+  bool operator != (const MilvusService_BuildIndex_args &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MilvusService_BuildIndex_args & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+
+class MilvusService_BuildIndex_pargs {
+ public:
+
+
+  virtual ~MilvusService_BuildIndex_pargs() throw();
+  const std::string* table_name;
+
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MilvusService_BuildIndex_result__isset {
+  _MilvusService_BuildIndex_result__isset() : e(false) {}
+  bool e :1;
+} _MilvusService_BuildIndex_result__isset;
+
+class MilvusService_BuildIndex_result {
+ public:
+
+  MilvusService_BuildIndex_result(const MilvusService_BuildIndex_result&);
+  MilvusService_BuildIndex_result& operator=(const MilvusService_BuildIndex_result&);
+  MilvusService_BuildIndex_result() {
+  }
+
+  virtual ~MilvusService_BuildIndex_result() throw();
+  Exception e;
+
+  _MilvusService_BuildIndex_result__isset __isset;
+
+  void __set_e(const Exception& val);
+
+  bool operator == (const MilvusService_BuildIndex_result & rhs) const
+  {
+    if (!(e == rhs.e))
+      return false;
+    return true;
+  }
+  bool operator != (const MilvusService_BuildIndex_result &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MilvusService_BuildIndex_result & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MilvusService_BuildIndex_presult__isset {
+  _MilvusService_BuildIndex_presult__isset() : e(false) {}
+  bool e :1;
+} _MilvusService_BuildIndex_presult__isset;
+
+class MilvusService_BuildIndex_presult {
+ public:
+
+
+  virtual ~MilvusService_BuildIndex_presult() throw();
+  Exception e;
+
+  _MilvusService_BuildIndex_presult__isset __isset;
 
   uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
 
@@ -1403,6 +1522,9 @@ class MilvusServiceClient : virtual public MilvusServiceIf {
   void DeleteTable(const std::string& table_name);
   void send_DeleteTable(const std::string& table_name);
   void recv_DeleteTable();
+  void BuildIndex(const std::string& table_name);
+  void send_BuildIndex(const std::string& table_name);
+  void recv_BuildIndex();
   void AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array);
   void send_AddVector(const std::string& table_name, const std::vector<RowRecord> & record_array);
   void recv_AddVector(std::vector<int64_t> & _return);
@@ -1442,6 +1564,7 @@ class MilvusServiceProcessor : public ::apache::thrift::TDispatchProcessor {
   void process_CreateTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_HasTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_DeleteTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  void process_BuildIndex(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_AddVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_SearchVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_SearchVectorInFiles(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
@@ -1455,6 +1578,7 @@ class MilvusServiceProcessor : public ::apache::thrift::TDispatchProcessor {
     processMap_["CreateTable"] = &MilvusServiceProcessor::process_CreateTable;
     processMap_["HasTable"] = &MilvusServiceProcessor::process_HasTable;
     processMap_["DeleteTable"] = &MilvusServiceProcessor::process_DeleteTable;
+    processMap_["BuildIndex"] = &MilvusServiceProcessor::process_BuildIndex;
     processMap_["AddVector"] = &MilvusServiceProcessor::process_AddVector;
     processMap_["SearchVector"] = &MilvusServiceProcessor::process_SearchVector;
     processMap_["SearchVectorInFiles"] = &MilvusServiceProcessor::process_SearchVectorInFiles;
@@ -1515,6 +1639,15 @@ class MilvusServiceMultiface : virtual public MilvusServiceIf {
       ifaces_[i]->DeleteTable(table_name);
     }
     ifaces_[i]->DeleteTable(table_name);
+  }
+
+  void BuildIndex(const std::string& table_name) {
+    size_t sz = ifaces_.size();
+    size_t i = 0;
+    for (; i < (sz - 1); ++i) {
+      ifaces_[i]->BuildIndex(table_name);
+    }
+    ifaces_[i]->BuildIndex(table_name);
   }
 
   void AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array) {
@@ -1625,6 +1758,9 @@ class MilvusServiceConcurrentClient : virtual public MilvusServiceIf {
   void DeleteTable(const std::string& table_name);
   int32_t send_DeleteTable(const std::string& table_name);
   void recv_DeleteTable(const int32_t seqid);
+  void BuildIndex(const std::string& table_name);
+  int32_t send_BuildIndex(const std::string& table_name);
+  void recv_BuildIndex(const int32_t seqid);
   void AddVector(std::vector<int64_t> & _return, const std::string& table_name, const std::vector<RowRecord> & record_array);
   int32_t send_AddVector(const std::string& table_name, const std::vector<RowRecord> & record_array);
   void recv_AddVector(std::vector<int64_t> & _return, const int32_t seqid);
