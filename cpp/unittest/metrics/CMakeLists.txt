@@ -66,7 +66,7 @@ target_link_libraries(metrics_test
         faiss
         cudart
         cublas
-        sqlite3
+        sqlite
         boost_system
         boost_filesystem
         lz4
