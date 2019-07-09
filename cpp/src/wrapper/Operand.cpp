@@ -4,6 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "src/server/ServerConfig.h"
 #include "Operand.h"
 
 
@@ -38,8 +39,15 @@ string Operand::get_index_type(const int &nb) {
             break;
         }
         case IVF: {
+
+            using namespace zilliz::milvus::server;
+            ServerConfig &config = ServerConfig::GetInstance();
+            ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
+            size_t nlist = engine_config.GetInt32Value(CONFIG_NLIST, 16384);
+
             index_str += (ncent != 0 ? index_type + std::to_string(ncent) :
-                          index_type + std::to_string(int(nb / 1000000.0 * 16384)));
+                          index_type + std::to_string(int(nb / 1000000.0 * nlist)));
+//            std::cout<<"nlist = "<<nlist<<std::endl;
             break;
         }
         case IDMAP: {
