@@ -80,6 +80,21 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class BuildIndexTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(const std::string& table_name);
+
+protected:
+    BuildIndexTask(const std::string& table_name);
+
+    ServerError OnExecute() override;
+
+
+private:
+    std::string table_name_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class ShowTablesTask : public BaseTask {
 public:
     static BaseTaskPtr Create(std::vector<std::string>& tables);

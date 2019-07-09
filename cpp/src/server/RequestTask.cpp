@@ -133,7 +133,7 @@ BaseTaskPtr CreateTableTask::Create(const thrift::TableSchema& schema) {
 
 ServerError CreateTableTask::OnExecute() {
     TimeRecorder rc("CreateTableTask");
-    
+
     try {
         //step 1: check arguments
         if(schema_.table_name.empty()) {
@@ -209,6 +209,39 @@ ServerError DescribeTableTask::OnExecute() {
     }
 
     rc.Record("done");
+
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+BuildIndexTask::BuildIndexTask(const std::string& table_name)
+    : BaseTask(DDL_DML_TASK_GROUP),
+      table_name_(table_name) {
+}
+
+BaseTaskPtr BuildIndexTask::Create(const std::string& table_name) {
+    return std::shared_ptr<BaseTask>(new BuildIndexTask(table_name));
+}
+
+ServerError BuildIndexTask::OnExecute() {
+    try {
+        TimeRecorder rc("BuildIndexTask");
+
+        //step 1: check arguments
+        if(table_name_.empty()) {
+            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        }
+
+        //step 2: check table existence
+        engine::Status stat = DBWrapper::DB()->BuildIndex(table_name_);
+        if(!stat.ok()) {
+            return SetError(SERVER_BUILD_INDEX_ERROR, "Engine failed: " + stat.ToString());
+        }
+
+        rc.Elapse("totally cost");
+    } catch (std::exception& ex) {
+        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
 
     return SERVER_SUCCESS;
 }

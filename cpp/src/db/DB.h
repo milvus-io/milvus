@@ -44,6 +44,8 @@ public:
 
     virtual Status Size(uint64_t& result) = 0;
 
+    virtual Status BuildIndex(const std::string& table_id) = 0;
+
     virtual Status DropAll() = 0;
 
     DB() = default;
