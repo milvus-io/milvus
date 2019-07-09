@@ -113,7 +113,7 @@ class DBImpl : public DB {
     void BackgroundBuildIndex();
 
     Status
-    BuildIndexByTable(const std::string& table_id) {
+    BuildIndexByTable(const std::string& table_id);
     Status
     BuildIndex(const meta::TableFileSchema &);
 
