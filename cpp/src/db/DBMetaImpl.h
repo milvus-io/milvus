@@ -35,6 +35,8 @@ public:
                                  const std::vector<size_t>& ids,
                                  TableFilesSchema& table_files) override;
 
+    virtual Status HasNonIndexFiles(const std::string& table_id, bool& has) override;
+
     virtual Status UpdateTableFilesToIndex(const std::string& table_id) override;
 
     virtual Status UpdateTableFile(TableFileSchema& file_schema) override;

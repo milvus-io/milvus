@@ -436,6 +436,11 @@ namespace meta {
         return Status::OK();
     }
 
+    Status MySQLMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) {
+        // TODO
+        return Status::OK();
+    }
+
     Status MySQLMetaImpl::DeleteTable(const std::string& table_id) {
 
 //        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);

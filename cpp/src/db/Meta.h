@@ -58,6 +58,8 @@ public:
 
     virtual Status FilesToIndex(TableFilesSchema&) = 0;
 
+    virtual Status HasNonIndexFiles(const std::string& table_id, bool& has) = 0;
+
     virtual Status CleanUp() = 0;
     virtual Status CleanUpFilesWithTTL(uint16_t) = 0;
 
