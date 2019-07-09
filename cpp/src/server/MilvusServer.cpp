@@ -11,6 +11,7 @@
 
 #include "milvus_types.h"
 #include "milvus_constants.h"
+#include "faiss/utils.h"
 
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/protocol/TJSONProtocol.h>
@@ -24,6 +25,8 @@
 
 #include <thread>
 #include <iostream>
+
+//extern int distance_compute_blas_threshold;
 
 namespace zilliz {
 namespace milvus {
@@ -46,11 +49,12 @@ MilvusServer::StartService() {
 
     ServerConfig &config = ServerConfig::GetInstance();
     ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-
+    ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
     std::string address = server_config.GetValue(CONFIG_SERVER_ADDRESS, "127.0.0.1");
     int32_t port = server_config.GetInt32Value(CONFIG_SERVER_PORT, 19530);
     std::string protocol = server_config.GetValue(CONFIG_SERVER_PROTOCOL, "binary");
-
+    faiss::distance_compute_blas_threshold = engine_config.GetInt32Value(CONFIG_DCBT,20);
+//    std::cout<<"distance_compute_blas_threshold = "<< faiss::distance_compute_blas_threshold << std::endl;
     try {
         DBWrapper::DB();//initialize db
 

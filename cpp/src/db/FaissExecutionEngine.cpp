@@ -167,6 +167,7 @@ Status FaissExecutionEngine::Init() {
         ServerConfig &config = ServerConfig::GetInstance();
         ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
         nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1000);
+        nlist_ = engine_config.GetInt32Value(CONFIG_NLIST,16384);
 
     } else if(build_index_type_ == "IDMap") {
         ;
