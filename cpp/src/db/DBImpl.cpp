@@ -430,6 +430,11 @@ void DBImpl::StartBuildIndexTask() {
     }
 }
 
+Status DBImpl::BuildIndex(const std::string& table_id) {
+    meta_ptr_->UpdateTableFilesToIndex(table_id);
+    return BuildIndexByTable(table_id);
+}
+
 Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
     ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
     if(to_index == nullptr) {
@@ -491,7 +496,27 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
     return Status::OK();
 }
 
+Status DBImpl::BuildIndexByTable(const std::string& table_id) {
+    std::unique_lock<std::mutex> lock(build_index_mutex_);
+    meta::TableFilesSchema to_index_files;
+    meta_ptr_->FilesToIndex(to_index_files);
+
+    Status status;
+
+    for (auto& file : to_index_files) {
+        status = BuildIndex(file);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
+            return status;
+        }
+        ENGINE_LOG_DEBUG << "Sync building index for " << file.id_ << " passed";
+    }
+
+    return status;
+}
+
 void DBImpl::BackgroundBuildIndex() {
+    std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
     meta_ptr_->FilesToIndex(to_index_files);
     Status status;
