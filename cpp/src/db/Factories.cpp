@@ -26,8 +26,6 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-#define USE_NEW_MEM_MANAGER 1
-
 DBMetaOptions DBMetaOptionsFactory::Build(const std::string& path) {
     auto p = path;
     if(p == "") {
