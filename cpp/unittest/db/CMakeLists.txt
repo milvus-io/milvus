@@ -24,6 +24,8 @@ link_directories("/usr/local/cuda/lib64")
 
 include_directories(/usr/include/mysql)
 
+#add_definitions(-DBOOST_ERROR_CODE_HEADER_ONLY)
+
 set(db_test_src
     #${unittest_srcs}
     ${config_files}
@@ -40,8 +42,8 @@ cuda_add_executable(db_test ${db_test_src})
 
 set(db_libs
         sqlite
-        boost_system_static
         boost_filesystem_static
+        boost_system_static
         lz4
         mysqlpp
         )
@@ -59,6 +61,6 @@ set(knowhere_libs
         cublas
         )
 
-target_link_libraries(db_test ${db_libs} ${unittest_libs} ${knowhere_libs})
+target_link_libraries(db_test ${knowhere_libs} ${db_libs} ${unittest_libs})
 
 install(TARGETS db_test DESTINATION bin)
