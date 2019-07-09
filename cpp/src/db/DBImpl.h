@@ -109,7 +109,7 @@ class DBImpl : public DB {
     Status BackgroundMergeFiles(const std::string &table_id);
     void BackgroundCompaction(std::set<std::string> table_ids);
 
-    void StartBuildIndexTask();
+    void StartBuildIndexTask(bool force=false);
     void BackgroundBuildIndex();
 
     Status
