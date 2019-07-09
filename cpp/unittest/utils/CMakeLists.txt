@@ -25,6 +25,6 @@ add_executable(valication_util_test
 
 target_link_libraries(valication_util_test
         ${unittest_libs}
-        boost_filesystem)
+        boost_filesystem_static)
 
 install(TARGETS valication_util_test DESTINATION bin)
