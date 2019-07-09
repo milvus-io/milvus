@@ -65,6 +65,7 @@ protected:
     std::string raw_index_type_;
 
     size_t nprobe_ = 0;
+    size_t nlist_ = 0;
 };
 
 

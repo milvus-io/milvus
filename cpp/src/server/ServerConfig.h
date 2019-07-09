@@ -44,6 +44,8 @@ static const std::string CONFIG_METRIC_PROMETHEUS_PORT = "port";
 
 static const std::string CONFIG_ENGINE = "engine_config";
 static const std::string CONFIG_NPROBE = "nprobe";
+static const std::string CONFIG_NLIST = "nlist";
+static const std::string CONFIG_DCBT = "use_blas_threshold";
 
 class ServerConfig {
  public:
