@@ -1479,6 +1479,11 @@ namespace meta {
         return Status::OK();
     }
 
+    Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
+        // TODO
+        return Status::OK();
+    }
+
     Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
 
 //        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
