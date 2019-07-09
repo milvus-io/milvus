@@ -23,6 +23,8 @@ link_directories("/usr/local/cuda/lib64")
 
 include_directories(/usr/include/mysql)
 
+#add_definitions(-DBOOST_ERROR_CODE_HEADER_ONLY)
+
 set(db_test_src
     #${unittest_srcs}
     ${config_files}
@@ -41,8 +43,8 @@ set(db_libs
         cudart
         cublas
         sqlite
-        boost_system_static
         boost_filesystem_static
+        boost_system_static
         lz4
         mysqlpp
         )
