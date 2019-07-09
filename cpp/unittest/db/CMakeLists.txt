@@ -40,9 +40,9 @@ set(db_libs
         faiss
         cudart
         cublas
-        sqlite3
-        boost_system
-        boost_filesystem
+        sqlite
+        boost_system_static
+        boost_filesystem_static
         lz4
         mysqlpp
         )
