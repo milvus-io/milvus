@@ -42,6 +42,8 @@ namespace meta {
 
         virtual Status UpdateTableFile(TableFileSchema& file_schema) override;
 
+        virtual Status UpdateTableFilesToIndex(const std::string& table_id) override;
+
         virtual Status UpdateTableFiles(TableFilesSchema& files) override;
 
         virtual Status FilesToSearch(const std::string& table_id,

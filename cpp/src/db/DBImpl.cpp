@@ -497,7 +497,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 }
 
 Status DBImpl::BuildIndexByTable(const std::string& table_id) {
-    std::unique_ptr<std::mutex> lock(build_index_mutex_);
+    std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
     meta_ptr_->FilesToIndex(to_index_files);
 
@@ -516,7 +516,7 @@ Status DBImpl::BuildIndexByTable(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundBuildIndex() {
-    std::unique_ptr<std::mutex> lock(build_index_mutex_);
+    std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
     meta_ptr_->FilesToIndex(to_index_files);
     Status status;
