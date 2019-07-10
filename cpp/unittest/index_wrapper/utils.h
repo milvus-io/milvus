@@ -23,7 +23,7 @@ extern DataGenPtr GetGenerateFactory(const std::string &gen_type);
 class DataGenBase {
  public:
     virtual void GenData(const int &dim, const int &nb, const int &nq, float *xb, float *xq, long *ids,
-                         const int &k, long *gt_ids);
+                         const int &k, long *gt_ids, float *gt_dis);
 
     virtual void GenData(const int &dim,
                          const int &nb,
@@ -32,30 +32,14 @@ class DataGenBase {
                          std::vector<float> &xq,
                          std::vector<long> &ids,
                          const int &k,
-                         std::vector<long> &gt_ids);
+                         std::vector<long> &gt_ids,
+                         std::vector<float> &gt_dis);
 };
 
 
-class SanityCheck : public DataGenBase {
- public:
-    void GenData(const int &dim, const int &nb, const int &nq, float *xb, float *xq, long *ids,
-                 const int &k, long *gt_ids) override;
-};
+//class SanityCheck : public DataGenBase {
+// public:
+//    void GenData(const int &dim, const int &nb, const int &nq, float *xb, float *xq, long *ids,
+//                 const int &k, long *gt_ids, float *gt_dis) override;
+//};
 
-struct FileIOWriter {
-    std::fstream fs;
-    std::string name;
-
-    FileIOWriter(const std::string &fname);
-    ~FileIOWriter();
-    size_t operator()(void *ptr, size_t size);
-};
-
-struct FileIOReader {
-    std::fstream fs;
-    std::string name;
-
-    FileIOReader(const std::string &fname);
-    ~FileIOReader();
-    size_t operator()(void *ptr, size_t size);
-};
