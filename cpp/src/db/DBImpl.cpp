@@ -438,7 +438,7 @@ Status DBImpl::BuildIndex(const std::string& table_id) {
     while (has) {
         ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
         meta_ptr_->UpdateTableFilesToIndex(table_id);
-        StartBuildIndexTask(true);
+        /* StartBuildIndexTask(true); */
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10*1000, times*100)));
         meta_ptr_->HasNonIndexFiles(table_id, has);
         times++;
