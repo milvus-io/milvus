@@ -78,8 +78,8 @@ target_link_libraries(metrics_test
         cudart
         cublas
         sqlite
-        boost_system
-        boost_filesystem
+        boost_system_static
+        boost_filesystem_static
         lz4
         metrics
         gtest
