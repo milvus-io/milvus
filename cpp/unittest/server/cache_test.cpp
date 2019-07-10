@@ -38,6 +38,10 @@ public:
 
     }
 
+    engine::IndexType GetType() override {
+        return engine::IndexType::INVALID;
+    }
+
     virtual void Add(const long &nb,
                      const float *xb,
                      const long *ids,
