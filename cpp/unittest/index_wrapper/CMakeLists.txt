@@ -21,3 +21,5 @@ set(knowhere_libs
 
 add_executable(knowhere_test knowhere_test.cpp ${knowhere_src} ${helper})
 target_link_libraries(knowhere_test ${knowhere_libs} ${unittest_libs})
+
+install(TARGETS knowhere_test DESTINATION bin)
