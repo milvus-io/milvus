@@ -22,13 +22,13 @@ add_executable(wrapper_test ${wrapper_test_src})
 
 set(wrapper_libs
         stdc++
-        boost_system
-        boost_filesystem
+        boost_system_static
+        boost_filesystem_static
         libgpufaiss.a
         faiss
         cudart
         cublas
-        sqlite3
+        sqlite
         snappy
         bz2
         z
