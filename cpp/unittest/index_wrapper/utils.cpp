@@ -19,7 +19,7 @@ DataGenPtr GetGenerateFactory(const std::string &gen_type) {
 
 void DataGenBase::GenData(const int &dim, const int &nb, const int &nq,
                           float *xb, float *xq, long *ids,
-                          const int &k, long *gt_ids) {
+                          const int &k, long *gt_ids, float *gt_dis) {
     for (auto i = 0; i < nb; ++i) {
         for (auto j = 0; j < dim; ++j) {
             //p_data[i * d + j] = float(base + i);
@@ -35,8 +35,7 @@ void DataGenBase::GenData(const int &dim, const int &nb, const int &nq,
     faiss::IndexFlatL2 index(dim);
     //index.add_with_ids(nb, xb, ids);
     index.add(nb, xb);
-    float *D = new float[k * nq];
-    index.search(nq, xq, k, D, gt_ids);
+    index.search(nq, xq, k, gt_dis, gt_ids);
 }
 
 void DataGenBase::GenData(const int &dim,
@@ -46,36 +45,12 @@ void DataGenBase::GenData(const int &dim,
                           std::vector<float> &xq,
                           std::vector<long> &ids,
                           const int &k,
-                          std::vector<long> &gt_ids) {
+                          std::vector<long> &gt_ids,
+                          std::vector<float> &gt_dis) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
     gt_ids.resize(nq * k);
-    GenData(dim, nb, nq, xb.data(), xq.data(), ids.data(), k, gt_ids.data());
-}
-
-FileIOReader::FileIOReader(const std::string &fname) {
-    name = fname;
-    fs = std::fstream(name, std::ios::in | std::ios::binary);
-}
-
-FileIOReader::~FileIOReader() {
-    fs.close();
-}
-
-size_t FileIOReader::operator()(void *ptr, size_t size) {
-    fs.read(reinterpret_cast<char *>(ptr), size);
-}
-
-FileIOWriter::FileIOWriter(const std::string &fname) {
-    name = fname;
-    fs = std::fstream(name, std::ios::out | std::ios::binary);
-}
-
-FileIOWriter::~FileIOWriter() {
-    fs.close();
-}
-
-size_t FileIOWriter::operator()(void *ptr, size_t size) {
-    fs.write(reinterpret_cast<char *>(ptr), size);
+    gt_dis.resize(nq * k);
+    GenData(dim, nb, nq, xb.data(), xq.data(), ids.data(), k, gt_ids.data(), gt_dis.data());
 }

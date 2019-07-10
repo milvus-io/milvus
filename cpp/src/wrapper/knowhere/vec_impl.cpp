@@ -6,6 +6,7 @@
 
 #include <src/utils/Log.h>
 #include "knowhere/index/vector_index/idmap.h"
+#include "knowhere/index/vector_index/gpu_ivf.h"
 
 #include "vec_impl.h"
 #include "data_transfer.h"
@@ -98,6 +99,10 @@ int64_t VecIndexImpl::Count() {
     return index_->Count();
 }
 
+IndexType VecIndexImpl::GetType() {
+    return type;
+}
+
 float *BFIndex::GetRawVectors() {
     auto raw_index = std::dynamic_pointer_cast<IDMAP>(index_);
     if (raw_index) { return raw_index->GetRawVectors(); }
@@ -124,6 +129,38 @@ void BFIndex::BuildAll(const long &nb,
 
     std::static_pointer_cast<IDMAP>(index_)->Train(dim);
     index_->Add(dataset, cfg);
+}
+
+// TODO(linxj): add lock here.
+void IVFMixIndex::BuildAll(const long &nb,
+                           const float *xb,
+                           const long *ids,
+                           const Config &cfg,
+                           const long &nt,
+                           const float *xt) {
+    dim = cfg["dim"].as<int>();
+    auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
+
+    auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
+    index_->set_preprocessor(preprocessor);
+    auto nlist = int(nb / 1000000.0 * 16384);
+    auto cfg_t = Config::object{{"nlist", nlist}, {"dim", dim}};
+    auto model = index_->Train(dataset, cfg_t);
+    index_->set_index_model(model);
+    index_->Add(dataset, cfg);
+
+    if (auto device_index = std::dynamic_pointer_cast<GPUIVF>(index_)) {
+        auto host_index = device_index->Copy_index_gpu_to_cpu();
+        index_ = host_index;
+    } else {
+        // TODO(linxj): LOG ERROR
+    }
+}
+
+void IVFMixIndex::Load(const zilliz::knowhere::BinarySet &index_binary) {
+    index_ = std::make_shared<IVF>();
+    index_->Load(index_binary);
+    dim = Dimension();
 }
 
 }
