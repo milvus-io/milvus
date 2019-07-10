@@ -234,7 +234,7 @@ spec:
     post {
         always {
             script {
-                node('master') {
+                node {
                     def notify = load "${env.WORKSPACE}/ci/jenkinsfile/notify.groovy"
                     notify.notify()
                 }
