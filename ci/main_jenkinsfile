@@ -232,6 +232,12 @@ spec:
     }
 
     post {
+        always {
+            script {
+                def notify = load "${env.WORKSPACE}/ci/jenkinsfile/notify.groovy"
+                notify.notify()
+            }
+        }
         success {
             script {
                 updateGitlabCommitStatus name: 'CI/CD', state: 'success'
