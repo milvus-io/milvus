@@ -17,13 +17,15 @@ namespace engine {
 
 class VecIndexImpl : public VecIndex {
  public:
-    explicit VecIndexImpl(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : index_(std::move(index)) {};
+    explicit VecIndexImpl(std::shared_ptr<zilliz::knowhere::VectorIndex> index, const IndexType &type)
+        : index_(std::move(index)), type(type) {};
     void BuildAll(const long &nb,
                   const float *xb,
                   const long *ids,
                   const Config &cfg,
                   const long &nt,
                   const float *xt) override;
+    IndexType GetType() override;
     int64_t Dimension() override;
     int64_t Count() override;
     void Add(const long &nb, const float *xb, const long *ids, const Config &cfg) override;
@@ -33,21 +35,36 @@ class VecIndexImpl : public VecIndex {
 
  protected:
     int64_t dim = 0;
+    IndexType type = IndexType::INVALID;
     std::shared_ptr<zilliz::knowhere::VectorIndex> index_ = nullptr;
 };
 
-class BFIndex : public VecIndexImpl {
+class IVFMixIndex : public VecIndexImpl {
  public:
-    explicit BFIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : VecIndexImpl(std::move(index)) {};
-    void Build(const int64_t& d);
-    float* GetRawVectors();
+    explicit IVFMixIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : VecIndexImpl(std::move(index),
+                                                                                              IndexType::FAISS_IVFFLAT_MIX) {};
     void BuildAll(const long &nb,
                   const float *xb,
                   const long *ids,
                   const Config &cfg,
                   const long &nt,
                   const float *xt) override;
-    int64_t* GetRawIds();
+    void Load(const zilliz::knowhere::BinarySet &index_binary) override;
+};
+
+class BFIndex : public VecIndexImpl {
+ public:
+    explicit BFIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : VecIndexImpl(std::move(index),
+                                                                                          IndexType::FAISS_IDMAP) {};
+    void Build(const int64_t &d);
+    float *GetRawVectors();
+    void BuildAll(const long &nb,
+                  const float *xb,
+                  const long *ids,
+                  const Config &cfg,
+                  const long &nt,
+                  const float *xt) override;
+    int64_t *GetRawIds();
 };
 
 }
