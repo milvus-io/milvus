@@ -34,5 +34,5 @@ cache_config:           # cache configure
 
 engine_config:
   nprobe: 10
-  nlist: 16381
-  use_blas_threshold: 10
+  nlist: 16384
+  use_blas_threshold: 20
