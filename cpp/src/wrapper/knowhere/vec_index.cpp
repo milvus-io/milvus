@@ -16,7 +16,56 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-// TODO(linxj): index_type => enum struct
+struct FileIOWriter {
+    std::fstream fs;
+    std::string name;
+
+    FileIOWriter(const std::string &fname);
+    ~FileIOWriter();
+    size_t operator()(void *ptr, size_t size);
+};
+
+struct FileIOReader {
+    std::fstream fs;
+    std::string name;
+
+    FileIOReader(const std::string &fname);
+    ~FileIOReader();
+    size_t operator()(void *ptr, size_t size);
+    size_t operator()(void *ptr, size_t size, size_t pos);
+};
+
+FileIOReader::FileIOReader(const std::string &fname) {
+    name = fname;
+    fs = std::fstream(name, std::ios::in | std::ios::binary);
+}
+
+FileIOReader::~FileIOReader() {
+    fs.close();
+}
+
+size_t FileIOReader::operator()(void *ptr, size_t size) {
+    fs.read(reinterpret_cast<char *>(ptr), size);
+}
+
+size_t FileIOReader::operator()(void *ptr, size_t size, size_t pos) {
+    return 0;
+}
+
+FileIOWriter::FileIOWriter(const std::string &fname) {
+    name = fname;
+    fs = std::fstream(name, std::ios::out | std::ios::binary);
+}
+
+FileIOWriter::~FileIOWriter() {
+    fs.close();
+}
+
+size_t FileIOWriter::operator()(void *ptr, size_t size) {
+    fs.write(reinterpret_cast<char *>(ptr), size);
+}
+
+
 VecIndexPtr GetVecIndexFactory(const IndexType &type) {
     std::shared_ptr<zilliz::knowhere::VectorIndex> index;
     switch (type) {
@@ -32,6 +81,10 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type) {
             index = std::make_shared<zilliz::knowhere::GPUIVF>(0);
             break;
         }
+        case IndexType::FAISS_IVFFLAT_MIX: {
+            index = std::make_shared<zilliz::knowhere::GPUIVF>(0);
+            return std::make_shared<IVFMixIndex>(index);
+        }
         case IndexType::FAISS_IVFPQ_CPU: {
             index = std::make_shared<zilliz::knowhere::IVFPQ>();
             break;
@@ -44,21 +97,79 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type) {
             index = std::make_shared<zilliz::knowhere::CPUKDTRNG>();
             break;
         }
-        //case IndexType::NSG: { // TODO(linxj): bug.
-        //    index = std::make_shared<zilliz::knowhere::NSG>();
-        //    break;
-        //}
+            //case IndexType::NSG: { // TODO(linxj): bug.
+            //    index = std::make_shared<zilliz::knowhere::NSG>();
+            //    break;
+            //}
         default: {
             return nullptr;
         }
     }
-    return std::make_shared<VecIndexImpl>(index);
+    return std::make_shared<VecIndexImpl>(index, type);
 }
 
 VecIndexPtr LoadVecIndex(const IndexType &index_type, const zilliz::knowhere::BinarySet &index_binary) {
     auto index = GetVecIndexFactory(index_type);
     index->Load(index_binary);
     return index;
+}
+
+VecIndexPtr read_index(const std::string &location) {
+    knowhere::BinarySet load_data_list;
+    FileIOReader reader(location);
+    reader.fs.seekg(0, reader.fs.end);
+    size_t length = reader.fs.tellg();
+    reader.fs.seekg(0);
+
+    size_t rp = 0;
+    auto current_type = IndexType::INVALID;
+    reader(&current_type, sizeof(current_type));
+    rp += sizeof(current_type);
+    while (rp < length) {
+        size_t meta_length;
+        reader(&meta_length, sizeof(meta_length));
+        rp += sizeof(meta_length);
+        reader.fs.seekg(rp);
+
+        auto meta = new char[meta_length];
+        reader(meta, meta_length);
+        rp += meta_length;
+        reader.fs.seekg(rp);
+
+        size_t bin_length;
+        reader(&bin_length, sizeof(bin_length));
+        rp += sizeof(bin_length);
+        reader.fs.seekg(rp);
+
+        auto bin = new uint8_t[bin_length];
+        reader(bin, bin_length);
+        rp += bin_length;
+
+        auto binptr = std::make_shared<uint8_t>();
+        binptr.reset(bin);
+        load_data_list.Append(std::string(meta, meta_length), binptr, bin_length);
+    }
+
+    return LoadVecIndex(current_type, load_data_list);
+}
+
+void write_index(VecIndexPtr index, const std::string &location) {
+    auto binaryset = index->Serialize();
+    auto index_type = index->GetType();
+
+    FileIOWriter writer(location);
+    writer(&index_type, sizeof(IndexType));
+    for (auto &iter: binaryset.binary_map_) {
+        auto meta = iter.first.c_str();
+        size_t meta_length = iter.first.length();
+        writer(&meta_length, sizeof(meta_length));
+        writer((void *) meta, meta_length);
+
+        auto binary = iter.second;
+        int64_t binary_length = binary->size;
+        writer(&binary_length, sizeof(binary_length));
+        writer((void *) binary->data.get(), binary_length);
+    }
 }
 
 }

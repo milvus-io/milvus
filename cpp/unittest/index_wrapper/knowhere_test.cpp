@@ -28,9 +28,35 @@ class KnowhereWrapperTest
 
         //auto generator = GetGenerateFactory(generator_type);
         auto generator = std::make_shared<DataGenBase>();
-        generator->GenData(dim, nb, nq, xb, xq, ids, k, gt_ids);
+        generator->GenData(dim, nb, nq, xb, xq, ids, k, gt_ids, gt_dis);
 
         index_ = GetVecIndexFactory(index_type);
+    }
+
+    void AssertResult(const std::vector<long> &ids, const std::vector<float> &dis) {
+        EXPECT_EQ(ids.size(), nq * k);
+        EXPECT_EQ(dis.size(), nq * k);
+
+        for (auto i = 0; i < nq; i++) {
+            EXPECT_EQ(ids[i * k], gt_ids[i * k]);
+            EXPECT_EQ(dis[i * k], gt_dis[i * k]);
+        }
+
+        int match = 0;
+        for (int i = 0; i < nq; ++i) {
+            for (int j = 0; j < k; ++j) {
+                for (int l = 0; l < k; ++l) {
+                    if (ids[i * nq + j] == gt_ids[i * nq + l]) match++;
+                }
+            }
+        }
+
+        auto precision = float(match) / (nq * k);
+        EXPECT_GT(precision, 0.5);
+        std::cout << std::endl << "Precision: " << precision
+                  << ", match: " << match
+                  << ", total: " << nq * k
+                  << std::endl;
     }
 
  protected:
@@ -50,126 +76,88 @@ class KnowhereWrapperTest
 
     // Ground Truth
     std::vector<long> gt_ids;
+    std::vector<float> gt_dis;
 };
 
 INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
                         Values(
-                            // ["Index type", "Generator type", "dim", "nb", "nq", "k", "build config", "search config"]
+                            //["Index type", "Generator type", "dim", "nb", "nq", "k", "build config", "search config"]
                             std::make_tuple(IndexType::FAISS_IVFFLAT_CPU, "Default",
-                                            64, 10000, 10, 10,
+                                            64, 100000, 10, 10,
                                             Config::object{{"nlist", 100}, {"dim", 64}},
-                                            Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 20}}
+                                            Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 10}}
                             ),
-                            std::make_tuple(IndexType::SPTAG_KDT_RNT_CPU, "Default",
-                                            64, 10000, 10, 10,
-                                            Config::object{{"TPTNumber", 1}, {"dim", 64}},
+                            //std::make_tuple(IndexType::FAISS_IVFFLAT_GPU, "Default",
+                            //                64, 10000, 10, 10,
+                            //                Config::object{{"nlist", 100}, {"dim", 64}},
+                            //                Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 40}}
+                            //),
+                            std::make_tuple(IndexType::FAISS_IVFFLAT_MIX, "Default",
+                                            64, 100000, 10, 10,
+                                            Config::object{{"nlist", 100}, {"dim", 64}},
+                                            Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 10}}
+                            ),
+                            std::make_tuple(IndexType::FAISS_IDMAP, "Default",
+                                            64, 100000, 10, 10,
+                                            Config::object{{"dim", 64}},
                                             Config::object{{"dim", 64}, {"k", 10}}
                             )
+                            //std::make_tuple(IndexType::SPTAG_KDT_RNT_CPU, "Default",
+                            //                64, 10000, 10, 10,
+                            //                Config::object{{"TPTNumber", 1}, {"dim", 64}},
+                            //                Config::object{{"dim", 64}, {"k", 10}}
+                            //)
                         )
 );
 
-void AssertAnns(const std::vector<long> &gt,
-                const std::vector<long> &res,
-                const int &nq,
-                const int &k) {
-    EXPECT_EQ(res.size(), nq * k);
-
-    for (auto i = 0; i < nq; i++) {
-        EXPECT_EQ(gt[i * k], res[i * k]);
-    }
-
-    int match = 0;
-    for (int i = 0; i < nq; ++i) {
-        for (int j = 0; j < k; ++j) {
-            for (int l = 0; l < k; ++l) {
-                if (gt[i * nq + j] == res[i * nq + l]) match++;
-            }
-        }
-    }
-
-    // TODO(linxj): percision check
-    EXPECT_GT(float(match/nq*k), 0.5);
-}
-
 TEST_P(KnowhereWrapperTest, base_test) {
-    std::vector<long> res_ids;
-    float *D = new float[k * nq];
-    res_ids.resize(nq * k);
+    EXPECT_EQ(index_->GetType(), index_type);
+
+    auto elems = nq * k;
+    std::vector<int64_t> res_ids(elems);
+    std::vector<float> res_dis(elems);
 
     index_->BuildAll(nb, xb.data(), ids.data(), train_cfg);
-    index_->Search(nq, xq.data(), D, res_ids.data(), search_cfg);
-    AssertAnns(gt_ids, res_ids, nq, k);
-    delete[] D;
+    index_->Search(nq, xq.data(), res_dis.data(), res_ids.data(), search_cfg);
+    AssertResult(res_ids, res_dis);
 }
 
-TEST_P(KnowhereWrapperTest, serialize_test) {
-    std::vector<long> res_ids;
-    float *D = new float[k * nq];
-    res_ids.resize(nq * k);
+TEST_P(KnowhereWrapperTest, serialize) {
+    EXPECT_EQ(index_->GetType(), index_type);
 
+    auto elems = nq * k;
+    std::vector<int64_t> res_ids(elems);
+    std::vector<float> res_dis(elems);
     index_->BuildAll(nb, xb.data(), ids.data(), train_cfg);
-    index_->Search(nq, xq.data(), D, res_ids.data(), search_cfg);
-    AssertAnns(gt_ids, res_ids, nq, k);
+    index_->Search(nq, xq.data(), res_dis.data(), res_ids.data(), search_cfg);
+    AssertResult(res_ids, res_dis);
 
     {
-        auto binaryset = index_->Serialize();
-        //int fileno = 0;
-        //const std::string &base_name = "/tmp/wrapper_serialize_test_bin_";
-        //std::vector<std::string> filename_list;
-        //std::vector<std::pair<std::string, size_t >> meta_list;
-        //for (auto &iter: binaryset.binary_map_) {
-        //    const std::string &filename = base_name + std::to_string(fileno);
-        //    FileIOWriter writer(filename);
-        //    writer(iter.second->data.get(), iter.second->size);
-        //
-        //    meta_list.push_back(std::make_pair(iter.first, iter.second.size));
-        //    filename_list.push_back(filename);
-        //    ++fileno;
-        //}
-        //
-        //BinarySet load_data_list;
-        //for (int i = 0; i < filename_list.size() && i < meta_list.size(); ++i) {
-        //    auto bin_size = meta_list[i].second;
-        //    FileIOReader reader(filename_list[i]);
-        //    std::vector<uint8_t> load_data(bin_size);
-        //    reader(load_data.data(), bin_size);
-        //    load_data_list.Append(meta_list[i].first, load_data);
-        //}
+        auto binary = index_->Serialize();
+        auto type = index_->GetType();
+        auto new_index = GetVecIndexFactory(type);
+        new_index->Load(binary);
+        EXPECT_EQ(new_index->Dimension(), index_->Dimension());
+        EXPECT_EQ(new_index->Count(), index_->Count());
 
-        int fileno = 0;
-        std::vector<std::string> filename_list;
-        const std::string &base_name = "/tmp/wrapper_serialize_test_bin_";
-        std::vector<std::pair<std::string, size_t >> meta_list;
-        for (auto &iter: binaryset.binary_map_) {
-            const std::string &filename = base_name + std::to_string(fileno);
-            FileIOWriter writer(filename);
-            writer(iter.second->data.get(), iter.second->size);
-
-            meta_list.emplace_back(std::make_pair(iter.first, iter.second->size));
-            filename_list.push_back(filename);
-            ++fileno;
-        }
-
-        BinarySet load_data_list;
-        for (int i = 0; i < filename_list.size() && i < meta_list.size(); ++i) {
-            auto bin_size = meta_list[i].second;
-            FileIOReader reader(filename_list[i]);
-
-            auto load_data = new uint8_t[bin_size];
-            reader(load_data, bin_size);
-            auto data = std::make_shared<uint8_t>();
-            data.reset(load_data);
-            load_data_list.Append(meta_list[i].first, data, bin_size);
-        }
-
-
-        res_ids.clear();
-        res_ids.resize(nq * k);
-        auto new_index = GetVecIndexFactory(index_type);
-        new_index->Load(load_data_list);
-        new_index->Search(nq, xq.data(), D, res_ids.data(), search_cfg);
-        AssertAnns(gt_ids, res_ids, nq, k);
+        std::vector<int64_t> res_ids(elems);
+        std::vector<float> res_dis(elems);
+        new_index->Search(nq, xq.data(), res_dis.data(), res_ids.data(), search_cfg);
+        AssertResult(res_ids, res_dis);
     }
 
-    delete[] D;
+    {
+        std::string file_location = "/tmp/whatever";
+        write_index(index_, file_location);
+        auto new_index = read_index(file_location);
+        EXPECT_EQ(new_index->GetType(), index_type);
+        EXPECT_EQ(new_index->Dimension(), index_->Dimension());
+        EXPECT_EQ(new_index->Count(), index_->Count());
+
+        std::vector<int64_t> res_ids(elems);
+        std::vector<float> res_dis(elems);
+        new_index->Search(nq, xq.data(), res_dis.data(), res_ids.data(), search_cfg);
+        AssertResult(res_ids, res_dis);
+    }
 }
+
