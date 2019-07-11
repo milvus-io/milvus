@@ -271,8 +271,9 @@ TEST_F(MySQLDBTest, DELETE_TEST) {
     stat = db_->DescribeTable(table_info_get);
     ASSERT_STATS(stat);
 
-//    std::cout << "location: " << table_info_get.location_ << std::endl;
-    ASSERT_TRUE(boost::filesystem::exists(table_info_get.location_));
+    bool has_table = false;
+    db_->HasTable(TABLE_NAME, has_table);
+    ASSERT_TRUE(has_table);
 
     engine::IDNumbers vector_ids;
 
@@ -295,7 +296,9 @@ TEST_F(MySQLDBTest, DELETE_TEST) {
     std::this_thread::sleep_for(std::chrono::seconds(5));
 //    std::cout << "5 sec finish" << std::endl;
     ASSERT_TRUE(stat.ok());
-//    ASSERT_FALSE(boost::filesystem::exists(table_info_get.location_));
+
+    db_->HasTable(TABLE_NAME, has_table);
+    ASSERT_FALSE(has_table);
 
     delete db_;
 

@@ -83,26 +83,6 @@ using ConnectorT = decltype(StoragePrototype(""));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
 using ConditionT = decltype(c(&TableFileSchema::id_) == 1UL);
 
-std::string DBMetaImpl::GetTablePath(const std::string &table_id) {
-    return options_.path + "/tables/" + table_id;
-}
-
-std::string DBMetaImpl::GetTableDatePartitionPath(const std::string &table_id, DateT &date) {
-    std::stringstream ss;
-    ss << GetTablePath(table_id) << "/" << date;
-    return ss.str();
-}
-
-void DBMetaImpl::GetTableFilePath(TableFileSchema &group_file) {
-    if (group_file.date_ == EmptyDate) {
-        group_file.date_ = Meta::GetDate();
-    }
-    std::stringstream ss;
-    ss << GetTableDatePartitionPath(group_file.table_id_, group_file.date_)
-       << "/" << group_file.file_id_;
-    group_file.location_ = ss.str();
-}
-
 Status DBMetaImpl::NextTableId(std::string &table_id) {
     std::stringstream ss;
     SimpleIDGenerator g;
@@ -213,15 +193,7 @@ Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
             return Status::DBTransactionError("Add Table Error");
         }
 
-        auto table_path = GetTablePath(table_schema.table_id_);
-        table_schema.location_ = table_path;
-        if (!boost::filesystem::is_directory(table_path)) {
-            auto ret = boost::filesystem::create_directories(table_path);
-            if (!ret) {
-                ENGINE_LOG_ERROR << "Create directory " << table_path << " Error";
-                return Status::Error("Failed to create table path");
-            }
-        }
+        return utils::CreateTablePath(options_, table_schema.table_id_);
 
     } catch (std::exception &e) {
         return HandleException("Encounter exception when create table", e);
@@ -306,9 +278,6 @@ Status DBMetaImpl::DescribeTable(TableSchema &table_schema) {
         } else {
             return Status::NotFound("Table " + table_schema.table_id_ + " not found");
         }
-
-        auto table_path = GetTablePath(table_schema.table_id_);
-        table_schema.location_ = table_path;
 
     } catch (std::exception &e) {
         return HandleException("Encounter exception when describe table", e);
@@ -411,20 +380,11 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.engine_type_ = table_schema.engine_type_;
-        GetTableFilePath(file_schema);
 
         auto id = ConnectorPtr->insert(file_schema);
         file_schema.id_ = id;
 
-        auto partition_path = GetTableDatePartitionPath(file_schema.table_id_, file_schema.date_);
-
-        if (!boost::filesystem::is_directory(partition_path)) {
-            auto ret = boost::filesystem::create_directory(partition_path);
-            if (!ret) {
-                ENGINE_LOG_ERROR << "Create directory " << partition_path << " Error";
-                return Status::DBTransactionError("Failed to create partition directory");
-            }
-        }
+        return utils::CreateTableFilePath(options_, file_schema);
 
     } catch (std::exception& ex) {
         return HandleException("Encounter exception when create table file", ex);
@@ -461,7 +421,7 @@ Status DBMetaImpl::FilesToIndex(TableFilesSchema &files) {
             table_file.date_ = std::get<5>(file);
             table_file.engine_type_ = std::get<6>(file);
 
-            GetTableFilePath(table_file);
+            utils::GetTableFilePath(options_, table_file);
             auto groupItr = groups.find(table_file.table_id_);
             if (groupItr == groups.end()) {
                 TableSchema table_schema;
@@ -524,7 +484,7 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
                 table_file.date_ = std::get<5>(file);
                 table_file.engine_type_ = std::get<6>(file);
                 table_file.dimension_ = table_schema.dimension_;
-                GetTableFilePath(table_file);
+                utils::GetTableFilePath(options_, table_file);
                 auto dateItr = files.find(table_file.date_);
                 if (dateItr == files.end()) {
                     files[table_file.date_] = TableFilesSchema();
@@ -566,7 +526,7 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
                 table_file.date_ = std::get<5>(file);
                 table_file.engine_type_ = std::get<6>(file);
                 table_file.dimension_ = table_schema.dimension_;
-                GetTableFilePath(table_file);
+                utils::GetTableFilePath(options_, table_file);
                 auto dateItr = files.find(table_file.date_);
                 if (dateItr == files.end()) {
                     files[table_file.date_] = TableFilesSchema();
@@ -616,7 +576,7 @@ Status DBMetaImpl::FilesToMerge(const std::string &table_id,
             table_file.size_ = std::get<4>(file);
             table_file.date_ = std::get<5>(file);
             table_file.dimension_ = table_schema.dimension_;
-            GetTableFilePath(table_file);
+            utils::GetTableFilePath(options_, table_file);
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
                 files[table_file.date_] = TableFilesSchema();
@@ -662,7 +622,7 @@ Status DBMetaImpl::GetTableFiles(const std::string& table_id,
             file_schema.date_ = std::get<4>(file);
             file_schema.engine_type_ = std::get<5>(file);
             file_schema.dimension_ = table_schema.dimension_;
-            GetTableFilePath(file_schema);
+            utils::GetTableFilePath(options_, file_schema);
 
             table_files.emplace_back(file_schema);
         }
@@ -895,10 +855,9 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 table_file.table_id_ = std::get<1>(file);
                 table_file.file_id_ = std::get<2>(file);
                 table_file.date_ = std::get<3>(file);
-                GetTableFilePath(table_file);
 
+                utils::DeleteTableFilePath(options_, table_file);
                 ENGINE_LOG_DEBUG << "Removing deleted id =" << table_file.id_ << " location = " << table_file.location_ << std::endl;
-                boost::filesystem::remove(table_file.location_);
                 ConnectorPtr->remove<TableFileSchema>(table_file.id_);
 
             }
@@ -922,10 +881,7 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
             for (auto &table : tables) {
-                auto table_path = GetTablePath(std::get<1>(table));
-
-                ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
-                boost::filesystem::remove_all(table_path);
+                utils::DeleteTablePath(options_, std::get<1>(table));
                 ConnectorPtr->remove<TableSchema>(std::get<0>(table));
             }
 
