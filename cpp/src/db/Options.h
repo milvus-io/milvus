@@ -8,6 +8,7 @@
 #include <string>
 #include <memory>
 #include <map>
+#include <vector>
 
 namespace zilliz {
 namespace milvus {
@@ -43,6 +44,7 @@ private:
 
 struct DBMetaOptions {
     std::string path;
+    std::vector<std::string> slave_paths;
     std::string backend_uri;
     ArchiveConf archive_conf = ArchiveConf("delete");
 }; // DBMetaOptions
