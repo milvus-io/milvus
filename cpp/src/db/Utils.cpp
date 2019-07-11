@@ -7,6 +7,7 @@
 #include "utils/CommonUtil.h"
 #include "Log.h"
 
+#include <mutex>
 #include <chrono>
 #include <boost/filesystem.hpp>
 
@@ -19,6 +20,9 @@ namespace {
 
 static const std::string TABLES_FOLDER = "/tables/";
 
+static uint64_t index_file_counter = 0;
+static std::mutex index_file_counter_mutex;
+
 std::string ConstructParentFolder(const std::string& db_path, const meta::TableFileSchema& table_file) {
     std::string table_path = db_path + TABLES_FOLDER + table_file.table_id_;
     std::string partition_path = table_path + "/" + std::to_string(table_file.date_);
@@ -28,8 +32,22 @@ std::string ConstructParentFolder(const std::string& db_path, const meta::TableF
 std::string GetTableFileParentFolder(const DBMetaOptions& options, const meta::TableFileSchema& table_file) {
     uint64_t path_count = options.slave_paths.size() + 1;
     std::string target_path = options.path;
-    uint64_t index = table_file.id_%path_count;
-    if(index > 0) {
+    uint64_t index = 0;
+
+    if(meta::TableFileSchema::INDEX == table_file.file_type_) {
+        // index file is large file and to be persisted permanently
+        // we need to distribute index files to each db_path averagely
+        // round robin according to a file counter
+        std::lock_guard<std::mutex> lock(index_file_counter_mutex);
+        index = index_file_counter % path_count;
+        index_file_counter++;
+    } else {
+        // for other type files, they could be merged or deleted
+        // so we round robin according to their file id
+        index = table_file.id_ % path_count;
+    }
+
+    if (index > 0) {
         target_path = options.slave_paths[index - 1];
     }
 
@@ -97,10 +115,6 @@ Status CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& 
 }
 
 Status GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
-#if 0
-    std::string parent_path = GetTableFileParentFolder(options, table_file);
-    table_file.location_ = parent_path + "/" + table_file.file_id_;
-#else
     std::string parent_path = ConstructParentFolder(options.path, table_file);
     std::string file_path = parent_path + "/" + table_file.file_id_;
     if(boost::filesystem::exists(file_path)) {
@@ -116,7 +130,6 @@ Status GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& tab
             }
         }
     }
-#endif
 
     return Status::Error("Table file doesn't exist: " + table_file.file_id_);
 }
