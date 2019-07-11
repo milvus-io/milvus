@@ -461,6 +461,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         meta::TableFileSchema table_file;
         table_file.table_id_ = file.table_id_;
         table_file.date_ = file.date_;
+        table_file.file_type_ = meta::TableFileSchema::INDEX; //for multi-db-path, distribute index file averagely to each path
         Status status = meta_ptr_->CreateTableFile(table_file);
         if (!status.ok()) {
             return status;
