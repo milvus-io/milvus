@@ -14,8 +14,8 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
-
 - MS-152 - Delete assert in MySQLMetaImpl and change MySQLConnectionPool impl
+- MS-204 - Support multi db_path
 
 ## New Feature
 - MS-195 - Add nlist and use_blas_threshold conf

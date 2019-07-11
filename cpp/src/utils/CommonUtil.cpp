@@ -51,8 +51,7 @@ bool CommonUtil::GetSystemAvailableThreads(unsigned int &threadCnt) {
     return true;
 }
 
-bool CommonUtil::IsDirectoryExist(const std::string &path)
-{
+bool CommonUtil::IsDirectoryExist(const std::string &path) {
     DIR *dp = nullptr;
     if ((dp = opendir(path.c_str())) == nullptr) {
         return false;
@@ -63,6 +62,10 @@ bool CommonUtil::IsDirectoryExist(const std::string &path)
 }
 
 ServerError CommonUtil::CreateDirectory(const std::string &path) {
+    if(path.empty()) {
+        return SERVER_SUCCESS;
+    }
+
     struct stat directoryStat;
     int statOK = stat(path.c_str(), &directoryStat);
     if (statOK == 0) {
@@ -120,6 +123,10 @@ namespace {
 }
 
 ServerError CommonUtil::DeleteDirectory(const std::string &path) {
+    if(path.empty()) {
+        return SERVER_SUCCESS;
+    }
+
     struct stat directoryStat;
     int statOK = stat(path.c_str(), &directoryStat);
     if (statOK != 0)
