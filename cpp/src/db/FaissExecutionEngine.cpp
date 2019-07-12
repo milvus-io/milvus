@@ -5,6 +5,7 @@
  ******************************************************************************/
 #include "FaissExecutionEngine.h"
 #include "Log.h"
+#include "utils/CommonUtil.h"
 
 #include <faiss/AutoTune.h>
 #include <faiss/MetaIndexes.h>
@@ -60,7 +61,7 @@ size_t FaissExecutionEngine::Dimension() const {
 }
 
 size_t FaissExecutionEngine::PhysicalSize() const {
-    return (size_t)(Count() * pIndex_->d)*sizeof(float);
+    return server::CommonUtil::GetFileSize(location_);
 }
 
 Status FaissExecutionEngine::Serialize() {

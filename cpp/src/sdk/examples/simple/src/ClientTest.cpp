@@ -21,7 +21,7 @@ namespace {
     static constexpr int64_t NQ = 10;
     static constexpr int64_t TOP_K = 10;
     static constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    static constexpr int64_t ADD_VECTOR_LOOP = 5;
+    static constexpr int64_t ADD_VECTOR_LOOP = 10;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
@@ -97,7 +97,7 @@ namespace {
     TableSchema BuildTableSchema() {
         TableSchema tb_schema;
         tb_schema.table_name = TABLE_NAME;
-        tb_schema.index_type = IndexType::cpu_idmap;
+        tb_schema.index_type = IndexType::gpu_ivfsq8;
         tb_schema.dimension = TABLE_DIMENSION;
         tb_schema.store_raw_vector = true;
 

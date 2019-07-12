@@ -17,21 +17,20 @@ using std::string;
 enum IndexType {
     Invalid_Option = 0,
     IVF = 1,
-    IDMAP = 2
+    IDMAP = 2,
+    IVFSQ8 = 3,
 };
 
 IndexType resolveIndexType(const string &index_type) {
     if (index_type == "IVF") { return IndexType::IVF; }
     if (index_type == "IDMap") { return IndexType::IDMAP; }
+    if (index_type == "IVFSQ8") { return IndexType::IVFSQ8; }
     return IndexType::Invalid_Option;
 }
 
 // nb at least 100
 string Operand::get_index_type(const int &nb) {
     if (!index_str.empty()) { return index_str; }
-
-    // TODO: support OPQ or ...
-    if (!preproc.empty()) { index_str += (preproc + ","); }
 
     switch (resolveIndexType(index_type)) {
         case Invalid_Option: {
@@ -48,16 +47,29 @@ string Operand::get_index_type(const int &nb) {
             index_str += (ncent != 0 ? index_type + std::to_string(ncent) :
                           index_type + std::to_string(int(nb / 1000000.0 * nlist)));
 //            std::cout<<"nlist = "<<nlist<<std::endl;
+            if (!postproc.empty()) { index_str += ("," + postproc); }
+            break;
+        }
+        case IVFSQ8: {
+
+            using namespace zilliz::milvus::server;
+            ServerConfig &config = ServerConfig::GetInstance();
+            ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
+            size_t nlist = engine_config.GetInt32Value(CONFIG_NLIST, 16384);
+
+            index_str += (ncent != 0 ? "IVF" + std::to_string(ncent) :
+                          "IVF" + std::to_string(int(nb / 1000000.0 * nlist)));
+            index_str += ",SQ8";
+//            std::cout<<"nlist = "<<nlist<<std::endl;
             break;
         }
         case IDMAP: {
             index_str += index_type;
+            if (!postproc.empty()) { index_str += ("," + postproc); }
             break;
         }
     }
 
-    // TODO: support PQ or ...
-    if (!postproc.empty()) { index_str += ("," + postproc); }
     return index_str;
 }
 
