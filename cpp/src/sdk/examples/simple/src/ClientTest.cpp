@@ -98,7 +98,7 @@ namespace {
     TableSchema BuildTableSchema() {
         TableSchema tb_schema;
         tb_schema.table_name = TABLE_NAME;
-        tb_schema.index_type = IndexType::gpu_ivfsq8;
+        tb_schema.index_type = IndexType::gpu_ivfflat;
         tb_schema.dimension = TABLE_DIMENSION;
         tb_schema.store_raw_vector = true;
 
