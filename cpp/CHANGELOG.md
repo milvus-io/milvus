@@ -17,6 +17,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-152 - Delete assert in MySQLMetaImpl and change MySQLConnectionPool impl
 - MS-204 - Support multi db_path
 - MS-206 - Support SQ8 index type
+- MS-208 - Add buildinde interface for C++ SDK
 
 ## New Feature
 - MS-195 - Add nlist and use_blas_threshold conf
