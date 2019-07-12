@@ -8,6 +8,7 @@
 #include "ServerConfig.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 namespace zilliz {
 namespace milvus {
@@ -19,6 +20,10 @@ DBWrapper::DBWrapper() {
     opt.meta.backend_uri = config.GetValue(CONFIG_DB_URL);
     std::string db_path = config.GetValue(CONFIG_DB_PATH);
     opt.meta.path = db_path + "/db";
+
+    std::string db_slave_path = config.GetValue(CONFIG_DB_SLAVE_PATH);
+    StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta.slave_paths);
+
     int64_t index_size = config.GetInt64Value(CONFIG_DB_INDEX_TRIGGER_SIZE);
     if(index_size > 0) {//ensure larger than zero, unit is MB
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
@@ -57,6 +62,14 @@ DBWrapper::DBWrapper() {
     if(err != SERVER_SUCCESS) {
         std::cout << "ERROR! Failed to create database root path: " << opt.meta.path << std::endl;
         kill(0, SIGUSR1);
+    }
+
+    for(auto& path : opt.meta.slave_paths) {
+        err = CommonUtil::CreateDirectory(path);
+        if(err != SERVER_SUCCESS) {
+            std::cout << "ERROR! Failed to create database slave path: " << path << std::endl;
+            kill(0, SIGUSR1);
+        }
     }
 
     std::string msg = opt.meta.path;
