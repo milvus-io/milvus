@@ -127,6 +127,22 @@ ClientProxy::DeleteTable(const std::string &table_name) {
 }
 
 Status
+ClientProxy::BuildIndex(const std::string &table_name) {
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
+    }
+
+    try {
+        ClientPtr()->interface()->BuildIndex(table_name);
+
+    }  catch ( std::exception& ex) {
+        return Status(StatusCode::UnknownError, "failed to build index: " + std::string(ex.what()));
+    }
+
+    return Status::OK();
+}
+
+Status
 ClientProxy::AddVector(const std::string &table_name,
                           const std::vector<RowRecord> &record_array,
                           std::vector<int64_t> &id_array) {
