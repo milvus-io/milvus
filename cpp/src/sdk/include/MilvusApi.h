@@ -18,6 +18,7 @@ enum class IndexType {
     invalid = 0,
     cpu_idmap,
     gpu_ivfflat,
+    gpu_ivfsq8,
 };
 
 /**

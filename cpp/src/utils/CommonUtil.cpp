@@ -140,6 +140,15 @@ bool CommonUtil::IsFileExist(const std::string &path) {
     return (access(path.c_str(), F_OK) == 0);
 }
 
+uint64_t CommonUtil::GetFileSize(const std::string &path) {
+    struct stat fileInfo;
+    if (stat(path.c_str(), &fileInfo) < 0) {
+        return 0;
+    } else {
+        return (uint64_t)fileInfo.st_size;
+    }
+}
+
 std::string CommonUtil::GetExePath() {
     const size_t buf_len = 1024;
     char buf[buf_len];
