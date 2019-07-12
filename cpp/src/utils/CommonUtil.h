@@ -16,8 +16,8 @@ namespace server {
 
 class CommonUtil {
  public:
-    static bool GetSystemMemInfo(unsigned long &totalMem, unsigned long &freeMem);
-    static bool GetSystemAvailableThreads(unsigned int &threadCnt);
+    static bool GetSystemMemInfo(unsigned long &total_mem, unsigned long &free_mem);
+    static bool GetSystemAvailableThreads(unsigned int &thread_count);
 
     static bool IsFileExist(const std::string &path);
     static uint64_t GetFileSize(const std::string &path);
