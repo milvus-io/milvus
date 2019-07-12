@@ -67,6 +67,11 @@ ConnectionImpl::DeleteTable(const std::string &table_name) {
 }
 
 Status
+ConnectionImpl::BuildIndex(const std::string &table_name) {
+    return client_proxy_->BuildIndex(table_name);
+}
+
+Status
 ConnectionImpl::AddVector(const std::string &table_name,
                           const std::vector<RowRecord> &record_array,
                           std::vector<int64_t> &id_array) {
