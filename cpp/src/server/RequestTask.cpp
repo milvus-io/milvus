@@ -30,6 +30,7 @@ namespace {
                 {0, engine::EngineType::INVALID},
                 {1, engine::EngineType::FAISS_IDMAP},
                 {2, engine::EngineType::FAISS_IVFFLAT},
+                {3, engine::EngineType::FAISS_IVFSQ8},
         };
 
         if(map_type.find(type) == map_type.end()) {
@@ -44,6 +45,7 @@ namespace {
                 {engine::EngineType::INVALID, 0},
                 {engine::EngineType::FAISS_IDMAP, 1},
                 {engine::EngineType::FAISS_IVFFLAT, 2},
+                {engine::EngineType::FAISS_IVFSQ8, 3},
         };
 
         if(map_type.find(type) == map_type.end()) {
