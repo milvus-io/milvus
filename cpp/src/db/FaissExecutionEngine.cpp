@@ -162,7 +162,8 @@ Status FaissExecutionEngine::Cache() {
 
 Status FaissExecutionEngine::Init() {
 
-    if(build_index_type_ == "IVF") {
+    if(build_index_type_ == BUILD_INDEX_TYPE_IVF ||
+        build_index_type_ == BUILD_INDEX_TYPE_IVFSQ8) {
 
         using namespace zilliz::milvus::server;
         ServerConfig &config = ServerConfig::GetInstance();
@@ -170,7 +171,7 @@ Status FaissExecutionEngine::Init() {
         nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1000);
         nlist_ = engine_config.GetInt32Value(CONFIG_NLIST,16384);
 
-    } else if(build_index_type_ == "IDMap") {
+    } else if(build_index_type_ == BUILD_INDEX_TYPE_IDMAP) {
         ;
     } else {
         return Status::Error("Wrong index type: ", build_index_type_);
