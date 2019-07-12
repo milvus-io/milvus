@@ -32,6 +32,12 @@ EngineFactory::Build(uint16_t dimension,
             break;
         }
 
+        case EngineType::FAISS_IVFSQ8: {
+            execution_engine_ptr =
+                    ExecutionEnginePtr(new FaissExecutionEngine(dimension, location, "IVFSQ8", "IDMap,Flat"));
+            break;
+        }
+
         default: {
             ENGINE_LOG_ERROR << "Unsupported engine type";
             return nullptr;

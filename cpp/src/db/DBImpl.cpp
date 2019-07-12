@@ -487,7 +487,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
         //step 6: update meta
         table_file.file_type_ = meta::TableFileSchema::INDEX;
-        table_file.size_ = index->Size();
+        table_file.size_ = index->PhysicalSize();
 
         auto to_remove = file;
         to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
@@ -503,7 +503,9 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         //index->Cache();
 
     } catch (std::exception& ex) {
-        return Status::Error("Build index encounter exception", ex.what());
+        std::string msg = "Build index encounter exception" + std::string(ex.what());
+        ENGINE_LOG_ERROR << msg;
+        return Status::Error(msg);
     }
 
     return Status::OK();
