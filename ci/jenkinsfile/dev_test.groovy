@@ -8,7 +8,6 @@ container('milvus-testframework') {
                     sh "pytest . --alluredir=test_out --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.kube-opt.svc.cluster.local"
                 }
             } catch (exc) {
-                sh "helm del --purge ${env.JOB_NAME}-${env.BUILD_NUMBER}"
                 updateGitlabCommitStatus name: 'Dev Test', state: 'failed'
                 currentBuild.result = 'FAILURE'
                 echo 'Milvus Test Failed !'
