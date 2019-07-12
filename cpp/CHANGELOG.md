@@ -18,6 +18,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-204 - Support multi db_path
 - MS-206 - Support SQ8 index type
 - MS-208 - Add buildinde interface for C++ SDK
+- MS-212 - Support Inner product metric type
 
 ## New Feature
 - MS-195 - Add nlist and use_blas_threshold conf
