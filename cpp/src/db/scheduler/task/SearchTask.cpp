@@ -30,11 +30,20 @@ void CollectDurationMetrics(int index_type, double total_time) {
     }
 }
 
+std::string GetMetricType() {
+    server::ServerConfig &config = server::ServerConfig::GetInstance();
+    server::ConfigNode engine_config = config.GetConfig(server::CONFIG_ENGINE);
+    return engine_config.GetValue(server::CONFIG_METRICTYPE, "L2");
+}
+
 }
 
 SearchTask::SearchTask()
 : IScheduleTask(ScheduleTaskType::kSearch) {
-
+    std::string metric_type = GetMetricType();
+    if(metric_type != "L2") {
+        metric_l2 = false;
+    }
 }
 
 std::shared_ptr<IScheduleTask> SearchTask::Execute() {
@@ -71,7 +80,7 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
             rc.Record("cluster result");
 
             //step 4: pick up topk result
-            SearchTask::TopkResult(result_set, inner_k, context->GetResult());
+            SearchTask::TopkResult(result_set, inner_k, metric_l2, context->GetResult());
             rc.Record("reduce topk");
 
         } catch (std::exception& ex) {
@@ -125,7 +134,8 @@ Status SearchTask::ClusterResult(const std::vector<long> &output_ids,
 
 Status SearchTask::MergeResult(SearchContext::Id2DistanceMap &distance_src,
                                SearchContext::Id2DistanceMap &distance_target,
-                               uint64_t topk) {
+                               uint64_t topk,
+                               bool ascending) {
     //Note: the score_src and score_target are already arranged by score in ascending order
     if(distance_src.empty()) {
         SERVER_LOG_WARNING << "Empty distance source array";
@@ -161,15 +171,27 @@ Status SearchTask::MergeResult(SearchContext::Id2DistanceMap &distance_src,
             break;
         }
 
-        //compare score, put smallest score to score_merged one by one
+        //compare score,
+        // if ascending = true, put smallest score to score_merged one by one
+        // else, put largest score to score_merged one by one
         auto& src_pair = distance_src[src_index];
         auto& target_pair = distance_target[target_index];
-        if(src_pair.second > target_pair.second) {
-            distance_merged.push_back(target_pair);
-            target_index++;
+        if(ascending){
+            if(src_pair.second > target_pair.second) {
+                distance_merged.push_back(target_pair);
+                target_index++;
+            } else {
+                distance_merged.push_back(src_pair);
+                src_index++;
+            }
         } else {
-            distance_merged.push_back(src_pair);
-            src_index++;
+            if(src_pair.second < target_pair.second) {
+                distance_merged.push_back(target_pair);
+                target_index++;
+            } else {
+                distance_merged.push_back(src_pair);
+                src_index++;
+            }
         }
 
         //score_merged.size() already equal topk
@@ -185,6 +207,7 @@ Status SearchTask::MergeResult(SearchContext::Id2DistanceMap &distance_src,
 
 Status SearchTask::TopkResult(SearchContext::ResultSet &result_src,
                               uint64_t topk,
+                              bool ascending,
                               SearchContext::ResultSet &result_target) {
     if (result_target.empty()) {
         result_target.swap(result_src);
@@ -200,7 +223,7 @@ Status SearchTask::TopkResult(SearchContext::ResultSet &result_src,
     for (size_t i = 0; i < result_src.size(); i++) {
         SearchContext::Id2DistanceMap &score_src = result_src[i];
         SearchContext::Id2DistanceMap &score_target = result_target[i];
-        SearchTask::MergeResult(score_src, score_target, topk);
+        SearchTask::MergeResult(score_src, score_target, topk, ascending);
     }
 
     return Status::OK();

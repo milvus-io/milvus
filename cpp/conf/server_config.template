@@ -37,3 +37,4 @@ engine_config:
   nprobe: 10
   nlist: 16384
   use_blas_threshold: 20
+  metric_type: L2       #L2 or Inner Product
