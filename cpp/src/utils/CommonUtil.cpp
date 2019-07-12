@@ -32,21 +32,21 @@ namespace server {
 
 namespace fs = boost::filesystem;
 
-bool CommonUtil::GetSystemMemInfo(unsigned long &totalMem, unsigned long &freeMem) {
+bool CommonUtil::GetSystemMemInfo(unsigned long &total_mem, unsigned long &free_mem) {
     struct sysinfo info;
     int ret = sysinfo(&info);
-    totalMem = info.totalram;
-    freeMem = info.freeram;
+    total_mem = info.totalram;
+    free_mem = info.freeram;
 
     return ret == 0;//succeed 0, failed -1
 }
 
-bool CommonUtil::GetSystemAvailableThreads(unsigned int &threadCnt) {
+bool CommonUtil::GetSystemAvailableThreads(unsigned int &thread_count) {
     //threadCnt = std::thread::hardware_concurrency();
-    threadCnt = sysconf(_SC_NPROCESSORS_CONF);
-    threadCnt *= THREAD_MULTIPLY_CPU;
-    if (threadCnt == 0)
-        threadCnt = 8;
+    thread_count = sysconf(_SC_NPROCESSORS_CONF);
+    thread_count *= THREAD_MULTIPLY_CPU;
+    if (thread_count == 0)
+        thread_count = 8;
 
     return true;
 }
@@ -66,9 +66,9 @@ ServerError CommonUtil::CreateDirectory(const std::string &path) {
         return SERVER_SUCCESS;
     }
 
-    struct stat directoryStat;
-    int statOK = stat(path.c_str(), &directoryStat);
-    if (statOK == 0) {
+    struct stat directory_stat;
+    int status = stat(path.c_str(), &directory_stat);
+    if (status == 0) {
         return SERVER_SUCCESS;//already exist
     }
 
@@ -79,8 +79,8 @@ ServerError CommonUtil::CreateDirectory(const std::string &path) {
         return err;
     }
 
-    statOK = stat(path.c_str(), &directoryStat);
-    if (statOK == 0) {
+    status = stat(path.c_str(), &directory_stat);
+    if (status == 0) {
         return SERVER_SUCCESS;//already exist
     }
 
@@ -94,29 +94,29 @@ ServerError CommonUtil::CreateDirectory(const std::string &path) {
 
 namespace {
     void RemoveDirectory(const std::string &path) {
-        DIR *pDir = NULL;
+        DIR *dir = nullptr;
         struct dirent *dmsg;
-        char szFileName[256];
-        char szFolderName[256];
+        char file_name[256];
+        char folder_name[256];
 
-        strcpy(szFolderName, path.c_str());
-        strcat(szFolderName, "/%s");
-        if ((pDir = opendir(path.c_str())) != NULL) {
-            while ((dmsg = readdir(pDir)) != NULL) {
+        strcpy(folder_name, path.c_str());
+        strcat(folder_name, "/%s");
+        if ((dir = opendir(path.c_str())) != nullptr) {
+            while ((dmsg = readdir(dir)) != nullptr) {
                 if (strcmp(dmsg->d_name, ".") != 0
                     && strcmp(dmsg->d_name, "..") != 0) {
-                    sprintf(szFileName, szFolderName, dmsg->d_name);
-                    std::string tmp = szFileName;
+                    sprintf(file_name, folder_name, dmsg->d_name);
+                    std::string tmp = file_name;
                     if (tmp.find(".") == std::string::npos) {
-                        RemoveDirectory(szFileName);
+                        RemoveDirectory(file_name);
                     }
-                    remove(szFileName);
+                    remove(file_name);
                 }
             }
         }
 
-        if (pDir != NULL) {
-            closedir(pDir);
+        if (dir != nullptr) {
+            closedir(dir);
         }
         remove(path.c_str());
     }
@@ -127,8 +127,8 @@ ServerError CommonUtil::DeleteDirectory(const std::string &path) {
         return SERVER_SUCCESS;
     }
 
-    struct stat directoryStat;
-    int statOK = stat(path.c_str(), &directoryStat);
+    struct stat directory_stat;
+    int statOK = stat(path.c_str(), &directory_stat);
     if (statOK != 0)
         return SERVER_SUCCESS;
 
@@ -141,11 +141,11 @@ bool CommonUtil::IsFileExist(const std::string &path) {
 }
 
 uint64_t CommonUtil::GetFileSize(const std::string &path) {
-    struct stat fileInfo;
-    if (stat(path.c_str(), &fileInfo) < 0) {
+    struct stat file_info;
+    if (stat(path.c_str(), &file_info) < 0) {
         return 0;
     } else {
-        return (uint64_t)fileInfo.st_size;
+        return (uint64_t)file_info.st_size;
     }
 }
 
