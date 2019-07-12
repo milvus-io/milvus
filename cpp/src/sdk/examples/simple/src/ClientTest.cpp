@@ -35,26 +35,17 @@ namespace {
         BLOCK_SPLITER
     }
 
-    void PrintRecordIdArray(const std::vector<int64_t>& record_ids) {
-        BLOCK_SPLITER
-        std::cout << "Returned id array count: " << record_ids.size() << std::endl;
-#if 0
-        for(auto id : record_ids) {
-            std::cout << std::to_string(id) << std::endl;
-        }
-#endif
-        BLOCK_SPLITER
-    }
-
-    void PrintSearchResult(const std::vector<TopKQueryResult>& topk_query_result_array) {
+    void PrintSearchResult(const std::vector<std::pair<int64_t, RowRecord>>& search_record_array,
+            const std::vector<TopKQueryResult>& topk_query_result_array) {
         BLOCK_SPLITER
         std::cout << "Returned result count: " << topk_query_result_array.size() << std::endl;
 
         int32_t index = 0;
         for(auto& result : topk_query_result_array) {
+            auto search_id = search_record_array[index].first;
             index++;
-            std::cout << "No." << std::to_string(index) << " vector top "
-                << std::to_string(result.query_result_arrays.size())
+            std::cout << "No." << std::to_string(index) << " vector " << std::to_string(search_id)
+                << " top " << std::to_string(result.query_result_arrays.size())
                 << " search result:" << std::endl;
             for(auto& item : result.query_result_arrays) {
                 std::cout << "\t" << std::to_string(item.id) << "\tdistance:" << std::to_string(item.distance);
@@ -92,7 +83,7 @@ namespace {
 
     std::string GetTableName() {
         static std::string s_id(CurrentTime());
-        return s_id;
+        return "tbl_" + s_id;
     }
 
     TableSchema BuildTableSchema() {
@@ -146,23 +137,46 @@ namespace {
         std::chrono::system_clock::time_point start_;
     };
 
+    void CheckResult(const std::vector<std::pair<int64_t, RowRecord>>& search_record_array,
+                     const std::vector<TopKQueryResult>& topk_query_result_array) {
+        BLOCK_SPLITER
+        int64_t index = 0;
+        for(auto& result : topk_query_result_array) {
+            auto result_id = result.query_result_arrays[0].id;
+            auto search_id = search_record_array[index++].first;
+            if(result_id != search_id) {
+                std::cout << "The top 1 result is wrong: " << result_id
+                    << " vs. " << search_id << std::endl;
+            } else {
+                std::cout << "Check result sucessfully" << std::endl;
+            }
+        }
+        BLOCK_SPLITER
+    }
+
     void DoSearch(std::shared_ptr<Connection> conn,
-                  const std::vector<RowRecord>& record_array,
+                  const std::vector<std::pair<int64_t, RowRecord>>& search_record_array,
                   const std::string& phase_name) {
         std::vector<Range> query_range_array;
         Range rg;
         rg.start_value = CurrentTmDate();
         rg.end_value = CurrentTmDate();
         query_range_array.emplace_back(rg);
-        std::vector<TopKQueryResult> topk_query_result_array;
 
+        std::vector<RowRecord> record_array;
+        for(auto& pair : search_record_array) {
+            record_array.push_back(pair.second);
+        }
+
+        std::vector<TopKQueryResult> topk_query_result_array;
         {
             TimeRecorder rc(phase_name);
             Status stat = conn->SearchVector(TABLE_NAME, record_array, query_range_array, TOP_K, topk_query_result_array);
             std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
         }
 
-        PrintSearchResult(topk_query_result_array);
+        PrintSearchResult(search_record_array, topk_query_result_array);
+        CheckResult(search_record_array, topk_query_result_array);
     }
 }
 
@@ -217,17 +231,23 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         PrintTableSchema(tb_schema);
     }
 
-    for(int i = 0; i < ADD_VECTOR_LOOP; i++){//add vectors
-        std::vector<RowRecord> record_array;
-        BuildVectors(i*BATCH_ROW_COUNT, (i+1)*BATCH_ROW_COUNT, record_array);
-        std::vector<int64_t> record_ids;
-        Status stat = conn->AddVector(TABLE_NAME, record_array, record_ids);
-        std::cout << "AddVector function call status: " << stat.ToString() << std::endl;
-        PrintRecordIdArray(record_ids);
-    }
+    std::vector<std::pair<int64_t, RowRecord>> search_record_array;
+    {//add vectors
+        for (int i = 0; i < ADD_VECTOR_LOOP; i++) {//add vectors
+            std::vector<RowRecord> record_array;
+            int64_t begin_index = i * BATCH_ROW_COUNT;
+            BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array);
+            std::vector<int64_t> record_ids;
+            Status stat = conn->AddVector(TABLE_NAME, record_array, record_ids);
+            std::cout << "AddVector function call status: " << stat.ToString() << std::endl;
+            std::cout << "Returned id array count: " << record_ids.size() << std::endl;
 
-    std::vector<RowRecord> search_record_array;
-    BuildVectors(SEARCH_TARGET, SEARCH_TARGET + NQ, search_record_array);
+            if(search_record_array.size() < NQ) {
+                search_record_array.push_back(
+                        std::make_pair(record_ids[SEARCH_TARGET], record_array[SEARCH_TARGET]));
+            }
+        }
+    }
 
     {//search vectors without index
         Sleep(2);
