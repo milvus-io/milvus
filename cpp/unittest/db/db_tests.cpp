@@ -272,7 +272,9 @@ TEST_F(DBTest2, DELETE_TEST) {
     stat = db_->DescribeTable(table_info_get);
     ASSERT_STATS(stat);
 
-    ASSERT_TRUE(boost::filesystem::exists(table_info_get.location_));
+    bool has_table = false;
+    db_->HasTable(TABLE_NAME, has_table);
+    ASSERT_TRUE(has_table);
 
     engine::IDNumbers vector_ids;
 
@@ -293,5 +295,7 @@ TEST_F(DBTest2, DELETE_TEST) {
     stat = db_->DeleteTable(TABLE_NAME, dates);
     std::this_thread::sleep_for(std::chrono::seconds(2));
     ASSERT_TRUE(stat.ok());
-    ASSERT_FALSE(boost::filesystem::exists(table_info_get.location_));
+
+    db_->HasTable(TABLE_NAME, has_table);
+    ASSERT_FALSE(has_table);
 };

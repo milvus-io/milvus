@@ -23,6 +23,7 @@ static const std::string CONFIG_CLUSTER_MODE = "mode";
 static const std::string CONFIG_DB = "db_config";
 static const std::string CONFIG_DB_URL = "db_backend_url";
 static const std::string CONFIG_DB_PATH = "db_path";
+static const std::string CONFIG_DB_SLAVE_PATH = "db_slave_path";
 static const std::string CONFIG_DB_INDEX_TRIGGER_SIZE = "index_building_threshold";
 static const std::string CONFIG_DB_ARCHIVE_DISK = "archive_disk_threshold";
 static const std::string CONFIG_DB_ARCHIVE_DAYS = "archive_days_threshold";
