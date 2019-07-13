@@ -33,11 +33,11 @@ set(db_libs
         nvidia-ml
         cudart
         cublas
-        boost_system
-        boost_filesystem
+        boost_system_static
+        boost_filesystem_static
         lz4
         crypto
-        boost_serialization
+        boost_serialization_static
         )
 
 target_link_libraries(license_test ${db_libs} ${unittest_libs})
