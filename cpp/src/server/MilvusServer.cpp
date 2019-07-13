@@ -8,6 +8,7 @@
 #include "ServerConfig.h"
 #include "ThreadPoolServer.h"
 #include "DBWrapper.h"
+#include "utils/Log.h"
 
 #include "milvus_types.h"
 #include "milvus_constants.h"

@@ -189,4 +189,4 @@ install(FILES
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4
         DESTINATION lib) #need to copy libmysqlpp.so
 
-add_subdirectory(sdk)
+#add_subdirectory(sdk)
