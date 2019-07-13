@@ -14,6 +14,7 @@
 #include <thread>
 #include <fstream>
 #include <iostream>
+#include <cmath>
 
 
 using namespace zilliz::milvus;
