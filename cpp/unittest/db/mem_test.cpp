@@ -15,7 +15,7 @@
 #include <fstream>
 #include <iostream>
 #include <cmath>
-
+#include <random>
 
 using namespace zilliz::milvus;
 
