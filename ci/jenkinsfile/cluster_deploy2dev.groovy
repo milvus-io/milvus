@@ -7,9 +7,11 @@ try {
         dir ("milvus/milvus-cluster") {
             sh "helm install --set roServers.image.tag=${DOCKER_VERSION} --set woServers.image.tag=${DOCKER_VERSION} --set expose.type=clusterIP -f ci/values.yaml --name ${env.JOB_NAME}-${env.BUILD_NUMBER}-cluster --namespace milvus-cluster --version 0.1.0 . "
         }
-        waitUntil {
-            def result = sh script: "nc -z -w 2 ${env.JOB_NAME}-${env.BUILD_NUMBER}-cluster-milvus-cluster-proxy.milvus-cluster.svc.cluster.local 19530", returnStatus: true
-            return !result
+        timeout(time: 2, unit: 'MINUTES') {
+            waitUntil {
+                def result = sh script: "nc -z -w 2 ${env.JOB_NAME}-${env.BUILD_NUMBER}-cluster-milvus-cluster-proxy.milvus-cluster.svc.cluster.local 19530", returnStatus: true
+                return !result
+            }
         }
     }
 } catch (exc) {
