@@ -165,8 +165,9 @@ Status FaissExecutionEngine::Search(long n,
 }
 
 Status FaissExecutionEngine::Cache() {
-    zilliz::milvus::cache::CpuCacheMgr::GetInstance(
-            )->InsertItem(location_, std::make_shared<Index>(pIndex_));
+    auto index = std::make_shared<Index>(pIndex_);
+    cache::DataObjPtr data_obj = std::make_shared<cache::DataObj>(index, PhysicalSize());
+    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, data_obj);
 
     return Status::OK();
 }
