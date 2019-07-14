@@ -9,8 +9,8 @@ container('milvus-testframework') {
                 }
             } catch (exc) {
                 updateGitlabCommitStatus name: 'Dev Test', state: 'failed'
-                currentBuild.result = 'FAILURE'
                 echo 'Milvus Test Failed !'
+                throw exc
             }
         }
     }
