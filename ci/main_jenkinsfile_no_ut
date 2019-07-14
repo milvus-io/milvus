@@ -191,22 +191,38 @@ spec:
                                             }
                                         }
                                     }
+                                }
+
+                                stage ("Cleanup Dev") {
+                                    agent {
+                                        kubernetes {
+                                            label 'jenkins-slave'
+                                            defaultContainer 'jnlp'
+                                        }
+                                    }
+                                    stages {
+                                        stage('Cleanup') {
+                                            steps {
+                                                gitlabCommitStatus(name: 'Cleanup Dev') {
+                                                    script {
+                                                        load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                     post {
-                                        always {
-                                            stage ("Cleanup Dev") {
-                                                agent {
-                                                    kubernetes {
-                                                        label 'jenkins-slave'
-                                                        defaultContainer 'jnlp'
-                                                    }
-                                                }
-                                                stages {
-                                                    gitlabCommitStatus(name: 'Cleanup Dev') {
-                                                        script {
-                                                            load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
-                                                        }
-                                                    }
-                                                }
+                                        aborted {
+                                            script {
+                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'canceled'
+                                                echo "Milvus Cleanup Dev aborted !"
+                                            }
+                                        }
+
+                                        failure {
+                                            script {
+                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'failed'
+                                                echo "Milvus Cleanup Dev failure !"
                                             }
                                         }
                                     }
@@ -274,22 +290,38 @@ spec:
                                             }
                                         }
                                     }
+                                }
+
+                                stage ("Cleanup Dev") {
+                                    agent {
+                                        kubernetes {
+                                            label 'jenkins-slave'
+                                            defaultContainer 'jnlp'
+                                        }
+                                    }
+                                    stages {
+                                        stage('Cleanup') {
+                                            steps {
+                                                gitlabCommitStatus(name: 'Cleanup Dev') {
+                                                    script {
+                                                        load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                     post {
-                                        always {
-                                            stage ("Cleanup Dev") {
-                                                agent {
-                                                    kubernetes {
-                                                        label 'jenkins-slave'
-                                                        defaultContainer 'jnlp'
-                                                    }
-                                                }
-                                                stages {
-                                                    gitlabCommitStatus(name: 'Cleanup Dev') {
-                                                        script {
-                                                            load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
-                                                        }
-                                                    }
-                                                }
+                                        aborted {
+                                            script {
+                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'canceled'
+                                                echo "Milvus Cleanup Dev aborted !"
+                                            }
+                                        }
+
+                                        failure {
+                                            script {
+                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'failed'
+                                                echo "Milvus Cleanup Dev failure !"
                                             }
                                         }
                                     }
@@ -305,18 +337,16 @@ spec:
     post {
         always {
             script {
-                if (env.gitlabAfter != null) {
-                    if (!currentBuild.resultIsBetterOrEqualTo('SUCCESS')) {
-                        // Send an email only if the build status has changed from green/unstable to red
-                        emailext subject: '$DEFAULT_SUBJECT',
-                        body: '$DEFAULT_CONTENT',
-                        recipientProviders: [
-                            [$class: 'DevelopersRecipientProvider'],
-                            [$class: 'RequesterRecipientProvider']
-                        ],
-                        replyTo: '$DEFAULT_REPLYTO',
-                        to: '$DEFAULT_RECIPIENTS'
-                    }
+                if (!currentBuild.resultIsBetterOrEqualTo('SUCCESS')) {
+                    // Send an email only if the build status has changed from green/unstable to red
+                    emailext subject: '$DEFAULT_SUBJECT',
+                    body: '$DEFAULT_CONTENT',
+                    recipientProviders: [
+                        [$class: 'DevelopersRecipientProvider'],
+                        [$class: 'RequesterRecipientProvider']
+                    ],
+                    replyTo: '$DEFAULT_REPLYTO',
+                    to: '$DEFAULT_RECIPIENTS'
                 }
             }
         }
@@ -343,3 +373,4 @@ spec:
         }
     }
 }
+
