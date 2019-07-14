@@ -18,11 +18,12 @@ namespace {
 
     static const std::string TABLE_NAME = GetTableName();
     static constexpr int64_t TABLE_DIMENSION = 512;
-    static constexpr int64_t BATCH_ROW_COUNT = 100000;
+    static constexpr int64_t BATCH_ROW_COUNT = 10000;
     static constexpr int64_t NQ = 10;
     static constexpr int64_t TOP_K = 10;
     static constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    static constexpr int64_t ADD_VECTOR_LOOP = 10;
+    static constexpr int64_t ADD_VECTOR_LOOP = 1;
+    static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
@@ -59,7 +60,7 @@ namespace {
     std::string CurrentTime() {
         time_t tt;
         time( &tt );
-        tt = tt + 8*3600;
+        tt = tt + 8*SECONDS_EACH_HOUR;
         tm* t= gmtime( &tt );
 
         std::string str = std::to_string(t->tm_year + 1900) + "_" + std::to_string(t->tm_mon + 1)
@@ -69,10 +70,11 @@ namespace {
         return str;
     }
 
-    std::string CurrentTmDate() {
+    std::string CurrentTmDate(int64_t offset_day = 0) {
         time_t tt;
         time( &tt );
-        tt = tt + 8*3600;
+        tt = tt + 8*SECONDS_EACH_HOUR;
+        tt = tt + 24*SECONDS_EACH_HOUR*offset_day;
         tm* t= gmtime( &tt );
 
         std::string str = std::to_string(t->tm_year + 1900) + "-" + std::to_string(t->tm_mon + 1)
@@ -160,7 +162,7 @@ namespace {
         std::vector<Range> query_range_array;
         Range rg;
         rg.start_value = CurrentTmDate();
-        rg.end_value = CurrentTmDate();
+        rg.end_value = CurrentTmDate(1);
         query_range_array.emplace_back(rg);
 
         std::vector<RowRecord> record_array;

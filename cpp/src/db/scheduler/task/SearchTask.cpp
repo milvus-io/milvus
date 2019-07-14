@@ -107,7 +107,7 @@ Status SearchTask::ClusterResult(const std::vector<long> &output_ids,
                                  uint64_t nq,
                                  uint64_t topk,
                                  SearchContext::ResultSet &result_set) {
-    if(output_ids.size() != nq*topk || output_distence.size() != nq*topk) {
+    if(output_ids.size() < nq*topk || output_distence.size() < nq*topk) {
         std::string msg = "Invalid id array size: " + std::to_string(output_ids.size()) +
                 " distance array size: " + std::to_string(output_distence.size());
         SERVER_LOG_ERROR << msg;
