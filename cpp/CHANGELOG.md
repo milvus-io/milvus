@@ -12,6 +12,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-153 - fix c_str error when connecting to MySQL
 - MS-157 - fix changelog
 - MS-190 - use env variable to switch mem manager and fix cmake
+- MS-217 - Fix SQ8 row count bug
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
