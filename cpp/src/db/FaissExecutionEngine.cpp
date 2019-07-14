@@ -110,7 +110,7 @@ Status FaissExecutionEngine::Merge(const std::string& location) {
     if (location == location_) {
         return Status::Error("Cannot Merge Self");
     }
-    ENGINE_LOG_DEBUG << "Merge index file: " << location << " to: " << location_;
+    ENGINE_LOG_DEBUG << "Merge raw file: " << location << " to: " << location_;
 
     auto to_merge = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
     if (!to_merge) {
