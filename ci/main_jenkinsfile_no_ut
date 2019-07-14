@@ -134,7 +134,7 @@ spec:
                         stage("Single Node") {
                             agent {
                                 kubernetes {
-                                    label 'dev test'
+                                    label 'dev-test'
                                     defaultContainer 'jnlp'
                                     yaml """
 apiVersion: v1
@@ -227,7 +227,7 @@ spec:
                         stage("Cluster") {
                             agent {
                                 kubernetes {
-                                    label 'dev test'
+                                    label 'dev-test'
                                     defaultContainer 'jnlp'
                                     yaml """
 apiVersion: v1
