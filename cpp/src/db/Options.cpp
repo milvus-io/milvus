@@ -41,6 +41,10 @@ void ArchiveConf::ParseCritirias(const std::string& criterias) {
     }
 
     for (auto& token : tokens) {
+        if(token.empty()) {
+            continue;
+        }
+
         std::vector<std::string> kv;
         boost::algorithm::split(kv, token, boost::is_any_of(":"));
         if (kv.size() != 2) {
