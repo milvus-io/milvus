@@ -191,38 +191,22 @@ spec:
                                             }
                                         }
                                     }
-                                }
-
-                                stage ("Cleanup Dev") {
-                                    agent {
-                                        kubernetes {
-                                            label 'jenkins-slave'
-                                            defaultContainer 'jnlp'
-                                        }
-                                    }
-                                    stages {
-                                        stage('Cleanup') {
-                                            steps {
-                                                gitlabCommitStatus(name: 'Cleanup Dev') {
-                                                    script {
-                                                        load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
+                                    post {
+                                        always {
+                                            stage ("Cleanup Dev") {
+                                                agent {
+                                                    kubernetes {
+                                                        label 'jenkins-slave'
+                                                        defaultContainer 'jnlp'
                                                     }
                                                 }
-                                            }
-                                        }
-                                    }
-                                    post {
-                                        aborted {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'canceled'
-                                                echo "Milvus Cleanup Dev aborted !"
-                                            }
-                                        }
-
-                                        failure {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'failed'
-                                                echo "Milvus Cleanup Dev failure !"
+                                                stages {
+                                                    gitlabCommitStatus(name: 'Cleanup Dev') {
+                                                        script {
+                                                            load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -290,38 +274,22 @@ spec:
                                             }
                                         }
                                     }
-                                }
-
-                                stage ("Cleanup Dev") {
-                                    agent {
-                                        kubernetes {
-                                            label 'jenkins-slave'
-                                            defaultContainer 'jnlp'
-                                        }
-                                    }
-                                    stages {
-                                        stage('Cleanup') {
-                                            steps {
-                                                gitlabCommitStatus(name: 'Cleanup Dev') {
-                                                    script {
-                                                        load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
+                                    post {
+                                        always {
+                                            stage ("Cleanup Dev") {
+                                                agent {
+                                                    kubernetes {
+                                                        label 'jenkins-slave'
+                                                        defaultContainer 'jnlp'
                                                     }
                                                 }
-                                            }
-                                        }
-                                    }
-                                    post {
-                                        aborted {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'canceled'
-                                                echo "Milvus Cleanup Dev aborted !"
-                                            }
-                                        }
-
-                                        failure {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'failed'
-                                                echo "Milvus Cleanup Dev failure !"
+                                                stages {
+                                                    gitlabCommitStatus(name: 'Cleanup Dev') {
+                                                        script {
+                                                            load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -375,4 +343,3 @@ spec:
         }
     }
 }
-
