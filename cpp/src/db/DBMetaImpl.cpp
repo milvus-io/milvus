@@ -674,16 +674,22 @@ Status DBMetaImpl::Archive() {
 Status DBMetaImpl::Size(uint64_t &result) {
     result = 0;
     try {
-        auto selected = ConnectorPtr->select(columns(sum(&TableFileSchema::size_)),
-                                             where(
-                                                 c(&TableFileSchema::file_type_) != (int) TableFileSchema::TO_DELETE
-                                             ));
+        auto files = ConnectorPtr->select(columns(&TableFileSchema::size_,
+                                                  &TableFileSchema::file_type_,
+                                                  &TableFileSchema::engine_type_),
+                                          where(
+                                                  c(&TableFileSchema::file_type_) != (int) TableFileSchema::TO_DELETE
+                                          ));
 
-        for (auto &sub_query : selected) {
-            if (!std::get<0>(sub_query)) {
-                continue;
+        for (auto &file : files) {
+            auto file_size = std::get<0>(file);
+            auto file_type = std::get<1>(file);
+            auto engine_type = std::get<2>(file);
+            if(file_type == (int)TableFileSchema::INDEX && engine_type == (int)EngineType::FAISS_IVFSQ8) {
+                result += (uint64_t)file_size/4;//hardcode for sq8
+            } else {
+                result += (uint64_t)file_size;
             }
-            result += (uint64_t) (*std::get<0>(sub_query));
         }
     } catch (std::exception &e) {
         return HandleException("Encounter exception when calculte db size", e);
