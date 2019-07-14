@@ -110,7 +110,7 @@ Status FaissExecutionEngine::Merge(const std::string& location) {
     if (location == location_) {
         return Status::Error("Cannot Merge Self");
     }
-    ENGINE_LOG_DEBUG << "Merge index file: " << location << " to: " << location_;
+    ENGINE_LOG_DEBUG << "Merge raw file: " << location << " to: " << location_;
 
     auto to_merge = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
     if (!to_merge) {
@@ -165,8 +165,9 @@ Status FaissExecutionEngine::Search(long n,
 }
 
 Status FaissExecutionEngine::Cache() {
-    zilliz::milvus::cache::CpuCacheMgr::GetInstance(
-            )->InsertItem(location_, std::make_shared<Index>(pIndex_));
+    auto index = std::make_shared<Index>(pIndex_);
+    cache::DataObjPtr data_obj = std::make_shared<cache::DataObj>(index, PhysicalSize());
+    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, data_obj);
 
     return Status::OK();
 }
