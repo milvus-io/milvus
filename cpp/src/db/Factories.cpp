@@ -3,10 +3,14 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
-#include <stdlib.h>
+
 #include "Factories.h"
 #include "DBImpl.h"
+#include "MemManager.h"
+#include "NewMemManager.h"
+#include "Exception.h"
 
+#include <stdlib.h>
 #include <time.h>
 #include <sstream>
 #include <iostream>
@@ -14,7 +18,9 @@
 #include <assert.h>
 #include <easylogging++.h>
 #include <regex>
-#include "Exception.h"
+#include <cstdlib>
+#include <string>
+#include <algorithm>
 
 namespace zilliz {
 namespace milvus {
@@ -72,17 +78,14 @@ std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOp
         if (dialect.find("mysql") != std::string::npos) {
             ENGINE_LOG_INFO << "Using MySQL";
             return std::make_shared<meta::MySQLMetaImpl>(meta::MySQLMetaImpl(metaOptions, mode));
-        }
-        else if (dialect.find("sqlite") != std::string::npos) {
+        } else if (dialect.find("sqlite") != std::string::npos) {
             ENGINE_LOG_INFO << "Using SQLite";
             return std::make_shared<meta::DBMetaImpl>(meta::DBMetaImpl(metaOptions));
-        }
-        else {
+        } else {
             ENGINE_LOG_ERROR << "Invalid dialect in URI: dialect = " << dialect;
             throw InvalidArgumentException("URI dialect is not mysql / sqlite");
         }
-    }
-    else {
+    } else {
         ENGINE_LOG_ERROR << "Wrong URI format: URI = " << uri;
         throw InvalidArgumentException("Wrong URI format ");
     }
@@ -96,6 +99,21 @@ std::shared_ptr<DB> DBFactory::Build() {
 
 DB* DBFactory::Build(const Options& options) {
     return new DBImpl(options);
+}
+
+MemManagerAbstractPtr MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta,
+                                               const Options& options) {
+    if (const char* env = getenv("MILVUS_USE_OLD_MEM_MANAGER")) {
+        std::string env_str = env;
+        std::transform(env_str.begin(), env_str.end(), env_str.begin(), ::toupper);
+        if (env_str == "ON") {
+            return std::make_shared<MemManager>(meta, options);
+        }
+        else {
+            return std::make_shared<NewMemManager>(meta, options);
+        }
+    }
+    return std::make_shared<NewMemManager>(meta, options);
 }
 
 } // namespace engine
