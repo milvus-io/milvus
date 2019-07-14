@@ -525,7 +525,7 @@ if(MILVUS_BOOST_VENDORED)
             ""
             ${EP_LOG_OPTIONS})
     set(Boost_INCLUDE_DIR "${BOOST_PREFIX}")
-    set(Boost_INCLUDE_DIRS "${BOOST_INCLUDE_DIR}")
+    set(Boost_INCLUDE_DIRS "${Boost_INCLUDE_DIR}")
     add_dependencies(boost_system_static boost_ep)
     add_dependencies(boost_filesystem_static boost_ep)
     add_dependencies(boost_serialization_static boost_ep)

@@ -55,7 +55,6 @@ constexpr ServerError SERVER_LICENSE_VALIDATION_FAIL = ToGlobalServerErrorCode(5
 
 constexpr ServerError DB_META_TRANSACTION_FAILED = ToGlobalServerErrorCode(1000);
 
-
 class ServerException : public std::exception {
 public:
     ServerException(ServerError error_code,

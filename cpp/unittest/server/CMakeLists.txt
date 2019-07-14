@@ -37,9 +37,9 @@ set(require_libs
         faiss
         cudart
         cublas
-        sqlite3
-        boost_system
-        boost_filesystem
+        sqlite
+        boost_system_static
+        boost_filesystem_static
         snappy
         z
         bz2

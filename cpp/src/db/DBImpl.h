@@ -9,6 +9,7 @@
 #include "MemManager.h"
 #include "Types.h"
 #include "utils/ThreadPool.h"
+#include "MemManagerAbstract.h"
 
 #include <mutex>
 #include <condition_variable>
@@ -33,7 +34,6 @@ class Meta;
 class DBImpl : public DB {
  public:
     using MetaPtr = meta::Meta::Ptr;
-    using MemManagerPtr = typename MemManager::Ptr;
 
     explicit DBImpl(const Options &options);
 
@@ -127,7 +127,7 @@ class DBImpl : public DB {
     std::thread bg_timer_thread_;
 
     MetaPtr meta_ptr_;
-    MemManagerPtr mem_mgr_;
+    MemManagerAbstractPtr mem_mgr_;
 
     server::ThreadPool compact_thread_pool_;
     std::list<std::future<void>> compact_thread_results_;
