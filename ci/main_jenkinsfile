@@ -193,19 +193,17 @@ spec:
                                     }
                                     post {
                                         always {
-                                            stages {
-                                                stage ("Cleanup Dev") {
-                                                    agent {
-                                                        kubernetes {
-                                                            label 'jenkins-slave'
-                                                            defaultContainer 'jnlp'
-                                                        }
+                                            stage ("Cleanup Dev") {
+                                                agent {
+                                                    kubernetes {
+                                                        label 'jenkins-slave'
+                                                        defaultContainer 'jnlp'
                                                     }
-                                                    stages {
-                                                        gitlabCommitStatus(name: 'Cleanup Dev') {
-                                                            script {
-                                                                load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
-                                                            }
+                                                }
+                                                stages {
+                                                    gitlabCommitStatus(name: 'Cleanup Dev') {
+                                                        script {
+                                                            load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
                                                         }
                                                     }
                                                 }
@@ -278,19 +276,17 @@ spec:
                                     }
                                     post {
                                         always {
-                                            stages {
-                                                stage ("Cleanup Dev") {
-                                                    agent {
-                                                        kubernetes {
-                                                            label 'jenkins-slave'
-                                                            defaultContainer 'jnlp'
-                                                        }
+                                            stage ("Cleanup Dev") {
+                                                agent {
+                                                    kubernetes {
+                                                        label 'jenkins-slave'
+                                                        defaultContainer 'jnlp'
                                                     }
-                                                    stages {
-                                                        gitlabCommitStatus(name: 'Cleanup Dev') {
-                                                            script {
-                                                                load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
-                                                            }
+                                                }
+                                                stages {
+                                                    gitlabCommitStatus(name: 'Cleanup Dev') {
+                                                        script {
+                                                            load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
                                                         }
                                                     }
                                                 }
