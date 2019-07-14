@@ -131,59 +131,53 @@ spec:
 
                 stage("Deploy to Development") {
                     parallel {
-                        stage("Single") {
+                        stage("Single Node") {
+                            agent {
+                                kubernetes {
+                                    label 'dev-test'
+                                    defaultContainer 'jnlp'
+                                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus
+    componet: test
+spec:
+  containers:
+  - name: milvus-testframework
+    image: registry.zilliz.com/milvus/milvus-test:v0.2
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: kubeconf
+      mountPath: /root/.kube/
+      readOnly: true
+  volumes:
+  - name: kubeconf
+    secret:
+      secretName: test-cluster-config
+"""
+                                }
+                            }
+
                             stages {
                                 stage("Deploy to Dev") {
-                                    agent {
-                                        kubernetes {
-                                            label 'jenkins-slave'
-                                            defaultContainer 'jnlp'
-                                        }
-                                    }
-                                    stages {
-                                        stage('Deploy') {
-                                            steps {
-                                                gitlabCommitStatus(name: 'Deloy to Dev') {
-                                                    script {
-                                                        load "${env.WORKSPACE}/ci/jenkinsfile/deploy2dev.groovy"
-                                                    }
+                                    steps {
+                                        gitlabCommitStatus(name: 'Deloy to Dev') {
+                                            container('milvus-testframework') {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkinsfile/deploy2dev.groovy"
                                                 }
                                             }
                                         }
                                     }
-                                    post {
-                                        aborted {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Deloy to Dev', state: 'canceled'
-                                                echo "Milvus Deloy to Dev aborted !"
-                                            }
-                                        }
-
-                                        failure {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Deloy to Dev', state: 'failed'
-                                                echo "Milvus Deloy to Dev failure !"
-                                            }
-                                        }
-                                    }
                                 }
-
                                 stage("Dev Test") {
-                                    agent {
-                                        kubernetes {
-                                            label 'test'
-                                            defaultContainer 'jnlp'
-                                            containerTemplate {
-                                                name 'milvus-testframework'
-                                                image 'registry.zilliz.com/milvus/milvus-test:v0.1'
-                                                ttyEnabled true
-                                                command 'cat'
-                                            }
-                                        }
-                                    }
-                                    stages {
-                                        stage('Test') {
-                                            steps {
+                                    steps {
+                                        gitlabCommitStatus(name: 'Deloy Test') {
+                                            container('milvus-testframework') {
                                                 script {
                                                     load "${env.WORKSPACE}/ci/jenkinsfile/dev_test.groovy"
                                                     load "${env.WORKSPACE}/ci/jenkinsfile/upload_dev_test_out.groovy"
@@ -192,138 +186,131 @@ spec:
                                         }
                                     }
                                 }
-
                                 stage ("Cleanup Dev") {
-                                    agent {
-                                        kubernetes {
-                                            label 'jenkins-slave'
-                                            defaultContainer 'jnlp'
-                                        }
-                                    }
-                                    stages {
-                                        stage('Cleanup') {
-                                            steps {
-                                                gitlabCommitStatus(name: 'Cleanup Dev') {
-                                                    script {
-                                                        load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
-                                                    }
+                                    steps {
+                                        gitlabCommitStatus(name: 'Cleanup Dev') {
+                                            container('milvus-testframework') {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
                                                 }
                                             }
                                         }
                                     }
-                                    post {
-                                        aborted {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'canceled'
-                                                echo "Milvus Cleanup Dev aborted !"
-                                            }
+                                }
+                            }
+                            post {
+                                always {
+                                    container('milvus-testframework') {
+                                        script {
+                                            load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
                                         }
-
-                                        failure {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'failed'
-                                                echo "Milvus Cleanup Dev failure !"
-                                            }
-                                        }
+                                    }
+                                }
+                                success {
+                                    script {
+                                        echo "Milvus Single Node CI/CD success !"
+                                    }
+                                }
+                                aborted {
+                                    script {
+                                        echo "Milvus Single Node CI/CD aborted !"
+                                    }
+                                }
+                                failure {
+                                    script {
+                                        echo "Milvus Single Node CI/CD failure !"
                                     }
                                 }
                             }
                         }
 
                         stage("Cluster") {
+                            agent {
+                                kubernetes {
+                                    label 'dev-test'
+                                    defaultContainer 'jnlp'
+                                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus
+    componet: test
+spec:
+  containers:
+  - name: milvus-testframework
+    image: registry.zilliz.com/milvus/milvus-test:v0.2
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: kubeconf
+      mountPath: /root/.kube/
+      readOnly: true
+  volumes:
+  - name: kubeconf
+    secret:
+      secretName: test-cluster-config
+"""
+                                }
+                            }
                             stages {
                                 stage("Deploy to Dev") {
-                                    agent {
-                                        kubernetes {
-                                            label 'jenkins-slave'
-                                            defaultContainer 'jnlp'
-                                        }
-                                    }
-                                    stages {
-                                        stage('Deploy') {
-                                            steps {
-                                                gitlabCommitStatus(name: 'Deloy to Dev') {
-                                                    script {
-                                                        load "${env.WORKSPACE}/ci/jenkinsfile/cluster_deploy2dev.groovy"
-                                                    }
+                                    steps {
+                                        gitlabCommitStatus(name: 'Deloy to Dev') {
+                                            container('milvus-testframework') {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkinsfile/cluster_deploy2dev.groovy"
                                                 }
                                             }
                                         }
                                     }
-                                    post {
-                                        aborted {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Deloy to Dev', state: 'canceled'
-                                                echo "Milvus Deloy to Dev aborted !"
-                                            }
-                                        }
-
-                                        failure {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Deloy to Dev', state: 'failed'
-                                                echo "Milvus Deloy to Dev failure !"
-                                            }
-                                        }
-                                    }
                                 }
-
                                 stage("Dev Test") {
-                                    agent {
-                                        kubernetes {
-                                            label 'test'
-                                            defaultContainer 'jnlp'
-                                            containerTemplate {
-                                                name 'milvus-testframework'
-                                                image 'registry.zilliz.com/milvus/milvus-test:v0.1'
-                                                ttyEnabled true
-                                                command 'cat'
-                                            }
-                                        }
-                                    }
-                                    stages {
-                                        stage('Test') {
-                                            steps {
+                                    steps {
+                                        gitlabCommitStatus(name: 'Deloy Test') {
+                                            container('milvus-testframework') {
                                                 script {
                                                     load "${env.WORKSPACE}/ci/jenkinsfile/cluster_dev_test.groovy"
-                                                    load "${env.WORKSPACE}/ci/jenkinsfile/upload_cluster_dev_test_out.groovy"
+                                                    load "${env.WORKSPACE}/ci/jenkinsfile/upload_dev_cluster_test_out.groovy"
                                                 }
                                             }
                                         }
                                     }
                                 }
-
                                 stage ("Cleanup Dev") {
-                                    agent {
-                                        kubernetes {
-                                            label 'jenkins-slave'
-                                            defaultContainer 'jnlp'
-                                        }
-                                    }
-                                    stages {
-                                        stage('Cleanup') {
-                                            steps {
-                                                gitlabCommitStatus(name: 'Cleanup Dev') {
-                                                    script {
-                                                        load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
-                                                    }
+                                    steps {
+                                        gitlabCommitStatus(name: 'Cleanup Dev') {
+                                            container('milvus-testframework') {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
                                                 }
                                             }
                                         }
                                     }
-                                    post {
-                                        aborted {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'canceled'
-                                                echo "Milvus Cleanup Dev aborted !"
-                                            }
+                                }
+                            }
+                            post {
+                                always {
+                                    container('milvus-testframework') {
+                                        script {
+                                            load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
                                         }
-
-                                        failure {
-                                            script {
-                                                updateGitlabCommitStatus name: 'Cleanup Dev', state: 'failed'
-                                                echo "Milvus Cleanup Dev failure !"
-                                            }
-                                        }
+                                    }
+                                }
+                                success {
+                                    script {
+                                        echo "Milvus Cluster CI/CD success !"
+                                    }
+                                }
+                                aborted {
+                                    script {
+                                        echo "Milvus Cluster CI/CD aborted !"
+                                    }
+                                }
+                                failure {
+                                    script {
+                                        echo "Milvus Cluster CI/CD failure !"
                                     }
                                 }
                             }
@@ -337,16 +324,18 @@ spec:
     post {
         always {
             script {
-                if (!currentBuild.resultIsBetterOrEqualTo('SUCCESS')) {
-                    // Send an email only if the build status has changed from green/unstable to red
-                    emailext subject: '$DEFAULT_SUBJECT',
-                    body: '$DEFAULT_CONTENT',
-                    recipientProviders: [
-                        [$class: 'DevelopersRecipientProvider'],
-                        [$class: 'RequesterRecipientProvider']
-                    ],
-                    replyTo: '$DEFAULT_REPLYTO',
-                    to: '$DEFAULT_RECIPIENTS'
+                if (env.gitlabAfter != null) {
+                    if (!currentBuild.resultIsBetterOrEqualTo('SUCCESS')) {
+                        // Send an email only if the build status has changed from green/unstable to red
+                        emailext subject: '$DEFAULT_SUBJECT',
+                        body: '$DEFAULT_CONTENT',
+                        recipientProviders: [
+                            [$class: 'DevelopersRecipientProvider'],
+                            [$class: 'RequesterRecipientProvider']
+                        ],
+                        replyTo: '$DEFAULT_REPLYTO',
+                        to: '$DEFAULT_RECIPIENTS'
+                    }
                 }
             }
         }
