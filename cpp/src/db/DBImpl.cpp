@@ -170,7 +170,10 @@ Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq,
         }
     }
 
-    return QueryAsync(table_id, file_id_array, k, nq, vectors, dates, results);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info before query
+    status = QueryAsync(table_id, file_id_array, k, nq, vectors, dates, results);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info after query
+    return status;
 }
 
 Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>& file_ids,
@@ -195,7 +198,10 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
         return Status::Error("Invalid file id");
     }
 
-    return QueryAsync(table_id, files_array, k, nq, vectors, dates, results);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info before query
+    status = QueryAsync(table_id, files_array, k, nq, vectors, dates, results);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info after query
+    return status;
 }
 
 Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
