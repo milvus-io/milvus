@@ -10,12 +10,11 @@ try {
     }
     timeout(time: 2, unit: 'MINUTES') {
         waitUntil {
-            def result = sh script: "nc -z -w 2 ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.kube-opt.svc.cluster.local 19530", returnStatus: true
+            def result = sh script: "nc -z -w 3 ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.kube-opt.svc.cluster.local 19530", returnStatus: true
             return !result
         }
     }
 } catch (exc) {
-    updateGitlabCommitStatus name: 'Deloy to Dev', state: 'failed'
     echo 'Helm running failed!'
     sh "helm del --purge ${env.JOB_NAME}-${env.BUILD_NUMBER}"
     throw exc
