@@ -487,7 +487,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
         //step 6: update meta
         table_file.file_type_ = meta::TableFileSchema::INDEX;
-        table_file.size_ = index->PhysicalSize();
+        table_file.size_ = index->Size();
 
         auto to_remove = file;
         to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
