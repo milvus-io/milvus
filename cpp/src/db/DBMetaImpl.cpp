@@ -292,6 +292,8 @@ Status DBMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) {
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_),
                                              where((c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW
                                                     or
+                                                    c(&TableFileSchema::file_type_) == (int) TableFileSchema::NEW
+                                                    or
                                                     c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_INDEX)
                                                    and c(&TableFileSchema::table_id_) == table_id
                                              ));

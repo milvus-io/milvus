@@ -18,6 +18,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-233 - Remove mem manager log
 - MS-230 - Change parameter name: Maximum_memory to insert_buffer_size
 - MS-234 - Some case cause background merge thread stop
+- MS-235 - Some test cases random fail
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
