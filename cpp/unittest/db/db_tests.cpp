@@ -52,15 +52,13 @@ TEST_F(DBTest, CONFIG_TEST) {
         engine::ArchiveConf conf("delete");
         ASSERT_EQ(conf.GetType(), "delete");
         auto criterias = conf.GetCriterias();
-        ASSERT_TRUE(criterias.size() == 1);
-        ASSERT_TRUE(criterias["disk"] == 512);
+        ASSERT_TRUE(criterias.size() == 0);
     }
     {
         engine::ArchiveConf conf("swap");
         ASSERT_EQ(conf.GetType(), "swap");
         auto criterias = conf.GetCriterias();
-        ASSERT_TRUE(criterias.size() == 1);
-        ASSERT_TRUE(criterias["disk"] == 512);
+        ASSERT_TRUE(criterias.size() == 0);
     }
     {
         ASSERT_ANY_THROW(engine::ArchiveConf conf1("swap", "disk:"));
