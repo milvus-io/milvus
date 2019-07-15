@@ -40,6 +40,12 @@ RequestHandler::DeleteTable(const std::string &table_name) {
 }
 
 void
+RequestHandler::BuildIndex(const std::string &table_name) {
+    BaseTaskPtr task_ptr = BuildIndexTask::Create(table_name);
+    RequestScheduler::ExecTask(task_ptr);
+}
+
+void
 RequestHandler::AddVector(std::vector<int64_t> &_return,
                           const std::string &table_name,
                           const std::vector<thrift::RowRecord> &record_array) {

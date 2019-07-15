@@ -5,6 +5,7 @@
  ******************************************************************************/
 #include "FaissExecutionEngine.h"
 #include "Log.h"
+#include "utils/CommonUtil.h"
 
 #include <faiss/AutoTune.h>
 #include <faiss/MetaIndexes.h>
@@ -21,15 +22,25 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+namespace {
+std::string GetMetricType() {
+    server::ServerConfig &config = server::ServerConfig::GetInstance();
+    server::ConfigNode engine_config = config.GetConfig(server::CONFIG_ENGINE);
+    return engine_config.GetValue(server::CONFIG_METRICTYPE, "L2");
+}
+}
 
 FaissExecutionEngine::FaissExecutionEngine(uint16_t dimension,
         const std::string& location,
         const std::string& build_index_type,
         const std::string& raw_index_type)
-    : pIndex_(faiss::index_factory(dimension, raw_index_type.c_str())),
-      location_(location),
+    : location_(location),
       build_index_type_(build_index_type),
       raw_index_type_(raw_index_type) {
+
+    std::string metric_type = GetMetricType();
+    faiss::MetricType faiss_metric_type = (metric_type == "L2") ? faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+    pIndex_.reset(faiss::index_factory(dimension, raw_index_type.c_str(), faiss_metric_type));
 }
 
 FaissExecutionEngine::FaissExecutionEngine(std::shared_ptr<faiss::Index> index,
@@ -60,7 +71,7 @@ size_t FaissExecutionEngine::Dimension() const {
 }
 
 size_t FaissExecutionEngine::PhysicalSize() const {
-    return (size_t)(Count() * pIndex_->d)*sizeof(float);
+    return server::CommonUtil::GetFileSize(location_);
 }
 
 Status FaissExecutionEngine::Serialize() {
@@ -118,6 +129,7 @@ FaissExecutionEngine::BuildIndex(const std::string& location) {
     auto opd = std::make_shared<Operand>();
     opd->d = pIndex_->d;
     opd->index_type = build_index_type_;
+    opd->metric_type = GetMetricType();
     IndexBuilderPtr pBuilder = GetIndexBuilder(opd);
 
     auto from_index = dynamic_cast<faiss::IndexIDMap*>(pIndex_.get());
@@ -161,14 +173,16 @@ Status FaissExecutionEngine::Cache() {
 
 Status FaissExecutionEngine::Init() {
 
-    if(build_index_type_ == "IVF") {
+    if(build_index_type_ == BUILD_INDEX_TYPE_IVF ||
+        build_index_type_ == BUILD_INDEX_TYPE_IVFSQ8) {
 
         using namespace zilliz::milvus::server;
         ServerConfig &config = ServerConfig::GetInstance();
         ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
         nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1000);
+        nlist_ = engine_config.GetInt32Value(CONFIG_NLIST,16384);
 
-    } else if(build_index_type_ == "IDMap") {
+    } else if(build_index_type_ == BUILD_INDEX_TYPE_IDMAP) {
         ;
     } else {
         return Status::Error("Wrong index type: ", build_index_type_);

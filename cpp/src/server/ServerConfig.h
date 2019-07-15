@@ -23,9 +23,11 @@ static const std::string CONFIG_CLUSTER_MODE = "mode";
 static const std::string CONFIG_DB = "db_config";
 static const std::string CONFIG_DB_URL = "db_backend_url";
 static const std::string CONFIG_DB_PATH = "db_path";
+static const std::string CONFIG_DB_SLAVE_PATH = "db_slave_path";
 static const std::string CONFIG_DB_INDEX_TRIGGER_SIZE = "index_building_threshold";
 static const std::string CONFIG_DB_ARCHIVE_DISK = "archive_disk_threshold";
 static const std::string CONFIG_DB_ARCHIVE_DAYS = "archive_days_threshold";
+static const std::string CONFIG_MAXMIMUM_MEMORY = "maximum_memory";
 
 static const std::string CONFIG_LOG = "log_config";
 
@@ -44,6 +46,9 @@ static const std::string CONFIG_METRIC_PROMETHEUS_PORT = "port";
 
 static const std::string CONFIG_ENGINE = "engine_config";
 static const std::string CONFIG_NPROBE = "nprobe";
+static const std::string CONFIG_NLIST = "nlist";
+static const std::string CONFIG_DCBT = "use_blas_threshold";
+static const std::string CONFIG_METRICTYPE = "metric_type";
 
 class ServerConfig {
  public:

@@ -8,6 +8,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
 #include "DBWrapper.h"
 #include "version.h"
 
@@ -30,6 +31,7 @@ namespace {
                 {0, engine::EngineType::INVALID},
                 {1, engine::EngineType::FAISS_IDMAP},
                 {2, engine::EngineType::FAISS_IVFFLAT},
+                {3, engine::EngineType::FAISS_IVFSQ8},
         };
 
         if(map_type.find(type) == map_type.end()) {
@@ -44,6 +46,7 @@ namespace {
                 {engine::EngineType::INVALID, 0},
                 {engine::EngineType::FAISS_IDMAP, 1},
                 {engine::EngineType::FAISS_IVFFLAT, 2},
+                {engine::EngineType::FAISS_IVFSQ8, 3},
         };
 
         if(map_type.find(type) == map_type.end()) {
@@ -108,7 +111,13 @@ namespace {
             }
 
             long days = (tt_end > tt_start) ? (tt_end - tt_start)/DAY_SECONDS : (tt_start - tt_end)/DAY_SECONDS;
-            for(long i = 0; i <= days; i++) {
+            if(days == 0) {
+                error_code = SERVER_INVALID_TIME_RANGE;
+                error_msg = "Invalid time range: " + range.start_value + " to " + range.end_value;
+                return ;
+            }
+
+            for(long i = 0; i < days; i++) {
                 time_t tt_day = tt_start + DAY_SECONDS*i;
                 tm tm_day;
                 CommonUtil::ConvertTime(tt_day, tm_day);
@@ -133,19 +142,23 @@ BaseTaskPtr CreateTableTask::Create(const thrift::TableSchema& schema) {
 
 ServerError CreateTableTask::OnExecute() {
     TimeRecorder rc("CreateTableTask");
-    
+
     try {
         //step 1: check arguments
-        if(schema_.table_name.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
-        }
-        if(schema_.dimension <= 0) {
-            return SetError(SERVER_INVALID_TABLE_DIMENSION, "Invalid table dimension: " + std::to_string(schema_.dimension));
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(schema_.table_name);
+        if(res != SERVER_SUCCESS) {
+            return res;
         }
 
-        engine::EngineType engine_type = EngineType(schema_.index_type);
-        if(engine_type == engine::EngineType::INVALID) {
-            return SetError(SERVER_INVALID_INDEX_TYPE, "Invalid index type: " + std::to_string(schema_.index_type));
+        res = ValidateTableDimension(schema_.dimension);
+        if(res != SERVER_SUCCESS) {
+            return res;
+        }
+
+        res = ValidateTableIndexType(schema_.index_type);
+        if(res != SERVER_SUCCESS) {
+            return res;
         }
 
         //step 2: construct table schema
@@ -187,8 +200,10 @@ ServerError DescribeTableTask::OnExecute() {
 
     try {
         //step 1: check arguments
-        if(table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return res;
         }
 
         //step 2: get table info
@@ -214,6 +229,39 @@ ServerError DescribeTableTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+BuildIndexTask::BuildIndexTask(const std::string& table_name)
+    : BaseTask(DDL_DML_TASK_GROUP),
+      table_name_(table_name) {
+}
+
+BaseTaskPtr BuildIndexTask::Create(const std::string& table_name) {
+    return std::shared_ptr<BaseTask>(new BuildIndexTask(table_name));
+}
+
+ServerError BuildIndexTask::OnExecute() {
+    try {
+        TimeRecorder rc("BuildIndexTask");
+
+        //step 1: check arguments
+        if(table_name_.empty()) {
+            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        }
+
+        //step 2: check table existence
+        engine::Status stat = DBWrapper::DB()->BuildIndex(table_name_);
+        if(!stat.ok()) {
+            return SetError(SERVER_BUILD_INDEX_ERROR, "Engine failed: " + stat.ToString());
+        }
+
+        rc.Elapse("totally cost");
+    } catch (std::exception& ex) {
+        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
+
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 HasTableTask::HasTableTask(const std::string& table_name, bool& has_table)
     : BaseTask(DDL_DML_TASK_GROUP),
       table_name_(table_name),
@@ -230,10 +278,11 @@ ServerError HasTableTask::OnExecute() {
         TimeRecorder rc("HasTableTask");
 
         //step 1: check arguments
-        if(table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return res;
         }
-
         //step 2: check table existence
         engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table_);
         if(!stat.ok()) {
@@ -264,8 +313,10 @@ ServerError DeleteTableTask::OnExecute() {
         TimeRecorder rc("DeleteTableTask");
 
         //step 1: check arguments
-        if (table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return res;
         }
 
         //step 2: check table existence
@@ -290,7 +341,7 @@ ServerError DeleteTableTask::OnExecute() {
         }
 
         rc.Record("deleta table");
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -346,8 +397,10 @@ ServerError AddVectorTask::OnExecute() {
         TimeRecorder rc("AddVectorTask");
 
         //step 1: check arguments
-        if (table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return res;
         }
 
         if(record_array_.empty()) {
@@ -394,7 +447,7 @@ ServerError AddVectorTask::OnExecute() {
         }
 
         rc.Record("do insert");
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
@@ -435,8 +488,10 @@ ServerError SearchVectorTask::OnExecute() {
         TimeRecorder rc("SearchVectorTask");
 
         //step 1: check arguments
-        if (table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return res;
         }
 
         if(top_k_ <= 0) {
@@ -522,7 +577,7 @@ ServerError SearchVectorTask::OnExecute() {
             result_array_.emplace_back(thrift_topk_result);
         }
         rc.Record("construct result");
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
@@ -548,8 +603,10 @@ ServerError GetTableRowCountTask::OnExecute() {
         TimeRecorder rc("GetTableRowCountTask");
 
         //step 1: check arguments
-        if (table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return res;
         }
 
         //step 2: get row count
@@ -561,7 +618,7 @@ ServerError GetTableRowCountTask::OnExecute() {
 
         row_count_ = (int64_t) row_count;
 
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());

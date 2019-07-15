@@ -27,10 +27,12 @@ public:
 
     static Status MergeResult(SearchContext::Id2DistanceMap &distance_src,
                               SearchContext::Id2DistanceMap &distance_target,
-                              uint64_t topk);
+                              uint64_t topk,
+                              bool ascending);
 
     static Status TopkResult(SearchContext::ResultSet &result_src,
                              uint64_t topk,
+                             bool ascending,
                              SearchContext::ResultSet &result_target);
 
 public:
@@ -38,6 +40,7 @@ public:
     int index_type_ = 0; //for metrics
     ExecutionEnginePtr index_engine_;
     std::vector<SearchContextPtr> search_contexts_;
+    bool metric_l2 = true;
 };
 
 using SearchTaskPtr = std::shared_ptr<SearchTask>;

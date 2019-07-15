@@ -15,6 +15,9 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+const static std::string BUILD_INDEX_TYPE_IDMAP = "IDMap";
+const static std::string BUILD_INDEX_TYPE_IVF = "IVF";
+const static std::string BUILD_INDEX_TYPE_IVFSQ8 = "IVFSQ8";
 
 class FaissExecutionEngine : public ExecutionEngine {
 public:
@@ -65,6 +68,7 @@ protected:
     std::string raw_index_type_;
 
     size_t nprobe_ = 0;
+    size_t nlist_ = 0;
 };
 
 

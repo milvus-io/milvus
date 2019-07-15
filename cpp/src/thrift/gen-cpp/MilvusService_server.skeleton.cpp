@@ -66,6 +66,21 @@ class MilvusServiceHandler : virtual public MilvusServiceIf {
   }
 
   /**
+   * @brief Build index by table method
+   * 
+   * This method is used to build index by table in sync mode.
+   * 
+   * @param table_name, table is going to be built index.
+   * 
+   * 
+   * @param table_name
+   */
+  void BuildIndex(const std::string& table_name) {
+    // Your implementation goes here
+    printf("BuildIndex\n");
+  }
+
+  /**
    * @brief Add vector array to table
    * 
    * This method is used to add vector array to table.

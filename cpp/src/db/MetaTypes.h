@@ -31,7 +31,6 @@ struct TableSchema {
     int state_ = (int)NORMAL;
     size_t files_cnt_ = 0;
     uint16_t dimension_ = 0;
-    std::string location_;
     long created_on_ = 0;
     int engine_type_ = (int)EngineType::FAISS_IDMAP;
     bool store_raw_data_ = false;

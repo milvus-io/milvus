@@ -9,6 +9,7 @@
 #include "MemManager.h"
 #include "Types.h"
 #include "utils/ThreadPool.h"
+#include "MemManagerAbstract.h"
 
 #include <mutex>
 #include <condition_variable>
@@ -33,7 +34,6 @@ class Meta;
 class DBImpl : public DB {
  public:
     using MetaPtr = meta::Meta::Ptr;
-    using MemManagerPtr = typename MemManager::Ptr;
 
     explicit DBImpl(const Options &options);
 
@@ -82,6 +82,8 @@ class DBImpl : public DB {
 
     Status Size(uint64_t &result) override;
 
+    Status BuildIndex(const std::string& table_id) override;
+
     ~DBImpl() override;
 
  private:
@@ -107,9 +109,11 @@ class DBImpl : public DB {
     Status BackgroundMergeFiles(const std::string &table_id);
     void BackgroundCompaction(std::set<std::string> table_ids);
 
-    void StartBuildIndexTask();
+    void StartBuildIndexTask(bool force=false);
     void BackgroundBuildIndex();
 
+    Status
+    BuildIndexByTable(const std::string& table_id);
     Status
     BuildIndex(const meta::TableFileSchema &);
 
@@ -123,7 +127,7 @@ class DBImpl : public DB {
     std::thread bg_timer_thread_;
 
     MetaPtr meta_ptr_;
-    MemManagerPtr mem_mgr_;
+    MemManagerAbstractPtr mem_mgr_;
 
     server::ThreadPool compact_thread_pool_;
     std::list<std::future<void>> compact_thread_results_;
@@ -131,6 +135,8 @@ class DBImpl : public DB {
 
     server::ThreadPool index_thread_pool_;
     std::list<std::future<void>> index_thread_results_;
+
+    std::mutex build_index_mutex_;
 
 }; // DBImpl
 

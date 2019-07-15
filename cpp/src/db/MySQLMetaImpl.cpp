@@ -67,26 +67,6 @@ namespace meta {
 
     }
 
-    std::string MySQLMetaImpl::GetTablePath(const std::string &table_id) {
-        return options_.path + "/tables/" + table_id;
-    }
-
-    std::string MySQLMetaImpl::GetTableDatePartitionPath(const std::string &table_id, DateT &date) {
-        std::stringstream ss;
-        ss << GetTablePath(table_id) << "/" << date;
-        return ss.str();
-    }
-
-    void MySQLMetaImpl::GetTableFilePath(TableFileSchema &group_file) {
-        if (group_file.date_ == EmptyDate) {
-            group_file.date_ = Meta::GetDate();
-        }
-        std::stringstream ss;
-        ss << GetTableDatePartitionPath(group_file.table_id_, group_file.date_)
-           << "/" << group_file.file_id_;
-        group_file.location_ = ss.str();
-    }
-
     Status MySQLMetaImpl::NextTableId(std::string &table_id) {
         std::stringstream ss;
         SimpleIDGenerator g;
@@ -412,15 +392,8 @@ namespace meta {
 //        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
 //        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
 
-            auto table_path = GetTablePath(table_schema.table_id_);
-            table_schema.location_ = table_path;
-            if (!boost::filesystem::is_directory(table_path)) {
-                auto ret = boost::filesystem::create_directories(table_path);
-                if (!ret) {
-                    ENGINE_LOG_ERROR << "Create directory " << table_path << " Error";
-                    return Status::Error("Failed to create table path");
-                }
-            }
+            return utils::CreateTablePath(options_, table_schema.table_id_);
+
         } catch (const BadQuery& er) {
             // Handle any query errors
             ENGINE_LOG_ERROR << "QUERY ERROR WHEN ADDING TABLE" << ": " << er.what();
@@ -433,6 +406,11 @@ namespace meta {
             return HandleException("Encounter exception when create table", e);
         }
 
+        return Status::OK();
+    }
+
+    Status MySQLMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) {
+        // TODO
         return Status::OK();
     }
 
@@ -582,9 +560,6 @@ namespace meta {
             else {
                 return Status::NotFound("Table " + table_schema.table_id_ + " not found");
             }
-
-            auto table_path = GetTablePath(table_schema.table_id_);
-            table_schema.location_ = table_path;
 
         } catch (const BadQuery& er) {
             // Handle any query errors
@@ -738,7 +713,7 @@ namespace meta {
             file_schema.created_on_ = utils::GetMicroSecTimeStamp();
             file_schema.updated_time_ = file_schema.created_on_;
             file_schema.engine_type_ = table_schema.engine_type_;
-            GetTableFilePath(file_schema);
+            utils::GetTableFilePath(options_, file_schema);
 
             std::string id = "NULL"; //auto-increment
             std::string table_id = file_schema.table_id_;
@@ -783,15 +758,7 @@ namespace meta {
                 }
             } // Scoped Connection
 
-            auto partition_path = GetTableDatePartitionPath(file_schema.table_id_, file_schema.date_);
-
-            if (!boost::filesystem::is_directory(partition_path)) {
-                auto ret = boost::filesystem::create_directory(partition_path);
-                if (!ret) {
-                    ENGINE_LOG_ERROR << "Create directory " << partition_path << " Error";
-                    return Status::DBTransactionError("Failed to create partition directory");
-                }
-            }
+            return utils::CreateTableFilePath(options_, file_schema);
 
         } catch (const BadQuery& er) {
             // Handle any query errors
@@ -876,7 +843,7 @@ namespace meta {
                 }
                 table_file.dimension_ = groups[table_file.table_id_].dimension_;
 
-                GetTableFilePath(table_file);
+                utils::GetTableFilePath(options_, table_file);
 
                 files.push_back(table_file);
             }
@@ -987,7 +954,7 @@ namespace meta {
 
                 table_file.dimension_ = table_schema.dimension_;
 
-                GetTableFilePath(table_file);
+                utils::GetTableFilePath(options_, table_file);
 
                 auto dateItr = files.find(table_file.date_);
                 if (dateItr == files.end()) {
@@ -1073,7 +1040,7 @@ namespace meta {
 
                 table_file.dimension_ = table_schema.dimension_;
 
-                GetTableFilePath(table_file);
+                utils::GetTableFilePath(options_, table_file);
 
                 auto dateItr = files.find(table_file.date_);
                 if (dateItr == files.end()) {
@@ -1168,7 +1135,7 @@ namespace meta {
 
                 file_schema.dimension_ = table_schema.dimension_;
 
-                GetTableFilePath(file_schema);
+                utils::GetTableFilePath(options_, file_schema);
 
                 table_files.emplace_back(file_schema);
             }
@@ -1479,6 +1446,11 @@ namespace meta {
         return Status::OK();
     }
 
+    Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
+        // TODO
+        return Status::OK();
+    }
+
     Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
 
 //        std::lock_guard<std::recursive_mutex> lock(mysql_mutex);
@@ -1623,11 +1595,10 @@ namespace meta {
 
                     table_file.date_ = resRow["date"];
 
-                    GetTableFilePath(table_file);
+                    utils::DeleteTableFilePath(options_, table_file);
 
                     ENGINE_LOG_DEBUG << "Removing deleted id =" << table_file.id_ << " location = "
                                      << table_file.location_ << std::endl;
-                    boost::filesystem::remove(table_file.location_);
 
                     idsToDelete.emplace_back(std::to_string(table_file.id_));
                 }
@@ -1700,10 +1671,7 @@ namespace meta {
                         std::string table_id;
                         resRow["table_id"].to_string(table_id);
 
-                        auto table_path = GetTablePath(table_id);
-
-                        ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
-                        boost::filesystem::remove_all(table_path);
+                        utils::DeleteTablePath(options_, table_id);
 
                         idsToDeleteSS << "id = " << std::to_string(id) << " OR ";
                     }
