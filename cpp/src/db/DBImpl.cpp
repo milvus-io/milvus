@@ -395,7 +395,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     for (auto& table_id : table_ids) {
         status = BackgroundMergeFiles(table_id);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "BGERROR found during merge files!";
+            ENGINE_LOG_ERROR << "BGERROR found during merge files: " << status.ToString();
             bg_error_ = status;
             return;
         }
@@ -540,7 +540,7 @@ void DBImpl::BackgroundBuildIndex() {
     for (auto& file : to_index_files) {
         status = BuildIndex(file);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "BGERROR found during build index!";
+            ENGINE_LOG_ERROR << "BGERROR found during build index: " << status.ToString();
             bg_error_ = status;
             return;
         }
