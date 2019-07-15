@@ -16,8 +16,8 @@ db_config:
   index_building_threshold: 1024   # index building trigger threshold, default: 1024, unit: MB
   archive_disk_threshold: 0        # triger archive action if storage size exceed this value, 0 means no limit, unit: GB
   archive_days_threshold: 0        # files older than x days will be archived, 0 means no limit, unit: day
-  maximum_memory: 4                # maximum memory allowed, default: 4, unit: GB, should be at least 1 GB.
-                                   # the sum of maximum_memory and cpu_cache_capacity should be less than total memory
+  insert_buffer_size: 4            # maximum insert buffer size allowed, default: 4, unit: GB, should be at least 1 GB.
+                                   # the sum of insert_buffer_size and cpu_cache_capacity should be less than total memory
 
 metric_config:
   is_startup: off      # if monitoring start: on, off
