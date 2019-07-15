@@ -12,6 +12,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-153 - fix c_str error when connecting to MySQL
 - MS-157 - fix changelog
 - MS-190 - use env variable to switch mem manager and fix cmake
+- MS-224 - Return AlreadyExist status in MySQLMetaImpl::CreateTable if table already exists
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
@@ -22,10 +23,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-212 - Support Inner product metric type
 
 ## New Feature
-- MS-195 - Add nlist and use_blas_threshold conf
-
-## New Feature
 - MS-180 - Add new mem manager
+- MS-195 - Add nlist and use_blas_threshold conf
 
 ## Task
 
