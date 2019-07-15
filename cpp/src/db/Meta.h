@@ -39,6 +39,8 @@ public:
             const std::vector<size_t>& ids,
             TableFilesSchema& table_files) = 0;
 
+    virtual Status UpdateTableFilesToIndex(const std::string& table_id) = 0;
+
     virtual Status UpdateTableFile(TableFileSchema& file_schema) = 0;
 
     virtual Status UpdateTableFiles(TableFilesSchema& files) = 0;
@@ -55,6 +57,8 @@ public:
     virtual Status Archive() = 0;
 
     virtual Status FilesToIndex(TableFilesSchema&) = 0;
+
+    virtual Status HasNonIndexFiles(const std::string& table_id, bool& has) = 0;
 
     virtual Status CleanUp() = 0;
     virtual Status CleanUpFilesWithTTL(uint16_t) = 0;

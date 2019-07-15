@@ -38,7 +38,7 @@ TEST_F(MetaTest, TABLE_TEST) {
 
     table.table_id_ = table_id;
     status = impl_->CreateTable(table);
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(status.IsAlreadyExist());
 
     table.table_id_ = "";
     status = impl_->CreateTable(table);

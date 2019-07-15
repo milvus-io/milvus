@@ -27,6 +27,10 @@ void StringHelpFunctions::TrimStringQuote(std::string &string, const std::string
 ServerError StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
                                                         const std::string &delimeter,
                                                         std::vector<std::string> &result) {
+    if(str.empty()) {
+        return SERVER_SUCCESS;
+    }
+
     size_t last = 0;
     size_t index = str.find_first_of(delimeter, last);
     while (index != std::string::npos) {
