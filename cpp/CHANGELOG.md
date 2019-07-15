@@ -17,6 +17,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-232 - Add MySQLMetaImpl::UpdateTableFilesToIndex and set maximum_memory to default if config value = 0
 - MS-233 - Remove mem manager log
 - MS-230 - Change parameter name: Maximum_memory to insert_buffer_size
+- MS-234 - Some case cause background merge thread stop
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions

@@ -89,6 +89,7 @@ DBImpl::DBImpl(const Options& options)
     meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
     if (options.mode != Options::MODE::READ_ONLY) {
+        ENGINE_LOG_INFO << "StartTimerTasks";
         StartTimerTasks();
     }
 }
@@ -389,10 +390,6 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
-//    static int b_count = 0;
-//    b_count++;
-//    std::cout << "BackgroundCompaction: " << b_count << std::endl;
-
     Status status;
     for (auto& table_id : table_ids) {
         status = BackgroundMergeFiles(table_id);
@@ -407,7 +404,6 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     int ttl = 1;
     if (options_.mode == Options::MODE::CLUSTER) {
         ttl = meta::D_SEC;
-//        ENGINE_LOG_DEBUG << "Server mode is cluster. Clean up files with ttl = " << std::to_string(ttl) << "seconds.";
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
 }
@@ -540,7 +536,6 @@ void DBImpl::BackgroundBuildIndex() {
     meta_ptr_->FilesToIndex(to_index_files);
     Status status;
     for (auto& file : to_index_files) {
-        /* ENGINE_LOG_DEBUG << "Buiding index for " << file.location; */
         status = BuildIndex(file);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
@@ -551,7 +546,6 @@ void DBImpl::BackgroundBuildIndex() {
             break;
         }
     }
-    /* ENGINE_LOG_DEBUG << "All Buiding index Done"; */
 }
 
 Status DBImpl::DropAll() {
