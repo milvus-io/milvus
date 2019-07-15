@@ -14,6 +14,7 @@
 #include "db/Options.h"
 #include "db/DBMetaImpl.h"
 #include "db/EngineFactory.h"
+#include "db/Utils.h"
 
 #include <vector>
 
@@ -134,4 +135,32 @@ TEST(DBMiscTest, META_TEST) {
     int delta = 10;
     engine::meta::DateT dt = impl.GetDate(tt, delta);
     ASSERT_GT(dt, 0);
+}
+
+TEST(DBMiscTest, UTILS_TEST) {
+    engine::DBMetaOptions options;
+    options.path = "/tmp/milvus_test/main";
+    options.slave_paths.push_back("/tmp/milvus_test/slave_1");
+    options.slave_paths.push_back("/tmp/milvus_test/slave_2");
+
+    const std::string TABLE_NAME = "test_tbl";
+    auto status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(boost::filesystem::exists(options.path));
+    for(auto& path : options.slave_paths) {
+       ASSERT_TRUE(boost::filesystem::exists(path));
+    }
+
+    engine::meta::TableFileSchema file;
+    file.id_ = 50;
+    file.table_id_ = TABLE_NAME;
+    file.file_type_ = 3;
+    file.date_ = 155000;
+    status = engine::utils::GetTableFilePath(options, file);
+    ASSERT_FALSE(status.ok());
+    ASSERT_TRUE(file.location_.empty());
+
+    status = engine::utils::DeleteTablePath(options, TABLE_NAME);
+    ASSERT_TRUE(status.ok());
+
 }
