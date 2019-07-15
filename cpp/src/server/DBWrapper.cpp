@@ -28,11 +28,11 @@ DBWrapper::DBWrapper() {
     if(index_size > 0) {//ensure larger than zero, unit is MB
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
-    float maximum_memory = config.GetFloatValue(CONFIG_MAXMIMUM_MEMORY);
+    int64_t maximum_memory = config.GetInt64Value(CONFIG_MAXMIMUM_MEMORY);
     if (maximum_memory > 1.0) {
         opt.maximum_memory = maximum_memory * engine::ONE_GB;
     }
-    else {
+    else if (maximum_memory != 0) { //if maximum_memory = 0, set it to default
         std::cout << "ERROR: maximum_memory should be at least 1 GB" << std::endl;
         kill(0, SIGUSR1);
     }
