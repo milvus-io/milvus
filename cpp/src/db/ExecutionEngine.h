@@ -19,6 +19,7 @@ enum class EngineType {
     FAISS_IDMAP = 1,
     FAISS_IVFFLAT,
     FAISS_IVFSQ8,
+    MAX_VALUE = FAISS_IVFSQ8,
 };
 
 class ExecutionEngine {
