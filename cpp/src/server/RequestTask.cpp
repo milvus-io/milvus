@@ -148,17 +148,17 @@ ServerError CreateTableTask::OnExecute() {
         ServerError res = SERVER_SUCCESS;
         res = ValidateTableName(schema_.table_name);
         if(res != SERVER_SUCCESS) {
-            return res;
+            return SetError(res, "Invalid table name: " + schema_.table_name);
         }
 
         res = ValidateTableDimension(schema_.dimension);
         if(res != SERVER_SUCCESS) {
-            return res;
+            return SetError(res, "Invalid table dimension: " + std::to_string(schema_.dimension));
         }
 
         res = ValidateTableIndexType(schema_.index_type);
         if(res != SERVER_SUCCESS) {
-            return res;
+            return SetError(res, "Invalid index type: " + std::to_string(schema_.index_type));
         }
 
         //step 2: construct table schema
@@ -203,7 +203,7 @@ ServerError DescribeTableTask::OnExecute() {
         ServerError res = SERVER_SUCCESS;
         res = ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
-            return res;
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         //step 2: get table info
@@ -243,12 +243,20 @@ ServerError BuildIndexTask::OnExecute() {
         TimeRecorder rc("BuildIndexTask");
 
         //step 1: check arguments
-        if(table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
+        }
+
+        bool has_table = false;
+        engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table);
+        if(!has_table) {
+            return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
         }
 
         //step 2: check table existence
-        engine::Status stat = DBWrapper::DB()->BuildIndex(table_name_);
+        stat = DBWrapper::DB()->BuildIndex(table_name_);
         if(!stat.ok()) {
             return SetError(SERVER_BUILD_INDEX_ERROR, "Engine failed: " + stat.ToString());
         }
@@ -281,8 +289,9 @@ ServerError HasTableTask::OnExecute() {
         ServerError res = SERVER_SUCCESS;
         res = ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
-            return res;
+            return SetError(res, "Invalid table name: " + table_name_);
         }
+        
         //step 2: check table existence
         engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table_);
         if(!stat.ok()) {
@@ -316,7 +325,7 @@ ServerError DeleteTableTask::OnExecute() {
         ServerError res = SERVER_SUCCESS;
         res = ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
-            return res;
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         //step 2: check table existence
@@ -400,7 +409,7 @@ ServerError AddVectorTask::OnExecute() {
         ServerError res = SERVER_SUCCESS;
         res = ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
-            return res;
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         if(record_array_.empty()) {
@@ -491,7 +500,7 @@ ServerError SearchVectorTask::OnExecute() {
         ServerError res = SERVER_SUCCESS;
         res = ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
-            return res;
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         if(top_k_ <= 0) {
@@ -606,7 +615,7 @@ ServerError GetTableRowCountTask::OnExecute() {
         ServerError res = SERVER_SUCCESS;
         res = ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
-            return res;
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         //step 2: get row count
