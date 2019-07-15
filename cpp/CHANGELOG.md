@@ -9,13 +9,14 @@ Please mark all change in change log and use the ticket from JIRA.
 
 - MS-148 - Disable cleanup if mode is read only
 - MS-149 - Fixed searching only one index file issue in distributed mode
-- MS-153 - fix c_str error when connecting to MySQL
-- MS-157 - fix changelog
-- MS-190 - use env variable to switch mem manager and fix cmake
+- MS-153 - Fix c_str error when connecting to MySQL
+- MS-157 - Fix changelog
+- MS-190 - Use env variable to switch mem manager and fix cmake
 - MS-217 - Fix SQ8 row count bug
 - MS-224 - Return AlreadyExist status in MySQLMetaImpl::CreateTable if table already exists
-- MS-232 - add MySQLMetaImpl::UpdateTableFilesToIndex and set maximum_memory to default if config value = 0
-- MS-233 - remove mem manager log
+- MS-232 - Add MySQLMetaImpl::UpdateTableFilesToIndex and set maximum_memory to default if config value = 0
+- MS-233 - Remove mem manager log
+- MS-230 - Change parameter name: Maximum_memory to insert_buffer_size
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
