@@ -87,8 +87,7 @@ DBImpl::DBImpl(const Options& options)
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
     meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
-    mem_mgr_ = std::make_shared<MemManager>(meta_ptr_, options_);
-    // mem_mgr_ = (MemManagerPtr)(new MemManager(meta_ptr_, options_));
+    mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
     if (options.mode != Options::MODE::READ_ONLY) {
         StartTimerTasks();
     }
@@ -408,10 +407,10 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     meta_ptr_->CleanUpFilesWithTTL(ttl);
 }
 
-void DBImpl::StartBuildIndexTask() {
+void DBImpl::StartBuildIndexTask(bool force) {
     static uint64_t index_clock_tick = 0;
     index_clock_tick++;
-    if(index_clock_tick%INDEX_ACTION_INTERVAL != 0) {
+    if(!force && (index_clock_tick%INDEX_ACTION_INTERVAL != 0)) {
         return;
     }
 
@@ -430,6 +429,23 @@ void DBImpl::StartBuildIndexTask() {
     }
 }
 
+Status DBImpl::BuildIndex(const std::string& table_id) {
+    bool has = false;
+    meta_ptr_->HasNonIndexFiles(table_id, has);
+    int times = 1;
+
+    while (has) {
+        ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
+        meta_ptr_->UpdateTableFilesToIndex(table_id);
+        /* StartBuildIndexTask(true); */
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10*1000, times*100)));
+        meta_ptr_->HasNonIndexFiles(table_id, has);
+        times++;
+    }
+    return Status::OK();
+    /* return BuildIndexByTable(table_id); */
+}
+
 Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
     ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
     if(to_index == nullptr) {
@@ -444,6 +460,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         meta::TableFileSchema table_file;
         table_file.table_id_ = file.table_id_;
         table_file.date_ = file.date_;
+        table_file.file_type_ = meta::TableFileSchema::INDEX; //for multi-db-path, distribute index file averagely to each path
         Status status = meta_ptr_->CreateTableFile(table_file);
         if (!status.ok()) {
             return status;
@@ -469,7 +486,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
         //step 6: update meta
         table_file.file_type_ = meta::TableFileSchema::INDEX;
-        table_file.size_ = index->Size();
+        table_file.size_ = index->PhysicalSize();
 
         auto to_remove = file;
         to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
@@ -485,13 +502,35 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         //index->Cache();
 
     } catch (std::exception& ex) {
-        return Status::Error("Build index encounter exception", ex.what());
+        std::string msg = "Build index encounter exception" + std::string(ex.what());
+        ENGINE_LOG_ERROR << msg;
+        return Status::Error(msg);
     }
 
     return Status::OK();
 }
 
+Status DBImpl::BuildIndexByTable(const std::string& table_id) {
+    std::unique_lock<std::mutex> lock(build_index_mutex_);
+    meta::TableFilesSchema to_index_files;
+    meta_ptr_->FilesToIndex(to_index_files);
+
+    Status status;
+
+    for (auto& file : to_index_files) {
+        status = BuildIndex(file);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
+            return status;
+        }
+        ENGINE_LOG_DEBUG << "Sync building index for " << file.id_ << " passed";
+    }
+
+    return status;
+}
+
 void DBImpl::BackgroundBuildIndex() {
+    std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
     meta_ptr_->FilesToIndex(to_index_files);
     Status status;

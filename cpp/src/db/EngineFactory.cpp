@@ -22,13 +22,19 @@ EngineFactory::Build(uint16_t dimension,
     switch (type) {
         case EngineType::FAISS_IDMAP: {
             execution_engine_ptr =
-                ExecutionEnginePtr(new FaissExecutionEngine(dimension, location, "IDMap", "IDMap,Flat"));
+                ExecutionEnginePtr(new FaissExecutionEngine(dimension, location, BUILD_INDEX_TYPE_IDMAP, "IDMap,Flat"));
             break;
         }
 
         case EngineType::FAISS_IVFFLAT: {
             execution_engine_ptr =
-                ExecutionEnginePtr(new FaissExecutionEngine(dimension, location, "IVF", "IDMap,Flat"));
+                ExecutionEnginePtr(new FaissExecutionEngine(dimension, location, BUILD_INDEX_TYPE_IVF, "IDMap,Flat"));
+            break;
+        }
+
+        case EngineType::FAISS_IVFSQ8: {
+            execution_engine_ptr =
+                    ExecutionEnginePtr(new FaissExecutionEngine(dimension, location, BUILD_INDEX_TYPE_IVFSQ8, "IDMap,Flat"));
             break;
         }
 

@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "db/scheduler/task/SearchTask.h"
-
+#include <cmath>
 #include <vector>
 
 using namespace zilliz::milvus;
@@ -73,13 +73,13 @@ TEST(DBSearchTest, TOPK_TEST) {
     ASSERT_EQ(src_result.size(), NQ);
 
     engine::SearchContext::ResultSet target_result;
-    status = engine::SearchTask::TopkResult(target_result, TOP_K, target_result);
+    status = engine::SearchTask::TopkResult(target_result, TOP_K, true, target_result);
     ASSERT_TRUE(status.ok());
 
-    status = engine::SearchTask::TopkResult(target_result, TOP_K, src_result);
+    status = engine::SearchTask::TopkResult(target_result, TOP_K, true, src_result);
     ASSERT_FALSE(status.ok());
 
-    status = engine::SearchTask::TopkResult(src_result, TOP_K, target_result);
+    status = engine::SearchTask::TopkResult(src_result, TOP_K, true, target_result);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(src_result.empty());
     ASSERT_EQ(target_result.size(), NQ);
@@ -92,7 +92,7 @@ TEST(DBSearchTest, TOPK_TEST) {
     status = engine::SearchTask::ClusterResult(src_ids, src_distence, NQ, wrong_topk, src_result);
     ASSERT_TRUE(status.ok());
 
-    status = engine::SearchTask::TopkResult(src_result, TOP_K, target_result);
+    status = engine::SearchTask::TopkResult(src_result, TOP_K, true, target_result);
     ASSERT_TRUE(status.ok());
     for(uint64_t i = 0; i < NQ; i++) {
         ASSERT_EQ(target_result[i].size(), TOP_K);
@@ -101,7 +101,7 @@ TEST(DBSearchTest, TOPK_TEST) {
     wrong_topk = TOP_K + 10;
     BuildResult(NQ, wrong_topk, src_ids, src_distence);
 
-    status = engine::SearchTask::TopkResult(src_result, TOP_K, target_result);
+    status = engine::SearchTask::TopkResult(src_result, TOP_K, true, target_result);
     ASSERT_TRUE(status.ok());
     for(uint64_t i = 0; i < NQ; i++) {
         ASSERT_EQ(target_result[i].size(), TOP_K);
@@ -126,7 +126,7 @@ TEST(DBSearchTest, MERGE_TEST) {
     {
         engine::SearchContext::Id2DistanceMap src = src_result[0];
         engine::SearchContext::Id2DistanceMap target = target_result[0];
-        status = engine::SearchTask::MergeResult(src, target, 10);
+        status = engine::SearchTask::MergeResult(src, target, 10, true);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), 10);
         CheckResult(src_result[0], target_result[0], target);
@@ -135,7 +135,7 @@ TEST(DBSearchTest, MERGE_TEST) {
     {
         engine::SearchContext::Id2DistanceMap src = src_result[0];
         engine::SearchContext::Id2DistanceMap target;
-        status = engine::SearchTask::MergeResult(src, target, 10);
+        status = engine::SearchTask::MergeResult(src, target, 10, true);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), src_count);
         ASSERT_TRUE(src.empty());
@@ -145,7 +145,7 @@ TEST(DBSearchTest, MERGE_TEST) {
     {
         engine::SearchContext::Id2DistanceMap src = src_result[0];
         engine::SearchContext::Id2DistanceMap target = target_result[0];
-        status = engine::SearchTask::MergeResult(src, target, 30);
+        status = engine::SearchTask::MergeResult(src, target, 30, true);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), src_count + target_count);
         CheckResult(src_result[0], target_result[0], target);
@@ -154,7 +154,7 @@ TEST(DBSearchTest, MERGE_TEST) {
     {
         engine::SearchContext::Id2DistanceMap target = src_result[0];
         engine::SearchContext::Id2DistanceMap src = target_result[0];
-        status = engine::SearchTask::MergeResult(src, target, 30);
+        status = engine::SearchTask::MergeResult(src, target, 30, true);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), src_count + target_count);
         CheckResult(src_result[0], target_result[0], target);

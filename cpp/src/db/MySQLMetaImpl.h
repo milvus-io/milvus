@@ -40,7 +40,11 @@ namespace meta {
                                      const std::vector<size_t>& ids,
                                      TableFilesSchema& table_files) override;
 
+        virtual Status HasNonIndexFiles(const std::string& table_id, bool& has) override;
+
         virtual Status UpdateTableFile(TableFileSchema& file_schema) override;
+
+        virtual Status UpdateTableFilesToIndex(const std::string& table_id) override;
 
         virtual Status UpdateTableFiles(TableFilesSchema& files) override;
 
@@ -71,9 +75,6 @@ namespace meta {
         Status NextFileId(std::string& file_id);
         Status NextTableId(std::string& table_id);
         Status DiscardFiles(long long to_discard_size);
-        std::string GetTablePath(const std::string& table_id);
-        std::string GetTableDatePartitionPath(const std::string& table_id, DateT& date);
-        void GetTableFilePath(TableFileSchema& group_file);
         Status Initialize();
 
         const DBMetaOptions options_;

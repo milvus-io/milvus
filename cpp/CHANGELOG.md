@@ -11,13 +11,21 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-149 - Fixed searching only one index file issue in distributed mode
 - MS-153 - fix c_str error when connecting to MySQL
 - MS-157 - fix changelog
+- MS-190 - use env variable to switch mem manager and fix cmake
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
-
 - MS-152 - Delete assert in MySQLMetaImpl and change MySQLConnectionPool impl
+- MS-204 - Support multi db_path
+- MS-206 - Support SQ8 index type
+- MS-208 - Add buildinde interface for C++ SDK
+- MS-212 - Support Inner product metric type
 
 ## New Feature
+- MS-195 - Add nlist and use_blas_threshold conf
+
+## New Feature
+- MS-180 - Add new mem manager
 
 ## Task
 
@@ -72,6 +80,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-144 - Add nprobe config
 - MS-147 - Enable IVF
 
+- MS-130 - Add prometheus_test
 ## Task
 - MS-74 - Change README.md in cpp
 - MS-88 - Add support for arm architecture
