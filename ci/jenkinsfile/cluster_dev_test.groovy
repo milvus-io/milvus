@@ -6,7 +6,7 @@ timeout(time: 10, unit: 'MINUTES') {
             sh "pytest . --alluredir=cluster_test_out --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-cluster-milvus-cluster-proxy.milvus-cluster.svc.cluster.local"
         }
     } catch (exc) {
-        echo 'Milvus Test Failed !'
+        echo 'Milvus Cluster Test Failed !'
         throw exc
     }
 }
