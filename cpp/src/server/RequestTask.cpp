@@ -291,7 +291,7 @@ ServerError HasTableTask::OnExecute() {
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
-        
+
         //step 2: check table existence
         engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table_);
         if(!stat.ok()) {
