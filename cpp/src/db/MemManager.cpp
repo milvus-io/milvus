@@ -125,9 +125,6 @@ Status MemManager::InsertVectors(const std::string &table_id_,
                                  const float *vectors_,
                                  IDNumbers &vector_ids_) {
 
-    LOG(DEBUG) << "MemManager::InsertVectors: mutable mem = " << GetCurrentMutableMem() <<
-               ", immutable mem = " << GetCurrentImmutableMem() << ", total mem = " << GetCurrentMem();
-
     std::unique_lock<std::mutex> lock(mutex_);
 
     return InsertVectorsNoLock(table_id_, n_, vectors_, vector_ids_);
