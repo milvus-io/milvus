@@ -25,7 +25,7 @@ Status NewMemManager::InsertVectors(const std::string &table_id_,
                                     const float *vectors_,
                                     IDNumbers &vector_ids_) {
 
-    while (GetCurrentMem() > options_.maximum_memory) {
+    while (GetCurrentMem() > options_.insert_buffer_size) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 

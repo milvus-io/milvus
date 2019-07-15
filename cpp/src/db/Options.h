@@ -63,7 +63,7 @@ struct Options {
     size_t  index_trigger_size = ONE_GB;            //unit: byte
     DBMetaOptions meta;
     int mode = MODE::SINGLE;
-    size_t maximum_memory = 4 * ONE_GB;
+    size_t insert_buffer_size = 4 * ONE_GB;
 }; // Options
 
 
