@@ -347,7 +347,7 @@ namespace meta {
                             return Status::Error("Table already exists and it is in delete state, please wait a second");
                         }
                         else {
-                            return Status::OK();//table already exists, no error
+                            return Status::AlreadyExist("Table already exists");
                         }
                     }
                 }
