@@ -29,9 +29,6 @@ Status NewMemManager::InsertVectors(const std::string &table_id_,
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
-    LOG(DEBUG) << "NewMemManager::InsertVectors: mutable mem = " << GetCurrentMutableMem() <<
-               ", immutable mem = " << GetCurrentImmutableMem() << ", total mem = " << GetCurrentMem();
-
     std::unique_lock<std::mutex> lock(mutex_);
 
     return InsertVectorsNoLock(table_id_, n_, vectors_, vector_ids_);

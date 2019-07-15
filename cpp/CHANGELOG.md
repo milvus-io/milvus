@@ -14,6 +14,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-190 - use env variable to switch mem manager and fix cmake
 - MS-224 - Return AlreadyExist status in MySQLMetaImpl::CreateTable if table already exists
 - MS-232 - add MySQLMetaImpl::UpdateTableFilesToIndex and set maximum_memory to default if config value = 0
+- MS-233 - remove mem manager log
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
