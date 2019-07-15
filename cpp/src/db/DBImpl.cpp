@@ -236,7 +236,6 @@ void DBImpl::BackgroundTimerTask() {
     Status status;
     server::SystemInfo::GetInstance().Init();
     while (true) {
-        if (!bg_error_.ok()) break;
         if (shutting_down_.load(std::memory_order_acquire)){
             for(auto& iter : compact_thread_results_) {
                 iter.wait();
@@ -395,8 +394,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     for (auto& table_id : table_ids) {
         status = BackgroundMergeFiles(table_id);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "BGERROR found during merge files: " << status.ToString();
-            bg_error_ = status;
+            ENGINE_LOG_ERROR << "Merge files for table " << table_id << " failed: " << status.ToString();
             return;
         }
     }
@@ -540,8 +538,7 @@ void DBImpl::BackgroundBuildIndex() {
     for (auto& file : to_index_files) {
         status = BuildIndex(file);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "BGERROR found during build index: " << status.ToString();
-            bg_error_ = status;
+            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
             return;
         }
 
