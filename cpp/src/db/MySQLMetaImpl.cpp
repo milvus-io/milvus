@@ -404,7 +404,7 @@ Status MySQLMetaImpl::HasNonIndexFiles(const std::string &table_id, bool &has) {
                                      "WHERE table_id = " << quote << table_id << " AND " <<
                                      "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
                                      "file_type = " << std::to_string(TableFileSchema::NEW) << " OR " <<
-                                     "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ") " <<
+                                     "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ")) " <<
                                      "AS " << quote << "check" << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasNonIndexFiles: " << hasNonIndexFilesQuery.str();
