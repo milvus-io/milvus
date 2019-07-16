@@ -400,12 +400,12 @@ Status MySQLMetaImpl::HasNonIndexFiles(const std::string &table_id, bool &has) {
             Query hasNonIndexFilesQuery = connectionPtr->query();
             //since table_id is a unique column we just need to check whether it exists or not
             hasNonIndexFilesQuery << "SELECT EXISTS " <<
-                                     "(SELECT 1 FROM TableFiles " <<
-                                     "WHERE table_id = " << quote << table_id << " AND " <<
-                                     "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
-                                     "file_type = " << std::to_string(TableFileSchema::NEW) << " OR " <<
-                                     "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ")) " <<
-                                     "AS " << quote << "check" << ";";
+                                  "(SELECT 1 FROM TableFiles " <<
+                                  "WHERE table_id = " << quote << table_id << " AND " <<
+                                  "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
+                                  "file_type = " << std::to_string(TableFileSchema::NEW) << " OR " <<
+                                  "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ")) " <<
+                                  "AS " << quote << "check" << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasNonIndexFiles: " << hasNonIndexFilesQuery.str();
 
@@ -1420,11 +1420,17 @@ Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string &table_id) {
         Query updateTableFilesToIndexQuery = connectionPtr->query();
 
         updateTableFilesToIndexQuery << "UPDATE TableFiles " <<
-                                        "SET file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " " <<
-                                        "WHERE table_id = " << quote << table_id << " AND " <<
-                                        "file_type = " << std::to_string(TableFileSchema::RAW) << ";";
+                                     "SET file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " " <<
+                                     "WHERE table_id = " << quote << table_id << " AND " <<
+                                     "file_type = " << std::to_string(TableFileSchema::RAW) << ";";
 
         ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFilesToIndex: " << updateTableFilesToIndexQuery.str();
+
+        if (!updateTableFilesToIndexQuery.exec()) {
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILE";
+            return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILE",
+                                              updateTableFilesToIndexQuery.error());
+        }
 
     } catch (const BadQuery &er) {
         // Handle any query errors
