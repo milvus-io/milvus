@@ -37,14 +37,17 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     std::shared_ptr<VecIndex> index;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
+            ENGINE_LOG_DEBUG << "Build Index: IDMAP";
             index = GetVecIndexFactory(IndexType::FAISS_IDMAP);
             break;
         }
         case EngineType::FAISS_IVFFLAT_GPU: {
+            ENGINE_LOG_DEBUG << "Build Index: IVFMIX";
             index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
             break;
         }
         case EngineType::FAISS_IVFFLAT_CPU: {
+            ENGINE_LOG_DEBUG << "Build Index: IVFCPU";
             index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
             break;
         }
@@ -135,6 +138,7 @@ ExecutionEngineImpl::BuildIndex(const std::string &location) {
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
     auto to_index = CreatetVecIndex(build_type);
+    ENGINE_LOG_DEBUG << "Build Params: [gpu_id]  " << gpu_num;
     to_index->BuildAll(Count(),
                        from_index->GetRawVectors(),
                        from_index->GetRawIds(),
@@ -148,6 +152,7 @@ Status ExecutionEngineImpl::Search(long n,
                                    long k,
                                    float *distances,
                                    long *labels) const {
+    ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe_;
     index_->Search(n, data, distances, labels, Config::object{{"k", k}, {"nprobe", nprobe_}});
     return Status::OK();
 }
@@ -169,7 +174,7 @@ Status ExecutionEngineImpl::Init() {
         }
         case EngineType::FAISS_IVFFLAT_CPU: {
             ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
-            nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1000);
+            nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1);
             break;
         }
     }
