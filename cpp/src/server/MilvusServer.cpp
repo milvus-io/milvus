@@ -76,7 +76,7 @@ MilvusServer::StartService() {
             return;
         }
 
-        stdcxx::shared_ptr<ThreadManager> threadManager(ThreadManager::newSimpleThreadManager());
+        stdcxx::shared_ptr<ThreadManager> threadManager(ThreadManager::newSimpleThreadManager(16));
         stdcxx::shared_ptr<PosixThreadFactory> threadFactory(new PosixThreadFactory());
         threadManager->threadFactory(threadFactory);
         threadManager->start();
