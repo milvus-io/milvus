@@ -29,7 +29,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-208 - Add buildinde interface for C++ SDK
 - MS-212 - Support Inner product metric type
 - MS-241 - Build Faiss with MKL if using Intel CPU; else build with OpenBlas
-- MS-242 - clean up cmake and change MAKE_BUILD_ARGS to be user defined variable
+- MS-242 - Clean up cmake and change MAKE_BUILD_ARGS to be user defined variable
+- MS-245 - Improve search result transfer performance
 
 ## New Feature
 - MS-180 - Add new mem manager
