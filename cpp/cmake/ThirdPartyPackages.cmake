@@ -713,7 +713,8 @@ macro(build_faiss)
     if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
         message(STATUS "Build Faiss with MKL")
         if(NOT DEFINED MKL_LIB_PATH)
-            set(MKL_LIB_PATH "/opt/intel/compilers_and_libraries_2019.4.243/linux/mkl/lib/intel64")
+            set(MKL_LIB_PATH "/opt/intel/compilers_and_libraries_${MKL_VERSION}/linux/mkl/lib/intel64")
+            message(STATUS "MKL_LIB_PATH = ${MKL_LIB_PATH}")
         endif()
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "CPPFLAGS=-DMKL_ILP64 -m64 -I${MKL_LIB_PATH}/../../include"
