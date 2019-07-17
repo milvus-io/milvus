@@ -388,6 +388,7 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.engine_type_ = table_schema.engine_type_;
+        ENGINE_LOG_DEBUG << "CreateTableFile EngineTypee: " << table_schema.engine_type_;
         GetTableFilePath(file_schema);
 
         auto id = ConnectorPtr->insert(file_schema);
