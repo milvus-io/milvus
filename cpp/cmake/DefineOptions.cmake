@@ -57,8 +57,6 @@ define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
 
 define_option(MILVUS_WITH_ARROW "Build with ARROW" OFF)
 
-define_option(MILVUS_BOOST_USE_SHARED "Rely on boost shared libraries where relevant" OFF)
-
 define_option(MILVUS_BOOST_VENDORED "Use vendored Boost instead of existing Boost. \
 Note that this requires linking Boost statically" ON)
 
