@@ -10,6 +10,7 @@
 
 #include "vec_impl.h"
 #include "data_transfer.h"
+#include "wrapper_log.h"
 
 
 namespace zilliz {
@@ -138,6 +139,8 @@ void IVFMixIndex::BuildAll(const long &nb,
                            const Config &cfg,
                            const long &nt,
                            const float *xt) {
+    WRAPPER_LOG_DEBUG << "Get Into Build IVFMIX";
+
     dim = cfg["dim"].as<int>();
     auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
@@ -153,7 +156,7 @@ void IVFMixIndex::BuildAll(const long &nb,
         auto host_index = device_index->Copy_index_gpu_to_cpu();
         index_ = host_index;
     } else {
-        // TODO(linxj): LOG ERROR
+        WRAPPER_LOG_ERROR << "Build IVFMIXIndex Failed";
     }
 }
 
