@@ -715,8 +715,9 @@ macro(build_faiss)
             set(MKL_LIB_PATH "/opt/intel/compilers_and_libraries_${MKL_VERSION}/linux/mkl/lib/intel64")
             message(STATUS "MKL_LIB_PATH = ${MKL_LIB_PATH}")
         endif()
+
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "CPPFLAGS=-DMKL_ILP64 -m64 -I${MKL_LIB_PATH}/../../include"
+                "CPPFLAGS=-DFINTEGER=long -DMKL_ILP64 -m64 -I${MKL_LIB_PATH}/../../include"
                 "LDFLAGS=-L${MKL_LIB_PATH}"
                 "LIBS=-Wl,--start-group ${MKL_LIB_PATH}/libmkl_intel_ilp64.a ${MKL_LIB_PATH}/libmkl_gnu_thread.a ${MKL_LIB_PATH}/libmkl_core.a -Wl,--end-group -lgomp -lpthread -lm -ldl")
 
