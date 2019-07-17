@@ -148,7 +148,7 @@ namespace {
                 std::cout << "The top 1 result is wrong: " << result_id
                     << " vs. " << search_id << std::endl;
             } else {
-                std::cout << "Check result sucessfully" << std::endl;
+                std::cout << "No." << index-1 << " Check result successfully" << std::endl;
             }
         }
         BLOCK_SPLITER
@@ -234,6 +234,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     std::vector<std::pair<int64_t, RowRecord>> search_record_array;
     {//add vectors
         for (int i = 0; i < ADD_VECTOR_LOOP; i++) {//add vectors
+            TimeRecorder recorder("Add vector No." + std::to_string(i));
             std::vector<RowRecord> record_array;
             int64_t begin_index = i * BATCH_ROW_COUNT;
             BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array);
@@ -255,6 +256,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//wait unit build index finish
+        TimeRecorder recorder("Build index");
         std::cout << "Wait until build all index done" << std::endl;
         Status stat = conn->BuildIndex(TABLE_NAME);
         std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;
