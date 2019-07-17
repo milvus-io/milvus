@@ -466,33 +466,21 @@ ServerError AddVectorTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-SearchVectorTask::SearchVectorTask(const std::string &table_name,
-                                   const std::vector<std::string>& file_id_array,
-                                   const std::vector<thrift::RowRecord> &query_record_array,
-                                   const std::vector<thrift::Range> &query_range_array,
-                                   const int64_t top_k,
-                                   std::vector<thrift::TopKQueryResult> &result_array)
+SearchVectorTaskBase::SearchVectorTaskBase(const std::string &table_name,
+        const std::vector<std::string>& file_id_array,
+        const std::vector<thrift::RowRecord> &query_record_array,
+        const std::vector<thrift::Range> &query_range_array,
+        const int64_t top_k)
     : BaseTask(DQL_TASK_GROUP),
       table_name_(table_name),
       file_id_array_(file_id_array),
       record_array_(query_record_array),
       range_array_(query_range_array),
-      top_k_(top_k),
-      result_array_(result_array) {
+      top_k_(top_k) {
 
 }
 
-BaseTaskPtr SearchVectorTask::Create(const std::string& table_name,
-                                     const std::vector<std::string>& file_id_array,
-                                     const std::vector<thrift::RowRecord> & query_record_array,
-                                     const std::vector<thrift::Range> & query_range_array,
-                                     const int64_t top_k,
-                                     std::vector<thrift::TopKQueryResult>& result_array) {
-    return std::shared_ptr<BaseTask>(new SearchVectorTask(table_name, file_id_array,
-            query_record_array, query_range_array, top_k, result_array));
-}
-
-ServerError SearchVectorTask::OnExecute() {
+ServerError SearchVectorTaskBase::OnExecute() {
     try {
         TimeRecorder rc("SearchVectorTask");
 
@@ -570,26 +558,106 @@ ServerError SearchVectorTask::OnExecute() {
         rc.Record("do search");
 
         //step 5: construct result array
-        for(uint64_t i = 0; i < record_count; i++) {
-            auto& result = results[i];
-            const auto& record = record_array_[i];
-
-            thrift::TopKQueryResult thrift_topk_result;
-            for(auto& pair : result) {
-                thrift::QueryResult thrift_result;
-                thrift_result.__set_id(pair.first);
-                thrift_result.__set_distance(pair.second);
-
-                thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
-            }
-
-            result_array_.emplace_back(thrift_topk_result);
-        }
+        ConstructResult(results);
         rc.Record("construct result");
         rc.Elapse("total cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
+
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+SearchVectorTask1::SearchVectorTask1(const std::string &table_name,
+                                     const std::vector<std::string>& file_id_array,
+                                     const std::vector<thrift::RowRecord> &query_record_array,
+                                     const std::vector<thrift::Range> &query_range_array,
+                                     const int64_t top_k,
+                                     std::vector<thrift::TopKQueryResult> &result_array)
+        : SearchVectorTaskBase(table_name, file_id_array, query_record_array, query_range_array, top_k),
+          result_array_(result_array) {
+
+}
+
+BaseTaskPtr SearchVectorTask1::Create(const std::string& table_name,
+                                      const std::vector<std::string>& file_id_array,
+                                      const std::vector<thrift::RowRecord> & query_record_array,
+                                      const std::vector<thrift::Range> & query_range_array,
+                                      const int64_t top_k,
+                                      std::vector<thrift::TopKQueryResult>& result_array) {
+    return std::shared_ptr<BaseTask>(new SearchVectorTask1(table_name, file_id_array,
+                                                           query_record_array, query_range_array, top_k, result_array));
+}
+
+ServerError SearchVectorTask1::ConstructResult(engine::QueryResults& results) {
+    for(uint64_t i = 0; i < results.size(); i++) {
+        auto& result = results[i];
+        const auto& record = record_array_[i];
+
+        thrift::TopKQueryResult thrift_topk_result;
+        for(auto& pair : result) {
+            thrift::QueryResult thrift_result;
+            thrift_result.__set_id(pair.first);
+            thrift_result.__set_distance(pair.second);
+
+            thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
+        }
+
+        result_array_.emplace_back(thrift_topk_result);
+    }
+
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+SearchVectorTask2::SearchVectorTask2(const std::string &table_name,
+                                     const std::vector<std::string>& file_id_array,
+                                     const std::vector<thrift::RowRecord> &query_record_array,
+                                     const std::vector<thrift::Range> &query_range_array,
+                                     const int64_t top_k,
+                                     std::vector<thrift::TopKQueryBinResult> &result_array)
+    : SearchVectorTaskBase(table_name, file_id_array, query_record_array, query_range_array, top_k),
+      result_array_(result_array) {
+
+}
+
+BaseTaskPtr SearchVectorTask2::Create(const std::string& table_name,
+                                     const std::vector<std::string>& file_id_array,
+                                     const std::vector<thrift::RowRecord> & query_record_array,
+                                     const std::vector<thrift::Range> & query_range_array,
+                                     const int64_t top_k,
+                                     std::vector<thrift::TopKQueryBinResult>& result_array) {
+    return std::shared_ptr<BaseTask>(new SearchVectorTask2(table_name, file_id_array,
+            query_record_array, query_range_array, top_k, result_array));
+}
+
+ServerError SearchVectorTask2::ConstructResult(engine::QueryResults& results) {
+    for(size_t i = 0; i < results.size(); i++) {
+        auto& result = results[i];
+
+        thrift::TopKQueryBinResult thrift_topk_result;
+        if(result.empty()) {
+            result_array_.emplace_back(thrift_topk_result);
+            continue;
+        }
+
+        std::string str_ids, str_distances;
+        str_ids.resize(sizeof(engine::IDNumber)*result.size());
+        str_distances.resize(sizeof(double)*result.size());
+
+        engine::IDNumber* ids_ptr = (engine::IDNumber*)str_ids.data();
+        double* distance_ptr = (double*)str_distances.data();
+        for(size_t k = 0; k < results.size(); k++) {
+            auto& pair = result[k];
+            ids_ptr[k] = pair.first;
+            distance_ptr[k] = pair.second;
+        }
+
+        thrift_topk_result.__set_id_array(str_ids);
+        thrift_topk_result.__set_distance_array(str_distances);
+        result_array_.emplace_back(thrift_topk_result);
     }
 
     return SERVER_SUCCESS;

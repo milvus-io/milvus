@@ -84,6 +84,14 @@ struct TopKQueryResult {
     1: list<QueryResult> query_result_arrays;        ///< TopK query result
 }
 
+/**
+ * @brief TopK query binary result
+ */
+struct TopKQueryBinResult {
+    1: required binary id_array;                     ///< id array, interger array
+    2: required binary distance_array;               ///< distance array, double array
+}
+
 service MilvusService {
     /**
      * @brief Create table method
@@ -157,6 +165,23 @@ service MilvusService {
                                        3: list<RowRecord> query_record_array,
                                        4: list<Range> query_range_array,
                                        5: i64 topk) throws(1: Exception e);
+
+    /**
+     * @brief Query vector
+     *
+     * This method is used to query vector in table.
+     *
+     * @param table_name, table_name is queried.
+     * @param query_record_array, all vector are going to be queried.
+     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+     * @param topk, how many similarity vectors will be searched.
+     *
+     * @return query binary result array.
+     */
+    list<TopKQueryBinResult> SearchVector2(2: string table_name,
+                                           3: list<RowRecord> query_record_array,
+                                           4: list<Range> query_range_array,
+                                           5: i64 topk) throws(1: Exception e);
 
     /**
      * @brief Internal use query interface
