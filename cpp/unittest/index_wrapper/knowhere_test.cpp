@@ -5,11 +5,13 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <gtest/gtest.h>
+#include <easylogging++.h>
 
 #include <wrapper/knowhere/vec_index.h>
 
 #include "utils.h"
 
+INITIALIZE_EASYLOGGINGPP
 
 using namespace zilliz::milvus::engine;
 using namespace zilliz::knowhere;
