@@ -141,6 +141,11 @@ endif()
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
 
+message("MILVUS_ENABLE_PROFILING = ${MILVUS_ENABLE_PROFILING}")
+if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
+    ADD_DEFINITIONS(-DMILVUS_ENABLE_PROFILING)
+endif()
+
 #install
 install(DIRECTORY scripts/
         DESTINATION scripts
