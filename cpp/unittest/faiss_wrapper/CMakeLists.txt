@@ -35,6 +35,10 @@ set(wrapper_libs
         zstd
         lz4
         )
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+    set(wrapper_libs ${wrapper_libs} ${MKL_LIBS} ${MKL_LIBS})
+endif()
+
 target_link_libraries(wrapper_test ${wrapper_libs} ${unittest_libs})
 
 set(topk_test_src
