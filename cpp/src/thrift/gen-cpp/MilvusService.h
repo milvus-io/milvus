@@ -105,6 +105,25 @@ class MilvusServiceIf {
   virtual void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) = 0;
 
   /**
+   * @brief Query vector
+   * 
+   * This method is used to query vector in table.
+   * 
+   * @param table_name, table_name is queried.
+   * @param query_record_array, all vector are going to be queried.
+   * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+   * @param topk, how many similarity vectors will be searched.
+   * 
+   * @return query binary result array.
+   * 
+   * @param table_name
+   * @param query_record_array
+   * @param query_range_array
+   * @param topk
+   */
+  virtual void SearchVector2(std::vector<TopKQueryBinResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) = 0;
+
+  /**
    * @brief Internal use query interface
    * 
    * This method is used to query vector in specified files.
@@ -216,6 +235,9 @@ class MilvusServiceNull : virtual public MilvusServiceIf {
     return;
   }
   void SearchVector(std::vector<TopKQueryResult> & /* _return */, const std::string& /* table_name */, const std::vector<RowRecord> & /* query_record_array */, const std::vector<Range> & /* query_range_array */, const int64_t /* topk */) {
+    return;
+  }
+  void SearchVector2(std::vector<TopKQueryBinResult> & /* _return */, const std::string& /* table_name */, const std::vector<RowRecord> & /* query_record_array */, const std::vector<Range> & /* query_range_array */, const int64_t /* topk */) {
     return;
   }
   void SearchVectorInFiles(std::vector<TopKQueryResult> & /* _return */, const std::string& /* table_name */, const std::vector<std::string> & /* file_id_array */, const std::vector<RowRecord> & /* query_record_array */, const std::vector<Range> & /* query_range_array */, const int64_t /* topk */) {
@@ -912,6 +934,139 @@ class MilvusService_SearchVector_presult {
 
 };
 
+typedef struct _MilvusService_SearchVector2_args__isset {
+  _MilvusService_SearchVector2_args__isset() : table_name(false), query_record_array(false), query_range_array(false), topk(false) {}
+  bool table_name :1;
+  bool query_record_array :1;
+  bool query_range_array :1;
+  bool topk :1;
+} _MilvusService_SearchVector2_args__isset;
+
+class MilvusService_SearchVector2_args {
+ public:
+
+  MilvusService_SearchVector2_args(const MilvusService_SearchVector2_args&);
+  MilvusService_SearchVector2_args& operator=(const MilvusService_SearchVector2_args&);
+  MilvusService_SearchVector2_args() : table_name(), topk(0) {
+  }
+
+  virtual ~MilvusService_SearchVector2_args() throw();
+  std::string table_name;
+  std::vector<RowRecord>  query_record_array;
+  std::vector<Range>  query_range_array;
+  int64_t topk;
+
+  _MilvusService_SearchVector2_args__isset __isset;
+
+  void __set_table_name(const std::string& val);
+
+  void __set_query_record_array(const std::vector<RowRecord> & val);
+
+  void __set_query_range_array(const std::vector<Range> & val);
+
+  void __set_topk(const int64_t val);
+
+  bool operator == (const MilvusService_SearchVector2_args & rhs) const
+  {
+    if (!(table_name == rhs.table_name))
+      return false;
+    if (!(query_record_array == rhs.query_record_array))
+      return false;
+    if (!(query_range_array == rhs.query_range_array))
+      return false;
+    if (!(topk == rhs.topk))
+      return false;
+    return true;
+  }
+  bool operator != (const MilvusService_SearchVector2_args &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MilvusService_SearchVector2_args & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+
+class MilvusService_SearchVector2_pargs {
+ public:
+
+
+  virtual ~MilvusService_SearchVector2_pargs() throw();
+  const std::string* table_name;
+  const std::vector<RowRecord> * query_record_array;
+  const std::vector<Range> * query_range_array;
+  const int64_t* topk;
+
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MilvusService_SearchVector2_result__isset {
+  _MilvusService_SearchVector2_result__isset() : success(false), e(false) {}
+  bool success :1;
+  bool e :1;
+} _MilvusService_SearchVector2_result__isset;
+
+class MilvusService_SearchVector2_result {
+ public:
+
+  MilvusService_SearchVector2_result(const MilvusService_SearchVector2_result&);
+  MilvusService_SearchVector2_result& operator=(const MilvusService_SearchVector2_result&);
+  MilvusService_SearchVector2_result() {
+  }
+
+  virtual ~MilvusService_SearchVector2_result() throw();
+  std::vector<TopKQueryBinResult>  success;
+  Exception e;
+
+  _MilvusService_SearchVector2_result__isset __isset;
+
+  void __set_success(const std::vector<TopKQueryBinResult> & val);
+
+  void __set_e(const Exception& val);
+
+  bool operator == (const MilvusService_SearchVector2_result & rhs) const
+  {
+    if (!(success == rhs.success))
+      return false;
+    if (!(e == rhs.e))
+      return false;
+    return true;
+  }
+  bool operator != (const MilvusService_SearchVector2_result &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const MilvusService_SearchVector2_result & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+};
+
+typedef struct _MilvusService_SearchVector2_presult__isset {
+  _MilvusService_SearchVector2_presult__isset() : success(false), e(false) {}
+  bool success :1;
+  bool e :1;
+} _MilvusService_SearchVector2_presult__isset;
+
+class MilvusService_SearchVector2_presult {
+ public:
+
+
+  virtual ~MilvusService_SearchVector2_presult() throw();
+  std::vector<TopKQueryBinResult> * success;
+  Exception e;
+
+  _MilvusService_SearchVector2_presult__isset __isset;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+
+};
+
 typedef struct _MilvusService_SearchVectorInFiles_args__isset {
   _MilvusService_SearchVectorInFiles_args__isset() : table_name(false), file_id_array(false), query_record_array(false), query_range_array(false), topk(false) {}
   bool table_name :1;
@@ -1531,6 +1686,9 @@ class MilvusServiceClient : virtual public MilvusServiceIf {
   void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void recv_SearchVector(std::vector<TopKQueryResult> & _return);
+  void SearchVector2(std::vector<TopKQueryBinResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
+  void send_SearchVector2(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
+  void recv_SearchVector2(std::vector<TopKQueryBinResult> & _return);
   void SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void send_SearchVectorInFiles(const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void recv_SearchVectorInFiles(std::vector<TopKQueryResult> & _return);
@@ -1567,6 +1725,7 @@ class MilvusServiceProcessor : public ::apache::thrift::TDispatchProcessor {
   void process_BuildIndex(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_AddVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_SearchVector(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
+  void process_SearchVector2(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_SearchVectorInFiles(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_DescribeTable(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
   void process_GetTableRowCount(int32_t seqid, ::apache::thrift::protocol::TProtocol* iprot, ::apache::thrift::protocol::TProtocol* oprot, void* callContext);
@@ -1581,6 +1740,7 @@ class MilvusServiceProcessor : public ::apache::thrift::TDispatchProcessor {
     processMap_["BuildIndex"] = &MilvusServiceProcessor::process_BuildIndex;
     processMap_["AddVector"] = &MilvusServiceProcessor::process_AddVector;
     processMap_["SearchVector"] = &MilvusServiceProcessor::process_SearchVector;
+    processMap_["SearchVector2"] = &MilvusServiceProcessor::process_SearchVector2;
     processMap_["SearchVectorInFiles"] = &MilvusServiceProcessor::process_SearchVectorInFiles;
     processMap_["DescribeTable"] = &MilvusServiceProcessor::process_DescribeTable;
     processMap_["GetTableRowCount"] = &MilvusServiceProcessor::process_GetTableRowCount;
@@ -1667,6 +1827,16 @@ class MilvusServiceMultiface : virtual public MilvusServiceIf {
       ifaces_[i]->SearchVector(_return, table_name, query_record_array, query_range_array, topk);
     }
     ifaces_[i]->SearchVector(_return, table_name, query_record_array, query_range_array, topk);
+    return;
+  }
+
+  void SearchVector2(std::vector<TopKQueryBinResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) {
+    size_t sz = ifaces_.size();
+    size_t i = 0;
+    for (; i < (sz - 1); ++i) {
+      ifaces_[i]->SearchVector2(_return, table_name, query_record_array, query_range_array, topk);
+    }
+    ifaces_[i]->SearchVector2(_return, table_name, query_record_array, query_range_array, topk);
     return;
   }
 
@@ -1767,6 +1937,9 @@ class MilvusServiceConcurrentClient : virtual public MilvusServiceIf {
   void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   int32_t send_SearchVector(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void recv_SearchVector(std::vector<TopKQueryResult> & _return, const int32_t seqid);
+  void SearchVector2(std::vector<TopKQueryBinResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
+  int32_t send_SearchVector2(const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
+  void recv_SearchVector2(std::vector<TopKQueryBinResult> & _return, const int32_t seqid);
   void SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   int32_t send_SearchVectorInFiles(const std::string& table_name, const std::vector<std::string> & file_id_array, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk);
   void recv_SearchVectorInFiles(std::vector<TopKQueryResult> & _return, const int32_t seqid);
