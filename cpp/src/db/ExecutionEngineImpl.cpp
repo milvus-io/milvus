@@ -37,17 +37,14 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     std::shared_ptr<VecIndex> index;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
-            ENGINE_LOG_DEBUG << "Build Index: IDMAP";
             index = GetVecIndexFactory(IndexType::FAISS_IDMAP);
             break;
         }
         case EngineType::FAISS_IVFFLAT_GPU: {
-            ENGINE_LOG_DEBUG << "Build Index: IVFMIX";
             index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
             break;
         }
         case EngineType::FAISS_IVFFLAT_CPU: {
-            ENGINE_LOG_DEBUG << "Build Index: IVFCPU";
             index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
             break;
         }
@@ -137,6 +134,7 @@ ExecutionEngineImpl::BuildIndex(const std::string &location) {
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
+    ENGINE_LOG_DEBUG << "BuildIndex EngineTypee: " << int(build_type);
     auto to_index = CreatetVecIndex(build_type);
     ENGINE_LOG_DEBUG << "Build Params: [gpu_id]  " << gpu_num;
     to_index->BuildAll(Count(),
