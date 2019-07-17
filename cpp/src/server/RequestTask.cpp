@@ -155,6 +155,7 @@ ServerError CreateTableTask::OnExecute() {
         }
 
         res = ValidateTableIndexType(schema_.index_type);
+        SERVER_LOG_DEBUG << "Createtbale EngineTypee: " << schema_.index_type;
         if(res != SERVER_SUCCESS) {
             return res;
         }
