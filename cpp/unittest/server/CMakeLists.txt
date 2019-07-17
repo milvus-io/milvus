@@ -48,6 +48,10 @@ set(require_libs
         pthread
         )
 
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+    set(require_libs ${require_libs} ${MKL_LIBS} ${MKL_LIBS})
+endif()
+
 target_link_libraries(server_test
         ${require_libs}
         ${cuda_library}
