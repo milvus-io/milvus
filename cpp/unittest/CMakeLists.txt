@@ -28,7 +28,6 @@ set(unittest_libs
         easyloggingpp
         pthread
         metrics
-        openblas
         gfortran
         prometheus-cpp-pull
         prometheus-cpp-push
