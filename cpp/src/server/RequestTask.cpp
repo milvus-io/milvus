@@ -12,6 +12,10 @@
 #include "DBWrapper.h"
 #include "version.h"
 
+#ifdef MILVUS_ENABLE_PROFILING
+#include "gperftools/profiler.h"
+#endif
+
 namespace zilliz {
 namespace milvus {
 namespace server {
@@ -126,6 +130,18 @@ namespace {
                 dates.push_back(date);
             }
         }
+    }
+
+    std::string
+    GetCurrTimeStr() {
+        char tm_buf[20] = {0};
+        time_t tt;
+        time(&tt);
+        tt = tt + 8 * 60 * 60;
+        tm* t = gmtime(&tt);
+        sprintf(tm_buf, "%4d%02d%02d_%02d%02d%02d", (t->tm_year+1900), (t->tm_mon+1), (t->tm_mday),
+                                                    (t->tm_hour), (t->tm_min), (t->tm_sec));
+        return tm_buf;
     }
 }
 
@@ -430,6 +446,12 @@ ServerError AddVectorTask::OnExecute() {
 
         rc.Record("check validation");
 
+#ifdef MILVUS_ENABLE_PROFILING
+        std::string fname = "/tmp/insert_" + std::to_string(this->record_array_.size()) +
+                            "_" + GetCurrTimeStr() + ".profiling";
+        ProfilerStart(fname.c_str());
+#endif
+
         //step 3: prepare float data
         std::vector<float> vec_f;
         ServerError error_code = SERVER_SUCCESS;
@@ -454,6 +476,10 @@ ServerError AddVectorTask::OnExecute() {
                     + std::to_string(record_ids_.size()) + " id";
             return SetError(SERVER_ILLEGAL_VECTOR_ID, msg);
         }
+
+#ifdef MILVUS_ENABLE_PROFILING
+        ProfilerStop();
+#endif
 
         rc.Record("do insert");
         rc.Elapse("total cost");
@@ -521,6 +547,13 @@ ServerError SearchVectorTaskBase::OnExecute() {
 
         rc.Record("check validation");
 
+#ifdef MILVUS_ENABLE_PROFILING
+        std::string fname = "/tmp/search_nq_" + std::to_string(this->record_array_.size()) +
+                            "_top_" + std::to_string(this->top_k_) + "_" +
+                            GetCurrTimeStr() + ".profiling";
+        ProfilerStart(fname.c_str());
+#endif
+
         //step 3: prepare float data
         std::vector<float> vec_f;
         ConvertRowRecordToFloatArray(record_array_, table_info.dimension_, vec_f, error_code, error_msg);
@@ -559,6 +592,11 @@ ServerError SearchVectorTaskBase::OnExecute() {
 
         //step 5: construct result array
         ConstructResult(results);
+
+#ifdef MILVUS_ENABLE_PROFILING
+        ProfilerStop();
+#endif
+
         rc.Record("construct result");
         rc.Elapse("total cost");
 
