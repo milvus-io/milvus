@@ -82,6 +82,7 @@ set(third_party_libs
         zlib
         zstd
         mysqlpp
+        profiler
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
 
