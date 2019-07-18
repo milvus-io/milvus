@@ -20,6 +20,11 @@ public:
             : index_(index)
     {}
 
+    DataObj(const engine::Index_ptr& index, int64_t size)
+            : index_(index),
+              size_(size)
+    {}
+
     engine::Index_ptr data() { return index_; }
     const engine::Index_ptr& data() const { return index_; }
 
@@ -28,11 +33,16 @@ public:
             return 0;
         }
 
+        if(size_ > 0) {
+            return size_;
+        }
+
         return index_->ntotal*(index_->dim*4);
     }
 
 private:
     engine::Index_ptr index_ = nullptr;
+    int64_t size_ = 0;
 };
 
 using DataObjPtr = std::shared_ptr<DataObj>;

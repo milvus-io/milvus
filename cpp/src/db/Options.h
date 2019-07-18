@@ -22,7 +22,7 @@ static constexpr uint64_t ONE_GB = ONE_KB*ONE_MB;
 
 static const std::string ARCHIVE_CONF_DISK = "disk";
 static const std::string ARCHIVE_CONF_DAYS = "days";
-static const std::string ARCHIVE_CONF_DEFAULT = ARCHIVE_CONF_DISK + ":512";
+static const std::string ARCHIVE_CONF_DEFAULT = "";
 
 struct ArchiveConf {
     using CriteriaT = std::map<std::string, int>;
@@ -63,6 +63,7 @@ struct Options {
     size_t  index_trigger_size = ONE_GB;            //unit: byte
     DBMetaOptions meta;
     int mode = MODE::SINGLE;
+    size_t insert_buffer_size = 4 * ONE_GB;
 }; // Options
 
 

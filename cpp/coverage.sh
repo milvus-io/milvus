@@ -13,6 +13,27 @@ DIR_LCOV_OUTPUT="lcov_out"
 
 DIR_GCNO="cmake_build"
 DIR_UNITTEST="milvus/bin"
+ 
+MYSQL_USER_NAME=root
+MYSQL_PASSWORD=Fantast1c
+MYSQL_HOST='192.168.1.194'
+MYSQL_PORT='3306'
+
+MYSQL_DB_NAME=milvus_`date +%s%N`
+
+function mysql_exc()
+{
+    cmd=$1
+    mysql -h${MYSQL_HOST} -u${MYSQL_USER_NAME} -p${MYSQL_PASSWORD} -e "${cmd}"
+    if [ $? -ne 0 ]; then
+        echo "mysql $cmd run failed"
+    fi
+}
+
+mysql_exc "CREATE DATABASE IF NOT EXISTS ${MYSQL_DB_NAME};"
+mysql_exc "GRANT ALL PRIVILEGES ON ${MYSQL_DB_NAME}.* TO '${MYSQL_USER_NAME}'@'%';"
+mysql_exc "FLUSH PRIVILEGES;"
+mysql_exc "USE ${MYSQL_DB_NAME};"
 
 MYSQL_USER_NAME=root
 MYSQL_PASSWORD=Fantast1c

@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "db/scheduler/task/SearchTask.h"
-
+#include <cmath>
 #include <vector>
 
 using namespace zilliz::milvus;

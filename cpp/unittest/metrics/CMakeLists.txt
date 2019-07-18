@@ -10,8 +10,6 @@
 
 include_directories(../../src)
 
-
-
 aux_source_directory(../../src/db db_srcs)
 aux_source_directory(../../src/config config_files)
 aux_source_directory(../../src/cache cache_srcs)
@@ -33,20 +31,9 @@ include_directories(../../third_party/build/include)
 link_directories(../../third_party/build/lib)
 include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
-#include_directories(../db/utils.h)
 include_directories(../../src/metrics)
 
 include_directories(/usr/include/mysql)
-
-#set(metrics_src_files
-#        ../../src/metrics/Metrics.cpp
-#        ../../src/metrics/Metrics.h
-#        ../../src/metrics/PrometheusMetrics.cpp
-#        ../../src/metrics/MetricBase.h
-#        ../../src/server/ServerConfig.cpp
-#        ../../src/utils/CommonUtil.cpp
-#        ../../src/utils/TimeRecorder.cpp
-#        )
 
 set(count_test_src
         ${config_files}
@@ -66,9 +53,9 @@ target_link_libraries(metrics_test
         faiss
         cudart
         cublas
-        sqlite3
-        boost_system
-        boost_filesystem
+        sqlite
+        boost_system_static
+        boost_filesystem_static
         lz4
         metrics
         gtest
@@ -77,5 +64,8 @@ target_link_libraries(metrics_test
         mysqlpp
         ${unittest_libs}
         )
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+    target_link_libraries(metrics_test ${MKL_LIBS} ${MKL_LIBS})
+endif()
 
 install(TARGETS metrics_test DESTINATION bin)

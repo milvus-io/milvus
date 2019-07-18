@@ -48,7 +48,6 @@ set(engine_files
         ${db_files}
         ${db_scheduler_files}
         ${wrapper_files}
-#        metrics/Metrics.cpp
         ${metrics_files}
         )
 
@@ -71,8 +70,6 @@ set(third_party_libs
         yaml-cpp
         libgpufaiss.a
         faiss
-        lapack
-        openblas
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
@@ -88,9 +85,19 @@ set(third_party_libs
         profiler
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
+
 if (MEGASEARCH_WITH_ARROW STREQUAL "ON")
     set(third_party_libs ${third_party_libs} arrow)
-endif() 
+endif()
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+    set(third_party_libs ${third_party_libs}
+            ${MKL_LIBS}
+            ${MKL_LIBS})
+else()
+    set(third_party_libs ${third_party_libs}
+            lapack
+            openblas)
+endif()
 
 if (GPU_VERSION STREQUAL "ON")
     link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
@@ -188,6 +195,6 @@ install(FILES
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4
-        DESTINATION lib) #need to copy libmysqlpp.so
+        DESTINATION lib)
 
 add_subdirectory(sdk)

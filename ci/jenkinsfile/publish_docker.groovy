@@ -12,7 +12,10 @@ container('publish-docker') {
                                 def customImage = docker.build("${PROJECT_NAME}/engine:${DOCKER_VERSION}")
                                 customImage.push()
                             }
-                            echo "Docker Pull Command: docker pull registry.zilliz.com/${PROJECT_NAME}/engine:${DOCKER_VERSION}"
+                            if (currentBuild.resultIsBetterOrEqualTo('SUCCESS')) {
+                                updateGitlabCommitStatus name: 'Publish Engine Docker', state: 'success'
+                                echo "Docker Pull Command: docker pull registry.zilliz.com/${PROJECT_NAME}/engine:${DOCKER_VERSION}"
+                            }
                         } catch (exc) {
                             updateGitlabCommitStatus name: 'Publish Engine Docker', state: 'canceled'
                             throw exc

@@ -87,9 +87,9 @@ DBImpl::DBImpl(const Options& options)
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
     meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
-    mem_mgr_ = std::make_shared<MemManager>(meta_ptr_, options_);
-    // mem_mgr_ = (MemManagerPtr)(new MemManager(meta_ptr_, options_));
+    mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
     if (options.mode != Options::MODE::READ_ONLY) {
+        ENGINE_LOG_INFO << "StartTimerTasks";
         StartTimerTasks();
     }
 }
@@ -170,7 +170,10 @@ Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq,
         }
     }
 
-    return QueryAsync(table_id, file_id_array, k, nq, vectors, dates, results);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info before query
+    status = QueryAsync(table_id, file_id_array, k, nq, vectors, dates, results);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info after query
+    return status;
 }
 
 Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>& file_ids,
@@ -195,7 +198,10 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
         return Status::Error("Invalid file id");
     }
 
-    return QueryAsync(table_id, files_array, k, nq, vectors, dates, results);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info before query
+    status = QueryAsync(table_id, files_array, k, nq, vectors, dates, results);
+    cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info after query
+    return status;
 }
 
 Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
@@ -230,7 +236,6 @@ void DBImpl::BackgroundTimerTask() {
     Status status;
     server::SystemInfo::GetInstance().Init();
     while (true) {
-        if (!bg_error_.ok()) break;
         if (shutting_down_.load(std::memory_order_acquire)){
             for(auto& iter : compact_thread_results_) {
                 iter.wait();
@@ -385,15 +390,11 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
-//    static int b_count = 0;
-//    b_count++;
-//    std::cout << "BackgroundCompaction: " << b_count << std::endl;
-
     Status status;
     for (auto& table_id : table_ids) {
         status = BackgroundMergeFiles(table_id);
         if (!status.ok()) {
-            bg_error_ = status;
+            ENGINE_LOG_ERROR << "Merge files for table " << table_id << " failed: " << status.ToString();
             return;
         }
     }
@@ -403,7 +404,6 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     int ttl = 1;
     if (options_.mode == Options::MODE::CLUSTER) {
         ttl = meta::D_SEC;
-//        ENGINE_LOG_DEBUG << "Server mode is cluster. Clean up files with ttl = " << std::to_string(ttl) << "seconds.";
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
 }
@@ -487,7 +487,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
         //step 6: update meta
         table_file.file_type_ = meta::TableFileSchema::INDEX;
-        table_file.size_ = index->PhysicalSize();
+        table_file.size_ = index->Size();
 
         auto to_remove = file;
         to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
@@ -536,10 +536,9 @@ void DBImpl::BackgroundBuildIndex() {
     meta_ptr_->FilesToIndex(to_index_files);
     Status status;
     for (auto& file : to_index_files) {
-        /* ENGINE_LOG_DEBUG << "Buiding index for " << file.location; */
         status = BuildIndex(file);
         if (!status.ok()) {
-            bg_error_ = status;
+            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
             return;
         }
 
@@ -547,7 +546,6 @@ void DBImpl::BackgroundBuildIndex() {
             break;
         }
     }
-    /* ENGINE_LOG_DEBUG << "All Buiding index Done"; */
 }
 
 Status DBImpl::DropAll() {

@@ -3,16 +3,18 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
-#include <gtest/gtest.h>
-#include <thread>
-#include <easylogging++.h>
-#include <boost/filesystem.hpp>
-
 #include "utils.h"
 #include "db/DB.h"
 #include "db/DBImpl.h"
 #include "db/MetaConsts.h"
 #include "db/Factories.h"
+
+#include <gtest/gtest.h>
+#include <easylogging++.h>
+#include <boost/filesystem.hpp>
+
+#include <thread>
+#include <random>
 
 using namespace zilliz::milvus;
 

@@ -5,7 +5,6 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-#
 #   http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing,
@@ -102,12 +101,8 @@ endmacro()
 
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
-        #message(STATUS "Finding ${DEPENDENCY_NAME} package")
-#        find_package(${DEPENDENCY_NAME} QUIET)
-#        if (NOT ${DEPENDENCY_NAME}_FOUND)
-            #message(STATUS "${DEPENDENCY_NAME} package not found")
+        #disable find_package for now
         build_dependency(${DEPENDENCY_NAME})
-#        endif ()
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
         build_dependency(${DEPENDENCY_NAME})
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "SYSTEM")
@@ -123,11 +118,9 @@ string(TOUPPER ${CMAKE_BUILD_TYPE} UPPERCASE_BUILD_TYPE)
 set(EP_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${UPPERCASE_BUILD_TYPE}}")
 set(EP_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${UPPERCASE_BUILD_TYPE}}")
 
-if(NOT MSVC)
-    # Set -fPIC on all external projects
-    set(EP_CXX_FLAGS "${EP_CXX_FLAGS} -fPIC")
-    set(EP_C_FLAGS "${EP_C_FLAGS} -fPIC")
-endif()
+# Set -fPIC on all external projects
+set(EP_CXX_FLAGS "${EP_CXX_FLAGS} -fPIC")
+set(EP_C_FLAGS "${EP_C_FLAGS} -fPIC")
 
 # CC/CXX environment variables are captured on the first invocation of the
 # builder (e.g make or ninja) instead of when CMake is invoked into to build
@@ -165,20 +158,13 @@ endif()
 
 # Ensure that a default make is set
 if("${MAKE}" STREQUAL "")
-    if(NOT MSVC)
-        find_program(MAKE make)
-    endif()
+    find_program(MAKE make)
 endif()
 
-set(MAKE_BUILD_ARGS "-j2")
-
-## Using make -j in sub-make is fragile
-#if(${CMAKE_GENERATOR} MATCHES "Makefiles")
-#    set(MAKE_BUILD_ARGS "")
-#else()
-#    # limit the maximum number of jobs for ninja
-#    set(MAKE_BUILD_ARGS "-j4")
-#endif()
+if (NOT DEFINED MAKE_BUILD_ARGS)
+    set(MAKE_BUILD_ARGS "-j8")
+endif()
+message(STATUS "Third Party MAKE_BUILD_ARGS = ${MAKE_BUILD_ARGS}")
 
 # ----------------------------------------------------------------------
 # Find pthreads
@@ -291,7 +277,6 @@ if (DEFINED ENV{MILVUS_PROMETHEUS_URL})
     set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
 else ()
     set(PROMETHEUS_SOURCE_URL
-            #"https://github.com/JinHai-CN/prometheus-cpp/archive/${PROMETHEUS_VERSION}.tar.gz"
             https://github.com/jupp0r/prometheus-cpp.git)
 endif()
 
@@ -375,19 +360,13 @@ macro(build_arrow)
     message(STATUS "Building Apache ARROW-${ARROW_VERSION} from source")
     set(ARROW_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep/cpp")
     set(ARROW_STATIC_LIB_NAME arrow)
-#    set(ARROW_CUDA_STATIC_LIB_NAME arrow_cuda)
+
     set(ARROW_STATIC_LIB
             "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
             )
-#    set(ARROW_CUDA_STATIC_LIB
-#            "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_CUDA_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
-#            )
     set(ARROW_INCLUDE_DIR "${ARROW_PREFIX}/include")
-
     set(ARROW_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
-#            "-DARROW_THRIFT_URL=${THRIFT_SOURCE_URL}"
-            #"env ARROW_THRIFT_URL=${THRIFT_SOURCE_URL}"
             -DARROW_BUILD_STATIC=ON
             -DARROW_BUILD_SHARED=OFF
             -DARROW_PARQUET=ON
@@ -396,8 +375,6 @@ macro(build_arrow)
             "-DCMAKE_LIBRARY_PATH=${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs"
             -DCMAKE_BUILD_TYPE=Release)
 
-#    set($ENV{ARROW_THRIFT_URL} ${THRIFT_SOURCE_URL})
-
     externalproject_add(arrow_ep
             GIT_REPOSITORY
             ${ARROW_SOURCE_URL}
@@ -405,14 +382,8 @@ macro(build_arrow)
             ${ARROW_VERSION}
             GIT_SHALLOW
             TRUE
-#            SOURCE_DIR
-#            ${ARROW_PREFIX}
-#            BINARY_DIR
-#            ${ARROW_PREFIX}
             SOURCE_SUBDIR
             cpp
-#            COMMAND
-#            "export \"ARROW_THRIFT_URL=${THRIFT_SOURCE_URL}\""
             ${EP_LOG_OPTIONS}
             CMAKE_ARGS
             ${ARROW_CMAKE_ARGS}
@@ -421,21 +392,16 @@ macro(build_arrow)
             ${MAKE_BUILD_ARGS}
             INSTALL_COMMAND
             ${MAKE} install
-#            BUILD_IN_SOURCE
-#            1
             BUILD_BYPRODUCTS
             "${ARROW_STATIC_LIB}"
-#            "${ARROW_CUDA_STATIC_LIB}"
             )
-
-#    ExternalProject_Add_StepDependencies(arrow_ep build thrift_ep)
 
     file(MAKE_DIRECTORY "${ARROW_PREFIX}/include")
     add_library(arrow STATIC IMPORTED)
     set_target_properties(arrow
             PROPERTIES IMPORTED_LOCATION "${ARROW_STATIC_LIB}"
             INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INCLUDE_DIR}")
-#            INTERFACE_LINK_LIBRARIES thrift)
+
     add_dependencies(arrow arrow_ep)
 
     set(JEMALLOC_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep-build/jemalloc_ep-prefix/src/jemalloc_ep")
@@ -459,9 +425,6 @@ endif()
 # Add Boost dependencies (code adapted from Apache Kudu (incubating))
 
 set(Boost_USE_MULTITHREADED ON)
-if(MSVC AND MILVUS_USE_STATIC_CRT)
-    set(Boost_USE_STATIC_RUNTIME ON)
-endif()
 set(Boost_ADDITIONAL_VERSIONS
         "1.70.0"
         "1.70"
@@ -546,63 +509,12 @@ if(MILVUS_BOOST_VENDORED)
             ""
             ${EP_LOG_OPTIONS})
     set(Boost_INCLUDE_DIR "${BOOST_PREFIX}")
-    set(Boost_INCLUDE_DIRS "${BOOST_INCLUDE_DIR}")
+    set(Boost_INCLUDE_DIRS "${Boost_INCLUDE_DIR}")
     add_dependencies(boost_system_static boost_ep)
     add_dependencies(boost_filesystem_static boost_ep)
     add_dependencies(boost_serialization_static boost_ep)
 
-else()
-    if(MSVC)
-        # disable autolinking in boost
-        add_definitions(-DBOOST_ALL_NO_LIB)
-    endif()
-
-#    if(DEFINED ENV{BOOST_ROOT} OR DEFINED BOOST_ROOT)
-#        # In older versions of CMake (such as 3.2), the system paths for Boost will
-#        # be looked in first even if we set $BOOST_ROOT or pass -DBOOST_ROOT
-#        set(Boost_NO_SYSTEM_PATHS ON)
-#    endif()
-
-    if(MILVUS_BOOST_USE_SHARED)
-        # Find shared Boost libraries.
-        set(Boost_USE_STATIC_LIBS OFF)
-        set(BUILD_SHARED_LIBS_KEEP ${BUILD_SHARED_LIBS})
-        set(BUILD_SHARED_LIBS ON)
-
-        if(MSVC)
-            # force all boost libraries to dynamic link
-            add_definitions(-DBOOST_ALL_DYN_LINK)
-        endif()
-
-        if(MILVUS_BOOST_HEADER_ONLY)
-            find_package(Boost REQUIRED)
-        else()
-            find_package(Boost COMPONENTS serialization system filesystem REQUIRED)
-            set(BOOST_SYSTEM_LIBRARY Boost::system)
-            set(BOOST_FILESYSTEM_LIBRARY Boost::filesystem)
-            set(BOOST_SERIALIZATION_LIBRARY Boost::serialization)
-            set(MILVUS_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY})
-        endif()
-        set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_KEEP})
-        unset(BUILD_SHARED_LIBS_KEEP)
-    else()
-        # Find static boost headers and libs
-        # TODO Differentiate here between release and debug builds
-        set(Boost_USE_STATIC_LIBS ON)
-        if(MILVUS_BOOST_HEADER_ONLY)
-            find_package(Boost REQUIRED)
-        else()
-            find_package(Boost COMPONENTS serialization system filesystem REQUIRED)
-            set(BOOST_SYSTEM_LIBRARY Boost::system)
-            set(BOOST_FILESYSTEM_LIBRARY Boost::filesystem)
-            set(BOOST_SERIALIZATION_LIBRARY Boost::serialization)
-            set(MILVUS_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY})
-        endif()
-    endif()
 endif()
-
-#message(STATUS "Boost include dir: " ${Boost_INCLUDE_DIR})
-#message(STATUS "Boost libraries: " ${Boost_LIBRARIES})
 
 include_directories(SYSTEM ${Boost_INCLUDE_DIR})
 link_directories(SYSTEM ${BOOST_LIB_DIR})
@@ -747,13 +659,6 @@ macro(build_openblas)
     add_dependencies(openblas openblas_ep)
 endmacro()
 
-#if(MILVUS_WITH_OPENBLAS)
-#    resolve_dependency(OpenBLAS)
-#
-#    get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
-#    include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
-#endif()
-
 # ----------------------------------------------------------------------
 # LAPACK
 
@@ -791,15 +696,22 @@ macro(build_lapack)
     add_dependencies(lapack lapack_ep)
 endmacro()
 
-#if(MILVUS_WITH_LAPACK)
-#    resolve_dependency(LAPACK)
-#
-#    get_target_property(LAPACK_INCLUDE_DIR lapack INTERFACE_INCLUDE_DIRECTORIES)
-#    include_directories(SYSTEM "${LAPACK_INCLUDE_DIR}")
-#endif()
-
 # ----------------------------------------------------------------------
 # FAISS
+
+set(BUILD_FAISS_WITH_MKL false)
+
+if(EXISTS "/proc/cpuinfo")
+    FILE(READ /proc/cpuinfo PROC_CPUINFO)
+
+    SET(VENDOR_ID_RX "vendor_id[ \t]*:[ \t]*([a-zA-Z]+)\n")
+    STRING(REGEX MATCH "${VENDOR_ID_RX}" VENDOR_ID "${PROC_CPUINFO}")
+    STRING(REGEX REPLACE "${VENDOR_ID_RX}" "\\1" VENDOR_ID "${VENDOR_ID}")
+
+    if(${VENDOR_ID} STREQUAL "GenuineIntel")
+        set(BUILD_FAISS_WITH_MKL true)
+    endif()
+endif()
 
 macro(build_faiss)
     message(STATUS "Building FAISS-${FAISS_VERSION} from source")
@@ -808,33 +720,36 @@ macro(build_faiss)
     set(FAISS_STATIC_LIB
             "${FAISS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}faiss${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-#    add_custom_target(faiss_dependencies)
-#    add_dependencies(faiss_dependencies openblas_ep)
-#    add_dependencies(faiss_dependencies openblas)
-#    get_target_property(FAISS_OPENBLAS_LIB_DIR openblas IMPORTED_LOCATION)
-#    get_filename_component(FAISS_OPENBLAS_LIB "${FAISS_OPENBLAS_LIB_DIR}" DIRECTORY)
-
     set(FAISS_CONFIGURE_ARGS
             "--prefix=${FAISS_PREFIX}"
             "CFLAGS=${EP_C_FLAGS}"
             "CXXFLAGS=${EP_CXX_FLAGS}"
-            "LDFLAGS=-L${OPENBLAS_PREFIX}/lib -L${LAPACK_PREFIX}/lib -lopenblas -llapack"
             --without-python)
 
-#    if(OPENBLAS_STATIC_LIB)
-#        set(OPENBLAS_LIBRARY ${OPENBLAS_STATIC_LIB})
-#    else()
-#        set(OPENBLAS_LIBRARY ${OPENBLAS_SHARED_LIB})
-#    endif()
-#    set(FAISS_DEPENDENCIES ${FAISS_DEPENDENCIES} ${OPENBLAS_LIBRARY})
+    set(FAISS_CFLAGS ${EP_C_FLAGS})
+    set(FAISS_CXXFLAGS ${EP_CXX_FLAGS})
+
+    if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+        message(STATUS "Build Faiss with MKL")
+        if(NOT DEFINED MKL_LIB_PATH)
+            set(MKL_LIB_PATH "/opt/intel/compilers_and_libraries_${MKL_VERSION}/linux/mkl/lib/intel64")
+            message(STATUS "MKL_LIB_PATH = ${MKL_LIB_PATH}")
+        endif()
+
+        set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
+                "CPPFLAGS=-DFINTEGER=long -DMKL_ILP64 -m64 -I${MKL_LIB_PATH}/../../include"
+                "LDFLAGS=-L${MKL_LIB_PATH}"
+                "LIBS=-Wl,--start-group ${MKL_LIB_PATH}/libmkl_intel_ilp64.a ${MKL_LIB_PATH}/libmkl_gnu_thread.a ${MKL_LIB_PATH}/libmkl_core.a -Wl,--end-group -lgomp -lpthread -lm -ldl")
+
+    else()
+        message(STATUS "Build Faiss with OpenBlas/LAPACK")
+        set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
+                "LDFLAGS=-L${OPENBLAS_PREFIX}/lib -L${LAPACK_PREFIX}/lib")
+    endif()
 
     if(${MILVUS_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
-#                "with_cuda_arch=\"-gencode=arch=compute_35,code=compute_35 \\
-#                                    -gencode=arch=compute_52,code=compute_52 \\
-#                                    -gencode=arch=compute_60,code=compute_60 \\
-#                                    -gencode=arch=compute_61,code=compute_61\""
                 "--with-cuda-arch=\"-gencode=arch=compute_35,code=compute_35\""
                 "--with-cuda-arch=\"-gencode=arch=compute_52,code=compute_52\""
                 "--with-cuda-arch=\"-gencode=arch=compute_60,code=compute_60\""
@@ -851,58 +766,66 @@ macro(build_faiss)
             CONFIGURE_COMMAND
             "./configure"
             ${FAISS_CONFIGURE_ARGS}
-#            BINARY_DIR
-#            ${FAISS_PREFIX}
-#            INSTALL_DIR
-#            ${FAISS_PREFIX}
-#            BUILD_COMMAND
-#            ${MAKE} ${MAKE_BUILD_ARGS}
             BUILD_COMMAND
             ${MAKE} ${MAKE_BUILD_ARGS} all
             COMMAND
             cd gpu && ${MAKE} ${MAKE_BUILD_ARGS}
             BUILD_IN_SOURCE
             1
-#            INSTALL_DIR
-#            ${FAISS_PREFIX}
             INSTALL_COMMAND
             ${MAKE} install
             COMMAND
             ln -s faiss_ep ../faiss
             BUILD_BYPRODUCTS
             ${FAISS_STATIC_LIB})
-#            DEPENDS
-#            ${faiss_dependencies})
-
-    ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
+        
+    if(${BUILD_FAISS_WITH_MKL} STREQUAL "false")
+        ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
+    endif()
 
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
-    add_library(faiss STATIC IMPORTED)
-    set_target_properties(
-            faiss
-            PROPERTIES IMPORTED_LOCATION "${FAISS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "openblas;lapack" )
+    add_library(faiss SHARED IMPORTED)
 
+    if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+        set(MKL_LIBS ${MKL_LIB_PATH}/libmkl_intel_ilp64.a
+                     ${MKL_LIB_PATH}/libmkl_gnu_thread.a
+                     ${MKL_LIB_PATH}/libmkl_core.a)
+
+        set_target_properties(
+                faiss
+                PROPERTIES IMPORTED_LOCATION "${FAISS_STATIC_LIB}"
+                INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
+                INTERFACE_LINK_LIBRARIES "${MKL_LIBS}" )
+    else()
+        set_target_properties(
+                faiss
+                PROPERTIES IMPORTED_LOCATION "${FAISS_STATIC_LIB}"
+                INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
+                INTERFACE_LINK_LIBRARIES "openblas;lapack" )
+    endif()
+            
     add_dependencies(faiss faiss_ep)
-    #add_dependencies(faiss openblas_ep)
-    #add_dependencies(faiss lapack_ep)
-    #target_link_libraries(faiss ${OPENBLAS_PREFIX}/lib)
-    #target_link_libraries(faiss ${LAPACK_PREFIX}/lib)
+
+    if(${BUILD_FAISS_WITH_MKL} STREQUAL "false")
+        add_dependencies(faiss openblas_ep)
+        add_dependencies(faiss lapack_ep)
+    endif()
 
 endmacro()
 
 if(MILVUS_WITH_FAISS)
 
-    resolve_dependency(OpenBLAS)
-    get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
-    link_directories(SYSTEM ${OPENBLAS_PREFIX}/lib)
+    if(${BUILD_FAISS_WITH_MKL} STREQUAL "false")
+        resolve_dependency(OpenBLAS)
+        get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
+        include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
+        link_directories(SYSTEM ${OPENBLAS_PREFIX}/lib)
 
-    resolve_dependency(LAPACK)
-    get_target_property(LAPACK_INCLUDE_DIR lapack INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM "${LAPACK_INCLUDE_DIR}")
-    link_directories(SYSTEM "${LAPACK_PREFIX}/lib")
+        resolve_dependency(LAPACK)
+        get_target_property(LAPACK_INCLUDE_DIR lapack INTERFACE_INCLUDE_DIRECTORIES)
+        include_directories(SYSTEM "${LAPACK_INCLUDE_DIR}")
+        link_directories(SYSTEM "${LAPACK_PREFIX}/lib")
+    endif()
 
     resolve_dependency(FAISS)
     get_target_property(FAISS_INCLUDE_DIR faiss INTERFACE_INCLUDE_DIRECTORIES)
@@ -947,8 +870,6 @@ macro(build_gtest)
     set(GMOCK_STATIC_LIB
             "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gmock${CMAKE_STATIC_LIBRARY_SUFFIX}"
     )
-
-
     ExternalProject_Add(googletest_ep
                         URL
                         ${GTEST_SOURCE_URL}
@@ -988,13 +909,11 @@ macro(build_gtest)
 endmacro()
 
 if (MILVUS_BUILD_TESTS)
-    #message(STATUS "Resolving gtest dependency")
     resolve_dependency(GTest)
 
     if(NOT GTEST_VENDORED)
     endif()
-
-    # TODO: Don't use global includes but rather target_include_directories
+    
     get_target_property(GTEST_INCLUDE_DIR gtest INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM "${GTEST_PREFIX}/lib")
     include_directories(SYSTEM ${GTEST_INCLUDE_DIR})
@@ -1032,32 +951,8 @@ macro(build_lz4)
     set(LZ4_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/lz4_ep-prefix/src/lz4_ep")
     set(LZ4_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/lz4_ep-prefix/")
 
-    if(MSVC)
-        if(MILVUS_USE_STATIC_CRT)
-            if(${UPPERCASE_BUILD_TYPE} STREQUAL "DEBUG")
-                set(LZ4_RUNTIME_LIBRARY_LINKAGE "/p:RuntimeLibrary=MultiThreadedDebug")
-            else()
-                set(LZ4_RUNTIME_LIBRARY_LINKAGE "/p:RuntimeLibrary=MultiThreaded")
-            endif()
-        endif()
-        set(LZ4_STATIC_LIB
-                "${LZ4_BUILD_DIR}/visual/VS2010/bin/x64_${CMAKE_BUILD_TYPE}/liblz4_static.lib")
-        set(LZ4_BUILD_COMMAND
-                BUILD_COMMAND
-                msbuild.exe
-                /m
-                /p:Configuration=${CMAKE_BUILD_TYPE}
-                /p:Platform=x64
-                /p:PlatformToolset=v140
-                ${LZ4_RUNTIME_LIBRARY_LINKAGE}
-                /t:Build
-                ${LZ4_BUILD_DIR}/visual/VS2010/lz4.sln)
-    else()
-        set(LZ4_STATIC_LIB "${LZ4_BUILD_DIR}/lib/liblz4.a")
-        #set(LZ4_BUILD_COMMAND BUILD_COMMAND ${CMAKE_SOURCE_DIR}/build-support/build-lz4-lib.sh
-        #        "AR=${CMAKE_AR}")
-        set(LZ4_BUILD_COMMAND BUILD_COMMAND ${MAKE} ${MAKE_BUILD_ARGS} CFLAGS=${EP_C_FLAGS})
-    endif()
+    set(LZ4_STATIC_LIB "${LZ4_BUILD_DIR}/lib/liblz4.a")
+    set(LZ4_BUILD_COMMAND BUILD_COMMAND ${MAKE} ${MAKE_BUILD_ARGS} CFLAGS=${EP_C_FLAGS})
 
     # We need to copy the header in lib to directory outside of the build
     externalproject_add(lz4_ep
@@ -1092,7 +987,6 @@ endmacro()
 if(MILVUS_WITH_LZ4)
     resolve_dependency(Lz4)
 
-    # TODO: Don't use global includes but rather target_include_directories
     get_target_property(LZ4_INCLUDE_DIR lz4 INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${LZ4_BUILD_DIR}/lib/)
     include_directories(SYSTEM ${LZ4_INCLUDE_DIR})
@@ -1118,16 +1012,8 @@ macro(build_mysqlpp)
     externalproject_add(mysqlpp_ep
             URL
             ${MYSQLPP_SOURCE_URL}
-#            GIT_REPOSITORY
-#            ${MYSQLPP_SOURCE_URL}
-#            GIT_TAG
-#            ${MYSQLPP_VERSION}
-#            GIT_SHALLOW
-#            TRUE
             ${EP_LOG_OPTIONS}
             CONFIGURE_COMMAND
-#            "./bootstrap"
-#            COMMAND
             "./configure"
             ${MYSQLPP_CONFIGURE_ARGS}
             BUILD_COMMAND
@@ -1188,10 +1074,6 @@ macro(build_prometheus)
             ${PROMETHEUS_VERSION}
             GIT_SHALLOW
             TRUE
-#            GIT_CONFIG
-#            recurse-submodules=true
-#            URL
-#            ${PROMETHEUS_SOURCE_URL}
             ${EP_LOG_OPTIONS}
             CMAKE_ARGS
             ${PROMETHEUS_CMAKE_ARGS}
@@ -1235,21 +1117,15 @@ if(MILVUS_WITH_PROMETHEUS)
 
     resolve_dependency(Prometheus)
 
-    # TODO: Don't use global includes but rather target_include_directories
-    #get_target_property(PROMETHEUS-core_INCLUDE_DIRS prometheus-core INTERFACE_INCLUDE_DIRECTORIES)
-
-    #get_target_property(PROMETHEUS_PUSH_INCLUDE_DIRS prometheus_push INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${PROMETHEUS_PREFIX}/push/)
     include_directories(SYSTEM ${PROMETHEUS_PREFIX}/push/include)
 
-    #get_target_property(PROMETHEUS_PULL_INCLUDE_DIRS prometheus_pull INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${PROMETHEUS_PREFIX}/pull/)
     include_directories(SYSTEM ${PROMETHEUS_PREFIX}/pull/include)
 
     link_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/)
     include_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/include)
 
-    #link_directories(${PROMETHEUS_PREFIX}/civetweb_ep-prefix/src/civetweb_ep)
 endif()
 
 # ----------------------------------------------------------------------
@@ -1297,8 +1173,6 @@ if(MILVUS_WITH_ROCKSDB)
 
     resolve_dependency(RocksDB)
 
-    # TODO: Don't use global includes but rather target_include_directories
-#    get_target_property(ROCKSDB_INCLUDE_DIRS rocksdb INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${ROCKSDB_PREFIX}/lib/lib/)
     include_directories(SYSTEM ${ROCKSDB_INCLUDE_DIRS})
 endif()
@@ -1347,34 +1221,9 @@ macro(build_snappy)
 endmacro()
 
 if(MILVUS_WITH_SNAPPY)
-#    if(Snappy_SOURCE STREQUAL "AUTO")
-#        # Normally *Config.cmake files reside in /usr/lib/cmake but Snappy
-#        # errornously places them in ${CMAKE_ROOT}/Modules/
-#        # This is fixed in 1.1.7 but fedora (30) still installs into the wrong
-#        # location.
-#        # https://bugzilla.redhat.com/show_bug.cgi?id=1679727
-#        # https://src.fedoraproject.org/rpms/snappy/pull-request/1
-#        find_package(Snappy QUIET HINTS "${CMAKE_ROOT}/Modules/")
-#        if(NOT Snappy_FOUND)
-#            find_package(SnappyAlt)
-#        endif()
-#        if(NOT Snappy_FOUND AND NOT SnappyAlt_FOUND)
-#            build_snappy()
-#        endif()
-#    elseif(Snappy_SOURCE STREQUAL "BUNDLED")
-#        build_snappy()
-#    elseif(Snappy_SOURCE STREQUAL "SYSTEM")
-#        # SnappyConfig.cmake is not installed on Ubuntu/Debian
-#        # TODO: Make a bug report upstream
-#        find_package(Snappy HINTS "${CMAKE_ROOT}/Modules/")
-#        if(NOT Snappy_FOUND)
-#            find_package(SnappyAlt REQUIRED)
-#        endif()
-#    endif()
 
     resolve_dependency(Snappy)
-
-    # TODO: Don't use global includes but rather target_include_directories
+    
     get_target_property(SNAPPY_INCLUDE_DIRS snappy INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${SNAPPY_PREFIX}/lib/)
     include_directories(SYSTEM ${SNAPPY_INCLUDE_DIRS})
@@ -1446,75 +1295,11 @@ macro(build_sqlite_orm)
 
     endif ()
 
-    #set(SQLITE_ORM_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/sqlite_orm_ep-prefix/src/sqlite_orm_ep")
-    #set(SQLITE_ORM_INCLUDE_DIR "${SQLITE_ORM_PREFIX}/include/sqlite_orm")
-
-#    set(SQLITE_ORM_STATIC_LIB
-#            "${SQLITE_ORM_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}sqlite_orm${CMAKE_STATIC_LIBRARY_SUFFIX}")
-#
-#    set(SQLITE_ORM_CMAKE_CXX_FLAGS "${EP_CXX_FLAGS} -std=c++14")
-#    set(SQLITE_ORM_CMAKE_CXX_FLAGS_DEBUG "${EP_CXX_FLAGS} -std=c++14")
-#
-#    set(SQLITE_ORM_CMAKE_ARGS
-#            ${EP_COMMON_CMAKE_ARGS}
-#            "-DCMAKE_INSTALL_PREFIX=${SQLITE_ORM_PREFIX}"
-#            #"LDFLAGS=-L${SQLITE_PREFIX}"
-#            #"-DCMAKE_PREFIX_PATH=${SQLITE_PREFIX}/include"
-#            "-DCMAKE_INCLUDE_PATH=${SQLITE_PREFIX}/include"
-#            "-DCMAKE_CXX_FLAGS=${SQLITE_ORM_CMAKE_CXX_FLAGS}"
-#            "-DCMAKE_CXX_FLAGS_DEBUG=${SQLITE_ORM_CMAKE_CXX_FLAGS}"
-#            -DSqliteOrm_BuildTests=off
-#            -DBUILD_TESTING=off)
-#    message(STATUS "SQLITE_INCLUDE: ${SQLITE_ORM_CMAKE_ARGS}")
-#
-#        message(STATUS "SQLITE_ORM_CMAKE_CXX_FLAGS: ${SQLITE_ORM_CMAKE_CXX_FLAGS}")
-
-#    externalproject_add(sqlite_orm_ep
-#            URL
-#            ${SQLITE_ORM_SOURCE_URL}
-#            PREFIX ${CMAKE_CURRENT_BINARY_DIR}/sqlite_orm_ep-prefix
-#            CONFIGURE_COMMAND
-#            ""
-#            BUILD_COMMAND
-#            ""
-#            INSTALL_COMMAND
-#            ""
-            #${EP_LOG_OPTIONS}
-            #${EP_LOG_OPTIONS}
-#            CMAKE_ARGS
-#            ${SQLITE_ORM_CMAKE_ARGS}
-#            BUILD_COMMAND
-#            ${MAKE}
-#            ${MAKE_BUILD_ARGS}
-#            #"LDFLAGS=-L${SQLITE_PREFIX}"
-#            BUILD_IN_SOURCE
-#            1
-#            BUILD_BYPRODUCTS
-#            "${SQLITE_ORM_STATIC_LIB}"
-#            )
-#    ExternalProject_Add_StepDependencies(sqlite_orm_ep build sqlite_ep)
-
-    #set(SQLITE_ORM_SQLITE_HEADER ${SQLITE_INCLUDE_DIR}/sqlite3.h)
-#    file(MAKE_DIRECTORY "${SQLITE_ORM_INCLUDE_DIR}")
-#    add_library(sqlite_orm STATIC IMPORTED)
-##    message(STATUS "SQLITE_INCLUDE_DIR: ${SQLITE_INCLUDE_DIR}")
-#    set_target_properties(
-#            sqlite_orm
-#            PROPERTIES
-#            IMPORTED_LOCATION "${SQLITE_ORM_STATIC_LIB}"
-#            INTERFACE_INCLUDE_DIRECTORIES "${SQLITE_ORM_INCLUDE_DIR};${SQLITE_INCLUDE_DIR}")
-#    target_include_directories(sqlite_orm INTERFACE ${SQLITE_PREFIX} ${SQLITE_INCLUDE_DIR})
-#    target_link_libraries(sqlite_orm INTERFACE sqlite)
-#
-#    add_dependencies(sqlite_orm sqlite_orm_ep)
 endmacro()
 
 if(MILVUS_WITH_SQLITE_ORM)
     resolve_dependency(SQLite_ORM)
-#    ExternalProject_Get_Property(sqlite_orm_ep source_dir)
-#    set(SQLITE_ORM_INCLUDE_DIR ${source_dir}/sqlite_orm_ep)
     include_directories(SYSTEM "${SQLITE_ORM_INCLUDE_DIR}")
-    #message(STATUS "SQLITE_ORM_INCLUDE_DIR: ${SQLITE_ORM_INCLUDE_DIR}")
 endif()
 
 # ----------------------------------------------------------------------
@@ -1554,18 +1339,7 @@ macro(build_thrift)
     endif()
 
     set(THRIFT_STATIC_LIB_NAME "${CMAKE_STATIC_LIBRARY_PREFIX}thrift")
-    if(MSVC)
-        if(MILVUS_USE_STATIC_CRT)
-            set(THRIFT_STATIC_LIB_NAME "${THRIFT_STATIC_LIB_NAME}")
-            set(THRIFT_CMAKE_ARGS ${THRIFT_CMAKE_ARGS} "-DWITH_MT=ON")
-        else()
-            set(THRIFT_STATIC_LIB_NAME "${THRIFT_STATIC_LIB_NAME}")
-            set(THRIFT_CMAKE_ARGS ${THRIFT_CMAKE_ARGS} "-DWITH_MT=OFF")
-        endif()
-    endif()
-    if(${UPPERCASE_BUILD_TYPE} STREQUAL "DEBUG")
-        set(THRIFT_STATIC_LIB_NAME "${THRIFT_STATIC_LIB_NAME}")
-    endif()
+
     set(THRIFT_STATIC_LIB
             "${THRIFT_PREFIX}/lib/${THRIFT_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
@@ -1575,60 +1349,6 @@ macro(build_thrift)
         set(THRIFT_CMAKE_ARGS "-DZLIB_LIBRARY=${ZLIB_STATIC_LIB}" ${THRIFT_CMAKE_ARGS})
     endif()
     set(THRIFT_DEPENDENCIES ${THRIFT_DEPENDENCIES} ${ZLIB_LIBRARY})
-
-    if(MSVC)
-        set(WINFLEXBISON_VERSION 2.4.9)
-        set(WINFLEXBISON_PREFIX
-                "${CMAKE_CURRENT_BINARY_DIR}/winflexbison_ep/src/winflexbison_ep-install")
-        externalproject_add(
-                winflexbison_ep
-                URL
-                https://github.com/lexxmark/winflexbison/releases/download/v.${WINFLEXBISON_VERSION}/win_flex_bison-${WINFLEXBISON_VERSION}.zip
-                URL_HASH
-                MD5=a2e979ea9928fbf8567e995e9c0df765
-                SOURCE_DIR
-                ${WINFLEXBISON_PREFIX}
-                CONFIGURE_COMMAND
-                ""
-                BUILD_COMMAND
-                ""
-                INSTALL_COMMAND
-                ""
-                ${EP_LOG_OPTIONS})
-        set(THRIFT_DEPENDENCIES ${THRIFT_DEPENDENCIES} winflexbison_ep)
-
-        set(THRIFT_CMAKE_ARGS
-                "-DFLEX_EXECUTABLE=${WINFLEXBISON_PREFIX}/win_flex.exe"
-                "-DBISON_EXECUTABLE=${WINFLEXBISON_PREFIX}/win_bison.exe"
-                "-DZLIB_INCLUDE_DIR=${ZLIB_INCLUDE_DIR}"
-                "-DWITH_SHARED_LIB=OFF"
-                "-DWITH_PLUGIN=OFF"
-                ${THRIFT_CMAKE_ARGS})
-    elseif(APPLE)
-        # Some other process always resets BISON_EXECUTABLE to the system default,
-        # thus we use our own variable here.
-        if(NOT DEFINED THRIFT_BISON_EXECUTABLE)
-            find_package(BISON 2.5.1)
-
-            # In the case where we cannot find a system-wide installation, look for
-            # homebrew and ask for its bison installation.
-            if(NOT BISON_FOUND)
-                find_program(BREW_BIN brew)
-                if(BREW_BIN)
-                    execute_process(COMMAND ${BREW_BIN} --prefix bison
-                            OUTPUT_VARIABLE BISON_PREFIX
-                            OUTPUT_STRIP_TRAILING_WHITESPACE)
-                    set(BISON_EXECUTABLE "${BISON_PREFIX}/bin/bison")
-                    find_package(BISON 2.5.1)
-                    set(THRIFT_BISON_EXECUTABLE "${BISON_EXECUTABLE}")
-                endif()
-            else()
-                set(THRIFT_BISON_EXECUTABLE "${BISON_EXECUTABLE}")
-            endif()
-        endif()
-        set(THRIFT_CMAKE_ARGS "-DBISON_EXECUTABLE=${THRIFT_BISON_EXECUTABLE}"
-                ${THRIFT_CMAKE_ARGS})
-    endif()
 
     externalproject_add(thrift_ep
             URL
@@ -1658,8 +1378,7 @@ endmacro()
 
 if(MILVUS_WITH_THRIFT)
     resolve_dependency(Thrift)
-    # TODO: Don't use global includes but rather target_include_directories
-#    MESSAGE(STATUS ${THRIFT_PREFIX}/lib/)
+
     link_directories(SYSTEM ${THRIFT_PREFIX}/lib/)
     link_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix/src/thrift_ep-build/lib)
     include_directories(SYSTEM ${THRIFT_INCLUDE_DIR})
@@ -1705,8 +1424,7 @@ endmacro()
 
 if(MILVUS_WITH_YAMLCPP)
     resolve_dependency(yaml-cpp)
-
-    # TODO: Don't use global includes but rather target_include_directories
+    
     get_target_property(YAMLCPP_INCLUDE_DIR yaml-cpp INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${YAMLCPP_PREFIX}/lib/)
     include_directories(SYSTEM ${YAMLCPP_INCLUDE_DIR})
@@ -1718,15 +1436,7 @@ endif()
 macro(build_zlib)
     message(STATUS "Building ZLIB-${ZLIB_VERSION} from source")
     set(ZLIB_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix/src/zlib_ep")
-    if(MSVC)
-        if(${UPPERCASE_BUILD_TYPE} STREQUAL "DEBUG")
-            set(ZLIB_STATIC_LIB_NAME zlibstaticd.lib)
-        else()
-            set(ZLIB_STATIC_LIB_NAME zlibstatic.lib)
-        endif()
-    else()
-        set(ZLIB_STATIC_LIB_NAME libz.a)
-    endif()
+    set(ZLIB_STATIC_LIB_NAME libz.a)
     set(ZLIB_STATIC_LIB "${ZLIB_PREFIX}/lib/${ZLIB_STATIC_LIB_NAME}")
     set(ZLIB_CMAKE_ARGS ${EP_COMMON_CMAKE_ARGS} "-DCMAKE_INSTALL_PREFIX=${ZLIB_PREFIX}"
             -DBUILD_SHARED_LIBS=OFF)
@@ -1755,8 +1465,7 @@ endmacro()
 
 if(MILVUS_WITH_ZLIB)
     resolve_dependency(ZLIB)
-
-    # TODO: Don't use global includes but rather target_include_directories
+    
     get_target_property(ZLIB_INCLUDE_DIR zlib INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${ZLIB_INCLUDE_DIR})
 endif()
@@ -1778,22 +1487,15 @@ macro(build_zstd)
             -DZSTD_BUILD_STATIC=on
             -DZSTD_MULTITHREAD_SUPPORT=off)
 
-    if(MSVC)
-        set(ZSTD_STATIC_LIB "${ZSTD_PREFIX}/lib/zstd_static.lib")
-        if(MILVUS_USE_STATIC_CRT)
-            set(ZSTD_CMAKE_ARGS ${ZSTD_CMAKE_ARGS} "-DZSTD_USE_STATIC_RUNTIME=on")
-        endif()
-    else()
-        set(ZSTD_STATIC_LIB "${ZSTD_PREFIX}/lib/libzstd.a")
-        # Only pass our C flags on Unix as on MSVC it leads to a
-        # "incompatible command-line options" error
-        set(ZSTD_CMAKE_ARGS
-                ${ZSTD_CMAKE_ARGS}
-                -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-                -DCMAKE_C_FLAGS=${EP_C_FLAGS}
-                -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
-    endif()
+
+    set(ZSTD_STATIC_LIB "${ZSTD_PREFIX}/lib/libzstd.a")
+
+    set(ZSTD_CMAKE_ARGS
+            ${ZSTD_CMAKE_ARGS}
+            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+            -DCMAKE_C_FLAGS=${EP_C_FLAGS}
+            -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
 
     if(CMAKE_VERSION VERSION_LESS 3.7)
         message(FATAL_ERROR "Building zstd using ExternalProject requires at least CMake 3.7")
@@ -1827,8 +1529,7 @@ endmacro()
 
 if(MILVUS_WITH_ZSTD)
     resolve_dependency(ZSTD)
-
-    # TODO: Don't use global includes but rather target_include_directories
+    
     get_target_property(ZSTD_INCLUDE_DIR zstd INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${ZSTD_PREFIX}/lib)
     include_directories(SYSTEM ${ZSTD_INCLUDE_DIR})
@@ -1844,7 +1545,7 @@ macro(build_aws)
             ${EP_COMMON_TOOLCHAIN}
             "-DCMAKE_INSTALL_PREFIX=${AWS_PREFIX}"
             -DCMAKE_BUILD_TYPE=Release
-            -DCMAKE_INSTALL_LIBDIR=lib #${CMAKE_INSTALL_LIBDIR}
+            -DCMAKE_INSTALL_LIBDIR=lib
             -DBUILD_ONLY=s3
             -DBUILD_SHARED_LIBS=off
             -DENABLE_TESTING=off
@@ -1855,18 +1556,13 @@ macro(build_aws)
             "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-core${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(AWS_CPP_SDK_S3_STATIC_LIB
             "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-s3${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    # Only pass our C flags on Unix as on MSVC it leads to a
-    # "incompatible command-line options" error
+
     set(AWS_CMAKE_ARGS
             ${AWS_CMAKE_ARGS}
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
             -DCMAKE_C_FLAGS=${EP_C_FLAGS}
             -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
-
-    if(CMAKE_VERSION VERSION_LESS 3.7)
-        message(FATAL_ERROR "Building AWS using ExternalProject requires at least CMake 3.7")
-    endif()
 
     externalproject_add(aws_ep
             ${EP_LOG_OPTIONS}
@@ -1882,8 +1578,6 @@ macro(build_aws)
             BUILD_BYPRODUCTS
             "${AWS_CPP_SDK_S3_STATIC_LIB}"
             "${AWS_CPP_SDK_CORE_STATIC_LIB}")
-
-
     file(MAKE_DIRECTORY "${AWS_PREFIX}/include")
 
     add_library(aws-cpp-sdk-s3 STATIC IMPORTED)
@@ -1906,8 +1600,7 @@ endmacro()
 
 if(MILVUS_WITH_AWS)
     resolve_dependency(AWS)
-
-    # TODO: Don't use global includes but rather target_include_directories
+    
     link_directories(SYSTEM ${AWS_PREFIX}/lib)
 
     get_target_property(AWS_CPP_SDK_S3_INCLUDE_DIR aws-cpp-sdk-s3 INTERFACE_INCLUDE_DIRECTORIES)
