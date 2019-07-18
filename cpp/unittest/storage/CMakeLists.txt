@@ -25,7 +25,7 @@ set(s3_client_libs
         stdc++
         aws-cpp-sdk-s3
         aws-cpp-sdk-core
-        boost_filesystem
+        boost_filesystem_static
         )
 target_link_libraries(s3_test
         ${s3_client_libs}

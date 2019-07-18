@@ -28,6 +28,14 @@ DBWrapper::DBWrapper() {
     if(index_size > 0) {//ensure larger than zero, unit is MB
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
+    int64_t insert_buffer_size = config.GetInt64Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
+    if (insert_buffer_size >= 1) {
+        opt.insert_buffer_size = insert_buffer_size * engine::ONE_GB;
+    }
+    else {
+        std::cout << "ERROR: insert_buffer_size should be at least 1 GB" << std::endl;
+        kill(0, SIGUSR1);
+    }
 
     ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
     std::string mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");

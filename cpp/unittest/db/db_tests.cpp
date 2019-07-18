@@ -3,16 +3,19 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
-#include <gtest/gtest.h>
-#include <thread>
-#include <easylogging++.h>
-#include <boost/filesystem.hpp>
-
 #include "utils.h"
 #include "db/DB.h"
 #include "db/DBImpl.h"
 #include "db/MetaConsts.h"
 #include "db/Factories.h"
+
+#include <gtest/gtest.h>
+#include <easylogging++.h>
+
+#include <boost/filesystem.hpp>
+
+#include <thread>
+#include <random>
 
 using namespace zilliz::milvus;
 
@@ -52,15 +55,13 @@ TEST_F(DBTest, CONFIG_TEST) {
         engine::ArchiveConf conf("delete");
         ASSERT_EQ(conf.GetType(), "delete");
         auto criterias = conf.GetCriterias();
-        ASSERT_TRUE(criterias.size() == 1);
-        ASSERT_TRUE(criterias["disk"] == 512);
+        ASSERT_TRUE(criterias.size() == 0);
     }
     {
         engine::ArchiveConf conf("swap");
         ASSERT_EQ(conf.GetType(), "swap");
         auto criterias = conf.GetCriterias();
-        ASSERT_TRUE(criterias.size() == 1);
-        ASSERT_TRUE(criterias["disk"] == 512);
+        ASSERT_TRUE(criterias.size() == 0);
     }
     {
         ASSERT_ANY_THROW(engine::ArchiveConf conf1("swap", "disk:"));
@@ -206,11 +207,21 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_STATS(stat);
     }
 
-    sleep(2); // wait until build index finish
+    db_->BuildIndex(TABLE_NAME); // wait until build index finish
 
-    engine::QueryResults results;
-    stat = db_->Query(TABLE_NAME, k, nq, xq.data(), results);
-    ASSERT_STATS(stat);
+    {
+        engine::QueryResults results;
+        stat = db_->Query(TABLE_NAME, k, nq, xq.data(), results);
+        ASSERT_STATS(stat);
+    }
+
+    {//search by specify index file
+        engine::meta::DatesT dates;
+        std::vector<std::string> file_ids = {"1", "2", "3", "4"};
+        engine::QueryResults results;
+        stat = db_->Query(TABLE_NAME, file_ids, k, nq, xq.data(), dates, results);
+        ASSERT_STATS(stat);
+    }
 
     // TODO(linxj): add groundTruth assert
 };
