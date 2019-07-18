@@ -116,6 +116,11 @@ set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
 
 add_compile_definitions(PROFILER=${PROFILER})
 
+message("MILVUS_ENABLE_PROFILING = ${MILVUS_ENABLE_PROFILING}")
+if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
+    ADD_DEFINITIONS(-DMILVUS_ENABLE_PROFILING)
+endif()
+
 include_directories(${MILVUS_ENGINE_INCLUDE})
 include_directories(${MILVUS_ENGINE_SRC})
 
@@ -140,11 +145,6 @@ if("${MILVUS_DB_PATH}" STREQUAL "")
 endif()
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
-
-message("MILVUS_ENABLE_PROFILING = ${MILVUS_ENABLE_PROFILING}")
-if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
-    ADD_DEFINITIONS(-DMILVUS_ENABLE_PROFILING)
-endif()
 
 #install
 install(DIRECTORY scripts/
