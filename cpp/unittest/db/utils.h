@@ -30,7 +30,7 @@
 #define STOP_TIMER(name)
 #endif
 
-void ASSERT_STATS(zilliz::milvus::engine::Status& stat);
+void ASSERT_STATS(zilliz::milvus::engine::Status &stat);
 
 //class TestEnv : public ::testing::Environment {
 //public:
@@ -54,8 +54,8 @@ void ASSERT_STATS(zilliz::milvus::engine::Status& stat);
 //        ::testing::AddGlobalTestEnvironment(new TestEnv);
 
 class DBTest : public ::testing::Test {
-protected:
-    zilliz::milvus::engine::DB* db_;
+ protected:
+    zilliz::milvus::engine::DB *db_;
 
     void InitLog();
     virtual void SetUp() override;
@@ -64,13 +64,13 @@ protected:
 };
 
 class DBTest2 : public DBTest {
-protected:
+ protected:
     virtual zilliz::milvus::engine::Options GetOptions() override;
 };
 
 
 class MetaTest : public DBTest {
-protected:
+ protected:
     std::shared_ptr<zilliz::milvus::engine::meta::DBMetaImpl> impl_;
 
     virtual void SetUp() override;
@@ -78,12 +78,17 @@ protected:
 };
 
 class MySQLTest : public ::testing::Test {
-protected:
+ protected:
 //    std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
     zilliz::milvus::engine::DBMetaOptions getDBMetaOptions();
 };
 
-class MySQLDBTest : public  ::testing::Test {
-protected:
+class MySQLDBTest : public ::testing::Test {
+ protected:
     zilliz::milvus::engine::Options GetOptions();
+};
+
+class NewMemManagerTest : public ::testing::Test {
+    void InitLog();
+    void SetUp() override;
 };

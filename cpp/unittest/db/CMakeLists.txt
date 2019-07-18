@@ -24,7 +24,6 @@ link_directories("/usr/local/cuda/lib64")
 include_directories(/usr/include/mysql)
 
 set(db_test_src
-    #${unittest_srcs}
     ${config_files}
     ${cache_srcs}
     ${db_srcs}
@@ -40,13 +39,18 @@ set(db_libs
         faiss
         cudart
         cublas
-        sqlite3
-        boost_system
-        boost_filesystem
+        sqlite
+        boost_system_static
+        boost_filesystem_static
         lz4
         mysqlpp
         )
 
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+    set(db_libs ${db_libs} ${MKL_LIBS} ${MKL_LIBS})
+endif()
+
 target_link_libraries(db_test ${db_libs} ${unittest_libs})
 
 install(TARGETS db_test DESTINATION bin)
+

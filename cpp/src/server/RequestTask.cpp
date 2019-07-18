@@ -8,6 +8,7 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
+#include "utils/ValidationUtil.h"
 #include "DBWrapper.h"
 #include "version.h"
 
@@ -114,7 +115,13 @@ namespace {
             }
 
             long days = (tt_end > tt_start) ? (tt_end - tt_start)/DAY_SECONDS : (tt_start - tt_end)/DAY_SECONDS;
-            for(long i = 0; i <= days; i++) {
+            if(days == 0) {
+                error_code = SERVER_INVALID_TIME_RANGE;
+                error_msg = "Invalid time range: " + range.start_value + " to " + range.end_value;
+                return ;
+            }
+
+            for(long i = 0; i < days; i++) {
                 time_t tt_day = tt_start + DAY_SECONDS*i;
                 tm tm_day;
                 CommonUtil::ConvertTime(tt_day, tm_day);
@@ -154,16 +161,20 @@ ServerError CreateTableTask::OnExecute() {
 
     try {
         //step 1: check arguments
-        if(schema_.table_name.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
-        }
-        if(schema_.dimension <= 0) {
-            return SetError(SERVER_INVALID_TABLE_DIMENSION, "Invalid table dimension: " + std::to_string(schema_.dimension));
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(schema_.table_name);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + schema_.table_name);
         }
 
-        engine::EngineType engine_type = EngineType(schema_.index_type);
-        if(engine_type == engine::EngineType::INVALID) {
-            return SetError(SERVER_INVALID_INDEX_TYPE, "Invalid index type: " + std::to_string(schema_.index_type));
+        res = ValidateTableDimension(schema_.dimension);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table dimension: " + std::to_string(schema_.dimension));
+        }
+
+        res = ValidateTableIndexType(schema_.index_type);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid index type: " + std::to_string(schema_.index_type));
         }
 
         //step 2: construct table schema
@@ -205,8 +216,10 @@ ServerError DescribeTableTask::OnExecute() {
 
     try {
         //step 1: check arguments
-        if(table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         //step 2: get table info
@@ -246,12 +259,20 @@ ServerError BuildIndexTask::OnExecute() {
         TimeRecorder rc("BuildIndexTask");
 
         //step 1: check arguments
-        if(table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
+        }
+
+        bool has_table = false;
+        engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table);
+        if(!has_table) {
+            return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
         }
 
         //step 2: check table existence
-        engine::Status stat = DBWrapper::DB()->BuildIndex(table_name_);
+        stat = DBWrapper::DB()->BuildIndex(table_name_);
         if(!stat.ok()) {
             return SetError(SERVER_BUILD_INDEX_ERROR, "Engine failed: " + stat.ToString());
         }
@@ -281,8 +302,10 @@ ServerError HasTableTask::OnExecute() {
         TimeRecorder rc("HasTableTask");
 
         //step 1: check arguments
-        if(table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         //step 2: check table existence
@@ -315,8 +338,10 @@ ServerError DeleteTableTask::OnExecute() {
         TimeRecorder rc("DeleteTableTask");
 
         //step 1: check arguments
-        if (table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         //step 2: check table existence
@@ -341,7 +366,7 @@ ServerError DeleteTableTask::OnExecute() {
         }
 
         rc.Record("deleta table");
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -397,8 +422,10 @@ ServerError AddVectorTask::OnExecute() {
         TimeRecorder rc("AddVectorTask");
 
         //step 1: check arguments
-        if (table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         if(record_array_.empty()) {
@@ -455,7 +482,7 @@ ServerError AddVectorTask::OnExecute() {
 #endif
 
         rc.Record("do insert");
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
@@ -465,39 +492,29 @@ ServerError AddVectorTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-SearchVectorTask::SearchVectorTask(const std::string &table_name,
-                                   const std::vector<std::string>& file_id_array,
-                                   const std::vector<thrift::RowRecord> &query_record_array,
-                                   const std::vector<thrift::Range> &query_range_array,
-                                   const int64_t top_k,
-                                   std::vector<thrift::TopKQueryResult> &result_array)
+SearchVectorTaskBase::SearchVectorTaskBase(const std::string &table_name,
+        const std::vector<std::string>& file_id_array,
+        const std::vector<thrift::RowRecord> &query_record_array,
+        const std::vector<thrift::Range> &query_range_array,
+        const int64_t top_k)
     : BaseTask(DQL_TASK_GROUP),
       table_name_(table_name),
       file_id_array_(file_id_array),
       record_array_(query_record_array),
       range_array_(query_range_array),
-      top_k_(top_k),
-      result_array_(result_array) {
+      top_k_(top_k) {
 
 }
 
-BaseTaskPtr SearchVectorTask::Create(const std::string& table_name,
-                                     const std::vector<std::string>& file_id_array,
-                                     const std::vector<thrift::RowRecord> & query_record_array,
-                                     const std::vector<thrift::Range> & query_range_array,
-                                     const int64_t top_k,
-                                     std::vector<thrift::TopKQueryResult>& result_array) {
-    return std::shared_ptr<BaseTask>(new SearchVectorTask(table_name, file_id_array,
-            query_record_array, query_range_array, top_k, result_array));
-}
-
-ServerError SearchVectorTask::OnExecute() {
+ServerError SearchVectorTaskBase::OnExecute() {
     try {
         TimeRecorder rc("SearchVectorTask");
 
         //step 1: check arguments
-        if (table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         if(top_k_ <= 0) {
@@ -574,31 +591,111 @@ ServerError SearchVectorTask::OnExecute() {
         rc.Record("do search");
 
         //step 5: construct result array
-        for(uint64_t i = 0; i < record_count; i++) {
-            auto& result = results[i];
-            const auto& record = record_array_[i];
-
-            thrift::TopKQueryResult thrift_topk_result;
-            for(auto& pair : result) {
-                thrift::QueryResult thrift_result;
-                thrift_result.__set_id(pair.first);
-                thrift_result.__set_distance(pair.second);
-
-                thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
-            }
-
-            result_array_.emplace_back(thrift_topk_result);
-        }
+        ConstructResult(results);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();
 #endif
 
         rc.Record("construct result");
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
+
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+SearchVectorTask1::SearchVectorTask1(const std::string &table_name,
+                                     const std::vector<std::string>& file_id_array,
+                                     const std::vector<thrift::RowRecord> &query_record_array,
+                                     const std::vector<thrift::Range> &query_range_array,
+                                     const int64_t top_k,
+                                     std::vector<thrift::TopKQueryResult> &result_array)
+        : SearchVectorTaskBase(table_name, file_id_array, query_record_array, query_range_array, top_k),
+          result_array_(result_array) {
+
+}
+
+BaseTaskPtr SearchVectorTask1::Create(const std::string& table_name,
+                                      const std::vector<std::string>& file_id_array,
+                                      const std::vector<thrift::RowRecord> & query_record_array,
+                                      const std::vector<thrift::Range> & query_range_array,
+                                      const int64_t top_k,
+                                      std::vector<thrift::TopKQueryResult>& result_array) {
+    return std::shared_ptr<BaseTask>(new SearchVectorTask1(table_name, file_id_array,
+                                                           query_record_array, query_range_array, top_k, result_array));
+}
+
+ServerError SearchVectorTask1::ConstructResult(engine::QueryResults& results) {
+    for(uint64_t i = 0; i < results.size(); i++) {
+        auto& result = results[i];
+        const auto& record = record_array_[i];
+
+        thrift::TopKQueryResult thrift_topk_result;
+        for(auto& pair : result) {
+            thrift::QueryResult thrift_result;
+            thrift_result.__set_id(pair.first);
+            thrift_result.__set_distance(pair.second);
+
+            thrift_topk_result.query_result_arrays.emplace_back(thrift_result);
+        }
+
+        result_array_.emplace_back(thrift_topk_result);
+    }
+
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+SearchVectorTask2::SearchVectorTask2(const std::string &table_name,
+                                     const std::vector<std::string>& file_id_array,
+                                     const std::vector<thrift::RowRecord> &query_record_array,
+                                     const std::vector<thrift::Range> &query_range_array,
+                                     const int64_t top_k,
+                                     std::vector<thrift::TopKQueryBinResult> &result_array)
+    : SearchVectorTaskBase(table_name, file_id_array, query_record_array, query_range_array, top_k),
+      result_array_(result_array) {
+
+}
+
+BaseTaskPtr SearchVectorTask2::Create(const std::string& table_name,
+                                     const std::vector<std::string>& file_id_array,
+                                     const std::vector<thrift::RowRecord> & query_record_array,
+                                     const std::vector<thrift::Range> & query_range_array,
+                                     const int64_t top_k,
+                                     std::vector<thrift::TopKQueryBinResult>& result_array) {
+    return std::shared_ptr<BaseTask>(new SearchVectorTask2(table_name, file_id_array,
+            query_record_array, query_range_array, top_k, result_array));
+}
+
+ServerError SearchVectorTask2::ConstructResult(engine::QueryResults& results) {
+    for(size_t i = 0; i < results.size(); i++) {
+        auto& result = results[i];
+
+        thrift::TopKQueryBinResult thrift_topk_result;
+        if(result.empty()) {
+            result_array_.emplace_back(thrift_topk_result);
+            continue;
+        }
+
+        std::string str_ids, str_distances;
+        str_ids.resize(sizeof(engine::IDNumber)*result.size());
+        str_distances.resize(sizeof(double)*result.size());
+
+        engine::IDNumber* ids_ptr = (engine::IDNumber*)str_ids.data();
+        double* distance_ptr = (double*)str_distances.data();
+        for(size_t k = 0; k < results.size(); k++) {
+            auto& pair = result[k];
+            ids_ptr[k] = pair.first;
+            distance_ptr[k] = pair.second;
+        }
+
+        thrift_topk_result.__set_id_array(str_ids);
+        thrift_topk_result.__set_distance_array(str_distances);
+        result_array_.emplace_back(thrift_topk_result);
     }
 
     return SERVER_SUCCESS;
@@ -621,8 +718,10 @@ ServerError GetTableRowCountTask::OnExecute() {
         TimeRecorder rc("GetTableRowCountTask");
 
         //step 1: check arguments
-        if (table_name_.empty()) {
-            return SetError(SERVER_INVALID_TABLE_NAME, "Empty table name");
+        ServerError res = SERVER_SUCCESS;
+        res = ValidateTableName(table_name_);
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
         }
 
         //step 2: get row count
@@ -634,7 +733,7 @@ ServerError GetTableRowCountTask::OnExecute() {
 
         row_count_ = (int64_t) row_count;
 
-        rc.Elapse("totally cost");
+        rc.Elapse("total cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());

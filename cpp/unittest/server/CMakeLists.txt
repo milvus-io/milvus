@@ -37,9 +37,9 @@ set(require_libs
         faiss
         cudart
         cublas
-        sqlite3
-        boost_system
-        boost_filesystem
+        sqlite
+        boost_system_static
+        boost_filesystem_static
         snappy
         z
         bz2
@@ -47,6 +47,10 @@ set(require_libs
         lz4
         pthread
         )
+
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+    set(require_libs ${require_libs} ${MKL_LIBS} ${MKL_LIBS})
+endif()
 
 target_link_libraries(server_test
         ${require_libs}
