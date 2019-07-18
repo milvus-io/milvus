@@ -7,9 +7,11 @@
 
 #include "utils/ValidationUtil.h"
 #include "utils/Error.h"
+#include "db/ExecutionEngine.h"
 
 #include <string>
 
+using namespace zilliz::milvus;
 using namespace zilliz::milvus::server;
 
 TEST(ValidationUtilTest, TableNameTest) {
@@ -53,9 +55,9 @@ TEST(ValidationUtilTest, TableDimensionTest) {
 }
 
 TEST(ValidationUtilTest, TableIndexTypeTest) {
-    ASSERT_EQ(ValidateTableIndexType(0), SERVER_INVALID_INDEX_TYPE);
-    ASSERT_EQ(ValidateTableIndexType(1), SERVER_SUCCESS);
-    ASSERT_EQ(ValidateTableIndexType(2), SERVER_SUCCESS);
-    ASSERT_EQ(ValidateTableIndexType(3), SERVER_INVALID_INDEX_TYPE);
-    ASSERT_EQ(ValidateTableIndexType(4), SERVER_INVALID_INDEX_TYPE);
+    ASSERT_EQ(ValidateTableIndexType((int)engine::EngineType::INVALID), SERVER_INVALID_INDEX_TYPE);
+    for(int i = 1; i <= (int)engine::EngineType::MAX_VALUE; i++) {
+        ASSERT_EQ(ValidateTableIndexType(i), SERVER_SUCCESS);
+    }
+    ASSERT_EQ(ValidateTableIndexType((int)engine::EngineType::MAX_VALUE + 1), SERVER_INVALID_INDEX_TYPE);
 }

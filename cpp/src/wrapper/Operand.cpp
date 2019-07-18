@@ -28,6 +28,15 @@ IndexType resolveIndexType(const string &index_type) {
     return IndexType::Invalid_Option;
 }
 
+int CalcBacketCount(int nb, size_t nlist) {
+    int backet_count = int(nb / 1000000.0 * nlist);
+    if(backet_count == 0) {
+        backet_count = 1; //avoid faiss rash
+    }
+
+    return backet_count;
+}
+
 // nb at least 100
 string Operand::get_index_type(const int &nb) {
     if (!index_str.empty()) { return index_str; }
@@ -45,7 +54,7 @@ string Operand::get_index_type(const int &nb) {
             size_t nlist = engine_config.GetInt32Value(CONFIG_NLIST, 16384);
 
             index_str += (ncent != 0 ? index_type + std::to_string(ncent) :
-                          index_type + std::to_string(int(nb / 1000000.0 * nlist)));
+                          index_type + std::to_string(CalcBacketCount(nb, nlist)));
 //            std::cout<<"nlist = "<<nlist<<std::endl;
             if (!postproc.empty()) { index_str += ("," + postproc); }
             break;
@@ -58,7 +67,7 @@ string Operand::get_index_type(const int &nb) {
             size_t nlist = engine_config.GetInt32Value(CONFIG_NLIST, 16384);
 
             index_str += (ncent != 0 ? "IVF" + std::to_string(ncent) :
-                          "IVF" + std::to_string(int(nb / 1000000.0 * nlist)));
+                          "IVF" + std::to_string(CalcBacketCount(nb, nlist)));
             index_str += ",SQ8";
 //            std::cout<<"nlist = "<<nlist<<std::endl;
             break;

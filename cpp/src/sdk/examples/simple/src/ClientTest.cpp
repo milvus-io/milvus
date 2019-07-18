@@ -23,6 +23,7 @@ namespace {
     static constexpr int64_t TOP_K = 10;
     static constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
     static constexpr int64_t ADD_VECTOR_LOOP = 10;
+    static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
@@ -59,7 +60,7 @@ namespace {
     std::string CurrentTime() {
         time_t tt;
         time( &tt );
-        tt = tt + 8*3600;
+        tt = tt + 8*SECONDS_EACH_HOUR;
         tm* t= gmtime( &tt );
 
         std::string str = std::to_string(t->tm_year + 1900) + "_" + std::to_string(t->tm_mon + 1)
@@ -69,10 +70,11 @@ namespace {
         return str;
     }
 
-    std::string CurrentTmDate() {
+    std::string CurrentTmDate(int64_t offset_day = 0) {
         time_t tt;
         time( &tt );
-        tt = tt + 8*3600;
+        tt = tt + 8*SECONDS_EACH_HOUR;
+        tt = tt + 24*SECONDS_EACH_HOUR*offset_day;
         tm* t= gmtime( &tt );
 
         std::string str = std::to_string(t->tm_year + 1900) + "-" + std::to_string(t->tm_mon + 1)
@@ -148,7 +150,7 @@ namespace {
                 std::cout << "The top 1 result is wrong: " << result_id
                     << " vs. " << search_id << std::endl;
             } else {
-                std::cout << "Check result sucessfully" << std::endl;
+                std::cout << "No." << index-1 << " Check result successfully" << std::endl;
             }
         }
         BLOCK_SPLITER
@@ -160,7 +162,7 @@ namespace {
         std::vector<Range> query_range_array;
         Range rg;
         rg.start_value = CurrentTmDate();
-        rg.end_value = CurrentTmDate();
+        rg.end_value = CurrentTmDate(1);
         query_range_array.emplace_back(rg);
 
         std::vector<RowRecord> record_array;
@@ -234,6 +236,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     std::vector<std::pair<int64_t, RowRecord>> search_record_array;
     {//add vectors
         for (int i = 0; i < ADD_VECTOR_LOOP; i++) {//add vectors
+            TimeRecorder recorder("Add vector No." + std::to_string(i));
             std::vector<RowRecord> record_array;
             int64_t begin_index = i * BATCH_ROW_COUNT;
             BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array);
@@ -255,6 +258,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//wait unit build index finish
+        TimeRecorder recorder("Build index");
         std::cout << "Wait until build all index done" << std::endl;
         Status stat = conn->BuildIndex(TABLE_NAME);
         std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;

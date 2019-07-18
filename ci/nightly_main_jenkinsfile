@@ -35,7 +35,7 @@ pipeline {
                             defaultContainer 'jnlp'
                             containerTemplate {
                                 name 'milvus-build-env'
-                                image 'registry.zilliz.com/milvus/milvus-build-env:v0.10'
+                                image 'registry.zilliz.com/milvus/milvus-build-env:v0.11'
                                 ttyEnabled true
                                 command 'cat'
                             }
