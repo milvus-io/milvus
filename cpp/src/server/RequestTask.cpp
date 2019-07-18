@@ -687,7 +687,7 @@ ServerError SearchVectorTask2::ConstructResult(engine::QueryResults& results) {
 
         engine::IDNumber* ids_ptr = (engine::IDNumber*)str_ids.data();
         double* distance_ptr = (double*)str_distances.data();
-        for(size_t k = 0; k < results.size(); k++) {
+        for(size_t k = 0; k < result.size(); k++) {
             auto& pair = result[k];
             ids_ptr[k] = pair.first;
             distance_ptr[k] = pair.second;

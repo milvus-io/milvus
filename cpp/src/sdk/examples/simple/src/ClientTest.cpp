@@ -22,7 +22,7 @@ namespace {
     static constexpr int64_t NQ = 10;
     static constexpr int64_t TOP_K = 10;
     static constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    static constexpr int64_t ADD_VECTOR_LOOP = 10;
+    static constexpr int64_t ADD_VECTOR_LOOP = 1;
     static constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
