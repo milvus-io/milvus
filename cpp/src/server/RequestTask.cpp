@@ -420,11 +420,9 @@ ServerError AddVectorTask::OnExecute() {
         rc.Record("check validation");
 
 #ifdef MILVUS_ENABLE_PROFILING
-        std::string fname = "/tmp/insert_" + std::to_string(this->record_array_.size()) + "_" +
-                            GetCurrTimeStr() + ".profiling";
+        std::string fname = "/tmp/insert_" + std::to_string(this->record_array_.size()) +
+                            "_" + GetCurrTimeStr() + ".profiling";
         ProfilerStart(fname.c_str());
-#else
-        std::cout << "CYD - MILVUS_ENABLE_PROFILING is OFF!" << std::endl;
 #endif
 
         //step 3: prepare float data
@@ -533,8 +531,8 @@ ServerError SearchVectorTask::OnExecute() {
         rc.Record("check validation");
 
 #ifdef MILVUS_ENABLE_PROFILING
-        std::string fname = "/tmp/search_nq_" + std::to_string(this->record_array_.size()) + "_" +
-                            "top_" + std::to_string(this->top_k_) + "_" +
+        std::string fname = "/tmp/search_nq_" + std::to_string(this->record_array_.size()) +
+                            "_top_" + std::to_string(this->top_k_) + "_" +
                             GetCurrTimeStr() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
