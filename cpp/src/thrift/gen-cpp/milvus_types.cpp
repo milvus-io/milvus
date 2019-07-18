@@ -781,4 +781,119 @@ void TopKQueryResult::printTo(std::ostream& out) const {
   out << ")";
 }
 
+
+TopKQueryBinResult::~TopKQueryBinResult() throw() {
+}
+
+
+void TopKQueryBinResult::__set_id_array(const std::string& val) {
+  this->id_array = val;
+}
+
+void TopKQueryBinResult::__set_distance_array(const std::string& val) {
+  this->distance_array = val;
+}
+std::ostream& operator<<(std::ostream& out, const TopKQueryBinResult& obj)
+{
+  obj.printTo(out);
+  return out;
+}
+
+
+uint32_t TopKQueryBinResult::read(::apache::thrift::protocol::TProtocol* iprot) {
+
+  ::apache::thrift::protocol::TInputRecursionTracker tracker(*iprot);
+  uint32_t xfer = 0;
+  std::string fname;
+  ::apache::thrift::protocol::TType ftype;
+  int16_t fid;
+
+  xfer += iprot->readStructBegin(fname);
+
+  using ::apache::thrift::protocol::TProtocolException;
+
+  bool isset_id_array = false;
+  bool isset_distance_array = false;
+
+  while (true)
+  {
+    xfer += iprot->readFieldBegin(fname, ftype, fid);
+    if (ftype == ::apache::thrift::protocol::T_STOP) {
+      break;
+    }
+    switch (fid)
+    {
+      case 1:
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += iprot->readBinary(this->id_array);
+          isset_id_array = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      case 2:
+        if (ftype == ::apache::thrift::protocol::T_STRING) {
+          xfer += iprot->readBinary(this->distance_array);
+          isset_distance_array = true;
+        } else {
+          xfer += iprot->skip(ftype);
+        }
+        break;
+      default:
+        xfer += iprot->skip(ftype);
+        break;
+    }
+    xfer += iprot->readFieldEnd();
+  }
+
+  xfer += iprot->readStructEnd();
+
+  if (!isset_id_array)
+    throw TProtocolException(TProtocolException::INVALID_DATA);
+  if (!isset_distance_array)
+    throw TProtocolException(TProtocolException::INVALID_DATA);
+  return xfer;
+}
+
+uint32_t TopKQueryBinResult::write(::apache::thrift::protocol::TProtocol* oprot) const {
+  uint32_t xfer = 0;
+  ::apache::thrift::protocol::TOutputRecursionTracker tracker(*oprot);
+  xfer += oprot->writeStructBegin("TopKQueryBinResult");
+
+  xfer += oprot->writeFieldBegin("id_array", ::apache::thrift::protocol::T_STRING, 1);
+  xfer += oprot->writeBinary(this->id_array);
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldBegin("distance_array", ::apache::thrift::protocol::T_STRING, 2);
+  xfer += oprot->writeBinary(this->distance_array);
+  xfer += oprot->writeFieldEnd();
+
+  xfer += oprot->writeFieldStop();
+  xfer += oprot->writeStructEnd();
+  return xfer;
+}
+
+void swap(TopKQueryBinResult &a, TopKQueryBinResult &b) {
+  using ::std::swap;
+  swap(a.id_array, b.id_array);
+  swap(a.distance_array, b.distance_array);
+}
+
+TopKQueryBinResult::TopKQueryBinResult(const TopKQueryBinResult& other19) {
+  id_array = other19.id_array;
+  distance_array = other19.distance_array;
+}
+TopKQueryBinResult& TopKQueryBinResult::operator=(const TopKQueryBinResult& other20) {
+  id_array = other20.id_array;
+  distance_array = other20.distance_array;
+  return *this;
+}
+void TopKQueryBinResult::printTo(std::ostream& out) const {
+  using ::apache::thrift::to_string;
+  out << "TopKQueryBinResult(";
+  out << "id_array=" << to_string(id_array);
+  out << ", " << "distance_array=" << to_string(distance_array);
+  out << ")";
+}
+
 }} // namespace

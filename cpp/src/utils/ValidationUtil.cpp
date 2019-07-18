@@ -56,17 +56,13 @@ ValidateTableDimension(int64_t dimension) {
 
 ServerError
 ValidateTableIndexType(int32_t index_type) {
-    auto engine_type = engine::EngineType(index_type);
-    switch (engine_type) {
-        case engine::EngineType::FAISS_IDMAP:
-        case engine::EngineType::FAISS_IVFFLAT: {
-            SERVER_LOG_DEBUG << "Index type: " << index_type;
-            return SERVER_SUCCESS;
-        }
-        default: {
-            return SERVER_INVALID_INDEX_TYPE;
-        }
+    int engine_type = (int)engine::EngineType(index_type);
+    if(engine_type <= 0 || engine_type > (int)engine::EngineType::MAX_VALUE) {
+        return SERVER_INVALID_INDEX_TYPE;
     }
+
+    SERVER_LOG_DEBUG << "Index type: " << index_type;
+    return SERVER_SUCCESS;
 }
 
 }

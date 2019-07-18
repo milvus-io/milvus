@@ -14,10 +14,10 @@ db_config:
   db_backend_url: sqlite://:@:/
 
   index_building_threshold: 1024   # index building trigger threshold, default: 1024, unit: MB
-  archive_disk_threshold: 512      # triger archive action if storage size exceed this value, unit: GB
-  archive_days_threshold: 30       # files older than x days will be archived, unit: day
-  maximum_memory: 4                # maximum memory allowed, default: 4, unit: GB, should be at least 1 GB.
-                                   # the sum of maximum_memory and cpu_cache_capacity should be less than total memory
+  archive_disk_threshold: 0        # triger archive action if storage size exceed this value, 0 means no limit, unit: GB
+  archive_days_threshold: 0        # files older than x days will be archived, 0 means no limit, unit: day
+  insert_buffer_size: 4            # maximum insert buffer size allowed, default: 4, unit: GB, should be at least 1 GB.
+                                   # the sum of insert_buffer_size and cpu_cache_capacity should be less than total memory
 
 metric_config:
   is_startup: off      # if monitoring start: on, off
@@ -39,4 +39,4 @@ engine_config:
   nprobe: 10
   nlist: 16384
   use_blas_threshold: 20
-  metric_type: L2       #L2 or Inner Product
+  metric_type: L2       # compare vectors by euclidean distance(L2) or inner product(IP), optional: L2 or IP
