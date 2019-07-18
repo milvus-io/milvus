@@ -17,3 +17,4 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-1 - Add CHANGELOG.md
 - MS-161 - Add CI / CD Module to Milvus Project
 - MS-202 - Add Milvus Jenkins project email notification
+- MS-215 - Add Milvus cluster CI/CD groovy file 

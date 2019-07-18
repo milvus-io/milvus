@@ -1,13 +1,13 @@
 ### Compilation
 #### Step 1: install necessery tools
 
-    Install MySQL
-    
     centos7 : 
-        yum install gfortran qt4 flex bison mysql-devel
+        yum install gfortran qt4 flex bison mysql-devel mysql
         
     ubuntu16.04 : 
-        sudo apt-get install gfortran qt4-qmake flex bison libmysqlclient-dev
+        sudo apt-get install gfortran qt4-qmake flex bison libmysqlclient-dev mysql-client
+        
+    cd scripts && sudo ./requirements.sh     
 
 If `libmysqlclient_r.so` does not exist after installing MySQL Development Files, you need to create a symbolic link:
 

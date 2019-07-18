@@ -63,6 +63,8 @@ class QueryResult;
 
 class TopKQueryResult;
 
+class TopKQueryBinResult;
+
 typedef struct _Exception__isset {
   _Exception__isset() : code(false), reason(false) {}
   bool code :1;
@@ -345,6 +347,47 @@ class TopKQueryResult : public virtual ::apache::thrift::TBase {
 void swap(TopKQueryResult &a, TopKQueryResult &b);
 
 std::ostream& operator<<(std::ostream& out, const TopKQueryResult& obj);
+
+
+class TopKQueryBinResult : public virtual ::apache::thrift::TBase {
+ public:
+
+  TopKQueryBinResult(const TopKQueryBinResult&);
+  TopKQueryBinResult& operator=(const TopKQueryBinResult&);
+  TopKQueryBinResult() : id_array(), distance_array() {
+  }
+
+  virtual ~TopKQueryBinResult() throw();
+  std::string id_array;
+  std::string distance_array;
+
+  void __set_id_array(const std::string& val);
+
+  void __set_distance_array(const std::string& val);
+
+  bool operator == (const TopKQueryBinResult & rhs) const
+  {
+    if (!(id_array == rhs.id_array))
+      return false;
+    if (!(distance_array == rhs.distance_array))
+      return false;
+    return true;
+  }
+  bool operator != (const TopKQueryBinResult &rhs) const {
+    return !(*this == rhs);
+  }
+
+  bool operator < (const TopKQueryBinResult & ) const;
+
+  uint32_t read(::apache::thrift::protocol::TProtocol* iprot);
+  uint32_t write(::apache::thrift::protocol::TProtocol* oprot) const;
+
+  virtual void printTo(std::ostream& out) const;
+};
+
+void swap(TopKQueryBinResult &a, TopKQueryBinResult &b);
+
+std::ostream& operator<<(std::ostream& out, const TopKQueryBinResult& obj);
 
 }} // namespace
 
