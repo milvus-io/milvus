@@ -8,6 +8,9 @@ timeout(time: 20, unit: 'MINUTES') {
 
         // mysql database backend test
         load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
+
+        sleep 30
+
         if (!fileExists('milvus-helm')) {
             dir ("milvus-helm") {
                 checkout([$class: 'GitSCM', branches: [[name: "${SEMVER}"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: "${params.GIT_USER}", url: "git@192.168.1.105:megasearch/milvus-helm.git", name: 'origin', refspec: "+refs/heads/${SEMVER}:refs/remotes/origin/${SEMVER}"]]])
