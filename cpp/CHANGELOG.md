@@ -31,6 +31,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-241 - Build Faiss with MKL if using Intel CPU; else build with OpenBlas
 - MS-242 - Clean up cmake and change MAKE_BUILD_ARGS to be user defined variable
 - MS-245 - Improve search result transfer performance
+- MS-248 - Support AddVector/SearchVector profiling
 
 ## New Feature
 - MS-180 - Add new mem manager
