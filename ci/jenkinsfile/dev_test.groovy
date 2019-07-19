@@ -9,7 +9,7 @@ timeout(time: 20, unit: 'MINUTES') {
         // mysql database backend test
         load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
 
-        sleep 30
+        sleep 60
 
         if (!fileExists('milvus-helm')) {
             dir ("milvus-helm") {
