@@ -87,7 +87,9 @@ Status MemVectors::Serialize(std::string &table_id) {
                << " file " << schema_.file_id_ << " of size " << (double) (active_engine_->Size()) / (double) meta::M
                << " M";
 
-    active_engine_->Cache();
+    if(options_.insert_cache_immediately_) {
+        active_engine_->Cache();
+    }
 
     return status;
 }
