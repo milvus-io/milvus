@@ -8,6 +8,9 @@ timeout(time: 20, unit: 'MINUTES') {
 
         // mysql database backend test
         load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
+
+        sleep 30
+
         if (!fileExists('milvus-helm')) {
             dir ("milvus-helm") {
                 checkout([$class: 'GitSCM', branches: [[name: "${SEMVER}"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: "${params.GIT_USER}", url: "git@192.168.1.105:megasearch/milvus-helm.git", name: 'origin', refspec: "+refs/heads/${SEMVER}:refs/remotes/origin/${SEMVER}"]]])
@@ -15,7 +18,7 @@ timeout(time: 20, unit: 'MINUTES') {
         }
         dir ("milvus-helm") {
             dir ("milvus/milvus-gpu") {
-                sh "helm install --set engine.image.tag=${DOCKER_VERSION} --set expose.type=clusterIP --name ${env.JOB_NAME}-${env.BUILD_NUMBER} -f ci/db_backend/mysql_values.yaml --version 0.3.1 ."
+                sh "helm install --wait --timeout 300 --set engine.image.tag=${DOCKER_VERSION} --set expose.type=clusterIP --name ${env.JOB_NAME}-${env.BUILD_NUMBER} -f ci/db_backend/mysql_values.yaml --version 0.3.1 ."
             }
         }
         dir ("${PROJECT_NAME}_test") {
