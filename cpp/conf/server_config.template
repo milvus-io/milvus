@@ -34,6 +34,8 @@ license_config:         # license configure
 
 cache_config:           # cache configure
   cpu_cache_capacity: 16   # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory
+  cache_free_percent: 0.85 # how much memory should be free when cache is full, range: greater than zero ~ 1.0
+  insert_cache_immediately: false  # insert data will be load into cache immediately for hot query
 
 engine_config:
   nprobe: 10

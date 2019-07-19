@@ -18,7 +18,6 @@ namespace milvus {
 namespace cache {
 
 const std::string SWAP_DIR = ".CACHE";
-const float THRESHHOLD_PERCENT = 0.75;
 
 class Cache {
 private:
@@ -45,6 +44,9 @@ public:
     int64_t capacity() const { return capacity_; } //unit: BYTE
     void set_capacity(int64_t capacity); //unit: BYTE
 
+    double freemem_percent() const { return freemem_percent_; };
+    void set_freemem_percent(double percent) { freemem_percent_ = percent; }
+
     size_t size() const;
     bool exists(const std::string& key);
     DataObjPtr get(const std::string& key);
@@ -57,6 +59,7 @@ public:
 private:
     int64_t usage_;
     int64_t capacity_;
+    double freemem_percent_;
 
     LRU<std::string, CacheObjPtr> lru_;
     mutable std::mutex mutex_;

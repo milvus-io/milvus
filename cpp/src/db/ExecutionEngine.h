@@ -39,7 +39,7 @@ public:
 
     virtual Status Serialize() = 0;
 
-    virtual Status Load() = 0;
+    virtual Status Load(bool to_cache = true) = 0;
 
     virtual Status Merge(const std::string& location) = 0;
 

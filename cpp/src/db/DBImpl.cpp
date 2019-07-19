@@ -92,6 +92,8 @@ DBImpl::DBImpl(const Options& options)
         ENGINE_LOG_INFO << "StartTimerTasks";
         StartTimerTasks();
     }
+
+
 }
 
 Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
@@ -359,8 +361,9 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ <<
         " of size=" << index->PhysicalSize()/(1024*1024) << " M";
 
-    //current disable this line to avoid memory
-    //index->Cache();
+    if(options_.insert_cache_immediately_) {
+        index->Cache();
+    }
 
     return status;
 }
@@ -455,7 +458,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
     try {
         //step 1: load index
-        to_index->Load();
+        to_index->Load(options_.insert_cache_immediately_);
 
         //step 2: create table file
         meta::TableFileSchema table_file;
@@ -499,8 +502,9 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
                    << index->PhysicalSize()/(1024*1024) << " M"
                    << " from file " << to_remove.file_id_;
 
-        //current disable this line to avoid memory
-        //index->Cache();
+        if(options_.insert_cache_immediately_) {
+            index->Cache();
+        }
 
     } catch (std::exception& ex) {
         std::string msg = "Build index encounter exception" + std::string(ex.what());

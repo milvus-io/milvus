@@ -16,19 +16,19 @@ namespace server {
 
 DBWrapper::DBWrapper() {
     zilliz::milvus::engine::Options opt;
-    ConfigNode& config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
-    opt.meta.backend_uri = config.GetValue(CONFIG_DB_URL);
-    std::string db_path = config.GetValue(CONFIG_DB_PATH);
+    ConfigNode& db_config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
+    opt.meta.backend_uri = db_config.GetValue(CONFIG_DB_URL);
+    std::string db_path = db_config.GetValue(CONFIG_DB_PATH);
     opt.meta.path = db_path + "/db";
 
-    std::string db_slave_path = config.GetValue(CONFIG_DB_SLAVE_PATH);
+    std::string db_slave_path = db_config.GetValue(CONFIG_DB_SLAVE_PATH);
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta.slave_paths);
 
-    int64_t index_size = config.GetInt64Value(CONFIG_DB_INDEX_TRIGGER_SIZE);
+    int64_t index_size = db_config.GetInt64Value(CONFIG_DB_INDEX_TRIGGER_SIZE);
     if(index_size > 0) {//ensure larger than zero, unit is MB
         opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
     }
-    int64_t insert_buffer_size = config.GetInt64Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
+    int64_t insert_buffer_size = db_config.GetInt64Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
     if (insert_buffer_size >= 1) {
         opt.insert_buffer_size = insert_buffer_size * engine::ONE_GB;
     }
@@ -36,6 +36,9 @@ DBWrapper::DBWrapper() {
         std::cout << "ERROR: insert_buffer_size should be at least 1 GB" << std::endl;
         kill(0, SIGUSR1);
     }
+
+    ConfigNode& cache_config = ServerConfig::GetInstance().GetConfig(CONFIG_CACHE);
+    opt.insert_cache_immediately_ = cache_config.GetBoolValue(CONFIG_INSERT_CACHE_IMMEDIATELY, false);
 
     ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
     std::string mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
@@ -55,8 +58,8 @@ DBWrapper::DBWrapper() {
 
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
-    int64_t disk = config.GetInt64Value(CONFIG_DB_ARCHIVE_DISK, 0);
-    int64_t days = config.GetInt64Value(CONFIG_DB_ARCHIVE_DAYS, 0);
+    int64_t disk = db_config.GetInt64Value(CONFIG_DB_ARCHIVE_DISK, 0);
+    int64_t days = db_config.GetInt64Value(CONFIG_DB_ARCHIVE_DAYS, 0);
     if(disk > 0) {
         criterial[engine::ARCHIVE_CONF_DISK] = disk;
     }
