@@ -18,7 +18,7 @@ timeout(time: 20, unit: 'MINUTES') {
         }
         dir ("milvus-helm") {
             dir ("milvus/milvus-gpu") {
-                sh "helm install --wait --set engine.image.tag=${DOCKER_VERSION} --set expose.type=clusterIP --name ${env.JOB_NAME}-${env.BUILD_NUMBER} -f ci/db_backend/mysql_values.yaml --version 0.3.1 ."
+                sh "helm install --wait --timeout 300 --set engine.image.tag=${DOCKER_VERSION} --set expose.type=clusterIP --name ${env.JOB_NAME}-${env.BUILD_NUMBER} -f ci/db_backend/mysql_values.yaml --version 0.3.1 ."
             }
         }
         dir ("${PROJECT_NAME}_test") {
