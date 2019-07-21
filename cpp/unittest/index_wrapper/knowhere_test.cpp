@@ -163,3 +163,7 @@ TEST_P(KnowhereWrapperTest, serialize) {
     }
 }
 
+// TODO(linxj): add exception test
+//TEST_P(KnowhereWrapperTest, exception_test) {
+//}
+
