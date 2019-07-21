@@ -3,6 +3,8 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#include <stdexcept>
+
 #include <src/server/ServerConfig.h>
 #include <src/metrics/Metrics.h>
 #include "Log.h"
@@ -11,6 +13,8 @@
 #include "ExecutionEngineImpl.h"
 #include "wrapper/knowhere/vec_index.h"
 #include "wrapper/knowhere/vec_impl.h"
+#include "knowhere/common/exception.h"
+#include "Exception.h"
 
 
 namespace zilliz {
@@ -21,9 +25,13 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
                                          const std::string &location,
                                          EngineType type)
     : location_(location), dim(dimension), build_type(type) {
-    index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
     current_type = EngineType::FAISS_IDMAP;
-    std::static_pointer_cast<BFIndex>(index_)->Build(dimension);
+
+    index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
+    if (!index_) throw Exception("Create Empty VecIndex");
+
+    auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(dimension);
+    if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index,
@@ -61,7 +69,10 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 }
 
 Status ExecutionEngineImpl::AddWithIds(long n, const float *xdata, const long *xids) {
-    index_->Add(n, xdata, xids, Config::object{{"dim", dim}});
+    auto ec = index_->Add(n, xdata, xids, Config::object{{"dim", dim}});
+    if (ec != server::KNOWHERE_SUCCESS) {
+        return Status::Error("Add error");
+    }
     return Status::OK();
 }
 
@@ -82,7 +93,10 @@ size_t ExecutionEngineImpl::PhysicalSize() const {
 }
 
 Status ExecutionEngineImpl::Serialize() {
-    write_index(index_, location_);
+    auto ec = write_index(index_, location_);
+    if (ec != server::KNOWHERE_SUCCESS) {
+        return Status::Error("Serialize: write to disk error");
+    }
     return Status::OK();
 }
 
@@ -91,9 +105,16 @@ Status ExecutionEngineImpl::Load() {
     bool to_cache = false;
     auto start_time = METRICS_NOW_TIME;
     if (!index_) {
-        index_ = read_index(location_);
-        to_cache = true;
-        ENGINE_LOG_DEBUG << "Disk io from: " << location_;
+        try {
+            index_ = read_index(location_);
+            to_cache = true;
+            ENGINE_LOG_DEBUG << "Disk io from: " << location_;
+        } catch (knowhere::KnowhereException &e) {
+            ENGINE_LOG_ERROR << e.what();
+            return Status::Error(e.what());
+        } catch (std::exception &e) {
+            return Status::Error(e.what());
+        }
     }
 
     if (to_cache) {
@@ -118,11 +139,22 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
 
     auto to_merge = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
     if (!to_merge) {
-        to_merge = read_index(location);
+        try {
+            to_merge = read_index(location);
+        } catch (knowhere::KnowhereException &e) {
+            ENGINE_LOG_ERROR << e.what();
+            return Status::Error(e.what());
+        } catch (std::exception &e) {
+            return Status::Error(e.what());
+        }
     }
 
     if (auto file_index = std::dynamic_pointer_cast<BFIndex>(to_merge)) {
-        index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
+        auto ec = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
+        if (ec != server::KNOWHERE_SUCCESS) {
+            ENGINE_LOG_ERROR << "Merge: Add Error";
+            return Status::Error("Merge: Add Error");
+        }
         return Status::OK();
     } else {
         return Status::Error("file index type is not idmap");
@@ -134,13 +166,16 @@ ExecutionEngineImpl::BuildIndex(const std::string &location) {
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
-    ENGINE_LOG_DEBUG << "BuildIndex EngineTypee: " << int(build_type);
     auto to_index = CreatetVecIndex(build_type);
-    ENGINE_LOG_DEBUG << "Build Params: [gpu_id]  " << gpu_num;
-    to_index->BuildAll(Count(),
-                       from_index->GetRawVectors(),
-                       from_index->GetRawIds(),
-                       Config::object{{"dim", Dimension()}, {"gpu_id", gpu_num}});
+    if (!to_index) {
+        throw Exception("Create Empty VecIndex");
+    }
+
+    auto ec = to_index->BuildAll(Count(),
+                                 from_index->GetRawVectors(),
+                                 from_index->GetRawIds(),
+                                 Config::object{{"dim", Dimension()}, {"gpu_id", gpu_num}});
+    if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
 
     return std::make_shared<ExecutionEngineImpl>(to_index, location, build_type);
 }
@@ -151,7 +186,11 @@ Status ExecutionEngineImpl::Search(long n,
                                    float *distances,
                                    long *labels) const {
     ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe_;
-    index_->Search(n, data, distances, labels, Config::object{{"k", k}, {"nprobe", nprobe_}});
+    auto ec = index_->Search(n, data, distances, labels, Config::object{{"k", k}, {"nprobe", nprobe_}});
+    if (ec != server::KNOWHERE_SUCCESS) {
+        ENGINE_LOG_ERROR << "Search error";
+        return Status::Error("Search: Search Error");
+    }
     return Status::OK();
 }
 
