@@ -98,7 +98,9 @@ Status MemTableFile::Serialize() {
     LOG(DEBUG) << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
                << " file " << table_file_schema_.file_id_ << " of size " << (double) size / (double) M << " M";
 
-    execution_engine_->Cache();
+    if(options_.insert_cache_immediately_) {
+        execution_engine_->Cache();
+    }
 
     return status;
 }
