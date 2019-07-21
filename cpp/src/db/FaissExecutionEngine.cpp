@@ -149,10 +149,11 @@ Status FaissExecutionEngine::Search(long n,
 
     std::shared_ptr<faiss::IndexIVF> ivf_index = std::dynamic_pointer_cast<faiss::IndexIVF>(pIndex_);
     if(ivf_index) {
-        ENGINE_LOG_DEBUG << "Index type: IVFFLAT nProbe: " << nprobe_;
+        ENGINE_LOG_DEBUG << "Searching index type: " << build_index_type_ << " nProbe: " << nprobe_;
         ivf_index->nprobe = nprobe_;
         ivf_index->search(n, data, k, distances, labels);
     } else {
+        ENGINE_LOG_DEBUG << "Searching raw file";
         pIndex_->search(n, data, k, distances, labels);
     }
 

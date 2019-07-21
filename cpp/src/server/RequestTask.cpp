@@ -194,7 +194,7 @@ ServerError CreateTableTask::OnExecute() {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    rc.Record("done");
+    rc.ElapseFromBegin("totally cost");
 
     return SERVER_SUCCESS;
 }
@@ -239,7 +239,7 @@ ServerError DescribeTableTask::OnExecute() {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    rc.Record("done");
+    rc.ElapseFromBegin("totally cost");
 
     return SERVER_SUCCESS;
 }
@@ -277,7 +277,7 @@ ServerError BuildIndexTask::OnExecute() {
             return SetError(SERVER_BUILD_INDEX_ERROR, "Engine failed: " + stat.ToString());
         }
 
-        rc.Elapse("totally cost");
+        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -314,7 +314,7 @@ ServerError HasTableTask::OnExecute() {
             return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
         }
 
-        rc.Elapse("totally cost");
+        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -356,8 +356,6 @@ ServerError DeleteTableTask::OnExecute() {
             }
         }
 
-        rc.Record("check validation");
-
         //step 3: delete table
         std::vector<DB_DATE> dates;
         stat = DBWrapper::DB()->DeleteTable(table_name_, dates);
@@ -365,8 +363,7 @@ ServerError DeleteTableTask::OnExecute() {
             return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
         }
 
-        rc.Record("deleta table");
-        rc.Elapse("total cost");
+        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -444,7 +441,7 @@ ServerError AddVectorTask::OnExecute() {
             }
         }
 
-        rc.Record("check validation");
+        rc.RecordSection("check validation");
 
 #ifdef MILVUS_ENABLE_PROFILING
         std::string fname = "/tmp/insert_" + std::to_string(this->record_array_.size()) +
@@ -461,12 +458,11 @@ ServerError AddVectorTask::OnExecute() {
             return SetError(error_code, error_msg);
         }
 
-        rc.Record("prepare vectors data");
+        rc.RecordSection("prepare vectors data");
 
         //step 4: insert vectors
         uint64_t vec_count = (uint64_t)record_array_.size();
         stat = DBWrapper::DB()->InsertVectors(table_name_, vec_count, vec_f.data(), record_ids_);
-        rc.Record("add vectors to engine");
         if(!stat.ok()) {
             return SetError(SERVER_CACHE_ERROR, "Cache error: " + stat.ToString());
         }
@@ -481,8 +477,8 @@ ServerError AddVectorTask::OnExecute() {
         ProfilerStop();
 #endif
 
-        rc.Record("do insert");
-        rc.Elapse("total cost");
+        rc.RecordSection("add vectors to engine");
+        rc.ElapseFromBegin("totally cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
@@ -517,7 +513,7 @@ ServerError SearchVectorTaskBase::OnExecute() {
             return SetError(res, "Invalid table name: " + table_name_);
         }
 
-        if(top_k_ <= 0) {
+        if(top_k_ <= 0 || top_k_ > 1024) {
             return SetError(SERVER_INVALID_TOPK, "Invalid topk: " + std::to_string(top_k_));
         }
         if(record_array_.empty()) {
@@ -545,7 +541,7 @@ ServerError SearchVectorTaskBase::OnExecute() {
             return SetError(error_code, error_msg);
         }
 
-        rc.Record("check validation");
+        double span_check = rc.RecordSection("check validation");
 
 #ifdef MILVUS_ENABLE_PROFILING
         std::string fname = "/tmp/search_nq_" + std::to_string(this->record_array_.size()) +
@@ -561,7 +557,7 @@ ServerError SearchVectorTaskBase::OnExecute() {
             return SetError(error_code, error_msg);
         }
 
-        rc.Record("prepare vector data");
+        double span_prepare = rc.RecordSection("prepare vector data");
 
         //step 4: search vectors
         engine::QueryResults results;
@@ -573,7 +569,7 @@ ServerError SearchVectorTaskBase::OnExecute() {
             stat = DBWrapper::DB()->Query(table_name_, file_id_array_, (size_t) top_k_, record_count, vec_f.data(), dates, results);
         }
 
-        rc.Record("search vectors from engine");
+        double span_search = rc.RecordSection("search vectors from engine");
         if(!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
         }
@@ -588,8 +584,6 @@ ServerError SearchVectorTaskBase::OnExecute() {
             return SetError(SERVER_ILLEGAL_SEARCH_RESULT, msg);
         }
 
-        rc.Record("do search");
-
         //step 5: construct result array
         ConstructResult(results);
 
@@ -597,8 +591,15 @@ ServerError SearchVectorTaskBase::OnExecute() {
         ProfilerStop();
 #endif
 
-        rc.Record("construct result");
-        rc.Elapse("total cost");
+        double span_result = rc.RecordSection("construct result");
+        rc.ElapseFromBegin("totally cost");
+
+        //step 6: print time cost percent
+        double total_cost = span_check + span_prepare + span_search + span_result;
+        SERVER_LOG_DEBUG << "SearchVectorTask: " << "check validation(" << (span_check/total_cost)*100.0 << "%)"
+            << " prepare data(" << (span_prepare/total_cost)*100.0 << "%)"
+            << " search(" << (span_search/total_cost)*100.0 << "%)"
+            << " construct result(" << (span_result/total_cost)*100.0 << "%)";
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
@@ -733,7 +734,7 @@ ServerError GetTableRowCountTask::OnExecute() {
 
         row_count_ = (int64_t) row_count;
 
-        rc.Elapse("total cost");
+        rc.ElapseFromBegin("totally cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
