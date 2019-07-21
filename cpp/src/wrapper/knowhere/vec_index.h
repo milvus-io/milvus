@@ -9,6 +9,8 @@
 #include <string>
 #include <memory>
 
+#include "utils/Error.h"
+
 #include "knowhere/common/config.h"
 #include "knowhere/common/binary_set.h"
 
@@ -34,23 +36,23 @@ enum class IndexType {
 
 class VecIndex {
  public:
-    virtual void BuildAll(const long &nb,
-                          const float *xb,
-                          const long *ids,
-                          const Config &cfg,
-                          const long &nt = 0,
-                          const float *xt = nullptr) = 0;
+    virtual server::KnowhereError BuildAll(const long &nb,
+                                           const float *xb,
+                                           const long *ids,
+                                           const Config &cfg,
+                                           const long &nt = 0,
+                                           const float *xt = nullptr) = 0;
 
-    virtual void Add(const long &nb,
-                     const float *xb,
-                     const long *ids,
-                     const Config &cfg = Config()) = 0;
+    virtual server::KnowhereError Add(const long &nb,
+                                      const float *xb,
+                                      const long *ids,
+                                      const Config &cfg = Config()) = 0;
 
-    virtual void Search(const long &nq,
-                        const float *xq,
-                        float *dist,
-                        long *ids,
-                        const Config &cfg = Config()) = 0;
+    virtual server::KnowhereError Search(const long &nq,
+                                         const float *xq,
+                                         float *dist,
+                                         long *ids,
+                                         const Config &cfg = Config()) = 0;
 
     virtual IndexType GetType() = 0;
 
@@ -60,12 +62,12 @@ class VecIndex {
 
     virtual zilliz::knowhere::BinarySet Serialize() = 0;
 
-    virtual void Load(const zilliz::knowhere::BinarySet &index_binary) = 0;
+    virtual server::KnowhereError Load(const zilliz::knowhere::BinarySet &index_binary) = 0;
 };
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;
 
-extern void write_index(VecIndexPtr index, const std::string &location);
+extern server::KnowhereError write_index(VecIndexPtr index, const std::string &location);
 
 extern VecIndexPtr read_index(const std::string &location);
 
