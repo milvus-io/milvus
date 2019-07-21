@@ -209,9 +209,10 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
 Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
                           uint64_t k, uint64_t nq, const float* vectors,
                           const meta::DatesT& dates, QueryResults& results) {
+    server::TimeRecorder rc("");
 
     //step 1: get files to search
-    ENGINE_LOG_DEBUG << "Search DateT Size=" << files.size();
+    ENGINE_LOG_DEBUG << "Engine query begin, index file count:" << files.size() << " date range count:" << dates.size();
     SearchContextPtr context = std::make_shared<SearchContext>(k, nq, vectors);
     for (auto &file : files) {
         TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
@@ -224,8 +225,31 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
 
     context->WaitResult();
 
-    //step 3: construct results
+    //step 3: print time cost information
+    double load_cost = context->LoadCost();
+    double search_cost = context->SearchCost();
+    double reduce_cost = context->ReduceCost();
+    std::string load_info = server::TimeRecorder::GetTimeSpanStr(load_cost);
+    std::string search_info = server::TimeRecorder::GetTimeSpanStr(search_cost);
+    std::string reduce_info = server::TimeRecorder::GetTimeSpanStr(reduce_cost);
+    if(search_cost > 0.0 || reduce_cost > 0.0) {
+        double total_cost = load_cost + search_cost + reduce_cost;
+        double load_percent = load_cost/total_cost;
+        double search_percent = search_cost/total_cost;
+        double reduce_percent = reduce_cost/total_cost;
+
+        ENGINE_LOG_DEBUG << "Engine load index totally cost:" << load_info << " percent: " << load_percent*100 << "%";
+        ENGINE_LOG_DEBUG << "Engine search index totally cost:" << search_info << " percent: " << search_percent*100 << "%";
+        ENGINE_LOG_DEBUG << "Engine reduce topk totally cost:" << reduce_info << " percent: " << reduce_percent*100 << "%";
+    } else {
+        ENGINE_LOG_DEBUG << "Engine load cost:" << load_info
+            << " search cost: " << search_info
+            << " reduce cost: " << reduce_info;
+    }
+
+    //step 4: construct results
     results = context->GetResult();
+    rc.ElapseFromBegin("Engine query totally cost");
 
     return Status::OK();
 }
@@ -359,7 +383,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     updated.push_back(table_file);
     status = meta_ptr_->UpdateTableFiles(updated);
     ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ <<
-        " of size=" << index->PhysicalSize()/(1024*1024) << " M";
+        " of size " << index->PhysicalSize() << " bytes";
 
     if(options_.insert_cache_immediately_) {
         index->Cache();
@@ -499,7 +523,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         meta_ptr_->UpdateTableFiles(update_files);
 
         ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size "
-                   << index->PhysicalSize()/(1024*1024) << " M"
+                   << index->PhysicalSize() << " bytes"
                    << " from file " << to_remove.file_id_;
 
         if(options_.insert_cache_immediately_) {

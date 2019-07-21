@@ -865,7 +865,7 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 table_file.date_ = std::get<3>(file);
 
                 utils::DeleteTableFilePath(options_, table_file);
-                ENGINE_LOG_DEBUG << "Removing deleted id =" << table_file.id_ << " location = " << table_file.location_ << std::endl;
+                ENGINE_LOG_DEBUG << "Removing file id:" << table_file.id_ << " location:" << table_file.location_;
                 ConnectorPtr->remove<TableFileSchema>(table_file.id_);
 
             }
