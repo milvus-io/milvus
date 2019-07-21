@@ -1578,8 +1578,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
                 utils::DeleteTableFilePath(options_, table_file);
 
-                ENGINE_LOG_DEBUG << "Removing deleted id =" << table_file.id_ << " location = "
-                                 << table_file.location_ << std::endl;
+                ENGINE_LOG_DEBUG << "Removing file id:" << table_file.id_ << " location:" << table_file.location_;
 
                 idsToDelete.emplace_back(std::to_string(table_file.id_));
             }

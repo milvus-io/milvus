@@ -34,6 +34,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-245 - Improve search result transfer performance
 - MS-248 - Support AddVector/SearchVector profiling
 - MS-256 - Add more cache config
+- MS-260 - Refine log
 
 ## New Feature
 - MS-180 - Add new mem manager
