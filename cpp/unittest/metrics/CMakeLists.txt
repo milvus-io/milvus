@@ -49,7 +49,6 @@ set(count_test_src
 add_executable(metrics_test ${count_test_src} ${require_files} )
 
 target_link_libraries(metrics_test
-        libgpufaiss.a
         faiss
         cudart
         cublas
@@ -64,7 +63,7 @@ target_link_libraries(metrics_test
         mysqlpp
         ${unittest_libs}
         )
-if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     target_link_libraries(metrics_test ${MKL_LIBS} ${MKL_LIBS})
 endif()
 
