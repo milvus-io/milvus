@@ -699,7 +699,9 @@ endmacro()
 # ----------------------------------------------------------------------
 # FAISS
 
-set(BUILD_FAISS_WITH_MKL false)
+if(NOT DEFINED BUILD_FAISS_WITH_MKL)
+    set(BUILD_FAISS_WITH_MKL OFF)
+endif()
 
 if(EXISTS "/proc/cpuinfo")
     FILE(READ /proc/cpuinfo PROC_CPUINFO)
@@ -708,8 +710,8 @@ if(EXISTS "/proc/cpuinfo")
     STRING(REGEX MATCH "${VENDOR_ID_RX}" VENDOR_ID "${PROC_CPUINFO}")
     STRING(REGEX REPLACE "${VENDOR_ID_RX}" "\\1" VENDOR_ID "${VENDOR_ID}")
 
-    if(${VENDOR_ID} STREQUAL "GenuineIntel")
-        set(BUILD_FAISS_WITH_MKL true)
+    if(NOT ${VENDOR_ID} STREQUAL "GenuineIntel")
+        set(BUILD_FAISS_WITH_MKL OFF)
     endif()
 endif()
 
@@ -729,7 +731,7 @@ macro(build_faiss)
     set(FAISS_CFLAGS ${EP_C_FLAGS})
     set(FAISS_CXXFLAGS ${EP_CXX_FLAGS})
 
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+    if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
         message(STATUS "Build Faiss with MKL")
         if(NOT DEFINED MKL_LIB_PATH)
             set(MKL_LIB_PATH "/opt/intel/compilers_and_libraries_${MKL_VERSION}/linux/mkl/lib/intel64")
@@ -750,10 +752,10 @@ macro(build_faiss)
     if(${MILVUS_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
-                "--with-cuda-arch=\"-gencode=arch=compute_35,code=compute_35\""
-                "--with-cuda-arch=\"-gencode=arch=compute_52,code=compute_52\""
-                "--with-cuda-arch=\"-gencode=arch=compute_60,code=compute_60\""
-                "--with-cuda-arch=\"-gencode=arch=compute_61,code=compute_61\""
+                "--with-cuda-arch=\"-gencode=arch=compute_35,code=sm_35\""
+                "--with-cuda-arch=\"-gencode=arch=compute_52,code=sm_52\""
+                "--with-cuda-arch=\"-gencode=arch=compute_60,code=sm_60\""
+                "--with-cuda-arch=\"-gencode=arch=compute_61,code=sm_61\""
                 )
     else()
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS} --without-cuda)
@@ -767,26 +769,22 @@ macro(build_faiss)
             "./configure"
             ${FAISS_CONFIGURE_ARGS}
             BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS} all
-            COMMAND
-            cd gpu && ${MAKE} ${MAKE_BUILD_ARGS}
+            ${MAKE} ${MAKE_BUILD_ARGS}
             BUILD_IN_SOURCE
             1
             INSTALL_COMMAND
             ${MAKE} install
-            COMMAND
-            ln -s faiss_ep ../faiss
             BUILD_BYPRODUCTS
             ${FAISS_STATIC_LIB})
         
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "false")
+    if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
         ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
     endif()
 
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     add_library(faiss SHARED IMPORTED)
 
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+    if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
         set(MKL_LIBS ${MKL_LIB_PATH}/libmkl_intel_ilp64.a
                      ${MKL_LIB_PATH}/libmkl_gnu_thread.a
                      ${MKL_LIB_PATH}/libmkl_core.a)
@@ -806,7 +804,7 @@ macro(build_faiss)
             
     add_dependencies(faiss faiss_ep)
 
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "false")
+    if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
         add_dependencies(faiss openblas_ep)
         add_dependencies(faiss lapack_ep)
     endif()
@@ -815,7 +813,7 @@ endmacro()
 
 if(MILVUS_WITH_FAISS)
 
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "false")
+    if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
         resolve_dependency(OpenBLAS)
         get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
         include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
@@ -830,10 +828,7 @@ if(MILVUS_WITH_FAISS)
     resolve_dependency(FAISS)
     get_target_property(FAISS_INCLUDE_DIR faiss INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM "${FAISS_INCLUDE_DIR}")
-    include_directories(SYSTEM "${CMAKE_CURRENT_BINARY_DIR}/faiss_ep-prefix/src/")
-    link_directories(SYSTEM ${FAISS_PREFIX}/)
     link_directories(SYSTEM ${FAISS_PREFIX}/lib/)
-    link_directories(SYSTEM ${FAISS_PREFIX}/gpu/)
 endif()
 
 # ----------------------------------------------------------------------
