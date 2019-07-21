@@ -513,7 +513,7 @@ ServerError SearchVectorTaskBase::OnExecute() {
             return SetError(res, "Invalid table name: " + table_name_);
         }
 
-        if(top_k_ <= 0) {
+        if(top_k_ <= 0 || top_k_ > 1024) {
             return SetError(SERVER_INVALID_TOPK, "Invalid topk: " + std::to_string(top_k_));
         }
         if(record_array_.empty()) {
