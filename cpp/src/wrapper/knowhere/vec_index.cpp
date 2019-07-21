@@ -7,9 +7,11 @@
 #include "knowhere/index/vector_index/idmap.h"
 #include "knowhere/index/vector_index/gpu_ivf.h"
 #include "knowhere/index/vector_index/cpu_kdt_rng.h"
+#include "knowhere/common/exception.h"
 
 #include "vec_index.h"
 #include "vec_impl.h"
+#include "wrapper_log.h"
 
 
 namespace zilliz {
@@ -153,23 +155,32 @@ VecIndexPtr read_index(const std::string &location) {
     return LoadVecIndex(current_type, load_data_list);
 }
 
-void write_index(VecIndexPtr index, const std::string &location) {
-    auto binaryset = index->Serialize();
-    auto index_type = index->GetType();
+server::KnowhereError write_index(VecIndexPtr index, const std::string &location) {
+    try {
+        auto binaryset = index->Serialize();
+        auto index_type = index->GetType();
 
-    FileIOWriter writer(location);
-    writer(&index_type, sizeof(IndexType));
-    for (auto &iter: binaryset.binary_map_) {
-        auto meta = iter.first.c_str();
-        size_t meta_length = iter.first.length();
-        writer(&meta_length, sizeof(meta_length));
-        writer((void *) meta, meta_length);
+        FileIOWriter writer(location);
+        writer(&index_type, sizeof(IndexType));
+        for (auto &iter: binaryset.binary_map_) {
+            auto meta = iter.first.c_str();
+            size_t meta_length = iter.first.length();
+            writer(&meta_length, sizeof(meta_length));
+            writer((void *) meta, meta_length);
 
-        auto binary = iter.second;
-        int64_t binary_length = binary->size;
-        writer(&binary_length, sizeof(binary_length));
-        writer((void *) binary->data.get(), binary_length);
+            auto binary = iter.second;
+            int64_t binary_length = binary->size;
+            writer(&binary_length, sizeof(binary_length));
+            writer((void *) binary->data.get(), binary_length);
+        }
+    } catch (knowhere::KnowhereException &e) {
+        WRAPPER_LOG_ERROR << e.what();
+        return server::KNOWHERE_UNEXPECTED_ERROR;
+    } catch (std::exception& e) {
+        WRAPPER_LOG_ERROR << e.what();
+        return server::KNOWHERE_ERROR;
     }
+    return server::KNOWHERE_SUCCESS;
 }
 
 }
