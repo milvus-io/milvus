@@ -67,7 +67,8 @@ void Cache::insert(const std::string& key, const DataObjPtr& data_ptr) {
             usage_ += data_ptr->size();
         }
 
-        SERVER_LOG_DEBUG << "Insert " << key << " size:" << data_ptr->size() << " into cache, usage: " << usage_;
+        SERVER_LOG_DEBUG << "Insert " << key << " size:" << data_ptr->size()
+            << " bytes into cache, usage: " << usage_ << " bytes";
     }
 
     if (usage_ > capacity_) {
@@ -198,8 +199,8 @@ void Cache::print() {
     }
 
     SERVER_LOG_DEBUG << "[Cache item count]: " << cache_count;
-    SERVER_LOG_DEBUG << "[Cache usage(byte)]: " << usage_;
-    SERVER_LOG_DEBUG << "[Cache capacity(byte)]: " << capacity_;
+    SERVER_LOG_DEBUG << "[Cache usage]: " << usage_ << " bytes";
+    SERVER_LOG_DEBUG << "[Cache capacity]: " << capacity_ << " bytes";
 }
 
 }   // cache
