@@ -51,7 +51,7 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
         return nullptr;
     }
 
-    SERVER_LOG_INFO << "Searching in index(" << index_id_<< ") with "
+    SERVER_LOG_DEBUG << "Searching in index(" << index_id_<< ") with "
                     << search_contexts_.size() << " tasks";
 
     server::TimeRecorder rc("DoSearch index(" + std::to_string(index_id_) + ")");

@@ -41,7 +41,7 @@ IndexLoadTask::IndexLoadTask()
 }
 
 std::shared_ptr<IScheduleTask> IndexLoadTask::Execute() {
-    ENGINE_LOG_INFO << "Loading index(" << file_->id_ << ") from location: " << file_->location_;
+    ENGINE_LOG_DEBUG << "Loading index(" << file_->id_ << ") from location: " << file_->location_;
 
     server::TimeRecorder rc("Load index");
     //step 1: load index
@@ -53,7 +53,7 @@ std::shared_ptr<IScheduleTask> IndexLoadTask::Execute() {
     rc.Record("load index file to memory");
 
     size_t file_size = index_ptr->PhysicalSize();
-    LOG(DEBUG) << "Index file type " << file_->file_type_ << " Of Size: "
+    ENGINE_LOG_DEBUG << "Index file type " << file_->file_type_ << " Of Size: "
                << file_size/(1024*1024) << " M";
 
     CollectFileMetrics(file_->file_type_, file_size);
