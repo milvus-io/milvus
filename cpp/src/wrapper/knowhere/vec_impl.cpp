@@ -144,10 +144,10 @@ int64_t *BFIndex::GetRawIds() {
     return std::static_pointer_cast<IDMAP>(index_)->GetRawIds();
 }
 
-server::KnowhereError BFIndex::Build(const int64_t &d) {
+server::KnowhereError BFIndex::Build(const Config &cfg) {
     try {
-        dim = d;
-        std::static_pointer_cast<IDMAP>(index_)->Train(dim);
+        dim = cfg["dim"].as<int>();
+        std::static_pointer_cast<IDMAP>(index_)->Train(cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return server::KNOWHERE_UNEXPECTED_ERROR;
@@ -171,7 +171,7 @@ server::KnowhereError BFIndex::BuildAll(const long &nb,
         dim = cfg["dim"].as<int>();
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
-        std::static_pointer_cast<IDMAP>(index_)->Train(dim);
+        std::static_pointer_cast<IDMAP>(index_)->Train(cfg);
         index_->Add(dataset, cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
