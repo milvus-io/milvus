@@ -154,6 +154,7 @@ if (ENABLE_LICENSE STREQUAL "ON")
 endif ()
 
 set(metrics_lib
+        easyloggingpp
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
