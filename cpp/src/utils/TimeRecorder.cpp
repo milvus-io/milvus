@@ -12,131 +12,81 @@ namespace milvus {
 namespace server {
 
 TimeRecorder::TimeRecorder(const std::string &header,
-                           TimeRecorder::TimeDisplayUnit unit,
                            int64_t log_level) :
-        header_(header),
-        time_unit_(unit),
-        log_level_(log_level) {
+    header_(header),
+    log_level_(log_level) {
     start_ = last_ = stdclock::now();
-    span_ = 0.0;
+}
+
+TimeRecorder::~TimeRecorder() {
 }
 
 std::string
-TimeRecorder::GetTimeSpanStr(TimeRecorder::TimeDisplayUnit &unit, double span) const {
-    std::string spanStr;
-    std::string unitStr;
+TimeRecorder::GetTimeSpanStr(double span) {
+    std::string str_sec = std::to_string(span * 0.000001) + ((span > 1000000) ? " seconds" : " second");
+    std::string str_ms = std::to_string(span * 0.001) + " ms";
 
-    switch (unit) {
-        case TimeRecorder::eTimeAutoUnit: {
-            if (span >= 1000000) {
-                int64_t t = (int64_t) span;
-                int64_t hour, minute;
-                double second;
-                hour = t / 1000000 / 3600;
-                t -= hour * 3600 * 1000000;
-                minute = t / 1000000 / 60;
-                t -= minute * 60 * 1000000;
-                second = t * 0.000001;
-                spanStr += (hour < 10 ? "0" : "") + std::to_string(hour) + ":";
-                spanStr += (minute < 10 ? "0" : "") + std::to_string(minute) + ":";
-                spanStr += (second < 10 ? "0" : "") + std::to_string(second);
-                unitStr = "";
-            } else if (span >= 1000) {
-                spanStr = std::to_string(span * 0.001);
-                unitStr = " ms";
-            } else {
-                spanStr = std::to_string(span);
-                unitStr = " us";
-            }
-        }
-            break;
-        case TimeRecorder::eTimeHourUnit:
-            spanStr = std::to_string((span * 0.000001) / 3600);
-            unitStr = " hour";
-            break;
-        case TimeRecorder::eTimeMinuteUnit:
-            spanStr = std::to_string((span * 0.000001) / 60);
-            unitStr = " min";
-            break;
-        case TimeRecorder::eTimeSecondUnit:
-            spanStr = std::to_string(span * 0.000001);
-            unitStr = " sec";
-            break;
-        case TimeRecorder::eTimeMilliSecUnit:
-            spanStr = std::to_string(span * 0.001);
-            unitStr = " ms";
-            break;
-        case TimeRecorder::eTimeMicroSecUnit:
-        default:
-            spanStr = std::to_string(span);
-            unitStr = " us";
-            break;
-    }
-
-    return spanStr + unitStr;
+    return str_sec + " [" + str_ms + "]";
 }
 
 void
 TimeRecorder::PrintTimeRecord(const std::string &msg, double span) {
-    std::string strLog;
-    if (!header_.empty()) strLog += header_ + ": ";
-    strLog += msg;
-    strLog += " (";
-    strLog += GetTimeSpanStr(time_unit_, span);
-    strLog += ")";
+    std::string str_log;
+    if (!header_.empty()) str_log += header_ + ": ";
+    str_log += msg;
+    str_log += " (";
+    str_log += TimeRecorder::GetTimeSpanStr(span);
+    str_log += ")";
 
     switch (log_level_) {
         case 0: {
-            SERVER_LOG_TRACE << strLog;
+            SERVER_LOG_TRACE << str_log;
             break;
         }
         case 1: {
-            SERVER_LOG_DEBUG << strLog;
+            SERVER_LOG_DEBUG << str_log;
             break;
         }
         case 2: {
-            SERVER_LOG_INFO << strLog;
+            SERVER_LOG_INFO << str_log;
             break;
         }
         case 3: {
-            SERVER_LOG_WARNING << strLog;
+            SERVER_LOG_WARNING << str_log;
             break;
         }
         case 4: {
-            SERVER_LOG_ERROR << strLog;
+            SERVER_LOG_ERROR << str_log;
             break;
         }
         case 5: {
-            SERVER_LOG_FATAL << strLog;
+            SERVER_LOG_FATAL << str_log;
             break;
         }
         default: {
-            SERVER_LOG_INFO << strLog;
+            SERVER_LOG_INFO << str_log;
             break;
         }
     }
 }
 
-void
-TimeRecorder::Record(const std::string &msg) {
+double
+TimeRecorder::RecordSection(const std::string &msg) {
     stdclock::time_point curr = stdclock::now();
-    span_ = (std::chrono::duration<double, std::micro>(curr - last_)).count();
+    double span = (std::chrono::duration<double, std::micro>(curr - last_)).count();
     last_ = curr;
 
-    PrintTimeRecord(msg, span_);
-}
-
-void
-TimeRecorder::Elapse(const std::string &msg) {
-    stdclock::time_point curr = stdclock::now();
-    span_ = (std::chrono::duration<double, std::micro>(curr - start_)).count();
-
-    PrintTimeRecord(msg, span_);
+    PrintTimeRecord(msg, span);
+    return span;
 }
 
 double
-TimeRecorder::Span() {
-    return span_;
+TimeRecorder::ElapseFromBegin(const std::string &msg) {
+    stdclock::time_point curr = stdclock::now();
+    double span = (std::chrono::duration<double, std::micro>(curr - start_)).count();
+
+    PrintTimeRecord(msg, span);
+    return span;
 }
 
 }

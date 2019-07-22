@@ -17,6 +17,10 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-232 - Add MySQLMetaImpl::UpdateTableFilesToIndex and set maximum_memory to default if config value = 0
 - MS-233 - Remove mem manager log
 - MS-230 - Change parameter name: Maximum_memory to insert_buffer_size
+- MS-234 - Some case cause background merge thread stop
+- MS-235 - Some test cases random fail
+- MS-236 - Add MySQLMetaImpl::HasNonIndexFiles
+- MS-257 - Update bzip2 download url
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
@@ -25,6 +29,13 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-206 - Support SQ8 index type
 - MS-208 - Add buildinde interface for C++ SDK
 - MS-212 - Support Inner product metric type
+- MS-241 - Build Faiss with MKL if using Intel CPU; else build with OpenBlas
+- MS-242 - Clean up cmake and change MAKE_BUILD_ARGS to be user defined variable
+- MS-245 - Improve search result transfer performance
+- MS-248 - Support AddVector/SearchVector profiling
+- MS-256 - Add more cache config
+- MS-260 - Refine log
+- MS-261 - update faiss version to 1.5.3 and add BUILD_FAISS_WITH_MKL as an option
 
 ## New Feature
 - MS-180 - Add new mem manager

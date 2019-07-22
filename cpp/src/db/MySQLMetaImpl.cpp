@@ -382,7 +382,49 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
 }
 
 Status MySQLMetaImpl::HasNonIndexFiles(const std::string &table_id, bool &has) {
-    // TODO
+
+    has = false;
+
+    try {
+
+        StoreQueryResult res;
+
+        {
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+
+            if (connectionPtr == nullptr) {
+                return Status::Error("Failed to connect to database server");
+            }
+
+
+            Query hasNonIndexFilesQuery = connectionPtr->query();
+            //since table_id is a unique column we just need to check whether it exists or not
+            hasNonIndexFilesQuery << "SELECT EXISTS " <<
+                                  "(SELECT 1 FROM TableFiles " <<
+                                  "WHERE table_id = " << quote << table_id << " AND " <<
+                                  "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
+                                  "file_type = " << std::to_string(TableFileSchema::NEW) << " OR " <<
+                                  "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ")) " <<
+                                  "AS " << quote << "check" << ";";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasNonIndexFiles: " << hasNonIndexFilesQuery.str();
+
+            res = hasNonIndexFilesQuery.store();
+        } //Scoped Connection
+
+        int check = res[0]["check"];
+        has = (check == 1);
+
+    } catch (const BadQuery &er) {
+        // Handle any query errors
+        ENGINE_LOG_ERROR << "QUERY ERROR WHEN CHECKING IF NON INDEX FILES EXISTS" << ": " << er.what();
+        return Status::DBTransactionError("QUERY ERROR WHEN CHECKING IF NON INDEX FILES EXISTS", er.what());
+    } catch (const Exception &er) {
+        // Catch-all for any other MySQL++ exceptions
+        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CHECKING IF NON INDEX FILES EXISTS" << ": " << er.what();
+        return Status::DBTransactionError("GENERAL ERROR WHEN CHECKING IF NON INDEX FILES EXISTS", er.what());
+    }
+
     return Status::OK();
 }
 
@@ -1378,11 +1420,17 @@ Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string &table_id) {
         Query updateTableFilesToIndexQuery = connectionPtr->query();
 
         updateTableFilesToIndexQuery << "UPDATE TableFiles " <<
-                                        "SET file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " " <<
-                                        "WHERE table_id = " << quote << table_id << " AND " <<
-                                        "file_type = " << std::to_string(TableFileSchema::RAW) << ";";
+                                     "SET file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " " <<
+                                     "WHERE table_id = " << quote << table_id << " AND " <<
+                                     "file_type = " << std::to_string(TableFileSchema::RAW) << ";";
 
-        ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFilesToIndexQuery.str();
+        ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFilesToIndex: " << updateTableFilesToIndexQuery.str();
+
+        if (!updateTableFilesToIndexQuery.exec()) {
+            ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILE";
+            return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILE",
+                                              updateTableFilesToIndexQuery.error());
+        }
 
     } catch (const BadQuery &er) {
         // Handle any query errors
@@ -1530,8 +1578,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
                 utils::DeleteTableFilePath(options_, table_file);
 
-                ENGINE_LOG_DEBUG << "Removing deleted id =" << table_file.id_ << " location = "
-                                 << table_file.location_ << std::endl;
+                ENGINE_LOG_DEBUG << "Removing file id:" << table_file.id_ << " location:" << table_file.location_;
 
                 idsToDelete.emplace_back(std::to_string(table_file.id_));
             }

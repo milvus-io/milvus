@@ -7,8 +7,10 @@ INSTALL_PREFIX=$(pwd)/milvus
 MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
 DB_PATH="/opt/milvus"
+PROFILING="OFF"
+BUILD_FAISS_WITH_MKL="OFF"
 
-while getopts "p:d:t:uhlrc" arg
+while getopts "p:d:t:uhlrcgm" arg
 do
         case $arg in
              t)
@@ -36,6 +38,12 @@ do
              c)
                 BUILD_COVERAGE="ON"
                 ;;
+             g)
+                PROFILING="ON"
+                ;;
+             m)
+                BUILD_FAISS_WITH_MKL="ON"
+                ;;
              h) # help
                 echo "
 
@@ -47,9 +55,11 @@ parameter:
 -l: build license version(default: OFF)
 -r: remove previous build directory(default: OFF)
 -c: code coverage(default: OFF)
+-g: profiling(default: OFF)
+-m: build faiss with MKL(default: OFF)
 
 usage:
-./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c]
+./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c] [-m]
                 "
                 exit 0
                 ;;
@@ -77,6 +87,8 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DCMAKE_LICENSE_CHECK=${LICENSE_CHECK} \
     -DBUILD_COVERAGE=${BUILD_COVERAGE} \
     -DMILVUS_DB_PATH=${DB_PATH} \
+    -DMILVUS_ENABLE_PROFILING=${PROFILING} \
+    -DBUILD_FAISS_WITH_MKL=${BUILD_FAISS_WITH_MKL} \
     $@ ../"
     echo ${CMAKE_CMD}
 

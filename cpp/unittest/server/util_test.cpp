@@ -19,15 +19,6 @@ namespace {
 
 static const std::string LOG_FILE_PATH = "./milvus/conf/log_config.conf";
 
-using TimeUnit = server::TimeRecorder::TimeDisplayUnit;
-double TestTimeRecorder(TimeUnit unit, int64_t log_level, int64_t sleep_ms) {
-    server::TimeRecorder rc("test rc", unit, log_level);
-    rc.Record("begin");
-    std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
-    rc.Elapse("end");
-    return rc.Span();
-}
-
 }
 
 TEST(UtilTest, EXCEPTION_TEST) {
@@ -122,23 +113,6 @@ TEST(UtilTest, STRINGFUNCTIONS_TEST) {
     ASSERT_EQ(result.size(), 3UL);
 
 
-}
-
-TEST(UtilTest, TIMERECORDER_TEST) {
-    double span = TestTimeRecorder(TimeUnit::eTimeAutoUnit, 0, 1001);
-    ASSERT_GT(span, 0.0);
-    span = TestTimeRecorder(TimeUnit::eTimeAutoUnit, 0, 101);
-    ASSERT_GT(span, 0.0);
-    span = TestTimeRecorder(TimeUnit::eTimeHourUnit, 1, 10);
-    ASSERT_GT(span, 0.0);
-    span = TestTimeRecorder(TimeUnit::eTimeMinuteUnit, 2, 10);
-    ASSERT_GT(span, 0.0);
-    span = TestTimeRecorder(TimeUnit::eTimeSecondUnit, 3, 10);
-    ASSERT_GT(span, 0.0);
-    span = TestTimeRecorder(TimeUnit::eTimeMilliSecUnit, 4, 10);
-    ASSERT_GT(span, 0.0);
-    span = TestTimeRecorder(TimeUnit::eTimeMicroSecUnit, -1, 10);
-    ASSERT_GT(span, 0.0);
 }
 
 TEST(UtilTest, BLOCKINGQUEUE_TEST) {

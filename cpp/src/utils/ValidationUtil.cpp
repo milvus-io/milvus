@@ -61,7 +61,6 @@ ValidateTableIndexType(int32_t index_type) {
         return SERVER_INVALID_INDEX_TYPE;
     }
 
-    SERVER_LOG_DEBUG << "Index type: " << index_type;
     return SERVER_SUCCESS;
 }
 

@@ -37,8 +37,18 @@ public:
     const ResultSet& GetResult() const { return result_; }
     ResultSet& GetResult() { return result_; }
 
+    std::string Identity() const { return identity_; }
+
     void IndexSearchDone(size_t index_id);
     void WaitResult();
+
+    void AccumLoadCost(double span) { time_cost_load_ += span; }
+    void AccumSearchCost(double span) { time_cost_search_ += span; }
+    void AccumReduceCost(double span) { time_cost_reduce_ += span; }
+
+    double LoadCost() const { return time_cost_load_; }
+    double SearchCost() const { return time_cost_search_; }
+    double ReduceCost() const { return time_cost_reduce_; }
 
 private:
     uint64_t topk_ = 0;
@@ -52,6 +62,10 @@ private:
     std::condition_variable done_cond_;
 
     std::string identity_; //for debug
+
+    double time_cost_load_ = 0.0; //time cost for load all index files, unit: us
+    double time_cost_search_ = 0.0; //time cost for entire search, unit: us
+    double time_cost_reduce_ = 0.0; //time cost for entire reduce, unit: us
 };
 
 using SearchContextPtr = std::shared_ptr<SearchContext>;
