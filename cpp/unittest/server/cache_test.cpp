@@ -7,6 +7,7 @@
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 
+#include "utils/Error.h"
 #include "wrapper/Index.h"
 #include "wrapper/knowhere/vec_index.h"
 
@@ -29,7 +30,7 @@ public:
 
 class MockVecIndex : public engine::VecIndex {
 public:
-    virtual void BuildAll(const long &nb,
+    virtual server::KnowhereError BuildAll(const long &nb,
                           const float *xb,
                           const long *ids,
                           const engine::Config &cfg,
@@ -42,14 +43,14 @@ public:
         return engine::IndexType::INVALID;
     }
 
-    virtual void Add(const long &nb,
+    virtual server::KnowhereError Add(const long &nb,
                      const float *xb,
                      const long *ids,
                      const engine::Config &cfg = engine::Config()) {
 
     }
 
-    virtual void Search(const long &nq,
+    virtual server::KnowhereError Search(const long &nq,
                         const float *xq,
                         float *dist,
                         long *ids,
@@ -70,7 +71,7 @@ public:
         return binset;
     }
 
-    virtual void Load(const zilliz::knowhere::BinarySet &index_binary) {
+    virtual server::KnowhereError Load(const zilliz::knowhere::BinarySet &index_binary) {
 
     }
 
