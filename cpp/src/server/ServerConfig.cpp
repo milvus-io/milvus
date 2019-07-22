@@ -61,7 +61,7 @@ ServerConfig::LoadConfigFile(const std::string& config_filename) {
 ServerError ServerConfig::ValidateConfig() const {
     //server config validation
     ConfigNode server_config = GetConfig(CONFIG_SERVER);
-    uint32_t gpu_index = (uint32_t)server_config.GetInt32Value(CONFIG_GPU_INDEX);
+    uint32_t gpu_index = (uint32_t)server_config.GetInt32Value(CONFIG_GPU_INDEX, 0);
     if(ValidationUtil::ValidateGpuIndex(gpu_index) != SERVER_SUCCESS) {
         std::cout << "Error: invalid gpu_index " << std::to_string(gpu_index) << std::endl;
         return SERVER_INVALID_ARGUMENT;
@@ -72,14 +72,14 @@ ServerError ServerConfig::ValidateConfig() const {
     CommonUtil::GetSystemMemInfo(total_mem, free_mem);
 
     ConfigNode db_config = GetConfig(CONFIG_DB);
-    uint64_t insert_buffer_size = (uint64_t)db_config.GetInt32Value(CONFIG_DB_INSERT_BUFFER_SIZE);
+    uint64_t insert_buffer_size = (uint64_t)db_config.GetInt32Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
     insert_buffer_size *= GB;
     if(insert_buffer_size >= total_mem) {
         std::cout << "Error: insert_buffer_size execeed system memory" << std::endl;
         return SERVER_INVALID_ARGUMENT;
     }
 
-    uint64_t index_building_threshold = (uint64_t)db_config.GetInt32Value(CONFIG_DB_INDEX_TRIGGER_SIZE);
+    uint64_t index_building_threshold = (uint64_t)db_config.GetInt32Value(CONFIG_DB_INDEX_TRIGGER_SIZE, 1024);
     index_building_threshold *= MB;
 
     size_t gpu_mem = 0;
@@ -94,7 +94,7 @@ ServerError ServerConfig::ValidateConfig() const {
 
     //cache config validation
     ConfigNode cache_config = GetConfig(CONFIG_CACHE);
-    uint64_t cache_cap = (uint64_t)cache_config.GetInt64Value(CONFIG_CPU_CACHE_CAPACITY);
+    uint64_t cache_cap = (uint64_t)cache_config.GetInt64Value(CONFIG_CPU_CACHE_CAPACITY, 16);
     cache_cap *= GB;
     if(cache_cap >= total_mem) {
         std::cout << "Error: cpu_cache_capacity execeed system memory" << std::endl;
@@ -108,7 +108,7 @@ ServerError ServerConfig::ValidateConfig() const {
         return SERVER_INVALID_ARGUMENT;
     }
 
-    double free_percent = cache_config.GetDoubleValue(server::CACHE_FREE_PERCENT);
+    double free_percent = cache_config.GetDoubleValue(server::CACHE_FREE_PERCENT, 0.85);
     if(free_percent < std::numeric_limits<double>::epsilon() || free_percent > 1.0) {
         std::cout << "Error: invalid cache_free_percent " << std::to_string(free_percent) << std::endl;
         return SERVER_INVALID_ARGUMENT;
