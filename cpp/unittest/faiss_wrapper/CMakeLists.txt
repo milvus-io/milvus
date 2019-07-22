@@ -6,6 +6,9 @@
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_src)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 
+set(util_files
+        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp)
+
 # Make sure that your call to link_directories takes place before your call to the relevant add_executable.
 include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
@@ -14,6 +17,7 @@ set(wrapper_test_src
         ${unittest_srcs}
         ${wrapper_src}
         ${config_files}
+        ${util_files}
         ${require_files}
         wrapper_test.cpp
         )

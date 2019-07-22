@@ -88,6 +88,7 @@ set(third_party_libs
         mysqlpp
         ${PROFILER_LIB}
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+        cudart
         )
 
 if (MEGASEARCH_WITH_ARROW STREQUAL "ON")

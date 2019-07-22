@@ -35,6 +35,7 @@ set(unittest_libs
         dl
         z
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+        cudart
         )
 
 add_subdirectory(server)

@@ -37,7 +37,7 @@ class GpuResources {
         using namespace zilliz::milvus::server;
         ServerConfig &config = ServerConfig::GetInstance();
         ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-        gpu_num = server_config.GetInt32Value("gpu_index", 0);
+        gpu_num = server_config.GetInt32Value(server::CONFIG_GPU_INDEX, 0);
     }
 
     int32_t GetGpu() {
