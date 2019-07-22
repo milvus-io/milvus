@@ -72,7 +72,6 @@ set(third_party_libs
         sqlite
         thrift
         yaml-cpp
-        libgpufaiss.a
         faiss
         prometheus-cpp-push
         prometheus-cpp-pull
@@ -94,7 +93,7 @@ set(third_party_libs
 if (MEGASEARCH_WITH_ARROW STREQUAL "ON")
     set(third_party_libs ${third_party_libs} arrow)
 endif()
-if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     set(third_party_libs ${third_party_libs}
             ${MKL_LIBS}
             ${MKL_LIBS})
