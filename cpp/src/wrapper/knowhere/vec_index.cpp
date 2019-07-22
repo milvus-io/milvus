@@ -180,7 +180,7 @@ server::KnowhereError write_index(VecIndexPtr index, const std::string &location
     } catch (knowhere::KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return server::KNOWHERE_UNEXPECTED_ERROR;
-    } catch (std::exception& e) {
+    } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
         return server::KNOWHERE_ERROR;
     }
@@ -192,6 +192,7 @@ server::KnowhereError write_index(VecIndexPtr index, const std::string &location
 void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Config &cfg) {
     if (!cfg.contains("nlist")) { cfg["nlist"] = int(size / 1000000.0 * 16384); }
     if (!cfg.contains("gpu_id")) { cfg["gpu_id"] = int(0); }
+    if (!cfg.contains("metric_type")) { cfg["metric_type"] = "L2"; }
 
     switch (type) {
         case IndexType::FAISS_IVFSQ8_MIX: {

@@ -96,17 +96,17 @@ INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
                             //),
                             std::make_tuple(IndexType::FAISS_IVFFLAT_MIX, "Default",
                                             64, 100000, 10, 10,
-                                            Config::object{{"nlist", 1000}, {"dim", 64}},
+                                            Config::object{{"nlist", 1000}, {"dim", 64}, {"metric_type", "L2"}},
                                             Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 5}}
                             ),
                             std::make_tuple(IndexType::FAISS_IDMAP, "Default",
                                             64, 100000, 10, 10,
-                                            Config::object{{"dim", 64}},
+                                            Config::object{{"dim", 64}, {"metric_type", "L2"}},
                                             Config::object{{"dim", 64}, {"k", 10}}
                             ),
                             std::make_tuple(IndexType::FAISS_IVFSQ8_MIX, "Default",
                                             64, 100000, 10, 10,
-                                            Config::object{{"dim", 64}, {"nlist", 1000}, {"nbits", 8}},
+                                            Config::object{{"dim", 64}, {"nlist", 1000}, {"nbits", 8}, {"metric_type", "L2"}},
                                             Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 5}}
                             )
                             //std::make_tuple(IndexType::SPTAG_KDT_RNT_CPU, "Default",
