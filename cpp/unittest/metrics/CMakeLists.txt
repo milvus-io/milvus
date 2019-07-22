@@ -65,6 +65,10 @@ target_link_libraries(metrics_test
         )
 if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     target_link_libraries(metrics_test ${MKL_LIBS} ${MKL_LIBS})
+else()
+    target_link_libraries(metrics_test
+            lapack
+            openblas)
 endif()
 
 install(TARGETS metrics_test DESTINATION bin)
