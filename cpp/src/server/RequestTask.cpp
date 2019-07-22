@@ -504,7 +504,9 @@ SearchVectorTaskBase::SearchVectorTaskBase(const std::string &table_name,
 
 ServerError SearchVectorTaskBase::OnExecute() {
     try {
-        TimeRecorder rc("SearchVectorTask");
+        std::string title = "SearchVectorTask(n=" + std::to_string(record_array_.size())
+                + " k=" + std::to_string(top_k_) + ")";
+        TimeRecorder rc(title);
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
@@ -596,7 +598,7 @@ ServerError SearchVectorTaskBase::OnExecute() {
 
         //step 6: print time cost percent
         double total_cost = span_check + span_prepare + span_search + span_result;
-        SERVER_LOG_DEBUG << "SearchVectorTask: " << "check validation(" << (span_check/total_cost)*100.0 << "%)"
+        SERVER_LOG_DEBUG << title << ": check validation(" << (span_check/total_cost)*100.0 << "%)"
             << " prepare data(" << (span_prepare/total_cost)*100.0 << "%)"
             << " search(" << (span_search/total_cost)*100.0 << "%)"
             << " construct result(" << (span_result/total_cost)*100.0 << "%)";
