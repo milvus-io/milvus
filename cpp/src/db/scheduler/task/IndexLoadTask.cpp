@@ -41,20 +41,21 @@ IndexLoadTask::IndexLoadTask()
 }
 
 std::shared_ptr<IScheduleTask> IndexLoadTask::Execute() {
-    ENGINE_LOG_INFO << "Loading index(" << file_->id_ << ") from location: " << file_->location_;
-
-    server::TimeRecorder rc("Load index");
+    server::TimeRecorder rc("");
     //step 1: load index
     ExecutionEnginePtr index_ptr = EngineFactory::Build(file_->dimension_,
                                                         file_->location_,
                                                         (EngineType)file_->engine_type_);
     index_ptr->Load();
 
-    rc.Record("load index file to memory");
-
     size_t file_size = index_ptr->PhysicalSize();
-    LOG(DEBUG) << "Index file type " << file_->file_type_ << " Of Size: "
-               << file_size/(1024*1024) << " M";
+
+    std::string info = "Load file id:" + std::to_string(file_->id_) + " file type:" + std::to_string(file_->file_type_)
+                       + " size:" + std::to_string(file_size) + " bytes from location: " + file_->location_ + " totally cost";
+    double span = rc.ElapseFromBegin(info);
+    for(auto& context : search_contexts_) {
+        context->AccumLoadCost(span);
+    }
 
     CollectFileMetrics(file_->file_type_, file_size);
 

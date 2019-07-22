@@ -31,7 +31,7 @@ SearchContext::AddIndexFile(TableFileSchemaPtr& index_file) {
         return false;
     }
 
-    SERVER_LOG_INFO << "SearchContext " << identity_ << " add index file: " << index_file->id_;
+    SERVER_LOG_DEBUG << "SearchContext " << identity_ << " add index file: " << index_file->id_;
 
     map_index_files_[index_file->id_] = index_file;
     return true;
@@ -42,7 +42,7 @@ SearchContext::IndexSearchDone(size_t index_id) {
     std::unique_lock <std::mutex> lock(mtx_);
     map_index_files_.erase(index_id);
     done_cond_.notify_all();
-    SERVER_LOG_INFO << "SearchContext " << identity_ << " finish index file: " << index_id;
+    SERVER_LOG_DEBUG << "SearchContext " << identity_ << " finish index file: " << index_id;
 }
 
 void

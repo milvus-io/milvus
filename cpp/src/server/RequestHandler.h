@@ -107,6 +107,29 @@ public:
             const int64_t topk);
 
     /**
+     * @brief Query vector
+     *
+     * This method is used to query vector in table.
+     *
+     * @param table_name, table_name is queried.
+     * @param query_record_array, all vector are going to be queried.
+     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+     * @param topk, how many similarity vectors will be searched.
+     *
+     * @return query binary result array.
+     *
+     * @param table_name
+     * @param query_record_array
+     * @param query_range_array
+     * @param topk
+     */
+    void SearchVector2(std::vector<::milvus::thrift::TopKQueryBinResult> & _return,
+            const std::string& table_name,
+            const std::vector<::milvus::thrift::RowRecord> & query_record_array,
+            const std::vector<::milvus::thrift::Range> & query_range_array,
+            const int64_t topk);
+
+    /**
    * @brief Internal use query interface
    *
    * This method is used to query vector in specified files.
