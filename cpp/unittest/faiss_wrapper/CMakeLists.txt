@@ -40,6 +40,10 @@ set(wrapper_libs
         )
 if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     set(wrapper_libs ${wrapper_libs} ${MKL_LIBS} ${MKL_LIBS})
+else()
+    set(wrapper_libs ${wrapper_libs}
+            lapack
+            openblas)
 endif()
 
 target_link_libraries(wrapper_test ${wrapper_libs} ${unittest_libs})
