@@ -9,6 +9,9 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_src)
 aux_source_directory(./ test_srcs)
 
+set(util_files
+        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp)
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task scheduler_task_files)
@@ -29,6 +32,7 @@ set(db_test_src
     ${db_srcs}
     ${db_scheduler_srcs}
     ${wrapper_src}
+    ${util_files}
     ${require_files}
     ${test_srcs})
 
