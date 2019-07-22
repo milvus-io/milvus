@@ -160,7 +160,7 @@ ServerError CreateTableTask::OnExecute() {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    rc.Record("done");
+    rc.ElapseFromBegin("totally cost");
 
     return SERVER_SUCCESS;
 }
@@ -205,7 +205,7 @@ ServerError DescribeTableTask::OnExecute() {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    rc.Record("done");
+    rc.ElapseFromBegin("totally cost");
 
     return SERVER_SUCCESS;
 }
@@ -243,7 +243,7 @@ ServerError BuildIndexTask::OnExecute() {
             return SetError(SERVER_BUILD_INDEX_ERROR, "Engine failed: " + stat.ToString());
         }
 
-        rc.Elapse("totally cost");
+        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -280,7 +280,7 @@ ServerError HasTableTask::OnExecute() {
             return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
         }
 
-        rc.Elapse("totally cost");
+        rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -322,7 +322,7 @@ ServerError DropTableTask::OnExecute() {
             }
         }
 
-        rc.Record("check validation");
+        rc.ElapseFromBegin("check validation");
 
         //step 3: Drop table
         std::vector<DB_DATE> dates;
@@ -331,8 +331,7 @@ ServerError DropTableTask::OnExecute() {
             return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
         }
 
-        rc.Record("drop table");
-        rc.Elapse("total cost");
+        rc.ElapseFromBegin("total cost");
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -406,7 +405,13 @@ ServerError InsertVectorTask::OnExecute() {
             }
         }
 
-        rc.Record("check validation");
+        rc.RecordSection("check validation");
+
+#ifdef MILVUS_ENABLE_PROFILING
+        std::string fname = "/tmp/insert_" + std::to_string(this->record_array_.size()) +
+                            "_" + GetCurrTimeStr() + ".profiling";
+        ProfilerStart(fname.c_str());
+#endif
 
         //step 3: prepare float data
         std::vector<float> vec_f;
@@ -418,7 +423,7 @@ ServerError InsertVectorTask::OnExecute() {
             }
         }
 
-        rc.Record("prepare vectors data");
+        rc.ElapseFromBegin("prepare vectors data");
 
         //step 4: insert vectors
         uint64_t vec_count = (uint64_t)insert_infos_.row_record_array_size();
@@ -427,7 +432,7 @@ ServerError InsertVectorTask::OnExecute() {
         vec_ids.clear();
 
         stat = DBWrapper::DB()->InsertVectors(insert_infos_.table_name(), vec_count, vec_f.data(), vec_ids);
-        rc.Record("add vectors to engine");
+        rc.ElapseFromBegin("add vectors to engine");
         if(!stat.ok()) {
             return SetError(SERVER_CACHE_ERROR, "Cache error: " + stat.ToString());
         }
@@ -441,8 +446,12 @@ ServerError InsertVectorTask::OnExecute() {
             return SetError(SERVER_ILLEGAL_VECTOR_ID, msg);
         }
 
-        rc.Record("do insert");
-        rc.Elapse("total cost");
+#ifdef MILVUS_ENABLE_PROFILING
+        ProfilerStop();
+#endif
+
+        rc.RecordSection("add vectors to engine");
+        rc.ElapseFromBegin("total cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
@@ -517,7 +526,14 @@ ServerError SearchVectorTask::OnExecute() {
             return SetError(error_code, error_msg);
         }
 
-        rc.Record("check validation");
+        double span_check = rc.RecordSection("check validation");
+
+#ifdef MILVUS_ENABLE_PROFILING
+        std::string fname = "/tmp/search_nq_" + std::to_string(this->record_array_.size()) +
+                            "_top_" + std::to_string(this->top_k_) + "_" +
+                            GetCurrTimeStr() + ".profiling";
+        ProfilerStart(fname.c_str());
+#endif
 
         //step 3: prepare float data
         std::vector<float> vec_f;
@@ -528,7 +544,7 @@ ServerError SearchVectorTask::OnExecute() {
                 vec_f[i * table_info.dimension_ + j] = searchVector_infos_.query_record_array(i).vector_data(j);
             }
         }
-        rc.Record("prepare vector data");
+        rc.ElapseFromBegin("prepare vector data");
 
         //step 4: search vectors
         engine::QueryResults results;
@@ -541,7 +557,7 @@ ServerError SearchVectorTask::OnExecute() {
                     (size_t) top_k_, record_count, vec_f.data(), dates, results);
         }
 
-        rc.Record("search vectors from engine");
+        rc.ElapseFromBegin("search vectors from engine");
         if(!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
         }
@@ -556,7 +572,7 @@ ServerError SearchVectorTask::OnExecute() {
             return SetError(SERVER_ILLEGAL_SEARCH_RESULT, msg);
         }
 
-        rc.Record("do search");
+        rc.ElapseFromBegin("do search");
 
         //step 5: construct result array
         for(uint64_t i = 0; i < record_count; i++) {
@@ -570,8 +586,15 @@ ServerError SearchVectorTask::OnExecute() {
             }
             writer_.Write(grpc_topk_result);
         }
-        rc.Record("construct result");
-        rc.Elapse("total cost");
+
+#ifdef MILVUS_ENABLE_PROFILING
+        ProfilerStop();
+#endif
+
+        double span_result = rc.RecordSection("construct result");
+        rc.ElapseFromBegin("totally cost");
+
+        //step 6: print time cost percent
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
@@ -612,7 +635,7 @@ ServerError GetTableRowCountTask::OnExecute() {
 
         row_count_ = (int64_t) row_count;
 
-        rc.Elapse("total cost");
+        rc.ElapseFromBegin("total cost");
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
