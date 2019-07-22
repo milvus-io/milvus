@@ -8,6 +8,7 @@
 aux_source_directory(cache cache_files)
 aux_source_directory(config config_files)
 aux_source_directory(server server_files)
+aux_source_directory(grpcserver grpcserver_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
@@ -40,6 +41,10 @@ set(service_files
         metrics/SystemInfo.h
         server/ThreadPoolServer.cpp
         server/ThreadPoolServer.h
+        grpc/gen-milvus/milvus.grpc.pb.cc
+        grpc/gen-milvus/milvus.pb.cc
+        grpc/gen-status/status.grpc.pb.cc
+        grpc/gen-status/status.pb.cc
         )
 
 set(engine_files
@@ -63,11 +68,16 @@ include_directories(/usr/include)
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 include_directories(thrift/gen-cpp)
 include_directories(/usr/include/mysql)
+include_directories(grpc/gen-status)
+include_directories(grpc/gen-milvus)
 
 set(third_party_libs
         easyloggingpp
         sqlite
         thrift
+        grpc
+        grpc++
+        grpcpp_channelz
         yaml-cpp
         libgpufaiss.a
         faiss
@@ -158,7 +168,8 @@ set(server_libs
 
 add_executable(milvus_server
         ${config_files}
-        ${server_files}
+#        ${server_files}
+        ${grpcserver_files}
         ${utils_files}
         ${service_files}
         ${metrics_files}
@@ -189,4 +200,5 @@ install(FILES
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4
         DESTINATION lib) #need to copy libmysqlpp.so
 
-add_subdirectory(sdk)
+#add_subdirectory(sdk)
+add_subdirectory(grpcsdk)

@@ -3,7 +3,8 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
-#include "server/Server.h"
+//#include "server/Server.h"
+#include "grpcserver/Server.h"
 #include "version.h"
 
 #include <getopt.h>
