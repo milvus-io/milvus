@@ -34,7 +34,6 @@ cuda_add_executable(server_test
 
 set(require_libs
         stdc++
-        libgpufaiss.a
         faiss
         cudart
         cublas
@@ -49,7 +48,7 @@ set(require_libs
         pthread
         )
 
-if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     set(require_libs ${require_libs} ${MKL_LIBS} ${MKL_LIBS})
 endif()
 
