@@ -35,6 +35,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-248 - Support AddVector/SearchVector profiling
 - MS-256 - Add more cache config
 - MS-260 - Refine log
+- MS-249 - Check machine hardware during initialize
 
 ## New Feature
 - MS-180 - Add new mem manager

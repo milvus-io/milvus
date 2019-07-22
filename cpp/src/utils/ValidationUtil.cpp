@@ -1,7 +1,8 @@
-#include <src/db/ExecutionEngine.h>
+#include "db/ExecutionEngine.h"
 #include "ValidationUtil.h"
 #include "Log.h"
 
+#include <cuda_runtime.h>
 
 namespace zilliz {
 namespace milvus {
@@ -11,7 +12,7 @@ constexpr size_t table_name_size_limit = 255;
 constexpr int64_t table_dimension_limit = 16384;
 
 ServerError
-ValidateTableName(const std::string &table_name) {
+ValidationUtil::ValidateTableName(const std::string &table_name) {
 
     // Table name shouldn't be empty.
     if (table_name.empty()) {
@@ -45,7 +46,7 @@ ValidateTableName(const std::string &table_name) {
 }
 
 ServerError
-ValidateTableDimension(int64_t dimension) {
+ValidationUtil::ValidateTableDimension(int64_t dimension) {
     if (dimension <= 0 || dimension > table_dimension_limit) {
         SERVER_LOG_ERROR << "Table dimension excceed the limitation: " << table_dimension_limit;
         return SERVER_INVALID_VECTOR_DIMENSION;
@@ -55,12 +56,41 @@ ValidateTableDimension(int64_t dimension) {
 }
 
 ServerError
-ValidateTableIndexType(int32_t index_type) {
+ValidationUtil::ValidateTableIndexType(int32_t index_type) {
     int engine_type = (int)engine::EngineType(index_type);
     if(engine_type <= 0 || engine_type > (int)engine::EngineType::MAX_VALUE) {
         return SERVER_INVALID_INDEX_TYPE;
     }
 
+    return SERVER_SUCCESS;
+}
+
+ServerError
+ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
+    int num_devices = 0;
+    auto cuda_err = cudaGetDeviceCount(&num_devices);
+    if (cuda_err) {
+        SERVER_LOG_ERROR << "Failed to count video card: " << std::to_string(cuda_err);
+        return SERVER_UNEXPECTED_ERROR;
+    }
+
+    if(gpu_index >= num_devices) {
+        return SERVER_INVALID_ARGUMENT;
+    }
+
+    return SERVER_SUCCESS;
+}
+
+ServerError
+ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t& memory) {
+    cudaDeviceProp deviceProp;
+    auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);
+    if (cuda_err) {
+        SERVER_LOG_ERROR << "Failed to get video card properties: " << std::to_string(cuda_err);
+        return SERVER_UNEXPECTED_ERROR;
+    }
+
+    memory = deviceProp.totalGlobalMem;
     return SERVER_SUCCESS;
 }
 
