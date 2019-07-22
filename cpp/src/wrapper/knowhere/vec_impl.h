@@ -41,8 +41,9 @@ class VecIndexImpl : public VecIndex {
 
 class IVFMixIndex : public VecIndexImpl {
  public:
-    explicit IVFMixIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : VecIndexImpl(std::move(index),
-                                                                                              IndexType::FAISS_IVFFLAT_MIX) {};
+    explicit IVFMixIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index, const IndexType &type)
+        : VecIndexImpl(std::move(index), type) {};
+
     server::KnowhereError BuildAll(const long &nb,
                                    const float *xb,
                                    const long *ids,

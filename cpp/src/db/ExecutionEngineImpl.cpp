@@ -69,7 +69,7 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 }
 
 Status ExecutionEngineImpl::AddWithIds(long n, const float *xdata, const long *xids) {
-    auto ec = index_->Add(n, xdata, xids, Config::object{{"dim", dim}});
+    auto ec = index_->Add(n, xdata, xids);
     if (ec != server::KNOWHERE_SUCCESS) {
         return Status::Error("Add error");
     }
@@ -171,10 +171,15 @@ ExecutionEngineImpl::BuildIndex(const std::string &location) {
         throw Exception("Create Empty VecIndex");
     }
 
+    Config build_cfg;
+    build_cfg["dim"] = Dimension();
+    build_cfg["gpu_id"] = gpu_num;
+    AutoGenParams(to_index->GetType(), Count(), build_cfg);
+
     auto ec = to_index->BuildAll(Count(),
                                  from_index->GetRawVectors(),
                                  from_index->GetRawIds(),
-                                 Config::object{{"dim", Dimension()}, {"gpu_id", gpu_num}});
+                                 build_cfg);
     if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
 
     return std::make_shared<ExecutionEngineImpl>(to_index, location, build_type);
