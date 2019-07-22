@@ -23,10 +23,7 @@ link_directories("/usr/local/cuda/lib64")
 
 include_directories(/usr/include/mysql)
 
-#add_definitions(-DBOOST_ERROR_CODE_HEADER_ONLY)
-
 set(db_test_src
-    #${unittest_srcs}
     ${config_files}
     ${cache_srcs}
     ${db_srcs}
@@ -38,7 +35,6 @@ set(db_test_src
 cuda_add_executable(db_test ${db_test_src})
 
 set(db_libs
-        libgpufaiss.a
         faiss
         cudart
         cublas
@@ -49,6 +45,11 @@ set(db_libs
         mysqlpp
         )
 
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
+    set(db_libs ${db_libs} ${MKL_LIBS} ${MKL_LIBS})
+endif()
+
 target_link_libraries(db_test ${db_libs} ${unittest_libs})
 
 install(TARGETS db_test DESTINATION bin)
+

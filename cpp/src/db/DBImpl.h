@@ -118,10 +118,8 @@ class DBImpl : public DB {
     BuildIndex(const meta::TableFileSchema &);
 
  private:
-
     const Options options_;
 
-    Status bg_error_;
     std::atomic<bool> shutting_down_;
 
     std::thread bg_timer_thread_;

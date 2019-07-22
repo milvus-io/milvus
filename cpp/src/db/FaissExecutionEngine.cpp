@@ -79,25 +79,23 @@ Status FaissExecutionEngine::Serialize() {
     return Status::OK();
 }
 
-Status FaissExecutionEngine::Load() {
+Status FaissExecutionEngine::Load(bool to_cache) {
     auto index  = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
-    bool to_cache = false;
+    bool already_in_cache = (index != nullptr);
     auto start_time = METRICS_NOW_TIME;
     if (!index) {
         index = read_index(location_);
-        to_cache = true;
         ENGINE_LOG_DEBUG << "Disk io from: " << location_;
     }
 
     pIndex_ = index->data();
-    if (to_cache) {
+    if (!already_in_cache && to_cache) {
         Cache();
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time, end_time);
 
         server::Metrics::GetInstance().FaissDiskLoadDurationSecondsHistogramObserve(total_time);
         double total_size = (pIndex_->d) * (pIndex_->ntotal) * 4;
-
 
         server::Metrics::GetInstance().FaissDiskLoadSizeBytesHistogramObserve(total_size);
 //        server::Metrics::GetInstance().FaissDiskLoadIOSpeedHistogramObserve(total_size/double(total_time));
@@ -151,10 +149,11 @@ Status FaissExecutionEngine::Search(long n,
 
     std::shared_ptr<faiss::IndexIVF> ivf_index = std::dynamic_pointer_cast<faiss::IndexIVF>(pIndex_);
     if(ivf_index) {
-        ENGINE_LOG_DEBUG << "Index type: IVFFLAT nProbe: " << nprobe_;
+        ENGINE_LOG_DEBUG << "Searching index type: " << build_index_type_ << " nProbe: " << nprobe_;
         ivf_index->nprobe = nprobe_;
         ivf_index->search(n, data, k, distances, labels);
     } else {
+        ENGINE_LOG_DEBUG << "Searching raw file";
         pIndex_->search(n, data, k, distances, labels);
     }
 

@@ -51,10 +51,10 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
         return nullptr;
     }
 
-    SERVER_LOG_INFO << "Searching in index(" << index_id_<< ") with "
+    SERVER_LOG_DEBUG << "Searching in file id:" << index_id_<< " with "
                     << search_contexts_.size() << " tasks";
 
-    server::TimeRecorder rc("DoSearch index(" + std::to_string(index_id_) + ")");
+    server::TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
 
     auto start_time = METRICS_NOW_TIME;
 
@@ -71,17 +71,19 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
             index_engine_->Search(context->nq(), context->vectors(), inner_k, output_distence.data(),
                                   output_ids.data());
 
-            rc.Record("do search");
+            double span = rc.RecordSection("do search for context:" + context->Identity());
+            context->AccumSearchCost(span);
 
             //step 3: cluster result
             SearchContext::ResultSet result_set;
             auto spec_k = index_engine_->Count() < context->topk() ? index_engine_->Count() : context->topk();
             SearchTask::ClusterResult(output_ids, output_distence, context->nq(), spec_k, result_set);
-            rc.Record("cluster result");
 
             //step 4: pick up topk result
             SearchTask::TopkResult(result_set, inner_k, metric_l2, context->GetResult());
-            rc.Record("reduce topk");
+
+            span = rc.RecordSection("reduce topk for context:" + context->Identity());
+            context->AccumReduceCost(span);
 
         } catch (std::exception& ex) {
             SERVER_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
@@ -97,7 +99,7 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     CollectDurationMetrics(index_type_, total_time);
 
-    rc.Elapse("totally cost");
+    rc.ElapseFromBegin("totally cost");
 
     return nullptr;
 }

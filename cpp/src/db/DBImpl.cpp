@@ -89,8 +89,11 @@ DBImpl::DBImpl(const Options& options)
     meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
     if (options.mode != Options::MODE::READ_ONLY) {
+        ENGINE_LOG_INFO << "StartTimerTasks";
         StartTimerTasks();
     }
+
+
 }
 
 Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
@@ -206,9 +209,10 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
 Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
                           uint64_t k, uint64_t nq, const float* vectors,
                           const meta::DatesT& dates, QueryResults& results) {
+    server::TimeRecorder rc("");
 
     //step 1: get files to search
-    ENGINE_LOG_DEBUG << "Search DateT Size=" << files.size();
+    ENGINE_LOG_DEBUG << "Engine query begin, index file count:" << files.size() << " date range count:" << dates.size();
     SearchContextPtr context = std::make_shared<SearchContext>(k, nq, vectors);
     for (auto &file : files) {
         TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
@@ -221,8 +225,31 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
 
     context->WaitResult();
 
-    //step 3: construct results
+    //step 3: print time cost information
+    double load_cost = context->LoadCost();
+    double search_cost = context->SearchCost();
+    double reduce_cost = context->ReduceCost();
+    std::string load_info = server::TimeRecorder::GetTimeSpanStr(load_cost);
+    std::string search_info = server::TimeRecorder::GetTimeSpanStr(search_cost);
+    std::string reduce_info = server::TimeRecorder::GetTimeSpanStr(reduce_cost);
+    if(search_cost > 0.0 || reduce_cost > 0.0) {
+        double total_cost = load_cost + search_cost + reduce_cost;
+        double load_percent = load_cost/total_cost;
+        double search_percent = search_cost/total_cost;
+        double reduce_percent = reduce_cost/total_cost;
+
+        ENGINE_LOG_DEBUG << "Engine load index totally cost:" << load_info << " percent: " << load_percent*100 << "%";
+        ENGINE_LOG_DEBUG << "Engine search index totally cost:" << search_info << " percent: " << search_percent*100 << "%";
+        ENGINE_LOG_DEBUG << "Engine reduce topk totally cost:" << reduce_info << " percent: " << reduce_percent*100 << "%";
+    } else {
+        ENGINE_LOG_DEBUG << "Engine load cost:" << load_info
+            << " search cost: " << search_info
+            << " reduce cost: " << reduce_info;
+    }
+
+    //step 4: construct results
     results = context->GetResult();
+    rc.ElapseFromBegin("Engine query totally cost");
 
     return Status::OK();
 }
@@ -235,7 +262,6 @@ void DBImpl::BackgroundTimerTask() {
     Status status;
     server::SystemInfo::GetInstance().Init();
     while (true) {
-        if (!bg_error_.ok()) break;
         if (shutting_down_.load(std::memory_order_acquire)){
             for(auto& iter : compact_thread_results_) {
                 iter.wait();
@@ -357,10 +383,11 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     updated.push_back(table_file);
     status = meta_ptr_->UpdateTableFiles(updated);
     ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ <<
-        " of size=" << index->PhysicalSize()/(1024*1024) << " M";
+        " of size " << index->PhysicalSize() << " bytes";
 
-    //current disable this line to avoid memory
-    //index->Cache();
+    if(options_.insert_cache_immediately_) {
+        index->Cache();
+    }
 
     return status;
 }
@@ -390,15 +417,11 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
-//    static int b_count = 0;
-//    b_count++;
-//    std::cout << "BackgroundCompaction: " << b_count << std::endl;
-
     Status status;
     for (auto& table_id : table_ids) {
         status = BackgroundMergeFiles(table_id);
         if (!status.ok()) {
-            bg_error_ = status;
+            ENGINE_LOG_ERROR << "Merge files for table " << table_id << " failed: " << status.ToString();
             return;
         }
     }
@@ -408,7 +431,6 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     int ttl = 1;
     if (options_.mode == Options::MODE::CLUSTER) {
         ttl = meta::D_SEC;
-//        ENGINE_LOG_DEBUG << "Server mode is cluster. Clean up files with ttl = " << std::to_string(ttl) << "seconds.";
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
 }
@@ -460,7 +482,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
     try {
         //step 1: load index
-        to_index->Load();
+        to_index->Load(options_.insert_cache_immediately_);
 
         //step 2: create table file
         meta::TableFileSchema table_file;
@@ -501,11 +523,12 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         meta_ptr_->UpdateTableFiles(update_files);
 
         ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size "
-                   << index->PhysicalSize()/(1024*1024) << " M"
+                   << index->PhysicalSize() << " bytes"
                    << " from file " << to_remove.file_id_;
 
-        //current disable this line to avoid memory
-        //index->Cache();
+        if(options_.insert_cache_immediately_) {
+            index->Cache();
+        }
 
     } catch (std::exception& ex) {
         std::string msg = "Build index encounter exception" + std::string(ex.what());
@@ -541,10 +564,9 @@ void DBImpl::BackgroundBuildIndex() {
     meta_ptr_->FilesToIndex(to_index_files);
     Status status;
     for (auto& file : to_index_files) {
-        /* ENGINE_LOG_DEBUG << "Buiding index for " << file.location; */
         status = BuildIndex(file);
         if (!status.ok()) {
-            bg_error_ = status;
+            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
             return;
         }
 
@@ -552,7 +574,6 @@ void DBImpl::BackgroundBuildIndex() {
             break;
         }
     }
-    /* ENGINE_LOG_DEBUG << "All Buiding index Done"; */
 }
 
 Status DBImpl::DropAll() {
