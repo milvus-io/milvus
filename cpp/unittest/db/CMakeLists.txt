@@ -47,6 +47,10 @@ set(db_libs
 
 if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     set(db_libs ${db_libs} ${MKL_LIBS} ${MKL_LIBS})
+else()
+    set(db_libs ${db_libs}
+            lapack
+            openblas)
 endif()
 
 target_link_libraries(db_test ${db_libs} ${unittest_libs})
