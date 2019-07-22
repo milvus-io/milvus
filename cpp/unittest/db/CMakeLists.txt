@@ -39,7 +39,6 @@ set(db_test_src
 cuda_add_executable(db_test ${db_test_src})
 
 set(db_libs
-        libgpufaiss.a
         faiss
         cudart
         cublas
@@ -50,7 +49,7 @@ set(db_libs
         mysqlpp
         )
 
-if(${BUILD_FAISS_WITH_MKL} STREQUAL "true")
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     set(db_libs ${db_libs} ${MKL_LIBS} ${MKL_LIBS})
 endif()
 
