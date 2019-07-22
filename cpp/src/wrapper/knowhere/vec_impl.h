@@ -57,7 +57,7 @@ class BFIndex : public VecIndexImpl {
  public:
     explicit BFIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : VecIndexImpl(std::move(index),
                                                                                           IndexType::FAISS_IDMAP) {};
-    server::KnowhereError Build(const int64_t &d);
+    server::KnowhereError Build(const Config& cfg);
     float *GetRawVectors();
     server::KnowhereError BuildAll(const long &nb,
                                    const float *xb,
