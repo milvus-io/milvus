@@ -136,13 +136,9 @@ ClientProxy::InsertVector(const std::string &table_name,
 //
 //        ::milvus::grpc::VectorIds vector_ids;
 //
-//        std::cout << "*****************************************************\n";
-//        auto start = std::chrono::high_resolution_clock::now();
 //        //Single thread
 //        client_ptr->InsertVector(vector_ids, insert_infos);
 //        auto finish = std::chrono::high_resolution_clock::now();
-//        std::cout << "InsertVector cost: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
-//        std::cout << "*****************************************************\n";
 //
 //        for (size_t i = 0; i < vector_ids.vector_id_array_size(); i++) {
 //            id_array.push_back(vector_ids.vector_id_array(i));

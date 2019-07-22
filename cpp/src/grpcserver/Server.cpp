@@ -4,7 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include "Server.h"
-#include "ServerConfig.h"
+//#include "ServerConfig.h"
 #include "MilvusServer.h"
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
