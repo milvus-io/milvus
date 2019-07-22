@@ -162,17 +162,17 @@ ServerError CreateTableTask::OnExecute() {
     try {
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(schema_.table_name);
+        res = ValidationUtil::ValidateTableName(schema_.table_name);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + schema_.table_name);
         }
 
-        res = ValidateTableDimension(schema_.dimension);
+        res = ValidationUtil::ValidateTableDimension(schema_.dimension);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table dimension: " + std::to_string(schema_.dimension));
         }
 
-        res = ValidateTableIndexType(schema_.index_type);
+        res = ValidationUtil::ValidateTableIndexType(schema_.index_type);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid index type: " + std::to_string(schema_.index_type));
         }
@@ -217,7 +217,7 @@ ServerError DescribeTableTask::OnExecute() {
     try {
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -260,7 +260,7 @@ ServerError BuildIndexTask::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -303,7 +303,7 @@ ServerError HasTableTask::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -339,7 +339,7 @@ ServerError DeleteTableTask::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -420,7 +420,7 @@ ServerError AddVectorTask::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -508,7 +508,7 @@ ServerError SearchVectorTaskBase::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -720,7 +720,7 @@ ServerError GetTableRowCountTask::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
