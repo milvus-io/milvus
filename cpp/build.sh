@@ -8,7 +8,7 @@ MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
 DB_PATH="/opt/milvus"
 PROFILING="OFF"
-BUILD_FAISS_WITH_MKL="ON"
+BUILD_FAISS_WITH_MKL="OFF"
 
 while getopts "p:d:t:uhlrcgm" arg
 do
