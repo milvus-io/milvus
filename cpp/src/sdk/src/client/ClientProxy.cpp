@@ -86,6 +86,7 @@ ClientProxy::CreateTable(const TableSchema &param) {
     }
 
     try {
+
         thrift::TableSchema schema;
         schema.__set_table_name(param.table_name);
         schema.__set_index_type((int)param.index_type);

@@ -1,13 +1,14 @@
 /*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+* Unauthorized copying of this file, via any medium is strictly prohibited.
+* Proprietary and confidential.
+******************************************************************************/
 #pragma once
 
-#include "MilvusApi.h"
+//#include "MilvusApi.h"
 #include "client/ClientProxy.h"
 
+namespace zilliz {
 namespace milvus {
 
 class ConnectionImpl : public Connection {
@@ -27,11 +28,11 @@ public:
 
     virtual bool HasTable(const std::string &table_name) override;
 
-    virtual Status DeleteTable(const std::string &table_name) override;
+    virtual Status DropTable(const std::string &table_name) override;
 
     virtual Status BuildIndex(const std::string &table_name) override;
 
-    virtual Status AddVector(const std::string &table_name,
+    virtual Status InsertVector(const std::string &table_name,
                              const std::vector<RowRecord> &record_array,
                              std::vector<int64_t> &id_array) override;
 
@@ -57,4 +58,5 @@ private:
     std::shared_ptr<ClientProxy> client_proxy_;
 };
 
+}
 }

@@ -1,19 +1,18 @@
 /*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+* Unauthorized copying of this file, via any medium is strictly prohibited.
+* Proprietary and confidential.
+******************************************************************************/
 #pragma once
 
 #include "MilvusApi.h"
-#include "client/ClientProxy.h"
+#include "grpcClient.h"
 
+namespace zilliz {
 namespace milvus {
 
-class ConnectionImpl : public Connection {
+class ClientProxy : public Connection {
 public:
-    ConnectionImpl();
-
     // Implementations of the Connection interface
     virtual Status Connect(const ConnectParam &param) override;
 
@@ -27,13 +26,13 @@ public:
 
     virtual bool HasTable(const std::string &table_name) override;
 
-    virtual Status DeleteTable(const std::string &table_name) override;
+    virtual Status DropTable(const std::string &table_name) override;
 
     virtual Status BuildIndex(const std::string &table_name) override;
 
-    virtual Status AddVector(const std::string &table_name,
-                             const std::vector<RowRecord> &record_array,
-                             std::vector<int64_t> &id_array) override;
+    virtual Status InsertVector(const std::string &table_name,
+                                const std::vector<RowRecord> &record_array,
+                                std::vector<int64_t> &id_array) override;
 
     virtual Status SearchVector(const std::string &table_name,
                                 const std::vector<RowRecord> &query_record_array,
@@ -54,7 +53,14 @@ public:
     virtual std::string ServerStatus() const override;
 
 private:
-    std::shared_ptr<ClientProxy> client_proxy_;
+
+    std::shared_ptr<::grpc::Channel> channel_;
+
+private:
+    grpcClient *client_ptr;
+//    std::shared_ptr<grpcClient> client_ptr;
+    bool connected_ = false;
 };
 
+}
 }
