@@ -102,6 +102,7 @@ Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
 
 Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& dates) {
     //dates partly delete files of the table but currently we don't support
+    ENGINE_LOG_DEBUG << "Prepare to delete table " << table_id;
 
     mem_mgr_->EraseMemVector(table_id); //not allow insert
     meta_ptr_->DeleteTable(table_id); //soft delete table
@@ -132,6 +133,7 @@ Status DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count
 
 Status DBImpl::InsertVectors(const std::string& table_id_,
         uint64_t n, const float* vectors, IDNumbers& vector_ids_) {
+    ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
 
     auto start_time = METRICS_NOW_TIME;
     Status status = mem_mgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
@@ -139,6 +141,8 @@ Status DBImpl::InsertVectors(const std::string& table_id_,
     double total_time = METRICS_MICROSECONDS(start_time,end_time);
 //    std::chrono::microseconds time_span = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
 //    double average_time = double(time_span.count()) / n;
+
+    ENGINE_LOG_DEBUG << "Insert vectors to cache finished";
 
     CollectInsertMetrics(total_time, n, status.ok());
     return status;
@@ -160,6 +164,8 @@ Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq,
 
 Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
+    ENGINE_LOG_DEBUG << "Query by vectors";
+
     //get all table files from table
     meta::DatePartionedTableFilesSchema files;
     auto status = meta_ptr_->FilesToSearch(table_id, dates, files);
@@ -181,6 +187,8 @@ Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq,
 Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>& file_ids,
         uint64_t k, uint64_t nq, const float* vectors,
         const meta::DatesT& dates, QueryResults& results) {
+    ENGINE_LOG_DEBUG << "Query by file ids";
+
     //get specified files
     std::vector<size_t> ids;
     for (auto &id : file_ids) {
@@ -269,6 +277,8 @@ void DBImpl::BackgroundTimerTask() {
             for(auto& iter : index_thread_results_) {
                 iter.wait();
             }
+
+            ENGINE_LOG_DEBUG << "DB background thread exit";
             break;
         }
 
@@ -287,6 +297,8 @@ void DBImpl::StartMetricTask() {
         return;
     }
 
+    ENGINE_LOG_DEBUG << "Start metric task";
+
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
@@ -299,19 +311,18 @@ void DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().GPUPercentGaugeSet();
     server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
     server::Metrics::GetInstance().OctetsSet();
+
+    ENGINE_LOG_DEBUG << "Metric task finished";
 }
 
 void DBImpl::StartCompactionTask() {
-//    static int count = 0;
-//    count++;
-//    std::cout << "StartCompactionTask: " << count << std::endl;
-//    std::cout <<  "c: " << count++ << std::endl;
     static uint64_t compact_clock_tick = 0;
     compact_clock_tick++;
     if(compact_clock_tick%COMPACT_ACTION_INTERVAL != 0) {
-//        std::cout <<  "c r: " << count++ << std::endl;
         return;
     }
+
+    ENGINE_LOG_DEBUG << "Serialize insert cache";
 
     //serialize memory data
     std::set<std::string> temp_table_ids;
@@ -319,6 +330,8 @@ void DBImpl::StartCompactionTask() {
     for(auto& id : temp_table_ids) {
         compact_table_ids_.insert(id);
     }
+
+    ENGINE_LOG_DEBUG << "Insert cache serialized";
 
     //compactiong has been finished?
     if(!compact_thread_results_.empty()) {
@@ -338,13 +351,15 @@ void DBImpl::StartCompactionTask() {
 
 Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         const meta::TableFilesSchema& files) {
+    ENGINE_LOG_DEBUG << "Merge files for table" << table_id;
+
     meta::TableFileSchema table_file;
     table_file.table_id_ = table_id;
     table_file.date_ = date;
     Status status = meta_ptr_->CreateTableFile(table_file);
 
     if (!status.ok()) {
-        ENGINE_LOG_INFO << status.ToString() << std::endl;
+        ENGINE_LOG_ERROR << "Failed to create table: " << status.ToString();
         return status;
     }
 
@@ -396,6 +411,7 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
     meta::DatePartionedTableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(table_id, raw_files);
     if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Failed to get merge files for table: " << table_id;
         return status;
     }
 
@@ -417,12 +433,14 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
+    ENGINE_LOG_DEBUG << " Background compaction thread start";
+
     Status status;
     for (auto& table_id : table_ids) {
         status = BackgroundMergeFiles(table_id);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Merge files for table " << table_id << " failed: " << status.ToString();
-            return;
+            continue;//let other table get chance to merge
         }
     }
 
@@ -433,6 +451,8 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
         ttl = meta::D_SEC;
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
+
+    ENGINE_LOG_DEBUG << " Background compaction thread exit";
 }
 
 void DBImpl::StartBuildIndexTask(bool force) {
@@ -477,6 +497,7 @@ Status DBImpl::BuildIndex(const std::string& table_id) {
 Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
     ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
     if(to_index == nullptr) {
+        ENGINE_LOG_ERROR << "Invalid engine type";
         return Status::Error("Invalid engine type");
     }
 
@@ -491,6 +512,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         table_file.file_type_ = meta::TableFileSchema::INDEX; //for multi-db-path, distribute index file averagely to each path
         Status status = meta_ptr_->CreateTableFile(table_file);
         if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Failed to create table: " << status.ToString();
             return status;
         }
 
@@ -559,6 +581,8 @@ Status DBImpl::BuildIndexByTable(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundBuildIndex() {
+    ENGINE_LOG_DEBUG << " Background build index thread start";
+
     std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
     meta_ptr_->FilesToIndex(to_index_files);
@@ -574,6 +598,8 @@ void DBImpl::BackgroundBuildIndex() {
             break;
         }
     }
+
+    ENGINE_LOG_DEBUG << " Background build index thread exit";
 }
 
 Status DBImpl::DropAll() {
