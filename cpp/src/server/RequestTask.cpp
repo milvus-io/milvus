@@ -162,17 +162,17 @@ ServerError CreateTableTask::OnExecute() {
     try {
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(schema_.table_name);
+        res = ValidationUtil::ValidateTableName(schema_.table_name);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + schema_.table_name);
         }
 
-        res = ValidateTableDimension(schema_.dimension);
+        res = ValidationUtil::ValidateTableDimension(schema_.dimension);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table dimension: " + std::to_string(schema_.dimension));
         }
 
-        res = ValidateTableIndexType(schema_.index_type);
+        res = ValidationUtil::ValidateTableIndexType(schema_.index_type);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid index type: " + std::to_string(schema_.index_type));
         }
@@ -217,7 +217,7 @@ ServerError DescribeTableTask::OnExecute() {
     try {
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -260,7 +260,7 @@ ServerError BuildIndexTask::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -303,7 +303,7 @@ ServerError HasTableTask::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -339,7 +339,7 @@ ServerError DeleteTableTask::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -420,7 +420,7 @@ ServerError AddVectorTask::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -504,11 +504,13 @@ SearchVectorTaskBase::SearchVectorTaskBase(const std::string &table_name,
 
 ServerError SearchVectorTaskBase::OnExecute() {
     try {
-        TimeRecorder rc("SearchVectorTask");
+        std::string title = "SearchVectorTask(n=" + std::to_string(record_array_.size())
+                + " k=" + std::to_string(top_k_) + ")";
+        TimeRecorder rc(title);
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -596,7 +598,7 @@ ServerError SearchVectorTaskBase::OnExecute() {
 
         //step 6: print time cost percent
         double total_cost = span_check + span_prepare + span_search + span_result;
-        SERVER_LOG_DEBUG << "SearchVectorTask: " << "check validation(" << (span_check/total_cost)*100.0 << "%)"
+        SERVER_LOG_DEBUG << title << ": check validation(" << (span_check/total_cost)*100.0 << "%)"
             << " prepare data(" << (span_prepare/total_cost)*100.0 << "%)"
             << " search(" << (span_search/total_cost)*100.0 << "%)"
             << " construct result(" << (span_result/total_cost)*100.0 << "%)";
@@ -720,7 +722,7 @@ ServerError GetTableRowCountTask::OnExecute() {
 
         //step 1: check arguments
         ServerError res = SERVER_SUCCESS;
-        res = ValidateTableName(table_name_);
+        res = ValidationUtil::ValidateTableName(table_name_);
         if(res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }

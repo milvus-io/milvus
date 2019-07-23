@@ -19,6 +19,7 @@ set(utils_srcs
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
         ${MILVUS_ENGINE_SRC}/utils/LogUtil.cpp
+        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp
         )
 
 cuda_add_executable(server_test

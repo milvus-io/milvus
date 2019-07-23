@@ -700,7 +700,7 @@ endmacro()
 # FAISS
 
 if(NOT DEFINED BUILD_FAISS_WITH_MKL)
-    set(BUILD_FAISS_WITH_MKL OFF)
+    set(BUILD_FAISS_WITH_MKL ON)
 endif()
 
 if(EXISTS "/proc/cpuinfo")
