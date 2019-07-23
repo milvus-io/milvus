@@ -154,6 +154,7 @@ endif ()
 
 set(metrics_lib
         easyloggingpp
+        yaml-cpp
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
