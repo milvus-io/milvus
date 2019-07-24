@@ -41,7 +41,7 @@ class KnowhereWrapperTest
 
         for (auto i = 0; i < nq; i++) {
             EXPECT_EQ(ids[i * k], gt_ids[i * k]);
-            EXPECT_EQ(dis[i * k], gt_dis[i * k]);
+            //EXPECT_EQ(dis[i * k], gt_dis[i * k]);
         }
 
         int match = 0;
@@ -84,11 +84,11 @@ class KnowhereWrapperTest
 INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
                         Values(
                             //["Index type", "Generator type", "dim", "nb", "nq", "k", "build config", "search config"]
-                            std::make_tuple(IndexType::FAISS_IVFFLAT_CPU, "Default",
-                                            64, 100000, 10, 10,
-                                            Config::object{{"nlist", 100}, {"dim", 64}},
-                                            Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 10}}
-                            ),
+                            //std::make_tuple(IndexType::FAISS_IVFFLAT_CPU, "Default",
+                            //                64, 100000, 10, 10,
+                            //                Config::object{{"nlist", 100}, {"dim", 64}},
+                            //                Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 10}}
+                            //),
                             //std::make_tuple(IndexType::FAISS_IVFFLAT_GPU, "Default",
                             //                64, 10000, 10, 10,
                             //                Config::object{{"nlist", 100}, {"dim", 64}},
@@ -96,13 +96,18 @@ INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
                             //),
                             std::make_tuple(IndexType::FAISS_IVFFLAT_MIX, "Default",
                                             64, 100000, 10, 10,
-                                            Config::object{{"nlist", 100}, {"dim", 64}},
-                                            Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 10}}
+                                            Config::object{{"nlist", 1000}, {"dim", 64}, {"metric_type", "L2"}},
+                                            Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 5}}
                             ),
                             std::make_tuple(IndexType::FAISS_IDMAP, "Default",
                                             64, 100000, 10, 10,
-                                            Config::object{{"dim", 64}},
+                                            Config::object{{"dim", 64}, {"metric_type", "L2"}},
                                             Config::object{{"dim", 64}, {"k", 10}}
+                            ),
+                            std::make_tuple(IndexType::FAISS_IVFSQ8_MIX, "Default",
+                                            64, 100000, 10, 10,
+                                            Config::object{{"dim", 64}, {"nlist", 1000}, {"nbits", 8}, {"metric_type", "L2"}},
+                                            Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 5}}
                             )
                             //std::make_tuple(IndexType::SPTAG_KDT_RNT_CPU, "Default",
                             //                64, 10000, 10, 10,
