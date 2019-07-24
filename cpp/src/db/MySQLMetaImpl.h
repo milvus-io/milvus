@@ -12,79 +12,80 @@
 #include "mysql++/mysql++.h"
 #include <mutex>
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
 
 //    auto StoragePrototype(const std::string& path);
-    using namespace mysqlpp;
+using namespace mysqlpp;
 
-    class MySQLMetaImpl : public Meta {
-    public:
-        MySQLMetaImpl(const DBMetaOptions& options_, const int& mode);
+class MySQLMetaImpl : public Meta {
+ public:
+    MySQLMetaImpl(const DBMetaOptions &options_, const int &mode);
 
-        virtual Status CreateTable(TableSchema& table_schema) override;
-        virtual Status DescribeTable(TableSchema& group_info_) override;
-        virtual Status HasTable(const std::string& table_id, bool& has_or_not) override;
-        virtual Status AllTables(std::vector<TableSchema>& table_schema_array) override;
+    Status CreateTable(TableSchema &table_schema) override;
+    Status DescribeTable(TableSchema &group_info_) override;
+    Status HasTable(const std::string &table_id, bool &has_or_not) override;
+    Status AllTables(std::vector<TableSchema> &table_schema_array) override;
 
-        virtual Status DeleteTable(const std::string& table_id) override;
-        virtual Status DeleteTableFiles(const std::string& table_id) override;
+    Status DeleteTable(const std::string &table_id) override;
+    Status DeleteTableFiles(const std::string &table_id) override;
 
-        virtual Status CreateTableFile(TableFileSchema& file_schema) override;
-        virtual Status DropPartitionsByDates(const std::string& table_id,
-                                             const DatesT& dates) override;
+    Status CreateTableFile(TableFileSchema &file_schema) override;
+    Status DropPartitionsByDates(const std::string &table_id,
+                                 const DatesT &dates) override;
 
-        virtual Status GetTableFiles(const std::string& table_id,
-                                     const std::vector<size_t>& ids,
-                                     TableFilesSchema& table_files) override;
+    Status GetTableFiles(const std::string &table_id,
+                         const std::vector<size_t> &ids,
+                         TableFilesSchema &table_files) override;
 
-        virtual Status HasNonIndexFiles(const std::string& table_id, bool& has) override;
+    Status HasNonIndexFiles(const std::string &table_id, bool &has) override;
 
-        virtual Status UpdateTableFile(TableFileSchema& file_schema) override;
+    Status UpdateTableFile(TableFileSchema &file_schema) override;
 
-        virtual Status UpdateTableFilesToIndex(const std::string& table_id) override;
+    Status UpdateTableFilesToIndex(const std::string &table_id) override;
 
-        virtual Status UpdateTableFiles(TableFilesSchema& files) override;
+    Status UpdateTableFiles(TableFilesSchema &files) override;
 
-        virtual Status FilesToSearch(const std::string& table_id,
-                                     const DatesT& partition,
-                                     DatePartionedTableFilesSchema& files) override;
+    Status FilesToSearch(const std::string &table_id,
+                         const DatesT &partition,
+                         DatePartionedTableFilesSchema &files) override;
 
-        virtual Status FilesToMerge(const std::string& table_id,
-                                    DatePartionedTableFilesSchema& files) override;
+    Status FilesToMerge(const std::string &table_id,
+                        DatePartionedTableFilesSchema &files) override;
 
-        virtual Status FilesToIndex(TableFilesSchema&) override;
+    Status FilesToIndex(TableFilesSchema &) override;
 
-        virtual Status Archive() override;
+    Status Archive() override;
 
-        virtual Status Size(uint64_t& result) override;
+    Status Size(uint64_t &result) override;
 
-        virtual Status CleanUp() override;
+    Status CleanUp() override;
 
-        virtual Status CleanUpFilesWithTTL(uint16_t seconds) override;
+    Status CleanUpFilesWithTTL(uint16_t seconds) override;
 
-        virtual Status DropAll() override;
+    Status DropAll() override;
 
-        virtual Status Count(const std::string& table_id, uint64_t& result) override;
+    Status Count(const std::string &table_id, uint64_t &result) override;
 
-        virtual ~MySQLMetaImpl();
+    virtual ~MySQLMetaImpl();
 
-    private:
-        Status NextFileId(std::string& file_id);
-        Status NextTableId(std::string& table_id);
-        Status DiscardFiles(long long to_discard_size);
-        Status Initialize();
+ private:
+    Status NextFileId(std::string &file_id);
+    Status NextTableId(std::string &table_id);
+    Status DiscardFiles(long long to_discard_size);
+    Status Initialize();
 
-        const DBMetaOptions options_;
-        const int mode_;
+    const DBMetaOptions options_;
+    const int mode_;
 
-        std::shared_ptr<MySQLConnectionPool> mysql_connection_pool_;
-        bool safe_grab = false;
+    std::shared_ptr<MySQLConnectionPool> mysql_connection_pool_;
+    bool safe_grab = false;
 
 //        std::mutex connectionMutex_;
-    }; // DBMetaImpl
+}; // DBMetaImpl
 
 } // namespace meta
 } // namespace engine

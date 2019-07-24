@@ -23,6 +23,7 @@ class Meta {
 public:
     using Ptr = std::shared_ptr<Meta>;
 
+    virtual ~Meta() = 0;
     virtual Status CreateTable(TableSchema& table_schema) = 0;
     virtual Status DescribeTable(TableSchema& table_schema) = 0;
     virtual Status HasTable(const std::string& table_id, bool& has_or_not) = 0;

@@ -20,6 +20,7 @@ class ReuseCacheIndexStrategy {
 public:
     bool Schedule(const SearchContextPtr &context, std::list<ScheduleTaskPtr>& task_list) {
         if(context == nullptr) {
+            ENGINE_LOG_ERROR << "Task Dispatch context doesn't exist";
             return false;
         }
 
@@ -64,6 +65,7 @@ class DeleteTableStrategy {
 public:
     bool Schedule(const DeleteContextPtr &context, std::list<ScheduleTaskPtr> &task_list) {
         if (context == nullptr) {
+            ENGINE_LOG_ERROR << "Task Dispatch context doesn't exist";
             return false;
         }
 
@@ -103,6 +105,7 @@ public:
 bool TaskDispatchStrategy::Schedule(const ScheduleContextPtr &context_ptr,
                                     std::list<zilliz::milvus::engine::ScheduleTaskPtr> &task_list) {
     if(context_ptr == nullptr) {
+        ENGINE_LOG_ERROR << "Task Dispatch context doesn't exist";
         return false;
     }
 
