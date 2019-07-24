@@ -32,9 +32,7 @@ server::KnowhereError VecIndexImpl::BuildAll(const long &nb,
 
         auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
         index_->set_preprocessor(preprocessor);
-        auto nlist = int(nb / 1000000.0 * 16384);
-        auto cfg_t = Config::object{{"nlist", nlist}, {"dim", dim}};
-        auto model = index_->Train(dataset, cfg_t);
+        auto model = index_->Train(dataset, cfg);
         index_->set_index_model(model);
         index_->Add(dataset, cfg);
     } catch (KnowhereException &e) {
@@ -52,8 +50,7 @@ server::KnowhereError VecIndexImpl::BuildAll(const long &nb,
 
 server::KnowhereError VecIndexImpl::Add(const long &nb, const float *xb, const long *ids, const Config &cfg) {
     try {
-        auto d = cfg.get_with_default("dim", dim);
-        auto dataset = GenDatasetWithIds(nb, d, xb, ids);
+        auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         index_->Add(dataset, cfg);
     } catch (KnowhereException &e) {
@@ -72,8 +69,7 @@ server::KnowhereError VecIndexImpl::Add(const long &nb, const float *xb, const l
 server::KnowhereError VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) {
     try {
         auto k = cfg["k"].as<int>();
-        auto d = cfg.get_with_default("dim", dim);
-        auto dataset = GenDataset(nq, d, xq);
+        auto dataset = GenDataset(nq, dim, xq);
 
         Config search_cfg;
         auto res = index_->Search(dataset, cfg);
@@ -148,10 +144,10 @@ int64_t *BFIndex::GetRawIds() {
     return std::static_pointer_cast<IDMAP>(index_)->GetRawIds();
 }
 
-server::KnowhereError BFIndex::Build(const int64_t &d) {
+server::KnowhereError BFIndex::Build(const Config &cfg) {
     try {
-        dim = d;
-        std::static_pointer_cast<IDMAP>(index_)->Train(dim);
+        dim = cfg["dim"].as<int>();
+        std::static_pointer_cast<IDMAP>(index_)->Train(cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return server::KNOWHERE_UNEXPECTED_ERROR;
@@ -175,7 +171,7 @@ server::KnowhereError BFIndex::BuildAll(const long &nb,
         dim = cfg["dim"].as<int>();
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
-        std::static_pointer_cast<IDMAP>(index_)->Train(dim);
+        std::static_pointer_cast<IDMAP>(index_)->Train(cfg);
         index_->Add(dataset, cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
@@ -203,9 +199,7 @@ server::KnowhereError IVFMixIndex::BuildAll(const long &nb,
 
         auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
         index_->set_preprocessor(preprocessor);
-        auto nlist = int(nb / 1000000.0 * 16384);
-        auto cfg_t = Config::object{{"nlist", nlist}, {"dim", dim}};
-        auto model = index_->Train(dataset, cfg_t);
+        auto model = index_->Train(dataset, cfg);
         index_->set_index_model(model);
         index_->Add(dataset, cfg);
 

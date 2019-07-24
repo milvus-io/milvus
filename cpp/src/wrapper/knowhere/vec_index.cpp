@@ -85,7 +85,7 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type) {
         }
         case IndexType::FAISS_IVFFLAT_MIX: {
             index = std::make_shared<zilliz::knowhere::GPUIVF>(0);
-            return std::make_shared<IVFMixIndex>(index);
+            return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFFLAT_MIX);
         }
         case IndexType::FAISS_IVFPQ_CPU: {
             index = std::make_shared<zilliz::knowhere::IVFPQ>();
@@ -98,6 +98,10 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type) {
         case IndexType::SPTAG_KDT_RNT_CPU: {
             index = std::make_shared<zilliz::knowhere::CPUKDTRNG>();
             break;
+        }
+        case IndexType::FAISS_IVFSQ8_MIX: {
+            index = std::make_shared<zilliz::knowhere::GPUIVFSQ>(0);
+            return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFSQ8_MIX);
         }
             //case IndexType::NSG: { // TODO(linxj): bug.
             //    index = std::make_shared<zilliz::knowhere::NSG>();
@@ -176,11 +180,26 @@ server::KnowhereError write_index(VecIndexPtr index, const std::string &location
     } catch (knowhere::KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return server::KNOWHERE_UNEXPECTED_ERROR;
-    } catch (std::exception& e) {
+    } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
         return server::KNOWHERE_ERROR;
     }
     return server::KNOWHERE_SUCCESS;
+}
+
+
+// TODO(linxj): redo here.
+void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Config &cfg) {
+    if (!cfg.contains("nlist")) { cfg["nlist"] = int(size / 1000000.0 * 16384); }
+    if (!cfg.contains("gpu_id")) { cfg["gpu_id"] = int(0); }
+    if (!cfg.contains("metric_type")) { cfg["metric_type"] = "IP"; } // TODO: remove
+
+    switch (type) {
+        case IndexType::FAISS_IVFSQ8_MIX: {
+            if (!cfg.contains("nbits")) { cfg["nbits"] = int(8); }
+            break;
+        }
+    }
 }
 
 }
