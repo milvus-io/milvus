@@ -8,7 +8,7 @@ package milvus.grpc;
  * @brief Table Name
  */
 message TableName {
-    milvus.Status status = 1;
+    Status status = 1;
     string table_name = 2;
 }
 
@@ -49,7 +49,7 @@ message InsertInfos {
  * @brief Vector ids
  */
 message VectorIds {
-    milvus.Status status = 1;
+    Status status = 1;
     repeated int64 vector_id_array = 2;
 }
 
@@ -83,7 +83,7 @@ message QueryResult {
  * @brief TopK query result
  */
 message TopKQueryResult {
-    milvus.Status status = 1;
+    Status status = 1;
     repeated QueryResult query_result_arrays = 2;
 }
 
@@ -91,7 +91,7 @@ message TopKQueryResult {
  * @brief Server String Reply
  */
 message StringReply {
-    milvus.Status status = 1;
+    Status status = 1;
     string string_reply = 2;
 }
 
@@ -99,7 +99,7 @@ message StringReply {
  * @brief Server bool Reply
  */
 message BoolReply {
-    milvus.Status status = 1;
+    Status status = 1;
     bool bool_reply = 2;
 }
 
@@ -107,7 +107,7 @@ message BoolReply {
  * @brief Return table row count
  */
 message TableRowCount {
-    milvus.Status status = 1;
+    Status status = 1;
     int64 table_row_count = 2;
 }
 
@@ -122,7 +122,7 @@ message Command {
  * @brief Give Server Command
  */
 message ServerStatus{
-    milvus.Status status = 1;
+    Status status = 1;
     string info = 2;
 }
 
@@ -135,7 +135,7 @@ service MilvusService {
      * @param param, use to provide table information to be created.
      *
      */
-    rpc CreateTable(TableSchema) returns (milvus.Status){}
+    rpc CreateTable(TableSchema) returns (Status){}
 
     /**
      * @brief Test table existence method
@@ -155,7 +155,7 @@ service MilvusService {
      * @param table_name, table name is going to be deleted.
      *
      */
-    rpc DropTable(TableName) returns (milvus.Status) {}
+    rpc DropTable(TableName) returns (Status) {}
 
     /**
      * @brief Build index by table method
@@ -165,7 +165,7 @@ service MilvusService {
      * @param table_name, table is going to be built index.
      *
      */
-    rpc BuildIndex(TableName) returns (milvus.Status) {}
+    rpc BuildIndex(TableName) returns (Status) {}
 
     /**
      * @brief Add vector array to table

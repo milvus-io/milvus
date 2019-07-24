@@ -8,7 +8,8 @@
 aux_source_directory(cache cache_files)
 aux_source_directory(config config_files)
 aux_source_directory(server server_files)
-aux_source_directory(grpcserver grpcserver_files)
+aux_source_directory(server/grpc_impl grpcserver_files)
+aux_source_directory(server/thrift_impl thriftserver_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
 aux_source_directory(wrapper wrapper_files)
@@ -39,8 +40,8 @@ set(service_files
         thrift/gen-cpp/milvus_types.cpp
         metrics/SystemInfo.cpp
         metrics/SystemInfo.h
-        server/ThreadPoolServer.cpp
-        server/ThreadPoolServer.h
+        server/thrift_impl/ThreadPoolServer.cpp
+        server/thrift_impl/ThreadPoolServer.h
         grpc/gen-milvus/milvus.grpc.pb.cc
         grpc/gen-milvus/milvus.pb.cc
         grpc/gen-status/status.grpc.pb.cc
@@ -177,19 +178,39 @@ set(server_libs
         metrics
         )
 
-add_executable(milvus_server
-        ${config_files}
-#        ${server_files}
-        ${grpcserver_files}
-        ${utils_files}
-        ${service_files}
-        ${metrics_files}
-        )
+if (MILVUS_ENABLE_THRIFT STREQUAL "ON")
+    add_executable(milvus_thrift_server
+            ${config_files}
+            ${server_files}
+            ${thriftserver_files}
+            ${utils_files}
+            ${service_files}
+            ${metrics_files}
+            )
+else()
+    add_executable(milvus_grpc_server
+            ${config_files}
+            ${server_files}
+            ${grpcserver_files}
+            ${utils_files}
+            ${service_files}
+            ${metrics_files}
+            )
+endif()
+
 
 if (ENABLE_LICENSE STREQUAL "ON")
-        target_link_libraries(milvus_server ${server_libs} license_check ${third_party_libs})
+    if(MILVUS_ENABLE_THRIFT STREQUAL "ON")
+        target_link_libraries(milvus_thrift_server ${server_libs} license_check ${third_party_libs})
+    else()
+        target_link_libraries(milvus_grpc_server ${server_libs} license_check ${third_party_libs})
+    endif()
 else ()
-        target_link_libraries(milvus_server ${server_libs} ${third_party_libs})
+    if(MILVUS_ENABLE_THRIFT STREQUAL "ON")
+        target_link_libraries(milvus_thrift_server ${server_libs} ${third_party_libs})
+    else()
+        target_link_libraries(milvus_grpc_server ${server_libs} ${third_party_libs})
+    endif()
 endif()
 
 if (ENABLE_LICENSE STREQUAL "ON")
@@ -203,7 +224,11 @@ if (ENABLE_LICENSE STREQUAL "ON")
         install(TARGETS license_generator DESTINATION bin)
 endif ()
 
-install(TARGETS milvus_server DESTINATION bin)
+if (MILVUS_ENABLE_THRIFT STREQUAL "ON")
+    install(TARGETS milvus_thrift_server DESTINATION bin)
+else()
+    install(TARGETS milvus_grpc_server DESTINATION bin)
+endif()
 
 install(FILES
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}
@@ -211,5 +236,4 @@ install(FILES
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4
         DESTINATION lib)
 
-#add_subdirectory(sdk)
-add_subdirectory(grpcsdk)
+add_subdirectory(sdk)

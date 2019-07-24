@@ -50,16 +50,19 @@ struct TableStruct_status_2eproto {
 };
 void AddDescriptors_status_2eproto();
 namespace milvus {
+namespace grpc {
 class Status;
 class StatusDefaultTypeInternal;
 extern StatusDefaultTypeInternal _Status_default_instance_;
+}  // namespace grpc
 }  // namespace milvus
 namespace google {
 namespace protobuf {
-template<> ::milvus::Status* Arena::CreateMaybeMessage<::milvus::Status>(Arena*);
+template<> ::milvus::grpc::Status* Arena::CreateMaybeMessage<::milvus::grpc::Status>(Arena*);
 }  // namespace protobuf
 }  // namespace google
 namespace milvus {
+namespace grpc {
 
 enum ErrorCode {
   SUCCESS = 0,
@@ -105,7 +108,7 @@ inline bool ErrorCode_Parse(
 // ===================================================================
 
 class Status final :
-    public ::google::protobuf::Message /* @@protoc_insertion_point(class_definition:milvus.Status) */ {
+    public ::google::protobuf::Message /* @@protoc_insertion_point(class_definition:milvus.grpc.Status) */ {
  public:
   Status();
   virtual ~Status();
@@ -213,13 +216,13 @@ class Status final :
   ::std::string* release_reason();
   void set_allocated_reason(::std::string* reason);
 
-  // .milvus.ErrorCode error_code = 1;
+  // .milvus.grpc.ErrorCode error_code = 1;
   void clear_error_code();
   static const int kErrorCodeFieldNumber = 1;
-  ::milvus::ErrorCode error_code() const;
-  void set_error_code(::milvus::ErrorCode value);
+  ::milvus::grpc::ErrorCode error_code() const;
+  void set_error_code(::milvus::grpc::ErrorCode value);
 
-  // @@protoc_insertion_point(class_scope:milvus.Status)
+  // @@protoc_insertion_point(class_scope:milvus.grpc.Status)
  private:
   class HasBitSetters;
 
@@ -240,18 +243,18 @@ class Status final :
 #endif  // __GNUC__
 // Status
 
-// .milvus.ErrorCode error_code = 1;
+// .milvus.grpc.ErrorCode error_code = 1;
 inline void Status::clear_error_code() {
   error_code_ = 0;
 }
-inline ::milvus::ErrorCode Status::error_code() const {
-  // @@protoc_insertion_point(field_get:milvus.Status.error_code)
-  return static_cast< ::milvus::ErrorCode >(error_code_);
+inline ::milvus::grpc::ErrorCode Status::error_code() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.Status.error_code)
+  return static_cast< ::milvus::grpc::ErrorCode >(error_code_);
 }
-inline void Status::set_error_code(::milvus::ErrorCode value) {
+inline void Status::set_error_code(::milvus::grpc::ErrorCode value) {
   
   error_code_ = value;
-  // @@protoc_insertion_point(field_set:milvus.Status.error_code)
+  // @@protoc_insertion_point(field_set:milvus.grpc.Status.error_code)
 }
 
 // string reason = 2;
@@ -259,41 +262,41 @@ inline void Status::clear_reason() {
   reason_.ClearToEmptyNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
 }
 inline const ::std::string& Status::reason() const {
-  // @@protoc_insertion_point(field_get:milvus.Status.reason)
+  // @@protoc_insertion_point(field_get:milvus.grpc.Status.reason)
   return reason_.GetNoArena();
 }
 inline void Status::set_reason(const ::std::string& value) {
   
   reason_.SetNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), value);
-  // @@protoc_insertion_point(field_set:milvus.Status.reason)
+  // @@protoc_insertion_point(field_set:milvus.grpc.Status.reason)
 }
 #if LANG_CXX11
 inline void Status::set_reason(::std::string&& value) {
   
   reason_.SetNoArena(
     &::google::protobuf::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
-  // @@protoc_insertion_point(field_set_rvalue:milvus.Status.reason)
+  // @@protoc_insertion_point(field_set_rvalue:milvus.grpc.Status.reason)
 }
 #endif
 inline void Status::set_reason(const char* value) {
   GOOGLE_DCHECK(value != nullptr);
   
   reason_.SetNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
-  // @@protoc_insertion_point(field_set_char:milvus.Status.reason)
+  // @@protoc_insertion_point(field_set_char:milvus.grpc.Status.reason)
 }
 inline void Status::set_reason(const char* value, size_t size) {
   
   reason_.SetNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(),
       ::std::string(reinterpret_cast<const char*>(value), size));
-  // @@protoc_insertion_point(field_set_pointer:milvus.Status.reason)
+  // @@protoc_insertion_point(field_set_pointer:milvus.grpc.Status.reason)
 }
 inline ::std::string* Status::mutable_reason() {
   
-  // @@protoc_insertion_point(field_mutable:milvus.Status.reason)
+  // @@protoc_insertion_point(field_mutable:milvus.grpc.Status.reason)
   return reason_.MutableNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
 }
 inline ::std::string* Status::release_reason() {
-  // @@protoc_insertion_point(field_release:milvus.Status.reason)
+  // @@protoc_insertion_point(field_release:milvus.grpc.Status.reason)
   
   return reason_.ReleaseNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
 }
@@ -304,7 +307,7 @@ inline void Status::set_allocated_reason(::std::string* reason) {
     
   }
   reason_.SetAllocatedNoArena(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), reason);
-  // @@protoc_insertion_point(field_set_allocated:milvus.Status.reason)
+  // @@protoc_insertion_point(field_set_allocated:milvus.grpc.Status.reason)
 }
 
 #ifdef __GNUC__
@@ -313,15 +316,16 @@ inline void Status::set_allocated_reason(::std::string* reason) {
 
 // @@protoc_insertion_point(namespace_scope)
 
+}  // namespace grpc
 }  // namespace milvus
 
 namespace google {
 namespace protobuf {
 
-template <> struct is_proto_enum< ::milvus::ErrorCode> : ::std::true_type {};
+template <> struct is_proto_enum< ::milvus::grpc::ErrorCode> : ::std::true_type {};
 template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::milvus::ErrorCode>() {
-  return ::milvus::ErrorCode_descriptor();
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::grpc::ErrorCode>() {
+  return ::milvus::grpc::ErrorCode_descriptor();
 }
 
 }  // namespace protobuf
