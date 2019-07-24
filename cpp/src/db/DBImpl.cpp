@@ -89,7 +89,7 @@ DBImpl::DBImpl(const Options& options)
     meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
     if (options.mode != Options::MODE::READ_ONLY) {
-        ENGINE_LOG_INFO << "StartTimerTasks";
+        ENGINE_LOG_TRACE << "StartTimerTasks";
         StartTimerTasks();
     }
 
@@ -297,7 +297,7 @@ void DBImpl::StartMetricTask() {
         return;
     }
 
-    ENGINE_LOG_INFO << "Start metric task";
+    ENGINE_LOG_TRACE << "Start metric task";
 
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
@@ -312,7 +312,7 @@ void DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
     server::Metrics::GetInstance().OctetsSet();
 
-    ENGINE_LOG_INFO << "Metric task finished";
+    ENGINE_LOG_TRACE << "Metric task finished";
 }
 
 void DBImpl::StartCompactionTask() {
@@ -433,7 +433,7 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
-    ENGINE_LOG_INFO << " Background compaction thread start";
+    ENGINE_LOG_TRACE << " Background compaction thread start";
 
     Status status;
     for (auto& table_id : table_ids) {
@@ -452,7 +452,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
 
-    ENGINE_LOG_INFO << " Background compaction thread exit";
+    ENGINE_LOG_TRACE << " Background compaction thread exit";
 }
 
 void DBImpl::StartBuildIndexTask(bool force) {
@@ -581,7 +581,7 @@ Status DBImpl::BuildIndexByTable(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundBuildIndex() {
-    ENGINE_LOG_INFO << " Background build index thread start";
+    ENGINE_LOG_TRACE << " Background build index thread start";
 
     std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
@@ -599,7 +599,7 @@ void DBImpl::BackgroundBuildIndex() {
         }
     }
 
-    ENGINE_LOG_INFO << " Background build index thread exit";
+    ENGINE_LOG_TRACE << " Background build index thread exit";
 }
 
 Status DBImpl::DropAll() {
