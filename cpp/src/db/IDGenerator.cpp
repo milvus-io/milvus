@@ -13,6 +13,8 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+IDGenerator::~IDGenerator() = default;
+
 constexpr size_t SimpleIDGenerator::MAX_IDS_PER_MICRO;
 
 IDNumber SimpleIDGenerator::GetNextIDNumber() {

@@ -17,9 +17,14 @@ namespace engine {
 
 class IDGenerator {
  public:
-    virtual IDNumber GetNextIDNumber() = 0;
-    virtual void GetNextIDNumbers(size_t n, IDNumbers &ids) = 0;
-    virtual ~IDGenerator() = 0;
+    virtual
+    IDNumber GetNextIDNumber() = 0;
+
+    virtual void
+    GetNextIDNumbers(size_t n, IDNumbers &ids) = 0;
+
+    virtual
+    ~IDGenerator() = 0;
 }; // IDGenerator
 
 
