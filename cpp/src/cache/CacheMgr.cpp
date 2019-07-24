@@ -49,7 +49,6 @@ DataObjPtr CacheMgr::GetItem(const std::string& key) {
 engine::Index_ptr CacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
     if(obj != nullptr) {
-        SERVER_LOG_ERROR << "Can't get object from key: " << key;
         return obj->data();
     }
 
