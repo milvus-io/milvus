@@ -12,11 +12,8 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-DB::~DB() {}
-
 void DB::Open(const Options& options, DB** dbptr) {
     *dbptr = DBFactory::Build(options);
-    return;
 }
 
 } // namespace engine

@@ -10,28 +10,34 @@
 #include <cstddef>
 #include <vector>
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class IDGenerator {
-public:
+ public:
     virtual IDNumber GetNextIDNumber() = 0;
-    virtual void GetNextIDNumbers(size_t n, IDNumbers& ids) = 0;
-
-    virtual ~IDGenerator();
-
+    virtual void GetNextIDNumbers(size_t n, IDNumbers &ids) = 0;
+    virtual ~IDGenerator() = 0;
 }; // IDGenerator
 
 
 class SimpleIDGenerator : public IDGenerator {
-public:
-    virtual IDNumber GetNextIDNumber() override;
-    virtual void GetNextIDNumbers(size_t n, IDNumbers& ids) override;
+ public:
+    ~SimpleIDGenerator() override = default;
 
-private:
-    void NextIDNumbers(size_t n, IDNumbers& ids);
-    const size_t MAX_IDS_PER_MICRO = 1000;
+    IDNumber
+    GetNextIDNumber() override;
+
+    void
+    GetNextIDNumbers(size_t n, IDNumbers &ids) override;
+
+ private:
+    void
+    NextIDNumbers(size_t n, IDNumbers &ids);
+
+    static constexpr size_t MAX_IDS_PER_MICRO = 1000;
 
 }; // SimpleIDGenerator
 
