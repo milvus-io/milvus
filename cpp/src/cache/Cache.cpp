@@ -89,7 +89,7 @@ void Cache::erase(const std::string& key) {
     const DataObjPtr& data_ptr = obj_ptr->data_;
     usage_ -= data_ptr->size();
 
-    SERVER_LOG_DEBUG << "Erase " << key << " from cache";
+    SERVER_LOG_DEBUG << "Erase " << key << " size: " << data_ptr->size();
 
     lru_.erase(key);
 }

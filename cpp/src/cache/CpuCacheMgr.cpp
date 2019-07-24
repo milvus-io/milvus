@@ -12,10 +12,14 @@ namespace zilliz {
 namespace milvus {
 namespace cache {
 
+namespace {
+    constexpr int64_t unit = 1024 * 1024 * 1024;
+}
+
 CpuCacheMgr::CpuCacheMgr() {
     server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
     int64_t cap = config.GetInt64Value(server::CONFIG_CPU_CACHE_CAPACITY, 16);
-    cap *= 1024*1024*1024;
+    cap *= unit;
     cache_ = std::make_shared<Cache>(cap, 1UL<<32);
 
     double free_percent = config.GetDoubleValue(server::CACHE_FREE_PERCENT, 0.85);

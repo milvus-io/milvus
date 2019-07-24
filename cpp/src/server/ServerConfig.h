@@ -29,6 +29,7 @@ static const std::string CONFIG_DB_INDEX_TRIGGER_SIZE = "index_building_threshol
 static const std::string CONFIG_DB_ARCHIVE_DISK = "archive_disk_threshold";
 static const std::string CONFIG_DB_ARCHIVE_DAYS = "archive_days_threshold";
 static const std::string CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
+static const std::string CONFIG_DB_PARALLEL_REDUCE = "parallel_reduce";
 
 static const std::string CONFIG_LOG = "log_config";
 
