@@ -5,7 +5,7 @@ namespace milvus {
 namespace engine {
 namespace meta {
 
-    // Do a simple form of in-use connection limiting: wait to return
+    // Do a thriftsimple form of in-use connection limiting: wait to return
     // a connection until there are a reasonably low number in use
     // already.  Can't do this in create() because we're interested in
     // connections actually in use, not those created.  Also note that

@@ -231,14 +231,14 @@ class TableName final :
   ::std::string* release_table_name();
   void set_allocated_table_name(::std::string* table_name);
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   bool has_status() const;
   void clear_status();
   static const int kStatusFieldNumber = 1;
-  const ::milvus::Status& status() const;
-  ::milvus::Status* release_status();
-  ::milvus::Status* mutable_status();
-  void set_allocated_status(::milvus::Status* status);
+  const ::milvus::grpc::Status& status() const;
+  ::milvus::grpc::Status* release_status();
+  ::milvus::grpc::Status* mutable_status();
+  void set_allocated_status(::milvus::grpc::Status* status);
 
   // @@protoc_insertion_point(class_scope:milvus.grpc.TableName)
  private:
@@ -246,7 +246,7 @@ class TableName final :
 
   ::google::protobuf::internal::InternalMetadataWithArena _internal_metadata_;
   ::google::protobuf::internal::ArenaStringPtr table_name_;
-  ::milvus::Status* status_;
+  ::milvus::grpc::Status* status_;
   mutable ::google::protobuf::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -882,14 +882,14 @@ class VectorIds final :
   ::google::protobuf::RepeatedField< ::google::protobuf::int64 >*
       mutable_vector_id_array();
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   bool has_status() const;
   void clear_status();
   static const int kStatusFieldNumber = 1;
-  const ::milvus::Status& status() const;
-  ::milvus::Status* release_status();
-  ::milvus::Status* mutable_status();
-  void set_allocated_status(::milvus::Status* status);
+  const ::milvus::grpc::Status& status() const;
+  ::milvus::grpc::Status* release_status();
+  ::milvus::grpc::Status* mutable_status();
+  void set_allocated_status(::milvus::grpc::Status* status);
 
   // @@protoc_insertion_point(class_scope:milvus.grpc.VectorIds)
  private:
@@ -898,7 +898,7 @@ class VectorIds final :
   ::google::protobuf::internal::InternalMetadataWithArena _internal_metadata_;
   ::google::protobuf::RepeatedField< ::google::protobuf::int64 > vector_id_array_;
   mutable std::atomic<int> _vector_id_array_cached_byte_size_;
-  ::milvus::Status* status_;
+  ::milvus::grpc::Status* status_;
   mutable ::google::protobuf::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -1421,14 +1421,14 @@ class TopKQueryResult final :
   const ::google::protobuf::RepeatedPtrField< ::milvus::grpc::QueryResult >&
       query_result_arrays() const;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   bool has_status() const;
   void clear_status();
   static const int kStatusFieldNumber = 1;
-  const ::milvus::Status& status() const;
-  ::milvus::Status* release_status();
-  ::milvus::Status* mutable_status();
-  void set_allocated_status(::milvus::Status* status);
+  const ::milvus::grpc::Status& status() const;
+  ::milvus::grpc::Status* release_status();
+  ::milvus::grpc::Status* mutable_status();
+  void set_allocated_status(::milvus::grpc::Status* status);
 
   // @@protoc_insertion_point(class_scope:milvus.grpc.TopKQueryResult)
  private:
@@ -1436,7 +1436,7 @@ class TopKQueryResult final :
 
   ::google::protobuf::internal::InternalMetadataWithArena _internal_metadata_;
   ::google::protobuf::RepeatedPtrField< ::milvus::grpc::QueryResult > query_result_arrays_;
-  ::milvus::Status* status_;
+  ::milvus::grpc::Status* status_;
   mutable ::google::protobuf::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -1551,14 +1551,14 @@ class StringReply final :
   ::std::string* release_string_reply();
   void set_allocated_string_reply(::std::string* string_reply);
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   bool has_status() const;
   void clear_status();
   static const int kStatusFieldNumber = 1;
-  const ::milvus::Status& status() const;
-  ::milvus::Status* release_status();
-  ::milvus::Status* mutable_status();
-  void set_allocated_status(::milvus::Status* status);
+  const ::milvus::grpc::Status& status() const;
+  ::milvus::grpc::Status* release_status();
+  ::milvus::grpc::Status* mutable_status();
+  void set_allocated_status(::milvus::grpc::Status* status);
 
   // @@protoc_insertion_point(class_scope:milvus.grpc.StringReply)
  private:
@@ -1566,7 +1566,7 @@ class StringReply final :
 
   ::google::protobuf::internal::InternalMetadataWithArena _internal_metadata_;
   ::google::protobuf::internal::ArenaStringPtr string_reply_;
-  ::milvus::Status* status_;
+  ::milvus::grpc::Status* status_;
   mutable ::google::protobuf::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -1667,14 +1667,14 @@ class BoolReply final :
 
   // accessors -------------------------------------------------------
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   bool has_status() const;
   void clear_status();
   static const int kStatusFieldNumber = 1;
-  const ::milvus::Status& status() const;
-  ::milvus::Status* release_status();
-  ::milvus::Status* mutable_status();
-  void set_allocated_status(::milvus::Status* status);
+  const ::milvus::grpc::Status& status() const;
+  ::milvus::grpc::Status* release_status();
+  ::milvus::grpc::Status* mutable_status();
+  void set_allocated_status(::milvus::grpc::Status* status);
 
   // bool bool_reply = 2;
   void clear_bool_reply();
@@ -1687,7 +1687,7 @@ class BoolReply final :
   class HasBitSetters;
 
   ::google::protobuf::internal::InternalMetadataWithArena _internal_metadata_;
-  ::milvus::Status* status_;
+  ::milvus::grpc::Status* status_;
   bool bool_reply_;
   mutable ::google::protobuf::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -1789,14 +1789,14 @@ class TableRowCount final :
 
   // accessors -------------------------------------------------------
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   bool has_status() const;
   void clear_status();
   static const int kStatusFieldNumber = 1;
-  const ::milvus::Status& status() const;
-  ::milvus::Status* release_status();
-  ::milvus::Status* mutable_status();
-  void set_allocated_status(::milvus::Status* status);
+  const ::milvus::grpc::Status& status() const;
+  ::milvus::grpc::Status* release_status();
+  ::milvus::grpc::Status* mutable_status();
+  void set_allocated_status(::milvus::grpc::Status* status);
 
   // int64 table_row_count = 2;
   void clear_table_row_count();
@@ -1809,7 +1809,7 @@ class TableRowCount final :
   class HasBitSetters;
 
   ::google::protobuf::internal::InternalMetadataWithArena _internal_metadata_;
-  ::milvus::Status* status_;
+  ::milvus::grpc::Status* status_;
   ::google::protobuf::int64 table_row_count_;
   mutable ::google::protobuf::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -2045,14 +2045,14 @@ class ServerStatus final :
   ::std::string* release_info();
   void set_allocated_info(::std::string* info);
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   bool has_status() const;
   void clear_status();
   static const int kStatusFieldNumber = 1;
-  const ::milvus::Status& status() const;
-  ::milvus::Status* release_status();
-  ::milvus::Status* mutable_status();
-  void set_allocated_status(::milvus::Status* status);
+  const ::milvus::grpc::Status& status() const;
+  ::milvus::grpc::Status* release_status();
+  ::milvus::grpc::Status* mutable_status();
+  void set_allocated_status(::milvus::grpc::Status* status);
 
   // @@protoc_insertion_point(class_scope:milvus.grpc.ServerStatus)
  private:
@@ -2060,7 +2060,7 @@ class ServerStatus final :
 
   ::google::protobuf::internal::InternalMetadataWithArena _internal_metadata_;
   ::google::protobuf::internal::ArenaStringPtr info_;
-  ::milvus::Status* status_;
+  ::milvus::grpc::Status* status_;
   mutable ::google::protobuf::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -2075,33 +2075,33 @@ class ServerStatus final :
 #endif  // __GNUC__
 // TableName
 
-// .milvus.Status status = 1;
+// .milvus.grpc.Status status = 1;
 inline bool TableName::has_status() const {
   return this != internal_default_instance() && status_ != nullptr;
 }
-inline const ::milvus::Status& TableName::status() const {
-  const ::milvus::Status* p = status_;
+inline const ::milvus::grpc::Status& TableName::status() const {
+  const ::milvus::grpc::Status* p = status_;
   // @@protoc_insertion_point(field_get:milvus.grpc.TableName.status)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::Status*>(
-      &::milvus::_Status_default_instance_);
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::Status*>(
+      &::milvus::grpc::_Status_default_instance_);
 }
-inline ::milvus::Status* TableName::release_status() {
+inline ::milvus::grpc::Status* TableName::release_status() {
   // @@protoc_insertion_point(field_release:milvus.grpc.TableName.status)
   
-  ::milvus::Status* temp = status_;
+  ::milvus::grpc::Status* temp = status_;
   status_ = nullptr;
   return temp;
 }
-inline ::milvus::Status* TableName::mutable_status() {
+inline ::milvus::grpc::Status* TableName::mutable_status() {
   
   if (status_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::Status>(GetArenaNoVirtual());
+    auto* p = CreateMaybeMessage<::milvus::grpc::Status>(GetArenaNoVirtual());
     status_ = p;
   }
   // @@protoc_insertion_point(field_mutable:milvus.grpc.TableName.status)
   return status_;
 }
-inline void TableName::set_allocated_status(::milvus::Status* status) {
+inline void TableName::set_allocated_status(::milvus::grpc::Status* status) {
   ::google::protobuf::Arena* message_arena = GetArenaNoVirtual();
   if (message_arena == nullptr) {
     delete reinterpret_cast< ::google::protobuf::MessageLite*>(status_);
@@ -2505,33 +2505,33 @@ InsertInfos::row_record_array() const {
 
 // VectorIds
 
-// .milvus.Status status = 1;
+// .milvus.grpc.Status status = 1;
 inline bool VectorIds::has_status() const {
   return this != internal_default_instance() && status_ != nullptr;
 }
-inline const ::milvus::Status& VectorIds::status() const {
-  const ::milvus::Status* p = status_;
+inline const ::milvus::grpc::Status& VectorIds::status() const {
+  const ::milvus::grpc::Status* p = status_;
   // @@protoc_insertion_point(field_get:milvus.grpc.VectorIds.status)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::Status*>(
-      &::milvus::_Status_default_instance_);
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::Status*>(
+      &::milvus::grpc::_Status_default_instance_);
 }
-inline ::milvus::Status* VectorIds::release_status() {
+inline ::milvus::grpc::Status* VectorIds::release_status() {
   // @@protoc_insertion_point(field_release:milvus.grpc.VectorIds.status)
   
-  ::milvus::Status* temp = status_;
+  ::milvus::grpc::Status* temp = status_;
   status_ = nullptr;
   return temp;
 }
-inline ::milvus::Status* VectorIds::mutable_status() {
+inline ::milvus::grpc::Status* VectorIds::mutable_status() {
   
   if (status_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::Status>(GetArenaNoVirtual());
+    auto* p = CreateMaybeMessage<::milvus::grpc::Status>(GetArenaNoVirtual());
     status_ = p;
   }
   // @@protoc_insertion_point(field_mutable:milvus.grpc.VectorIds.status)
   return status_;
 }
-inline void VectorIds::set_allocated_status(::milvus::Status* status) {
+inline void VectorIds::set_allocated_status(::milvus::grpc::Status* status) {
   ::google::protobuf::Arena* message_arena = GetArenaNoVirtual();
   if (message_arena == nullptr) {
     delete reinterpret_cast< ::google::protobuf::MessageLite*>(status_);
@@ -2871,33 +2871,33 @@ inline void QueryResult::set_distance(double value) {
 
 // TopKQueryResult
 
-// .milvus.Status status = 1;
+// .milvus.grpc.Status status = 1;
 inline bool TopKQueryResult::has_status() const {
   return this != internal_default_instance() && status_ != nullptr;
 }
-inline const ::milvus::Status& TopKQueryResult::status() const {
-  const ::milvus::Status* p = status_;
+inline const ::milvus::grpc::Status& TopKQueryResult::status() const {
+  const ::milvus::grpc::Status* p = status_;
   // @@protoc_insertion_point(field_get:milvus.grpc.TopKQueryResult.status)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::Status*>(
-      &::milvus::_Status_default_instance_);
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::Status*>(
+      &::milvus::grpc::_Status_default_instance_);
 }
-inline ::milvus::Status* TopKQueryResult::release_status() {
+inline ::milvus::grpc::Status* TopKQueryResult::release_status() {
   // @@protoc_insertion_point(field_release:milvus.grpc.TopKQueryResult.status)
   
-  ::milvus::Status* temp = status_;
+  ::milvus::grpc::Status* temp = status_;
   status_ = nullptr;
   return temp;
 }
-inline ::milvus::Status* TopKQueryResult::mutable_status() {
+inline ::milvus::grpc::Status* TopKQueryResult::mutable_status() {
   
   if (status_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::Status>(GetArenaNoVirtual());
+    auto* p = CreateMaybeMessage<::milvus::grpc::Status>(GetArenaNoVirtual());
     status_ = p;
   }
   // @@protoc_insertion_point(field_mutable:milvus.grpc.TopKQueryResult.status)
   return status_;
 }
-inline void TopKQueryResult::set_allocated_status(::milvus::Status* status) {
+inline void TopKQueryResult::set_allocated_status(::milvus::grpc::Status* status) {
   ::google::protobuf::Arena* message_arena = GetArenaNoVirtual();
   if (message_arena == nullptr) {
     delete reinterpret_cast< ::google::protobuf::MessageLite*>(status_);
@@ -2950,33 +2950,33 @@ TopKQueryResult::query_result_arrays() const {
 
 // StringReply
 
-// .milvus.Status status = 1;
+// .milvus.grpc.Status status = 1;
 inline bool StringReply::has_status() const {
   return this != internal_default_instance() && status_ != nullptr;
 }
-inline const ::milvus::Status& StringReply::status() const {
-  const ::milvus::Status* p = status_;
+inline const ::milvus::grpc::Status& StringReply::status() const {
+  const ::milvus::grpc::Status* p = status_;
   // @@protoc_insertion_point(field_get:milvus.grpc.StringReply.status)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::Status*>(
-      &::milvus::_Status_default_instance_);
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::Status*>(
+      &::milvus::grpc::_Status_default_instance_);
 }
-inline ::milvus::Status* StringReply::release_status() {
+inline ::milvus::grpc::Status* StringReply::release_status() {
   // @@protoc_insertion_point(field_release:milvus.grpc.StringReply.status)
   
-  ::milvus::Status* temp = status_;
+  ::milvus::grpc::Status* temp = status_;
   status_ = nullptr;
   return temp;
 }
-inline ::milvus::Status* StringReply::mutable_status() {
+inline ::milvus::grpc::Status* StringReply::mutable_status() {
   
   if (status_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::Status>(GetArenaNoVirtual());
+    auto* p = CreateMaybeMessage<::milvus::grpc::Status>(GetArenaNoVirtual());
     status_ = p;
   }
   // @@protoc_insertion_point(field_mutable:milvus.grpc.StringReply.status)
   return status_;
 }
-inline void StringReply::set_allocated_status(::milvus::Status* status) {
+inline void StringReply::set_allocated_status(::milvus::grpc::Status* status) {
   ::google::protobuf::Arena* message_arena = GetArenaNoVirtual();
   if (message_arena == nullptr) {
     delete reinterpret_cast< ::google::protobuf::MessageLite*>(status_);
@@ -3052,33 +3052,33 @@ inline void StringReply::set_allocated_string_reply(::std::string* string_reply)
 
 // BoolReply
 
-// .milvus.Status status = 1;
+// .milvus.grpc.Status status = 1;
 inline bool BoolReply::has_status() const {
   return this != internal_default_instance() && status_ != nullptr;
 }
-inline const ::milvus::Status& BoolReply::status() const {
-  const ::milvus::Status* p = status_;
+inline const ::milvus::grpc::Status& BoolReply::status() const {
+  const ::milvus::grpc::Status* p = status_;
   // @@protoc_insertion_point(field_get:milvus.grpc.BoolReply.status)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::Status*>(
-      &::milvus::_Status_default_instance_);
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::Status*>(
+      &::milvus::grpc::_Status_default_instance_);
 }
-inline ::milvus::Status* BoolReply::release_status() {
+inline ::milvus::grpc::Status* BoolReply::release_status() {
   // @@protoc_insertion_point(field_release:milvus.grpc.BoolReply.status)
   
-  ::milvus::Status* temp = status_;
+  ::milvus::grpc::Status* temp = status_;
   status_ = nullptr;
   return temp;
 }
-inline ::milvus::Status* BoolReply::mutable_status() {
+inline ::milvus::grpc::Status* BoolReply::mutable_status() {
   
   if (status_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::Status>(GetArenaNoVirtual());
+    auto* p = CreateMaybeMessage<::milvus::grpc::Status>(GetArenaNoVirtual());
     status_ = p;
   }
   // @@protoc_insertion_point(field_mutable:milvus.grpc.BoolReply.status)
   return status_;
 }
-inline void BoolReply::set_allocated_status(::milvus::Status* status) {
+inline void BoolReply::set_allocated_status(::milvus::grpc::Status* status) {
   ::google::protobuf::Arena* message_arena = GetArenaNoVirtual();
   if (message_arena == nullptr) {
     delete reinterpret_cast< ::google::protobuf::MessageLite*>(status_);
@@ -3115,33 +3115,33 @@ inline void BoolReply::set_bool_reply(bool value) {
 
 // TableRowCount
 
-// .milvus.Status status = 1;
+// .milvus.grpc.Status status = 1;
 inline bool TableRowCount::has_status() const {
   return this != internal_default_instance() && status_ != nullptr;
 }
-inline const ::milvus::Status& TableRowCount::status() const {
-  const ::milvus::Status* p = status_;
+inline const ::milvus::grpc::Status& TableRowCount::status() const {
+  const ::milvus::grpc::Status* p = status_;
   // @@protoc_insertion_point(field_get:milvus.grpc.TableRowCount.status)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::Status*>(
-      &::milvus::_Status_default_instance_);
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::Status*>(
+      &::milvus::grpc::_Status_default_instance_);
 }
-inline ::milvus::Status* TableRowCount::release_status() {
+inline ::milvus::grpc::Status* TableRowCount::release_status() {
   // @@protoc_insertion_point(field_release:milvus.grpc.TableRowCount.status)
   
-  ::milvus::Status* temp = status_;
+  ::milvus::grpc::Status* temp = status_;
   status_ = nullptr;
   return temp;
 }
-inline ::milvus::Status* TableRowCount::mutable_status() {
+inline ::milvus::grpc::Status* TableRowCount::mutable_status() {
   
   if (status_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::Status>(GetArenaNoVirtual());
+    auto* p = CreateMaybeMessage<::milvus::grpc::Status>(GetArenaNoVirtual());
     status_ = p;
   }
   // @@protoc_insertion_point(field_mutable:milvus.grpc.TableRowCount.status)
   return status_;
 }
-inline void TableRowCount::set_allocated_status(::milvus::Status* status) {
+inline void TableRowCount::set_allocated_status(::milvus::grpc::Status* status) {
   ::google::protobuf::Arena* message_arena = GetArenaNoVirtual();
   if (message_arena == nullptr) {
     delete reinterpret_cast< ::google::protobuf::MessageLite*>(status_);
@@ -3235,33 +3235,33 @@ inline void Command::set_allocated_cmd(::std::string* cmd) {
 
 // ServerStatus
 
-// .milvus.Status status = 1;
+// .milvus.grpc.Status status = 1;
 inline bool ServerStatus::has_status() const {
   return this != internal_default_instance() && status_ != nullptr;
 }
-inline const ::milvus::Status& ServerStatus::status() const {
-  const ::milvus::Status* p = status_;
+inline const ::milvus::grpc::Status& ServerStatus::status() const {
+  const ::milvus::grpc::Status* p = status_;
   // @@protoc_insertion_point(field_get:milvus.grpc.ServerStatus.status)
-  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::Status*>(
-      &::milvus::_Status_default_instance_);
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::grpc::Status*>(
+      &::milvus::grpc::_Status_default_instance_);
 }
-inline ::milvus::Status* ServerStatus::release_status() {
+inline ::milvus::grpc::Status* ServerStatus::release_status() {
   // @@protoc_insertion_point(field_release:milvus.grpc.ServerStatus.status)
   
-  ::milvus::Status* temp = status_;
+  ::milvus::grpc::Status* temp = status_;
   status_ = nullptr;
   return temp;
 }
-inline ::milvus::Status* ServerStatus::mutable_status() {
+inline ::milvus::grpc::Status* ServerStatus::mutable_status() {
   
   if (status_ == nullptr) {
-    auto* p = CreateMaybeMessage<::milvus::Status>(GetArenaNoVirtual());
+    auto* p = CreateMaybeMessage<::milvus::grpc::Status>(GetArenaNoVirtual());
     status_ = p;
   }
   // @@protoc_insertion_point(field_mutable:milvus.grpc.ServerStatus.status)
   return status_;
 }
-inline void ServerStatus::set_allocated_status(::milvus::Status* status) {
+inline void ServerStatus::set_allocated_status(::milvus::grpc::Status* status) {
   ::google::protobuf::Arena* message_arena = GetArenaNoVirtual();
   if (message_arena == nullptr) {
     delete reinterpret_cast< ::google::protobuf::MessageLite*>(status_);

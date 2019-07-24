@@ -75,7 +75,7 @@ struct TopKQueryResult {
  * @brief SDK main class
  */
 class Connection {
-public:
+ public:
 
     /**
      * @brief CreateConnection
@@ -99,7 +99,7 @@ public:
      */
 
     static Status
-    Destroy(std::shared_ptr<Connection> connection_ptr);
+    Destroy(std::shared_ptr<Connection>& connection_ptr);
 
     /**
      * @brief Connect
@@ -178,6 +178,8 @@ public:
      *
      * @return Indicate if table is delete successfully.
      */
+    virtual Status DropTable(const std::string &table_name) = 0;
+
     virtual Status DeleteTable(const std::string &table_name) = 0;
 
 
@@ -203,6 +205,10 @@ public:
      *
      * @return Indicate if vector array are inserted successfully
      */
+    virtual Status InsertVector(const std::string &table_name,
+                             const std::vector<RowRecord> &record_array,
+                             std::vector<int64_t> &id_array) = 0;
+
     virtual Status AddVector(const std::string &table_name,
                              const std::vector<RowRecord> &record_array,
                              std::vector<int64_t> &id_array) = 0;

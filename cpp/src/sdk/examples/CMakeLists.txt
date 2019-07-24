@@ -4,4 +4,5 @@
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
 
-add_subdirectory(simple)
+add_subdirectory(thriftsimple)
+add_subdirectory(grpcsimple)
