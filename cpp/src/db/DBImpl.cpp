@@ -297,7 +297,7 @@ void DBImpl::StartMetricTask() {
         return;
     }
 
-    ENGINE_LOG_DEBUG << "Start metric task";
+    ENGINE_LOG_INFO << "Start metric task";
 
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
@@ -312,7 +312,7 @@ void DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
     server::Metrics::GetInstance().OctetsSet();
 
-    ENGINE_LOG_DEBUG << "Metric task finished";
+    ENGINE_LOG_INFO << "Metric task finished";
 }
 
 void DBImpl::StartCompactionTask() {
@@ -322,8 +322,6 @@ void DBImpl::StartCompactionTask() {
         return;
     }
 
-    ENGINE_LOG_DEBUG << "Serialize insert cache";
-
     //serialize memory data
     std::set<std::string> temp_table_ids;
     mem_mgr_->Serialize(temp_table_ids);
@@ -331,7 +329,9 @@ void DBImpl::StartCompactionTask() {
         compact_table_ids_.insert(id);
     }
 
-    ENGINE_LOG_DEBUG << "Insert cache serialized";
+    if(!temp_table_ids.empty()) {
+        SERVER_LOG_DEBUG << "Insert cache serialized";
+    }
 
     //compactiong has been finished?
     if(!compact_thread_results_.empty()) {
@@ -433,7 +433,7 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
-    ENGINE_LOG_DEBUG << " Background compaction thread start";
+    ENGINE_LOG_INFO << " Background compaction thread start";
 
     Status status;
     for (auto& table_id : table_ids) {
@@ -452,7 +452,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
 
-    ENGINE_LOG_DEBUG << " Background compaction thread exit";
+    ENGINE_LOG_INFO << " Background compaction thread exit";
 }
 
 void DBImpl::StartBuildIndexTask(bool force) {
@@ -581,7 +581,7 @@ Status DBImpl::BuildIndexByTable(const std::string& table_id) {
 }
 
 void DBImpl::BackgroundBuildIndex() {
-    ENGINE_LOG_DEBUG << " Background build index thread start";
+    ENGINE_LOG_INFO << " Background build index thread start";
 
     std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
@@ -599,7 +599,7 @@ void DBImpl::BackgroundBuildIndex() {
         }
     }
 
-    ENGINE_LOG_DEBUG << " Background build index thread exit";
+    ENGINE_LOG_INFO << " Background build index thread exit";
 }
 
 Status DBImpl::DropAll() {
