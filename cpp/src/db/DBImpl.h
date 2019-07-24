@@ -82,6 +82,8 @@ class DBImpl : public DB {
 
     Status Size(uint64_t &result) override;
 
+    Status BuildIndex(const std::string& table_id) override;
+
     ~DBImpl() override;
 
  private:
@@ -107,9 +109,11 @@ class DBImpl : public DB {
     Status BackgroundMergeFiles(const std::string &table_id);
     void BackgroundCompaction(std::set<std::string> table_ids);
 
-    void StartBuildIndexTask();
+    void StartBuildIndexTask(bool force=false);
     void BackgroundBuildIndex();
 
+    Status
+    BuildIndexByTable(const std::string& table_id);
     Status
     BuildIndex(const meta::TableFileSchema &);
 
@@ -129,6 +133,8 @@ class DBImpl : public DB {
 
     server::ThreadPool index_thread_pool_;
     std::list<std::future<void>> index_thread_results_;
+
+    std::mutex build_index_mutex_;
 
 }; // DBImpl
 

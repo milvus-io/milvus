@@ -20,6 +20,9 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere knowhere_src)
 aux_source_directory(${MILVUS_ENGINE_SRC}/src/metrics metrics_src)
 aux_source_directory(./ test_srcs)
 
+set(util_files
+        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp)
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task scheduler_task_files)
@@ -34,20 +37,9 @@ include_directories(../../third_party/build/include)
 link_directories(../../third_party/build/lib)
 include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
-#include_directories(../db/utils.h)
 include_directories(../../src/metrics)
 
 include_directories(/usr/include/mysql)
-
-#set(metrics_src_files
-#        ../../src/metrics/Metrics.cpp
-#        ../../src/metrics/Metrics.h
-#        ../../src/metrics/PrometheusMetrics.cpp
-#        ../../src/metrics/MetricBase.h
-#        ../../src/server/ServerConfig.cpp
-#        ../../src/utils/CommonUtil.cpp
-#        ../../src/utils/TimeRecorder.cpp
-#        )
 
 set(count_test_src
         ${config_files}
@@ -58,6 +50,7 @@ set(count_test_src
         ${knowhere_src}
         ${metrics_src}
         ${test_srcs}
+        ${util_files}
         )
 
 add_executable(metrics_test ${count_test_src} ${require_files} )
@@ -88,5 +81,12 @@ target_link_libraries(metrics_test
         mysqlpp
         ${unittest_libs}
         )
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
+    target_link_libraries(metrics_test ${MKL_LIBS} ${MKL_LIBS})
+else()
+    target_link_libraries(metrics_test
+            lapack
+            openblas)
+endif()
 
 install(TARGETS metrics_test DESTINATION bin)

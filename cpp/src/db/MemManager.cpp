@@ -83,11 +83,12 @@ Status MemVectors::Serialize(std::string &table_id) {
 
     auto status = meta_->UpdateTableFile(schema_);
 
-    LOG(DEBUG) << "New " << ((schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-               << " file " << schema_.file_id_ << " of size " << (double) (active_engine_->Size()) / (double) meta::M
-               << " M";
+    ENGINE_LOG_DEBUG << "New " << ((schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
+               << " file " << schema_.file_id_ << " of size " << active_engine_->Size() << " bytes";
 
-    active_engine_->Cache();
+    if(options_.insert_cache_immediately_) {
+        active_engine_->Cache();
+    }
 
     return status;
 }
@@ -124,9 +125,6 @@ Status MemManager::InsertVectors(const std::string &table_id_,
                                  size_t n_,
                                  const float *vectors_,
                                  IDNumbers &vector_ids_) {
-
-    LOG(DEBUG) << "MemManager::InsertVectors: mutable mem = " << GetCurrentMutableMem() <<
-               ", immutable mem = " << GetCurrentImmutableMem() << ", total mem = " << GetCurrentMem();
 
     std::unique_lock<std::mutex> lock(mutex_);
 

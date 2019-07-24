@@ -57,8 +57,6 @@ define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
 
 define_option(MILVUS_WITH_ARROW "Build with ARROW" OFF)
 
-define_option(MILVUS_BOOST_USE_SHARED "Rely on boost shared libraries where relevant" OFF)
-
 define_option(MILVUS_BOOST_VENDORED "Use vendored Boost instead of existing Boost. \
 Note that this requires linking Boost statically" ON)
 
@@ -109,6 +107,11 @@ endif()
 define_option(MILVUS_WITH_ZSTD "Build with zstd compression" ${MILVUS_WITH_ZSTD_DEFAULT})
 
 define_option(MILVUS_WITH_AWS "Build with AWS SDK" ON)
+
+if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
+    define_option(MILVUS_WITH_LIBUNWIND "Build with libunwind" ON)
+    define_option(MILVUS_WITH_GPERFTOOLS "Build with gperftools" ON)
+endif()
 
 #----------------------------------------------------------------------
 if(MSVC)

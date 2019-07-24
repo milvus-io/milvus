@@ -80,6 +80,21 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class BuildIndexTask : public BaseTask {
+public:
+    static BaseTaskPtr Create(const std::string& table_name);
+
+protected:
+    BuildIndexTask(const std::string& table_name);
+
+    ServerError OnExecute() override;
+
+
+private:
+    std::string table_name_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class ShowTablesTask : public BaseTask {
 public:
     static BaseTaskPtr Create(std::vector<std::string>& tables);
@@ -114,7 +129,28 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class SearchVectorTask : public BaseTask {
+class SearchVectorTaskBase : public BaseTask {
+protected:
+    SearchVectorTaskBase(const std::string& table_name,
+                        const std::vector<std::string>& file_id_array,
+                        const std::vector<::milvus::thrift::RowRecord> & query_record_array,
+                        const std::vector<::milvus::thrift::Range> & query_range_array,
+                        const int64_t top_k);
+
+    ServerError OnExecute() override;
+
+    virtual ServerError ConstructResult(engine::QueryResults& results) = 0;
+
+protected:
+    std::string table_name_;
+    std::vector<std::string> file_id_array_;
+    int64_t top_k_;
+    const std::vector<::milvus::thrift::RowRecord>& record_array_;
+    const std::vector<::milvus::thrift::Range>& range_array_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class SearchVectorTask1 : public SearchVectorTaskBase {
 public:
     static BaseTaskPtr Create(const std::string& table_name,
                               const std::vector<std::string>& file_id_array,
@@ -124,22 +160,41 @@ public:
                               std::vector<::milvus::thrift::TopKQueryResult>& result_array);
 
 protected:
-    SearchVectorTask(const std::string& table_name,
-                     const std::vector<std::string>& file_id_array,
-                     const std::vector<::milvus::thrift::RowRecord> & query_record_array,
-                     const std::vector<::milvus::thrift::Range> & query_range_array,
-                     const int64_t top_k,
+    SearchVectorTask1(const std::string& table_name,
+                      const std::vector<std::string>& file_id_array,
+                      const std::vector<::milvus::thrift::RowRecord> & query_record_array,
+                      const std::vector<::milvus::thrift::Range> & query_range_array,
+                      const int64_t top_k,
                      std::vector<::milvus::thrift::TopKQueryResult>& result_array);
 
-    ServerError OnExecute() override;
+    ServerError ConstructResult(engine::QueryResults& results) override;
 
 private:
-    std::string table_name_;
-    std::vector<std::string> file_id_array_;
-    int64_t top_k_;
-    const std::vector<::milvus::thrift::RowRecord>& record_array_;
-    const std::vector<::milvus::thrift::Range>& range_array_;
     std::vector<::milvus::thrift::TopKQueryResult>& result_array_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class SearchVectorTask2 : public SearchVectorTaskBase {
+public:
+    static BaseTaskPtr Create(const std::string& table_name,
+                              const std::vector<std::string>& file_id_array,
+                              const std::vector<::milvus::thrift::RowRecord> & query_record_array,
+                              const std::vector<::milvus::thrift::Range> & query_range_array,
+                              const int64_t top_k,
+                              std::vector<::milvus::thrift::TopKQueryBinResult>& result_array);
+
+protected:
+    SearchVectorTask2(const std::string& table_name,
+                      const std::vector<std::string>& file_id_array,
+                      const std::vector<::milvus::thrift::RowRecord> & query_record_array,
+                      const std::vector<::milvus::thrift::Range> & query_range_array,
+                      const int64_t top_k,
+                      std::vector<::milvus::thrift::TopKQueryBinResult>& result_array);
+
+    ServerError ConstructResult(engine::QueryResults& results) override;
+
+private:
+    std::vector<::milvus::thrift::TopKQueryBinResult>& result_array_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

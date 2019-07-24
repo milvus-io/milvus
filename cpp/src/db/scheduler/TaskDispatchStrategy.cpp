@@ -20,6 +20,7 @@ class ReuseCacheIndexStrategy {
 public:
     bool Schedule(const SearchContextPtr &context, std::list<ScheduleTaskPtr>& task_list) {
         if(context == nullptr) {
+            ENGINE_LOG_ERROR << "Task Dispatch context doesn't exist";
             return false;
         }
 
@@ -32,7 +33,7 @@ public:
 
             IndexLoadTaskPtr loader = std::static_pointer_cast<IndexLoadTask>(task);
             if(index_files.find(loader->file_->id_) != index_files.end()){
-                ENGINE_LOG_INFO << "Append SearchContext to exist IndexLoaderContext";
+                ENGINE_LOG_DEBUG << "Append SearchContext to exist IndexLoaderContext";
                 index_files.erase(loader->file_->id_);
                 loader->search_contexts_.push_back(context);
             }
@@ -40,7 +41,7 @@ public:
 
         //index_files still contains some index files, create new loader
         for(auto& pair : index_files) {
-            ENGINE_LOG_INFO << "Create new IndexLoaderContext for: " << pair.second->location_;
+            ENGINE_LOG_DEBUG << "Create new IndexLoaderContext for: " << pair.second->location_;
             IndexLoadTaskPtr new_loader = std::make_shared<IndexLoadTask>();
             new_loader->search_contexts_.push_back(context);
             new_loader->file_ = pair.second;
@@ -64,6 +65,7 @@ class DeleteTableStrategy {
 public:
     bool Schedule(const DeleteContextPtr &context, std::list<ScheduleTaskPtr> &task_list) {
         if (context == nullptr) {
+            ENGINE_LOG_ERROR << "Task Dispatch context doesn't exist";
             return false;
         }
 
@@ -103,6 +105,7 @@ public:
 bool TaskDispatchStrategy::Schedule(const ScheduleContextPtr &context_ptr,
                                     std::list<zilliz::milvus::engine::ScheduleTaskPtr> &task_list) {
     if(context_ptr == nullptr) {
+        ENGINE_LOG_ERROR << "Task Dispatch context doesn't exist";
         return false;
     }
 

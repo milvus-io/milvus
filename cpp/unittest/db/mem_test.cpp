@@ -14,7 +14,8 @@
 #include <thread>
 #include <fstream>
 #include <iostream>
-
+#include <cmath>
+#include <random>
 
 using namespace zilliz::milvus;
 
@@ -150,7 +151,6 @@ TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
 
     status = mem_table.Add(source_100);
     ASSERT_TRUE(status.ok());
-
     engine::IDNumbers vector_ids = source_100->GetVectorIds();
     ASSERT_EQ(vector_ids.size(), 100);
 
@@ -273,7 +273,7 @@ TEST_F(NewMemManagerTest, INSERT_TEST) {
 
     int insert_loop = 20;
     for (int i = 0; i < insert_loop; ++i) {
-        int64_t nb = 409600;
+        int64_t nb = 40960;
         std::vector<float> xb;
         BuildVectors(nb, xb);
         engine::IDNumbers vector_ids;
@@ -308,7 +308,7 @@ TEST_F(NewMemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
     engine::IDNumbers vector_ids;
     engine::IDNumbers target_ids;
 
-    int64_t nb = 409600;
+    int64_t nb = 40960;
     std::vector<float> xb;
     BuildVectors(nb, xb);
 

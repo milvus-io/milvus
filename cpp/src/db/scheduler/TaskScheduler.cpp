@@ -31,6 +31,7 @@ TaskScheduler& TaskScheduler::GetInstance() {
 bool
 TaskScheduler::Start() {
     if(!stopped_) {
+        SERVER_LOG_INFO << "Task Scheduler isn't started";
         return true;
     }
 
@@ -47,6 +48,7 @@ TaskScheduler::Start() {
 bool
 TaskScheduler::Stop() {
     if(stopped_) {
+        SERVER_LOG_INFO << "Task Scheduler already stopped";
         return true;
     }
 
@@ -80,7 +82,7 @@ TaskScheduler::TaskDispatchWorker() {
         ScheduleTaskPtr task_ptr = task_dispatch_queue_.Take();
         if(task_ptr == nullptr) {
             SERVER_LOG_INFO << "Stop db task dispatch thread";
-            break;//exit
+            return true;
         }
 
         //execute task
@@ -98,8 +100,8 @@ TaskScheduler::TaskWorker() {
     while(true) {
         ScheduleTaskPtr task_ptr = task_queue_.Take();
         if(task_ptr == nullptr) {
-            SERVER_LOG_INFO << "Stop db task thread";
-            break;//exit
+            SERVER_LOG_INFO << "Stop db task worker thread";
+            return true;
         }
 
         //execute task
