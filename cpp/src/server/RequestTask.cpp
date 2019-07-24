@@ -191,6 +191,7 @@ ServerError CreateTableTask::OnExecute() {
         }
 
     } catch (std::exception& ex) {
+        SERVER_LOG_ERROR << "CreateTableTask encounter exception: " << ex.what();
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
@@ -236,6 +237,7 @@ ServerError DescribeTableTask::OnExecute() {
         schema_.store_raw_vector = table_info.store_raw_data_;
 
     } catch (std::exception& ex) {
+        SERVER_LOG_ERROR << "DescribeTableTask encounter exception: " << ex.what();
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
@@ -279,6 +281,7 @@ ServerError BuildIndexTask::OnExecute() {
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
+        SERVER_LOG_ERROR << "BuildIndexTask encounter exception: " << ex.what();
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
@@ -316,6 +319,7 @@ ServerError HasTableTask::OnExecute() {
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
+        SERVER_LOG_ERROR << "HasTableTask encounter exception: " << ex.what();
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
@@ -365,6 +369,7 @@ ServerError DeleteTableTask::OnExecute() {
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception& ex) {
+        SERVER_LOG_ERROR << "DeleteTableTask encounter exception: " << ex.what();
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
@@ -481,6 +486,7 @@ ServerError AddVectorTask::OnExecute() {
         rc.ElapseFromBegin("totally cost");
 
     } catch (std::exception& ex) {
+        SERVER_LOG_ERROR << "AddVectorTask encounter exception: " << ex.what();
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
@@ -604,6 +610,7 @@ ServerError SearchVectorTaskBase::OnExecute() {
             << " construct result(" << (span_result/total_cost)*100.0 << "%)";
 
     } catch (std::exception& ex) {
+        SERVER_LOG_ERROR << "SearchVectorTask encounter exception: " << ex.what();
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
@@ -739,6 +746,7 @@ ServerError GetTableRowCountTask::OnExecute() {
         rc.ElapseFromBegin("totally cost");
 
     } catch (std::exception& ex) {
+        SERVER_LOG_ERROR << "GetTableRowCountTask encounter exception: " << ex.what();
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 

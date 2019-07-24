@@ -233,21 +233,22 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         PrintTableSchema(tb_schema);
     }
 
+    //add vectors
     std::vector<std::pair<int64_t, RowRecord>> search_record_array;
-    {//add vectors
-        for (int i = 0; i < ADD_VECTOR_LOOP; i++) {//add vectors
-            TimeRecorder recorder("Add vector No." + std::to_string(i));
-            std::vector<RowRecord> record_array;
-            int64_t begin_index = i * BATCH_ROW_COUNT;
-            BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array);
-            std::vector<int64_t> record_ids;
-            Status stat = conn->AddVector(TABLE_NAME, record_array, record_ids);
-            std::cout << "AddVector function call status: " << stat.ToString() << std::endl;
-            std::cout << "Returned id array count: " << record_ids.size() << std::endl;
+    for (int i = 0; i < ADD_VECTOR_LOOP; i++) {
+        TimeRecorder recorder("Add vector No." + std::to_string(i));
+        std::vector<RowRecord> record_array;
+        int64_t begin_index = i * BATCH_ROW_COUNT;
+        BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array);
+        std::vector<int64_t> record_ids;
+        Status stat = conn->AddVector(TABLE_NAME, record_array, record_ids);
+        std::cout << "AddVector function call status: " << stat.ToString() << std::endl;
+        std::cout << "Returned id array count: " << record_ids.size() << std::endl;
 
-            if(search_record_array.size() < NQ) {
+        if(i == 0) {
+            for(int64_t k = SEARCH_TARGET; k < SEARCH_TARGET + NQ; k++) {
                 search_record_array.push_back(
-                        std::make_pair(record_ids[SEARCH_TARGET], record_array[SEARCH_TARGET]));
+                        std::make_pair(record_ids[k], record_array[k]));
             }
         }
     }
