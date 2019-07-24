@@ -752,10 +752,7 @@ macro(build_faiss)
     if(${MILVUS_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
-                "--with-cuda-arch=\"-gencode=arch=compute_35,code=sm_35\""
-                "--with-cuda-arch=\"-gencode=arch=compute_52,code=sm_52\""
-                "--with-cuda-arch=\"-gencode=arch=compute_60,code=sm_60\""
-                "--with-cuda-arch=\"-gencode=arch=compute_61,code=sm_61\""
+                "--with-cuda-arch=-gencode=arch=compute_35,code=sm_35 -gencode=arch=compute_52,code=sm_52 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_75,code=sm_75"
                 )
     else()
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS} --without-cuda)
@@ -769,7 +766,7 @@ macro(build_faiss)
             "./configure"
             ${FAISS_CONFIGURE_ARGS}
             BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
+            ${MAKE} ${MAKE_BUILD_ARGS} VERBOSE=1
             BUILD_IN_SOURCE
             1
             INSTALL_COMMAND
