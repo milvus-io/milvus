@@ -30,10 +30,31 @@ std::string GetMetricType() {
 }
 }
 
+std::string IndexStatsHelper::ToString(const std::string &prefix) const {
+    return "";
+}
+
+void IndexStatsHelper::Reset() const {
+    faiss::indexIVF_stats.reset();
+}
+
+std::string FaissIndexIVFStatsHelper::ToString(const std::string &prefix) const {
+    std::stringstream ss;
+    ss << prefix;
+    ss << identifier_ << ":";
+    ss << " NQ=" << faiss::indexIVF_stats.nq;
+    ss << " NL=" << faiss::indexIVF_stats.nlist;
+    ss << " ND=" << faiss::indexIVF_stats.ndis;
+    ss << " NH=" << faiss::indexIVF_stats.nheap_updates;
+    ss << " Q=" << faiss::indexIVF_stats.quantization_time;
+    ss << " S=" << faiss::indexIVF_stats.search_time;
+    return ss.str();
+}
+
 FaissExecutionEngine::FaissExecutionEngine(uint16_t dimension,
-        const std::string& location,
-        const std::string& build_index_type,
-        const std::string& raw_index_type)
+                                           const std::string &location,
+                                           const std::string &build_index_type,
+                                           const std::string &raw_index_type)
     : location_(location),
       build_index_type_(build_index_type),
       raw_index_type_(raw_index_type) {
@@ -44,9 +65,9 @@ FaissExecutionEngine::FaissExecutionEngine(uint16_t dimension,
 }
 
 FaissExecutionEngine::FaissExecutionEngine(std::shared_ptr<faiss::Index> index,
-        const std::string& location,
-        const std::string& build_index_type,
-        const std::string& raw_index_type)
+                                           const std::string &location,
+                                           const std::string &build_index_type,
+                                           const std::string &raw_index_type)
     : pIndex_(index),
       location_(location),
       build_index_type_(build_index_type),
@@ -59,11 +80,11 @@ Status FaissExecutionEngine::AddWithIds(long n, const float *xdata, const long *
 }
 
 size_t FaissExecutionEngine::Count() const {
-    return (size_t)(pIndex_->ntotal);
+    return (size_t) (pIndex_->ntotal);
 }
 
 size_t FaissExecutionEngine::Size() const {
-    return (size_t)(Count() * pIndex_->d)*sizeof(float);
+    return (size_t) (Count() * pIndex_->d) * sizeof(float);
 }
 
 size_t FaissExecutionEngine::Dimension() const {
@@ -80,7 +101,7 @@ Status FaissExecutionEngine::Serialize() {
 }
 
 Status FaissExecutionEngine::Load(bool to_cache) {
-    auto index  = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    auto index = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool already_in_cache = (index != nullptr);
     auto start_time = METRICS_NOW_TIME;
     if (!index) {
@@ -99,12 +120,12 @@ Status FaissExecutionEngine::Load(bool to_cache) {
 
         server::Metrics::GetInstance().FaissDiskLoadSizeBytesHistogramObserve(total_size);
 //        server::Metrics::GetInstance().FaissDiskLoadIOSpeedHistogramObserve(total_size/double(total_time));
-        server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(total_size/double(total_time));
+        server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(total_size / double(total_time));
     }
     return Status::OK();
 }
 
-Status FaissExecutionEngine::Merge(const std::string& location) {
+Status FaissExecutionEngine::Merge(const std::string &location) {
     if (location == location_) {
         return Status::Error("Cannot Merge Self");
     }
@@ -114,14 +135,14 @@ Status FaissExecutionEngine::Merge(const std::string& location) {
     if (!to_merge) {
         to_merge = read_index(location);
     }
-    auto file_index = dynamic_cast<faiss::IndexIDMap*>(to_merge->data().get());
-    pIndex_->add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat*>(file_index->index)->xb.data(),
-            file_index->id_map.data());
+    auto file_index = dynamic_cast<faiss::IndexIDMap *>(to_merge->data().get());
+    pIndex_->add_with_ids(file_index->ntotal, dynamic_cast<faiss::IndexFlat *>(file_index->index)->xb.data(),
+                          file_index->id_map.data());
     return Status::OK();
 }
 
 ExecutionEnginePtr
-FaissExecutionEngine::BuildIndex(const std::string& location) {
+FaissExecutionEngine::BuildIndex(const std::string &location) {
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto opd = std::make_shared<Operand>();
@@ -130,11 +151,11 @@ FaissExecutionEngine::BuildIndex(const std::string& location) {
     opd->metric_type = GetMetricType();
     IndexBuilderPtr pBuilder = GetIndexBuilder(opd);
 
-    auto from_index = dynamic_cast<faiss::IndexIDMap*>(pIndex_.get());
+    auto from_index = dynamic_cast<faiss::IndexIDMap *>(pIndex_.get());
 
     auto index = pBuilder->build_all(from_index->ntotal,
-            dynamic_cast<faiss::IndexFlat*>(from_index->index)->xb.data(),
-            from_index->id_map.data());
+                                     dynamic_cast<faiss::IndexFlat *>(from_index->index)->xb.data(),
+                                     from_index->id_map.data());
 
     ExecutionEnginePtr new_ee(new FaissExecutionEngine(index->data(), location, build_index_type_, raw_index_type_));
     return new_ee;
@@ -148,18 +169,21 @@ Status FaissExecutionEngine::Search(long n,
     auto start_time = METRICS_NOW_TIME;
 
     std::shared_ptr<faiss::IndexIVF> ivf_index = std::dynamic_pointer_cast<faiss::IndexIVF>(pIndex_);
-    if(ivf_index) {
+    if (ivf_index) {
+        std::string stats_prefix = "K=" + std::to_string(k) + ":";
         ENGINE_LOG_DEBUG << "Searching index type: " << build_index_type_ << " nProbe: " << nprobe_;
         ivf_index->nprobe = nprobe_;
+        ivf_stats_helper_.Reset();
         ivf_index->search(n, data, k, distances, labels);
+        ENGINE_LOG_INFO << ivf_stats_helper_.ToString(stats_prefix);
     } else {
         ENGINE_LOG_DEBUG << "Searching raw file";
         pIndex_->search(n, data, k, distances, labels);
     }
 
     auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-    server::Metrics::GetInstance().QueryIndexTypePerSecondSet(build_index_type_, double(n)/double(total_time));
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    server::Metrics::GetInstance().QueryIndexTypePerSecondSet(build_index_type_, double(n) / double(total_time));
     return Status::OK();
 }
 
@@ -173,17 +197,16 @@ Status FaissExecutionEngine::Cache() {
 
 Status FaissExecutionEngine::Init() {
 
-    if(build_index_type_ == BUILD_INDEX_TYPE_IVF ||
+    if (build_index_type_ == BUILD_INDEX_TYPE_IVF ||
         build_index_type_ == BUILD_INDEX_TYPE_IVFSQ8) {
 
         using namespace zilliz::milvus::server;
         ServerConfig &config = ServerConfig::GetInstance();
         ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
         nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1000);
-        nlist_ = engine_config.GetInt32Value(CONFIG_NLIST,16384);
+        nlist_ = engine_config.GetInt32Value(CONFIG_NLIST, 16384);
 
-    } else if(build_index_type_ == BUILD_INDEX_TYPE_IDMAP) {
-        ;
+    } else if (build_index_type_ == BUILD_INDEX_TYPE_IDMAP) { ;
     } else {
         return Status::Error("Wrong index type: ", build_index_type_);
     }
