@@ -17,20 +17,22 @@
 #include <google/protobuf/port_def.inc>
 
 namespace milvus {
+namespace grpc {
 class StatusDefaultTypeInternal {
  public:
   ::google::protobuf::internal::ExplicitlyConstructed<Status> _instance;
 } _Status_default_instance_;
+}  // namespace grpc
 }  // namespace milvus
 static void InitDefaultsStatus_status_2eproto() {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
   {
-    void* ptr = &::milvus::_Status_default_instance_;
-    new (ptr) ::milvus::Status();
+    void* ptr = &::milvus::grpc::_Status_default_instance_;
+    new (ptr) ::milvus::grpc::Status();
     ::google::protobuf::internal::OnShutdownDestroyMessage(ptr);
   }
-  ::milvus::Status::InitAsDefaultInstance();
+  ::milvus::grpc::Status::InitAsDefaultInstance();
 }
 
 ::google::protobuf::internal::SCCInfo<0> scc_info_Status_status_2eproto =
@@ -46,19 +48,19 @@ constexpr ::google::protobuf::ServiceDescriptor const** file_level_service_descr
 
 const ::google::protobuf::uint32 TableStruct_status_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   ~0u,  // no _has_bits_
-  PROTOBUF_FIELD_OFFSET(::milvus::Status, _internal_metadata_),
+  PROTOBUF_FIELD_OFFSET(::milvus::grpc::Status, _internal_metadata_),
   ~0u,  // no _extensions_
   ~0u,  // no _oneof_case_
   ~0u,  // no _weak_field_map_
-  PROTOBUF_FIELD_OFFSET(::milvus::Status, error_code_),
-  PROTOBUF_FIELD_OFFSET(::milvus::Status, reason_),
+  PROTOBUF_FIELD_OFFSET(::milvus::grpc::Status, error_code_),
+  PROTOBUF_FIELD_OFFSET(::milvus::grpc::Status, reason_),
 };
 static const ::google::protobuf::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
-  { 0, -1, sizeof(::milvus::Status)},
+  { 0, -1, sizeof(::milvus::grpc::Status)},
 };
 
 static ::google::protobuf::Message const * const file_default_instances[] = {
-  reinterpret_cast<const ::google::protobuf::Message*>(&::milvus::_Status_default_instance_),
+  reinterpret_cast<const ::google::protobuf::Message*>(&::milvus::grpc::_Status_default_instance_),
 };
 
 ::google::protobuf::internal::AssignDescriptorsTable assign_descriptors_table_status_2eproto = {
@@ -68,26 +70,26 @@ static ::google::protobuf::Message const * const file_default_instances[] = {
 };
 
 const char descriptor_table_protodef_status_2eproto[] =
-  "\n\014status.proto\022\006milvus\"\?\n\006Status\022%\n\nerro"
-  "r_code\030\001 \001(\0162\021.milvus.ErrorCode\022\016\n\006reaso"
-  "n\030\002 \001(\t*\354\003\n\tErrorCode\022\013\n\007SUCCESS\020\000\022\024\n\020UN"
-  "EXPECTED_ERROR\020\001\022\022\n\016CONNECT_FAILED\020\002\022\025\n\021"
-  "PERMISSION_DENIED\020\003\022\024\n\020TABLE_NOT_EXISTS\020"
-  "\004\022\024\n\020ILLEGAL_ARGUMENT\020\005\022\021\n\rILLEGAL_RANGE"
-  "\020\006\022\025\n\021ILLEGAL_DIMENSION\020\007\022\026\n\022ILLEGAL_IND"
-  "EX_TYPE\020\010\022\026\n\022ILLEGAL_TABLE_NAME\020\t\022\020\n\014ILL"
-  "EGAL_TOPK\020\n\022\025\n\021ILLEGAL_ROWRECORD\020\013\022\025\n\021IL"
-  "LEGAL_VECTOR_ID\020\014\022\031\n\025ILLEGAL_SEARCH_RESU"
-  "LT\020\r\022\022\n\016FILE_NOT_FOUND\020\016\022\017\n\013META_FAILED\020"
-  "\017\022\020\n\014CACHE_FAILED\020\020\022\030\n\024CANNOT_CREATE_FOL"
-  "DER\020\021\022\026\n\022CANNOT_CREATE_FILE\020\022\022\030\n\024CANNOT_"
-  "DELETE_FOLDER\020\023\022\026\n\022CANNOT_DELETE_FILE\020\024\022"
-  "\025\n\021BUILD_INDEX_ERROR\020\025b\006proto3"
+  "\n\014status.proto\022\013milvus.grpc\"D\n\006Status\022*\n"
+  "\nerror_code\030\001 \001(\0162\026.milvus.grpc.ErrorCod"
+  "e\022\016\n\006reason\030\002 \001(\t*\354\003\n\tErrorCode\022\013\n\007SUCCE"
+  "SS\020\000\022\024\n\020UNEXPECTED_ERROR\020\001\022\022\n\016CONNECT_FA"
+  "ILED\020\002\022\025\n\021PERMISSION_DENIED\020\003\022\024\n\020TABLE_N"
+  "OT_EXISTS\020\004\022\024\n\020ILLEGAL_ARGUMENT\020\005\022\021\n\rILL"
+  "EGAL_RANGE\020\006\022\025\n\021ILLEGAL_DIMENSION\020\007\022\026\n\022I"
+  "LLEGAL_INDEX_TYPE\020\010\022\026\n\022ILLEGAL_TABLE_NAM"
+  "E\020\t\022\020\n\014ILLEGAL_TOPK\020\n\022\025\n\021ILLEGAL_ROWRECO"
+  "RD\020\013\022\025\n\021ILLEGAL_VECTOR_ID\020\014\022\031\n\025ILLEGAL_S"
+  "EARCH_RESULT\020\r\022\022\n\016FILE_NOT_FOUND\020\016\022\017\n\013ME"
+  "TA_FAILED\020\017\022\020\n\014CACHE_FAILED\020\020\022\030\n\024CANNOT_"
+  "CREATE_FOLDER\020\021\022\026\n\022CANNOT_CREATE_FILE\020\022\022"
+  "\030\n\024CANNOT_DELETE_FOLDER\020\023\022\026\n\022CANNOT_DELE"
+  "TE_FILE\020\024\022\025\n\021BUILD_INDEX_ERROR\020\025b\006proto3"
   ;
 ::google::protobuf::internal::DescriptorTable descriptor_table_status_2eproto = {
   false, InitDefaults_status_2eproto, 
   descriptor_table_protodef_status_2eproto,
-  "status.proto", &assign_descriptors_table_status_2eproto, 590,
+  "status.proto", &assign_descriptors_table_status_2eproto, 600,
 };
 
 void AddDescriptors_status_2eproto() {
@@ -100,6 +102,7 @@ void AddDescriptors_status_2eproto() {
 // Force running AddDescriptors() at dynamic initialization time.
 static bool dynamic_init_dummy_status_2eproto = []() { AddDescriptors_status_2eproto(); return true; }();
 namespace milvus {
+namespace grpc {
 const ::google::protobuf::EnumDescriptor* ErrorCode_descriptor() {
   ::google::protobuf::internal::AssignDescriptors(&assign_descriptors_table_status_2eproto);
   return file_level_enum_descriptors_status_2eproto[0];
@@ -151,7 +154,7 @@ const int Status::kReasonFieldNumber;
 Status::Status()
   : ::google::protobuf::Message(), _internal_metadata_(nullptr) {
   SharedCtor();
-  // @@protoc_insertion_point(constructor:milvus.Status)
+  // @@protoc_insertion_point(constructor:milvus.grpc.Status)
 }
 Status::Status(const Status& from)
   : ::google::protobuf::Message(),
@@ -162,7 +165,7 @@ Status::Status(const Status& from)
     reason_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.reason_);
   }
   error_code_ = from.error_code_;
-  // @@protoc_insertion_point(copy_constructor:milvus.Status)
+  // @@protoc_insertion_point(copy_constructor:milvus.grpc.Status)
 }
 
 void Status::SharedCtor() {
@@ -173,7 +176,7 @@ void Status::SharedCtor() {
 }
 
 Status::~Status() {
-  // @@protoc_insertion_point(destructor:milvus.Status)
+  // @@protoc_insertion_point(destructor:milvus.grpc.Status)
   SharedDtor();
 }
 
@@ -191,7 +194,7 @@ const Status& Status::default_instance() {
 
 
 void Status::Clear() {
-// @@protoc_insertion_point(message_clear_start:milvus.Status)
+// @@protoc_insertion_point(message_clear_start:milvus.grpc.Status)
   ::google::protobuf::uint32 cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
@@ -214,11 +217,11 @@ const char* Status::_InternalParse(const char* begin, const char* end, void* obj
     ptr = ::google::protobuf::io::Parse32(ptr, &tag);
     GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
     switch (tag >> 3) {
-      // .milvus.ErrorCode error_code = 1;
+      // .milvus.grpc.ErrorCode error_code = 1;
       case 1: {
         if (static_cast<::google::protobuf::uint8>(tag) != 8) goto handle_unusual;
         ::google::protobuf::uint64 val = ::google::protobuf::internal::ReadVarint(&ptr);
-        msg->set_error_code(static_cast<::milvus::ErrorCode>(val));
+        msg->set_error_code(static_cast<::milvus::grpc::ErrorCode>(val));
         GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
         break;
       }
@@ -227,7 +230,7 @@ const char* Status::_InternalParse(const char* begin, const char* end, void* obj
         if (static_cast<::google::protobuf::uint8>(tag) != 18) goto handle_unusual;
         ptr = ::google::protobuf::io::ReadSize(ptr, &size);
         GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        ctx->extra_parse_data().SetFieldName("milvus.Status.reason");
+        ctx->extra_parse_data().SetFieldName("milvus.grpc.Status.reason");
         object = msg->mutable_reason();
         if (size > end - ptr + ::google::protobuf::internal::ParseContext::kSlopBytes) {
           parser_till_end = ::google::protobuf::internal::GreedyStringParserUTF8;
@@ -266,20 +269,20 @@ bool Status::MergePartialFromCodedStream(
     ::google::protobuf::io::CodedInputStream* input) {
 #define DO_(EXPRESSION) if (!PROTOBUF_PREDICT_TRUE(EXPRESSION)) goto failure
   ::google::protobuf::uint32 tag;
-  // @@protoc_insertion_point(parse_start:milvus.Status)
+  // @@protoc_insertion_point(parse_start:milvus.grpc.Status)
   for (;;) {
     ::std::pair<::google::protobuf::uint32, bool> p = input->ReadTagWithCutoffNoLastTag(127u);
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::google::protobuf::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // .milvus.ErrorCode error_code = 1;
+      // .milvus.grpc.ErrorCode error_code = 1;
       case 1: {
         if (static_cast< ::google::protobuf::uint8>(tag) == (8 & 0xFF)) {
           int value = 0;
           DO_((::google::protobuf::internal::WireFormatLite::ReadPrimitive<
                    int, ::google::protobuf::internal::WireFormatLite::TYPE_ENUM>(
                  input, &value)));
-          set_error_code(static_cast< ::milvus::ErrorCode >(value));
+          set_error_code(static_cast< ::milvus::grpc::ErrorCode >(value));
         } else {
           goto handle_unusual;
         }
@@ -294,7 +297,7 @@ bool Status::MergePartialFromCodedStream(
           DO_(::google::protobuf::internal::WireFormatLite::VerifyUtf8String(
             this->reason().data(), static_cast<int>(this->reason().length()),
             ::google::protobuf::internal::WireFormatLite::PARSE,
-            "milvus.Status.reason"));
+            "milvus.grpc.Status.reason"));
         } else {
           goto handle_unusual;
         }
@@ -313,10 +316,10 @@ bool Status::MergePartialFromCodedStream(
     }
   }
 success:
-  // @@protoc_insertion_point(parse_success:milvus.Status)
+  // @@protoc_insertion_point(parse_success:milvus.grpc.Status)
   return true;
 failure:
-  // @@protoc_insertion_point(parse_failure:milvus.Status)
+  // @@protoc_insertion_point(parse_failure:milvus.grpc.Status)
   return false;
 #undef DO_
 }
@@ -324,11 +327,11 @@ failure:
 
 void Status::SerializeWithCachedSizes(
     ::google::protobuf::io::CodedOutputStream* output) const {
-  // @@protoc_insertion_point(serialize_start:milvus.Status)
+  // @@protoc_insertion_point(serialize_start:milvus.grpc.Status)
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.ErrorCode error_code = 1;
+  // .milvus.grpc.ErrorCode error_code = 1;
   if (this->error_code() != 0) {
     ::google::protobuf::internal::WireFormatLite::WriteEnum(
       1, this->error_code(), output);
@@ -339,7 +342,7 @@ void Status::SerializeWithCachedSizes(
     ::google::protobuf::internal::WireFormatLite::VerifyUtf8String(
       this->reason().data(), static_cast<int>(this->reason().length()),
       ::google::protobuf::internal::WireFormatLite::SERIALIZE,
-      "milvus.Status.reason");
+      "milvus.grpc.Status.reason");
     ::google::protobuf::internal::WireFormatLite::WriteStringMaybeAliased(
       2, this->reason(), output);
   }
@@ -348,16 +351,16 @@ void Status::SerializeWithCachedSizes(
     ::google::protobuf::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
   }
-  // @@protoc_insertion_point(serialize_end:milvus.Status)
+  // @@protoc_insertion_point(serialize_end:milvus.grpc.Status)
 }
 
 ::google::protobuf::uint8* Status::InternalSerializeWithCachedSizesToArray(
     ::google::protobuf::uint8* target) const {
-  // @@protoc_insertion_point(serialize_to_array_start:milvus.Status)
+  // @@protoc_insertion_point(serialize_to_array_start:milvus.grpc.Status)
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.ErrorCode error_code = 1;
+  // .milvus.grpc.ErrorCode error_code = 1;
   if (this->error_code() != 0) {
     target = ::google::protobuf::internal::WireFormatLite::WriteEnumToArray(
       1, this->error_code(), target);
@@ -368,7 +371,7 @@ void Status::SerializeWithCachedSizes(
     ::google::protobuf::internal::WireFormatLite::VerifyUtf8String(
       this->reason().data(), static_cast<int>(this->reason().length()),
       ::google::protobuf::internal::WireFormatLite::SERIALIZE,
-      "milvus.Status.reason");
+      "milvus.grpc.Status.reason");
     target =
       ::google::protobuf::internal::WireFormatLite::WriteStringToArray(
         2, this->reason(), target);
@@ -378,12 +381,12 @@ void Status::SerializeWithCachedSizes(
     target = ::google::protobuf::internal::WireFormat::SerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields(), target);
   }
-  // @@protoc_insertion_point(serialize_to_array_end:milvus.Status)
+  // @@protoc_insertion_point(serialize_to_array_end:milvus.grpc.Status)
   return target;
 }
 
 size_t Status::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:milvus.Status)
+// @@protoc_insertion_point(message_byte_size_start:milvus.grpc.Status)
   size_t total_size = 0;
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -402,7 +405,7 @@ size_t Status::ByteSizeLong() const {
         this->reason());
   }
 
-  // .milvus.ErrorCode error_code = 1;
+  // .milvus.grpc.ErrorCode error_code = 1;
   if (this->error_code() != 0) {
     total_size += 1 +
       ::google::protobuf::internal::WireFormatLite::EnumSize(this->error_code());
@@ -414,22 +417,22 @@ size_t Status::ByteSizeLong() const {
 }
 
 void Status::MergeFrom(const ::google::protobuf::Message& from) {
-// @@protoc_insertion_point(generalized_merge_from_start:milvus.Status)
+// @@protoc_insertion_point(generalized_merge_from_start:milvus.grpc.Status)
   GOOGLE_DCHECK_NE(&from, this);
   const Status* source =
       ::google::protobuf::DynamicCastToGenerated<Status>(
           &from);
   if (source == nullptr) {
-  // @@protoc_insertion_point(generalized_merge_from_cast_fail:milvus.Status)
+  // @@protoc_insertion_point(generalized_merge_from_cast_fail:milvus.grpc.Status)
     ::google::protobuf::internal::ReflectionOps::Merge(from, this);
   } else {
-  // @@protoc_insertion_point(generalized_merge_from_cast_success:milvus.Status)
+  // @@protoc_insertion_point(generalized_merge_from_cast_success:milvus.grpc.Status)
     MergeFrom(*source);
   }
 }
 
 void Status::MergeFrom(const Status& from) {
-// @@protoc_insertion_point(class_specific_merge_from_start:milvus.Status)
+// @@protoc_insertion_point(class_specific_merge_from_start:milvus.grpc.Status)
   GOOGLE_DCHECK_NE(&from, this);
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   ::google::protobuf::uint32 cached_has_bits = 0;
@@ -445,14 +448,14 @@ void Status::MergeFrom(const Status& from) {
 }
 
 void Status::CopyFrom(const ::google::protobuf::Message& from) {
-// @@protoc_insertion_point(generalized_copy_from_start:milvus.Status)
+// @@protoc_insertion_point(generalized_copy_from_start:milvus.grpc.Status)
   if (&from == this) return;
   Clear();
   MergeFrom(from);
 }
 
 void Status::CopyFrom(const Status& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:milvus.Status)
+// @@protoc_insertion_point(class_specific_copy_from_start:milvus.grpc.Status)
   if (&from == this) return;
   Clear();
   MergeFrom(from);
@@ -481,11 +484,12 @@ void Status::InternalSwap(Status* other) {
 
 
 // @@protoc_insertion_point(namespace_scope)
+}  // namespace grpc
 }  // namespace milvus
 namespace google {
 namespace protobuf {
-template<> PROTOBUF_NOINLINE ::milvus::Status* Arena::CreateMaybeMessage< ::milvus::Status >(Arena* arena) {
-  return Arena::CreateInternal< ::milvus::Status >(arena);
+template<> PROTOBUF_NOINLINE ::milvus::grpc::Status* Arena::CreateMaybeMessage< ::milvus::grpc::Status >(Arena* arena) {
+  return Arena::CreateInternal< ::milvus::grpc::Status >(arena);
 }
 }  // namespace protobuf
 }  // namespace google

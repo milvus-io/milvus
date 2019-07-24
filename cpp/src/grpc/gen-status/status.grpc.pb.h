@@ -28,7 +28,9 @@ class ServerContext;
 }  // namespace grpc
 
 namespace milvus {
+namespace grpc {
 
+}  // namespace grpc
 }  // namespace milvus
 
 

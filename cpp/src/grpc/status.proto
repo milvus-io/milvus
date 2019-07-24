@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package milvus;
+package milvus.grpc;
 
 enum ErrorCode {
     SUCCESS = 0;

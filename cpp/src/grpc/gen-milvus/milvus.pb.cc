@@ -484,59 +484,60 @@ static ::google::protobuf::Message const * const file_default_instances[] = {
 
 const char descriptor_table_protodef_milvus_2eproto[] =
   "\n\014milvus.proto\022\013milvus.grpc\032\014status.prot"
-  "o\"\?\n\tTableName\022\036\n\006status\030\001 \001(\0132\016.milvus."
-  "Status\022\022\n\ntable_name\030\002 \001(\t\"z\n\013TableSchem"
-  "a\022*\n\ntable_name\030\001 \001(\0132\026.milvus.grpc.Tabl"
-  "eName\022\022\n\nindex_type\030\002 \001(\005\022\021\n\tdimension\030\003"
-  " \001(\003\022\030\n\020store_raw_vector\030\004 \001(\010\"/\n\005Range\022"
-  "\023\n\013start_value\030\001 \001(\t\022\021\n\tend_value\030\002 \001(\t\""
-  " \n\tRowRecord\022\023\n\013vector_data\030\001 \003(\002\"S\n\013Ins"
-  "ertInfos\022\022\n\ntable_name\030\001 \001(\t\0220\n\020row_reco"
-  "rd_array\030\002 \003(\0132\026.milvus.grpc.RowRecord\"D"
-  "\n\tVectorIds\022\036\n\006status\030\001 \001(\0132\016.milvus.Sta"
-  "tus\022\027\n\017vector_id_array\030\002 \003(\003\"\230\001\n\021SearchV"
-  "ectorInfos\022\022\n\ntable_name\030\001 \001(\t\0222\n\022query_"
-  "record_array\030\002 \003(\0132\026.milvus.grpc.RowReco"
-  "rd\022-\n\021query_range_array\030\003 \003(\0132\022.milvus.g"
-  "rpc.Range\022\014\n\004topk\030\004 \001(\003\"n\n\030SearchVectorI"
-  "nFilesInfos\022\025\n\rfile_id_array\030\001 \003(\t\022;\n\023se"
-  "arch_vector_infos\030\002 \001(\0132\036.milvus.grpc.Se"
-  "archVectorInfos\"+\n\013QueryResult\022\n\n\002id\030\001 \001"
-  "(\003\022\020\n\010distance\030\002 \001(\001\"h\n\017TopKQueryResult\022"
-  "\036\n\006status\030\001 \001(\0132\016.milvus.Status\0225\n\023query"
-  "_result_arrays\030\002 \003(\0132\030.milvus.grpc.Query"
-  "Result\"C\n\013StringReply\022\036\n\006status\030\001 \001(\0132\016."
-  "milvus.Status\022\024\n\014string_reply\030\002 \001(\t\"\?\n\tB"
-  "oolReply\022\036\n\006status\030\001 \001(\0132\016.milvus.Status"
-  "\022\022\n\nbool_reply\030\002 \001(\010\"H\n\rTableRowCount\022\036\n"
-  "\006status\030\001 \001(\0132\016.milvus.Status\022\027\n\017table_r"
-  "ow_count\030\002 \001(\003\"\026\n\007Command\022\013\n\003cmd\030\001 \001(\t\"<"
-  "\n\014ServerStatus\022\036\n\006status\030\001 \001(\0132\016.milvus."
-  "Status\022\014\n\004info\030\002 \001(\t2\367\005\n\rMilvusService\0229"
-  "\n\013CreateTable\022\030.milvus.grpc.TableSchema\032"
-  "\016.milvus.Status\"\000\022<\n\010HasTable\022\026.milvus.g"
+  "o\"D\n\tTableName\022#\n\006status\030\001 \001(\0132\023.milvus."
+  "grpc.Status\022\022\n\ntable_name\030\002 \001(\t\"z\n\013Table"
+  "Schema\022*\n\ntable_name\030\001 \001(\0132\026.milvus.grpc"
+  ".TableName\022\022\n\nindex_type\030\002 \001(\005\022\021\n\tdimens"
+  "ion\030\003 \001(\003\022\030\n\020store_raw_vector\030\004 \001(\010\"/\n\005R"
+  "ange\022\023\n\013start_value\030\001 \001(\t\022\021\n\tend_value\030\002"
+  " \001(\t\" \n\tRowRecord\022\023\n\013vector_data\030\001 \003(\002\"S"
+  "\n\013InsertInfos\022\022\n\ntable_name\030\001 \001(\t\0220\n\020row"
+  "_record_array\030\002 \003(\0132\026.milvus.grpc.RowRec"
+  "ord\"I\n\tVectorIds\022#\n\006status\030\001 \001(\0132\023.milvu"
+  "s.grpc.Status\022\027\n\017vector_id_array\030\002 \003(\003\"\230"
+  "\001\n\021SearchVectorInfos\022\022\n\ntable_name\030\001 \001(\t"
+  "\0222\n\022query_record_array\030\002 \003(\0132\026.milvus.gr"
+  "pc.RowRecord\022-\n\021query_range_array\030\003 \003(\0132"
+  "\022.milvus.grpc.Range\022\014\n\004topk\030\004 \001(\003\"n\n\030Sea"
+  "rchVectorInFilesInfos\022\025\n\rfile_id_array\030\001"
+  " \003(\t\022;\n\023search_vector_infos\030\002 \001(\0132\036.milv"
+  "us.grpc.SearchVectorInfos\"+\n\013QueryResult"
+  "\022\n\n\002id\030\001 \001(\003\022\020\n\010distance\030\002 \001(\001\"m\n\017TopKQu"
+  "eryResult\022#\n\006status\030\001 \001(\0132\023.milvus.grpc."
+  "Status\0225\n\023query_result_arrays\030\002 \003(\0132\030.mi"
+  "lvus.grpc.QueryResult\"H\n\013StringReply\022#\n\006"
+  "status\030\001 \001(\0132\023.milvus.grpc.Status\022\024\n\014str"
+  "ing_reply\030\002 \001(\t\"D\n\tBoolReply\022#\n\006status\030\001"
+  " \001(\0132\023.milvus.grpc.Status\022\022\n\nbool_reply\030"
+  "\002 \001(\010\"M\n\rTableRowCount\022#\n\006status\030\001 \001(\0132\023"
+  ".milvus.grpc.Status\022\027\n\017table_row_count\030\002"
+  " \001(\003\"\026\n\007Command\022\013\n\003cmd\030\001 \001(\t\"A\n\014ServerSt"
+  "atus\022#\n\006status\030\001 \001(\0132\023.milvus.grpc.Statu"
+  "s\022\014\n\004info\030\002 \001(\t2\206\006\n\rMilvusService\022>\n\013Cre"
+  "ateTable\022\030.milvus.grpc.TableSchema\032\023.mil"
+  "vus.grpc.Status\"\000\022<\n\010HasTable\022\026.milvus.g"
   "rpc.TableName\032\026.milvus.grpc.BoolReply\"\000\022"
-  "5\n\tDropTable\022\026.milvus.grpc.TableName\032\016.m"
-  "ilvus.Status\"\000\0226\n\nBuildIndex\022\026.milvus.gr"
-  "pc.TableName\032\016.milvus.Status\"\000\022B\n\014Insert"
-  "Vector\022\030.milvus.grpc.InsertInfos\032\026.milvu"
-  "s.grpc.VectorIds\"\000\022P\n\014SearchVector\022\036.mil"
-  "vus.grpc.SearchVectorInfos\032\034.milvus.grpc"
-  ".TopKQueryResult\"\0000\001\022^\n\023SearchVectorInFi"
-  "les\022%.milvus.grpc.SearchVectorInFilesInf"
-  "os\032\034.milvus.grpc.TopKQueryResult\"\0000\001\022C\n\r"
-  "DescribeTable\022\026.milvus.grpc.TableName\032\030."
-  "milvus.grpc.TableSchema\"\000\022H\n\020GetTableRow"
-  "Count\022\026.milvus.grpc.TableName\032\032.milvus.g"
-  "rpc.TableRowCount\"\000\022>\n\nShowTables\022\024.milv"
-  "us.grpc.Command\032\026.milvus.grpc.TableName\""
-  "\0000\001\0229\n\004Ping\022\024.milvus.grpc.Command\032\031.milv"
-  "us.grpc.ServerStatus\"\000b\006proto3"
+  ":\n\tDropTable\022\026.milvus.grpc.TableName\032\023.m"
+  "ilvus.grpc.Status\"\000\022;\n\nBuildIndex\022\026.milv"
+  "us.grpc.TableName\032\023.milvus.grpc.Status\"\000"
+  "\022B\n\014InsertVector\022\030.milvus.grpc.InsertInf"
+  "os\032\026.milvus.grpc.VectorIds\"\000\022P\n\014SearchVe"
+  "ctor\022\036.milvus.grpc.SearchVectorInfos\032\034.m"
+  "ilvus.grpc.TopKQueryResult\"\0000\001\022^\n\023Search"
+  "VectorInFiles\022%.milvus.grpc.SearchVector"
+  "InFilesInfos\032\034.milvus.grpc.TopKQueryResu"
+  "lt\"\0000\001\022C\n\rDescribeTable\022\026.milvus.grpc.Ta"
+  "bleName\032\030.milvus.grpc.TableSchema\"\000\022H\n\020G"
+  "etTableRowCount\022\026.milvus.grpc.TableName\032"
+  "\032.milvus.grpc.TableRowCount\"\000\022>\n\nShowTab"
+  "les\022\024.milvus.grpc.Command\032\026.milvus.grpc."
+  "TableName\"\0000\001\0229\n\004Ping\022\024.milvus.grpc.Comm"
+  "and\032\031.milvus.grpc.ServerStatus\"\000b\006proto3"
   ;
 ::google::protobuf::internal::DescriptorTable descriptor_table_milvus_2eproto = {
   false, InitDefaults_milvus_2eproto, 
   descriptor_table_protodef_milvus_2eproto,
-  "milvus.proto", &assign_descriptors_table_milvus_2eproto, 1950,
+  "milvus.proto", &assign_descriptors_table_milvus_2eproto, 2000,
 };
 
 void AddDescriptors_milvus_2eproto() {
@@ -555,15 +556,15 @@ namespace grpc {
 // ===================================================================
 
 void TableName::InitAsDefaultInstance() {
-  ::milvus::grpc::_TableName_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::Status*>(
-      ::milvus::Status::internal_default_instance());
+  ::milvus::grpc::_TableName_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::grpc::Status*>(
+      ::milvus::grpc::Status::internal_default_instance());
 }
 class TableName::HasBitSetters {
  public:
-  static const ::milvus::Status& status(const TableName* msg);
+  static const ::milvus::grpc::Status& status(const TableName* msg);
 };
 
-const ::milvus::Status&
+const ::milvus::grpc::Status&
 TableName::HasBitSetters::status(const TableName* msg) {
   return *msg->status_;
 }
@@ -592,7 +593,7 @@ TableName::TableName(const TableName& from)
     table_name_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.table_name_);
   }
   if (from.has_status()) {
-    status_ = new ::milvus::Status(*from.status_);
+    status_ = new ::milvus::grpc::Status(*from.status_);
   } else {
     status_ = nullptr;
   }
@@ -652,12 +653,12 @@ const char* TableName::_InternalParse(const char* begin, const char* end, void* 
     ptr = ::google::protobuf::io::Parse32(ptr, &tag);
     GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
     switch (tag >> 3) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast<::google::protobuf::uint8>(tag) != 10) goto handle_unusual;
         ptr = ::google::protobuf::io::ReadSize(ptr, &size);
         GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        parser_till_end = ::milvus::Status::_InternalParse;
+        parser_till_end = ::milvus::grpc::Status::_InternalParse;
         object = msg->mutable_status();
         if (size > end - ptr) goto len_delim_till_end;
         ptr += size;
@@ -715,7 +716,7 @@ bool TableName::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::google::protobuf::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast< ::google::protobuf::uint8>(tag) == (10 & 0xFF)) {
           DO_(::google::protobuf::internal::WireFormatLite::ReadMessage(
@@ -768,7 +769,7 @@ void TableName::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     ::google::protobuf::internal::WireFormatLite::WriteMessageMaybeToArray(
       1, HasBitSetters::status(this), output);
@@ -797,7 +798,7 @@ void TableName::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     target = ::google::protobuf::internal::WireFormatLite::
       InternalWriteMessageToArray(
@@ -843,7 +844,7 @@ size_t TableName::ByteSizeLong() const {
         this->table_name());
   }
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     total_size += 1 +
       ::google::protobuf::internal::WireFormatLite::MessageSize(
@@ -882,7 +883,7 @@ void TableName::MergeFrom(const TableName& from) {
     table_name_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.table_name_);
   }
   if (from.has_status()) {
-    mutable_status()->::milvus::Status::MergeFrom(from.status());
+    mutable_status()->::milvus::grpc::Status::MergeFrom(from.status());
   }
 }
 
@@ -2367,15 +2368,15 @@ void InsertInfos::InternalSwap(InsertInfos* other) {
 // ===================================================================
 
 void VectorIds::InitAsDefaultInstance() {
-  ::milvus::grpc::_VectorIds_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::Status*>(
-      ::milvus::Status::internal_default_instance());
+  ::milvus::grpc::_VectorIds_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::grpc::Status*>(
+      ::milvus::grpc::Status::internal_default_instance());
 }
 class VectorIds::HasBitSetters {
  public:
-  static const ::milvus::Status& status(const VectorIds* msg);
+  static const ::milvus::grpc::Status& status(const VectorIds* msg);
 };
 
-const ::milvus::Status&
+const ::milvus::grpc::Status&
 VectorIds::HasBitSetters::status(const VectorIds* msg) {
   return *msg->status_;
 }
@@ -2401,7 +2402,7 @@ VectorIds::VectorIds(const VectorIds& from)
       vector_id_array_(from.vector_id_array_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   if (from.has_status()) {
-    status_ = new ::milvus::Status(*from.status_);
+    status_ = new ::milvus::grpc::Status(*from.status_);
   } else {
     status_ = nullptr;
   }
@@ -2459,12 +2460,12 @@ const char* VectorIds::_InternalParse(const char* begin, const char* end, void* 
     ptr = ::google::protobuf::io::Parse32(ptr, &tag);
     GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
     switch (tag >> 3) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast<::google::protobuf::uint8>(tag) != 10) goto handle_unusual;
         ptr = ::google::protobuf::io::ReadSize(ptr, &size);
         GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        parser_till_end = ::milvus::Status::_InternalParse;
+        parser_till_end = ::milvus::grpc::Status::_InternalParse;
         object = msg->mutable_status();
         if (size > end - ptr) goto len_delim_till_end;
         ptr += size;
@@ -2522,7 +2523,7 @@ bool VectorIds::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::google::protobuf::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast< ::google::protobuf::uint8>(tag) == (10 & 0xFF)) {
           DO_(::google::protobuf::internal::WireFormatLite::ReadMessage(
@@ -2576,7 +2577,7 @@ void VectorIds::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     ::google::protobuf::internal::WireFormatLite::WriteMessageMaybeToArray(
       1, HasBitSetters::status(this), output);
@@ -2606,7 +2607,7 @@ void VectorIds::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     target = ::google::protobuf::internal::WireFormatLite::
       InternalWriteMessageToArray(
@@ -2662,7 +2663,7 @@ size_t VectorIds::ByteSizeLong() const {
     total_size += data_size;
   }
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     total_size += 1 +
       ::google::protobuf::internal::WireFormatLite::MessageSize(
@@ -2698,7 +2699,7 @@ void VectorIds::MergeFrom(const VectorIds& from) {
 
   vector_id_array_.MergeFrom(from.vector_id_array_);
   if (from.has_status()) {
-    mutable_status()->::milvus::Status::MergeFrom(from.status());
+    mutable_status()->::milvus::grpc::Status::MergeFrom(from.status());
   }
 }
 
@@ -3867,15 +3868,15 @@ void QueryResult::InternalSwap(QueryResult* other) {
 // ===================================================================
 
 void TopKQueryResult::InitAsDefaultInstance() {
-  ::milvus::grpc::_TopKQueryResult_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::Status*>(
-      ::milvus::Status::internal_default_instance());
+  ::milvus::grpc::_TopKQueryResult_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::grpc::Status*>(
+      ::milvus::grpc::Status::internal_default_instance());
 }
 class TopKQueryResult::HasBitSetters {
  public:
-  static const ::milvus::Status& status(const TopKQueryResult* msg);
+  static const ::milvus::grpc::Status& status(const TopKQueryResult* msg);
 };
 
-const ::milvus::Status&
+const ::milvus::grpc::Status&
 TopKQueryResult::HasBitSetters::status(const TopKQueryResult* msg) {
   return *msg->status_;
 }
@@ -3901,7 +3902,7 @@ TopKQueryResult::TopKQueryResult(const TopKQueryResult& from)
       query_result_arrays_(from.query_result_arrays_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   if (from.has_status()) {
-    status_ = new ::milvus::Status(*from.status_);
+    status_ = new ::milvus::grpc::Status(*from.status_);
   } else {
     status_ = nullptr;
   }
@@ -3959,12 +3960,12 @@ const char* TopKQueryResult::_InternalParse(const char* begin, const char* end, 
     ptr = ::google::protobuf::io::Parse32(ptr, &tag);
     GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
     switch (tag >> 3) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast<::google::protobuf::uint8>(tag) != 10) goto handle_unusual;
         ptr = ::google::protobuf::io::ReadSize(ptr, &size);
         GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        parser_till_end = ::milvus::Status::_InternalParse;
+        parser_till_end = ::milvus::grpc::Status::_InternalParse;
         object = msg->mutable_status();
         if (size > end - ptr) goto len_delim_till_end;
         ptr += size;
@@ -4018,7 +4019,7 @@ bool TopKQueryResult::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::google::protobuf::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast< ::google::protobuf::uint8>(tag) == (10 & 0xFF)) {
           DO_(::google::protobuf::internal::WireFormatLite::ReadMessage(
@@ -4067,7 +4068,7 @@ void TopKQueryResult::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     ::google::protobuf::internal::WireFormatLite::WriteMessageMaybeToArray(
       1, HasBitSetters::status(this), output);
@@ -4095,7 +4096,7 @@ void TopKQueryResult::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     target = ::google::protobuf::internal::WireFormatLite::
       InternalWriteMessageToArray(
@@ -4142,7 +4143,7 @@ size_t TopKQueryResult::ByteSizeLong() const {
     }
   }
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     total_size += 1 +
       ::google::protobuf::internal::WireFormatLite::MessageSize(
@@ -4178,7 +4179,7 @@ void TopKQueryResult::MergeFrom(const TopKQueryResult& from) {
 
   query_result_arrays_.MergeFrom(from.query_result_arrays_);
   if (from.has_status()) {
-    mutable_status()->::milvus::Status::MergeFrom(from.status());
+    mutable_status()->::milvus::grpc::Status::MergeFrom(from.status());
   }
 }
 
@@ -4220,15 +4221,15 @@ void TopKQueryResult::InternalSwap(TopKQueryResult* other) {
 // ===================================================================
 
 void StringReply::InitAsDefaultInstance() {
-  ::milvus::grpc::_StringReply_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::Status*>(
-      ::milvus::Status::internal_default_instance());
+  ::milvus::grpc::_StringReply_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::grpc::Status*>(
+      ::milvus::grpc::Status::internal_default_instance());
 }
 class StringReply::HasBitSetters {
  public:
-  static const ::milvus::Status& status(const StringReply* msg);
+  static const ::milvus::grpc::Status& status(const StringReply* msg);
 };
 
-const ::milvus::Status&
+const ::milvus::grpc::Status&
 StringReply::HasBitSetters::status(const StringReply* msg) {
   return *msg->status_;
 }
@@ -4257,7 +4258,7 @@ StringReply::StringReply(const StringReply& from)
     string_reply_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.string_reply_);
   }
   if (from.has_status()) {
-    status_ = new ::milvus::Status(*from.status_);
+    status_ = new ::milvus::grpc::Status(*from.status_);
   } else {
     status_ = nullptr;
   }
@@ -4317,12 +4318,12 @@ const char* StringReply::_InternalParse(const char* begin, const char* end, void
     ptr = ::google::protobuf::io::Parse32(ptr, &tag);
     GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
     switch (tag >> 3) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast<::google::protobuf::uint8>(tag) != 10) goto handle_unusual;
         ptr = ::google::protobuf::io::ReadSize(ptr, &size);
         GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        parser_till_end = ::milvus::Status::_InternalParse;
+        parser_till_end = ::milvus::grpc::Status::_InternalParse;
         object = msg->mutable_status();
         if (size > end - ptr) goto len_delim_till_end;
         ptr += size;
@@ -4380,7 +4381,7 @@ bool StringReply::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::google::protobuf::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast< ::google::protobuf::uint8>(tag) == (10 & 0xFF)) {
           DO_(::google::protobuf::internal::WireFormatLite::ReadMessage(
@@ -4433,7 +4434,7 @@ void StringReply::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     ::google::protobuf::internal::WireFormatLite::WriteMessageMaybeToArray(
       1, HasBitSetters::status(this), output);
@@ -4462,7 +4463,7 @@ void StringReply::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     target = ::google::protobuf::internal::WireFormatLite::
       InternalWriteMessageToArray(
@@ -4508,7 +4509,7 @@ size_t StringReply::ByteSizeLong() const {
         this->string_reply());
   }
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     total_size += 1 +
       ::google::protobuf::internal::WireFormatLite::MessageSize(
@@ -4547,7 +4548,7 @@ void StringReply::MergeFrom(const StringReply& from) {
     string_reply_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.string_reply_);
   }
   if (from.has_status()) {
-    mutable_status()->::milvus::Status::MergeFrom(from.status());
+    mutable_status()->::milvus::grpc::Status::MergeFrom(from.status());
   }
 }
 
@@ -4590,15 +4591,15 @@ void StringReply::InternalSwap(StringReply* other) {
 // ===================================================================
 
 void BoolReply::InitAsDefaultInstance() {
-  ::milvus::grpc::_BoolReply_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::Status*>(
-      ::milvus::Status::internal_default_instance());
+  ::milvus::grpc::_BoolReply_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::grpc::Status*>(
+      ::milvus::grpc::Status::internal_default_instance());
 }
 class BoolReply::HasBitSetters {
  public:
-  static const ::milvus::Status& status(const BoolReply* msg);
+  static const ::milvus::grpc::Status& status(const BoolReply* msg);
 };
 
-const ::milvus::Status&
+const ::milvus::grpc::Status&
 BoolReply::HasBitSetters::status(const BoolReply* msg) {
   return *msg->status_;
 }
@@ -4623,7 +4624,7 @@ BoolReply::BoolReply(const BoolReply& from)
       _internal_metadata_(nullptr) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   if (from.has_status()) {
-    status_ = new ::milvus::Status(*from.status_);
+    status_ = new ::milvus::grpc::Status(*from.status_);
   } else {
     status_ = nullptr;
   }
@@ -4684,12 +4685,12 @@ const char* BoolReply::_InternalParse(const char* begin, const char* end, void* 
     ptr = ::google::protobuf::io::Parse32(ptr, &tag);
     GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
     switch (tag >> 3) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast<::google::protobuf::uint8>(tag) != 10) goto handle_unusual;
         ptr = ::google::protobuf::io::ReadSize(ptr, &size);
         GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        parser_till_end = ::milvus::Status::_InternalParse;
+        parser_till_end = ::milvus::grpc::Status::_InternalParse;
         object = msg->mutable_status();
         if (size > end - ptr) goto len_delim_till_end;
         ptr += size;
@@ -4734,7 +4735,7 @@ bool BoolReply::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::google::protobuf::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast< ::google::protobuf::uint8>(tag) == (10 & 0xFF)) {
           DO_(::google::protobuf::internal::WireFormatLite::ReadMessage(
@@ -4785,7 +4786,7 @@ void BoolReply::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     ::google::protobuf::internal::WireFormatLite::WriteMessageMaybeToArray(
       1, HasBitSetters::status(this), output);
@@ -4809,7 +4810,7 @@ void BoolReply::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     target = ::google::protobuf::internal::WireFormatLite::
       InternalWriteMessageToArray(
@@ -4842,7 +4843,7 @@ size_t BoolReply::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     total_size += 1 +
       ::google::protobuf::internal::WireFormatLite::MessageSize(
@@ -4882,7 +4883,7 @@ void BoolReply::MergeFrom(const BoolReply& from) {
   (void) cached_has_bits;
 
   if (from.has_status()) {
-    mutable_status()->::milvus::Status::MergeFrom(from.status());
+    mutable_status()->::milvus::grpc::Status::MergeFrom(from.status());
   }
   if (from.bool_reply() != 0) {
     set_bool_reply(from.bool_reply());
@@ -4927,15 +4928,15 @@ void BoolReply::InternalSwap(BoolReply* other) {
 // ===================================================================
 
 void TableRowCount::InitAsDefaultInstance() {
-  ::milvus::grpc::_TableRowCount_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::Status*>(
-      ::milvus::Status::internal_default_instance());
+  ::milvus::grpc::_TableRowCount_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::grpc::Status*>(
+      ::milvus::grpc::Status::internal_default_instance());
 }
 class TableRowCount::HasBitSetters {
  public:
-  static const ::milvus::Status& status(const TableRowCount* msg);
+  static const ::milvus::grpc::Status& status(const TableRowCount* msg);
 };
 
-const ::milvus::Status&
+const ::milvus::grpc::Status&
 TableRowCount::HasBitSetters::status(const TableRowCount* msg) {
   return *msg->status_;
 }
@@ -4960,7 +4961,7 @@ TableRowCount::TableRowCount(const TableRowCount& from)
       _internal_metadata_(nullptr) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   if (from.has_status()) {
-    status_ = new ::milvus::Status(*from.status_);
+    status_ = new ::milvus::grpc::Status(*from.status_);
   } else {
     status_ = nullptr;
   }
@@ -5021,12 +5022,12 @@ const char* TableRowCount::_InternalParse(const char* begin, const char* end, vo
     ptr = ::google::protobuf::io::Parse32(ptr, &tag);
     GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
     switch (tag >> 3) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast<::google::protobuf::uint8>(tag) != 10) goto handle_unusual;
         ptr = ::google::protobuf::io::ReadSize(ptr, &size);
         GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        parser_till_end = ::milvus::Status::_InternalParse;
+        parser_till_end = ::milvus::grpc::Status::_InternalParse;
         object = msg->mutable_status();
         if (size > end - ptr) goto len_delim_till_end;
         ptr += size;
@@ -5071,7 +5072,7 @@ bool TableRowCount::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::google::protobuf::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast< ::google::protobuf::uint8>(tag) == (10 & 0xFF)) {
           DO_(::google::protobuf::internal::WireFormatLite::ReadMessage(
@@ -5122,7 +5123,7 @@ void TableRowCount::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     ::google::protobuf::internal::WireFormatLite::WriteMessageMaybeToArray(
       1, HasBitSetters::status(this), output);
@@ -5146,7 +5147,7 @@ void TableRowCount::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     target = ::google::protobuf::internal::WireFormatLite::
       InternalWriteMessageToArray(
@@ -5179,7 +5180,7 @@ size_t TableRowCount::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     total_size += 1 +
       ::google::protobuf::internal::WireFormatLite::MessageSize(
@@ -5221,7 +5222,7 @@ void TableRowCount::MergeFrom(const TableRowCount& from) {
   (void) cached_has_bits;
 
   if (from.has_status()) {
-    mutable_status()->::milvus::Status::MergeFrom(from.status());
+    mutable_status()->::milvus::grpc::Status::MergeFrom(from.status());
   }
   if (from.table_row_count() != 0) {
     set_table_row_count(from.table_row_count());
@@ -5563,15 +5564,15 @@ void Command::InternalSwap(Command* other) {
 // ===================================================================
 
 void ServerStatus::InitAsDefaultInstance() {
-  ::milvus::grpc::_ServerStatus_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::Status*>(
-      ::milvus::Status::internal_default_instance());
+  ::milvus::grpc::_ServerStatus_default_instance_._instance.get_mutable()->status_ = const_cast< ::milvus::grpc::Status*>(
+      ::milvus::grpc::Status::internal_default_instance());
 }
 class ServerStatus::HasBitSetters {
  public:
-  static const ::milvus::Status& status(const ServerStatus* msg);
+  static const ::milvus::grpc::Status& status(const ServerStatus* msg);
 };
 
-const ::milvus::Status&
+const ::milvus::grpc::Status&
 ServerStatus::HasBitSetters::status(const ServerStatus* msg) {
   return *msg->status_;
 }
@@ -5600,7 +5601,7 @@ ServerStatus::ServerStatus(const ServerStatus& from)
     info_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.info_);
   }
   if (from.has_status()) {
-    status_ = new ::milvus::Status(*from.status_);
+    status_ = new ::milvus::grpc::Status(*from.status_);
   } else {
     status_ = nullptr;
   }
@@ -5660,12 +5661,12 @@ const char* ServerStatus::_InternalParse(const char* begin, const char* end, voi
     ptr = ::google::protobuf::io::Parse32(ptr, &tag);
     GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
     switch (tag >> 3) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast<::google::protobuf::uint8>(tag) != 10) goto handle_unusual;
         ptr = ::google::protobuf::io::ReadSize(ptr, &size);
         GOOGLE_PROTOBUF_PARSER_ASSERT(ptr);
-        parser_till_end = ::milvus::Status::_InternalParse;
+        parser_till_end = ::milvus::grpc::Status::_InternalParse;
         object = msg->mutable_status();
         if (size > end - ptr) goto len_delim_till_end;
         ptr += size;
@@ -5723,7 +5724,7 @@ bool ServerStatus::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::google::protobuf::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // .milvus.Status status = 1;
+      // .milvus.grpc.Status status = 1;
       case 1: {
         if (static_cast< ::google::protobuf::uint8>(tag) == (10 & 0xFF)) {
           DO_(::google::protobuf::internal::WireFormatLite::ReadMessage(
@@ -5776,7 +5777,7 @@ void ServerStatus::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     ::google::protobuf::internal::WireFormatLite::WriteMessageMaybeToArray(
       1, HasBitSetters::status(this), output);
@@ -5805,7 +5806,7 @@ void ServerStatus::SerializeWithCachedSizes(
   ::google::protobuf::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     target = ::google::protobuf::internal::WireFormatLite::
       InternalWriteMessageToArray(
@@ -5851,7 +5852,7 @@ size_t ServerStatus::ByteSizeLong() const {
         this->info());
   }
 
-  // .milvus.Status status = 1;
+  // .milvus.grpc.Status status = 1;
   if (this->has_status()) {
     total_size += 1 +
       ::google::protobuf::internal::WireFormatLite::MessageSize(
@@ -5890,7 +5891,7 @@ void ServerStatus::MergeFrom(const ServerStatus& from) {
     info_.AssignWithDefault(&::google::protobuf::internal::GetEmptyStringAlreadyInited(), from.info_);
   }
   if (from.has_status()) {
-    mutable_status()->::milvus::Status::MergeFrom(from.status());
+    mutable_status()->::milvus::grpc::Status::MergeFrom(from.status());
   }
 }
 
