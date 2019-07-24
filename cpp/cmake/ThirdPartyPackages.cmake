@@ -1673,14 +1673,18 @@ macro(build_gperftools)
             BUILD_BYPRODUCTS
             ${GPERFTOOLS_STATIC_LIB})
 
+    ExternalProject_Add_StepDependencies(gperftools_ep build libunwind_ep)
+
     file(MAKE_DIRECTORY "${GPERFTOOLS_INCLUDE_DIR}")
 
-    add_library(gperftools SHARED IMPORTED)
+    add_library(gperftools STATIC IMPORTED)
     set_target_properties(gperftools
             PROPERTIES IMPORTED_LOCATION "${GPERFTOOLS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${GPERFTOOLS_INCLUDE_DIR}")
+            INTERFACE_INCLUDE_DIRECTORIES "${GPERFTOOLS_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES libunwind)
 
     add_dependencies(gperftools gperftools_ep)
+    add_dependencies(gperftools libunwind_ep)
 endmacro()
 
 if(MILVUS_WITH_GPERFTOOLS)
@@ -1689,4 +1693,5 @@ if(MILVUS_WITH_GPERFTOOLS)
     # TODO: Don't use global includes but rather target_include_directories
     get_target_property(GPERFTOOLS_INCLUDE_DIR gperftools INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${GPERFTOOLS_INCLUDE_DIR})
+    link_directories(SYSTEM ${GPERFTOOLS_PREFIX}/lib)
 endif()
