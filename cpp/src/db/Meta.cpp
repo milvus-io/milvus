@@ -13,6 +13,8 @@ namespace milvus {
 namespace engine {
 namespace meta {
 
+Meta::~Meta() = default;
+
 DateT Meta::GetDate(const std::time_t& t, int day_delta) {
     struct tm ltm;
     localtime_r(&t, &ltm);
