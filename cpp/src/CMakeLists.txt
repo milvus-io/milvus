@@ -49,7 +49,6 @@ set(engine_files
         ${db_files}
         ${db_scheduler_files}
         ${wrapper_files}
-#        metrics/Metrics.cpp
         ${metrics_files}
         ${knowhere_files}
         )
@@ -93,10 +92,26 @@ set(third_party_libs
         cublas
         mysqlpp
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+        cudart
         )
+
 if (MEGASEARCH_WITH_ARROW STREQUAL "ON")
     set(third_party_libs ${third_party_libs} arrow)
-endif() 
+endif()
+if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
+    set(third_party_libs ${third_party_libs}
+            ${MKL_LIBS})
+else()
+    set(third_party_libs ${third_party_libs}
+            lapack
+            openblas)
+endif()
+
+if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
+    set(third_party_libs ${third_party_libs}
+            gperftools
+            libunwind)
+endif()
 
 if (GPU_VERSION STREQUAL "ON")
     link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
@@ -147,6 +162,8 @@ if (ENABLE_LICENSE STREQUAL "ON")
 endif ()
 
 set(metrics_lib
+        easyloggingpp
+        yaml-cpp
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
@@ -213,6 +230,6 @@ install(FILES
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4
-        DESTINATION lib) #need to copy libmysqlpp.so
+        DESTINATION lib)
 
-#add_subdirectory(sdk)
+add_subdirectory(sdk)

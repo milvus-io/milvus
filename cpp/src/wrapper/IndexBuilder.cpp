@@ -38,7 +38,7 @@ class GpuResources {
         using namespace zilliz::milvus::server;
         ServerConfig &config = ServerConfig::GetInstance();
         ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-        gpu_num = server_config.GetInt32Value("gpu_index", 0);
+        gpu_num = server_config.GetInt32Value(server::CONFIG_GPU_INDEX, 0);
     }
 
     int32_t GetGpu() {
@@ -72,7 +72,8 @@ Index_ptr IndexBuilder::build_all(const long &nb,
     {
         LOG(DEBUG) << "Build index by GPU";
         // TODO: list support index-type.
-        faiss::Index *ori_index = faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str());
+        faiss::MetricType metric_type = opd_->metric_type == "L2" ? faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+        faiss::Index *ori_index = faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str(), metric_type);
 
         std::lock_guard<std::mutex> lk(gpu_resource);
         faiss::gpu::StandardGpuResources res;
@@ -91,7 +92,8 @@ Index_ptr IndexBuilder::build_all(const long &nb,
 #else
     {
         LOG(DEBUG) << "Build index by CPU";
-        faiss::Index *index = faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str());
+        faiss::MetricType metric_type = opd_->metric_type == "L2" ? faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+        faiss::Index *index = faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str(), metric_type);
         if (!index->is_trained) {
             nt == 0 || xt == nullptr ? index->train(nb, xb)
                                      : index->train(nt, xt);
@@ -114,7 +116,8 @@ BgCpuBuilder::BgCpuBuilder(const zilliz::milvus::engine::Operand_ptr &opd) : Ind
 
 Index_ptr BgCpuBuilder::build_all(const long &nb, const float *xb, const long *ids, const long &nt, const float *xt) {
     std::shared_ptr<faiss::Index> index = nullptr;
-    index.reset(faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str()));
+    faiss::MetricType metric_type = opd_->metric_type == "L2" ? faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+    index.reset(faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str(), metric_type));
 
     LOG(DEBUG) << "Build index by CPU";
     {

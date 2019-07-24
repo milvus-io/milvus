@@ -44,13 +44,15 @@ public:
 
     virtual Status Size(uint64_t& result) = 0;
 
+    virtual Status BuildIndex(const std::string& table_id) = 0;
+
     virtual Status DropAll() = 0;
 
     DB() = default;
     DB(const DB&) = delete;
     DB& operator=(const DB&) = delete;
 
-    virtual ~DB();
+    virtual ~DB() = 0;
 }; // DB
 
 } // namespace engine

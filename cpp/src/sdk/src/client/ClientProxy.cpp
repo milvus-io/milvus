@@ -127,6 +127,22 @@ ClientProxy::DeleteTable(const std::string &table_name) {
 }
 
 Status
+ClientProxy::BuildIndex(const std::string &table_name) {
+    if(!IsConnected()) {
+        return Status(StatusCode::NotConnected, "not connected to server");
+    }
+
+    try {
+        ClientPtr()->interface()->BuildIndex(table_name);
+
+    }  catch ( std::exception& ex) {
+        return Status(StatusCode::UnknownError, "failed to build index: " + std::string(ex.what()));
+    }
+
+    return Status::OK();
+}
+
+Status
 ClientProxy::AddVector(const std::string &table_name,
                           const std::vector<RowRecord> &record_array,
                           std::vector<int64_t> &id_array) {
@@ -193,17 +209,25 @@ ClientProxy::SearchVector(const std::string &table_name,
         }
 
         //step 3: search vectors
-        std::vector<thrift::TopKQueryResult> result_array;
-        ClientPtr()->interface()->SearchVector(result_array, table_name, thrift_records, thrift_ranges, topk);
+        std::vector<thrift::TopKQueryBinResult> result_array;
+        ClientPtr()->interface()->SearchVector2(result_array, table_name, thrift_records, thrift_ranges, topk);
 
         //step 4: convert result array
         for(auto& thrift_topk_result : result_array) {
             TopKQueryResult result;
 
-            for(auto& thrift_query_result : thrift_topk_result.query_result_arrays) {
+            size_t id_count = thrift_topk_result.id_array.size()/sizeof(int64_t);
+            size_t dist_count = thrift_topk_result.distance_array.size()/ sizeof(double);
+            if(id_count != dist_count) {
+                return Status(StatusCode::UnknownError, "illegal result");
+            }
+
+            int64_t* id_ptr = (int64_t*)thrift_topk_result.id_array.data();
+            double* dist_ptr = (double*)thrift_topk_result.distance_array.data();
+            for(size_t i = 0; i < id_count; i++) {
                 QueryResult query_result;
-                query_result.id = thrift_query_result.id;
-                query_result.distance = thrift_query_result.distance;
+                query_result.id = id_ptr[i];
+                query_result.distance = dist_ptr[i];
                 result.query_result_arrays.emplace_back(query_result);
             }
 

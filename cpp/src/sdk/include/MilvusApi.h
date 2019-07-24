@@ -18,6 +18,7 @@ enum class IndexType {
     invalid = 0,
     cpu_idmap,
     gpu_ivfflat,
+    gpu_ivfsq8,
 };
 
 /**
@@ -179,6 +180,17 @@ public:
      */
     virtual Status DeleteTable(const std::string &table_name) = 0;
 
+
+    /**
+     * @brief Build index method
+     *
+     * This method is used to build index for whole table
+     *
+     * @param table_name, table name is going to be build index.
+     *
+     * @return Indicate if build index successfully.
+     */
+    virtual Status BuildIndex(const std::string &table_name) = 0;
 
     /**
      * @brief Add vector to table

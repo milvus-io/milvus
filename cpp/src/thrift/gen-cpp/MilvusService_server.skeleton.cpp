@@ -66,6 +66,21 @@ class MilvusServiceHandler : virtual public MilvusServiceIf {
   }
 
   /**
+   * @brief Build index by table method
+   * 
+   * This method is used to build index by table in sync mode.
+   * 
+   * @param table_name, table is going to be built index.
+   * 
+   * 
+   * @param table_name
+   */
+  void BuildIndex(const std::string& table_name) {
+    // Your implementation goes here
+    printf("BuildIndex\n");
+  }
+
+  /**
    * @brief Add vector array to table
    * 
    * This method is used to add vector array to table.
@@ -103,6 +118,28 @@ class MilvusServiceHandler : virtual public MilvusServiceIf {
   void SearchVector(std::vector<TopKQueryResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) {
     // Your implementation goes here
     printf("SearchVector\n");
+  }
+
+  /**
+   * @brief Query vector
+   * 
+   * This method is used to query vector in table.
+   * 
+   * @param table_name, table_name is queried.
+   * @param query_record_array, all vector are going to be queried.
+   * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+   * @param topk, how many similarity vectors will be searched.
+   * 
+   * @return query binary result array.
+   * 
+   * @param table_name
+   * @param query_record_array
+   * @param query_range_array
+   * @param topk
+   */
+  void SearchVector2(std::vector<TopKQueryBinResult> & _return, const std::string& table_name, const std::vector<RowRecord> & query_record_array, const std::vector<Range> & query_range_array, const int64_t topk) {
+    // Your implementation goes here
+    printf("SearchVector2\n");
   }
 
   /**

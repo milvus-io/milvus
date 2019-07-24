@@ -13,9 +13,12 @@ namespace zilliz {
 namespace milvus {
 namespace cache {
 
+constexpr double DEFAULT_THRESHHOLD_PERCENT = 0.85;
+
 Cache::Cache(int64_t capacity, uint64_t cache_max_count)
     : usage_(0),
       capacity_(capacity),
+      freemem_percent_(DEFAULT_THRESHHOLD_PERCENT),
       lru_(cache_max_count) {
 //    AGENT_LOG_DEBUG << "Construct Cache with capacity " << std::to_string(mem_capacity)
 }
@@ -64,15 +67,14 @@ void Cache::insert(const std::string& key, const DataObjPtr& data_ptr) {
             usage_ += data_ptr->size();
         }
 
-//        AGENT_LOG_DEBUG << "Insert into LRU(" << (capacity_ > 0 ? std::to_string(usage_ * 100 / capacity_) : "Nan")
-//                        << "%, +" << data_ptr->size() << ", " << usage_ << ", " << lru_.size() << "):"
-//                        << " " << key;
+        SERVER_LOG_DEBUG << "Insert " << key << " size:" << data_ptr->size()
+            << " bytes into cache, usage: " << usage_ << " bytes";
     }
 
     if (usage_ > capacity_) {
-//        AGENT_LOG_TRACE << "Current usage " << usage_
-//                        << " exceeds cache capacity " << capacity_
-//                        << ", start free memory";
+        SERVER_LOG_DEBUG << "Current usage " << usage_
+                        << " exceeds cache capacity " << capacity_
+                        << ", start free memory";
         free_memory();
     }
 }
@@ -86,12 +88,9 @@ void Cache::erase(const std::string& key) {
     const CacheObjPtr& obj_ptr = lru_.get(key);
     const DataObjPtr& data_ptr = obj_ptr->data_;
     usage_ -= data_ptr->size();
-//    AGENT_LOG_DEBUG << "Erase from LRU(" << (capacity_ > 0 ? std::to_string(usage_*100/capacity_) : "Nan")
-//                    << "%, -" << data_ptr->size() << ", " << usage_ << ", " << lru_.size() << "): "
-//                    << (data_ptr->flags().get_flag(DataObjAttr::kPinned) ? "Pinned " : "")
-//                    << (data_ptr->flags().get_flag(DataObjAttr::kValid) ? "Valid " : "")
-//                    << "(ref:" << obj_ptr->ref_ << ") "
-//                    << key;
+
+    SERVER_LOG_DEBUG << "Erase " << key << " size: " << data_ptr->size();
+
     lru_.erase(key);
 }
 
@@ -99,7 +98,7 @@ void Cache::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     lru_.clear();
     usage_ = 0;
-//    AGENT_LOG_DEBUG << "Clear LRU !";
+    SERVER_LOG_DEBUG << "Clear cache !";
 }
 
 #if 0 /* caiyd 20190221, need more testing before enable */
@@ -162,8 +161,11 @@ void Cache::restore_from_file(const std::string& key, const CacheObjPtr& obj_ptr
 void Cache::free_memory() {
     if (usage_ <= capacity_) return;
 
-    int64_t threshhold = capacity_ * THRESHHOLD_PERCENT;
+    int64_t threshhold = capacity_ * freemem_percent_;
     int64_t delta_size = usage_ - threshhold;
+    if(delta_size <= 0) {
+        delta_size = 1;//ensure at least one item erased
+    }
 
     std::set<std::string> key_array;
     int64_t released_size = 0;
@@ -183,7 +185,7 @@ void Cache::free_memory() {
         }
     }
 
-//    AGENT_LOG_DEBUG << "to be released memory size: " << released_size;
+    SERVER_LOG_DEBUG << "to be released memory size: " << released_size;
 
     for (auto& key : key_array) {
         erase(key);
@@ -193,28 +195,15 @@ void Cache::free_memory() {
 }
 
 void Cache::print() {
-    int64_t still_pinned_count = 0;
-    int64_t total_pinned_size = 0;
-    int64_t total_valid_empty_size = 0;
+    size_t cache_count = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-
-        for (auto it = lru_.begin(); it != lru_.end(); ++it) {
-            auto& obj_ptr = it->second;
-            const auto& data_ptr = obj_ptr->data_;
-            if (data_ptr != nullptr) {
-                total_pinned_size += data_ptr->size();
-                ++still_pinned_count;
-            } else {
-                total_valid_empty_size += data_ptr->size();
-            }
-        }
+        cache_count = lru_.size();
     }
 
-    SERVER_LOG_DEBUG << "[Still Pinned count]: " << still_pinned_count;
-    SERVER_LOG_DEBUG << "[Pinned Memory total size(byte)]: " << total_pinned_size;
-    SERVER_LOG_DEBUG << "[valid_empty total size(byte)]: " << total_valid_empty_size;
-    SERVER_LOG_DEBUG << "[free memory size(byte)]: " << capacity_ - total_pinned_size - total_valid_empty_size;
+    SERVER_LOG_DEBUG << "[Cache item count]: " << cache_count;
+    SERVER_LOG_DEBUG << "[Cache usage]: " << usage_ << " bytes";
+    SERVER_LOG_DEBUG << "[Cache capacity]: " << capacity_ << " bytes";
 }
 
 }   // cache

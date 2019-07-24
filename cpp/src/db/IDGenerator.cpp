@@ -13,7 +13,9 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-IDGenerator::~IDGenerator() {}
+IDGenerator::~IDGenerator() = default;
+
+constexpr size_t SimpleIDGenerator::MAX_IDS_PER_MICRO;
 
 IDNumber SimpleIDGenerator::GetNextIDNumber() {
     auto now = std::chrono::system_clock::now();

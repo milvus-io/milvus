@@ -8,6 +8,7 @@
 #include <src/server/ServerConfig.h>
 #include <src/metrics/Metrics.h>
 #include "Log.h"
+#include "utils/CommonUtil.h"
 
 #include "src/cache/CpuCacheMgr.h"
 #include "ExecutionEngineImpl.h"
@@ -51,16 +52,12 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = GetVecIndexFactory(IndexType::FAISS_IDMAP);
             break;
         }
-        case EngineType::FAISS_IVFFLAT_GPU: {
+        case EngineType::FAISS_IVFFLAT: {
             index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_MIX);
             break;
         }
-        case EngineType::FAISS_IVFFLAT_CPU: {
-            index = GetVecIndexFactory(IndexType::FAISS_IVFFLAT_CPU);
-            break;
-        }
-        case EngineType::SPTAG_KDT_RNT_CPU: {
-            index = GetVecIndexFactory(IndexType::SPTAG_KDT_RNT_CPU);
+        case EngineType::FAISS_IVFSQ8: {
+            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
             break;
         }
         default: {
@@ -92,7 +89,7 @@ size_t ExecutionEngineImpl::Dimension() const {
 }
 
 size_t ExecutionEngineImpl::PhysicalSize() const {
-    return (size_t) (Count() * Dimension()) * sizeof(float);
+    return server::CommonUtil::GetFileSize(location_);
 }
 
 Status ExecutionEngineImpl::Serialize() {
@@ -103,14 +100,13 @@ Status ExecutionEngineImpl::Serialize() {
     return Status::OK();
 }
 
-Status ExecutionEngineImpl::Load() {
+Status ExecutionEngineImpl::Load(bool to_cache) {
     index_ = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
-    bool to_cache = false;
+    bool already_in_cache = (index_ != nullptr);
     auto start_time = METRICS_NOW_TIME;
     if (!index_) {
         try {
             index_ = read_index(location_);
-            to_cache = true;
             ENGINE_LOG_DEBUG << "Disk io from: " << location_;
         } catch (knowhere::KnowhereException &e) {
             ENGINE_LOG_ERROR << e.what();
@@ -120,16 +116,16 @@ Status ExecutionEngineImpl::Load() {
         }
     }
 
-    if (to_cache) {
+    if (!already_in_cache && to_cache) {
         Cache();
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time, end_time);
 
         server::Metrics::GetInstance().FaissDiskLoadDurationSecondsHistogramObserve(total_time);
-        double total_size = Size();
+        double physical_size = PhysicalSize();
 
-        server::Metrics::GetInstance().FaissDiskLoadSizeBytesHistogramObserve(total_size);
-        server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(total_size / double(total_time));
+        server::Metrics::GetInstance().FaissDiskLoadSizeBytesHistogramObserve(physical_size);
+        server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(physical_size / double(total_time));
     }
     return Status::OK();
 }
@@ -215,9 +211,8 @@ Status ExecutionEngineImpl::Init() {
     gpu_num = server_config.GetInt32Value("gpu_index", 0);
 
     switch (build_type) {
-        case EngineType::FAISS_IVFFLAT_GPU: {
-        }
-        case EngineType::FAISS_IVFFLAT_CPU: {
+        case EngineType::FAISS_IVFSQ8:
+        case EngineType::FAISS_IVFFLAT: {
             ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
             nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1);
             break;
