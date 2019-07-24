@@ -5,6 +5,9 @@
 #-------------------------------------------------------------------------------
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 s3_client_src)
 
+set(util_files
+        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp)
+
 # Make sure that your call to link_directories takes place before your call to the relevant add_executable.
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
@@ -19,7 +22,9 @@ set(s3_client_test_src
 
 add_executable(s3_test
         ${s3_client_test_src}
-        ${config_files})
+        ${config_files}
+        ${util_files}
+        )
 
 set(s3_client_libs
         stdc++

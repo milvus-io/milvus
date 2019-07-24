@@ -40,7 +40,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status Serialize() override;
 
-    Status Load() override;
+    Status Load(bool to_cache) override;
 
     Status Merge(const std::string &location) override;
 

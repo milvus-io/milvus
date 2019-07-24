@@ -4,6 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "utils/Log.h"
 #include "CacheMgr.h"
 #include "metrics/Metrics.h"
 
@@ -20,6 +21,7 @@ CacheMgr::~CacheMgr() {
 
 uint64_t CacheMgr::ItemCount() const {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
     }
 
@@ -28,6 +30,7 @@ uint64_t CacheMgr::ItemCount() const {
 
 bool CacheMgr::ItemExists(const std::string& key) {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return false;
     }
 
@@ -36,6 +39,7 @@ bool CacheMgr::ItemExists(const std::string& key) {
 
 DataObjPtr CacheMgr::GetItem(const std::string& key) {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return nullptr;
     }
     server::Metrics::GetInstance().CacheAccessTotalIncrement();
@@ -53,6 +57,7 @@ engine::Index_ptr CacheMgr::GetIndex(const std::string& key) {
 
 void CacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
 
@@ -62,6 +67,7 @@ void CacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
 
 void CacheMgr::InsertItem(const std::string& key, const engine::Index_ptr& index) {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
 
@@ -72,6 +78,7 @@ void CacheMgr::InsertItem(const std::string& key, const engine::Index_ptr& index
 
 void CacheMgr::EraseItem(const std::string& key) {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
 
@@ -81,6 +88,7 @@ void CacheMgr::EraseItem(const std::string& key) {
 
 void CacheMgr::PrintInfo() {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
 
@@ -89,6 +97,7 @@ void CacheMgr::PrintInfo() {
 
 void CacheMgr::ClearCache() {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
 
@@ -97,6 +106,7 @@ void CacheMgr::ClearCache() {
 
 int64_t CacheMgr::CacheUsage() const {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
     }
 
@@ -105,6 +115,7 @@ int64_t CacheMgr::CacheUsage() const {
 
 int64_t CacheMgr::CacheCapacity() const {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
     }
 
@@ -113,6 +124,7 @@ int64_t CacheMgr::CacheCapacity() const {
 
 void CacheMgr::SetCapacity(int64_t capacity) {
     if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
     cache_->set_capacity(capacity);

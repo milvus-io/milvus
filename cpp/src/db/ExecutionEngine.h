@@ -17,9 +17,9 @@ namespace engine {
 enum class EngineType {
     INVALID = 0,
     FAISS_IDMAP = 1,
-    FAISS_IVFFLAT_GPU,
-    FAISS_IVFFLAT_CPU,
-    SPTAG_KDT_RNT_CPU,
+    FAISS_IVFFLAT,
+    FAISS_IVFSQ8,
+    MAX_VALUE = FAISS_IVFSQ8,
 };
 
 class ExecutionEngine {
@@ -39,7 +39,7 @@ public:
 
     virtual Status Serialize() = 0;
 
-    virtual Status Load() = 0;
+    virtual Status Load(bool to_cache = true) = 0;
 
     virtual Status Merge(const std::string& location) = 0;
 

@@ -9,14 +9,14 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-const size_t K = 1024UL;
-const size_t M = K * K;
-const size_t G = K * M;
-const size_t T = K * G;
+constexpr size_t K = 1024UL;
+constexpr size_t M = K * K;
+constexpr size_t G = K * M;
+constexpr size_t T = K * G;
 
-const size_t MAX_TABLE_FILE_MEM = 128 * M;
+constexpr size_t MAX_TABLE_FILE_MEM = 128 * M;
 
-const int VECTOR_TYPE_SIZE = sizeof(float);
+constexpr int VECTOR_TYPE_SIZE = sizeof(float);
 
 } // namespace engine
 } // namespace milvus
