@@ -94,7 +94,7 @@ double
 ConfigNode::GetDoubleValue(const std::string &param_key, double default_val) const {
     std::string val = GetValue(param_key);
     if (!val.empty()) {
-        return std::strtold(val.c_str(), nullptr);
+        return std::strtod(val.c_str(), nullptr);
     } else {
         return default_val;
     }

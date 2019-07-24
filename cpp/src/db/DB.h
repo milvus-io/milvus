@@ -52,7 +52,7 @@ public:
     DB(const DB&) = delete;
     DB& operator=(const DB&) = delete;
 
-    virtual ~DB();
+    virtual ~DB() = 0;
 }; // DB
 
 } // namespace engine
