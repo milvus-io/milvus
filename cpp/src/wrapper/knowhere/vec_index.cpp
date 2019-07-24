@@ -192,7 +192,7 @@ server::KnowhereError write_index(VecIndexPtr index, const std::string &location
 void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Config &cfg) {
     if (!cfg.contains("nlist")) { cfg["nlist"] = int(size / 1000000.0 * 16384); }
     if (!cfg.contains("gpu_id")) { cfg["gpu_id"] = int(0); }
-    if (!cfg.contains("metric_type")) { cfg["metric_type"] = "L2"; }
+    if (!cfg.contains("metric_type")) { cfg["metric_type"] = "IP"; } // TODO: remove
 
     switch (type) {
         case IndexType::FAISS_IVFSQ8_MIX: {
