@@ -324,18 +324,6 @@ spec:
     post {
         always {
             script {
-<<<<<<< HEAD
-                if (!currentBuild.resultIsBetterOrEqualTo('SUCCESS')) {
-                    // Send an email only if the build status has changed from green/unstable to red
-                    emailext subject: '$DEFAULT_SUBJECT',
-                    body: '$DEFAULT_CONTENT',
-                    recipientProviders: [
-                        [$class: 'DevelopersRecipientProvider'],
-                        [$class: 'RequesterRecipientProvider']
-                    ],
-                    replyTo: '$DEFAULT_REPLYTO',
-                    to: '$DEFAULT_RECIPIENTS'
-=======
                 if (env.gitlabAfter != null) {
                     if (!currentBuild.resultIsBetterOrEqualTo('SUCCESS')) {
                         // Send an email only if the build status has changed from green/unstable to red
@@ -348,7 +336,6 @@ spec:
                         replyTo: '$DEFAULT_REPLYTO',
                         to: '$DEFAULT_RECIPIENTS'
                     }
->>>>>>> branch-0.3.1
                 }
             }
         }
