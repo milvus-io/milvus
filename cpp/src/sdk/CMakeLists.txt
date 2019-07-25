@@ -33,6 +33,7 @@ if (MILVUS_ENABLE_THRIFT STREQUAL "ON")
     target_link_libraries(milvus_thrift_sdk
             ${third_party_libs}
             )
+    install(TARGETS milvus_thrift_sdk DESTINATION lib)
 else()
     aux_source_directory(grpc grpc_client_files)
 
@@ -56,12 +57,6 @@ else()
     target_link_libraries(milvus_grpc_sdk
             ${third_party_libs}
             )
-
-endif()
-
-if (MILVUS_ENABLE_THRIFT STREQUAL "ON")
-    install(TARGETS milvus_thrift_sdk DESTINATION lib)
-else()
     install(TARGETS milvus_grpc_sdk DESTINATION lib)
 endif()
 
