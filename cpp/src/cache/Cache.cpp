@@ -89,7 +89,7 @@ void Cache::erase(const std::string& key) {
     const DataObjPtr& data_ptr = obj_ptr->data_;
     usage_ -= data_ptr->size();
 
-    SERVER_LOG_DEBUG << "Erase " << key << " from cache";
+    SERVER_LOG_DEBUG << "Erase " << key << " size: " << data_ptr->size();
 
     lru_.erase(key);
 }
@@ -163,6 +163,9 @@ void Cache::free_memory() {
 
     int64_t threshhold = capacity_ * freemem_percent_;
     int64_t delta_size = usage_ - threshhold;
+    if(delta_size <= 0) {
+        delta_size = 1;//ensure at least one item erased
+    }
 
     std::set<std::string> key_array;
     int64_t released_size = 0;

@@ -17,6 +17,9 @@ aux_source_directory(../../src/wrapper wrapper_src)
 aux_source_directory(../../src/metrics metrics_src)
 aux_source_directory(./ test_srcs)
 
+set(util_files
+        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp)
+
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task scheduler_task_files)
@@ -43,6 +46,7 @@ set(count_test_src
         ${wrapper_src}
         ${metrics_src}
         ${test_srcs}
+        ${util_files}
         )
 
 
@@ -65,6 +69,10 @@ target_link_libraries(metrics_test
         )
 if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     target_link_libraries(metrics_test ${MKL_LIBS} ${MKL_LIBS})
+else()
+    target_link_libraries(metrics_test
+            lapack
+            openblas)
 endif()
 
 install(TARGETS metrics_test DESTINATION bin)
