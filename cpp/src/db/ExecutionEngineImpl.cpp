@@ -22,6 +22,14 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+namespace {
+std::string GetMetricType() {
+    server::ServerConfig &config = server::ServerConfig::GetInstance();
+    server::ConfigNode engine_config = config.GetConfig(server::CONFIG_ENGINE);
+    return engine_config.GetValue(server::CONFIG_METRICTYPE, "L2");
+}
+}
+
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
                                          const std::string &location,
                                          EngineType type)
@@ -33,6 +41,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
 
     Config build_cfg;
     build_cfg["dim"] = dimension;
+    build_cfg["metric_type"] = GetMetricType();
     AutoGenParams(index_->GetType(), 0, build_cfg);
     auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(build_cfg);
     if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
@@ -172,7 +181,9 @@ ExecutionEngineImpl::BuildIndex(const std::string &location) {
 
     Config build_cfg;
     build_cfg["dim"] = Dimension();
+    build_cfg["metric_type"] = GetMetricType();
     build_cfg["gpu_id"] = gpu_num;
+    build_cfg["nlist"] = nlist_;
     AutoGenParams(to_index->GetType(), Count(), build_cfg);
 
     auto ec = to_index->BuildAll(Count(),
@@ -204,6 +215,7 @@ Status ExecutionEngineImpl::Cache() {
     return Status::OK();
 }
 
+// TODO(linxj): remove.
 Status ExecutionEngineImpl::Init() {
     using namespace zilliz::milvus::server;
     ServerConfig &config = ServerConfig::GetInstance();
@@ -215,6 +227,7 @@ Status ExecutionEngineImpl::Init() {
         case EngineType::FAISS_IVFFLAT: {
             ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
             nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1);
+            nlist_ = engine_config.GetInt32Value(CONFIG_NLIST, 16384);
             break;
         }
     }
