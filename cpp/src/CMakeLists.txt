@@ -71,10 +71,6 @@ include_directories(/usr/include/mysql)
 include_directories(grpc/gen-status)
 include_directories(grpc/gen-milvus)
 
-if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
-    SET(PROFILER_LIB profiler)
-endif()
-
 set(third_party_libs
         easyloggingpp
         sqlite
@@ -96,8 +92,8 @@ set(third_party_libs
         zlib
         zstd
         mysqlpp
-        ${PROFILER_LIB}
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+        cudart
         )
 
 if (MEGASEARCH_WITH_ARROW STREQUAL "ON")
@@ -111,6 +107,12 @@ else()
     set(third_party_libs ${third_party_libs}
             lapack
             openblas)
+endif()
+
+if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
+    set(third_party_libs ${third_party_libs}
+            gperftools
+            libunwind)
 endif()
 
 if (GPU_VERSION STREQUAL "ON")
@@ -164,6 +166,8 @@ if (ENABLE_LICENSE STREQUAL "ON")
 endif ()
 
 set(metrics_lib
+        easyloggingpp
+        yaml-cpp
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core

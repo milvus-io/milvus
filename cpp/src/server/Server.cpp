@@ -231,6 +231,10 @@ Server::Stop() {
 ServerError
 Server::LoadConfig() {
     ServerConfig::GetInstance().LoadConfigFile(config_filename_);
+    ServerError err = ServerConfig::GetInstance().ValidateConfig();
+    if(err != SERVER_SUCCESS){
+        exit(0);
+    }
 
     return SERVER_SUCCESS;
 }
