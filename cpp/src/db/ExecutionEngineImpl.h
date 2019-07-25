@@ -70,6 +70,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     std::string location_;
 
     size_t nprobe_ = 0;
+    size_t nlist_ = 0;
     int64_t gpu_num = 0;
 };
 
