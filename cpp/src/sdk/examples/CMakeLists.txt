@@ -4,5 +4,8 @@
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
 
-add_subdirectory(thriftsimple)
-add_subdirectory(grpcsimple)
+if (MILVUS_ENABLE_THRIFT STREQUAL "ON")
+    add_subdirectory(thriftsimple)
+else()
+    add_subdirectory(grpcsimple)
+endif()
