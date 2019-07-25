@@ -19,6 +19,7 @@ static const std::string CONFIG_SERVER_ADDRESS = "address";
 static const std::string CONFIG_SERVER_PORT = "port";
 static const std::string CONFIG_SERVER_PROTOCOL = "transfer_protocol";
 static const std::string CONFIG_CLUSTER_MODE = "mode";
+static const std::string CONFIG_GPU_INDEX = "gpu_index";
 
 static const std::string CONFIG_DB = "db_config";
 static const std::string CONFIG_DB_URL = "db_backend_url";
@@ -28,6 +29,7 @@ static const std::string CONFIG_DB_INDEX_TRIGGER_SIZE = "index_building_threshol
 static const std::string CONFIG_DB_ARCHIVE_DISK = "archive_disk_threshold";
 static const std::string CONFIG_DB_ARCHIVE_DAYS = "archive_days_threshold";
 static const std::string CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
+static const std::string CONFIG_DB_PARALLEL_REDUCE = "parallel_reduce";
 
 static const std::string CONFIG_LOG = "log_config";
 
@@ -57,6 +59,7 @@ class ServerConfig {
     static ServerConfig &GetInstance();
 
     ServerError LoadConfigFile(const std::string& config_filename);
+    ServerError ValidateConfig() const;
     void PrintAll() const;
 
     ConfigNode GetConfig(const std::string& name) const;

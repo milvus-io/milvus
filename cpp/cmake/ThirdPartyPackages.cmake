@@ -752,10 +752,7 @@ macro(build_faiss)
     if(${MILVUS_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
-                "--with-cuda-arch=\"-gencode=arch=compute_35,code=sm_35\""
-                "--with-cuda-arch=\"-gencode=arch=compute_52,code=sm_52\""
-                "--with-cuda-arch=\"-gencode=arch=compute_60,code=sm_60\""
-                "--with-cuda-arch=\"-gencode=arch=compute_61,code=sm_61\""
+                "--with-cuda-arch=-gencode=arch=compute_35,code=sm_35 -gencode=arch=compute_52,code=sm_52 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_75,code=sm_75"
                 )
     else()
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS} --without-cuda)
@@ -769,7 +766,7 @@ macro(build_faiss)
             "./configure"
             ${FAISS_CONFIGURE_ARGS}
             BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
+            ${MAKE} ${MAKE_BUILD_ARGS} VERBOSE=1
             BUILD_IN_SOURCE
             1
             INSTALL_COMMAND
@@ -1676,14 +1673,18 @@ macro(build_gperftools)
             BUILD_BYPRODUCTS
             ${GPERFTOOLS_STATIC_LIB})
 
+    ExternalProject_Add_StepDependencies(gperftools_ep build libunwind_ep)
+
     file(MAKE_DIRECTORY "${GPERFTOOLS_INCLUDE_DIR}")
 
-    add_library(gperftools SHARED IMPORTED)
+    add_library(gperftools STATIC IMPORTED)
     set_target_properties(gperftools
             PROPERTIES IMPORTED_LOCATION "${GPERFTOOLS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${GPERFTOOLS_INCLUDE_DIR}")
+            INTERFACE_INCLUDE_DIRECTORIES "${GPERFTOOLS_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES libunwind)
 
     add_dependencies(gperftools gperftools_ep)
+    add_dependencies(gperftools libunwind_ep)
 endmacro()
 
 if(MILVUS_WITH_GPERFTOOLS)
@@ -1692,4 +1693,5 @@ if(MILVUS_WITH_GPERFTOOLS)
     # TODO: Don't use global includes but rather target_include_directories
     get_target_property(GPERFTOOLS_INCLUDE_DIR gperftools INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${GPERFTOOLS_INCLUDE_DIR})
+    link_directories(SYSTEM ${GPERFTOOLS_PREFIX}/lib)
 endif()
