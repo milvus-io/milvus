@@ -22,7 +22,7 @@ static constexpr size_t PARALLEL_REDUCE_BATCH = 1000;
 bool NeedParallelReduce(uint64_t nq, uint64_t topk) {
     server::ServerConfig &config = server::ServerConfig::GetInstance();
     server::ConfigNode& db_config = config.GetConfig(server::CONFIG_DB);
-    bool need_parallel = db_config.GetBoolValue(server::CONFIG_DB_PARALLEL_REDUCE, true);
+    bool need_parallel = db_config.GetBoolValue(server::CONFIG_DB_PARALLEL_REDUCE, false);
     if(!need_parallel) {
         return false;
     }
