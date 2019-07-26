@@ -86,6 +86,7 @@ ClientProxy::CreateTable(const TableSchema &param) {
     }
 
     try {
+
         thrift::TableSchema schema;
         schema.__set_table_name(param.table_name);
         schema.__set_index_type((int)param.index_type);
@@ -124,6 +125,11 @@ ClientProxy::DeleteTable(const std::string &table_name) {
     }
 
     return Status::OK();
+}
+
+Status
+ClientProxy::DropTable(const std::string &table_name) {
+    return this->DeleteTable(table_name);
 }
 
 Status
@@ -173,6 +179,13 @@ ClientProxy::AddVector(const std::string &table_name,
 }
 
 Status
+ClientProxy::InsertVector(const std::string &table_name,
+                       const std::vector<RowRecord> &record_array,
+                       std::vector<int64_t> &id_array) {
+    return this->AddVector(table_name, record_array, id_array);
+}
+
+Status
 ClientProxy::SearchVector(const std::string &table_name,
                           const std::vector<RowRecord> &query_record_array,
                           const std::vector<Range> &query_range_array,
@@ -190,7 +203,7 @@ ClientProxy::SearchVector(const std::string &table_name,
             thrift::RowRecord thrift_record;
 
             thrift_record.vector_data.resize(record.data.size() * sizeof(double));
-            double *dbl = (double *) (const_cast<char *>(thrift_record.vector_data.data()));
+            auto dbl = (double *) (const_cast<char *>(thrift_record.vector_data.data()));
             for (size_t i = 0; i < record.data.size(); i++) {
                 dbl[i] = (double) (record.data[i]);
             }
@@ -222,8 +235,8 @@ ClientProxy::SearchVector(const std::string &table_name,
                 return Status(StatusCode::UnknownError, "illegal result");
             }
 
-            int64_t* id_ptr = (int64_t*)thrift_topk_result.id_array.data();
-            double* dist_ptr = (double*)thrift_topk_result.distance_array.data();
+            auto id_ptr = (int64_t*)thrift_topk_result.id_array.data();
+            auto dist_ptr = (double*)thrift_topk_result.distance_array.data();
             for(size_t i = 0; i < id_count; i++) {
                 QueryResult query_result;
                 query_result.id = id_ptr[i];

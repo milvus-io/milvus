@@ -4,7 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include "SignalUtil.h"
-#include "server/Server.h"
+#include "src/server/Server.h"
 #include "utils/Log.h"
 
 #include <signal.h>
@@ -15,7 +15,6 @@ namespace milvus {
 namespace server {
 
 void SignalUtil::HandleSignal(int signum){
-
 
     switch(signum){
         case SIGINT:

@@ -5,9 +5,9 @@
  ******************************************************************************/
 #include "MilvusServer.h"
 #include "RequestHandler.h"
-#include "ServerConfig.h"
+#include "src/server/ServerConfig.h"
 #include "ThreadPoolServer.h"
-#include "DBWrapper.h"
+#include "src/server/DBWrapper.h"
 #include "utils/Log.h"
 
 #include "milvus_types.h"

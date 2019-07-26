@@ -14,9 +14,9 @@ namespace milvus {
 
 using ServiceClientPtr = std::shared_ptr<::milvus::thrift::MilvusServiceClient>;
 
-static const std::string THRIFT_PROTOCOL_JSON = "json";
-static const std::string THRIFT_PROTOCOL_BINARY = "binary";
-static const std::string THRIFT_PROTOCOL_COMPACT = "compact";
+static const char* THRIFT_PROTOCOL_JSON = "json";
+static const char* THRIFT_PROTOCOL_BINARY = "binary";
+static const char* THRIFT_PROTOCOL_COMPACT = "compact";
 
 class ThriftClient {
 public:
