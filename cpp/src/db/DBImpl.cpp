@@ -198,18 +198,25 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
         ids.push_back(std::stoul(id, &sz));
     }
 
-    meta::TableFilesSchema files_array;
-    auto status = meta_ptr_->GetTableFiles(table_id, ids, files_array);
+    meta::DatePartionedTableFilesSchema files_array;
+    auto status = meta_ptr_->FilesToSearch(table_id, ids, dates, files_array);
     if (!status.ok()) {
         return status;
     }
 
-    if(files_array.empty()) {
+    meta::TableFilesSchema file_id_array;
+    for (auto &day_files : files_array) {
+        for (auto &file : day_files.second) {
+            file_id_array.push_back(file);
+        }
+    }
+
+    if(file_id_array.empty()) {
         return Status::Error("Invalid file id");
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info before query
-    status = QueryAsync(table_id, files_array, k, nq, vectors, dates, results);
+    status = QueryAsync(table_id, file_id_array, k, nq, vectors, dates, results);
     cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info after query
     return status;
 }
