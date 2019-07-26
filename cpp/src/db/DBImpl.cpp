@@ -357,7 +357,7 @@ void DBImpl::StartCompactionTask() {
 
 Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         const meta::TableFilesSchema& files) {
-    ENGINE_LOG_DEBUG << "Merge files for table" << table_id;
+    ENGINE_LOG_DEBUG << "Merge files for table " << table_id;
 
     meta::TableFileSchema table_file;
     table_file.table_id_ = table_id;
@@ -424,13 +424,15 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
     bool has_merge = false;
     for (auto& kv : raw_files) {
         auto files = kv.second;
-        if (files.size() <= options_.merge_trigger_number) {
+        if (files.size() < options_.merge_trigger_number) {
+            ENGINE_LOG_DEBUG << "Files number not greater equal than merge trigger number, skip merge action";
             continue;
         }
         has_merge = true;
         MergeFiles(table_id, kv.first, kv.second);
 
         if (shutting_down_.load(std::memory_order_acquire)){
+            ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action for table " << table_id;
             break;
         }
     }
@@ -447,6 +449,11 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Merge files for table " << table_id << " failed: " << status.ToString();
             continue;//let other table get chance to merge
+        }
+
+        if (shutting_down_.load(std::memory_order_acquire)){
+            ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action";
+            break;
         }
     }
 
@@ -581,6 +588,11 @@ Status DBImpl::BuildIndexByTable(const std::string& table_id) {
             return status;
         }
         ENGINE_LOG_DEBUG << "Sync building index for " << file.id_ << " passed";
+
+        if (shutting_down_.load(std::memory_order_acquire)){
+            ENGINE_LOG_DEBUG << "Server will shutdown, skip build index action for table " << table_id;
+            break;
+        }
     }
 
     return status;
@@ -601,6 +613,7 @@ void DBImpl::BackgroundBuildIndex() {
         }
 
         if (shutting_down_.load(std::memory_order_acquire)){
+            ENGINE_LOG_DEBUG << "Server will shutdown, skip build index action";
             break;
         }
     }
