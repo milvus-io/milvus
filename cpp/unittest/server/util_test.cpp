@@ -17,7 +17,7 @@ using namespace zilliz::milvus;
 
 namespace {
 
-static const std::string LOG_FILE_PATH = "./milvus/conf/log_config.conf";
+static const char* LOG_FILE_PATH = "./milvus/conf/log_config.conf";
 
 }
 
