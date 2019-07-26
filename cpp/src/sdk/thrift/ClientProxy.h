@@ -27,9 +27,15 @@ public:
 
     virtual Status DeleteTable(const std::string &table_name) override;
 
+    virtual Status DropTable(const std::string &table_name) override;
+
     virtual Status BuildIndex(const std::string &table_name) override;
 
     virtual Status AddVector(const std::string &table_name,
+                             const std::vector<RowRecord> &record_array,
+                             std::vector<int64_t> &id_array) override;
+
+    virtual Status InsertVector(const std::string &table_name,
                              const std::vector<RowRecord> &record_array,
                              std::vector<int64_t> &id_array) override;
 

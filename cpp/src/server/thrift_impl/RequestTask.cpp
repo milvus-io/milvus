@@ -4,12 +4,12 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "RequestTask.h"
-#include "ServerConfig.h"
+#include "src/server/ServerConfig.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
-#include "DBWrapper.h"
+#include "src/server/DBWrapper.h"
 #include "version.h"
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -22,9 +22,9 @@ namespace server {
 
 using namespace ::milvus;
 
-static const std::string DQL_TASK_GROUP = "dql";
-static const std::string DDL_DML_TASK_GROUP = "ddl_dml";
-static const std::string PING_TASK_GROUP = "ping";
+static const char* DQL_TASK_GROUP = "dql";
+static const char* DDL_DML_TASK_GROUP = "ddl_dml";
+static const char* PING_TASK_GROUP = "ping";
 
 using DB_META = zilliz::milvus::engine::meta::Meta;
 using DB_DATE = zilliz::milvus::engine::meta::DateT;

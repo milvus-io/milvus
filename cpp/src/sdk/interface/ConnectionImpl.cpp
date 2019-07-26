@@ -1,8 +1,8 @@
 /*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+* Unauthorized copying of this file, via any medium is strictly prohibited.
+* Proprietary and confidential.
+******************************************************************************/
 #include "ConnectionImpl.h"
 #include "version.h"
 
@@ -14,8 +14,8 @@ Connection::Create() {
 }
 
 Status
-Connection::Destroy(std::shared_ptr<milvus::Connection> connection_ptr) {
-    if(connection_ptr != nullptr) {
+Connection::Destroy(std::shared_ptr<milvus::Connection>& connection_ptr) {
+    if (connection_ptr != nullptr) {
         return connection_ptr->Disconnect();
     }
     return Status::OK();
@@ -62,8 +62,13 @@ ConnectionImpl::HasTable(const std::string &table_name) {
 }
 
 Status
+ConnectionImpl::DropTable(const std::string &table_name) {
+    return client_proxy_->DropTable(table_name);
+}
+
+Status
 ConnectionImpl::DeleteTable(const std::string &table_name) {
-    return client_proxy_->DeleteTable(table_name);
+    return client_proxy_->DropTable(table_name);
 }
 
 Status
@@ -72,10 +77,17 @@ ConnectionImpl::BuildIndex(const std::string &table_name) {
 }
 
 Status
-ConnectionImpl::AddVector(const std::string &table_name,
+ConnectionImpl::InsertVector(const std::string &table_name,
                           const std::vector<RowRecord> &record_array,
                           std::vector<int64_t> &id_array) {
-    return client_proxy_->AddVector(table_name, record_array, id_array);
+    return client_proxy_->InsertVector(table_name, record_array, id_array);
+}
+
+Status
+ConnectionImpl::AddVector(const std::string &table_name,
+                             const std::vector<RowRecord> &record_array,
+                             std::vector<int64_t> &id_array) {
+    return client_proxy_->InsertVector(table_name, record_array, id_array);
 }
 
 Status
@@ -84,7 +96,8 @@ ConnectionImpl::SearchVector(const std::string &table_name,
                              const std::vector<Range> &query_range_array,
                              int64_t topk,
                              std::vector<TopKQueryResult> &topk_query_result_array) {
-    return client_proxy_->SearchVector(table_name, query_record_array, query_range_array, topk, topk_query_result_array);
+    return client_proxy_->SearchVector(table_name, query_record_array, query_range_array, topk,
+                                       topk_query_result_array);
 }
 
 Status
@@ -113,4 +126,3 @@ ConnectionImpl::ServerStatus() const {
 }
 
 }
-
