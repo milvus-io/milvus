@@ -351,7 +351,7 @@ void DBImpl::StartCompactionTask() {
 
 Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         const meta::TableFilesSchema& files) {
-    ENGINE_LOG_DEBUG << "Merge files for table" << table_id;
+    ENGINE_LOG_DEBUG << "Merge files for table " << table_id;
 
     meta::TableFileSchema table_file;
     table_file.table_id_ = table_id;
