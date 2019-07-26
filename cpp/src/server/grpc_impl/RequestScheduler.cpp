@@ -102,13 +102,12 @@ void RequestScheduler::ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status *g
     RequestScheduler& scheduler = RequestScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 
-
     if(!task_ptr->IsAsync()) {
         task_ptr->WaitToFinish();
         ServerError err = task_ptr->ErrorCode();
         if (err != SERVER_SUCCESS) {
             grpc_status->set_reason(task_ptr->ErrorMsg());
-            grpc_status->set_error_code(::milvus::grpc::ErrorCode((int) err));
+            grpc_status->set_error_code(ErrorMap().at(err));
         } else {
 //            grpc_status->set_error_code(::milvus::ErrorCode((int) SERVER_SUCCESS));
         }
