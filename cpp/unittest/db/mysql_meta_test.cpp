@@ -328,6 +328,17 @@ TEST_F(MySQLTest, TABLE_FILES_TEST) {
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);
 
+    std::vector<size_t> ids;
+    status = impl.FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[table_file.date_].size(),
+              to_index_files_cnt+raw_files_cnt+index_files_cnt);
+
+    ids.push_back(size_t(9999999999));
+    status = impl.FilesToSearch(table_id, ids, dates, dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[table_file.date_].size(),0);
+
     status = impl.DropAll();
     ASSERT_TRUE(status.ok());
 }
