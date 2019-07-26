@@ -217,6 +217,7 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
 Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
                           uint64_t k, uint64_t nq, const float* vectors,
                           const meta::DatesT& dates, QueryResults& results) {
+    auto start_time = METRICS_NOW_TIME;
     server::TimeRecorder rc("");
 
     //step 1: get files to search
@@ -258,6 +259,11 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
     //step 4: construct results
     results = context->GetResult();
     rc.ElapseFromBegin("Engine query totally cost");
+
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time,end_time);
+
+    CollectQueryMetrics(total_time, nq);
 
     return Status::OK();
 }
