@@ -113,7 +113,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     ss << "days:" << days_num;
     options.archive_conf = ArchiveConf("delete", ss.str());
 
-    auto impl = meta::DBMetaImpl(options);
+    meta::DBMetaImpl impl(options);
     auto table_id = "meta_test_table";
 
     meta::TableSchema table;
@@ -163,7 +163,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     options.path = "/tmp/milvus_test";
     options.archive_conf = ArchiveConf("delete", "disk:11");
 
-    auto impl = meta::DBMetaImpl(options);
+    meta::DBMetaImpl impl(options);
     auto table_id = "meta_test_group";
 
     meta::TableSchema table;
