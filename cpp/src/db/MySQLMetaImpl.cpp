@@ -965,6 +965,117 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
     return Status::OK();
 }
 
+Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
+                                    const std::vector<size_t> &ids,
+                                    const DatesT &partition,
+                                    DatePartionedTableFilesSchema &files) {
+
+
+    files.clear();
+
+    try {
+
+        MetricCollector metric;
+
+        StoreQueryResult res;
+
+        {
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+
+            if (connectionPtr == nullptr) {
+                return Status::Error("Failed to connect to database server");
+            }
+
+            Query filesToSearchQuery = connectionPtr->query();
+            filesToSearchQuery << "SELECT id, table_id, engine_type, file_id, file_type, size, date " <<
+                               "FROM TableFiles " <<
+                               "WHERE table_id = " << quote << table_id;
+
+            if (!partition.empty()) {
+                std::stringstream partitionListSS;
+                for (auto &date : partition) {
+                    partitionListSS << std::to_string(date) << ", ";
+                }
+                std::string partitionListStr = partitionListSS.str();
+
+                partitionListStr = partitionListStr.substr(0, partitionListStr.size() - 2); //remove the last ", "
+                filesToSearchQuery << " AND " << "date IN (" << partitionListStr << ")";
+            }
+
+            if (!ids.empty()) {
+                std::stringstream idSS;
+                for (auto &id : ids) {
+                    idSS << "id = " << std::to_string(id) << " OR ";
+                }
+                std::string idStr = idSS.str();
+                idStr = idStr.substr(0, idStr.size() - 4); //remove the last " OR "
+
+                filesToSearchQuery  << " AND " << "(" << idStr << ")";
+
+            }
+            // End
+            filesToSearchQuery << " AND " <<
+                               "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
+                               "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " OR " <<
+                               "file_type = " << std::to_string(TableFileSchema::INDEX) << ");";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
+
+            res = filesToSearchQuery.store();
+        } //Scoped Connection
+
+        TableSchema table_schema;
+        table_schema.table_id_ = table_id;
+        auto status = DescribeTable(table_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
+        TableFileSchema table_file;
+        for (auto &resRow : res) {
+
+            table_file.id_ = resRow["id"]; //implicit conversion
+
+            std::string table_id_str;
+            resRow["table_id"].to_string(table_id_str);
+            table_file.table_id_ = table_id_str;
+
+            table_file.engine_type_ = resRow["engine_type"];
+
+            std::string file_id;
+            resRow["file_id"].to_string(file_id);
+            table_file.file_id_ = file_id;
+
+            table_file.file_type_ = resRow["file_type"];
+
+            table_file.size_ = resRow["size"];
+
+            table_file.date_ = resRow["date"];
+
+            table_file.dimension_ = table_schema.dimension_;
+
+            utils::GetTableFilePath(options_, table_file);
+
+            auto dateItr = files.find(table_file.date_);
+            if (dateItr == files.end()) {
+                files[table_file.date_] = TableFilesSchema();
+            }
+
+            files[table_file.date_].push_back(table_file);
+        }
+    } catch (const BadQuery &er) {
+        // Handle any query errors
+        ENGINE_LOG_ERROR << "QUERY ERROR WHEN FINDING TABLE FILES TO SEARCH" << ": " << er.what();
+        return Status::DBTransactionError("QUERY ERROR WHEN FINDING TABLE FILES TO SEARCH", er.what());
+    } catch (const Exception &er) {
+        // Catch-all for any other MySQL++ exceptions
+        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH" << ": " << er.what();
+        return Status::DBTransactionError("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", er.what());
+    }
+
+    return Status::OK();
+}
+
 Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
                                    DatePartionedTableFilesSchema &files) {
 
