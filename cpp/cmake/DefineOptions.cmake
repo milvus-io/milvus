@@ -96,7 +96,7 @@ define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)
 
 define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
 
-define_option(MILVUS_WITH_KNOWHERE "Build with Knowhere" ON)
+define_option(MILVUS_WITH_KNOWHERE "Build with Knowhere" OFF)
 
 if(CMAKE_VERSION VERSION_LESS 3.7)
     set(MILVUS_WITH_ZSTD_DEFAULT OFF)
