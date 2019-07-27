@@ -75,6 +75,12 @@ if [[ ! -d cmake_build ]]; then
 	MAKE_CLEAN="ON"
 fi
 
+# Build Knowhere
+KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere_build"
+pushd `pwd`/thirdparty/knowhere
+./build.sh -t Release -p ${KNOWHERE_BUILD_DIR}
+popd
+
 cd cmake_build
 
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
@@ -89,6 +95,7 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DMILVUS_DB_PATH=${DB_PATH} \
     -DMILVUS_ENABLE_PROFILING=${PROFILING} \
     -DBUILD_FAISS_WITH_MKL=${BUILD_FAISS_WITH_MKL} \
+    -DKNOWHERE_BUILD_DIR=${KNOWHERE_BUILD_DIR} \
     $@ ../"
     echo ${CMAKE_CMD}
 
