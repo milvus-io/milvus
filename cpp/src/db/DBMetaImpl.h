@@ -8,6 +8,7 @@
 #include "Meta.h"
 #include "Options.h"
 
+#include <mutex>
 
 namespace zilliz {
 namespace milvus {
@@ -94,6 +95,8 @@ class DBMetaImpl : public Meta {
     Status Initialize();
 
     const DBMetaOptions options_;
+
+    std::mutex meta_mutex_;
 }; // DBMetaImpl
 
 } // namespace meta
