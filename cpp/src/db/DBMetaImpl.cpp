@@ -109,7 +109,7 @@ Status DBMetaImpl::Initialize() {
         auto ret = boost::filesystem::create_directory(options_.path);
         if (!ret) {
             ENGINE_LOG_ERROR << "Failed to create db directory " << options_.path;
-            return Status::DBTransactionError("Failed to create db directory", options_.path);
+            return Status::InvalidDBPath("Failed to create db directory", options_.path);
         }
     }
 
@@ -147,6 +147,9 @@ Status DBMetaImpl::DropPartitionsByDates(const std::string &table_id,
             }
         }
 
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
         ConnectorPtr->update_all(
             set(
                 c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_DELETE
@@ -166,6 +169,9 @@ Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
 
     try {
         MetricCollector metric;
+
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         if (table_schema.table_id_ == "") {
             NextTableId(table_schema.table_id_);
@@ -190,6 +196,7 @@ Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
             auto id = ConnectorPtr->insert(table_schema);
             table_schema.id_ = id;
         } catch (...) {
+            ENGINE_LOG_ERROR << "sqlite transaction failed";
             return Status::DBTransactionError("Add Table Error");
         }
 
@@ -205,6 +212,9 @@ Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
 Status DBMetaImpl::DeleteTable(const std::string& table_id) {
     try {
         MetricCollector metric;
+
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         //soft delete table
         auto tables = ConnectorPtr->select(columns(&TableSchema::id_,
@@ -237,6 +247,9 @@ Status DBMetaImpl::DeleteTable(const std::string& table_id) {
 Status DBMetaImpl::DeleteTableFiles(const std::string& table_id) {
     try {
         MetricCollector metric;
+
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         //soft delete table files
         ConnectorPtr->update_all(
@@ -382,6 +395,9 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.engine_type_ = table_schema.engine_type_;
+
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         auto id = ConnectorPtr->insert(file_schema);
         file_schema.id_ = id;
@@ -649,6 +665,9 @@ Status DBMetaImpl::Archive() {
             long usecs = limit * D_SEC * US_PS;
             long now = utils::GetMicroSecTimeStamp();
             try {
+                //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+                std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
                 ConnectorPtr->update_all(
                     set(
                         c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_DELETE
@@ -710,6 +729,9 @@ Status DBMetaImpl::DiscardFiles(long to_discard_size) {
     try {
         MetricCollector metric;
 
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
         auto commited = ConnectorPtr->transaction([&]() mutable {
             auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
                                                          &TableFileSchema::size_),
@@ -748,6 +770,7 @@ Status DBMetaImpl::DiscardFiles(long to_discard_size) {
         });
 
         if (!commited) {
+            ENGINE_LOG_ERROR << "sqlite transaction failed";
             return Status::DBTransactionError("Update table file error");
         }
 
@@ -762,6 +785,9 @@ Status DBMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     file_schema.updated_time_ = utils::GetMicroSecTimeStamp();
     try {
         MetricCollector metric;
+
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         auto tables = ConnectorPtr->select(columns(&TableSchema::state_),
                                            where(c(&TableSchema::table_id_) == file_schema.table_id_));
@@ -784,6 +810,11 @@ Status DBMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
 
 Status DBMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
     try {
+        MetricCollector metric;
+
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
         ConnectorPtr->update_all(
             set(
                 c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_INDEX
@@ -802,6 +833,9 @@ Status DBMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
 Status DBMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
     try {
         MetricCollector metric;
+
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         std::map<std::string, bool> has_tables;
         for (auto &file : files) {
@@ -831,6 +865,7 @@ Status DBMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
         });
 
         if (!commited) {
+            ENGINE_LOG_ERROR << "sqlite transaction failed";
             return Status::DBTransactionError("Update table files error");
         }
 
@@ -844,6 +879,9 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
     auto now = utils::GetMicroSecTimeStamp();
     try {
         MetricCollector metric;
+
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         auto files = ConnectorPtr->select(columns(&TableFileSchema::id_,
                                                   &TableFileSchema::table_id_,
@@ -873,6 +911,7 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         });
 
         if (!commited) {
+            ENGINE_LOG_ERROR << "sqlite transaction failed";
             return Status::DBTransactionError("Clean files error");
         }
 
@@ -882,6 +921,9 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
     try {
         MetricCollector metric;
+
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         auto tables = ConnectorPtr->select(columns(&TableSchema::id_,
                                                    &TableSchema::table_id_),
@@ -897,6 +939,7 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         });
 
         if (!commited) {
+            ENGINE_LOG_ERROR << "sqlite transaction failed";
             return Status::DBTransactionError("Clean files error");
         }
 
@@ -909,6 +952,11 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
 Status DBMetaImpl::CleanUp() {
     try {
+        MetricCollector metric;
+
+        //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
+        std::lock_guard<std::mutex> meta_lock(meta_mutex_);
+
         auto files = ConnectorPtr->select(columns(&TableFileSchema::id_),
                                              where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::NEW));
 
@@ -921,6 +969,7 @@ Status DBMetaImpl::CleanUp() {
         });
 
         if (!commited) {
+            ENGINE_LOG_ERROR << "sqlite transaction failed";
             return Status::DBTransactionError("Clean files error");
         }
 
