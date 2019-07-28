@@ -33,8 +33,11 @@ cuda_add_executable(server_test
         )
 
 set(require_libs
-        stdc++
+        knowhere
         faiss
+        openblas
+        lapack
+        stdc++
         cudart
         cublas
         sqlite

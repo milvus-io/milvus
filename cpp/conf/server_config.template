@@ -2,7 +2,7 @@ server_config:
   address: 0.0.0.0
   port: 19530                 # the port milvus listen to, default: 19530, range: 1025 ~ 65534
   gpu_index: 0                # the gpu milvus use, default: 0, range: 0 ~ gpu number - 1
-  mode: single                # milvus deployment type: single, cluster
+  mode: single                # milvus deployment type: single, cluster, read_only
 
 db_config:
   db_path: @MILVUS_DB_PATH@             # milvus data storage path

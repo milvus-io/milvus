@@ -4,6 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
+#if 0
 #pragma once
 
 #include "faiss/Index.h"
@@ -64,3 +65,4 @@ extern IndexBuilderPtr GetIndexBuilder(const Operand_ptr &opd);
 }
 }
 }
+#endif

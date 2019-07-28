@@ -5,6 +5,7 @@
  ******************************************************************************/
 #pragma once
 
+#if 0
 #include "ExecutionEngine.h"
 #include "faiss/Index.h"
 
@@ -94,3 +95,4 @@ class FaissExecutionEngine : public ExecutionEngine {
 } // namespace engine
 } // namespace milvus
 } // namespace zilliz
+#endif
