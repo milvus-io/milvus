@@ -21,6 +21,9 @@ cmake_build/src/milvus_server is the server
 
 cmake_build/src/libmilvus_engine.a is the static library
 
+    git submodule init
+    git submodule update
+
     cd [sourcecode path]/cpp
     ./build.sh -t Debug
     ./build.sh -t Release
@@ -53,10 +56,10 @@ If you encounter the following error when building:
 ### Launch server
 Set config in cpp/conf/server_config.yaml
 
-Add milvus/bin/lib to LD_LIBRARY_PATH
+Add milvus/lib to LD_LIBRARY_PATH
 
 ```
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/milvus/bin/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/milvus/lib
 ```
 
 Then launch server with config:

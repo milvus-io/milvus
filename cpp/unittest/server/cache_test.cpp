@@ -7,7 +7,9 @@
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 
+#include "utils/Error.h"
 #include "wrapper/Index.h"
+#include "wrapper/knowhere/vec_index.h"
 
 using namespace zilliz::milvus;
 
@@ -26,6 +28,58 @@ public:
     }
 };
 
+class MockVecIndex : public engine::VecIndex {
+public:
+    virtual server::KnowhereError BuildAll(const long &nb,
+                          const float *xb,
+                          const long *ids,
+                          const engine::Config &cfg,
+                          const long &nt = 0,
+                          const float *xt = nullptr) {
+
+    }
+
+    engine::IndexType GetType() override {
+        return engine::IndexType::INVALID;
+    }
+
+    virtual server::KnowhereError Add(const long &nb,
+                     const float *xb,
+                     const long *ids,
+                     const engine::Config &cfg = engine::Config()) {
+
+    }
+
+    virtual server::KnowhereError Search(const long &nq,
+                        const float *xq,
+                        float *dist,
+                        long *ids,
+                        const engine::Config &cfg = engine::Config()) {
+
+    }
+
+    virtual int64_t Dimension() {
+        return dimension_;
+    }
+
+    virtual int64_t Count() {
+        return ntotal_;
+    }
+
+    virtual zilliz::knowhere::BinarySet Serialize() {
+        zilliz::knowhere::BinarySet binset;
+        return binset;
+    }
+
+    virtual server::KnowhereError Load(const zilliz::knowhere::BinarySet &index_binary) {
+
+    }
+
+public:
+    int64_t dimension_ = 512;
+    int64_t ntotal_ = 0;
+};
+
 }
 
 TEST(CacheTest, CPU_CACHE_TEST) {
@@ -40,9 +94,9 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     const int dim = 256;
 
     for (int i = 0; i < 20; i++) {
-        std::shared_ptr<faiss::Index> raw_index(faiss::index_factory(dim, "IDMap,Flat"));
-        engine::Index_ptr index = std::make_shared<engine::Index>(raw_index);
-        index->ntotal = 1000000;//less 1G per index
+        MockVecIndex* mock_index = new MockVecIndex();
+        mock_index->ntotal_ = 1000000;//less 1G per index
+        engine::Index_ptr index(mock_index);
 
         cpu_mgr->InsertItem("index_" + std::to_string(i), index);
     }
@@ -65,9 +119,9 @@ TEST(CacheTest, CPU_CACHE_TEST) {
         g_num = 5;
         cpu_mgr->SetCapacity(g_num * gbyte);
 
-        std::shared_ptr<faiss::Index> raw_index(faiss::index_factory(dim, "IDMap,Flat"));
-        engine::Index_ptr index = std::make_shared<engine::Index>(raw_index);
-        index->ntotal = 6000000;//6G less
+        MockVecIndex* mock_index = new MockVecIndex();
+        mock_index->ntotal_ = 6000000;//6G less
+        engine::Index_ptr index(mock_index);
 
         cpu_mgr->InsertItem("index_6g", index);
         ASSERT_EQ(cpu_mgr->ItemCount(), 0);//data greater than capacity can not be inserted sucessfully
@@ -82,9 +136,9 @@ TEST(CacheTest, GPU_CACHE_TEST) {
     const int dim = 256;
 
     for(int i = 0; i < 20; i++) {
-        std::shared_ptr<faiss::Index> raw_index(faiss::index_factory(dim, "IDMap,Flat"));
-        engine::Index_ptr index = std::make_shared<engine::Index>(raw_index);
-        index->ntotal = 1000;
+        MockVecIndex* mock_index = new MockVecIndex();
+        mock_index->ntotal_ = 1000;
+        engine::Index_ptr index(mock_index);
 
         cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index);
 
@@ -117,9 +171,9 @@ TEST(CacheTest, INVALID_TEST) {
     {
         LessItemCacheMgr mgr;
         for(int i = 0; i < 20; i++) {
-            std::shared_ptr<faiss::Index> raw_index(faiss::index_factory(2, "IDMap,Flat"));
-            engine::Index_ptr index = std::make_shared<engine::Index>(raw_index);
-            index->ntotal = 2;
+            MockVecIndex* mock_index = new MockVecIndex();
+            mock_index->ntotal_ = 2;
+            engine::Index_ptr index(mock_index);
 
             cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index);
             mgr.InsertItem("index_" + std::to_string(i), obj);
