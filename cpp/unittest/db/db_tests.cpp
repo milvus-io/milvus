@@ -217,7 +217,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     {//search by specify index file
         engine::meta::DatesT dates;
-        std::vector<std::string> file_ids = {"4", "5"};
+        std::vector<std::string> file_ids = {"4", "5", "6"};
         engine::QueryResults results;
         stat = db_->Query(TABLE_NAME, file_ids, k, nq, xq.data(), dates, results);
         ASSERT_STATS(stat);

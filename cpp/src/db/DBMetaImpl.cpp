@@ -560,6 +560,79 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
     return Status::OK();
 }
 
+Status DBMetaImpl::FilesToSearch(const std::string &table_id,
+                                 const std::vector<size_t> &ids,
+                                 const DatesT &partition,
+                                 DatePartionedTableFilesSchema &files) {
+    files.clear();
+    MetricCollector metric;
+
+    try {
+        auto select_columns = columns(&TableFileSchema::id_,
+                                      &TableFileSchema::table_id_,
+                                      &TableFileSchema::file_id_,
+                                      &TableFileSchema::file_type_,
+                                      &TableFileSchema::size_,
+                                      &TableFileSchema::date_,
+                                      &TableFileSchema::engine_type_);
+
+        auto match_tableid = c(&TableFileSchema::table_id_) == table_id;
+        auto is_raw = c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW;
+        auto is_toindex = c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_INDEX;
+        auto is_index = c(&TableFileSchema::file_type_) == (int) TableFileSchema::INDEX;
+
+        TableSchema table_schema;
+        table_schema.table_id_ = table_id;
+        auto status = DescribeTable(table_schema);
+        if (!status.ok()) { return status; }
+
+        decltype(ConnectorPtr->select(select_columns)) result;
+        if (partition.empty() && ids.empty()) {
+            auto filter = where(match_tableid and (is_raw or is_toindex or is_index));
+            result = ConnectorPtr->select(select_columns, filter);
+        }
+        else if (partition.empty() && !ids.empty()) {
+            auto match_fileid = in(&TableFileSchema::id_, ids);
+            auto filter = where(match_tableid and match_fileid and (is_raw or is_toindex or is_index));
+            result = ConnectorPtr->select(select_columns, filter);
+        }
+        else if (!partition.empty() && ids.empty()) {
+            auto match_date = in(&TableFileSchema::date_, partition);
+            auto filter = where(match_tableid and match_date and (is_raw or is_toindex or is_index));
+            result = ConnectorPtr->select(select_columns, filter);
+        }
+        else if (!partition.empty() && !ids.empty()) {
+            auto match_fileid = in(&TableFileSchema::id_, ids);
+            auto match_date = in(&TableFileSchema::date_, partition);
+            auto filter = where(match_tableid and match_fileid and match_date and (is_raw or is_toindex or is_index));
+            result = ConnectorPtr->select(select_columns, filter);
+        }
+
+        TableFileSchema table_file;
+        for (auto &file : result) {
+            table_file.id_ = std::get<0>(file);
+            table_file.table_id_ = std::get<1>(file);
+            table_file.file_id_ = std::get<2>(file);
+            table_file.file_type_ = std::get<3>(file);
+            table_file.size_ = std::get<4>(file);
+            table_file.date_ = std::get<5>(file);
+            table_file.engine_type_ = std::get<6>(file);
+            table_file.dimension_ = table_schema.dimension_;
+            utils::GetTableFilePath(options_, table_file);
+            auto dateItr = files.find(table_file.date_);
+            if (dateItr == files.end()) {
+                files[table_file.date_] = TableFilesSchema();
+            }
+            files[table_file.date_].push_back(table_file);
+        }
+
+    } catch (std::exception &e) {
+        return HandleException("Encounter exception when iterate index files", e);
+    }
+
+    return Status::OK();
+}
+
 Status DBMetaImpl::FilesToMerge(const std::string &table_id,
                                 DatePartionedTableFilesSchema &files) {
     files.clear();

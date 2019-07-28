@@ -1,10 +1,11 @@
+
 ////////////////////////////////////////////////////////////////////////////////
 // Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "src/server/ServerConfig.h"
+#if 0
 #include "Operand.h"
 
 
@@ -119,3 +120,4 @@ Operand_ptr str_to_operand(const std::string &input) {
 }
 }
 }
+#endif
