@@ -174,7 +174,7 @@ namespace {
         std::vector<TopKQueryResult> topk_query_result_array;
         {
             TimeRecorder rc(phase_name);
-            Status stat = conn->SearchVector(TABLE_NAME, record_array, query_range_array, TOP_K, topk_query_result_array);
+            Status stat = conn->SearchVector("qqq", record_array, query_range_array, TOP_K, topk_query_result_array);
             std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
         }
 
@@ -244,11 +244,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
             auto start = std::chrono::high_resolution_clock::now();
 
-            std::vector<RowRecord> null_record;
-            RowRecord rowRecord;
-            rowRecord.data.resize(0);
-            null_record.push_back(rowRecord);
-            Status stat = conn->InsertVector(TABLE_NAME, null_record, record_ids);
+            Status stat = conn->InsertVector(TABLE_NAME, record_array, record_ids);
             auto finish = std::chrono::high_resolution_clock::now();
             std::cout << "InsertVector cost: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
 
