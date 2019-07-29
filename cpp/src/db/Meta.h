@@ -66,6 +66,9 @@ class Meta {
     FilesToSearch(const std::string &table_id, const DatesT &partition, DatePartionedTableFilesSchema &files) = 0;
 
     virtual Status
+    FilesToSearch(const std::string &table_id, const std::vector<size_t> &ids, const DatesT &partition, DatePartionedTableFilesSchema &files) = 0;
+
+    virtual Status
     FilesToMerge(const std::string &table_id, DatePartionedTableFilesSchema &files) = 0;
 
     virtual Status

@@ -109,6 +109,14 @@ include(ThirdPartyPackages)
 include_directories(${MILVUS_SOURCE_DIR})
 link_directories(${MILVUS_BINARY_DIR})
 
+if (NOT DEFINED KNOWHERE_BUILD_DIR)
+    message(FATAL_ERROR "You must set  environment variable KNOWHERE_BUILD_DIR")
+endif()
+message(STATUS "Build with ${KNOWHERE_BUILD_DIR}")
+include_directories(${KNOWHERE_BUILD_DIR}/include)
+include_directories(${KNOWHERE_BUILD_DIR}/include/SPTAG/AnnService)
+link_directories(${KNOWHERE_BUILD_DIR}/lib)
+
 ## Following should be check
 
 set(MILVUS_ENGINE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
