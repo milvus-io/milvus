@@ -115,7 +115,8 @@ GrpcClient::SearchVector(std::vector<::milvus::grpc::TopKQueryResult>& result_ar
     ::grpc::Status status = reader->Finish();
 
     if (!status.ok()) {
-        std::cerr << "SearchVector rpc failed!\n";
+        std::cerr << "SearchVector rpc failed!" << std::endl;
+        std::cerr << status.error_message() << std::endl;
     }
 
     if (query_result.status().error_code() != grpc::SUCCESS) {
@@ -131,7 +132,8 @@ GrpcClient::DescribeTable(::milvus::grpc::TableSchema& grpc_schema, const std::s
     ::grpc::Status status = stub_->DescribeTable(&context, grpc_tablename, &grpc_schema);
 
     if (!status.ok()) {
-        std::cerr << "DescribeTable rpc failed!\n";
+        std::cerr << "DescribeTable rpc failed!" << std::endl;
+        std::cerr << status.error_message() << std::endl;
     }
 
     if (grpc_schema.table_name().status().error_code() != grpc::SUCCESS) {
@@ -174,6 +176,7 @@ GrpcClient::ShowTables(std::vector<std::string> &table_array) {
 
     if (!status.ok()) {
         std::cerr << "ShowTables gRPC failed!" << std::endl;
+        std::cerr << status.error_message() << std::endl;
     }
 
     if (table_name.status().error_code() != grpc::SUCCESS) {
