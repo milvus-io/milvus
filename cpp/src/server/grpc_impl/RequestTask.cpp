@@ -405,6 +405,16 @@ ServerError InsertVectorTask::OnExecute() {
         // TODO: change to one dimension array in protobuf or use multiple-thread to copy the data
         for (size_t i = 0; i < insert_infos_.row_record_array_size(); i++) {
             for (size_t j = 0; j < table_info.dimension_; j++) {
+                if (insert_infos_.row_record_array(i).vector_data().empty()) {
+                    return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record float array is empty");
+                }
+                uint64_t vec_dim = insert_infos_.row_record_array(i).vector_data().size();
+                if (vec_dim != table_info.dimension_) {
+                    ServerError error_code = SERVER_INVALID_VECTOR_DIMENSION;
+                    std::string error_msg = "Invalid rowrecord dimension: " + std::to_string(vec_dim)
+                        + " vs. table dimension:" + std::to_string(table_info.dimension_);
+                    return SetError(error_code, error_msg);
+                }
                 vec_f[i * table_info.dimension_ + j] = insert_infos_.row_record_array(i).vector_data(j);
             }
         }
