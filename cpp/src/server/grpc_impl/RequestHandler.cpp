@@ -73,8 +73,14 @@ RequestHandler::SearchVector(::grpc::ServerContext* context, const ::milvus::grp
 RequestHandler::SearchVectorInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchVectorInFilesInfos* request, ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult>* writer) {
     std::vector<std::string> file_id_array;
     BaseTaskPtr task_ptr = SearchVectorTask::Create(request->search_vector_infos(), file_id_array, *writer);
-    RequestScheduler::ExecTask(task_ptr, nullptr);
-    return ::grpc::Status::OK;
+    ::milvus::grpc::Status grpc_status;
+    RequestScheduler::ExecTask(task_ptr, &grpc_status);
+    if (grpc_status.error_code() != SERVER_SUCCESS) {
+        ::grpc::Status status(::grpc::INVALID_ARGUMENT, grpc_status.reason());
+        return status;
+    } else {
+        return ::grpc::Status::OK;
+    }
 }
 
 ::grpc::Status
