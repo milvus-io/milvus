@@ -21,6 +21,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-235 - Some test cases random fail
 - MS-236 - Add MySQLMetaImpl::HasNonIndexFiles
 - MS-257 - Update bzip2 download url
+- MS-288 - Update compile scripts
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
@@ -37,11 +38,14 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-260 - Refine log
 - MS-249 - Check machine hardware during initialize
 - MS-261 - Update faiss version to 1.5.3 and add BUILD_FAISS_WITH_MKL as an option
+- MS-266 - Improve topk reduce time by using multi-threads
+- MS-275 - Avoid sqlite logic error excetion
 - MS-278 - add IndexStatsHelper
 
 ## New Feature
 - MS-180 - Add new mem manager
 - MS-195 - Add nlist and use_blas_threshold conf
+- MS-137 - Integrate knowhere
 
 ## Task
 

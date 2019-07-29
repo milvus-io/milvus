@@ -4,14 +4,15 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "EngineFactory.h"
-#include "FaissExecutionEngine.h"
+//#include "FaissExecutionEngine.h"
+#include "ExecutionEngineImpl.h"
 #include "Log.h"
-
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
+#if 0
 ExecutionEnginePtr
 EngineFactory::Build(uint16_t dimension,
                      const std::string &location,
@@ -26,7 +27,7 @@ EngineFactory::Build(uint16_t dimension,
             break;
         }
 
-        case EngineType::FAISS_IVFFLAT: {
+        case EngineType::FAISS_IVFFLAT_GPU: {
             execution_engine_ptr =
                 ExecutionEnginePtr(new FaissExecutionEngine(dimension, location, BUILD_INDEX_TYPE_IVF, "IDMap,Flat"));
             break;
@@ -47,6 +48,25 @@ EngineFactory::Build(uint16_t dimension,
     execution_engine_ptr->Init();
     return execution_engine_ptr;
 }
+#else
+ExecutionEnginePtr
+EngineFactory::Build(uint16_t dimension,
+                     const std::string &location,
+                     EngineType type) {
+
+    if(type == EngineType::INVALID) {
+        ENGINE_LOG_ERROR << "Unsupported engine type";
+        return nullptr;
+    }
+
+    ENGINE_LOG_DEBUG << "EngineFactory EngineTypee: " << int(type);
+    ExecutionEnginePtr execution_engine_ptr =
+            std::make_shared<ExecutionEngineImpl>(dimension, location, type);
+
+    execution_engine_ptr->Init();
+    return execution_engine_ptr;
+}
+#endif
 
 }
 }

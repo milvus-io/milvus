@@ -37,7 +37,7 @@ public:
             return size_;
         }
 
-        return index_->ntotal*(index_->dim*4);
+        return index_->Count() * index_->Dimension() * sizeof(float);
     }
 
 private:

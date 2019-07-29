@@ -12,8 +12,9 @@ aux_source_directory(server/grpc_impl grpcserver_files)
 aux_source_directory(server/thrift_impl thriftserver_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_files)
-aux_source_directory(wrapper wrapper_files)
+#aux_source_directory(wrapper wrapper_files)
 aux_source_directory(metrics metrics_files)
+aux_source_directory(wrapper/knowhere knowhere_files)
 
 aux_source_directory(db/scheduler scheduler_files)
 aux_source_directory(db/scheduler/context scheduler_context_files)
@@ -55,6 +56,7 @@ set(engine_files
         ${db_scheduler_files}
         ${wrapper_files}
         ${metrics_files}
+        ${knowhere_files}
         )
 
 set(get_sys_info_files
@@ -72,6 +74,13 @@ include_directories(grpc/gen-status)
 include_directories(grpc/gen-milvus)
 
 set(third_party_libs
+        knowhere
+        SPTAGLibStatic
+        arrow
+        jemalloc_pic
+        faiss
+        openblas
+        lapack
         easyloggingpp
         sqlite
         thrift
@@ -79,7 +88,6 @@ set(third_party_libs
         grpc++
         grpcpp_channelz
         yaml-cpp
-        faiss
         prometheus-cpp-push
         prometheus-cpp-pull
         prometheus-cpp-core
@@ -91,6 +99,8 @@ set(third_party_libs
         snappy
         zlib
         zstd
+        cudart
+        cublas
         mysqlpp
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         cudart
@@ -101,7 +111,6 @@ if (MEGASEARCH_WITH_ARROW STREQUAL "ON")
 endif()
 if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     set(third_party_libs ${third_party_libs}
-            ${MKL_LIBS}
             ${MKL_LIBS})
 else()
     set(third_party_libs ${third_party_libs}
@@ -121,8 +130,6 @@ if (GPU_VERSION STREQUAL "ON")
             pthread
             libgomp.a
             libgfortran.a
-            cudart
-            cublas
             ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
             )
 else()
@@ -182,6 +189,17 @@ set(server_libs
         metrics
         )
 
+set(knowhere_libs
+        knowhere
+        SPTAGLibStatic
+        arrow
+        jemalloc_pic
+        faiss
+        openblas
+        lapack
+        tbb
+        )
+
 if (MILVUS_ENABLE_THRIFT STREQUAL "ON")
     add_executable(milvus_thrift_server
             ${config_files}
@@ -205,16 +223,17 @@ endif()
 
 if (ENABLE_LICENSE STREQUAL "ON")
     if(MILVUS_ENABLE_THRIFT STREQUAL "ON")
-        target_link_libraries(milvus_thrift_server ${server_libs} license_check ${third_party_libs})
+        target_link_libraries(milvus_thrift_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
     else()
-        target_link_libraries(milvus_grpc_server ${server_libs} license_check ${third_party_libs})
+        target_link_libraries(milvus_grpc_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
     endif()
 else ()
     if(MILVUS_ENABLE_THRIFT STREQUAL "ON")
-        target_link_libraries(milvus_thrift_server ${server_libs} ${third_party_libs})
+        target_link_libraries(milvus_thrift_server ${server_libs} ${knowhere_libs} ${third_party_libs})
     else()
-        target_link_libraries(milvus_grpc_server ${server_libs} ${third_party_libs})
+        target_link_libraries(milvus_grpc_server ${server_libs} ${knowhere_libs} ${third_party_libs})
     endif()
+
 endif()
 
 if (ENABLE_LICENSE STREQUAL "ON")
@@ -235,6 +254,8 @@ else()
 endif()
 
 install(FILES
+        ${KNOWHERE_BUILD_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}
+        ${KNOWHERE_BUILD_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}.2
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4
