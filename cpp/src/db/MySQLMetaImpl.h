@@ -53,6 +53,11 @@ class MySQLMetaImpl : public Meta {
                          const DatesT &partition,
                          DatePartionedTableFilesSchema &files) override;
 
+    Status FilesToSearch(const std::string &table_id,
+                         const std::vector<size_t> &ids,
+                         const DatesT &partition,
+                         DatePartionedTableFilesSchema &files) override;
+
     Status FilesToMerge(const std::string &table_id,
                         DatePartionedTableFilesSchema &files) override;
 

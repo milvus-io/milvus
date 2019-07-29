@@ -8,6 +8,7 @@
 #include "Meta.h"
 #include "Options.h"
 
+#include <mutex>
 
 namespace zilliz {
 namespace milvus {
@@ -62,6 +63,11 @@ class DBMetaImpl : public Meta {
     Status
     FilesToSearch(const std::string &table_id, const DatesT &partition, DatePartionedTableFilesSchema &files) override;
 
+    Status FilesToSearch(const std::string &table_id,
+                         const std::vector<size_t> &ids,
+                         const DatesT &partition,
+                         DatePartionedTableFilesSchema &files) override;
+
     Status
     FilesToMerge(const std::string &table_id, DatePartionedTableFilesSchema &files) override;
 
@@ -94,6 +100,8 @@ class DBMetaImpl : public Meta {
     Status Initialize();
 
     const DBMetaOptions options_;
+
+    std::mutex meta_mutex_;
 }; // DBMetaImpl
 
 } // namespace meta

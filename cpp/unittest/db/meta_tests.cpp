@@ -113,7 +113,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     ss << "days:" << days_num;
     options.archive_conf = ArchiveConf("delete", ss.str());
 
-    auto impl = meta::DBMetaImpl(options);
+    meta::DBMetaImpl impl(options);
     auto table_id = "meta_test_table";
 
     meta::TableSchema table;
@@ -163,7 +163,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     options.path = "/tmp/milvus_test";
     options.archive_conf = ArchiveConf("delete", "disk:11");
 
-    auto impl = meta::DBMetaImpl(options);
+    meta::DBMetaImpl impl(options);
     auto table_id = "meta_test_group";
 
     meta::TableSchema table;
@@ -269,4 +269,15 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);
+
+    std::vector<size_t> ids;
+    status = impl_->FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[table_file.date_].size(),
+              to_index_files_cnt+raw_files_cnt+index_files_cnt);
+
+    ids.push_back(size_t(9999999999));
+    status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[table_file.date_].size(),0);
 }
