@@ -243,7 +243,12 @@ ClientTest::Test(const std::string& address, const std::string& port) {
             std::vector<int64_t> record_ids;
 
             auto start = std::chrono::high_resolution_clock::now();
-            Status stat = conn->InsertVector(TABLE_NAME, record_array, record_ids);
+
+            std::vector<RowRecord> null_record;
+            RowRecord rowRecord;
+            rowRecord.data.resize(0);
+            null_record.push_back(rowRecord);
+            Status stat = conn->InsertVector(TABLE_NAME, null_record, record_ids);
             auto finish = std::chrono::high_resolution_clock::now();
             std::cout << "InsertVector cost: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
 
