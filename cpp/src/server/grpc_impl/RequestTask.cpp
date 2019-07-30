@@ -655,6 +655,8 @@ ServerError PingTask::OnExecute() {
         result_ = MILVUS_VERSION;
     } else if (cmd_ == "disconnect") {
         //TODO stopservice
+    } else {
+        result_ = "OK";
     }
 
     return SERVER_SUCCESS;
