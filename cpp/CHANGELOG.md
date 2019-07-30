@@ -2,7 +2,7 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
-# Milvus 0.3.1 (2019-07-10)
+# Milvus 0.4.0 (2019-07-28)
 
 ## Bug
 
