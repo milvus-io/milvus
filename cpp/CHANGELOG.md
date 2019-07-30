@@ -2,6 +2,16 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
+# Milvus 0.3.1 (2019-07-10)
+
+## Bug
+
+## Improvement
+
+## New Feature
+
+## Task
+- MS-297 - disable mysql unit test
 
 # Milvus 0.3.1 (2019-07-10)
 
