@@ -486,7 +486,7 @@ ServerError SearchVectorTask::OnExecute() {
 
         int top_k_ = search_vector_infos_.topk();
 
-        if(top_k_ <= 0) {
+        if(top_k_ <= 0 || top_k_ > 1024) {
             return SetError(SERVER_INVALID_TOPK, "Invalid topk: " + std::to_string(
                     top_k_));
         }
@@ -535,6 +535,16 @@ ServerError SearchVectorTask::OnExecute() {
         //TODO
         for (size_t i = 0; i < record_array_size; i++) {
             for (size_t j = 0; j < table_info.dimension_; j++) {
+                if (search_vector_infos_.query_record_array(i).vector_data().empty()) {
+                    return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Query record float array is empty");
+                }
+                uint64_t query_vec_dim = search_vector_infos_.query_record_array(i).vector_data().size();
+                if (query_vec_dim != table_info.dimension_) {
+                    ServerError error_code = SERVER_INVALID_VECTOR_DIMENSION;
+                    std::string error_msg = "Invalid rowrecord dimension: " + std::to_string(query_vec_dim)
+                        + " vs. table dimension:" + std::to_string(table_info.dimension_);
+                    return SetError(error_code, error_msg);
+                }
                 vec_f[i * table_info.dimension_ + j] = search_vector_infos_.query_record_array(i).vector_data(j);
             }
         }
