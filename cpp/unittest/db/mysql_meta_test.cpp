@@ -21,7 +21,7 @@
 
 using namespace zilliz::milvus::engine;
 
-TEST_F(MySQLTest, TABLE_TEST) {
+TEST_F(DISABLED_MySQLTest, TABLE_TEST) {
     DBMetaOptions options;
     try {
         options = getDBMetaOptions();
@@ -63,7 +63,7 @@ TEST_F(MySQLTest, TABLE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MySQLTest, TABLE_FILE_TEST) {
+TEST_F(DISABLED_MySQLTest, TABLE_FILE_TEST) {
     DBMetaOptions options;
     try {
         options = getDBMetaOptions();
@@ -136,7 +136,7 @@ TEST_F(MySQLTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
+TEST_F(DISABLED_MySQLTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
     DBMetaOptions options;
     try {
@@ -198,7 +198,7 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
+TEST_F(DISABLED_MySQLTest, ARCHIVE_TEST_DISK) {
     DBMetaOptions options;
     try {
         options = getDBMetaOptions();
@@ -252,7 +252,7 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MySQLTest, TABLE_FILES_TEST) {
+TEST_F(DISABLED_MySQLTest, TABLE_FILES_TEST) {
     DBMetaOptions options;
     try {
         options = getDBMetaOptions();
