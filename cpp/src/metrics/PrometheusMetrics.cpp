@@ -61,18 +61,14 @@ void
 PrometheusMetrics::GPUPercentGaugeSet() {
     if(!startup_) return;
     int numDevice = server::SystemInfo::GetInstance().num_device();
-//    std::vector<unsigned int> values = server::SystemInfo::GetInstance().GPUPercent();
+    std::vector<unsigned long long > used_total = server::SystemInfo::GetInstance().GPUMemoryTotal();
     std::vector<unsigned long long > used_memory = server::SystemInfo::GetInstance().GPUMemoryUsed();
-    constexpr unsigned long long MtoB = 1024*1024;
 
 
     for (int i = 0; i < numDevice; i++) {
         prometheus::Gauge &GPU_percent = GPU_percent_.Add({{"DeviceNum", std::to_string(i)}});
-//        std::cout << "nvmlDeviceGetUtilizationRates: " << values[i] << std::endl;
-//        GPU_percent.Set(static_cast<double>(values[i]));
-        double percent = (double)used_memory[i] / (double)MtoB;
-        double res = (percent / 6078) * 100;
-        GPU_percent.Set(res);
+        double percent = (double)used_memory[i] / (double)used_total[i];
+        GPU_percent.Set(percent * 100);
     }
 
 }

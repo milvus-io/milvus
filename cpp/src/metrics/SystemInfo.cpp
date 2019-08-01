@@ -192,17 +192,17 @@ SystemInfo::CPUPercent() {
 }
 
 
-std::vector<unsigned int>
-SystemInfo::GPUPercent() {
+std::vector<unsigned long long>
+SystemInfo::GPUMemoryTotal() {
     // get GPU usage percent
     if(!initialized_) Init();
-    std::vector<unsigned int> result;
-    nvmlUtilization_t utilization;
+    std::vector<unsigned long long > result;
+    nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
         nvmlDeviceGetHandleByIndex(i, &device);
-        nvmlDeviceGetUtilizationRates(device, &utilization);
-        result.push_back(utilization.gpu);
+        nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
+        result.push_back(nvmlMemory.total);
     }
     return result;
 }
