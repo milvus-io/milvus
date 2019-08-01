@@ -1797,26 +1797,63 @@ macro(build_thrift)
     endif()
     set(THRIFT_DEPENDENCIES ${THRIFT_DEPENDENCIES} ${ZLIB_LIBRARY})
 
-    externalproject_add(thrift_ep
-            URL
-            ${THRIFT_SOURCE_URL}
-            BUILD_BYPRODUCTS
-            "${THRIFT_STATIC_LIB}"
-            "${THRIFT_COMPILER}"
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            CMAKE_ARGS
-            ${THRIFT_CMAKE_ARGS}
-	    INSTALL_COMMAND
-	    ${MAKE} install
-            DEPENDS
-            ${THRIFT_DEPENDENCIES}
-            ${EP_LOG_OPTIONS})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        string(MD5 THRIFT_COMBINE_MD5 "${THRIFT_MD5}${ZLIB_MD5}")
+        set(THRIFT_CACHE_PACKAGE_NAME "thrift_${THRIFT_COMBINE_MD5}.tar.gz")
+        set(THRIFT_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${THRIFT_CACHE_PACKAGE_NAME}")
+        set(THRIFT_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${THRIFT_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${THRIFT_CACHE_URL} ${THRIFT_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${THRIFT_CACHE_URL} TO ${THRIFT_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(thrift_ep
+                    URL
+                    ${THRIFT_SOURCE_URL}
+                    BUILD_BYPRODUCTS
+                    "${THRIFT_STATIC_LIB}"
+                    "${THRIFT_COMPILER}"
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    CMAKE_ARGS
+                    ${THRIFT_CMAKE_ARGS}
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    DEPENDS
+                    ${THRIFT_DEPENDENCIES}
+                    ${EP_LOG_OPTIONS})
+
+            ExternalProject_Create_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${THRIFT_CACHE_URL})
+
+            # The include directory must exist before it is referenced by a target.
+            file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(thrift_ep
+                URL
+                ${THRIFT_SOURCE_URL}
+                BUILD_BYPRODUCTS
+                "${THRIFT_STATIC_LIB}"
+                "${THRIFT_COMPILER}"
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                CMAKE_ARGS
+                ${THRIFT_CMAKE_ARGS}
+                INSTALL_COMMAND
+                ${MAKE} install
+                DEPENDS
+                ${THRIFT_DEPENDENCIES}
+                ${EP_LOG_OPTIONS})
+
+        # The include directory must exist before it is referenced by a target.
+        file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
+    endif()
 
     add_library(thrift STATIC IMPORTED)
-    # The include directory must exist before it is referenced by a target.
-    file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
     set_target_properties(thrift
             PROPERTIES IMPORTED_LOCATION "${THRIFT_STATIC_LIB}"
             INTERFACE_INCLUDE_DIRECTORIES "${THRIFT_INCLUDE_DIR}")
@@ -1840,6 +1877,7 @@ macro(build_yamlcpp)
     message(STATUS "Building yaml-cpp-${YAMLCPP_VERSION} from source")
     set(YAMLCPP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/yaml-cpp_ep-prefix/src/yaml-cpp_ep")
     set(YAMLCPP_STATIC_LIB "${YAMLCPP_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}yaml-cpp${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(YAMLCPP_INCLUDE_DIR "${YAMLCPP_PREFIX}/include")
     set(YAMLCPP_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${YAMLCPP_PREFIX}"
@@ -1847,24 +1885,53 @@ macro(build_yamlcpp)
             -DYAML_CPP_BUILD_TESTS=OFF
             -DYAML_CPP_BUILD_TOOLS=OFF)
 
-    externalproject_add(yaml-cpp_ep
-            URL
-            ${YAMLCPP_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            "${YAMLCPP_STATIC_LIB}"
-            CMAKE_ARGS
-            ${YAMLCPP_CMAKE_ARGS})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(YAMLCPP_CACHE_PACKAGE_NAME "yaml-cpp_${YAMLCPP_MD5}.tar.gz")
+        set(YAMLCPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${YAMLCPP_CACHE_PACKAGE_NAME}")
+        set(YAMLCPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${YAMLCPP_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${YAMLCPP_PREFIX}/include")
+        file(DOWNLOAD ${YAMLCPP_CACHE_URL} ${YAMLCPP_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${YAMLCPP_CACHE_URL} TO ${YAMLCPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(yaml-cpp_ep
+                    URL
+                    ${YAMLCPP_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_BYPRODUCTS
+                    "${YAMLCPP_STATIC_LIB}"
+                    CMAKE_ARGS
+                    ${YAMLCPP_CMAKE_ARGS})
+
+            ExternalProject_Create_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/yaml-cpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${YAMLCPP_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${YAMLCPP_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(yaml-cpp_ep
+                URL
+                ${YAMLCPP_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_BYPRODUCTS
+                "${YAMLCPP_STATIC_LIB}"
+                CMAKE_ARGS
+                ${YAMLCPP_CMAKE_ARGS})
+
+        file(MAKE_DIRECTORY "${YAMLCPP_INCLUDE_DIR}")
+    endif()
 
     add_library(yaml-cpp STATIC IMPORTED)
     set_target_properties(yaml-cpp
             PROPERTIES IMPORTED_LOCATION "${YAMLCPP_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${YAMLCPP_PREFIX}/include")
+            INTERFACE_INCLUDE_DIRECTORIES "${YAMLCPP_INCLUDE_DIR}")
 
     add_dependencies(yaml-cpp yaml-cpp_ep)
 endmacro()
@@ -1885,27 +1952,57 @@ macro(build_zlib)
     set(ZLIB_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix/src/zlib_ep")
     set(ZLIB_STATIC_LIB_NAME libz.a)
     set(ZLIB_STATIC_LIB "${ZLIB_PREFIX}/lib/${ZLIB_STATIC_LIB_NAME}")
+    set(ZLIB_INCLUDE_DIR "${ZLIB_PREFIX}/include")
     set(ZLIB_CMAKE_ARGS ${EP_COMMON_CMAKE_ARGS} "-DCMAKE_INSTALL_PREFIX=${ZLIB_PREFIX}"
             -DBUILD_SHARED_LIBS=OFF)
 
-    externalproject_add(zlib_ep
-            URL
-            ${ZLIB_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            "${ZLIB_STATIC_LIB}"
-            CMAKE_ARGS
-            ${ZLIB_CMAKE_ARGS})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(ZLIB_CACHE_PACKAGE_NAME "zlib_${ZLIB_MD5}.tar.gz")
+        set(ZLIB_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ZLIB_CACHE_PACKAGE_NAME}")
+        set(ZLIB_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ZLIB_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${ZLIB_PREFIX}/include")
+        file(DOWNLOAD ${ZLIB_CACHE_URL} ${ZLIB_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${ZLIB_CACHE_URL} TO ${ZLIB_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(zlib_ep
+                    URL
+                    ${ZLIB_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_BYPRODUCTS
+                    "${ZLIB_STATIC_LIB}"
+                    CMAKE_ARGS
+                    ${ZLIB_CMAKE_ARGS})
+
+            ExternalProject_Create_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZLIB_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(zlib_ep
+                URL
+                ${ZLIB_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_BYPRODUCTS
+                "${ZLIB_STATIC_LIB}"
+                CMAKE_ARGS
+                ${ZLIB_CMAKE_ARGS})
+
+        file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
+    endif()
 
     add_library(zlib STATIC IMPORTED)
     set_target_properties(zlib
             PROPERTIES IMPORTED_LOCATION "${ZLIB_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_PREFIX}/include")
+            INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_INCLUDE_DIR}")
 
     add_dependencies(zlib zlib_ep)
 endmacro()
