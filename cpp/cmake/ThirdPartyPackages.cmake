@@ -1797,25 +1797,61 @@ macro(build_thrift)
     endif()
     set(THRIFT_DEPENDENCIES ${THRIFT_DEPENDENCIES} ${ZLIB_LIBRARY})
 
-    externalproject_add(thrift_ep
-            URL
-            ${THRIFT_SOURCE_URL}
-            BUILD_BYPRODUCTS
-            "${THRIFT_STATIC_LIB}"
-            "${THRIFT_COMPILER}"
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            CMAKE_ARGS
-            ${THRIFT_CMAKE_ARGS}
-	    INSTALL_COMMAND
-	    ${MAKE} install
-            DEPENDS
-            ${THRIFT_DEPENDENCIES}
-            ${EP_LOG_OPTIONS})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        string(MD5 THRIFT_COMBINE_MD5 "${THRIFT_MD5}${ZLIB_MD5}")
+        set(THRIFT_CACHE_PACKAGE_NAME "thrift_${THRIFT_COMBINE_MD5}.tar.gz")
+        set(THRIFT_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${THRIFT_CACHE_PACKAGE_NAME}")
+        set(THRIFT_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${THRIFT_CACHE_PACKAGE_NAME}")
 
-    # The include directory must exist before it is referenced by a target.
-    file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
+        file(DOWNLOAD ${THRIFT_CACHE_URL} ${THRIFT_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${THRIFT_CACHE_URL} TO ${THRIFT_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(thrift_ep
+                    URL
+                    ${THRIFT_SOURCE_URL}
+                    BUILD_BYPRODUCTS
+                    "${THRIFT_STATIC_LIB}"
+                    "${THRIFT_COMPILER}"
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    CMAKE_ARGS
+                    ${THRIFT_CMAKE_ARGS}
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    DEPENDS
+                    ${THRIFT_DEPENDENCIES}
+                    ${EP_LOG_OPTIONS})
+
+            ExternalProject_Create_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${THRIFT_CACHE_URL})
+
+            # The include directory must exist before it is referenced by a target.
+            file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(thrift_ep
+                URL
+                ${THRIFT_SOURCE_URL}
+                BUILD_BYPRODUCTS
+                "${THRIFT_STATIC_LIB}"
+                "${THRIFT_COMPILER}"
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                CMAKE_ARGS
+                ${THRIFT_CMAKE_ARGS}
+                INSTALL_COMMAND
+                ${MAKE} install
+                DEPENDS
+                ${THRIFT_DEPENDENCIES}
+                ${EP_LOG_OPTIONS})
+
+        # The include directory must exist before it is referenced by a target.
+        file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
+    endif()
 
     add_library(thrift STATIC IMPORTED)
     set_target_properties(thrift
