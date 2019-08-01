@@ -1066,27 +1066,66 @@ macro(build_faiss)
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS} --without-cuda)
     endif()
 
-    externalproject_add(faiss_ep
-            URL
-            ${FAISS_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${FAISS_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS} VERBOSE=1
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE} install
-            BUILD_BYPRODUCTS
-            ${FAISS_STATIC_LIB})
-        
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
-        ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        string(MD5 FAISS_COMBINE_MD5 "${FAISS_MD5}${LAPACK_MD5}${OPENBLAS_MD5}")
+        set(FAISS_CACHE_PACKAGE_NAME "faiss_${FAISS_COMBINE_MD5}.tar.gz")
+        set(FAISS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${FAISS_CACHE_PACKAGE_NAME}")
+        set(FAISS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${FAISS_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${FAISS_CACHE_URL} ${FAISS_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${FAISS_CACHE_URL} TO ${FAISS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(faiss_ep
+                    URL
+                    ${FAISS_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${FAISS_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS} VERBOSE=1
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    BUILD_BYPRODUCTS
+                    ${FAISS_STATIC_LIB})
+
+            if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
+                ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
+            endif()
+
+            ExternalProject_Create_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/faiss_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${FAISS_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(faiss_ep
+                URL
+                ${FAISS_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${FAISS_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS} VERBOSE=1
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE} install
+                BUILD_BYPRODUCTS
+                ${FAISS_STATIC_LIB})
+
+        if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
+            ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
+        endif()
+
+        file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     endif()
 
-    file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     add_library(faiss SHARED IMPORTED)
 
     if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
