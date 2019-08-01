@@ -952,19 +952,49 @@ macro(build_lapack)
             "-DCMAKE_INSTALL_PREFIX=${LAPACK_PREFIX}"
             -DCMAKE_INSTALL_LIBDIR=lib)
 
-    externalproject_add(lapack_ep
-            URL
-            ${LAPACK_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${LAPACK_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            ${LAPACK_STATIC_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(LAPACK_CACHE_PACKAGE_NAME "lapack_${LAPACK_MD5}.tar.gz")
+        set(LAPACK_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${LAPACK_CACHE_PACKAGE_NAME}")
+        set(LAPACK_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${LAPACK_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
+        file(DOWNLOAD ${LAPACK_CACHE_URL} ${LAPACK_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${LAPACK_CACHE_URL} TO ${LAPACK_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(lapack_ep
+                    URL
+                    ${LAPACK_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CMAKE_ARGS
+                    ${LAPACK_CMAKE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_BYPRODUCTS
+                    ${LAPACK_STATIC_LIB})
+
+            ExternalProject_Create_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lapack_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LAPACK_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(lapack_ep
+                    URL
+                    ${LAPACK_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CMAKE_ARGS
+                    ${LAPACK_CMAKE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_BYPRODUCTS
+                    ${LAPACK_STATIC_LIB})
+
+        file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
+    endif()
+
     add_library(lapack STATIC IMPORTED)
     set_target_properties(
             lapack
