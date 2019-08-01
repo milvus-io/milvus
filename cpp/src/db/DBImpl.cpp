@@ -318,6 +318,9 @@ void DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
     server::Metrics::GetInstance().OctetsSet();
 
+    server::Metrics::GetInstance().CPUCoreUsagePercentSet();
+
+
     ENGINE_LOG_TRACE << "Metric task finished";
 }
 
