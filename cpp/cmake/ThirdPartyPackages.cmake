@@ -102,6 +102,57 @@ macro(build_dependency DEPENDENCY_NAME)
     endif ()
 endmacro()
 
+# ----------------------------------------------------------------------
+# Identify OS
+if (UNIX)
+    if (APPLE)
+        set (CMAKE_OS_NAME "osx" CACHE STRING "Operating system name" FORCE)
+    else (APPLE)
+        ## Check for Debian GNU/Linux ________________
+        find_file (DEBIAN_FOUND debian_version debconf.conf
+            PATHS /etc
+        )
+        if (DEBIAN_FOUND)
+            set (CMAKE_OS_NAME "debian" CACHE STRING "Operating system name" FORCE)
+        endif (DEBIAN_FOUND)
+        ##  Check for Fedora _________________________
+        find_file (FEDORA_FOUND fedora-release
+            PATHS /etc
+        )
+        if (FEDORA_FOUND)
+            set (CMAKE_OS_NAME "fedora" CACHE STRING "Operating system name" FORCE)
+        endif (FEDORA_FOUND)
+        ##  Check for RedHat _________________________
+        find_file (REDHAT_FOUND redhat-release inittab.RH
+            PATHS /etc
+        )
+        if (REDHAT_FOUND)
+            set (CMAKE_OS_NAME "redhat" CACHE STRING "Operating system name" FORCE)
+        endif (REDHAT_FOUND)
+        ## Extra check for Ubuntu ____________________
+        if (DEBIAN_FOUND)
+            ## At its core Ubuntu is a Debian system, with
+            ## a slightly altered configuration; hence from
+            ## a first superficial inspection a system will
+            ## be considered as Debian, which signifies an
+            ## extra check is required.
+            find_file (UBUNTU_EXTRA legal issue
+                PATHS /etc
+            )
+            if (UBUNTU_EXTRA)
+                ## Scan contents of file
+                file (STRINGS ${UBUNTU_EXTRA} UBUNTU_FOUND
+                    REGEX Ubuntu
+                )
+                ## Check result of string search
+                if (UBUNTU_FOUND)
+                    set (CMAKE_OS_NAME "ubuntu" CACHE STRING "Operating system name" FORCE)
+                    set (DEBIAN_FOUND FALSE)
+                endif (UBUNTU_FOUND)
+            endif (UBUNTU_EXTRA)
+        endif (DEBIAN_FOUND)
+    endif (APPLE)
+endif (UNIX)
 
 # ----------------------------------------------------------------------
 # JFrog
@@ -109,11 +160,11 @@ if(NOT DEFINED USE_JFROG_CACHE)
     set(USE_JFROG_CACHE "ON")
 endif()
 if(USE_JFROG_CACHE STREQUAL "ON")    
-    set(JFROG_ARTFACTORY_CACHE_URL "http://192.168.1.201:80/artifactory/generic-local/thirdparty/cache")
+    set(JFROG_ARTFACTORY_CACHE_URL "http://192.168.1.201:80/artifactory/generic-local/thirdparty/cache/${CMAKE_OS_NAME}/${MILVUS_BUILD_ARCH}")
     set(JFROG_USER_NAME "test")
     set(JFROG_PASSWORD "Fantast1c")
     set(THIRDPARTY_PACKAGE_CACHE "${THIRDPARTY_DIR}/cache")
-endif()    
+endif()
 
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
@@ -231,6 +282,7 @@ else()
             "https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz"
     )
 endif()
+set(BOOST_MD5 "fea771fe8176828fabf9c09242ee8c26")
 
 if(DEFINED ENV{MILVUS_BZIP2_URL})
     set(BZIP2_SOURCE_URL "$ENV{MILVUS_BZIP2_URL}")
@@ -244,12 +296,14 @@ if(DEFINED ENV{MILVUS_EASYLOGGINGPP_URL})
 else()
     set(EASYLOGGINGPP_SOURCE_URL "https://github.com/zuhd-org/easyloggingpp/archive/${EASYLOGGINGPP_VERSION}.tar.gz")
 endif()
+set(EASYLOGGINGPP_MD5 "b78cd319db4be9b639927657b8aa7732")
 
 if(DEFINED ENV{MILVUS_FAISS_URL})
     set(FAISS_SOURCE_URL "$ENV{MILVUS_FAISS_URL}")
 else()
     set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
 endif()
+set(FAISS_MD5 "0bc12737b23def156f6a1eb782050135")
 
 if(DEFINED ENV{MILVUS_KNOWHERE_URL})
     set(KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}")
@@ -276,18 +330,21 @@ if(DEFINED ENV{MILVUS_LAPACK_URL})
 else()
     set(LAPACK_SOURCE_URL "https://github.com/Reference-LAPACK/lapack/archive/${LAPACK_VERSION}.tar.gz")
 endif()
+set(LAPACK_MD5 "96591affdbf58c450d45c1daa540dbd2")
 
 if(DEFINED ENV{MILVUS_LZ4_URL})
     set(LZ4_SOURCE_URL "$ENV{MILVUS_LZ4_URL}")
 else()
     set(LZ4_SOURCE_URL "https://github.com/lz4/lz4/archive/${LZ4_VERSION}.tar.gz")
 endif()
+set(LZ4_MD5 "a80f28f2a2e5fe59ebfe8407f793da22")
 
 if(DEFINED ENV{MILVUS_MYSQLPP_URL})
     set(MYSQLPP_SOURCE_URL "$ENV{MILVUS_MYSQLPP_URL}")
 else()
     set(MYSQLPP_SOURCE_URL "https://tangentsoft.com/mysqlpp/releases/mysql++-${MYSQLPP_VERSION}.tar.gz")
 endif()
+set(MYSQLPP_MD5 "cda38b5ecc0117de91f7c42292dd1e79")
 
 if (DEFINED ENV{MILVUS_OPENBLAS_URL})
     set(OPENBLAS_SOURCE_URL "$ENV{MILVUS_OPENBLAS_URL}")
@@ -295,6 +352,7 @@ else ()
     set(OPENBLAS_SOURCE_URL
             "https://github.com/xianyi/OpenBLAS/archive/${OPENBLAS_VERSION}.tar.gz")
 endif()
+set(OPENBLAS_MD5 "8a110a25b819a4b94e8a9580702b6495")
 
 if (DEFINED ENV{MILVUS_PROMETHEUS_URL})
     set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
@@ -302,6 +360,7 @@ else ()
     set(PROMETHEUS_SOURCE_URL
             https://github.com/jupp0r/prometheus-cpp.git)
 endif()
+
 
 if (DEFINED ENV{MILVUS_ROCKSDB_URL})
     set(ROCKSDB_SOURCE_URL "$ENV{MILVUS_ROCKSDB_URL}")
@@ -316,6 +375,7 @@ else()
     set(SNAPPY_SOURCE_URL
             "https://github.com/google/snappy/archive/${SNAPPY_VERSION}.tar.gz")
 endif()
+set(SNAPPY_MD5 "ee9086291c9ae8deb4dac5e0b85bf54a")
 
 if(DEFINED ENV{MILVUS_SQLITE_URL})
     set(SQLITE_SOURCE_URL "$ENV{MILVUS_SQLITE_URL}")
@@ -323,6 +383,7 @@ else()
     set(SQLITE_SOURCE_URL
             "https://www.sqlite.org/2019/sqlite-autoconf-${SQLITE_VERSION}.tar.gz")
 endif()
+set(SQLITE_MD5 "3c68eb400f8354605736cd55400e1572")
 
 if(DEFINED ENV{MILVUS_SQLITE_ORM_URL})
     set(SQLITE_ORM_SOURCE_URL "$ENV{MILVUS_SQLITE_ORM_URL}")
@@ -330,6 +391,7 @@ else()
     set(SQLITE_ORM_SOURCE_URL
             "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
 endif()
+set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
 
 if(DEFINED ENV{MILVUS_THRIFT_URL})
     set(THRIFT_SOURCE_URL "$ENV{MILVUS_THRIFT_URL}")
@@ -337,30 +399,35 @@ else()
     set(THRIFT_SOURCE_URL
             "https://github.com/apache/thrift/archive/${THRIFT_VERSION}.tar.gz")
 endif()
+set(THRIFT_MD5 "ff9af01fec424b5a279fa8a3c9e95c0c")
 
 if(DEFINED ENV{MILVUS_YAMLCPP_URL})
     set(YAMLCPP_SOURCE_URL "$ENV{MILVUS_YAMLCPP_URL}")
 else()
     set(YAMLCPP_SOURCE_URL "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz")
 endif()
+set(YAMLCPP_MD5 "5b943e9af0060d0811148b037449ef82")
 
 if(DEFINED ENV{MILVUS_ZLIB_URL})
     set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
 else()
     set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz")
 endif()
+set(ZLIB_MD5 "0095d2d2d1f3442ce1318336637b695f")
 
 if(DEFINED ENV{MILVUS_ZSTD_URL})
     set(ZSTD_SOURCE_URL "$ENV{MILVUS_ZSTD_URL}")
 else()
     set(ZSTD_SOURCE_URL "https://github.com/facebook/zstd/archive/${ZSTD_VERSION}.tar.gz")
 endif()
+set(ZSTD_MD5 "340c837db48354f8d5eafe74c6077120")
 
 if(DEFINED ENV{MILVUS_AWS_URL})
     set(AWS_SOURCE_URL "$ENV{MILVUS_AWS_URL}")
 else()
     set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
 endif()
+set(AWS_MD5 "9217f5bc8bf23dea04f4466521c85fd9")
 
 if(DEFINED ENV{MILVUS_LIBUNWIND_URL})
     set(LIBUNWIND_SOURCE_URL "$ENV{MILVUS_LIBUNWIND_URL}")
@@ -517,20 +584,52 @@ if(MILVUS_BOOST_VENDORED)
 
         set(MILVUS_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY} ${BOOST_STATIC_SERIALIZATION_LIBRARY})
     endif()
-    externalproject_add(boost_ep
-            URL
-            ${BOOST_SOURCE_URL}
-            BUILD_BYPRODUCTS
-            ${BOOST_BUILD_PRODUCTS}
-            BUILD_IN_SOURCE
-            1
-            CONFIGURE_COMMAND
-            ${BOOST_CONFIGURE_COMMAND}
-            BUILD_COMMAND
-            ${BOOST_BUILD_COMMAND}
-            INSTALL_COMMAND
-            ""
-            ${EP_LOG_OPTIONS})
+
+    set(BOOST_CACHE_PACKAGE_NAME "boost_${BOOST_MD5}.tar.gz")
+    set(BOOST_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${BOOST_CACHE_PACKAGE_NAME}")
+    set(BOOST_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${BOOST_CACHE_PACKAGE_NAME}")
+
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        file(DOWNLOAD ${BOOST_CACHE_URL} ${BOOST_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${BOOST_CACHE_URL} TO ${BOOST_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(boost_ep
+                    URL
+                    ${BOOST_SOURCE_URL}
+                    BUILD_BYPRODUCTS
+                    ${BOOST_BUILD_PRODUCTS}
+                    BUILD_IN_SOURCE
+                    1
+                    CONFIGURE_COMMAND
+                    ${BOOST_CONFIGURE_COMMAND}
+                    BUILD_COMMAND
+                    ${BOOST_BUILD_COMMAND}
+                    INSTALL_COMMAND
+                    ""
+                    ${EP_LOG_OPTIONS})
+
+            ExternalProject_Create_Cache(boost_ep ${BOOST_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/boost_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${BOOST_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(boost_ep ${BOOST_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(boost_ep
+                    URL
+                    ${BOOST_SOURCE_URL}
+                    BUILD_BYPRODUCTS
+                    ${BOOST_BUILD_PRODUCTS}
+                    BUILD_IN_SOURCE
+                    1
+                    CONFIGURE_COMMAND
+                    ${BOOST_CONFIGURE_COMMAND}
+                    BUILD_COMMAND
+                    ${BOOST_BUILD_COMMAND}
+                    INSTALL_COMMAND
+                    ""
+                    ${EP_LOG_OPTIONS})
+    endif()
+
     set(Boost_INCLUDE_DIR "${BOOST_PREFIX}")
     set(Boost_INCLUDE_DIRS "${Boost_INCLUDE_DIR}")
     add_dependencies(boost_system_static boost_ep)
@@ -703,19 +802,50 @@ macro(build_easyloggingpp)
             -Dtest=OFF
             -Dbuild_static_lib=ON)
 
-    externalproject_add(easyloggingpp_ep
-            URL
-            ${EASYLOGGINGPP_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${EASYLOGGINGPP_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            ${EASYLOGGINGPP_STATIC_LIB})
+    set(EASYLOGGINGPP_CACHE_PACKAGE_NAME "easyloggingpp_${EASYLOGGINGPP_MD5}.tar.gz")
+    set(EASYLOGGINGPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${EASYLOGGINGPP_CACHE_PACKAGE_NAME}")
+    set(EASYLOGGINGPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${EASYLOGGINGPP_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        file(DOWNLOAD ${EASYLOGGINGPP_CACHE_URL} ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${EASYLOGGINGPP_CACHE_URL} TO ${EASYLOGGINGPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(easyloggingpp_ep
+                URL
+                ${EASYLOGGINGPP_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${EASYLOGGINGPP_CMAKE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_BYPRODUCTS
+                ${EASYLOGGINGPP_STATIC_LIB})
+
+            ExternalProject_Create_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/easyloggingpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${EASYLOGGINGPP_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(easyloggingpp_ep
+                URL
+                ${EASYLOGGINGPP_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${EASYLOGGINGPP_CMAKE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_BYPRODUCTS
+                ${EASYLOGGINGPP_STATIC_LIB})
+
+        file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
+    endif()
+
+
     add_library(easyloggingpp STATIC IMPORTED)
     set_target_properties(
             easyloggingpp
@@ -1807,4 +1937,3 @@ if(MILVUS_WITH_GPERFTOOLS)
     include_directories(SYSTEM ${GPERFTOOLS_INCLUDE_DIR})
     link_directories(SYSTEM ${GPERFTOOLS_PREFIX}/lib)
 endif()
-
