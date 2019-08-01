@@ -584,51 +584,21 @@ if(MILVUS_BOOST_VENDORED)
 
         set(MILVUS_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY} ${BOOST_STATIC_SERIALIZATION_LIBRARY})
     endif()
+    externalproject_add(boost_ep
+            URL
+            ${BOOST_SOURCE_URL}
+            BUILD_BYPRODUCTS
+            ${BOOST_BUILD_PRODUCTS}
+            BUILD_IN_SOURCE
+            1
+            CONFIGURE_COMMAND
+            ${BOOST_CONFIGURE_COMMAND}
+            BUILD_COMMAND
+            ${BOOST_BUILD_COMMAND}
+            INSTALL_COMMAND
+            ""
+            ${EP_LOG_OPTIONS})
 
-    set(BOOST_CACHE_PACKAGE_NAME "boost_${BOOST_MD5}.tar.gz")
-    set(BOOST_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${BOOST_CACHE_PACKAGE_NAME}")
-    set(BOOST_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${BOOST_CACHE_PACKAGE_NAME}")
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        file(DOWNLOAD ${BOOST_CACHE_URL} ${BOOST_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${BOOST_CACHE_URL} TO ${BOOST_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
-            externalproject_add(boost_ep
-                    URL
-                    ${BOOST_SOURCE_URL}
-                    BUILD_BYPRODUCTS
-                    ${BOOST_BUILD_PRODUCTS}
-                    BUILD_IN_SOURCE
-                    1
-                    CONFIGURE_COMMAND
-                    ${BOOST_CONFIGURE_COMMAND}
-                    BUILD_COMMAND
-                    ${BOOST_BUILD_COMMAND}
-                    INSTALL_COMMAND
-                    ""
-                    ${EP_LOG_OPTIONS})
-
-            ExternalProject_Create_Cache(boost_ep ${BOOST_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/boost_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${BOOST_CACHE_URL})
-        else()
-            ExternalProject_Use_Cache(boost_ep ${BOOST_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-        endif()
-    else()
-        externalproject_add(boost_ep
-                    URL
-                    ${BOOST_SOURCE_URL}
-                    BUILD_BYPRODUCTS
-                    ${BOOST_BUILD_PRODUCTS}
-                    BUILD_IN_SOURCE
-                    1
-                    CONFIGURE_COMMAND
-                    ${BOOST_CONFIGURE_COMMAND}
-                    BUILD_COMMAND
-                    ${BOOST_BUILD_COMMAND}
-                    INSTALL_COMMAND
-                    ""
-                    ${EP_LOG_OPTIONS})
-    endif()
 
     set(Boost_INCLUDE_DIR "${BOOST_PREFIX}")
     set(Boost_INCLUDE_DIRS "${Boost_INCLUDE_DIR}")
