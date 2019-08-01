@@ -302,10 +302,15 @@ Status DBMetaImpl::DescribeTable(TableSchema &table_schema) {
 Status DBMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) {
     has = false;
     try {
-        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_),
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
+                                                     &TableFileSchema::file_type_),
                                              where((c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW
                                                     or
                                                     c(&TableFileSchema::file_type_) == (int) TableFileSchema::NEW
+                                                    or
+                                                    c(&TableFileSchema::file_type_) == (int) TableFileSchema::NEW_MERGE
+                                                    or
+                                                    c(&TableFileSchema::file_type_) == (int) TableFileSchema::NEW_INDEX
                                                     or
                                                     c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_INDEX)
                                                    and c(&TableFileSchema::table_id_) == table_id
@@ -313,8 +318,33 @@ Status DBMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) {
 
         if (selected.size() >= 1) {
             has = true;
-        } else {
-            has = false;
+
+            int raw_count = 0, new_count = 0, new_merge_count = 0, new_index_count = 0, to_index_count = 0;
+            for (auto &file : selected) {
+                switch (std::get<1>(file)) {
+                    case (int) TableFileSchema::RAW:
+                        raw_count++;
+                        break;
+                    case (int) TableFileSchema::NEW:
+                        new_count++;
+                        break;
+                    case (int) TableFileSchema::NEW_MERGE:
+                        new_merge_count++;
+                        break;
+                    case (int) TableFileSchema::NEW_INDEX:
+                        new_index_count++;
+                        break;
+                    case (int) TableFileSchema::TO_INDEX:
+                        to_index_count++;
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            ENGINE_LOG_DEBUG << "Table " << table_id << " currently has raw files:" << raw_count
+                << " new files:" << new_count << " new_merge files:" << new_merge_count
+                << " new_index files:" << new_index_count << " to_index files:" << to_index_count;
         }
 
     } catch (std::exception &e) {
@@ -389,7 +419,6 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         MetricCollector metric;
 
         NextFileId(file_schema.file_id_);
-        file_schema.file_type_ = TableFileSchema::NEW;
         file_schema.dimension_ = table_schema.dimension_;
         file_schema.size_ = 0;
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
@@ -1031,7 +1060,11 @@ Status DBMetaImpl::CleanUp() {
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         auto files = ConnectorPtr->select(columns(&TableFileSchema::id_),
-                                             where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::NEW));
+                                             where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::NEW
+                                                   or
+                                                   c(&TableFileSchema::file_type_) == (int) TableFileSchema::NEW_INDEX
+                                                   or
+                                                   c(&TableFileSchema::file_type_) == (int) TableFileSchema::NEW_MERGE));
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
             for (auto &file : files) {
