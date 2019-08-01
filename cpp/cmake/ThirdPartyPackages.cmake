@@ -2133,7 +2133,7 @@ macro(build_aws)
             "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-core${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(AWS_CPP_SDK_S3_STATIC_LIB
             "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-s3${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
+    set(AWS_INCLUDE_DIR "${AWS_PREFIX}/include")
     set(AWS_CMAKE_ARGS
             ${AWS_CMAKE_ARGS}
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
@@ -2141,33 +2141,66 @@ macro(build_aws)
             -DCMAKE_C_FLAGS=${EP_C_FLAGS}
             -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
 
-    externalproject_add(aws_ep
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${AWS_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            INSTALL_DIR
-            ${AWS_PREFIX}
-            URL
-            ${AWS_SOURCE_URL}
-            BUILD_BYPRODUCTS
-            "${AWS_CPP_SDK_S3_STATIC_LIB}"
-            "${AWS_CPP_SDK_CORE_STATIC_LIB}")
-    file(MAKE_DIRECTORY "${AWS_PREFIX}/include")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(AWS_CACHE_PACKAGE_NAME "aws_${AWS_MD5}.tar.gz")
+        set(AWS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${AWS_CACHE_PACKAGE_NAME}")
+        set(AWS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${AWS_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${AWS_CACHE_URL} ${AWS_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${AWS_CACHE_URL} TO ${AWS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(aws_ep
+                    ${EP_LOG_OPTIONS}
+                    CMAKE_ARGS
+                    ${AWS_CMAKE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    INSTALL_DIR
+                    ${AWS_PREFIX}
+                    URL
+                    ${AWS_SOURCE_URL}
+                    BUILD_BYPRODUCTS
+                    "${AWS_CPP_SDK_S3_STATIC_LIB}"
+                    "${AWS_CPP_SDK_CORE_STATIC_LIB}")
+
+            ExternalProject_Create_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/aws_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${AWS_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(aws_ep
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${AWS_CMAKE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                INSTALL_DIR
+                ${AWS_PREFIX}
+                URL
+                ${AWS_SOURCE_URL}
+                BUILD_BYPRODUCTS
+                "${AWS_CPP_SDK_S3_STATIC_LIB}"
+                "${AWS_CPP_SDK_CORE_STATIC_LIB}")
+
+        file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
+    endif()
 
     add_library(aws-cpp-sdk-s3 STATIC IMPORTED)
     set_target_properties(aws-cpp-sdk-s3
             PROPERTIES
             IMPORTED_LOCATION "${AWS_CPP_SDK_S3_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${AWS_PREFIX}/include"
+            INTERFACE_INCLUDE_DIRECTORIES "${AWS_INCLUDE_DIR}"
             INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
 
     add_library(aws-cpp-sdk-core STATIC IMPORTED)
     set_target_properties(aws-cpp-sdk-core
             PROPERTIES IMPORTED_LOCATION "${AWS_CPP_SDK_CORE_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${AWS_PREFIX}/include"
+            INTERFACE_INCLUDE_DIRECTORIES "${AWS_INCLUDE_DIR}"
             INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
 
     add_dependencies(aws-cpp-sdk-s3 aws_ep)
