@@ -60,46 +60,33 @@ PrometheusMetrics::RAMUsagePercentSet() {
 void
 PrometheusMetrics::GPUPercentGaugeSet() {
     if(!startup_) return;
-    int numDevide = server::SystemInfo::GetInstance().num_device();
-    std::vector<unsigned int> values = server::SystemInfo::GetInstance().GPUPercent();
+    int numDevice = server::SystemInfo::GetInstance().num_device();
+//    std::vector<unsigned int> values = server::SystemInfo::GetInstance().GPUPercent();
+    std::vector<unsigned long long > used_memory = server::SystemInfo::GetInstance().GPUMemoryUsed();
+    constexpr unsigned long long MtoB = 1024*1024;
 
-    for (int i = 0; i < values.size(); i++) {
+
+    for (int i = 0; i < numDevice; i++) {
         prometheus::Gauge &GPU_percent = GPU_percent_.Add({{"DeviceNum", std::to_string(i)}});
-        GPU_percent.Set(static_cast<double>(values[i]));
+//        std::cout << "nvmlDeviceGetUtilizationRates: " << values[i] << std::endl;
+//        GPU_percent.Set(static_cast<double>(values[i]));
+        double percent = (double)used_memory[i] / (double)MtoB;
+        double res = (percent / 6078) * 100;
+        GPU_percent.Set(res);
     }
 
-//    if(numDevide >= 1) GPU0_percent_gauge_.Set(static_cast<double>(values[0]));
-//    if(numDevide >= 2) GPU1_percent_gauge_.Set(static_cast<double>(values[1]));
-//    if(numDevide >= 3) GPU2_percent_gauge_.Set(static_cast<double>(values[2]));
-//    if(numDevide >= 4) GPU3_percent_gauge_.Set(static_cast<double>(values[3]));
-//    if(numDevide >= 5) GPU4_percent_gauge_.Set(static_cast<double>(values[4]));
-//    if(numDevide >= 6) GPU5_percent_gauge_.Set(static_cast<double>(values[5]));
-//    if(numDevide >= 7) GPU6_percent_gauge_.Set(static_cast<double>(values[6]));
-//    if(numDevide >= 8) GPU7_percent_gauge_.Set(static_cast<double>(values[7]));
-
-    // to do
 }
 
 void PrometheusMetrics::GPUMemoryUsageGaugeSet() {
     if(!startup_) return;
     std::vector<unsigned long long> values = server::SystemInfo::GetInstance().GPUMemoryUsed();
     constexpr unsigned long long MtoB = 1024*1024;
-    int numDevice = values.size();
+    int numDevice = server::SystemInfo::GetInstance().num_device();
 
     for (int i = 0; i < numDevice; i++) {
         prometheus::Gauge &GPU_memory = GPU_memory_usage_.Add({{"DeviceNum", std::to_string(i)}});
         GPU_memory.Set(values[i] / MtoB);
     }
-
-
-//    if(numDevice >=1) GPU0_memory_usage_gauge_.Set(values[0]/MtoB);
-//    if(numDevice >=2) GPU1_memory_usage_gauge_.Set(values[1]/MtoB);
-//    if(numDevice >=3) GPU2_memory_usage_gauge_.Set(values[2]/MtoB);
-//    if(numDevice >=4) GPU3_memory_usage_gauge_.Set(values[3]/MtoB);
-//    if(numDevice >=5) GPU4_memory_usage_gauge_.Set(values[4]/MtoB);
-//    if(numDevice >=6) GPU5_memory_usage_gauge_.Set(values[5]/MtoB);
-//    if(numDevice >=7) GPU6_memory_usage_gauge_.Set(values[6]/MtoB);
-//    if(numDevice >=8) GPU7_memory_usage_gauge_.Set(values[7]/MtoB);
 
 }
 void PrometheusMetrics::AddVectorsPerSecondGaugeSet(int num_vector, int dim, double time) {
@@ -162,7 +149,6 @@ void PrometheusMetrics::CPUCoreUsagePercentSet() {
     for (int i = 0; i < cpu_core_percent.size(); i++) {
         prometheus::Gauge &core_percent = CPU_.Add({{"CPU", std::to_string(i)}});
         core_percent.Set(cpu_core_percent[i]);
-//        std::cout << cpu_core_percent[i] << "+";
     }
 }
 
