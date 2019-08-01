@@ -102,6 +102,19 @@ macro(build_dependency DEPENDENCY_NAME)
     endif ()
 endmacro()
 
+
+# ----------------------------------------------------------------------
+# JFrog
+if(NOT DEFINED USE_JFROG_CACHE)
+    set(USE_JFROG_CACHE "ON")
+endif()
+if(USE_JFROG_CACHE STREQUAL "ON")    
+    set(JFROG_ARTFACTORY_CACHE_URL "http://192.168.1.201:80/artifactory/generic-local/thirdparty/cache")
+    set(JFROG_USER_NAME "test")
+    set(JFROG_PASSWORD "Fantast1c")
+    set(THIRDPARTY_PACKAGE_CACHE "${THIRDPARTY_DIR}/cache")
+endif()    
+
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
         #disable find_package for now
@@ -224,6 +237,7 @@ if(DEFINED ENV{MILVUS_BZIP2_URL})
 else()
     set(BZIP2_SOURCE_URL "https://sourceware.org/pub/bzip2/bzip2-${BZIP2_VERSION}.tar.gz")
 endif()
+set(BZIP2_MD5 "00b516f4704d4a7cb50a1d97e6e8e15b")
 
 if(DEFINED ENV{MILVUS_EASYLOGGINGPP_URL})
     set(EASYLOGGINGPP_SOURCE_URL "$ENV{MILVUS_EASYLOGGINGPP_URL}")
@@ -538,29 +552,69 @@ macro(build_bzip2)
     set(BZIP2_STATIC_LIB
             "${BZIP2_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}bz2${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-    externalproject_add(bzip2_ep
-                        ${EP_LOG_OPTIONS}
-                        CONFIGURE_COMMAND
-                        ""
-                        BUILD_IN_SOURCE
-                        1
-                        BUILD_COMMAND
-                        ${MAKE}
-                        ${MAKE_BUILD_ARGS}
-                        CFLAGS=${EP_C_FLAGS}
-                        INSTALL_COMMAND
-                        ${MAKE}
-                        install
-                        PREFIX=${BZIP2_PREFIX}
-                        CFLAGS=${EP_C_FLAGS}
-                        INSTALL_DIR
-                        ${BZIP2_PREFIX}
-                        URL
-                        ${BZIP2_SOURCE_URL}
-                        BUILD_BYPRODUCTS
-                        "${BZIP2_STATIC_LIB}")
+    set(BZIP2_CACHE_PACKAGE_NAME "bzip2_${BZIP2_MD5}.tar.gz")
+    set(BZIP2_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${BZIP2_CACHE_PACKAGE_NAME}")
+    set(BZIP2_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${BZIP2_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
+    if(USE_JFROG_CACHE STREQUAL "ON") 
+        file(DOWNLOAD ${BZIP2_CACHE_URL} ${BZIP2_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${BZIP2_CACHE_URL} TO ${BZIP2_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(bzip2_ep
+                                ${EP_LOG_OPTIONS}
+                                CONFIGURE_COMMAND
+                                ""
+                                BUILD_IN_SOURCE
+                                1
+                                BUILD_COMMAND
+                                ${MAKE}
+                                ${MAKE_BUILD_ARGS}
+                                CFLAGS=${EP_C_FLAGS}
+                                INSTALL_COMMAND
+                                ${MAKE}
+                                install
+                                PREFIX=${BZIP2_PREFIX}
+                                CFLAGS=${EP_C_FLAGS}
+                                INSTALL_DIR
+                                ${BZIP2_PREFIX}
+                                URL
+                                ${BZIP2_SOURCE_URL}
+                                BUILD_BYPRODUCTS
+                                "${BZIP2_STATIC_LIB}")
+
+            ExternalProject_Create_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/bzip2_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${BZIP2_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
+
+        else()
+             ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})   
+        endif()
+    else()
+        externalproject_add(bzip2_ep
+                                ${EP_LOG_OPTIONS}
+                                CONFIGURE_COMMAND
+                                ""
+                                BUILD_IN_SOURCE
+                                1
+                                BUILD_COMMAND
+                                ${MAKE}
+                                ${MAKE_BUILD_ARGS}
+                                CFLAGS=${EP_C_FLAGS}
+                                INSTALL_COMMAND
+                                ${MAKE}
+                                install
+                                PREFIX=${BZIP2_PREFIX}
+                                CFLAGS=${EP_C_FLAGS}
+                                INSTALL_DIR
+                                ${BZIP2_PREFIX}
+                                URL
+                                ${BZIP2_SOURCE_URL}
+                                BUILD_BYPRODUCTS
+                                "${BZIP2_STATIC_LIB}")    
+        file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
+    endif()    
+        
     add_library(bzip2 STATIC IMPORTED)
     set_target_properties(
             bzip2
@@ -1753,3 +1807,4 @@ if(MILVUS_WITH_GPERFTOOLS)
     include_directories(SYSTEM ${GPERFTOOLS_INCLUDE_DIR})
     link_directories(SYSTEM ${GPERFTOOLS_PREFIX}/lib)
 endif()
+
