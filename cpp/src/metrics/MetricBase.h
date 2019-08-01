@@ -64,6 +64,8 @@ class MetricsBase{
     virtual void ConnectionGaugeDecrement() {};
     virtual void KeepingAliveCounterIncrement(double value = 1) {};
     virtual void OctetsSet() {};
+
+    virtual void CPUCoreUsagePercentSet() {};
 };
 
 
