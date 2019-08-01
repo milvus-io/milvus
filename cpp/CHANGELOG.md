@@ -60,6 +60,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Task
 
 - MS-125 - Create 0.3.1 release branch
+- MS-306 - Optimize build efficiency
 
 # Milvus 0.3.0 (2019-06-30)
 
