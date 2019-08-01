@@ -2033,7 +2033,7 @@ macro(build_zstd)
 
 
     set(ZSTD_STATIC_LIB "${ZSTD_PREFIX}/lib/libzstd.a")
-
+    set(ZSTD_INCLUDE_DIR "${ZSTD_PREFIX}/include")
     set(ZSTD_CMAKE_ARGS
             ${ZSTD_CMAKE_ARGS}
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
@@ -2045,28 +2045,61 @@ macro(build_zstd)
         message(FATAL_ERROR "Building zstd using ExternalProject requires at least CMake 3.7")
     endif()
 
-    externalproject_add(zstd_ep
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${ZSTD_CMAKE_ARGS}
-            SOURCE_SUBDIR
-            "build/cmake"
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            INSTALL_DIR
-            ${ZSTD_PREFIX}
-            URL
-            ${ZSTD_SOURCE_URL}
-            BUILD_BYPRODUCTS
-            "${ZSTD_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(ZSTD_CACHE_PACKAGE_NAME "zstd_${ZSTD_MD5}.tar.gz")
+        set(ZSTD_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ZSTD_CACHE_PACKAGE_NAME}")
+        set(ZSTD_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ZSTD_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${ZSTD_PREFIX}/include")
+        file(DOWNLOAD ${ZSTD_CACHE_URL} ${ZSTD_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${ZSTD_CACHE_URL} TO ${ZSTD_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(zstd_ep
+                    ${EP_LOG_OPTIONS}
+                    CMAKE_ARGS
+                    ${ZSTD_CMAKE_ARGS}
+                    SOURCE_SUBDIR
+                    "build/cmake"
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    INSTALL_DIR
+                    ${ZSTD_PREFIX}
+                    URL
+                    ${ZSTD_SOURCE_URL}
+                    BUILD_BYPRODUCTS
+                    "${ZSTD_STATIC_LIB}")
+
+            ExternalProject_Create_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zstd_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZSTD_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${ZSTD_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(zstd_ep
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${ZSTD_CMAKE_ARGS}
+                SOURCE_SUBDIR
+                "build/cmake"
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                INSTALL_DIR
+                ${ZSTD_PREFIX}
+                URL
+                ${ZSTD_SOURCE_URL}
+                BUILD_BYPRODUCTS
+                "${ZSTD_STATIC_LIB}")
+
+        file(MAKE_DIRECTORY "${ZSTD_INCLUDE_DIR}")
+    endif()
 
     add_library(zstd STATIC IMPORTED)
     set_target_properties(zstd
             PROPERTIES IMPORTED_LOCATION "${ZSTD_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_PREFIX}/include")
+            INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_INCLUDE_DIR}")
 
     add_dependencies(zstd zstd_ep)
 endmacro()
