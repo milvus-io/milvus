@@ -60,7 +60,7 @@ class SystemInfo {
     double MemoryPercent();
     double CPUPercent();
     std::pair<unsigned long long , unsigned long long > Octets();
-    std::vector<unsigned int> GPUPercent();
+    std::vector<unsigned long long> GPUMemoryTotal();
     std::vector<unsigned long long> GPUMemoryUsed();
 
     std::vector<double> CPUCorePercent();
