@@ -1357,21 +1357,53 @@ macro(build_mysqlpp)
             "CXXFLAGS=${EP_CXX_FLAGS}"
             "LDFLAGS=-pthread")
 
-    externalproject_add(mysqlpp_ep
-            URL
-            ${MYSQLPP_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${MYSQLPP_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            BUILD_BYPRODUCTS
-            ${MYSQLPP_SHARED_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(MYSQLPP_CACHE_PACKAGE_NAME "mysqlpp_${MYSQLPP_MD5}.tar.gz")
+        set(MYSQLPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${MYSQLPP_CACHE_PACKAGE_NAME}")
+        set(MYSQLPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${MYSQLPP_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
+        file(DOWNLOAD ${MYSQLPP_CACHE_URL} ${MYSQLPP_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${MYSQLPP_CACHE_URL} TO ${MYSQLPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(mysqlpp_ep
+                    URL
+                    ${MYSQLPP_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${MYSQLPP_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    BUILD_BYPRODUCTS
+                    ${MYSQLPP_SHARED_LIB})
+
+            ExternalProject_Create_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${MYSQLPP_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(mysqlpp_ep
+                URL
+                ${MYSQLPP_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${MYSQLPP_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                BUILD_BYPRODUCTS
+                ${MYSQLPP_SHARED_LIB})
+
+        file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
+    endif()
+
     add_library(mysqlpp SHARED IMPORTED)
     set_target_properties(
             mysqlpp
