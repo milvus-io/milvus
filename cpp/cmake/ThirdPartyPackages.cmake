@@ -1357,21 +1357,53 @@ macro(build_mysqlpp)
             "CXXFLAGS=${EP_CXX_FLAGS}"
             "LDFLAGS=-pthread")
 
-    externalproject_add(mysqlpp_ep
-            URL
-            ${MYSQLPP_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${MYSQLPP_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            BUILD_BYPRODUCTS
-            ${MYSQLPP_SHARED_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(MYSQLPP_CACHE_PACKAGE_NAME "mysqlpp_${MYSQLPP_MD5}.tar.gz")
+        set(MYSQLPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${MYSQLPP_CACHE_PACKAGE_NAME}")
+        set(MYSQLPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${MYSQLPP_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
+        file(DOWNLOAD ${MYSQLPP_CACHE_URL} ${MYSQLPP_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${MYSQLPP_CACHE_URL} TO ${MYSQLPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(mysqlpp_ep
+                    URL
+                    ${MYSQLPP_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${MYSQLPP_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    BUILD_BYPRODUCTS
+                    ${MYSQLPP_SHARED_LIB})
+
+            ExternalProject_Create_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${MYSQLPP_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(mysqlpp_ep
+                URL
+                ${MYSQLPP_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${MYSQLPP_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                BUILD_BYPRODUCTS
+                ${MYSQLPP_SHARED_LIB})
+
+        file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
+    endif()
+
     add_library(mysqlpp SHARED IMPORTED)
     set_target_properties(
             mysqlpp
@@ -1531,6 +1563,7 @@ endif()
 macro(build_snappy)
     message(STATUS "Building snappy-${SNAPPY_VERSION} from source")
     set(SNAPPY_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/snappy_ep-prefix/src/snappy_ep")
+    set(SNAPPY_INCLUDE_DIRS "${SNAPPY_PREFIX}/include")
     set(SNAPPY_STATIC_LIB_NAME snappy)
     set(SNAPPY_STATIC_LIB
             "${SNAPPY_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${SNAPPY_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
@@ -1542,29 +1575,62 @@ macro(build_snappy)
             -DSNAPPY_BUILD_TESTS=OFF
             "-DCMAKE_INSTALL_PREFIX=${SNAPPY_PREFIX}")
 
-    externalproject_add(snappy_ep
-                        ${EP_LOG_OPTIONS}
-                        BUILD_COMMAND
-                        ${MAKE}
-                        ${MAKE_BUILD_ARGS}
-                        BUILD_IN_SOURCE
-                        1
-                        INSTALL_DIR
-                        ${SNAPPY_PREFIX}
-                        URL
-                        ${SNAPPY_SOURCE_URL}
-                        CMAKE_ARGS
-                        ${SNAPPY_CMAKE_ARGS}
-                        BUILD_BYPRODUCTS
-                        "${SNAPPY_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(SNAPPY_CACHE_PACKAGE_NAME "snappy_${SNAPPY_MD5}.tar.gz")
+        set(SNAPPY_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${SNAPPY_CACHE_PACKAGE_NAME}")
+        set(SNAPPY_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${SNAPPY_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${SNAPPY_PREFIX}/include")
+        file(DOWNLOAD ${SNAPPY_CACHE_URL} ${SNAPPY_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${SNAPPY_CACHE_URL} TO ${SNAPPY_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(snappy_ep
+                    ${EP_LOG_OPTIONS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_DIR
+                    ${SNAPPY_PREFIX}
+                    URL
+                    ${SNAPPY_SOURCE_URL}
+                    CMAKE_ARGS
+                    ${SNAPPY_CMAKE_ARGS}
+                    BUILD_BYPRODUCTS
+                    "${SNAPPY_STATIC_LIB}")
+
+            ExternalProject_Create_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/snappy_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SNAPPY_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${SNAPPY_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(snappy_ep
+                ${EP_LOG_OPTIONS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                INSTALL_DIR
+                ${SNAPPY_PREFIX}
+                URL
+                ${SNAPPY_SOURCE_URL}
+                CMAKE_ARGS
+                ${SNAPPY_CMAKE_ARGS}
+                BUILD_BYPRODUCTS
+                "${SNAPPY_STATIC_LIB}")
+
+        file(MAKE_DIRECTORY "${SNAPPY_INCLUDE_DIR}")
+    endif()
 
     add_library(snappy STATIC IMPORTED)
     set_target_properties(snappy
                         PROPERTIES IMPORTED_LOCATION "${SNAPPY_STATIC_LIB}"
                         INTERFACE_INCLUDE_DIRECTORIES
-                        "${SNAPPY_PREFIX}/include")
+                        "${SNAPPY_INCLUDE_DIRS}")
     add_dependencies(snappy snappy_ep)
 endmacro()
 
@@ -1594,22 +1660,55 @@ macro(build_sqlite)
             "CFLAGS=${EP_C_FLAGS}"
             "CXXFLAGS=${EP_CXX_FLAGS}")
 
-    externalproject_add(sqlite_ep
-            URL
-            ${SQLITE_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${SQLITE_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            BUILD_BYPRODUCTS
-            "${SQLITE_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(SQLITE_CACHE_PACKAGE_NAME "sqlite_${SQLITE_MD5}.tar.gz")
+        set(SQLITE_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${SQLITE_CACHE_PACKAGE_NAME}")
+        set(SQLITE_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${SQLITE_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
+        file(DOWNLOAD ${SQLITE_CACHE_URL} ${SQLITE_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${SQLITE_CACHE_URL} TO ${SQLITE_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(sqlite_ep
+                    URL
+                    ${SQLITE_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${SQLITE_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    BUILD_BYPRODUCTS
+                    "${SQLITE_STATIC_LIB}")
+
+            ExternalProject_Create_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/sqlite_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SQLITE_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(sqlite_ep
+                URL
+                ${SQLITE_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${SQLITE_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                BUILD_BYPRODUCTS
+                "${SQLITE_STATIC_LIB}")
+
+        file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
+    endif()
+
     add_library(sqlite STATIC IMPORTED)
     set_target_properties(
             sqlite
