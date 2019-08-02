@@ -1064,8 +1064,6 @@ macro(build_faiss)
             endif()
 
             ExternalProject_Create_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/faiss_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${FAISS_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1089,10 +1087,9 @@ macro(build_faiss)
         if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
             ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
         endif()
-
-        file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     add_library(faiss SHARED IMPORTED)
 
     if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
