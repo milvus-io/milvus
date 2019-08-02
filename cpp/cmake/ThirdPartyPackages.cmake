@@ -154,6 +154,11 @@ if (UNIX)
     endif (APPLE)
 endif (UNIX)
 
+
+# ----------------------------------------------------------------------
+# thirdparty directory
+set(THIRDPARTY_DIR "${MILVUS_SOURCE_DIR}/thirdparty")
+
 # ----------------------------------------------------------------------
 # JFrog
 if(NOT DEFINED USE_JFROG_CACHE)
@@ -244,7 +249,6 @@ find_package(Threads REQUIRED)
 # offline builds
 
 # Read toolchain versions from cpp/thirdparty/versions.txt
-set(THIRDPARTY_DIR "${MILVUS_SOURCE_DIR}/thirdparty")
 file(STRINGS "${THIRDPARTY_DIR}/versions.txt" TOOLCHAIN_VERSIONS_TXT)
 foreach(_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     # Exclude comments
@@ -653,11 +657,8 @@ macro(build_bzip2)
                                 "${BZIP2_STATIC_LIB}")
 
             ExternalProject_Create_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/bzip2_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${BZIP2_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
-
         else()
-             ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})   
+            ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
     else()
         externalproject_add(bzip2_ep
@@ -680,10 +681,10 @@ macro(build_bzip2)
                                 URL
                                 ${BZIP2_SOURCE_URL}
                                 BUILD_BYPRODUCTS
-                                "${BZIP2_STATIC_LIB}")    
-        file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
-    endif()    
-        
+                                "${BZIP2_STATIC_LIB}")
+    endif()
+
+    file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
     add_library(bzip2 STATIC IMPORTED)
     set_target_properties(
             bzip2
@@ -794,8 +795,6 @@ macro(build_easyloggingpp)
                 ${EASYLOGGINGPP_STATIC_LIB})
 
             ExternalProject_Create_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/easyloggingpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${EASYLOGGINGPP_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -811,11 +810,9 @@ macro(build_easyloggingpp)
                 ${MAKE_BUILD_ARGS}
                 BUILD_BYPRODUCTS
                 ${EASYLOGGINGPP_STATIC_LIB})
-
-        file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
     endif()
 
-
+    file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
     add_library(easyloggingpp STATIC IMPORTED)
     set_target_properties(
             easyloggingpp
@@ -944,8 +941,6 @@ macro(build_lapack)
                     ${LAPACK_STATIC_LIB})
 
             ExternalProject_Create_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lapack_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LAPACK_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -961,10 +956,9 @@ macro(build_lapack)
                     ${MAKE_BUILD_ARGS}
                     BUILD_BYPRODUCTS
                     ${LAPACK_STATIC_LIB})
-
-        file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
     add_library(lapack STATIC IMPORTED)
     set_target_properties(
             lapack
@@ -1067,8 +1061,6 @@ macro(build_faiss)
             endif()
 
             ExternalProject_Create_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/faiss_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${FAISS_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1092,10 +1084,9 @@ macro(build_faiss)
         if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
             ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
         endif()
-
-        file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
     add_library(faiss SHARED IMPORTED)
 
     if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
@@ -1295,8 +1286,6 @@ macro(build_lz4)
                     ${LZ4_BUILD_COMMAND})
 
             ExternalProject_Create_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lz4_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LZ4_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${LZ4_PREFIX}/include")
         else()
             ExternalProject_Use_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1321,10 +1310,9 @@ macro(build_lz4)
                 BUILD_BYPRODUCTS
                 ${LZ4_STATIC_LIB}
                 ${LZ4_BUILD_COMMAND})
-
-        file(MAKE_DIRECTORY "${LZ4_PREFIX}/include")
     endif()
 
+    file(MAKE_DIRECTORY "${LZ4_PREFIX}/include")
     add_library(lz4 STATIC IMPORTED)
     set_target_properties(lz4
             PROPERTIES IMPORTED_LOCATION "${LZ4_STATIC_LIB}"
@@ -1381,8 +1369,6 @@ macro(build_mysqlpp)
                     ${MYSQLPP_SHARED_LIB})
 
             ExternalProject_Create_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${MYSQLPP_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1400,10 +1386,9 @@ macro(build_mysqlpp)
                 1
                 BUILD_BYPRODUCTS
                 ${MYSQLPP_SHARED_LIB})
-
-        file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
     add_library(mysqlpp SHARED IMPORTED)
     set_target_properties(
             mysqlpp
@@ -1601,8 +1586,6 @@ macro(build_snappy)
                     "${SNAPPY_STATIC_LIB}")
 
             ExternalProject_Create_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/snappy_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SNAPPY_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${SNAPPY_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1622,10 +1605,9 @@ macro(build_snappy)
                 ${SNAPPY_CMAKE_ARGS}
                 BUILD_BYPRODUCTS
                 "${SNAPPY_STATIC_LIB}")
-
-        file(MAKE_DIRECTORY "${SNAPPY_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${SNAPPY_INCLUDE_DIR}")
     add_library(snappy STATIC IMPORTED)
     set_target_properties(snappy
                         PROPERTIES IMPORTED_LOCATION "${SNAPPY_STATIC_LIB}"
@@ -1685,8 +1667,6 @@ macro(build_sqlite)
                     "${SQLITE_STATIC_LIB}")
 
             ExternalProject_Create_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/sqlite_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SQLITE_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1705,10 +1685,9 @@ macro(build_sqlite)
                 1
                 BUILD_BYPRODUCTS
                 "${SQLITE_STATIC_LIB}")
-
-        file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
     add_library(sqlite STATIC IMPORTED)
     set_target_properties(
             sqlite
@@ -1825,9 +1804,6 @@ macro(build_thrift)
                     ${EP_LOG_OPTIONS})
 
             ExternalProject_Create_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${THRIFT_CACHE_URL})
-
-            # The include directory must exist before it is referenced by a target.
-            file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1848,11 +1824,10 @@ macro(build_thrift)
                 DEPENDS
                 ${THRIFT_DEPENDENCIES}
                 ${EP_LOG_OPTIONS})
-
-        # The include directory must exist before it is referenced by a target.
-        file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
     endif()
 
+    # The include directory must exist before it is referenced by a target.
+    file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
     add_library(thrift STATIC IMPORTED)
     set_target_properties(thrift
             PROPERTIES IMPORTED_LOCATION "${THRIFT_STATIC_LIB}"
@@ -1907,8 +1882,6 @@ macro(build_yamlcpp)
                     ${YAMLCPP_CMAKE_ARGS})
 
             ExternalProject_Create_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/yaml-cpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${YAMLCPP_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${YAMLCPP_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1924,10 +1897,9 @@ macro(build_yamlcpp)
                 "${YAMLCPP_STATIC_LIB}"
                 CMAKE_ARGS
                 ${YAMLCPP_CMAKE_ARGS})
-
-        file(MAKE_DIRECTORY "${YAMLCPP_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${YAMLCPP_INCLUDE_DIR}")
     add_library(yaml-cpp STATIC IMPORTED)
     set_target_properties(yaml-cpp
             PROPERTIES IMPORTED_LOCATION "${YAMLCPP_STATIC_LIB}"
@@ -1978,8 +1950,6 @@ macro(build_zlib)
                     ${ZLIB_CMAKE_ARGS})
 
             ExternalProject_Create_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZLIB_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1995,10 +1965,9 @@ macro(build_zlib)
                 "${ZLIB_STATIC_LIB}"
                 CMAKE_ARGS
                 ${ZLIB_CMAKE_ARGS})
-
-        file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
     add_library(zlib STATIC IMPORTED)
     set_target_properties(zlib
             PROPERTIES IMPORTED_LOCATION "${ZLIB_STATIC_LIB}"
@@ -2071,8 +2040,6 @@ macro(build_zstd)
                     "${ZSTD_STATIC_LIB}")
 
             ExternalProject_Create_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zstd_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZSTD_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${ZSTD_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -2092,10 +2059,9 @@ macro(build_zstd)
                 ${ZSTD_SOURCE_URL}
                 BUILD_BYPRODUCTS
                 "${ZSTD_STATIC_LIB}")
-
-        file(MAKE_DIRECTORY "${ZSTD_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${ZSTD_INCLUDE_DIR}")
     add_library(zstd STATIC IMPORTED)
     set_target_properties(zstd
             PROPERTIES IMPORTED_LOCATION "${ZSTD_STATIC_LIB}"
@@ -2166,8 +2132,6 @@ macro(build_aws)
                     "${AWS_CPP_SDK_CORE_STATIC_LIB}")
 
             ExternalProject_Create_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/aws_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${AWS_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -2186,10 +2150,9 @@ macro(build_aws)
                 BUILD_BYPRODUCTS
                 "${AWS_CPP_SDK_S3_STATIC_LIB}"
                 "${AWS_CPP_SDK_CORE_STATIC_LIB}")
-
-        file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
     add_library(aws-cpp-sdk-s3 STATIC IMPORTED)
     set_target_properties(aws-cpp-sdk-s3
             PROPERTIES
