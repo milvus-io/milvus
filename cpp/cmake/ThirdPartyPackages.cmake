@@ -795,8 +795,6 @@ macro(build_easyloggingpp)
                 ${EASYLOGGINGPP_STATIC_LIB})
 
             ExternalProject_Create_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/easyloggingpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${EASYLOGGINGPP_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -812,11 +810,9 @@ macro(build_easyloggingpp)
                 ${MAKE_BUILD_ARGS}
                 BUILD_BYPRODUCTS
                 ${EASYLOGGINGPP_STATIC_LIB})
-
-        file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
     endif()
 
-
+    file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
     add_library(easyloggingpp STATIC IMPORTED)
     set_target_properties(
             easyloggingpp
