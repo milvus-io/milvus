@@ -1882,8 +1882,6 @@ macro(build_yamlcpp)
                     ${YAMLCPP_CMAKE_ARGS})
 
             ExternalProject_Create_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/yaml-cpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${YAMLCPP_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${YAMLCPP_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1899,10 +1897,9 @@ macro(build_yamlcpp)
                 "${YAMLCPP_STATIC_LIB}"
                 CMAKE_ARGS
                 ${YAMLCPP_CMAKE_ARGS})
-
-        file(MAKE_DIRECTORY "${YAMLCPP_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${YAMLCPP_INCLUDE_DIR}")
     add_library(yaml-cpp STATIC IMPORTED)
     set_target_properties(yaml-cpp
             PROPERTIES IMPORTED_LOCATION "${YAMLCPP_STATIC_LIB}"
