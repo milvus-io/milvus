@@ -85,7 +85,7 @@ void MetaTest::TearDown() {
     impl_->DropAll();
 }
 
-zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
+zilliz::milvus::engine::DBMetaOptions DISABLED_MySQLTest::getDBMetaOptions() {
 //    std::string path = "/tmp/milvus_test";
 //    engine::DBMetaOptions options = engine::DBMetaOptionsFactory::Build(path);
     zilliz::milvus::engine::DBMetaOptions options;
@@ -99,7 +99,7 @@ zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
     return options;
 }
 
-zilliz::milvus::engine::Options MySQLDBTest::GetOptions() {
+zilliz::milvus::engine::Options DISABLED_MySQLDBTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = DBTestEnvironment::getURI();

@@ -34,7 +34,7 @@ std::string GetTableFileParentFolder(const DBMetaOptions& options, const meta::T
     std::string target_path = options.path;
     uint64_t index = 0;
 
-    if(meta::TableFileSchema::INDEX == table_file.file_type_) {
+    if(meta::TableFileSchema::NEW_INDEX == table_file.file_type_) {
         // index file is large file and to be persisted permanently
         // we need to distribute index files to each db_path averagely
         // round robin according to a file counter

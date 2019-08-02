@@ -404,6 +404,8 @@ Status MySQLMetaImpl::HasNonIndexFiles(const std::string &table_id, bool &has) {
                                   "WHERE table_id = " << quote << table_id << " AND " <<
                                   "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
                                   "file_type = " << std::to_string(TableFileSchema::NEW) << " OR " <<
+                                  "file_type = " << std::to_string(TableFileSchema::NEW_MERGE) << " OR " <<
+                                  "file_type = " << std::to_string(TableFileSchema::NEW_INDEX) << " OR " <<
                                   "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ")) " <<
                                   "AS " << quote << "check" << ";";
 
@@ -706,7 +708,6 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         MetricCollector metric;
 
         NextFileId(file_schema.file_id_);
-        file_schema.file_type_ = TableFileSchema::NEW;
         file_schema.dimension_ = table_schema.dimension_;
         file_schema.size_ = 0;
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
@@ -1812,7 +1813,10 @@ Status MySQLMetaImpl::CleanUp() {
 
         if (!res.empty()) {
             ENGINE_LOG_DEBUG << "Remove table file type as NEW";
-            cleanUpQuery << "DELETE FROM TableFiles WHERE file_type = " << std::to_string(TableFileSchema::NEW) << ";";
+            cleanUpQuery << "DELETE FROM TableFiles WHERE file_type IN ("
+                    << std::to_string(TableFileSchema::NEW) << ","
+                    << std::to_string(TableFileSchema::NEW_MERGE) << ","
+                    << std::to_string(TableFileSchema::NEW_INDEX) << ");";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
 

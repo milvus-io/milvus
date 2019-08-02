@@ -9,8 +9,10 @@ BUILD_COVERAGE="OFF"
 DB_PATH="/opt/milvus"
 PROFILING="OFF"
 BUILD_FAISS_WITH_MKL="OFF"
+USE_JFROG_CACHE="OFF"
+KNOWHERE_OPTS=""
 
-while getopts "p:d:t:uhlrcgm" arg
+while getopts "p:d:t:uhlrcgmj" arg
 do
         case $arg in
              t)
@@ -44,6 +46,10 @@ do
              m)
                 BUILD_FAISS_WITH_MKL="ON"
                 ;;
+             j)
+                USE_JFROG_CACHE="ON"
+                KNOWHERE_OPTS="${KNOWHERE_OPTS} -j"
+                ;;
              h) # help
                 echo "
 
@@ -57,9 +63,10 @@ parameter:
 -c: code coverage(default: OFF)
 -g: profiling(default: OFF)
 -m: build faiss with MKL(default: OFF)
+-j: use jfrog cache build directory
 
 usage:
-./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c] [-m]
+./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c] [-m] [-j]
                 "
                 exit 0
                 ;;
@@ -78,7 +85,7 @@ fi
 # Build Knowhere
 KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere_build"
 pushd `pwd`/thirdparty/knowhere
-./build.sh -t Release -p ${KNOWHERE_BUILD_DIR}
+./build.sh -t Release -p ${KNOWHERE_BUILD_DIR} ${KNOWHERE_OPTS}
 popd
 
 cd cmake_build
@@ -97,6 +104,7 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DBUILD_FAISS_WITH_MKL=${BUILD_FAISS_WITH_MKL} \
     -DMILVUS_ENABLE_THRIFT=${MILVUS_ENABLE_THRIFT} \
     -DKNOWHERE_BUILD_DIR=${KNOWHERE_BUILD_DIR} \
+    -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
     $@ ../"
     echo ${CMAKE_CMD}
 
