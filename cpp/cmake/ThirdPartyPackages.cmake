@@ -2040,8 +2040,6 @@ macro(build_zstd)
                     "${ZSTD_STATIC_LIB}")
 
             ExternalProject_Create_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zstd_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZSTD_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${ZSTD_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -2061,10 +2059,9 @@ macro(build_zstd)
                 ${ZSTD_SOURCE_URL}
                 BUILD_BYPRODUCTS
                 "${ZSTD_STATIC_LIB}")
-
-        file(MAKE_DIRECTORY "${ZSTD_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${ZSTD_INCLUDE_DIR}")
     add_library(zstd STATIC IMPORTED)
     set_target_properties(zstd
             PROPERTIES IMPORTED_LOCATION "${ZSTD_STATIC_LIB}"
