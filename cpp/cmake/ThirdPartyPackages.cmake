@@ -941,8 +941,6 @@ macro(build_lapack)
                     ${LAPACK_STATIC_LIB})
 
             ExternalProject_Create_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lapack_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LAPACK_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -958,10 +956,9 @@ macro(build_lapack)
                     ${MAKE_BUILD_ARGS}
                     BUILD_BYPRODUCTS
                     ${LAPACK_STATIC_LIB})
-
-        file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
     add_library(lapack STATIC IMPORTED)
     set_target_properties(
             lapack
