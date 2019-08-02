@@ -46,7 +46,7 @@ namespace {
 }
 
 
-TEST_F(MySQLDBTest, DB_TEST) {
+TEST_F(DISABLED_MySQLDBTest, DB_TEST) {
 
     auto options = GetOptions();
     auto db_ = engine::DBFactory::Build(options);
@@ -139,7 +139,7 @@ TEST_F(MySQLDBTest, DB_TEST) {
     delete dummyDB;
 };
 
-TEST_F(MySQLDBTest, SEARCH_TEST) {
+TEST_F(DISABLED_MySQLDBTest, SEARCH_TEST) {
     auto options = GetOptions();
     auto db_ = engine::DBFactory::Build(options);
 
@@ -202,7 +202,7 @@ TEST_F(MySQLDBTest, SEARCH_TEST) {
     // TODO(linxj): add groundTruth assert
 };
 
-TEST_F(MySQLDBTest, ARHIVE_DISK_CHECK) {
+TEST_F(DISABLED_MySQLDBTest, ARHIVE_DISK_CHECK) {
 
     auto options = GetOptions();
     options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
@@ -258,7 +258,7 @@ TEST_F(MySQLDBTest, ARHIVE_DISK_CHECK) {
     delete dummyDB;
 };
 
-TEST_F(MySQLDBTest, DELETE_TEST) {
+TEST_F(DISABLED_MySQLDBTest, DELETE_TEST) {
 
     auto options = GetOptions();
     options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");

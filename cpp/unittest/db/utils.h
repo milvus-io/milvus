@@ -77,13 +77,13 @@ class MetaTest : public DBTest {
     virtual void TearDown() override;
 };
 
-class MySQLTest : public ::testing::Test {
+class DISABLED_MySQLTest : public ::testing::Test {
  protected:
 //    std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
     zilliz::milvus::engine::DBMetaOptions getDBMetaOptions();
 };
 
-class MySQLDBTest : public ::testing::Test {
+class DISABLED_MySQLDBTest : public ::testing::Test {
  protected:
     zilliz::milvus::engine::Options GetOptions();
 };
