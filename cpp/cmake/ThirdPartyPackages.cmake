@@ -1667,8 +1667,6 @@ macro(build_sqlite)
                     "${SQLITE_STATIC_LIB}")
 
             ExternalProject_Create_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/sqlite_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SQLITE_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1687,10 +1685,9 @@ macro(build_sqlite)
                 1
                 BUILD_BYPRODUCTS
                 "${SQLITE_STATIC_LIB}")
-
-        file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
     add_library(sqlite STATIC IMPORTED)
     set_target_properties(
             sqlite
