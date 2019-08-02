@@ -2132,8 +2132,6 @@ macro(build_aws)
                     "${AWS_CPP_SDK_CORE_STATIC_LIB}")
 
             ExternalProject_Create_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/aws_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${AWS_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -2152,10 +2150,9 @@ macro(build_aws)
                 BUILD_BYPRODUCTS
                 "${AWS_CPP_SDK_S3_STATIC_LIB}"
                 "${AWS_CPP_SDK_CORE_STATIC_LIB}")
-
-        file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
     add_library(aws-cpp-sdk-s3 STATIC IMPORTED)
     set_target_properties(aws-cpp-sdk-s3
             PROPERTIES
