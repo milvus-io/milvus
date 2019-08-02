@@ -1612,7 +1612,7 @@ macro(build_snappy)
     set_target_properties(snappy
                         PROPERTIES IMPORTED_LOCATION "${SNAPPY_STATIC_LIB}"
                         INTERFACE_INCLUDE_DIRECTORIES
-                        "${SNAPPY_INCLUDE_DIRS}")
+                        "${SNAPPY_INCLUDE_DIR}")
     add_dependencies(snappy snappy_ep)
 endmacro()
 
