@@ -469,28 +469,70 @@ macro(build_arrow)
             "-DCMAKE_LIBRARY_PATH=${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs"
             -DCMAKE_BUILD_TYPE=Release)
 
-    externalproject_add(arrow_ep
-            GIT_REPOSITORY
-            ${ARROW_SOURCE_URL}
-            GIT_TAG
-            ${ARROW_VERSION}
-            GIT_SHALLOW
-            TRUE
-            SOURCE_SUBDIR
-            cpp
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${ARROW_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            INSTALL_COMMAND
-            ${MAKE} install
-            BUILD_BYPRODUCTS
-            "${ARROW_STATIC_LIB}"
-            )
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        execute_process(COMMAND git ls-remote --heads ${ARROW_SOURCE_URL} ${ARROW_VERSION} OUTPUT_VARIABLE ARROW_LAST_COMMIT_ID)
+        if(${ARROW_LAST_COMMIT_ID} MATCHES "^[0-9a-z]+$")
+            string(MD5 ARROW_COMBINE_MD5 "${ARROW_LAST_COMMIT_ID}")
+            set(ARROW_CACHE_PACKAGE_NAME "arrow_${ARROW_COMBINE_MD5}.tar.gz")
+            set(ARROW_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ARROW_CACHE_PACKAGE_NAME}")
+            set(ARROW_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ARROW_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${ARROW_PREFIX}/include")
+            file(DOWNLOAD ${ARROW_CACHE_URL} ${ARROW_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${ARROW_CACHE_URL} TO ${ARROW_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (NOT status_code EQUAL 0)
+                externalproject_add(arrow_ep
+                        GIT_REPOSITORY
+                        ${ARROW_SOURCE_URL}
+                        GIT_TAG
+                        ${ARROW_VERSION}
+                        GIT_SHALLOW
+                        TRUE
+                        SOURCE_SUBDIR
+                        cpp
+                        ${EP_LOG_OPTIONS}
+                        CMAKE_ARGS
+                        ${ARROW_CMAKE_ARGS}
+                        BUILD_COMMAND
+                        ${MAKE}
+                        ${MAKE_BUILD_ARGS}
+                        INSTALL_COMMAND
+                        ${MAKE} install
+                        BUILD_BYPRODUCTS
+                        "${ARROW_STATIC_LIB}"
+                        )
+
+                ExternalProject_Create_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ARROW_CACHE_URL})
+            else()
+                ExternalProject_Use_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        else()
+            message(FATAL_ERROR "The last commit ID of \"${ARROW_SOURCE_URL}\" repository don't match!")
+        endif()
+    else()
+        externalproject_add(arrow_ep
+                GIT_REPOSITORY
+                ${ARROW_SOURCE_URL}
+                GIT_TAG
+                ${ARROW_VERSION}
+                GIT_SHALLOW
+                TRUE
+                SOURCE_SUBDIR
+                cpp
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${ARROW_CMAKE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                INSTALL_COMMAND
+                ${MAKE} install
+                BUILD_BYPRODUCTS
+                "${ARROW_STATIC_LIB}"
+                )
+    endif()
+
+    file(MAKE_DIRECTORY "${ARROW_INCLUDE_DIR}")
     add_library(arrow STATIC IMPORTED)
     set_target_properties(arrow
             PROPERTIES IMPORTED_LOCATION "${ARROW_STATIC_LIB}"
