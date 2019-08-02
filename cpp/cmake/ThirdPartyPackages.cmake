@@ -1286,8 +1286,6 @@ macro(build_lz4)
                     ${LZ4_BUILD_COMMAND})
 
             ExternalProject_Create_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lz4_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LZ4_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${LZ4_PREFIX}/include")
         else()
             ExternalProject_Use_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1312,10 +1310,9 @@ macro(build_lz4)
                 BUILD_BYPRODUCTS
                 ${LZ4_STATIC_LIB}
                 ${LZ4_BUILD_COMMAND})
-
-        file(MAKE_DIRECTORY "${LZ4_PREFIX}/include")
     endif()
 
+    file(MAKE_DIRECTORY "${LZ4_PREFIX}/include")
     add_library(lz4 STATIC IMPORTED)
     set_target_properties(lz4
             PROPERTIES IMPORTED_LOCATION "${LZ4_STATIC_LIB}"
