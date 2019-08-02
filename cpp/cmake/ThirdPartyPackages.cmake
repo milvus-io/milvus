@@ -154,6 +154,11 @@ if (UNIX)
     endif (APPLE)
 endif (UNIX)
 
+
+# ----------------------------------------------------------------------
+# thirdparty directory
+set(THIRDPARTY_DIR "${MILVUS_SOURCE_DIR}/thirdparty")
+
 # ----------------------------------------------------------------------
 # JFrog
 if(NOT DEFINED USE_JFROG_CACHE)
@@ -244,7 +249,6 @@ find_package(Threads REQUIRED)
 # offline builds
 
 # Read toolchain versions from cpp/thirdparty/versions.txt
-set(THIRDPARTY_DIR "${MILVUS_SOURCE_DIR}/thirdparty")
 file(STRINGS "${THIRDPARTY_DIR}/versions.txt" TOOLCHAIN_VERSIONS_TXT)
 foreach(_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     # Exclude comments
@@ -653,11 +657,8 @@ macro(build_bzip2)
                                 "${BZIP2_STATIC_LIB}")
 
             ExternalProject_Create_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/bzip2_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${BZIP2_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
-
         else()
-             ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})   
+            ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
     else()
         externalproject_add(bzip2_ep
@@ -680,10 +681,10 @@ macro(build_bzip2)
                                 URL
                                 ${BZIP2_SOURCE_URL}
                                 BUILD_BYPRODUCTS
-                                "${BZIP2_STATIC_LIB}")    
-        file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
-    endif()    
-        
+                                "${BZIP2_STATIC_LIB}")
+    endif()
+
+    file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
     add_library(bzip2 STATIC IMPORTED)
     set_target_properties(
             bzip2
