@@ -23,7 +23,7 @@ namespace {
     constexpr int64_t NQ = 10;
     constexpr int64_t TOP_K = 10;
     constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    constexpr int64_t ADD_VECTOR_LOOP = 5;
+    constexpr int64_t ADD_VECTOR_LOOP = 1;
     constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
@@ -174,7 +174,7 @@ namespace {
         std::vector<TopKQueryResult> topk_query_result_array;
         {
             TimeRecorder rc(phase_name);
-            Status stat = conn->SearchVector("qqq", record_array, query_range_array, TOP_K, topk_query_result_array);
+            Status stat = conn->SearchVector(TABLE_NAME, record_array, query_range_array, TOP_K, topk_query_result_array);
             std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
         }
 
