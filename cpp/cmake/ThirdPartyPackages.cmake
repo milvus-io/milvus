@@ -470,7 +470,7 @@ macro(build_arrow)
             -DCMAKE_BUILD_TYPE=Release)
 
     if(USE_JFROG_CACHE STREQUAL "ON")
-        execute_process(COMMAND sh -c "git ls-remote --heads ${ARROW_SOURCE_URL} ${ARROW_VERSION} | cut -f 1" OUTPUT_VARIABLE ARROW_LAST_COMMIT_ID)
+        execute_process(COMMAND sh -c "git ls-remote --heads --tags ${ARROW_SOURCE_URL} ${ARROW_VERSION} | cut -f 1" OUTPUT_VARIABLE ARROW_LAST_COMMIT_ID)
         if(${ARROW_LAST_COMMIT_ID} MATCHES "^[^#][a-z0-9]+")
             string(MD5 ARROW_COMBINE_MD5 "${ARROW_LAST_COMMIT_ID}")
             set(ARROW_CACHE_PACKAGE_NAME "arrow_${ARROW_COMBINE_MD5}.tar.gz")
@@ -1474,29 +1474,74 @@ macro(build_prometheus)
             "-DCMAKE_INSTALL_PREFIX=${PROMETHEUS_PREFIX}"
             -DCMAKE_BUILD_TYPE=Release)
 
-    externalproject_add(prometheus_ep
-            GIT_REPOSITORY
-            ${PROMETHEUS_SOURCE_URL}
-            GIT_TAG
-            ${PROMETHEUS_VERSION}
-            GIT_SHALLOW
-            TRUE
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${PROMETHEUS_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE}
-            "DESTDIR=${PROMETHEUS_PREFIX}"
-            install
-            BUILD_BYPRODUCTS
-            "${PROMETHEUS_CORE_STATIC_LIB}"
-            "${PROMETHEUS_PUSH_STATIC_LIB}"
-            "${PROMETHEUS_PULL_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        execute_process(COMMAND sh -c "git ls-remote --heads --tags ${PROMETHEUS_SOURCE_URL} ${PROMETHEUS_VERSION} | cut -f 1" OUTPUT_VARIABLE PROMETHEUS_LAST_COMMIT_ID)
+        if(${PROMETHEUS_LAST_COMMIT_ID} MATCHES "^[^#][a-z0-9]+")
+            string(MD5 PROMETHEUS_COMBINE_MD5 "${PROMETHEUS_LAST_COMMIT_ID}")
+            set(PROMETHEUS_CACHE_PACKAGE_NAME "prometheus_${PROMETHEUS_COMBINE_MD5}.tar.gz")
+            set(PROMETHEUS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${PROMETHEUS_CACHE_PACKAGE_NAME}")
+            set(PROMETHEUS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${PROMETHEUS_CACHE_PACKAGE_NAME}")
+
+            file(DOWNLOAD ${PROMETHEUS_CACHE_URL} ${PROMETHEUS_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${PROMETHEUS_CACHE_URL} TO ${PROMETHEUS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (NOT status_code EQUAL 0)
+                externalproject_add(prometheus_ep
+                        GIT_REPOSITORY
+                        ${PROMETHEUS_SOURCE_URL}
+                        GIT_TAG
+                        ${PROMETHEUS_VERSION}
+                        GIT_SHALLOW
+                        TRUE
+                        ${EP_LOG_OPTIONS}
+                        CMAKE_ARGS
+                        ${PROMETHEUS_CMAKE_ARGS}
+                        BUILD_COMMAND
+                        ${MAKE}
+                        ${MAKE_BUILD_ARGS}
+                        BUILD_IN_SOURCE
+                        1
+                        INSTALL_COMMAND
+                        ${MAKE}
+                        "DESTDIR=${PROMETHEUS_PREFIX}"
+                        install
+                        BUILD_BYPRODUCTS
+                        "${PROMETHEUS_CORE_STATIC_LIB}"
+                        "${PROMETHEUS_PUSH_STATIC_LIB}"
+                        "${PROMETHEUS_PULL_STATIC_LIB}")
+
+                ExternalProject_Create_Cache(prometheus_ep ${PROMETHEUS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/prometheus_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${PROMETHEUS_CACHE_URL})
+            else()
+                ExternalProject_Use_Cache(prometheus_ep ${PROMETHEUS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        else()
+            message(FATAL_ERROR "The last commit ID of \"${PROMETHEUS_SOURCE_URL}\" repository don't match!")
+        endif()
+    else()
+        externalproject_add(prometheus_ep
+                GIT_REPOSITORY
+                ${PROMETHEUS_SOURCE_URL}
+                GIT_TAG
+                ${PROMETHEUS_VERSION}
+                GIT_SHALLOW
+                TRUE
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${PROMETHEUS_CMAKE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE}
+                "DESTDIR=${PROMETHEUS_PREFIX}"
+                install
+                BUILD_BYPRODUCTS
+                "${PROMETHEUS_CORE_STATIC_LIB}"
+                "${PROMETHEUS_PUSH_STATIC_LIB}"
+                "${PROMETHEUS_PULL_STATIC_LIB}")
+    endif()
 
     file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/push/include")
     add_library(prometheus-cpp-push STATIC IMPORTED)
