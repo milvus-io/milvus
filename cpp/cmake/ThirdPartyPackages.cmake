@@ -1369,8 +1369,6 @@ macro(build_mysqlpp)
                     ${MYSQLPP_SHARED_LIB})
 
             ExternalProject_Create_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${MYSQLPP_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1388,10 +1386,9 @@ macro(build_mysqlpp)
                 1
                 BUILD_BYPRODUCTS
                 ${MYSQLPP_SHARED_LIB})
-
-        file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
     add_library(mysqlpp SHARED IMPORTED)
     set_target_properties(
             mysqlpp
