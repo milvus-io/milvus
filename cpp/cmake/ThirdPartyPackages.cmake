@@ -1950,8 +1950,6 @@ macro(build_zlib)
                     ${ZLIB_CMAKE_ARGS})
 
             ExternalProject_Create_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZLIB_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1967,10 +1965,9 @@ macro(build_zlib)
                 "${ZLIB_STATIC_LIB}"
                 CMAKE_ARGS
                 ${ZLIB_CMAKE_ARGS})
-
-        file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
     add_library(zlib STATIC IMPORTED)
     set_target_properties(zlib
             PROPERTIES IMPORTED_LOCATION "${ZLIB_STATIC_LIB}"
