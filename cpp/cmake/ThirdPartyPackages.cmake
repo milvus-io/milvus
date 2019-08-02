@@ -1804,9 +1804,6 @@ macro(build_thrift)
                     ${EP_LOG_OPTIONS})
 
             ExternalProject_Create_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${THRIFT_CACHE_URL})
-
-            # The include directory must exist before it is referenced by a target.
-            file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1827,11 +1824,10 @@ macro(build_thrift)
                 DEPENDS
                 ${THRIFT_DEPENDENCIES}
                 ${EP_LOG_OPTIONS})
-
-        # The include directory must exist before it is referenced by a target.
-        file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
     endif()
 
+    # The include directory must exist before it is referenced by a target.
+    file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
     add_library(thrift STATIC IMPORTED)
     set_target_properties(thrift
             PROPERTIES IMPORTED_LOCATION "${THRIFT_STATIC_LIB}"
