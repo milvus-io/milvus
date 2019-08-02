@@ -102,6 +102,75 @@ macro(build_dependency DEPENDENCY_NAME)
     endif ()
 endmacro()
 
+# ----------------------------------------------------------------------
+# Identify OS
+if (UNIX)
+    if (APPLE)
+        set (CMAKE_OS_NAME "osx" CACHE STRING "Operating system name" FORCE)
+    else (APPLE)
+        ## Check for Debian GNU/Linux ________________
+        find_file (DEBIAN_FOUND debian_version debconf.conf
+            PATHS /etc
+        )
+        if (DEBIAN_FOUND)
+            set (CMAKE_OS_NAME "debian" CACHE STRING "Operating system name" FORCE)
+        endif (DEBIAN_FOUND)
+        ##  Check for Fedora _________________________
+        find_file (FEDORA_FOUND fedora-release
+            PATHS /etc
+        )
+        if (FEDORA_FOUND)
+            set (CMAKE_OS_NAME "fedora" CACHE STRING "Operating system name" FORCE)
+        endif (FEDORA_FOUND)
+        ##  Check for RedHat _________________________
+        find_file (REDHAT_FOUND redhat-release inittab.RH
+            PATHS /etc
+        )
+        if (REDHAT_FOUND)
+            set (CMAKE_OS_NAME "redhat" CACHE STRING "Operating system name" FORCE)
+        endif (REDHAT_FOUND)
+        ## Extra check for Ubuntu ____________________
+        if (DEBIAN_FOUND)
+            ## At its core Ubuntu is a Debian system, with
+            ## a slightly altered configuration; hence from
+            ## a first superficial inspection a system will
+            ## be considered as Debian, which signifies an
+            ## extra check is required.
+            find_file (UBUNTU_EXTRA legal issue
+                PATHS /etc
+            )
+            if (UBUNTU_EXTRA)
+                ## Scan contents of file
+                file (STRINGS ${UBUNTU_EXTRA} UBUNTU_FOUND
+                    REGEX Ubuntu
+                )
+                ## Check result of string search
+                if (UBUNTU_FOUND)
+                    set (CMAKE_OS_NAME "ubuntu" CACHE STRING "Operating system name" FORCE)
+                    set (DEBIAN_FOUND FALSE)
+                endif (UBUNTU_FOUND)
+            endif (UBUNTU_EXTRA)
+        endif (DEBIAN_FOUND)
+    endif (APPLE)
+endif (UNIX)
+
+
+# ----------------------------------------------------------------------
+# thirdparty directory
+set(THIRDPARTY_DIR "${MILVUS_SOURCE_DIR}/thirdparty")
+
+# ----------------------------------------------------------------------
+# JFrog
+if(NOT DEFINED USE_JFROG_CACHE)
+    set(USE_JFROG_CACHE "OFF")
+endif()
+if(USE_JFROG_CACHE STREQUAL "ON")    
+    set(JFROG_ARTFACTORY_CACHE_URL "http://192.168.1.201:80/artifactory/generic-local/milvus/thirdparty/cache/${CMAKE_OS_NAME}/${MILVUS_BUILD_ARCH}/${BUILD_TYPE}")
+    set(JFROG_USER_NAME "test")
+    set(JFROG_PASSWORD "Fantast1c")
+    set(THIRDPARTY_PACKAGE_CACHE "${THIRDPARTY_DIR}/cache")
+endif()
+
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
         #disable find_package for now
@@ -180,7 +249,6 @@ find_package(Threads REQUIRED)
 # offline builds
 
 # Read toolchain versions from cpp/thirdparty/versions.txt
-set(THIRDPARTY_DIR "${MILVUS_SOURCE_DIR}/thirdparty")
 file(STRINGS "${THIRDPARTY_DIR}/versions.txt" TOOLCHAIN_VERSIONS_TXT)
 foreach(_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     # Exclude comments
@@ -218,24 +286,28 @@ else()
             "https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz"
     )
 endif()
+set(BOOST_MD5 "fea771fe8176828fabf9c09242ee8c26")
 
 if(DEFINED ENV{MILVUS_BZIP2_URL})
     set(BZIP2_SOURCE_URL "$ENV{MILVUS_BZIP2_URL}")
 else()
     set(BZIP2_SOURCE_URL "https://sourceware.org/pub/bzip2/bzip2-${BZIP2_VERSION}.tar.gz")
 endif()
+set(BZIP2_MD5 "00b516f4704d4a7cb50a1d97e6e8e15b")
 
 if(DEFINED ENV{MILVUS_EASYLOGGINGPP_URL})
     set(EASYLOGGINGPP_SOURCE_URL "$ENV{MILVUS_EASYLOGGINGPP_URL}")
 else()
     set(EASYLOGGINGPP_SOURCE_URL "https://github.com/zuhd-org/easyloggingpp/archive/${EASYLOGGINGPP_VERSION}.tar.gz")
 endif()
+set(EASYLOGGINGPP_MD5 "b78cd319db4be9b639927657b8aa7732")
 
 if(DEFINED ENV{MILVUS_FAISS_URL})
     set(FAISS_SOURCE_URL "$ENV{MILVUS_FAISS_URL}")
 else()
     set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
 endif()
+set(FAISS_MD5 "0bc12737b23def156f6a1eb782050135")
 
 if(DEFINED ENV{MILVUS_KNOWHERE_URL})
     set(KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}")
@@ -262,18 +334,21 @@ if(DEFINED ENV{MILVUS_LAPACK_URL})
 else()
     set(LAPACK_SOURCE_URL "https://github.com/Reference-LAPACK/lapack/archive/${LAPACK_VERSION}.tar.gz")
 endif()
+set(LAPACK_MD5 "96591affdbf58c450d45c1daa540dbd2")
 
 if(DEFINED ENV{MILVUS_LZ4_URL})
     set(LZ4_SOURCE_URL "$ENV{MILVUS_LZ4_URL}")
 else()
     set(LZ4_SOURCE_URL "https://github.com/lz4/lz4/archive/${LZ4_VERSION}.tar.gz")
 endif()
+set(LZ4_MD5 "a80f28f2a2e5fe59ebfe8407f793da22")
 
 if(DEFINED ENV{MILVUS_MYSQLPP_URL})
     set(MYSQLPP_SOURCE_URL "$ENV{MILVUS_MYSQLPP_URL}")
 else()
     set(MYSQLPP_SOURCE_URL "https://tangentsoft.com/mysqlpp/releases/mysql++-${MYSQLPP_VERSION}.tar.gz")
 endif()
+set(MYSQLPP_MD5 "cda38b5ecc0117de91f7c42292dd1e79")
 
 if (DEFINED ENV{MILVUS_OPENBLAS_URL})
     set(OPENBLAS_SOURCE_URL "$ENV{MILVUS_OPENBLAS_URL}")
@@ -281,6 +356,7 @@ else ()
     set(OPENBLAS_SOURCE_URL
             "https://github.com/xianyi/OpenBLAS/archive/${OPENBLAS_VERSION}.tar.gz")
 endif()
+set(OPENBLAS_MD5 "8a110a25b819a4b94e8a9580702b6495")
 
 if (DEFINED ENV{MILVUS_PROMETHEUS_URL})
     set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
@@ -288,6 +364,7 @@ else ()
     set(PROMETHEUS_SOURCE_URL
             https://github.com/jupp0r/prometheus-cpp.git)
 endif()
+
 
 if (DEFINED ENV{MILVUS_ROCKSDB_URL})
     set(ROCKSDB_SOURCE_URL "$ENV{MILVUS_ROCKSDB_URL}")
@@ -302,6 +379,7 @@ else()
     set(SNAPPY_SOURCE_URL
             "https://github.com/google/snappy/archive/${SNAPPY_VERSION}.tar.gz")
 endif()
+set(SNAPPY_MD5 "ee9086291c9ae8deb4dac5e0b85bf54a")
 
 if(DEFINED ENV{MILVUS_SQLITE_URL})
     set(SQLITE_SOURCE_URL "$ENV{MILVUS_SQLITE_URL}")
@@ -309,6 +387,7 @@ else()
     set(SQLITE_SOURCE_URL
             "https://www.sqlite.org/2019/sqlite-autoconf-${SQLITE_VERSION}.tar.gz")
 endif()
+set(SQLITE_MD5 "3c68eb400f8354605736cd55400e1572")
 
 if(DEFINED ENV{MILVUS_SQLITE_ORM_URL})
     set(SQLITE_ORM_SOURCE_URL "$ENV{MILVUS_SQLITE_ORM_URL}")
@@ -316,6 +395,7 @@ else()
     set(SQLITE_ORM_SOURCE_URL
             "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
 endif()
+set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
 
 if(DEFINED ENV{MILVUS_THRIFT_URL})
     set(THRIFT_SOURCE_URL "$ENV{MILVUS_THRIFT_URL}")
@@ -323,30 +403,35 @@ else()
     set(THRIFT_SOURCE_URL
             "https://github.com/apache/thrift/archive/${THRIFT_VERSION}.tar.gz")
 endif()
+set(THRIFT_MD5 "ff9af01fec424b5a279fa8a3c9e95c0c")
 
 if(DEFINED ENV{MILVUS_YAMLCPP_URL})
     set(YAMLCPP_SOURCE_URL "$ENV{MILVUS_YAMLCPP_URL}")
 else()
     set(YAMLCPP_SOURCE_URL "https://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${YAMLCPP_VERSION}.tar.gz")
 endif()
+set(YAMLCPP_MD5 "5b943e9af0060d0811148b037449ef82")
 
 if(DEFINED ENV{MILVUS_ZLIB_URL})
     set(ZLIB_SOURCE_URL "$ENV{MILVUS_ZLIB_URL}")
 else()
     set(ZLIB_SOURCE_URL "https://github.com/madler/zlib/archive/${ZLIB_VERSION}.tar.gz")
 endif()
+set(ZLIB_MD5 "0095d2d2d1f3442ce1318336637b695f")
 
 if(DEFINED ENV{MILVUS_ZSTD_URL})
     set(ZSTD_SOURCE_URL "$ENV{MILVUS_ZSTD_URL}")
 else()
     set(ZSTD_SOURCE_URL "https://github.com/facebook/zstd/archive/${ZSTD_VERSION}.tar.gz")
 endif()
+set(ZSTD_MD5 "340c837db48354f8d5eafe74c6077120")
 
 if(DEFINED ENV{MILVUS_AWS_URL})
     set(AWS_SOURCE_URL "$ENV{MILVUS_AWS_URL}")
 else()
     set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
 endif()
+set(AWS_MD5 "9217f5bc8bf23dea04f4466521c85fd9")
 
 if(DEFINED ENV{MILVUS_LIBUNWIND_URL})
     set(LIBUNWIND_SOURCE_URL "$ENV{MILVUS_LIBUNWIND_URL}")
@@ -384,28 +469,70 @@ macro(build_arrow)
             "-DCMAKE_LIBRARY_PATH=${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs"
             -DCMAKE_BUILD_TYPE=Release)
 
-    externalproject_add(arrow_ep
-            GIT_REPOSITORY
-            ${ARROW_SOURCE_URL}
-            GIT_TAG
-            ${ARROW_VERSION}
-            GIT_SHALLOW
-            TRUE
-            SOURCE_SUBDIR
-            cpp
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${ARROW_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            INSTALL_COMMAND
-            ${MAKE} install
-            BUILD_BYPRODUCTS
-            "${ARROW_STATIC_LIB}"
-            )
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        execute_process(COMMAND sh -c "git ls-remote --heads ${ARROW_SOURCE_URL} ${ARROW_VERSION} | cut -f 1" OUTPUT_VARIABLE ARROW_LAST_COMMIT_ID)
+        if(${ARROW_LAST_COMMIT_ID} MATCHES "^[^#][a-z0-9]+")
+            string(MD5 ARROW_COMBINE_MD5 "${ARROW_LAST_COMMIT_ID}")
+            set(ARROW_CACHE_PACKAGE_NAME "arrow_${ARROW_COMBINE_MD5}.tar.gz")
+            set(ARROW_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ARROW_CACHE_PACKAGE_NAME}")
+            set(ARROW_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ARROW_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${ARROW_PREFIX}/include")
+            file(DOWNLOAD ${ARROW_CACHE_URL} ${ARROW_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${ARROW_CACHE_URL} TO ${ARROW_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (NOT status_code EQUAL 0)
+                externalproject_add(arrow_ep
+                        GIT_REPOSITORY
+                        ${ARROW_SOURCE_URL}
+                        GIT_TAG
+                        ${ARROW_VERSION}
+                        GIT_SHALLOW
+                        TRUE
+                        SOURCE_SUBDIR
+                        cpp
+                        ${EP_LOG_OPTIONS}
+                        CMAKE_ARGS
+                        ${ARROW_CMAKE_ARGS}
+                        BUILD_COMMAND
+                        ${MAKE}
+                        ${MAKE_BUILD_ARGS}
+                        INSTALL_COMMAND
+                        ${MAKE} install
+                        BUILD_BYPRODUCTS
+                        "${ARROW_STATIC_LIB}"
+                        )
+
+                ExternalProject_Create_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ARROW_CACHE_URL})
+            else()
+                ExternalProject_Use_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        else()
+            message(FATAL_ERROR "The last commit ID of \"${ARROW_SOURCE_URL}\" repository don't match!")
+        endif()
+    else()
+        externalproject_add(arrow_ep
+                GIT_REPOSITORY
+                ${ARROW_SOURCE_URL}
+                GIT_TAG
+                ${ARROW_VERSION}
+                GIT_SHALLOW
+                TRUE
+                SOURCE_SUBDIR
+                cpp
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${ARROW_CMAKE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                INSTALL_COMMAND
+                ${MAKE} install
+                BUILD_BYPRODUCTS
+                "${ARROW_STATIC_LIB}"
+                )
+    endif()
+
+    file(MAKE_DIRECTORY "${ARROW_INCLUDE_DIR}")
     add_library(arrow STATIC IMPORTED)
     set_target_properties(arrow
             PROPERTIES IMPORTED_LOCATION "${ARROW_STATIC_LIB}"
@@ -517,6 +644,8 @@ if(MILVUS_BOOST_VENDORED)
             INSTALL_COMMAND
             ""
             ${EP_LOG_OPTIONS})
+
+
     set(Boost_INCLUDE_DIR "${BOOST_PREFIX}")
     set(Boost_INCLUDE_DIRS "${Boost_INCLUDE_DIR}")
     add_dependencies(boost_system_static boost_ep)
@@ -538,27 +667,64 @@ macro(build_bzip2)
     set(BZIP2_STATIC_LIB
             "${BZIP2_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}bz2${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-    externalproject_add(bzip2_ep
-                        ${EP_LOG_OPTIONS}
-                        CONFIGURE_COMMAND
-                        ""
-                        BUILD_IN_SOURCE
-                        1
-                        BUILD_COMMAND
-                        ${MAKE}
-                        ${MAKE_BUILD_ARGS}
-                        CFLAGS=${EP_C_FLAGS}
-                        INSTALL_COMMAND
-                        ${MAKE}
-                        install
-                        PREFIX=${BZIP2_PREFIX}
-                        CFLAGS=${EP_C_FLAGS}
-                        INSTALL_DIR
-                        ${BZIP2_PREFIX}
-                        URL
-                        ${BZIP2_SOURCE_URL}
-                        BUILD_BYPRODUCTS
-                        "${BZIP2_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON") 
+        set(BZIP2_CACHE_PACKAGE_NAME "bzip2_${BZIP2_MD5}.tar.gz")
+        set(BZIP2_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${BZIP2_CACHE_PACKAGE_NAME}")
+        set(BZIP2_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${BZIP2_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${BZIP2_CACHE_URL} ${BZIP2_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${BZIP2_CACHE_URL} TO ${BZIP2_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(bzip2_ep
+                                ${EP_LOG_OPTIONS}
+                                CONFIGURE_COMMAND
+                                ""
+                                BUILD_IN_SOURCE
+                                1
+                                BUILD_COMMAND
+                                ${MAKE}
+                                ${MAKE_BUILD_ARGS}
+                                CFLAGS=${EP_C_FLAGS}
+                                INSTALL_COMMAND
+                                ${MAKE}
+                                install
+                                PREFIX=${BZIP2_PREFIX}
+                                CFLAGS=${EP_C_FLAGS}
+                                INSTALL_DIR
+                                ${BZIP2_PREFIX}
+                                URL
+                                ${BZIP2_SOURCE_URL}
+                                BUILD_BYPRODUCTS
+                                "${BZIP2_STATIC_LIB}")
+
+            ExternalProject_Create_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/bzip2_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${BZIP2_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(bzip2_ep
+                                ${EP_LOG_OPTIONS}
+                                CONFIGURE_COMMAND
+                                ""
+                                BUILD_IN_SOURCE
+                                1
+                                BUILD_COMMAND
+                                ${MAKE}
+                                ${MAKE_BUILD_ARGS}
+                                CFLAGS=${EP_C_FLAGS}
+                                INSTALL_COMMAND
+                                ${MAKE}
+                                install
+                                PREFIX=${BZIP2_PREFIX}
+                                CFLAGS=${EP_C_FLAGS}
+                                INSTALL_DIR
+                                ${BZIP2_PREFIX}
+                                URL
+                                ${BZIP2_SOURCE_URL}
+                                BUILD_BYPRODUCTS
+                                "${BZIP2_STATIC_LIB}")
+    endif()
 
     file(MAKE_DIRECTORY "${BZIP2_INCLUDE_DIR}")
     add_library(bzip2 STATIC IMPORTED)
@@ -649,17 +815,44 @@ macro(build_easyloggingpp)
             -Dtest=OFF
             -Dbuild_static_lib=ON)
 
-    externalproject_add(easyloggingpp_ep
-            URL
-            ${EASYLOGGINGPP_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${EASYLOGGINGPP_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            ${EASYLOGGINGPP_STATIC_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(EASYLOGGINGPP_CACHE_PACKAGE_NAME "easyloggingpp_${EASYLOGGINGPP_MD5}.tar.gz")
+        set(EASYLOGGINGPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${EASYLOGGINGPP_CACHE_PACKAGE_NAME}")
+        set(EASYLOGGINGPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${EASYLOGGINGPP_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${EASYLOGGINGPP_CACHE_URL} ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${EASYLOGGINGPP_CACHE_URL} TO ${EASYLOGGINGPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(easyloggingpp_ep
+                URL
+                ${EASYLOGGINGPP_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${EASYLOGGINGPP_CMAKE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_BYPRODUCTS
+                ${EASYLOGGINGPP_STATIC_LIB})
+
+            ExternalProject_Create_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/easyloggingpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${EASYLOGGINGPP_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(easyloggingpp_ep
+                URL
+                ${EASYLOGGINGPP_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${EASYLOGGINGPP_CMAKE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_BYPRODUCTS
+                ${EASYLOGGINGPP_STATIC_LIB})
+    endif()
 
     file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
     add_library(easyloggingpp STATIC IMPORTED)
@@ -689,25 +882,61 @@ macro(build_openblas)
     set(OPENBLAS_STATIC_LIB
             "${OPENBLAS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-    externalproject_add(openblas_ep
-            URL
-            ${OPENBLAS_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            ""
-            BUILD_IN_SOURCE
-            1
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            INSTALL_COMMAND
-            ${MAKE}
-            PREFIX=${OPENBLAS_PREFIX}
-            install
-            BUILD_BYPRODUCTS
-            ${OPENBLAS_STATIC_LIB})
+        if(USE_JFROG_CACHE STREQUAL "ON")
+        set(OPENBLAS_CACHE_PACKAGE_NAME "openblas_${OPENBLAS_MD5}.tar.gz")
+        set(OPENBLAS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${OPENBLAS_CACHE_PACKAGE_NAME}")
+        set(OPENBLAS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${OPENBLAS_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${OPENBLAS_INCLUDE_DIR}")
+        file(DOWNLOAD ${OPENBLAS_CACHE_URL} ${OPENBLAS_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${OPENBLAS_CACHE_URL} TO ${OPENBLAS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(openblas_ep
+                    URL
+                    ${OPENBLAS_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    ""
+                    BUILD_IN_SOURCE
+                    1
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    INSTALL_COMMAND
+                    ${MAKE}
+                    PREFIX=${OPENBLAS_PREFIX}
+                    install
+                    BUILD_BYPRODUCTS
+                    ${OPENBLAS_STATIC_LIB})
+
+            ExternalProject_Create_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/openblas_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${OPENBLAS_CACHE_URL})
+
+            file(MAKE_DIRECTORY "${OPENBLAS_INCLUDE_DIR}")
+        else()
+            ExternalProject_Use_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(openblas_ep
+                    URL
+                    ${OPENBLAS_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    ""
+                    BUILD_IN_SOURCE
+                    1
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    INSTALL_COMMAND
+                    ${MAKE}
+                    PREFIX=${OPENBLAS_PREFIX}
+                    install
+                    BUILD_BYPRODUCTS
+                    ${OPENBLAS_STATIC_LIB})
+
+        file(MAKE_DIRECTORY "${OPENBLAS_INCLUDE_DIR}")
+    endif()
+
     add_library(openblas STATIC IMPORTED)
     set_target_properties(
             openblas
@@ -732,17 +961,44 @@ macro(build_lapack)
             "-DCMAKE_INSTALL_PREFIX=${LAPACK_PREFIX}"
             -DCMAKE_INSTALL_LIBDIR=lib)
 
-    externalproject_add(lapack_ep
-            URL
-            ${LAPACK_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${LAPACK_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            ${LAPACK_STATIC_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(LAPACK_CACHE_PACKAGE_NAME "lapack_${LAPACK_MD5}.tar.gz")
+        set(LAPACK_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${LAPACK_CACHE_PACKAGE_NAME}")
+        set(LAPACK_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${LAPACK_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${LAPACK_CACHE_URL} ${LAPACK_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${LAPACK_CACHE_URL} TO ${LAPACK_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(lapack_ep
+                    URL
+                    ${LAPACK_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CMAKE_ARGS
+                    ${LAPACK_CMAKE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_BYPRODUCTS
+                    ${LAPACK_STATIC_LIB})
+
+            ExternalProject_Create_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lapack_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LAPACK_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(lapack_ep
+                    URL
+                    ${LAPACK_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CMAKE_ARGS
+                    ${LAPACK_CMAKE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_BYPRODUCTS
+                    ${LAPACK_STATIC_LIB})
+    endif()
 
     file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
     add_library(lapack STATIC IMPORTED)
@@ -810,30 +1066,66 @@ macro(build_faiss)
     if(${MILVUS_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
-                "--with-cuda-arch=-gencode=arch=compute_35,code=sm_35 -gencode=arch=compute_52,code=sm_52 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_75,code=sm_75"
+                "--with-cuda-arch=-gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_75,code=sm_75"
                 )
     else()
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS} --without-cuda)
     endif()
 
-    externalproject_add(faiss_ep
-            URL
-            ${FAISS_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${FAISS_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS} VERBOSE=1
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE} install
-            BUILD_BYPRODUCTS
-            ${FAISS_STATIC_LIB})
-        
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
-        ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        string(MD5 FAISS_COMBINE_MD5 "${FAISS_MD5}${LAPACK_MD5}${OPENBLAS_MD5}")
+        set(FAISS_CACHE_PACKAGE_NAME "faiss_${FAISS_COMBINE_MD5}.tar.gz")
+        set(FAISS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${FAISS_CACHE_PACKAGE_NAME}")
+        set(FAISS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${FAISS_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${FAISS_CACHE_URL} ${FAISS_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${FAISS_CACHE_URL} TO ${FAISS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(faiss_ep
+                    URL
+                    ${FAISS_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${FAISS_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS} VERBOSE=1
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    BUILD_BYPRODUCTS
+                    ${FAISS_STATIC_LIB})
+
+            if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
+                ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
+            endif()
+
+            ExternalProject_Create_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/faiss_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${FAISS_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(faiss_ep
+                URL
+                ${FAISS_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${FAISS_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS} VERBOSE=1
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE} install
+                BUILD_BYPRODUCTS
+                ${FAISS_STATIC_LIB})
+
+        if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
+            ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
+        endif()
     endif()
 
     file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
@@ -1005,26 +1297,62 @@ macro(build_lz4)
     set(LZ4_BUILD_COMMAND BUILD_COMMAND ${MAKE} ${MAKE_BUILD_ARGS} CFLAGS=${EP_C_FLAGS})
 
     # We need to copy the header in lib to directory outside of the build
-    externalproject_add(lz4_ep
-            URL
-            ${LZ4_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            UPDATE_COMMAND
-            ${CMAKE_COMMAND}
-            -E
-            copy_directory
-            "${LZ4_BUILD_DIR}/lib"
-            "${LZ4_PREFIX}/include"
-            ${LZ4_PATCH_COMMAND}
-            CONFIGURE_COMMAND
-            ""
-            INSTALL_COMMAND
-            ""
-            BINARY_DIR
-            ${LZ4_BUILD_DIR}
-            BUILD_BYPRODUCTS
-            ${LZ4_STATIC_LIB}
-            ${LZ4_BUILD_COMMAND})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(LZ4_CACHE_PACKAGE_NAME "lz4_${LZ4_MD5}.tar.gz")
+        set(LZ4_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${LZ4_CACHE_PACKAGE_NAME}")
+        set(LZ4_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${LZ4_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${LZ4_CACHE_URL} ${LZ4_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${LZ4_CACHE_URL} TO ${LZ4_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(lz4_ep
+                    URL
+                    ${LZ4_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    UPDATE_COMMAND
+                    ${CMAKE_COMMAND}
+                    -E
+                    copy_directory
+                    "${LZ4_BUILD_DIR}/lib"
+                    "${LZ4_PREFIX}/include"
+                    ${LZ4_PATCH_COMMAND}
+                    CONFIGURE_COMMAND
+                    ""
+                    INSTALL_COMMAND
+                    ""
+                    BINARY_DIR
+                    ${LZ4_BUILD_DIR}
+                    BUILD_BYPRODUCTS
+                    ${LZ4_STATIC_LIB}
+                    ${LZ4_BUILD_COMMAND})
+
+            ExternalProject_Create_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lz4_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LZ4_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(lz4_ep
+                URL
+                ${LZ4_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                UPDATE_COMMAND
+                ${CMAKE_COMMAND}
+                -E
+                copy_directory
+                "${LZ4_BUILD_DIR}/lib"
+                "${LZ4_PREFIX}/include"
+                ${LZ4_PATCH_COMMAND}
+                CONFIGURE_COMMAND
+                ""
+                INSTALL_COMMAND
+                ""
+                BINARY_DIR
+                ${LZ4_BUILD_DIR}
+                BUILD_BYPRODUCTS
+                ${LZ4_STATIC_LIB}
+                ${LZ4_BUILD_COMMAND})
+    endif()
 
     file(MAKE_DIRECTORY "${LZ4_PREFIX}/include")
     add_library(lz4 STATIC IMPORTED)
@@ -1059,19 +1387,48 @@ macro(build_mysqlpp)
             "CXXFLAGS=${EP_CXX_FLAGS}"
             "LDFLAGS=-pthread")
 
-    externalproject_add(mysqlpp_ep
-            URL
-            ${MYSQLPP_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${MYSQLPP_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            BUILD_BYPRODUCTS
-            ${MYSQLPP_SHARED_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(MYSQLPP_CACHE_PACKAGE_NAME "mysqlpp_${MYSQLPP_MD5}.tar.gz")
+        set(MYSQLPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${MYSQLPP_CACHE_PACKAGE_NAME}")
+        set(MYSQLPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${MYSQLPP_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${MYSQLPP_CACHE_URL} ${MYSQLPP_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${MYSQLPP_CACHE_URL} TO ${MYSQLPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(mysqlpp_ep
+                    URL
+                    ${MYSQLPP_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${MYSQLPP_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    BUILD_BYPRODUCTS
+                    ${MYSQLPP_SHARED_LIB})
+
+            ExternalProject_Create_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${MYSQLPP_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(mysqlpp_ep
+                URL
+                ${MYSQLPP_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${MYSQLPP_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                BUILD_BYPRODUCTS
+                ${MYSQLPP_SHARED_LIB})
+    endif()
 
     file(MAKE_DIRECTORY "${MYSQLPP_INCLUDE_DIR}")
     add_library(mysqlpp SHARED IMPORTED)
@@ -1233,6 +1590,7 @@ endif()
 macro(build_snappy)
     message(STATUS "Building snappy-${SNAPPY_VERSION} from source")
     set(SNAPPY_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/snappy_ep-prefix/src/snappy_ep")
+    set(SNAPPY_INCLUDE_DIRS "${SNAPPY_PREFIX}/include")
     set(SNAPPY_STATIC_LIB_NAME snappy)
     set(SNAPPY_STATIC_LIB
             "${SNAPPY_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${SNAPPY_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
@@ -1244,29 +1602,59 @@ macro(build_snappy)
             -DSNAPPY_BUILD_TESTS=OFF
             "-DCMAKE_INSTALL_PREFIX=${SNAPPY_PREFIX}")
 
-    externalproject_add(snappy_ep
-                        ${EP_LOG_OPTIONS}
-                        BUILD_COMMAND
-                        ${MAKE}
-                        ${MAKE_BUILD_ARGS}
-                        BUILD_IN_SOURCE
-                        1
-                        INSTALL_DIR
-                        ${SNAPPY_PREFIX}
-                        URL
-                        ${SNAPPY_SOURCE_URL}
-                        CMAKE_ARGS
-                        ${SNAPPY_CMAKE_ARGS}
-                        BUILD_BYPRODUCTS
-                        "${SNAPPY_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(SNAPPY_CACHE_PACKAGE_NAME "snappy_${SNAPPY_MD5}.tar.gz")
+        set(SNAPPY_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${SNAPPY_CACHE_PACKAGE_NAME}")
+        set(SNAPPY_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${SNAPPY_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${SNAPPY_PREFIX}/include")
+        file(DOWNLOAD ${SNAPPY_CACHE_URL} ${SNAPPY_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${SNAPPY_CACHE_URL} TO ${SNAPPY_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(snappy_ep
+                    ${EP_LOG_OPTIONS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_DIR
+                    ${SNAPPY_PREFIX}
+                    URL
+                    ${SNAPPY_SOURCE_URL}
+                    CMAKE_ARGS
+                    ${SNAPPY_CMAKE_ARGS}
+                    BUILD_BYPRODUCTS
+                    "${SNAPPY_STATIC_LIB}")
 
+            ExternalProject_Create_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/snappy_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SNAPPY_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(snappy_ep
+                ${EP_LOG_OPTIONS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                INSTALL_DIR
+                ${SNAPPY_PREFIX}
+                URL
+                ${SNAPPY_SOURCE_URL}
+                CMAKE_ARGS
+                ${SNAPPY_CMAKE_ARGS}
+                BUILD_BYPRODUCTS
+                "${SNAPPY_STATIC_LIB}")
+    endif()
+
+    file(MAKE_DIRECTORY "${SNAPPY_INCLUDE_DIR}")
     add_library(snappy STATIC IMPORTED)
     set_target_properties(snappy
                         PROPERTIES IMPORTED_LOCATION "${SNAPPY_STATIC_LIB}"
                         INTERFACE_INCLUDE_DIRECTORIES
-                        "${SNAPPY_PREFIX}/include")
+                        "${SNAPPY_INCLUDE_DIR}")
     add_dependencies(snappy snappy_ep)
 endmacro()
 
@@ -1296,20 +1684,50 @@ macro(build_sqlite)
             "CFLAGS=${EP_C_FLAGS}"
             "CXXFLAGS=${EP_CXX_FLAGS}")
 
-    externalproject_add(sqlite_ep
-            URL
-            ${SQLITE_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${SQLITE_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            BUILD_BYPRODUCTS
-            "${SQLITE_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(SQLITE_CACHE_PACKAGE_NAME "sqlite_${SQLITE_MD5}.tar.gz")
+        set(SQLITE_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${SQLITE_CACHE_PACKAGE_NAME}")
+        set(SQLITE_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${SQLITE_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${SQLITE_CACHE_URL} ${SQLITE_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${SQLITE_CACHE_URL} TO ${SQLITE_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(sqlite_ep
+                    URL
+                    ${SQLITE_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${SQLITE_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    BUILD_BYPRODUCTS
+                    "${SQLITE_STATIC_LIB}")
+
+            ExternalProject_Create_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/sqlite_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SQLITE_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(sqlite_ep
+                URL
+                ${SQLITE_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${SQLITE_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                BUILD_BYPRODUCTS
+                "${SQLITE_STATIC_LIB}")
+    endif()
 
     file(MAKE_DIRECTORY "${SQLITE_INCLUDE_DIR}")
     add_library(sqlite STATIC IMPORTED)
@@ -1400,26 +1818,59 @@ macro(build_thrift)
     endif()
     set(THRIFT_DEPENDENCIES ${THRIFT_DEPENDENCIES} ${ZLIB_LIBRARY})
 
-    externalproject_add(thrift_ep
-            URL
-            ${THRIFT_SOURCE_URL}
-            BUILD_BYPRODUCTS
-            "${THRIFT_STATIC_LIB}"
-            "${THRIFT_COMPILER}"
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            CMAKE_ARGS
-            ${THRIFT_CMAKE_ARGS}
-	    INSTALL_COMMAND
-	    ${MAKE} install
-            DEPENDS
-            ${THRIFT_DEPENDENCIES}
-            ${EP_LOG_OPTIONS})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        string(MD5 THRIFT_COMBINE_MD5 "${THRIFT_MD5}${ZLIB_MD5}")
+        set(THRIFT_CACHE_PACKAGE_NAME "thrift_${THRIFT_COMBINE_MD5}.tar.gz")
+        set(THRIFT_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${THRIFT_CACHE_PACKAGE_NAME}")
+        set(THRIFT_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${THRIFT_CACHE_PACKAGE_NAME}")
 
-    add_library(thrift STATIC IMPORTED)
+        file(DOWNLOAD ${THRIFT_CACHE_URL} ${THRIFT_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${THRIFT_CACHE_URL} TO ${THRIFT_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(thrift_ep
+                    URL
+                    ${THRIFT_SOURCE_URL}
+                    BUILD_BYPRODUCTS
+                    "${THRIFT_STATIC_LIB}"
+                    "${THRIFT_COMPILER}"
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    CMAKE_ARGS
+                    ${THRIFT_CMAKE_ARGS}
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    DEPENDS
+                    ${THRIFT_DEPENDENCIES}
+                    ${EP_LOG_OPTIONS})
+
+            ExternalProject_Create_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${THRIFT_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(thrift_ep
+                URL
+                ${THRIFT_SOURCE_URL}
+                BUILD_BYPRODUCTS
+                "${THRIFT_STATIC_LIB}"
+                "${THRIFT_COMPILER}"
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                CMAKE_ARGS
+                ${THRIFT_CMAKE_ARGS}
+                INSTALL_COMMAND
+                ${MAKE} install
+                DEPENDS
+                ${THRIFT_DEPENDENCIES}
+                ${EP_LOG_OPTIONS})
+    endif()
+
     # The include directory must exist before it is referenced by a target.
     file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
+    add_library(thrift STATIC IMPORTED)
     set_target_properties(thrift
             PROPERTIES IMPORTED_LOCATION "${THRIFT_STATIC_LIB}"
             INTERFACE_INCLUDE_DIRECTORIES "${THRIFT_INCLUDE_DIR}")
@@ -1443,6 +1894,7 @@ macro(build_yamlcpp)
     message(STATUS "Building yaml-cpp-${YAMLCPP_VERSION} from source")
     set(YAMLCPP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/yaml-cpp_ep-prefix/src/yaml-cpp_ep")
     set(YAMLCPP_STATIC_LIB "${YAMLCPP_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}yaml-cpp${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(YAMLCPP_INCLUDE_DIR "${YAMLCPP_PREFIX}/include")
     set(YAMLCPP_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
             "-DCMAKE_INSTALL_PREFIX=${YAMLCPP_PREFIX}"
@@ -1450,24 +1902,50 @@ macro(build_yamlcpp)
             -DYAML_CPP_BUILD_TESTS=OFF
             -DYAML_CPP_BUILD_TOOLS=OFF)
 
-    externalproject_add(yaml-cpp_ep
-            URL
-            ${YAMLCPP_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            "${YAMLCPP_STATIC_LIB}"
-            CMAKE_ARGS
-            ${YAMLCPP_CMAKE_ARGS})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(YAMLCPP_CACHE_PACKAGE_NAME "yaml-cpp_${YAMLCPP_MD5}.tar.gz")
+        set(YAMLCPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${YAMLCPP_CACHE_PACKAGE_NAME}")
+        set(YAMLCPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${YAMLCPP_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${YAMLCPP_PREFIX}/include")
+        file(DOWNLOAD ${YAMLCPP_CACHE_URL} ${YAMLCPP_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${YAMLCPP_CACHE_URL} TO ${YAMLCPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(yaml-cpp_ep
+                    URL
+                    ${YAMLCPP_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_BYPRODUCTS
+                    "${YAMLCPP_STATIC_LIB}"
+                    CMAKE_ARGS
+                    ${YAMLCPP_CMAKE_ARGS})
 
+            ExternalProject_Create_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/yaml-cpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${YAMLCPP_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(yaml-cpp_ep
+                URL
+                ${YAMLCPP_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_BYPRODUCTS
+                "${YAMLCPP_STATIC_LIB}"
+                CMAKE_ARGS
+                ${YAMLCPP_CMAKE_ARGS})
+    endif()
+
+    file(MAKE_DIRECTORY "${YAMLCPP_INCLUDE_DIR}")
     add_library(yaml-cpp STATIC IMPORTED)
     set_target_properties(yaml-cpp
             PROPERTIES IMPORTED_LOCATION "${YAMLCPP_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${YAMLCPP_PREFIX}/include")
+            INTERFACE_INCLUDE_DIRECTORIES "${YAMLCPP_INCLUDE_DIR}")
 
     add_dependencies(yaml-cpp yaml-cpp_ep)
 endmacro()
@@ -1488,27 +1966,54 @@ macro(build_zlib)
     set(ZLIB_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix/src/zlib_ep")
     set(ZLIB_STATIC_LIB_NAME libz.a)
     set(ZLIB_STATIC_LIB "${ZLIB_PREFIX}/lib/${ZLIB_STATIC_LIB_NAME}")
+    set(ZLIB_INCLUDE_DIR "${ZLIB_PREFIX}/include")
     set(ZLIB_CMAKE_ARGS ${EP_COMMON_CMAKE_ARGS} "-DCMAKE_INSTALL_PREFIX=${ZLIB_PREFIX}"
             -DBUILD_SHARED_LIBS=OFF)
 
-    externalproject_add(zlib_ep
-            URL
-            ${ZLIB_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            "${ZLIB_STATIC_LIB}"
-            CMAKE_ARGS
-            ${ZLIB_CMAKE_ARGS})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(ZLIB_CACHE_PACKAGE_NAME "zlib_${ZLIB_MD5}.tar.gz")
+        set(ZLIB_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ZLIB_CACHE_PACKAGE_NAME}")
+        set(ZLIB_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ZLIB_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${ZLIB_PREFIX}/include")
+        file(DOWNLOAD ${ZLIB_CACHE_URL} ${ZLIB_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${ZLIB_CACHE_URL} TO ${ZLIB_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(zlib_ep
+                    URL
+                    ${ZLIB_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_BYPRODUCTS
+                    "${ZLIB_STATIC_LIB}"
+                    CMAKE_ARGS
+                    ${ZLIB_CMAKE_ARGS})
 
+            ExternalProject_Create_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZLIB_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(zlib_ep
+                URL
+                ${ZLIB_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_BYPRODUCTS
+                "${ZLIB_STATIC_LIB}"
+                CMAKE_ARGS
+                ${ZLIB_CMAKE_ARGS})
+    endif()
+
+    file(MAKE_DIRECTORY "${ZLIB_INCLUDE_DIR}")
     add_library(zlib STATIC IMPORTED)
     set_target_properties(zlib
             PROPERTIES IMPORTED_LOCATION "${ZLIB_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_PREFIX}/include")
+            INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_INCLUDE_DIR}")
 
     add_dependencies(zlib zlib_ep)
 endmacro()
@@ -1539,7 +2044,7 @@ macro(build_zstd)
 
 
     set(ZSTD_STATIC_LIB "${ZSTD_PREFIX}/lib/libzstd.a")
-
+    set(ZSTD_INCLUDE_DIR "${ZSTD_PREFIX}/include")
     set(ZSTD_CMAKE_ARGS
             ${ZSTD_CMAKE_ARGS}
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
@@ -1551,28 +2056,58 @@ macro(build_zstd)
         message(FATAL_ERROR "Building zstd using ExternalProject requires at least CMake 3.7")
     endif()
 
-    externalproject_add(zstd_ep
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${ZSTD_CMAKE_ARGS}
-            SOURCE_SUBDIR
-            "build/cmake"
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            INSTALL_DIR
-            ${ZSTD_PREFIX}
-            URL
-            ${ZSTD_SOURCE_URL}
-            BUILD_BYPRODUCTS
-            "${ZSTD_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(ZSTD_CACHE_PACKAGE_NAME "zstd_${ZSTD_MD5}.tar.gz")
+        set(ZSTD_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ZSTD_CACHE_PACKAGE_NAME}")
+        set(ZSTD_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ZSTD_CACHE_PACKAGE_NAME}")
 
-    file(MAKE_DIRECTORY "${ZSTD_PREFIX}/include")
+        file(DOWNLOAD ${ZSTD_CACHE_URL} ${ZSTD_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${ZSTD_CACHE_URL} TO ${ZSTD_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(zstd_ep
+                    ${EP_LOG_OPTIONS}
+                    CMAKE_ARGS
+                    ${ZSTD_CMAKE_ARGS}
+                    SOURCE_SUBDIR
+                    "build/cmake"
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    INSTALL_DIR
+                    ${ZSTD_PREFIX}
+                    URL
+                    ${ZSTD_SOURCE_URL}
+                    BUILD_BYPRODUCTS
+                    "${ZSTD_STATIC_LIB}")
 
+            ExternalProject_Create_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zstd_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZSTD_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(zstd_ep
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${ZSTD_CMAKE_ARGS}
+                SOURCE_SUBDIR
+                "build/cmake"
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                INSTALL_DIR
+                ${ZSTD_PREFIX}
+                URL
+                ${ZSTD_SOURCE_URL}
+                BUILD_BYPRODUCTS
+                "${ZSTD_STATIC_LIB}")
+    endif()
+
+    file(MAKE_DIRECTORY "${ZSTD_INCLUDE_DIR}")
     add_library(zstd STATIC IMPORTED)
     set_target_properties(zstd
             PROPERTIES IMPORTED_LOCATION "${ZSTD_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_PREFIX}/include")
+            INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_INCLUDE_DIR}")
 
     add_dependencies(zstd zstd_ep)
 endmacro()
@@ -1606,7 +2141,7 @@ macro(build_aws)
             "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-core${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(AWS_CPP_SDK_S3_STATIC_LIB
             "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-s3${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
+    set(AWS_INCLUDE_DIR "${AWS_PREFIX}/include")
     set(AWS_CMAKE_ARGS
             ${AWS_CMAKE_ARGS}
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
@@ -1614,33 +2149,63 @@ macro(build_aws)
             -DCMAKE_C_FLAGS=${EP_C_FLAGS}
             -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
 
-    externalproject_add(aws_ep
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${AWS_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            INSTALL_DIR
-            ${AWS_PREFIX}
-            URL
-            ${AWS_SOURCE_URL}
-            BUILD_BYPRODUCTS
-            "${AWS_CPP_SDK_S3_STATIC_LIB}"
-            "${AWS_CPP_SDK_CORE_STATIC_LIB}")
-    file(MAKE_DIRECTORY "${AWS_PREFIX}/include")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(AWS_CACHE_PACKAGE_NAME "aws_${AWS_MD5}.tar.gz")
+        set(AWS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${AWS_CACHE_PACKAGE_NAME}")
+        set(AWS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${AWS_CACHE_PACKAGE_NAME}")
 
+        file(DOWNLOAD ${AWS_CACHE_URL} ${AWS_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${AWS_CACHE_URL} TO ${AWS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            externalproject_add(aws_ep
+                    ${EP_LOG_OPTIONS}
+                    CMAKE_ARGS
+                    ${AWS_CMAKE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    INSTALL_DIR
+                    ${AWS_PREFIX}
+                    URL
+                    ${AWS_SOURCE_URL}
+                    BUILD_BYPRODUCTS
+                    "${AWS_CPP_SDK_S3_STATIC_LIB}"
+                    "${AWS_CPP_SDK_CORE_STATIC_LIB}")
+
+            ExternalProject_Create_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/aws_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${AWS_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        externalproject_add(aws_ep
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${AWS_CMAKE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                INSTALL_DIR
+                ${AWS_PREFIX}
+                URL
+                ${AWS_SOURCE_URL}
+                BUILD_BYPRODUCTS
+                "${AWS_CPP_SDK_S3_STATIC_LIB}"
+                "${AWS_CPP_SDK_CORE_STATIC_LIB}")
+    endif()
+
+    file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
     add_library(aws-cpp-sdk-s3 STATIC IMPORTED)
     set_target_properties(aws-cpp-sdk-s3
             PROPERTIES
             IMPORTED_LOCATION "${AWS_CPP_SDK_S3_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${AWS_PREFIX}/include"
+            INTERFACE_INCLUDE_DIRECTORIES "${AWS_INCLUDE_DIR}"
             INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
 
     add_library(aws-cpp-sdk-core STATIC IMPORTED)
     set_target_properties(aws-cpp-sdk-core
             PROPERTIES IMPORTED_LOCATION "${AWS_CPP_SDK_CORE_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${AWS_PREFIX}/include"
+            INTERFACE_INCLUDE_DIRECTORIES "${AWS_INCLUDE_DIR}"
             INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
 
     add_dependencies(aws-cpp-sdk-s3 aws_ep)

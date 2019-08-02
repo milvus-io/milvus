@@ -64,17 +64,6 @@ set(knowhere_libs
         cublas
         )
 
-target_link_libraries(db_test
-        ${knowhere_libs}
-        ${db_libs}
-        ${unittest_libs}
-        sqlite
-        boost_system_static
-        boost_filesystem_static
-        lz4
-        mysqlpp
-        )
-
 if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     set(db_libs ${db_libs} ${MKL_LIBS} ${MKL_LIBS})
 else()
@@ -83,7 +72,7 @@ else()
             openblas)
 endif()
 
-target_link_libraries(db_test ${db_libs} ${unittest_libs})
+target_link_libraries(db_test ${db_libs} ${knowhere_libs} ${unittest_libs})
 
 install(TARGETS db_test DESTINATION bin)
 
