@@ -162,7 +162,7 @@ set(THIRDPARTY_DIR "${MILVUS_SOURCE_DIR}/thirdparty")
 # ----------------------------------------------------------------------
 # JFrog
 if(NOT DEFINED USE_JFROG_CACHE)
-    set(USE_JFROG_CACHE "ON")
+    set(USE_JFROG_CACHE "OFF")
 endif()
 if(USE_JFROG_CACHE STREQUAL "ON")    
     set(JFROG_ARTFACTORY_CACHE_URL "http://192.168.1.201:80/artifactory/generic-local/milvus/thirdparty/cache/${CMAKE_OS_NAME}/${MILVUS_BUILD_ARCH}/${BUILD_TYPE}")
