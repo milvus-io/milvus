@@ -1586,8 +1586,6 @@ macro(build_snappy)
                     "${SNAPPY_STATIC_LIB}")
 
             ExternalProject_Create_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/snappy_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SNAPPY_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${SNAPPY_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
@@ -1607,10 +1605,9 @@ macro(build_snappy)
                 ${SNAPPY_CMAKE_ARGS}
                 BUILD_BYPRODUCTS
                 "${SNAPPY_STATIC_LIB}")
-
-        file(MAKE_DIRECTORY "${SNAPPY_INCLUDE_DIR}")
     endif()
 
+    file(MAKE_DIRECTORY "${SNAPPY_INCLUDE_DIR}")
     add_library(snappy STATIC IMPORTED)
     set_target_properties(snappy
                         PROPERTIES IMPORTED_LOCATION "${SNAPPY_STATIC_LIB}"
