@@ -203,11 +203,13 @@ void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Co
         case IndexType::NSG_MIX: {
             auto scale_factor = round(cfg["dim"].as<int>() / 128.0);
             scale_factor = scale_factor >= 4 ? 4 : scale_factor;
-            if (!cfg.contains("nprobe")) { cfg["nprobe"] = 16 + 10 * scale_factor; }
+            cfg["nlist"] = int(size / 1000000.0 * 8192);
+            if (!cfg.contains("nprobe")) { cfg["nprobe"] = 6 + 10 * scale_factor; }
             if (!cfg.contains("knng")) { cfg["knng"] = 100 + 100 * scale_factor; }
-            if (!cfg.contains("search_length")) { cfg["search_length"] = 30 + 10 * scale_factor; }
-            if (!cfg.contains("out_degree")) { cfg["out_degree"] = 40 + 5 * scale_factor; }
+            if (!cfg.contains("search_length")) { cfg["search_length"] = 40 + 5 * scale_factor; }
+            if (!cfg.contains("out_degree")) { cfg["out_degree"] = 50 + 5 * scale_factor; }
             if (!cfg.contains("candidate_pool_size")) { cfg["candidate_pool_size"] = 200 + 100 * scale_factor; }
+            WRAPPER_LOG_DEBUG << pretty_print(cfg);
             break;
         }
     }

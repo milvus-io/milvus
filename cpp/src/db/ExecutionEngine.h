@@ -20,7 +20,7 @@ enum class EngineType {
     FAISS_IVFFLAT,
     FAISS_IVFSQ8,
     NSG_MIX,
-    MAX_VALUE = FAISS_IVFSQ8,
+    MAX_VALUE = NSG_MIX,
 };
 
 class ExecutionEngine {
