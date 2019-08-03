@@ -19,6 +19,7 @@ enum class IndexType {
     cpu_idmap,
     gpu_ivfflat,
     gpu_ivfsq8,
+    mix_nsg,
 };
 
 /**
