@@ -69,6 +69,10 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_MIX);
             break;
         }
+        case EngineType::NSG_MIX: {
+            index = GetVecIndexFactory(IndexType::NSG_MIX);
+            break;
+        }
         default: {
             ENGINE_LOG_ERROR << "Invalid engine type";
             return nullptr;
