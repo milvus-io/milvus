@@ -7,6 +7,7 @@
 #include "knowhere/index/vector_index/idmap.h"
 #include "knowhere/index/vector_index/gpu_ivf.h"
 #include "knowhere/index/vector_index/cpu_kdt_rng.h"
+#include "knowhere/index/vector_index/nsg_index.h"
 #include "knowhere/common/exception.h"
 
 #include "vec_index.h"
@@ -103,10 +104,10 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type) {
             index = std::make_shared<zilliz::knowhere::GPUIVFSQ>(0);
             return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFSQ8_MIX);
         }
-            //case IndexType::NSG: { // TODO(linxj): bug.
-            //    index = std::make_shared<zilliz::knowhere::NSG>();
-            //    break;
-            //}
+        case IndexType::NSG_MIX: { // TODO(linxj): bug.
+            index = std::make_shared<zilliz::knowhere::NSG>(0);
+            break;
+        }
         default: {
             return nullptr;
         }
@@ -197,6 +198,16 @@ void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Co
     switch (type) {
         case IndexType::FAISS_IVFSQ8_MIX: {
             if (!cfg.contains("nbits")) { cfg["nbits"] = int(8); }
+            break;
+        }
+        case IndexType::NSG_MIX: {
+            auto scale_factor = round(cfg["dim"].as<int>() / 128.0);
+            scale_factor = scale_factor >= 4 ? 4 : scale_factor;
+            if (!cfg.contains("nprobe")) { cfg["nprobe"] = 16 + 10 * scale_factor; }
+            if (!cfg.contains("knng")) { cfg["knng"] = 100 + 100 * scale_factor; }
+            if (!cfg.contains("search_length")) { cfg["search_length"] = 30 + 10 * scale_factor; }
+            if (!cfg.contains("out_degree")) { cfg["out_degree"] = 40 + 5 * scale_factor; }
+            if (!cfg.contains("candidate_pool_size")) { cfg["candidate_pool_size"] = 200 + 100 * scale_factor; }
             break;
         }
     }
