@@ -32,7 +32,7 @@ enum class IndexType {
     FAISS_IVFPQ_GPU,
     SPTAG_KDT_RNT_CPU,
     FAISS_IVFSQ8_MIX,
-    //NSG,
+    NSG_MIX,
 };
 
 class VecIndex {
