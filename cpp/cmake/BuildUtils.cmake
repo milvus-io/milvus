@@ -1,3 +1,58 @@
+# Define a function that extracts a cached package
+function(ExternalProject_Use_Cache project_name package_file install_path)
+    message(STATUS "Will use cached package file: ${package_file}")
+
+    ExternalProject_Add(${project_name}
+        DOWNLOAD_COMMAND ${CMAKE_COMMAND} -E echo
+            "No download step needed (using cached package)"
+        CONFIGURE_COMMAND ${CMAKE_COMMAND} -E echo
+            "No configure step needed (using cached package)"
+        BUILD_COMMAND ${CMAKE_COMMAND} -E echo
+            "No build step needed (using cached package)"
+        INSTALL_COMMAND ${CMAKE_COMMAND} -E echo
+            "No install step needed (using cached package)"
+    )
+
+    # We want our tar files to contain the Install/<package> prefix (not for any
+    # very special reason, only for consistency and so that we can identify them
+    # in the extraction logs) which means that we must extract them in the
+    # binary (top-level build) directory to have them installed in the right
+    # place for subsequent ExternalProjects to pick them up. It seems that the
+    # only way to control the working directory is with Add_Step!
+    ExternalProject_Add_Step(${project_name} extract
+        ALWAYS 1
+        COMMAND
+            ${CMAKE_COMMAND} -E echo
+            "Extracting ${package_file} to ${install_path}"
+        COMMAND
+            ${CMAKE_COMMAND} -E tar xzvf ${package_file} ${install_path}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+
+    ExternalProject_Add_StepTargets(${project_name} extract)
+endfunction()
+
+# Define a function that to create a new cached package
+function(ExternalProject_Create_Cache project_name package_file install_path cache_username cache_password cache_path)
+    if(EXISTS ${package_file})
+        message(STATUS "Removing existing package file: ${package_file}")
+        file(REMOVE ${package_file})
+    endif()
+
+    message(STATUS "Will create cached package file: ${package_file}")
+
+    ExternalProject_Add_Step(${project_name} package
+        DEPENDEES install
+        BYPRODUCTS ${package_file}
+        COMMAND ${CMAKE_COMMAND} -E echo "Updating cached package file: ${package_file}"
+        COMMAND ${CMAKE_COMMAND} -E tar czvf ${package_file} ${install_path}
+        COMMAND ${CMAKE_COMMAND} -E echo "Uploading package file ${package_file} to ${cache_path}"
+        COMMAND curl -u${cache_username}:${cache_password} -T ${package_file} ${cache_path}
+    )
+
+    ExternalProject_Add_StepTargets(${project_name} package)
+endfunction()
+
 function(ADD_THIRDPARTY_LIB LIB_NAME)
     set(options)
     set(one_value_args SHARED_LIB STATIC_LIB)
