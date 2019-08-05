@@ -36,6 +36,7 @@ namespace {
                 {1, engine::EngineType::FAISS_IDMAP},
                 {2, engine::EngineType::FAISS_IVFFLAT},
                 {3, engine::EngineType::FAISS_IVFSQ8},
+                {4, engine::EngineType::NSG_MIX},
         };
 
         if(map_type.find(type) == map_type.end()) {
@@ -51,6 +52,7 @@ namespace {
                 {engine::EngineType::FAISS_IDMAP, 1},
                 {engine::EngineType::FAISS_IVFFLAT, 2},
                 {engine::EngineType::FAISS_IVFSQ8, 3},
+                {engine::EngineType::NSG_MIX, 4},
         };
 
         if(map_type.find(type) == map_type.end()) {

@@ -108,6 +108,12 @@ INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
                                             64, 100000, 10, 10,
                                             Config::object{{"dim", 64}, {"nlist", 1000}, {"nbits", 8}, {"metric_type", "L2"}},
                                             Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 5}}
+                            ),
+                            std::make_tuple(IndexType::NSG_MIX, "Default",
+                                            128, 250000, 10, 10,
+                                            Config::object{{"dim", 128}, {"nlist", 8192}, {"nprobe", 16}, {"metric_type", "L2"},
+                                                           {"knng", 200}, {"search_length", 40}, {"out_degree", 60}, {"candidate_pool_size", 200}},
+                                            Config::object{{"k", 10}, {"search_length", 20}}
                             )
                             //std::make_tuple(IndexType::SPTAG_KDT_RNT_CPU, "Default",
                             //                64, 10000, 10, 10,
