@@ -29,6 +29,7 @@ class BasicIndex {
     std::shared_ptr<faiss::Index> index_ = nullptr;
 };
 
+using Graph = std::vector<std::vector<int64_t>>;
 
 class IVF : public VectorIndex, public BasicIndex {
  public:
@@ -37,16 +38,23 @@ class IVF : public VectorIndex, public BasicIndex {
     IndexModelPtr Train(const DatasetPtr &dataset, const Config &config) override;
     void set_index_model(IndexModelPtr model) override;
     void Add(const DatasetPtr &dataset, const Config &config) override;
+    void AddWithoutIds(const DatasetPtr &dataset, const Config &config);
     DatasetPtr Search(const DatasetPtr &dataset, const Config &config) override;
+    void GenGraph(const int64_t &k, Graph &graph, const DatasetPtr &dataset, const Config &config);
     BinarySet Serialize() override;
     void Load(const BinarySet &index_binary) override;
     int64_t Count() override;
     int64_t Dimension() override;
 
-    //DatasetPtr Search_twice(const DatasetPtr &dataset, const Config &config, float* xb);
-
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters> GenParams(const Config &config);
+
+    virtual void search_impl(int64_t n,
+                             const float *data,
+                             int64_t k,
+                             float *distances,
+                             int64_t *labels,
+                             const Config &cfg);
 
  protected:
     std::mutex mutex_;
