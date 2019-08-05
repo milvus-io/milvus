@@ -321,6 +321,7 @@ else ()
     set(GTEST_SOURCE_URL
             "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
 endif()
+set(GTEST_MD5 "2e6fbeb6a91310a16efe181886c59596")
 
 if (DEFINED ENV{MILVUS_JSONCONS_URL})
     set(JSONCONS_SOURCE_URL "$ENV{MILVUS_JSONCONS_URL}")
@@ -470,7 +471,7 @@ macro(build_arrow)
             -DCMAKE_BUILD_TYPE=Release)
 
     if(USE_JFROG_CACHE STREQUAL "ON")
-        execute_process(COMMAND sh -c "git ls-remote --heads ${ARROW_SOURCE_URL} ${ARROW_VERSION} | cut -f 1" OUTPUT_VARIABLE ARROW_LAST_COMMIT_ID)
+        execute_process(COMMAND sh -c "git ls-remote --heads --tags ${ARROW_SOURCE_URL} ${ARROW_VERSION} | cut -f 1" OUTPUT_VARIABLE ARROW_LAST_COMMIT_ID)
         if(${ARROW_LAST_COMMIT_ID} MATCHES "^[^#][a-z0-9]+")
             string(MD5 ARROW_COMBINE_MD5 "${ARROW_LAST_COMMIT_ID}")
             set(ARROW_CACHE_PACKAGE_NAME "arrow_${ARROW_COMBINE_MD5}.tar.gz")
@@ -882,7 +883,7 @@ macro(build_openblas)
     set(OPENBLAS_STATIC_LIB
             "${OPENBLAS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-        if(USE_JFROG_CACHE STREQUAL "ON")
+    if(USE_JFROG_CACHE STREQUAL "ON")
         set(OPENBLAS_CACHE_PACKAGE_NAME "openblas_${OPENBLAS_MD5}.tar.gz")
         set(OPENBLAS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${OPENBLAS_CACHE_PACKAGE_NAME}")
         set(OPENBLAS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${OPENBLAS_CACHE_PACKAGE_NAME}")
@@ -910,33 +911,30 @@ macro(build_openblas)
                     ${OPENBLAS_STATIC_LIB})
 
             ExternalProject_Create_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/openblas_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${OPENBLAS_CACHE_URL})
-
-            file(MAKE_DIRECTORY "${OPENBLAS_INCLUDE_DIR}")
         else()
             ExternalProject_Use_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
         endif()
     else()
         externalproject_add(openblas_ep
-                    URL
-                    ${OPENBLAS_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    CONFIGURE_COMMAND
-                    ""
-                    BUILD_IN_SOURCE
-                    1
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    INSTALL_COMMAND
-                    ${MAKE}
-                    PREFIX=${OPENBLAS_PREFIX}
-                    install
-                    BUILD_BYPRODUCTS
-                    ${OPENBLAS_STATIC_LIB})
-
-        file(MAKE_DIRECTORY "${OPENBLAS_INCLUDE_DIR}")
+                URL
+                ${OPENBLAS_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                ""
+                BUILD_IN_SOURCE
+                1
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                INSTALL_COMMAND
+                ${MAKE}
+                PREFIX=${OPENBLAS_PREFIX}
+                install
+                BUILD_BYPRODUCTS
+                ${OPENBLAS_STATIC_LIB})
     endif()
 
+    file(MAKE_DIRECTORY "${OPENBLAS_INCLUDE_DIR}")
     add_library(openblas STATIC IMPORTED)
     set_target_properties(
             openblas
@@ -1212,19 +1210,49 @@ macro(build_gtest)
     set(GMOCK_STATIC_LIB
             "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gmock${CMAKE_STATIC_LIBRARY_SUFFIX}"
     )
-    ExternalProject_Add(googletest_ep
-                        URL
-                        ${GTEST_SOURCE_URL}
-                        BUILD_COMMAND
-                        ${MAKE}
-                        ${MAKE_BUILD_ARGS}
-                        BUILD_BYPRODUCTS
-                        ${GTEST_STATIC_LIB}
-                        ${GTEST_MAIN_STATIC_LIB}
-                        ${GMOCK_STATIC_LIB}
-                        CMAKE_ARGS
-                        ${GTEST_CMAKE_ARGS}
-                        ${EP_LOG_OPTIONS})
+
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(GTEST_CACHE_PACKAGE_NAME "googletest_${GTEST_MD5}.tar.gz")
+        set(GTEST_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${GTEST_CACHE_PACKAGE_NAME}")
+        set(GTEST_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${GTEST_CACHE_PACKAGE_NAME}")
+
+        file(DOWNLOAD ${GTEST_CACHE_URL} ${GTEST_CACHE_PACKAGE_PATH} STATUS status)
+        list(GET status 0 status_code)
+        message(STATUS "DOWNLOADING FROM ${GTEST_CACHE_URL} TO ${GTEST_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+        if (NOT status_code EQUAL 0)
+            ExternalProject_Add(googletest_ep
+                    URL
+                    ${GTEST_SOURCE_URL}
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    BUILD_BYPRODUCTS
+                    ${GTEST_STATIC_LIB}
+                    ${GTEST_MAIN_STATIC_LIB}
+                    ${GMOCK_STATIC_LIB}
+                    CMAKE_ARGS
+                    ${GTEST_CMAKE_ARGS}
+                    ${EP_LOG_OPTIONS})
+
+            ExternalProject_Create_Cache(googletest_ep ${GTEST_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/googletest_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${GTEST_CACHE_URL})
+        else()
+            ExternalProject_Use_Cache(googletest_ep ${GTEST_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+        endif()
+    else()
+        ExternalProject_Add(googletest_ep
+                URL
+                ${GTEST_SOURCE_URL}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_BYPRODUCTS
+                ${GTEST_STATIC_LIB}
+                ${GTEST_MAIN_STATIC_LIB}
+                ${GMOCK_STATIC_LIB}
+                CMAKE_ARGS
+                ${GTEST_CMAKE_ARGS}
+                ${EP_LOG_OPTIONS})
+    endif()
 
     # The include directory must exist before it is referenced by a target.
     file(MAKE_DIRECTORY "${GTEST_INCLUDE_DIR}")
@@ -1474,29 +1502,74 @@ macro(build_prometheus)
             "-DCMAKE_INSTALL_PREFIX=${PROMETHEUS_PREFIX}"
             -DCMAKE_BUILD_TYPE=Release)
 
-    externalproject_add(prometheus_ep
-            GIT_REPOSITORY
-            ${PROMETHEUS_SOURCE_URL}
-            GIT_TAG
-            ${PROMETHEUS_VERSION}
-            GIT_SHALLOW
-            TRUE
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${PROMETHEUS_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE}
-            "DESTDIR=${PROMETHEUS_PREFIX}"
-            install
-            BUILD_BYPRODUCTS
-            "${PROMETHEUS_CORE_STATIC_LIB}"
-            "${PROMETHEUS_PUSH_STATIC_LIB}"
-            "${PROMETHEUS_PULL_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        execute_process(COMMAND sh -c "git ls-remote --heads --tags ${PROMETHEUS_SOURCE_URL} ${PROMETHEUS_VERSION} | cut -f 1" OUTPUT_VARIABLE PROMETHEUS_LAST_COMMIT_ID)
+        if(${PROMETHEUS_LAST_COMMIT_ID} MATCHES "^[^#][a-z0-9]+")
+            string(MD5 PROMETHEUS_COMBINE_MD5 "${PROMETHEUS_LAST_COMMIT_ID}")
+            set(PROMETHEUS_CACHE_PACKAGE_NAME "prometheus_${PROMETHEUS_COMBINE_MD5}.tar.gz")
+            set(PROMETHEUS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${PROMETHEUS_CACHE_PACKAGE_NAME}")
+            set(PROMETHEUS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${PROMETHEUS_CACHE_PACKAGE_NAME}")
+
+            file(DOWNLOAD ${PROMETHEUS_CACHE_URL} ${PROMETHEUS_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${PROMETHEUS_CACHE_URL} TO ${PROMETHEUS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (NOT status_code EQUAL 0)
+                externalproject_add(prometheus_ep
+                        GIT_REPOSITORY
+                        ${PROMETHEUS_SOURCE_URL}
+                        GIT_TAG
+                        ${PROMETHEUS_VERSION}
+                        GIT_SHALLOW
+                        TRUE
+                        ${EP_LOG_OPTIONS}
+                        CMAKE_ARGS
+                        ${PROMETHEUS_CMAKE_ARGS}
+                        BUILD_COMMAND
+                        ${MAKE}
+                        ${MAKE_BUILD_ARGS}
+                        BUILD_IN_SOURCE
+                        1
+                        INSTALL_COMMAND
+                        ${MAKE}
+                        "DESTDIR=${PROMETHEUS_PREFIX}"
+                        install
+                        BUILD_BYPRODUCTS
+                        "${PROMETHEUS_CORE_STATIC_LIB}"
+                        "${PROMETHEUS_PUSH_STATIC_LIB}"
+                        "${PROMETHEUS_PULL_STATIC_LIB}")
+
+                ExternalProject_Create_Cache(prometheus_ep ${PROMETHEUS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/prometheus_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${PROMETHEUS_CACHE_URL})
+            else()
+                ExternalProject_Use_Cache(prometheus_ep ${PROMETHEUS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        else()
+            message(FATAL_ERROR "The last commit ID of \"${PROMETHEUS_SOURCE_URL}\" repository don't match!")
+        endif()
+    else()
+        externalproject_add(prometheus_ep
+                GIT_REPOSITORY
+                ${PROMETHEUS_SOURCE_URL}
+                GIT_TAG
+                ${PROMETHEUS_VERSION}
+                GIT_SHALLOW
+                TRUE
+                ${EP_LOG_OPTIONS}
+                CMAKE_ARGS
+                ${PROMETHEUS_CMAKE_ARGS}
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE}
+                "DESTDIR=${PROMETHEUS_PREFIX}"
+                install
+                BUILD_BYPRODUCTS
+                "${PROMETHEUS_CORE_STATIC_LIB}"
+                "${PROMETHEUS_PUSH_STATIC_LIB}"
+                "${PROMETHEUS_PULL_STATIC_LIB}")
+    endif()
 
     file(MAKE_DIRECTORY "${PROMETHEUS_PREFIX}/push/include")
     add_library(prometheus-cpp-push STATIC IMPORTED)
