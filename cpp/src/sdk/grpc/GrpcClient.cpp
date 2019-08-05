@@ -190,7 +190,9 @@ GrpcClient::Ping(std::string &result, const std::string& cmd) {
     ::milvus::grpc::ServerStatus response;
     ::milvus::grpc::Command command;
     command.set_cmd(cmd);
+    std::cout << "in ping \n";
     ::grpc::Status status = stub_->Ping(&context, command, &response);
+    std::cout << "finish ping stub \n";
 
     result = response.info();
     if (!status.ok()) {
