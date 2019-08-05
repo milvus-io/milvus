@@ -310,9 +310,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//wait unit build index finish
-//        std::cout << "Wait until build all index done" << std::endl;
-//        Status stat = conn->BuildIndex(TABLE_NAME);
-//        std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;
+        std::cout << "Wait until build all index done" << std::endl;
+        Status stat = conn->BuildIndex(TABLE_NAME);
+        std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;
     }
 
     {//search vectors after build index finish
