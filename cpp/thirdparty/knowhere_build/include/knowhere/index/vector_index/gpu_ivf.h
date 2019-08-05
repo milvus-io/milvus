@@ -19,6 +19,12 @@ class GPUIVF : public IVF {
     void SetGpuDevice(const int &gpu_id);
 
  protected:
+    void search_impl(int64_t n,
+                     const float *data,
+                     int64_t k,
+                     float *distances,
+                     int64_t *labels,
+                     const Config &cfg) override;
     BinarySet SerializeImpl() override;
     void LoadImpl(const BinarySet &index_binary) override;
 
