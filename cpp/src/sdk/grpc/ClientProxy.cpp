@@ -133,7 +133,6 @@ ClientProxy::InsertVector(const std::string &table_name,
                           const std::vector<RowRecord> &record_array,
                           std::vector<int64_t> &id_array) {
     try {
-
 ////////////////////////////////////////////////////////////////////////////
 #ifdef GRPC_MULTIPLE_THREAD
         //multithread

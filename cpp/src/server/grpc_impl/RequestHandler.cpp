@@ -107,6 +107,7 @@ RequestHandler::GetTableRowCount(::grpc::ServerContext* context, const ::milvus:
 
 ::grpc::Status
 RequestHandler::ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request, ::grpc::ServerWriter< ::milvus::grpc::TableName>* writer) {
+    std::cout << "in handler\n";
     BaseTaskPtr task_ptr = ShowTablesTask::Create(*writer);
     ::milvus::grpc::Status grpc_status;
     RequestScheduler::ExecTask(task_ptr, &grpc_status);
@@ -120,6 +121,7 @@ RequestHandler::ShowTables(::grpc::ServerContext* context, const ::milvus::grpc:
 
 ::grpc::Status
 RequestHandler::Ping(::grpc::ServerContext* context, const ::milvus::grpc::Command* request, ::milvus::grpc::ServerStatus* response) {
+    std::cout << "in handler\n";
     std::string result;
     BaseTaskPtr task_ptr = PingTask::Create(request->cmd(), result);
     ::milvus::grpc::Status grpc_status;

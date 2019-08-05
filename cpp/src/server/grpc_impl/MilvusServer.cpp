@@ -31,7 +31,7 @@ namespace server {
 
 static std::unique_ptr<grpc::Server> server;
 
-constexpr long MESSAGE_SIZE = 400 * 1024 * 1024;
+constexpr long MESSAGE_SIZE = -1;
 
 void
 MilvusServer::StartService() {
