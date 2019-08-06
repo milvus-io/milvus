@@ -1448,10 +1448,9 @@ macro(build_mysqlpp)
         set(MYSQLPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${MYSQLPP_CACHE_PACKAGE_NAME}")
         set(MYSQLPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${MYSQLPP_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${MYSQLPP_CACHE_URL} ${MYSQLPP_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${MYSQLPP_CACHE_URL} TO ${MYSQLPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${MYSQLPP_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${MYSQLPP_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(mysqlpp_ep
                     URL
                     ${MYSQLPP_SOURCE_URL}
@@ -1468,7 +1467,12 @@ macro(build_mysqlpp)
 
             ExternalProject_Create_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${MYSQLPP_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${MYSQLPP_CACHE_URL} ${MYSQLPP_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${MYSQLPP_CACHE_URL} TO ${MYSQLPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(mysqlpp_ep
