@@ -41,6 +41,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-275 - Avoid sqlite logic error excetion
 - MS-278 - add IndexStatsHelper
 - MS-312 - Set openmp thread number by config
+- MS-305 - add CPU core percent metric
+- MS-310 - add milvus CPU utilization ratio and CPU/GPU temperature metrics
 
 ## New Feature
 - MS-180 - Add new mem manager

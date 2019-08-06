@@ -66,6 +66,8 @@ class MetricsBase{
     virtual void OctetsSet() {};
 
     virtual void CPUCoreUsagePercentSet() {};
+    virtual void GPUTemperature() {};
+    virtual void CPUTemperature() {};
 };
 
 
