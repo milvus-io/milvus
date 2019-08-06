@@ -449,6 +449,7 @@ else()
     set(GPERFTOOLS_SOURCE_URL
             "https://github.com/gperftools/gperftools/releases/download/gperftools-${GPERFTOOLS_VERSION}/gperftools-${GPERFTOOLS_VERSION}.tar.gz")
 endif()
+set(GPERFTOOLS_MD5 "c6a852a817e9160c79bdb2d3101b4601")
 
 # ----------------------------------------------------------------------
 # ARROW
@@ -2494,21 +2495,56 @@ macro(build_gperftools)
     set(GPERFTOOLS_STATIC_LIB "${GPERFTOOLS_PREFIX}/lib/libprofiler${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(GPERFTOOLS_CONFIGURE_ARGS "--prefix=${GPERFTOOLS_PREFIX}")
 
-    externalproject_add(gperftools_ep
-            URL
-            ${GPERFTOOLS_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${GPERFTOOLS_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE} install
-            BUILD_BYPRODUCTS
-            ${GPERFTOOLS_STATIC_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(GPERFTOOLS_CACHE_PACKAGE_NAME "gperftools_${GPERFTOOLS_MD5}.tar.gz")
+        set(GPERFTOOLS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${GPERFTOOLS_CACHE_PACKAGE_NAME}")
+        set(GPERFTOOLS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${GPERFTOOLS_CACHE_PACKAGE_NAME}")
+
+        execute_process(COMMAND wget -q --method HEAD ${GPERFTOOLS_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${GPERFTOOLS_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
+            externalproject_add(gperftools_ep
+                    URL
+                    ${GPERFTOOLS_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${GPERFTOOLS_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    BUILD_BYPRODUCTS
+                    ${GPERFTOOLS_STATIC_LIB})
+
+            ExternalProject_Create_Cache(gperftools_ep ${GPERFTOOLS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/gperftools_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${GPERFTOOLS_CACHE_URL})
+        else()
+            file(DOWNLOAD ${GPERFTOOLS_CACHE_URL} ${GPERFTOOLS_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${GPERFTOOLS_CACHE_URL} TO ${GPERFTOOLS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(gperftools_ep ${GPERFTOOLS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        endif()
+    else()
+        externalproject_add(gperftools_ep
+                URL
+                ${GPERFTOOLS_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${GPERFTOOLS_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE} install
+                BUILD_BYPRODUCTS
+                ${GPERFTOOLS_STATIC_LIB})
+    endif()
 
     ExternalProject_Add_StepDependencies(gperftools_ep build libunwind_ep)
 
