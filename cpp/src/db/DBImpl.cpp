@@ -366,6 +366,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     meta::TableFileSchema table_file;
     table_file.table_id_ = table_id;
     table_file.date_ = date;
+    table_file.file_type_ = meta::TableFileSchema::NEW_MERGE;
     Status status = meta_ptr_->CreateTableFile(table_file);
 
     if (!status.ok()) {
@@ -526,7 +527,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         meta::TableFileSchema table_file;
         table_file.table_id_ = file.table_id_;
         table_file.date_ = file.date_;
-        table_file.file_type_ = meta::TableFileSchema::INDEX; //for multi-db-path, distribute index file averagely to each path
+        table_file.file_type_ = meta::TableFileSchema::NEW_INDEX; //for multi-db-path, distribute index file averagely to each path
         Status status = meta_ptr_->CreateTableFile(table_file);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Failed to create table: " << status.ToString();
@@ -558,15 +559,25 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         auto to_remove = file;
         to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
 
-        meta::TableFilesSchema update_files = {to_remove, table_file};
-        meta_ptr_->UpdateTableFiles(update_files);
+        meta::TableFilesSchema update_files = {table_file, to_remove};
+        status = meta_ptr_->UpdateTableFiles(update_files);
+        if(status.ok()) {
+            ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size "
+                             << index->PhysicalSize() << " bytes"
+                             << " from file " << to_remove.file_id_;
 
-        ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size "
-                   << index->PhysicalSize() << " bytes"
-                   << " from file " << to_remove.file_id_;
+            if(options_.insert_cache_immediately_) {
+                index->Cache();
+            }
+        } else {
+            //failed to update meta, mark the new file as to_delete, don't delete old file
+            to_remove.file_type_ = meta::TableFileSchema::TO_INDEX;
+            status = meta_ptr_->UpdateTableFile(to_remove);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << to_remove.file_id_ << " to to_index";
 
-        if(options_.insert_cache_immediately_) {
-            index->Cache();
+            table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+            status = meta_ptr_->UpdateTableFile(table_file);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
         }
 
     } catch (std::exception& ex) {
