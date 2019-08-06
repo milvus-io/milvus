@@ -62,13 +62,11 @@ DBWrapper::DBWrapper() {
 
     // engine config
     ConfigNode& engine_config = ServerConfig::GetInstance().GetConfig(CONFIG_ENGINE);
-    float omp_thread_rate = engine_config.GetFloatValue(CONFIG_OMP_THREAD_RATE, 0.75);
-    uint32_t cpu_count = 1;
-    CommonUtil::GetSystemAvailableThreads(cpu_count);
-    float thread_count = omp_thread_rate*(float)cpu_count;
-    int32_t omp_thread = (int32_t)round(thread_count);
-    omp_set_num_threads(omp_thread);
-    SERVER_LOG_DEBUG << "Openmp thread number = " << omp_thread;
+    int32_t omp_thread = engine_config.GetInt32Value(CONFIG_OMP_THREAD_NUM, 0);
+    if(omp_thread > 0) {
+        omp_set_num_threads(omp_thread);
+        SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
+    }
 
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
