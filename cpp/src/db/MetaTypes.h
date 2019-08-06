@@ -43,6 +43,8 @@ struct TableFileSchema {
         TO_INDEX,
         INDEX,
         TO_DELETE,
+        NEW_MERGE,
+        NEW_INDEX,
     } FILE_TYPE;
 
     size_t id_ = 0;
