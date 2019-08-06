@@ -35,7 +35,7 @@ set(license_generator_files
         license/LicenseLibrary.cpp
         )
 
-set(service_files
+set(thrift_service_files
         thrift/gen-cpp/MilvusService.cpp
         thrift/gen-cpp/milvus_constants.cpp
         thrift/gen-cpp/milvus_types.cpp
@@ -43,6 +43,11 @@ set(service_files
         metrics/SystemInfo.h
         server/thrift_impl/ThreadPoolServer.cpp
         server/thrift_impl/ThreadPoolServer.h
+        )
+
+set(grpc_service_files
+        metrics/SystemInfo.cpp
+        metrics/SystemInfo.h
         grpc/gen-milvus/milvus.grpc.pb.cc
         grpc/gen-milvus/milvus.pb.cc
         grpc/gen-status/status.grpc.pb.cc
@@ -73,6 +78,18 @@ include_directories(/usr/include/mysql)
 include_directories(grpc/gen-status)
 include_directories(grpc/gen-milvus)
 
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
+    set(client_lib
+            thrift)
+else()
+    set(client_lib
+            grpcpp_channelz
+            grpc++
+            grpc
+            grpc_protobuf
+            grpc_protoc)
+endif()
+
 set(third_party_libs
         knowhere
         SPTAGLibStatic
@@ -83,10 +100,7 @@ set(third_party_libs
         lapack
         easyloggingpp
         sqlite
-        thrift
-        grpc
-        grpc++
-        grpcpp_channelz
+        ${client_lib}
         yaml-cpp
         prometheus-cpp-push
         prometheus-cpp-pull
@@ -200,13 +214,13 @@ set(knowhere_libs
         tbb
         )
 
-if (MILVUS_ENABLE_THRIFT STREQUAL "ON")
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
     add_executable(milvus_thrift_server
             ${config_files}
             ${server_files}
             ${thriftserver_files}
             ${utils_files}
-            ${service_files}
+            ${thrift_service_files}
             ${metrics_files}
             )
 else()
@@ -215,20 +229,20 @@ else()
             ${server_files}
             ${grpcserver_files}
             ${utils_files}
-            ${service_files}
+            ${grpc_service_files}
             ${metrics_files}
             )
 endif()
 
 
 if (ENABLE_LICENSE STREQUAL "ON")
-    if(MILVUS_ENABLE_THRIFT STREQUAL "ON")
+    if(MILVUS_WITH_THRIFT STREQUAL "ON")
         target_link_libraries(milvus_thrift_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
     else()
         target_link_libraries(milvus_grpc_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
     endif()
 else ()
-    if(MILVUS_ENABLE_THRIFT STREQUAL "ON")
+    if(MILVUS_WITH_THRIFT STREQUAL "ON")
         target_link_libraries(milvus_thrift_server ${server_libs} ${knowhere_libs} ${third_party_libs})
     else()
         target_link_libraries(milvus_grpc_server ${server_libs} ${knowhere_libs} ${third_party_libs})
@@ -247,7 +261,7 @@ if (ENABLE_LICENSE STREQUAL "ON")
         install(TARGETS license_generator DESTINATION bin)
 endif ()
 
-if (MILVUS_ENABLE_THRIFT STREQUAL "ON")
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
     install(TARGETS milvus_thrift_server DESTINATION bin)
 else()
     install(TARGETS milvus_grpc_server DESTINATION bin)

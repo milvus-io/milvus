@@ -12,7 +12,7 @@ include_directories(/usr/include)
 include_directories(include)
 include_directories(/usr/local/include)
 
-if (MILVUS_ENABLE_THRIFT STREQUAL "ON")
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
     aux_source_directory(thrift thrift_client_files)
     include_directories(thrift)
     include_directories(${CMAKE_SOURCE_DIR}/src/thrift/gen-cpp)
