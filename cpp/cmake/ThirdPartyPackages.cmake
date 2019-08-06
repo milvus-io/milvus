@@ -479,7 +479,7 @@ macro(build_arrow)
             set(ARROW_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ARROW_CACHE_PACKAGE_NAME}")
 
             execute_process(COMMAND wget -q --method HEAD ${ARROW_CACHE_URL} RESULT_VARIABLE return_code)
-            message(STATUS "Check if remote file ${ARROW_CACHE_URL}. return code = ${return_code}")
+            message(STATUS "Check the remote cache file ${ARROW_CACHE_URL}. return code = ${return_code}")
             if (NOT return_code EQUAL 0)
                 externalproject_add(arrow_ep
                         GIT_REPOSITORY
@@ -677,10 +677,9 @@ macro(build_bzip2)
         set(BZIP2_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${BZIP2_CACHE_PACKAGE_NAME}")
         set(BZIP2_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${BZIP2_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${BZIP2_CACHE_URL} ${BZIP2_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${BZIP2_CACHE_URL} TO ${BZIP2_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${BZIP2_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote cache file ${BZIP2_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(bzip2_ep
                                 ${EP_LOG_OPTIONS}
                                 CONFIGURE_COMMAND
@@ -705,7 +704,12 @@ macro(build_bzip2)
 
             ExternalProject_Create_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/bzip2_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${BZIP2_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${BZIP2_CACHE_URL} ${BZIP2_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${BZIP2_CACHE_URL} TO ${BZIP2_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(bzip2_ep
@@ -825,10 +829,9 @@ macro(build_easyloggingpp)
         set(EASYLOGGINGPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${EASYLOGGINGPP_CACHE_PACKAGE_NAME}")
         set(EASYLOGGINGPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${EASYLOGGINGPP_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${EASYLOGGINGPP_CACHE_URL} ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${EASYLOGGINGPP_CACHE_URL} TO ${EASYLOGGINGPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${EASYLOGGINGPP_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote cache file ${EASYLOGGINGPP_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(easyloggingpp_ep
                 URL
                 ${EASYLOGGINGPP_SOURCE_URL}
@@ -843,7 +846,12 @@ macro(build_easyloggingpp)
 
             ExternalProject_Create_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/easyloggingpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${EASYLOGGINGPP_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${EASYLOGGINGPP_CACHE_URL} ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${EASYLOGGINGPP_CACHE_URL} TO ${EASYLOGGINGPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(easyloggingpp_ep
