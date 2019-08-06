@@ -325,6 +325,9 @@ void DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().GPUMemoryUsageGaugeSet();
     server::Metrics::GetInstance().OctetsSet();
 
+    server::Metrics::GetInstance().CPUCoreUsagePercentSet();
+
+
     ENGINE_LOG_TRACE << "Metric task finished";
 }
 
@@ -562,15 +565,25 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         auto to_remove = file;
         to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
 
-        meta::TableFilesSchema update_files = {to_remove, table_file};
-        meta_ptr_->UpdateTableFiles(update_files);
+        meta::TableFilesSchema update_files = {table_file, to_remove};
+        status = meta_ptr_->UpdateTableFiles(update_files);
+        if(status.ok()) {
+            ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size "
+                             << index->PhysicalSize() << " bytes"
+                             << " from file " << to_remove.file_id_;
 
-        ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size "
-                   << index->PhysicalSize() << " bytes"
-                   << " from file " << to_remove.file_id_;
+            if(options_.insert_cache_immediately_) {
+                index->Cache();
+            }
+        } else {
+            //failed to update meta, mark the new file as to_delete, don't delete old file
+            to_remove.file_type_ = meta::TableFileSchema::TO_INDEX;
+            status = meta_ptr_->UpdateTableFile(to_remove);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << to_remove.file_id_ << " to to_index";
 
-        if(options_.insert_cache_immediately_) {
-            index->Cache();
+            table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+            status = meta_ptr_->UpdateTableFile(table_file);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
         }
 
     } catch (std::exception& ex) {

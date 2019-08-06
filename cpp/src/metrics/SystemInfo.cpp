@@ -105,8 +105,64 @@ SystemInfo::GetProcessUsedMemory() {
 double
 SystemInfo::MemoryPercent() {
     if (!initialized_) Init();
-    return GetProcessUsedMemory()*100/total_ram_;
+    return (double)(GetProcessUsedMemory()*100)/(double)total_ram_;
 }
+
+
+
+std::vector<double>
+SystemInfo::CPUCorePercent() {
+    std::vector<unsigned long long> prev_work_time_array;
+    std::vector<unsigned long long> prev_total_time_array = getTotalCpuTime(prev_work_time_array);
+    usleep(100000);
+    std::vector<unsigned long long> cur_work_time_array;
+    std::vector<unsigned long long> cur_total_time_array = getTotalCpuTime(cur_work_time_array);
+
+    std::vector<double> cpu_core_percent;
+    for (int i = 0; i < num_processors_; i++) {
+        double total_cpu_time = cur_total_time_array[i] - prev_total_time_array[i];
+        double cpu_work_time = cur_work_time_array[i] - prev_work_time_array[i];
+        cpu_core_percent.push_back((cpu_work_time / total_cpu_time) * 100);
+    }
+    return cpu_core_percent;
+}
+
+std::vector<unsigned long long>
+SystemInfo::getTotalCpuTime(std::vector<unsigned long long> &work_time_array)
+{
+    std::vector<unsigned long long> total_time_array;
+    FILE* file = fopen("/proc/stat", "r");
+    if (file == NULL) {
+        perror("Could not open stat file");
+        return total_time_array;
+    }
+
+    unsigned long long user = 0, nice = 0, system = 0, idle = 0;
+    unsigned long long iowait = 0, irq = 0, softirq = 0, steal = 0, guest = 0, guestnice = 0;
+
+    for (int i = 0; i < num_processors_; i++) {
+        char buffer[1024];
+        char* ret = fgets(buffer, sizeof(buffer) - 1, file);
+        if (ret == NULL) {
+            perror("Could not read stat file");
+            fclose(file);
+            return total_time_array;
+        }
+
+        sscanf(buffer,
+               "cpu  %16llu %16llu %16llu %16llu %16llu %16llu %16llu %16llu %16llu %16llu",
+               &user, &nice, &system, &idle, &iowait, &irq, &softirq, &steal, &guest, &guestnice);
+
+        work_time_array.push_back(user + nice + system);
+        total_time_array.push_back(user + nice + system + idle + iowait + irq + softirq + steal);
+    }
+
+    fclose(file);
+    return total_time_array;
+}
+
+
+
 
 double
 SystemInfo::CPUPercent() {
@@ -136,17 +192,17 @@ SystemInfo::CPUPercent() {
 }
 
 
-std::vector<unsigned int>
-SystemInfo::GPUPercent() {
+std::vector<unsigned long long>
+SystemInfo::GPUMemoryTotal() {
     // get GPU usage percent
     if(!initialized_) Init();
-    std::vector<unsigned int> result;
-    nvmlUtilization_t utilization;
+    std::vector<unsigned long long > result;
+    nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
         nvmlDevice_t device;
         nvmlDeviceGetHandleByIndex(i, &device);
-        nvmlDeviceGetUtilizationRates(device, &utilization);
-        result.push_back(utilization.gpu);
+        nvmlDeviceGetMemoryInfo(device, &nvmlMemory);
+        result.push_back(nvmlMemory.total);
     }
     return result;
 }

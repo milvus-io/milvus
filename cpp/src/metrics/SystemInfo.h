@@ -46,6 +46,7 @@ class SystemInfo {
     }
 
     void Init();
+    int num_processor() const { return num_processors_;};
     int num_device() const {return num_device_;};
     unsigned long long get_inoctets() { return in_octets_;};
     unsigned long long get_octets() { return out_octets_;};
@@ -59,8 +60,12 @@ class SystemInfo {
     double MemoryPercent();
     double CPUPercent();
     std::pair<unsigned long long , unsigned long long > Octets();
-    std::vector<unsigned int> GPUPercent();
+    std::vector<unsigned long long> GPUMemoryTotal();
     std::vector<unsigned long long> GPUMemoryUsed();
+
+    std::vector<double> CPUCorePercent();
+    std::vector<unsigned long long> getTotalCpuTime(std::vector<unsigned long long> &workTime);
+
 
 };
 
