@@ -376,6 +376,7 @@ else ()
     set(ROCKSDB_SOURCE_URL
             "https://github.com/facebook/rocksdb/archive/${ROCKSDB_VERSION}.tar.gz")
 endif()
+set(ROCKSDB_MD5 "a8f2f594182e97a08629bcc66dfd3fa0")
 
 if(DEFINED ENV{MILVUS_SNAPPY_URL})
     set(SNAPPY_SOURCE_URL "$ENV{MILVUS_SNAPPY_URL}")
@@ -443,6 +444,7 @@ else()
     set(LIBUNWIND_SOURCE_URL
             "https://github.com/libunwind/libunwind/releases/download/v${LIBUNWIND_VERSION}/libunwind-${LIBUNWIND_VERSION}.tar.gz")
 endif()
+set(LIBUNWIND_MD5 "a04f69d66d8e16f8bf3ab72a69112cd6")
 
 if(DEFINED ENV{MILVUS_GPERFTOOLS_URL})
     set(GPERFTOOLS_SOURCE_URL "$ENV{MILVUS_GPERFTOOLS_URL}")
@@ -450,6 +452,7 @@ else()
     set(GPERFTOOLS_SOURCE_URL
             "https://github.com/gperftools/gperftools/releases/download/gperftools-${GPERFTOOLS_VERSION}/gperftools-${GPERFTOOLS_VERSION}.tar.gz")
 endif()
+set(GPERFTOOLS_MD5 "c6a852a817e9160c79bdb2d3101b4601")
 
 if(DEFINED ENV{MILVUS_GRPC_URL})
     set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
@@ -488,10 +491,9 @@ macro(build_arrow)
             set(ARROW_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ARROW_CACHE_PACKAGE_NAME}")
             set(ARROW_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ARROW_CACHE_PACKAGE_NAME}")
 
-            file(DOWNLOAD ${ARROW_CACHE_URL} ${ARROW_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${ARROW_CACHE_URL} TO ${ARROW_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (NOT status_code EQUAL 0)
+            execute_process(COMMAND wget -q --method HEAD ${ARROW_CACHE_URL} RESULT_VARIABLE return_code)
+            message(STATUS "Check the remote cache file ${ARROW_CACHE_URL}. return code = ${return_code}")
+            if (NOT return_code EQUAL 0)
                 externalproject_add(arrow_ep
                         GIT_REPOSITORY
                         ${ARROW_SOURCE_URL}
@@ -515,7 +517,12 @@ macro(build_arrow)
 
                 ExternalProject_Create_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ARROW_CACHE_URL})
             else()
-                ExternalProject_Use_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+                file(DOWNLOAD ${ARROW_CACHE_URL} ${ARROW_CACHE_PACKAGE_PATH} STATUS status)
+                list(GET status 0 status_code)
+                message(STATUS "DOWNLOADING FROM ${ARROW_CACHE_URL} TO ${ARROW_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+                if (status_code EQUAL 0)
+                    ExternalProject_Use_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+                endif()
             endif()
         else()
             message(FATAL_ERROR "The last commit ID of \"${ARROW_SOURCE_URL}\" repository don't match!")
@@ -683,10 +690,9 @@ macro(build_bzip2)
         set(BZIP2_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${BZIP2_CACHE_PACKAGE_NAME}")
         set(BZIP2_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${BZIP2_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${BZIP2_CACHE_URL} ${BZIP2_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${BZIP2_CACHE_URL} TO ${BZIP2_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${BZIP2_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote cache file ${BZIP2_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(bzip2_ep
                                 ${EP_LOG_OPTIONS}
                                 CONFIGURE_COMMAND
@@ -711,7 +717,12 @@ macro(build_bzip2)
 
             ExternalProject_Create_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/bzip2_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${BZIP2_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${BZIP2_CACHE_URL} ${BZIP2_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${BZIP2_CACHE_URL} TO ${BZIP2_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(bzip2_ep ${BZIP2_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(bzip2_ep
@@ -831,10 +842,9 @@ macro(build_easyloggingpp)
         set(EASYLOGGINGPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${EASYLOGGINGPP_CACHE_PACKAGE_NAME}")
         set(EASYLOGGINGPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${EASYLOGGINGPP_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${EASYLOGGINGPP_CACHE_URL} ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${EASYLOGGINGPP_CACHE_URL} TO ${EASYLOGGINGPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${EASYLOGGINGPP_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote cache file ${EASYLOGGINGPP_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(easyloggingpp_ep
                 URL
                 ${EASYLOGGINGPP_SOURCE_URL}
@@ -849,7 +859,12 @@ macro(build_easyloggingpp)
 
             ExternalProject_Create_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/easyloggingpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${EASYLOGGINGPP_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${EASYLOGGINGPP_CACHE_URL} ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${EASYLOGGINGPP_CACHE_URL} TO ${EASYLOGGINGPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(easyloggingpp_ep
@@ -898,10 +913,9 @@ macro(build_openblas)
         set(OPENBLAS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${OPENBLAS_CACHE_PACKAGE_NAME}")
         set(OPENBLAS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${OPENBLAS_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${OPENBLAS_CACHE_URL} ${OPENBLAS_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${OPENBLAS_CACHE_URL} TO ${OPENBLAS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${OPENBLAS_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${OPENBLAS_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(openblas_ep
                     URL
                     ${OPENBLAS_SOURCE_URL}
@@ -922,7 +936,12 @@ macro(build_openblas)
 
             ExternalProject_Create_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/openblas_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${OPENBLAS_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${OPENBLAS_CACHE_URL} ${OPENBLAS_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${OPENBLAS_CACHE_URL} TO ${OPENBLAS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(openblas_ep
@@ -974,10 +993,9 @@ macro(build_lapack)
         set(LAPACK_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${LAPACK_CACHE_PACKAGE_NAME}")
         set(LAPACK_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${LAPACK_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${LAPACK_CACHE_URL} ${LAPACK_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${LAPACK_CACHE_URL} TO ${LAPACK_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${LAPACK_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${LAPACK_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(lapack_ep
                     URL
                     ${LAPACK_SOURCE_URL}
@@ -992,7 +1010,12 @@ macro(build_lapack)
 
             ExternalProject_Create_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lapack_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LAPACK_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${LAPACK_CACHE_URL} ${LAPACK_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${LAPACK_CACHE_URL} TO ${LAPACK_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(lapack_ep
@@ -1086,10 +1109,9 @@ macro(build_faiss)
         set(FAISS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${FAISS_CACHE_PACKAGE_NAME}")
         set(FAISS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${FAISS_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${FAISS_CACHE_URL} ${FAISS_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${FAISS_CACHE_URL} TO ${FAISS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${FAISS_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${FAISS_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(faiss_ep
                     URL
                     ${FAISS_SOURCE_URL}
@@ -1112,7 +1134,12 @@ macro(build_faiss)
 
             ExternalProject_Create_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/faiss_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${FAISS_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${FAISS_CACHE_URL} ${FAISS_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${FAISS_CACHE_URL} TO ${FAISS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(faiss_ep
@@ -1340,10 +1367,9 @@ macro(build_lz4)
         set(LZ4_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${LZ4_CACHE_PACKAGE_NAME}")
         set(LZ4_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${LZ4_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${LZ4_CACHE_URL} ${LZ4_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${LZ4_CACHE_URL} TO ${LZ4_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${LZ4_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${LZ4_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(lz4_ep
                     URL
                     ${LZ4_SOURCE_URL}
@@ -1367,7 +1393,12 @@ macro(build_lz4)
 
             ExternalProject_Create_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lz4_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LZ4_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${LZ4_CACHE_URL} ${LZ4_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${LZ4_CACHE_URL} TO ${LZ4_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(lz4_ep ${LZ4_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(lz4_ep
@@ -1430,10 +1461,9 @@ macro(build_mysqlpp)
         set(MYSQLPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${MYSQLPP_CACHE_PACKAGE_NAME}")
         set(MYSQLPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${MYSQLPP_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${MYSQLPP_CACHE_URL} ${MYSQLPP_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${MYSQLPP_CACHE_URL} TO ${MYSQLPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${MYSQLPP_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${MYSQLPP_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(mysqlpp_ep
                     URL
                     ${MYSQLPP_SOURCE_URL}
@@ -1450,7 +1480,12 @@ macro(build_mysqlpp)
 
             ExternalProject_Create_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/mysqlpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${MYSQLPP_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${MYSQLPP_CACHE_URL} ${MYSQLPP_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${MYSQLPP_CACHE_URL} TO ${MYSQLPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(mysqlpp_ep ${MYSQLPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(mysqlpp_ep
@@ -1520,10 +1555,9 @@ macro(build_prometheus)
             set(PROMETHEUS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${PROMETHEUS_CACHE_PACKAGE_NAME}")
             set(PROMETHEUS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${PROMETHEUS_CACHE_PACKAGE_NAME}")
 
-            file(DOWNLOAD ${PROMETHEUS_CACHE_URL} ${PROMETHEUS_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${PROMETHEUS_CACHE_URL} TO ${PROMETHEUS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (NOT status_code EQUAL 0)
+            execute_process(COMMAND wget -q --method HEAD ${PROMETHEUS_CACHE_URL} RESULT_VARIABLE return_code)
+            message(STATUS "Check the remote file ${PROMETHEUS_CACHE_URL}. return code = ${return_code}")
+            if (NOT return_code EQUAL 0)
                 externalproject_add(prometheus_ep
                         GIT_REPOSITORY
                         ${PROMETHEUS_SOURCE_URL}
@@ -1550,7 +1584,12 @@ macro(build_prometheus)
 
                 ExternalProject_Create_Cache(prometheus_ep ${PROMETHEUS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/prometheus_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${PROMETHEUS_CACHE_URL})
             else()
-                ExternalProject_Use_Cache(prometheus_ep ${PROMETHEUS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+                file(DOWNLOAD ${PROMETHEUS_CACHE_URL} ${PROMETHEUS_CACHE_PACKAGE_PATH} STATUS status)
+                list(GET status 0 status_code)
+                message(STATUS "DOWNLOADING FROM ${PROMETHEUS_CACHE_URL} TO ${PROMETHEUS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+                if (status_code EQUAL 0)
+                    ExternalProject_Use_Cache(prometheus_ep ${PROMETHEUS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+                endif()
             endif()
         else()
             message(FATAL_ERROR "The last commit ID of \"${PROMETHEUS_SOURCE_URL}\" repository don't match!")
@@ -1630,25 +1669,65 @@ macro(build_rocksdb)
             "${ROCKSDB_PREFIX}/lib/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ROCKSDB_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
             )
 
-    externalproject_add(rocksdb_ep
-            URL
-            ${ROCKSDB_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            ""
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            static_lib
-            "prefix=${ROCKSDB_PREFIX}"
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE}
-            install-static
-            "INSTALL_PATH=${ROCKSDB_PREFIX}/lib"
-            BUILD_BYPRODUCTS
-            "${ROCKSDB_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        string(MD5 ROCKSDB_COMBINE_MD5 "${ROCKSDB_LAST_COMMIT_ID}")
+        set(ROCKSDB_CACHE_PACKAGE_NAME "rocksdb_${ROCKSDB_MD5}.tar.gz")
+        set(ROCKSDB_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ROCKSDB_CACHE_PACKAGE_NAME}")
+        set(ROCKSDB_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ROCKSDB_CACHE_PACKAGE_NAME}")
+
+        execute_process(COMMAND wget -q --method HEAD ${ROCKSDB_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${ROCKSDB_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
+            externalproject_add(rocksdb_ep
+                    URL
+                    ${ROCKSDB_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    ""
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    static_lib
+                    "prefix=${ROCKSDB_PREFIX}"
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_COMMAND
+                    ${MAKE}
+                    install-static
+                    "INSTALL_PATH=${ROCKSDB_PREFIX}/lib"
+                    BUILD_BYPRODUCTS
+                    "${ROCKSDB_STATIC_LIB}")
+
+            ExternalProject_Create_Cache(rocksdb_ep ${ROCKSDB_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/rocksdb_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ROCKSDB_CACHE_URL})
+        else()
+            file(DOWNLOAD ${ROCKSDB_CACHE_URL} ${ROCKSDB_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${ROCKSDB_CACHE_URL} TO ${ROCKSDB_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(rocksdb_ep ${ROCKSDB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        endif()
+    else()
+        externalproject_add(rocksdb_ep
+                URL
+                ${ROCKSDB_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                ""
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                static_lib
+                "prefix=${ROCKSDB_PREFIX}"
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE}
+                install-static
+                "INSTALL_PATH=${ROCKSDB_PREFIX}/lib"
+                BUILD_BYPRODUCTS
+                "${ROCKSDB_STATIC_LIB}")
+    endif()
 
     file(MAKE_DIRECTORY "${ROCKSDB_PREFIX}/include")
 
@@ -1690,10 +1769,9 @@ macro(build_snappy)
         set(SNAPPY_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${SNAPPY_CACHE_PACKAGE_NAME}")
         set(SNAPPY_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${SNAPPY_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${SNAPPY_CACHE_URL} ${SNAPPY_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${SNAPPY_CACHE_URL} TO ${SNAPPY_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${SNAPPY_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${SNAPPY_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(snappy_ep
                     ${EP_LOG_OPTIONS}
                     BUILD_COMMAND
@@ -1712,7 +1790,12 @@ macro(build_snappy)
 
             ExternalProject_Create_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/snappy_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SNAPPY_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${SNAPPY_CACHE_URL} ${SNAPPY_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${SNAPPY_CACHE_URL} TO ${SNAPPY_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(snappy_ep ${SNAPPY_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(snappy_ep
@@ -1772,10 +1855,9 @@ macro(build_sqlite)
         set(SQLITE_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${SQLITE_CACHE_PACKAGE_NAME}")
         set(SQLITE_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${SQLITE_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${SQLITE_CACHE_URL} ${SQLITE_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${SQLITE_CACHE_URL} TO ${SQLITE_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${SQLITE_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${SQLITE_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(sqlite_ep
                     URL
                     ${SQLITE_SOURCE_URL}
@@ -1793,7 +1875,12 @@ macro(build_sqlite)
 
             ExternalProject_Create_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/sqlite_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${SQLITE_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${SQLITE_CACHE_URL} ${SQLITE_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${SQLITE_CACHE_URL} TO ${SQLITE_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(sqlite_ep ${SQLITE_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(sqlite_ep
@@ -1907,10 +1994,9 @@ macro(build_thrift)
         set(THRIFT_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${THRIFT_CACHE_PACKAGE_NAME}")
         set(THRIFT_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${THRIFT_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${THRIFT_CACHE_URL} ${THRIFT_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${THRIFT_CACHE_URL} TO ${THRIFT_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${THRIFT_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${THRIFT_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(thrift_ep
                     URL
                     ${THRIFT_SOURCE_URL}
@@ -1930,7 +2016,12 @@ macro(build_thrift)
 
             ExternalProject_Create_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${THRIFT_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${THRIFT_CACHE_URL} ${THRIFT_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${THRIFT_CACHE_URL} TO ${THRIFT_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(thrift_ep
@@ -1990,10 +2081,9 @@ macro(build_yamlcpp)
         set(YAMLCPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${YAMLCPP_CACHE_PACKAGE_NAME}")
         set(YAMLCPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${YAMLCPP_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${YAMLCPP_CACHE_URL} ${YAMLCPP_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${YAMLCPP_CACHE_URL} TO ${YAMLCPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${YAMLCPP_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${YAMLCPP_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(yaml-cpp_ep
                     URL
                     ${YAMLCPP_SOURCE_URL}
@@ -2008,7 +2098,12 @@ macro(build_yamlcpp)
 
             ExternalProject_Create_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/yaml-cpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${YAMLCPP_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${YAMLCPP_CACHE_URL} ${YAMLCPP_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${YAMLCPP_CACHE_URL} TO ${YAMLCPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(yaml-cpp_ep ${YAMLCPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(yaml-cpp_ep
@@ -2058,10 +2153,9 @@ macro(build_zlib)
         set(ZLIB_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ZLIB_CACHE_PACKAGE_NAME}")
         set(ZLIB_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ZLIB_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${ZLIB_CACHE_URL} ${ZLIB_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${ZLIB_CACHE_URL} TO ${ZLIB_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${ZLIB_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${ZLIB_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(zlib_ep
                     URL
                     ${ZLIB_SOURCE_URL}
@@ -2076,7 +2170,12 @@ macro(build_zlib)
 
             ExternalProject_Create_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zlib_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZLIB_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${ZLIB_CACHE_URL} ${ZLIB_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${ZLIB_CACHE_URL} TO ${ZLIB_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(zlib_ep ${ZLIB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(zlib_ep
@@ -2144,10 +2243,9 @@ macro(build_zstd)
         set(ZSTD_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ZSTD_CACHE_PACKAGE_NAME}")
         set(ZSTD_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ZSTD_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${ZSTD_CACHE_URL} ${ZSTD_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${ZSTD_CACHE_URL} TO ${ZSTD_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${ZSTD_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${ZSTD_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(zstd_ep
                     ${EP_LOG_OPTIONS}
                     CMAKE_ARGS
@@ -2166,7 +2264,12 @@ macro(build_zstd)
 
             ExternalProject_Create_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zstd_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZSTD_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${ZSTD_CACHE_URL} ${ZSTD_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${ZSTD_CACHE_URL} TO ${ZSTD_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(zstd_ep
@@ -2237,10 +2340,9 @@ macro(build_aws)
         set(AWS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${AWS_CACHE_PACKAGE_NAME}")
         set(AWS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${AWS_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${AWS_CACHE_URL} ${AWS_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${AWS_CACHE_URL} TO ${AWS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${AWS_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${AWS_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(aws_ep
                     ${EP_LOG_OPTIONS}
                     CMAKE_ARGS
@@ -2258,7 +2360,12 @@ macro(build_aws)
 
             ExternalProject_Create_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/aws_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${AWS_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${AWS_CACHE_URL} ${AWS_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${AWS_CACHE_URL} TO ${AWS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(aws_ep
@@ -2319,21 +2426,56 @@ macro(build_libunwind)
     set(LIBUNWIND_SHARED_LIB "${LIBUNWIND_PREFIX}/lib/libunwind${CMAKE_SHARED_LIBRARY_SUFFIX}")
     set(LIBUNWIND_CONFIGURE_ARGS "--prefix=${LIBUNWIND_PREFIX}")
 
-    externalproject_add(libunwind_ep
-            URL
-            ${LIBUNWIND_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${LIBUNWIND_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE} install
-            BUILD_BYPRODUCTS
-            ${LIBUNWIND_SHARED_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(LIBUNWIND_CACHE_PACKAGE_NAME "libunwind_${LIBUNWIND_MD5}.tar.gz")
+        set(LIBUNWIND_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${LIBUNWIND_CACHE_PACKAGE_NAME}")
+        set(LIBUNWIND_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${LIBUNWIND_CACHE_PACKAGE_NAME}")
+
+        execute_process(COMMAND wget -q --method HEAD ${LIBUNWIND_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${LIBUNWIND_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
+            externalproject_add(libunwind_ep
+                    URL
+                    ${LIBUNWIND_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${LIBUNWIND_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    BUILD_BYPRODUCTS
+                    ${LIBUNWIND_SHARED_LIB})
+
+            ExternalProject_Create_Cache(libunwind_ep ${LIBUNWIND_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/libunwind_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LIBUNWIND_CACHE_URL})
+        else()
+            file(DOWNLOAD ${LIBUNWIND_CACHE_URL} ${LIBUNWIND_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${LIBUNWIND_CACHE_URL} TO ${LIBUNWIND_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(libunwind_ep ${LIBUNWIND_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        endif()
+    else()
+        externalproject_add(libunwind_ep
+                URL
+                ${LIBUNWIND_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${LIBUNWIND_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE} install
+                BUILD_BYPRODUCTS
+                ${LIBUNWIND_SHARED_LIB})
+    endif()
 
     file(MAKE_DIRECTORY "${LIBUNWIND_INCLUDE_DIR}")
 
@@ -2362,21 +2504,56 @@ macro(build_gperftools)
     set(GPERFTOOLS_STATIC_LIB "${GPERFTOOLS_PREFIX}/lib/libprofiler${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(GPERFTOOLS_CONFIGURE_ARGS "--prefix=${GPERFTOOLS_PREFIX}")
 
-    externalproject_add(gperftools_ep
-            URL
-            ${GPERFTOOLS_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${GPERFTOOLS_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE} install
-            BUILD_BYPRODUCTS
-            ${GPERFTOOLS_STATIC_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(GPERFTOOLS_CACHE_PACKAGE_NAME "gperftools_${GPERFTOOLS_MD5}.tar.gz")
+        set(GPERFTOOLS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${GPERFTOOLS_CACHE_PACKAGE_NAME}")
+        set(GPERFTOOLS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${GPERFTOOLS_CACHE_PACKAGE_NAME}")
+
+        execute_process(COMMAND wget -q --method HEAD ${GPERFTOOLS_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${GPERFTOOLS_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
+            externalproject_add(gperftools_ep
+                    URL
+                    ${GPERFTOOLS_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${GPERFTOOLS_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    BUILD_BYPRODUCTS
+                    ${GPERFTOOLS_STATIC_LIB})
+
+            ExternalProject_Create_Cache(gperftools_ep ${GPERFTOOLS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/gperftools_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${GPERFTOOLS_CACHE_URL})
+        else()
+            file(DOWNLOAD ${GPERFTOOLS_CACHE_URL} ${GPERFTOOLS_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${GPERFTOOLS_CACHE_URL} TO ${GPERFTOOLS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(gperftools_ep ${GPERFTOOLS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        endif()
+    else()
+        externalproject_add(gperftools_ep
+                URL
+                ${GPERFTOOLS_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${GPERFTOOLS_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE} install
+                BUILD_BYPRODUCTS
+                ${GPERFTOOLS_STATIC_LIB})
+    endif()
 
     file(MAKE_DIRECTORY "${GPERFTOOLS_INCLUDE_DIR}")
 

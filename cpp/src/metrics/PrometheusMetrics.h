@@ -12,6 +12,7 @@
 
 #include <prometheus/registry.h>
 #include <prometheus/exposer.h>
+#include <iostream>
 #include "server/ServerConfig.h"
 #include "MetricBase.h"
 
@@ -78,6 +79,9 @@ class PrometheusMetrics: public MetricsBase {
     void QueryVectorResponseSummaryObserve(double value, int count = 1) override { if (startup_) for(int i = 0 ; i < count ; ++i) query_vector_response_summary_.Observe(value);};
     void QueryVectorResponsePerSecondGaugeSet(double value) override {if (startup_) query_vector_response_per_second_gauge_.Set(value);};
     void CPUUsagePercentSet() override ;
+
+    void CPUCoreUsagePercentSet() override;
+
     void RAMUsagePercentSet() override ;
     void QueryResponsePerSecondGaugeSet(double value) override {if(startup_) query_response_per_second_gauge.Set(value);};
     void GPUPercentGaugeSet() override ;
@@ -322,7 +326,7 @@ class PrometheusMetrics: public MetricsBase {
     prometheus::Gauge &faiss_disk_load_IO_speed_gauge_ = faiss_disk_load_IO_speed_.Add({{"DB","Faiss"}});
 
 
-        ////all from CacheMgr.cpp
+    ////all from CacheMgr.cpp
     //record cache access count
     prometheus::Family<prometheus::Counter> &cache_access_ = prometheus::BuildCounter()
         .Name("cache_access_total")
@@ -392,7 +396,8 @@ class PrometheusMetrics: public MetricsBase {
         .Name("CPU_usage_percent")
         .Help("CPU usage percent by this this process")
         .Register(*registry_);
-    prometheus::Gauge &CPU_usage_percent_ = CPU_.Add({});
+    prometheus::Gauge &CPU_usage_percent_ = CPU_.Add({{"CPU", "0"}});
+
 
     prometheus::Family<prometheus::Gauge> &RAM_ = prometheus::BuildGauge()
         .Name("RAM_usage_percent")
@@ -405,33 +410,12 @@ class PrometheusMetrics: public MetricsBase {
         .Name("Gpu_usage_percent")
         .Help("GPU_usage_percent ")
         .Register(*registry_);
-    prometheus::Gauge &GPU0_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "0"}});
-    prometheus::Gauge &GPU1_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "1"}});
-    prometheus::Gauge &GPU2_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "2"}});
-    prometheus::Gauge &GPU3_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "3"}});
-    prometheus::Gauge &GPU4_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "4"}});
-    prometheus::Gauge &GPU5_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "5"}});
-    prometheus::Gauge &GPU6_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "6"}});
-    prometheus::Gauge &GPU7_percent_gauge_ = GPU_percent_.Add({{"DeviceNum", "7"}});
-//    std::vector<prometheus::Gauge> GPU_percent_gauges_;
-
-
-
 
     //GPU Mempry used
     prometheus::Family<prometheus::Gauge> &GPU_memory_usage_ = prometheus::BuildGauge()
         .Name("GPU_memory_usage_total")
         .Help("GPU memory usage total ")
         .Register(*registry_);
-    prometheus::Gauge &GPU0_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "0"}});
-    prometheus::Gauge &GPU1_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "1"}});
-    prometheus::Gauge &GPU2_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "2"}});
-    prometheus::Gauge &GPU3_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "3"}});
-    prometheus::Gauge &GPU4_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "4"}});
-    prometheus::Gauge &GPU5_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "5"}});
-    prometheus::Gauge &GPU6_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "6"}});
-    prometheus::Gauge &GPU7_memory_usage_gauge_ = GPU_memory_usage_.Add({{"DeviceNum", "7"}});
-//    std::vector<prometheus::Gauge> GPU_memory_usage_gauges_;
 
     prometheus::Family<prometheus::Gauge> &query_index_type_per_second_ = prometheus::BuildGauge()
         .Name("query_index_throughtout_per_microsecond")
