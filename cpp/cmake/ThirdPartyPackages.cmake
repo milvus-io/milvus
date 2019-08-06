@@ -441,6 +441,7 @@ else()
     set(LIBUNWIND_SOURCE_URL
             "https://github.com/libunwind/libunwind/releases/download/v${LIBUNWIND_VERSION}/libunwind-${LIBUNWIND_VERSION}.tar.gz")
 endif()
+set(LIBUNWIND_MD5 "a04f69d66d8e16f8bf3ab72a69112cd6")
 
 if(DEFINED ENV{MILVUS_GPERFTOOLS_URL})
     set(GPERFTOOLS_SOURCE_URL "$ENV{MILVUS_GPERFTOOLS_URL}")
@@ -2414,21 +2415,56 @@ macro(build_libunwind)
     set(LIBUNWIND_SHARED_LIB "${LIBUNWIND_PREFIX}/lib/libunwind${CMAKE_SHARED_LIBRARY_SUFFIX}")
     set(LIBUNWIND_CONFIGURE_ARGS "--prefix=${LIBUNWIND_PREFIX}")
 
-    externalproject_add(libunwind_ep
-            URL
-            ${LIBUNWIND_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            "./configure"
-            ${LIBUNWIND_CONFIGURE_ARGS}
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS}
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE} install
-            BUILD_BYPRODUCTS
-            ${LIBUNWIND_SHARED_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(LIBUNWIND_CACHE_PACKAGE_NAME "libunwind_${LIBUNWIND_MD5}.tar.gz")
+        set(LIBUNWIND_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${LIBUNWIND_CACHE_PACKAGE_NAME}")
+        set(LIBUNWIND_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${LIBUNWIND_CACHE_PACKAGE_NAME}")
+
+        execute_process(COMMAND wget -q --method HEAD ${LIBUNWIND_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${LIBUNWIND_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
+            externalproject_add(libunwind_ep
+                    URL
+                    ${LIBUNWIND_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    "./configure"
+                    ${LIBUNWIND_CONFIGURE_ARGS}
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS}
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_COMMAND
+                    ${MAKE} install
+                    BUILD_BYPRODUCTS
+                    ${LIBUNWIND_SHARED_LIB})
+
+            ExternalProject_Create_Cache(libunwind_ep ${LIBUNWIND_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/libunwind_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LIBUNWIND_CACHE_URL})
+        else()
+            file(DOWNLOAD ${LIBUNWIND_CACHE_URL} ${LIBUNWIND_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${LIBUNWIND_CACHE_URL} TO ${LIBUNWIND_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(libunwind_ep ${LIBUNWIND_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        endif()
+    else()
+        externalproject_add(libunwind_ep
+                URL
+                ${LIBUNWIND_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                "./configure"
+                ${LIBUNWIND_CONFIGURE_ARGS}
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS}
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE} install
+                BUILD_BYPRODUCTS
+                ${LIBUNWIND_SHARED_LIB})
+    endif()
 
     file(MAKE_DIRECTORY "${LIBUNWIND_INCLUDE_DIR}")
 
