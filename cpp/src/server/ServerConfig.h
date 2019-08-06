@@ -53,6 +53,7 @@ static const std::string CONFIG_NPROBE = "nprobe";
 static const std::string CONFIG_NLIST = "nlist";
 static const std::string CONFIG_DCBT = "use_blas_threshold";
 static const std::string CONFIG_METRICTYPE = "metric_type";
+static const std::string CONFIG_OMP_THREAD_RATE = "omp_thread_occupancy";
 
 class ServerConfig {
  public:
