@@ -44,4 +44,4 @@ engine_config:
   nlist: 16384
   use_blas_threshold: 20
   metric_type: L2               # compare vectors by euclidean distance(L2) or inner product(IP), optional: L2 or IP
-  omp_thread_occupancy: 0.75    # how many compute threads be used, this is a percent value compare to system cpu core number(for instance: cpu core is 4, then 0.75 means use 3 compute threads)
+  omp_thread_num: 0             # how many compute threads be used by engine, 0 means use all cpu core to compute
