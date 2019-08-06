@@ -2231,10 +2231,9 @@ macro(build_zstd)
         set(ZSTD_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ZSTD_CACHE_PACKAGE_NAME}")
         set(ZSTD_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ZSTD_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${ZSTD_CACHE_URL} ${ZSTD_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${ZSTD_CACHE_URL} TO ${ZSTD_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${ZSTD_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${ZSTD_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(zstd_ep
                     ${EP_LOG_OPTIONS}
                     CMAKE_ARGS
@@ -2253,7 +2252,12 @@ macro(build_zstd)
 
             ExternalProject_Create_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/zstd_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ZSTD_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${ZSTD_CACHE_URL} ${ZSTD_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${ZSTD_CACHE_URL} TO ${ZSTD_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(zstd_ep ${ZSTD_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(zstd_ep
@@ -2324,10 +2328,9 @@ macro(build_aws)
         set(AWS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${AWS_CACHE_PACKAGE_NAME}")
         set(AWS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${AWS_CACHE_PACKAGE_NAME}")
 
-        file(DOWNLOAD ${AWS_CACHE_URL} ${AWS_CACHE_PACKAGE_PATH} STATUS status)
-        list(GET status 0 status_code)
-        message(STATUS "DOWNLOADING FROM ${AWS_CACHE_URL} TO ${AWS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-        if (NOT status_code EQUAL 0)
+        execute_process(COMMAND wget -q --method HEAD ${AWS_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${AWS_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
             externalproject_add(aws_ep
                     ${EP_LOG_OPTIONS}
                     CMAKE_ARGS
@@ -2345,7 +2348,12 @@ macro(build_aws)
 
             ExternalProject_Create_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/aws_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${AWS_CACHE_URL})
         else()
-            ExternalProject_Use_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            file(DOWNLOAD ${AWS_CACHE_URL} ${AWS_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${AWS_CACHE_URL} TO ${AWS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
         endif()
     else()
         externalproject_add(aws_ep
