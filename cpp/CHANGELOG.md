@@ -51,7 +51,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-266 - Improve topk reduce time by using multi-threads
 - MS-275 - Avoid sqlite logic error excetion
 - MS-278 - add IndexStatsHelper
-- MS-313 - add cmake
+- MS-313 - add GRPC
 
 ## New Feature
 - MS-180 - Add new mem manager
