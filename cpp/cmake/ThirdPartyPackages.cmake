@@ -373,6 +373,7 @@ else ()
     set(ROCKSDB_SOURCE_URL
             "https://github.com/facebook/rocksdb/archive/${ROCKSDB_VERSION}.tar.gz")
 endif()
+set(ROCKSDB_MD5 "a8f2f594182e97a08629bcc66dfd3fa0")
 
 if(DEFINED ENV{MILVUS_SNAPPY_URL})
     set(SNAPPY_SOURCE_URL "$ENV{MILVUS_SNAPPY_URL}")
@@ -1656,25 +1657,65 @@ macro(build_rocksdb)
             "${ROCKSDB_PREFIX}/lib/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ROCKSDB_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
             )
 
-    externalproject_add(rocksdb_ep
-            URL
-            ${ROCKSDB_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            ""
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            static_lib
-            "prefix=${ROCKSDB_PREFIX}"
-            BUILD_IN_SOURCE
-            1
-            INSTALL_COMMAND
-            ${MAKE}
-            install-static
-            "INSTALL_PATH=${ROCKSDB_PREFIX}/lib"
-            BUILD_BYPRODUCTS
-            "${ROCKSDB_STATIC_LIB}")
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        string(MD5 ROCKSDB_COMBINE_MD5 "${ROCKSDB_LAST_COMMIT_ID}")
+        set(ROCKSDB_CACHE_PACKAGE_NAME "rocksdb_${ROCKSDB_MD5}.tar.gz")
+        set(ROCKSDB_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ROCKSDB_CACHE_PACKAGE_NAME}")
+        set(ROCKSDB_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ROCKSDB_CACHE_PACKAGE_NAME}")
+
+        execute_process(COMMAND wget -q --method HEAD ${ROCKSDB_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${ROCKSDB_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
+            externalproject_add(rocksdb_ep
+                    URL
+                    ${ROCKSDB_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    ""
+                    BUILD_COMMAND
+                    ${MAKE}
+                    ${MAKE_BUILD_ARGS}
+                    static_lib
+                    "prefix=${ROCKSDB_PREFIX}"
+                    BUILD_IN_SOURCE
+                    1
+                    INSTALL_COMMAND
+                    ${MAKE}
+                    install-static
+                    "INSTALL_PATH=${ROCKSDB_PREFIX}/lib"
+                    BUILD_BYPRODUCTS
+                    "${ROCKSDB_STATIC_LIB}")
+
+            ExternalProject_Create_Cache(rocksdb_ep ${ROCKSDB_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/rocksdb_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ROCKSDB_CACHE_URL})
+        else()
+            file(DOWNLOAD ${ROCKSDB_CACHE_URL} ${ROCKSDB_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${ROCKSDB_CACHE_URL} TO ${ROCKSDB_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(rocksdb_ep ${ROCKSDB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        endif()
+    else()
+        externalproject_add(rocksdb_ep
+                URL
+                ${ROCKSDB_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                ""
+                BUILD_COMMAND
+                ${MAKE}
+                ${MAKE_BUILD_ARGS}
+                static_lib
+                "prefix=${ROCKSDB_PREFIX}"
+                BUILD_IN_SOURCE
+                1
+                INSTALL_COMMAND
+                ${MAKE}
+                install-static
+                "INSTALL_PATH=${ROCKSDB_PREFIX}/lib"
+                BUILD_BYPRODUCTS
+                "${ROCKSDB_STATIC_LIB}")
+    endif()
 
     file(MAKE_DIRECTORY "${ROCKSDB_PREFIX}/include")
 
