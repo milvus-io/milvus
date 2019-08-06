@@ -43,4 +43,5 @@ engine_config:
   nprobe: 10
   nlist: 16384
   use_blas_threshold: 20
-  metric_type: L2       # compare vectors by euclidean distance(L2) or inner product(IP), optional: L2 or IP
+  metric_type: L2               # compare vectors by euclidean distance(L2) or inner product(IP), optional: L2 or IP
+  omp_thread_num: 0             # how many compute threads be used by engine, 0 means use all cpu core to compute
