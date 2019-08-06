@@ -478,10 +478,9 @@ macro(build_arrow)
             set(ARROW_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ARROW_CACHE_PACKAGE_NAME}")
             set(ARROW_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ARROW_CACHE_PACKAGE_NAME}")
 
-            file(DOWNLOAD ${ARROW_CACHE_URL} ${ARROW_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${ARROW_CACHE_URL} TO ${ARROW_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (NOT status_code EQUAL 0)
+            execute_process(COMMAND wget -q --method HEAD ${ARROW_CACHE_URL} RESULT_VARIABLE return_code)
+            message(STATUS "Check if remote file ${ARROW_CACHE_URL}. return code = ${return_code}")
+            if (NOT return_code EQUAL 0)
                 externalproject_add(arrow_ep
                         GIT_REPOSITORY
                         ${ARROW_SOURCE_URL}
@@ -505,7 +504,12 @@ macro(build_arrow)
 
                 ExternalProject_Create_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ARROW_CACHE_URL})
             else()
-                ExternalProject_Use_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+                file(DOWNLOAD ${ARROW_CACHE_URL} ${ARROW_CACHE_PACKAGE_PATH} STATUS status)
+                list(GET status 0 status_code)
+                message(STATUS "DOWNLOADING FROM ${ARROW_CACHE_URL} TO ${ARROW_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+                if (status_code EQUAL 0)
+                    ExternalProject_Use_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+                endif()
             endif()
         else()
             message(FATAL_ERROR "The last commit ID of \"${ARROW_SOURCE_URL}\" repository don't match!")
