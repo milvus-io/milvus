@@ -10,11 +10,14 @@
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
+#include <omp.h>
+
 namespace zilliz {
 namespace milvus {
 namespace server {
 
 DBWrapper::DBWrapper() {
+    //db config
     zilliz::milvus::engine::Options opt;
     ConfigNode& db_config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
     opt.meta.backend_uri = db_config.GetValue(CONFIG_DB_URL);
@@ -37,6 +40,7 @@ DBWrapper::DBWrapper() {
         kill(0, SIGUSR1);
     }
 
+    // cache config
     ConfigNode& cache_config = ServerConfig::GetInstance().GetConfig(CONFIG_CACHE);
     opt.insert_cache_immediately_ = cache_config.GetBoolValue(CONFIG_INSERT_CACHE_IMMEDIATELY, false);
 
@@ -54,6 +58,14 @@ DBWrapper::DBWrapper() {
     else {
         std::cout << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
         kill(0, SIGUSR1);
+    }
+
+    // engine config
+    ConfigNode& engine_config = ServerConfig::GetInstance().GetConfig(CONFIG_ENGINE);
+    int32_t omp_thread = engine_config.GetInt32Value(CONFIG_OMP_THREAD_NUM, 0);
+    if(omp_thread > 0) {
+        omp_set_num_threads(omp_thread);
+        SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
     }
 
     //set archive config

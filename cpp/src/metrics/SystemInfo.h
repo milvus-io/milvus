@@ -32,6 +32,7 @@ class SystemInfo {
     clock_t last_user_cpu_ = clock_t();
     std::chrono::system_clock::time_point net_time_ = std::chrono::system_clock::now();
     int num_processors_ = 0;
+    int num_physical_processors_ = 0;
     //number of GPU
     unsigned int num_device_ = 0;
     unsigned long long in_octets_ = 0;
@@ -47,6 +48,7 @@ class SystemInfo {
 
     void Init();
     int num_processor() const { return num_processors_;};
+    int num_physical_processors() const { return num_physical_processors_; };
     int num_device() const {return num_device_;};
     unsigned long long get_inoctets() { return in_octets_;};
     unsigned long long get_octets() { return out_octets_;};
@@ -65,7 +67,8 @@ class SystemInfo {
 
     std::vector<double> CPUCorePercent();
     std::vector<unsigned long long> getTotalCpuTime(std::vector<unsigned long long> &workTime);
-
+    std::vector<unsigned int> GPUTemperature();
+    std::vector<float> CPUTemperature();
 
 };
 
