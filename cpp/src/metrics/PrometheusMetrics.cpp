@@ -34,8 +34,6 @@ PrometheusMetrics::Init() {
         return SERVER_UNEXPECTED_ERROR;
     }
 
-    //
-
     return SERVER_SUCCESS;
 
 }
@@ -44,8 +42,6 @@ PrometheusMetrics::Init() {
 void
 PrometheusMetrics::CPUUsagePercentSet()  {
     if(!startup_) return ;
-    int numProcessor = server::SystemInfo::GetInstance().num_processor();
-
     double usage_percent = server::SystemInfo::GetInstance().CPUPercent();
     CPU_usage_percent_.Set(usage_percent);
 }
@@ -64,13 +60,11 @@ PrometheusMetrics::GPUPercentGaugeSet() {
     std::vector<unsigned long long > used_total = server::SystemInfo::GetInstance().GPUMemoryTotal();
     std::vector<unsigned long long > used_memory = server::SystemInfo::GetInstance().GPUMemoryUsed();
 
-
-    for (int i = 0; i < numDevice; i++) {
+    for (int i = 0; i < numDevice; ++i) {
         prometheus::Gauge &GPU_percent = GPU_percent_.Add({{"DeviceNum", std::to_string(i)}});
         double percent = (double)used_memory[i] / (double)used_total[i];
         GPU_percent.Set(percent * 100);
     }
-
 }
 
 void PrometheusMetrics::GPUMemoryUsageGaugeSet() {
@@ -79,7 +73,7 @@ void PrometheusMetrics::GPUMemoryUsageGaugeSet() {
     constexpr unsigned long long MtoB = 1024*1024;
     int numDevice = server::SystemInfo::GetInstance().num_device();
 
-    for (int i = 0; i < numDevice; i++) {
+    for (int i = 0; i < numDevice; ++i) {
         prometheus::Gauge &GPU_memory = GPU_memory_usage_.Add({{"DeviceNum", std::to_string(i)}});
         GPU_memory.Set(values[i] / MtoB);
     }
@@ -142,12 +136,35 @@ void PrometheusMetrics::CPUCoreUsagePercentSet() {
 
     std::vector<double> cpu_core_percent = server::SystemInfo::GetInstance().CPUCorePercent();
 
-    for (int i = 0; i < cpu_core_percent.size(); i++) {
+    for (int i = 0; i < cpu_core_percent.size(); ++i) {
         prometheus::Gauge &core_percent = CPU_.Add({{"CPU", std::to_string(i)}});
         core_percent.Set(cpu_core_percent[i]);
     }
 }
 
+void PrometheusMetrics::GPUTemperature() {
+    if (!startup_)
+        return;
+
+    std::vector<unsigned int> GPU_temperatures = server::SystemInfo::GetInstance().GPUTemperature();
+
+    for (int i = 0; i < GPU_temperatures.size(); ++i) {
+        prometheus::Gauge &gpu_temp = GPU_temperature_.Add({{"GPU", std::to_string(i)}});
+        gpu_temp.Set(GPU_temperatures[i]);
+    }
+}
+
+void PrometheusMetrics::CPUTemperature() {
+    if (!startup_)
+        return;
+
+    std::vector<float> CPU_temperatures = server::SystemInfo::GetInstance().CPUTemperature();
+
+    for (int i = 0; i < CPU_temperatures.size(); ++i) {
+        prometheus::Gauge &cpu_temp = CPU_temperature_.Add({{"CPU", std::to_string(i)}});
+        cpu_temp.Set(CPU_temperatures[i]);
+    }
+}
 
 }
 }

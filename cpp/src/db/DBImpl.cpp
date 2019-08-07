@@ -326,7 +326,8 @@ void DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().OctetsSet();
 
     server::Metrics::GetInstance().CPUCoreUsagePercentSet();
-
+    server::Metrics::GetInstance().GPUTemperature();
+    server::Metrics::GetInstance().CPUTemperature();
 
     ENGINE_LOG_TRACE << "Metric task finished";
 }
@@ -541,11 +542,27 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         }
 
         //step 3: build index
-        auto start_time = METRICS_NOW_TIME;
-        auto index = to_index->BuildIndex(table_file.location_);
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-        server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
+        std::shared_ptr<ExecutionEngine> index;
+
+        try {
+            auto start_time = METRICS_NOW_TIME;
+            index = to_index->BuildIndex(table_file.location_);
+            auto end_time = METRICS_NOW_TIME;
+            auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+            server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
+        } catch (std::exception& ex) {
+            //typical error: out of gpu memory
+            std::string msg = "BuildIndex encounter exception" + std::string(ex.what());
+            ENGINE_LOG_ERROR << msg;
+
+            table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+            status = meta_ptr_->UpdateTableFile(table_file);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
+
+            std::cout << "ERROR: failed to build index, index file is too large or gpu memory is not enough" << std::endl;
+
+            return Status::Error(msg);
+        }
 
         //step 4: if table has been deleted, dont save index file
         bool has_table = false;
@@ -556,7 +573,22 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         }
 
         //step 5: save index file
-        index->Serialize();
+        try {
+            index->Serialize();
+        } catch (std::exception& ex) {
+            //typical error: out of disk space or permition denied
+            std::string msg = "Serialize index encounter exception" + std::string(ex.what());
+            ENGINE_LOG_ERROR << msg;
+
+            table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+            status = meta_ptr_->UpdateTableFile(table_file);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
+
+            std::cout << "ERROR: failed to persist index file: " << table_file.location_
+                << ", possible out of disk space" << std::endl;
+
+            return Status::Error(msg);
+        }
 
         //step 6: update meta
         table_file.file_type_ = meta::TableFileSchema::INDEX;
