@@ -319,7 +319,8 @@ void DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().OctetsSet();
 
     server::Metrics::GetInstance().CPUCoreUsagePercentSet();
-
+    server::Metrics::GetInstance().GPUTemperature();
+    server::Metrics::GetInstance().CPUTemperature();
 
     ENGINE_LOG_TRACE << "Metric task finished";
 }
