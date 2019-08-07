@@ -53,6 +53,11 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-278 - add IndexStatsHelper
 - MS-313 - add GRPC
 - MS-325 - add grpc status return for C++ sdk and modify some format
+- MS-278 - Add IndexStatsHelper
+- MS-312 - Set openmp thread number by config
+- MS-305 - Add CPU core percent metric
+- MS-310 - Add milvus CPU utilization ratio and CPU/GPU temperature metrics
+- MS-324 - Show error when there is not enough gpu memory to build index
 
 ## New Feature
 - MS-180 - Add new mem manager
