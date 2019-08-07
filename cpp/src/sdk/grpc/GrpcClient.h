@@ -16,6 +16,7 @@
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
+#include "MilvusApi.h"
 
 #include "milvus.grpc.pb.h"
 //#include "status.grpc.pb.h"
@@ -25,32 +26,48 @@
 namespace milvus {
 class GrpcClient {
 public:
-    explicit GrpcClient(std::shared_ptr<::grpc::Channel>& channel);
+    explicit
+    GrpcClient(std::shared_ptr<::grpc::Channel>& channel);
 
-    virtual ~GrpcClient();
+    virtual
+    ~GrpcClient();
 
-    void CreateTable(const grpc::TableSchema& table_schema);
+    Status
+    CreateTable(const grpc::TableSchema& table_schema);
 
-    bool HasTable(const grpc::TableName& table_name);
+    bool
+    HasTable(const grpc::TableName& table_name, Status& status);
 
-    void DropTable(const grpc::TableName& table_name);
+    Status
+    DropTable(const grpc::TableName& table_name);
 
-    void BuildIndex(const grpc::TableName& table_name);
+    Status
+    BuildIndex(const grpc::TableName& table_name);
 
-    void InsertVector(grpc::VectorIds& vector_ids, const grpc::InsertInfos& insert_infos);
+    void
+    InsertVector(grpc::VectorIds& vector_ids,
+                      const grpc::InsertInfos& insert_infos,
+                      Status& status);
 
-    void SearchVector(std::vector<grpc::TopKQueryResult>& result_array,
+    Status
+    SearchVector(std::vector<grpc::TopKQueryResult>& result_array,
                       const grpc::SearchVectorInfos& search_vector_infos);
 
-    void DescribeTable(grpc::TableSchema& grpc_schema, const std::string& table_name);
+    Status
+    DescribeTable(grpc::TableSchema& grpc_schema,
+                        const std::string& table_name);
 
-    int64_t GetTableRowCount(const std::string& table_name);
+    int64_t
+    GetTableRowCount(const std::string& table_name, Status& status);
 
-    void ShowTables(std::vector<std::string> &table_array);
+    Status
+    ShowTables(std::vector<std::string> &table_array);
 
-    void Ping(std::string &result, const std::string& cmd);
+    Status
+    Ping(std::string &result, const std::string& cmd);
 
-    void Disconnect();
+    Status
+    Disconnect();
 
 private:
     std::unique_ptr<grpc::MilvusService::Stub> stub_;

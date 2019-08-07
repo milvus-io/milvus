@@ -51,17 +51,17 @@ private:
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class DescribeTableTask : public BaseTask {
 public:
-    static BaseTaskPtr Create(const std::string& table_name, ::milvus::grpc::TableSchema* schema);
+    static BaseTaskPtr Create(const std::string& table_name, ::milvus::grpc::TableSchema& schema);
 
 protected:
-    DescribeTableTask(const std::string& table_name, ::milvus::grpc::TableSchema* schema);
+    DescribeTableTask(const std::string& table_name, ::milvus::grpc::TableSchema& schema);
 
     ServerError OnExecute() override;
 
 
 private:
     std::string table_name_;
-    ::milvus::grpc::TableSchema* schema_;
+    ::milvus::grpc::TableSchema& schema_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

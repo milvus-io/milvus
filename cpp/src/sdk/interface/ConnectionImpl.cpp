@@ -48,7 +48,7 @@ ConnectionImpl::Disconnect() {
 
 std::string
 ConnectionImpl::ClientVersion() const {
-    return MILVUS_VERSION;
+    return client_proxy_->ClientVersion();
 }
 
 Status

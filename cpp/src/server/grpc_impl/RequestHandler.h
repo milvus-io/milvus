@@ -21,10 +21,13 @@ public:
      *
      * This method is used to create table
      *
-     * @param param, use to provide table information to be created.
+     * @param request, used to provide table information to be created.
+     * @param response, used to get the status
      *
+     * @return status
      *
-     * @param param
+     * @param request
+     * @param response
      */
     ::grpc::Status
     CreateTable(::grpc::ServerContext* context,
@@ -35,10 +38,13 @@ public:
      *
      * This method is used to test table existence.
      *
-     * @param table_name, table name is going to be tested.
+     * @param request, table name is going to be tested.
+     * @param response, get the bool reply of hastable
      *
+     * @return status
      *
-     * @param table_name
+     * @param request
+     * @param response
      */
     ::grpc::Status
     HasTable(::grpc::ServerContext* context,
@@ -49,10 +55,13 @@ public:
      *
      * This method is used to drop table.
      *
-     * @param table_name, table name is going to be deleted.
+     * @param request, table name is going to be deleted.
+     * @param response, get the status of droptable
      *
+     * @return status
      *
-     * @param table_name
+     * @param request
+     * @param response
      */
     ::grpc::Status
     DropTable(::grpc::ServerContext* context,
@@ -63,10 +72,13 @@ public:
      *
      * This method is used to build index by table in sync.
      *
-     * @param table_name, table name is going to be built index.
+     * @param request, table name is going to be built index.
+     * @param response, get the status of buildindex
      *
+     * @return status
      *
-     * @param table_name
+     * @param request
+     * @param response
      */
     ::grpc::Status
     BuildIndex(::grpc::ServerContext* context,
@@ -78,13 +90,13 @@ public:
      *
      * This method is used to insert vector array to table.
      *
-     * @param table_name, table_name is inserted.
-     * @param record_array, vector array is inserted.
+     * @param request, table_name is inserted.
+     * @param response, vector array is inserted.
      *
-     * @return vector id array
+     * @return status
      *
-     * @param table_name
-     * @param record_array
+     * @param request
+     * @param response
      */
     ::grpc::Status
     InsertVector(::grpc::ServerContext* context,
@@ -95,17 +107,17 @@ public:
      *
      * This method is used to query vector in table.
      *
-     * @param table_name, table_name is queried.
-     * @param query_record_array, all vector are going to be queried.
-     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
-     * @param topk, how many similarity vectors will be searched.
+     * @param request:
+     *               table_name, table_name is queried.
+     *               query_record_array, all vector are going to be queried.
+     *               query_range_array, optional ranges for conditional search. If not specified, search whole table
+     *               topk, how many similarity vectors will be searched.
      *
-     * @return query result array.
+     * @param writer, write query result array.
      *
-     * @param table_name
-     * @param query_record_array
-     * @param query_range_array
-     * @param topk
+     * @return status
+     * @param request
+     * @param writer
      */
     ::grpc::Status
     SearchVector(::grpc::ServerContext* context,
@@ -116,17 +128,18 @@ public:
    *
    * This method is used to query vector in specified files.
    *
-   * @param file_id_array, specified files id array, queried.
-   * @param query_record_array, all vector are going to be queried.
-   * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
-   * @param topk, how many similarity vectors will be searched.
+   * @param request:
+   *                file_id_array, specified files id array, queried.
+   *                query_record_array, all vector are going to be queried.
+   *                query_range_array, optional ranges for conditional search. If not specified, search whole table
+   *                topk, how many similarity vectors will be searched.
    *
-   * @return query result array.
+   * @param writer, write query result array.
    *
-   * @param file_id_array
-   * @param query_record_array
-   * @param query_range_array
-   * @param topk
+   * @return status
+   *
+   * @param request
+   * @param writer
    */
     ::grpc::Status
     SearchVectorInFiles(::grpc::ServerContext* context,
@@ -168,7 +181,7 @@ public:
      * This method is used to list all tables.
      *
      *
-     * @return table names.
+     * @return status
      */
     ::grpc::Status
     ShowTables(::grpc::ServerContext* context,
@@ -180,7 +193,7 @@ public:
      *
      * This method is used to give the server status.
      *
-     * @return Server status.
+     * @return status
      *
      * @param cmd
      */
