@@ -79,7 +79,6 @@ class PrometheusMetrics: public MetricsBase {
     void QueryVectorResponseSummaryObserve(double value, int count = 1) override { if (startup_) for(int i = 0 ; i < count ; ++i) query_vector_response_summary_.Observe(value);};
     void QueryVectorResponsePerSecondGaugeSet(double value) override {if (startup_) query_vector_response_per_second_gauge_.Set(value);};
     void CPUUsagePercentSet() override ;
-
     void CPUCoreUsagePercentSet() override;
 
     void RAMUsagePercentSet() override ;
@@ -92,6 +91,9 @@ class PrometheusMetrics: public MetricsBase {
     void ConnectionGaugeDecrement() override ;
     void KeepingAliveCounterIncrement(double value = 1) override {if(startup_) keeping_alive_counter_.Increment(value);};
     void OctetsSet() override ;
+
+    void GPUTemperature() override;
+    void CPUTemperature() override;
 
 
 
@@ -396,7 +398,7 @@ class PrometheusMetrics: public MetricsBase {
         .Name("CPU_usage_percent")
         .Help("CPU usage percent by this this process")
         .Register(*registry_);
-    prometheus::Gauge &CPU_usage_percent_ = CPU_.Add({{"CPU", "0"}});
+    prometheus::Gauge &CPU_usage_percent_ = CPU_.Add({{"CPU", "avg"}});
 
 
     prometheus::Family<prometheus::Gauge> &RAM_ = prometheus::BuildGauge()
@@ -444,6 +446,15 @@ class PrometheusMetrics: public MetricsBase {
     prometheus::Gauge &outoctets_gauge_ = octets_.Add({{"type", "outoctets"}});
 
 
+    prometheus::Family<prometheus::Gauge> &GPU_temperature_ = prometheus::BuildGauge()
+        .Name("GPU_temperature")
+        .Help("GPU temperature")
+        .Register(*registry_);
+
+    prometheus::Family<prometheus::Gauge> &CPU_temperature_ = prometheus::BuildGauge()
+        .Name("CPU_temperature")
+        .Help("CPU temperature")
+        .Register(*registry_);
 
 };
 
