@@ -52,6 +52,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-275 - Avoid sqlite logic error excetion
 - MS-278 - add IndexStatsHelper
 - MS-313 - add GRPC
+- MS-325 - add grpc status return for C++ sdk and modify some format
 
 ## New Feature
 - MS-180 - Add new mem manager
