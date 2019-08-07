@@ -36,6 +36,9 @@ void SystemInfo::Init() {
     num_processors_ = 0;
     while(fgets(line, 128, file) != NULL){
         if (strncmp(line, "processor", 9) == 0) num_processors_++;
+        if (strncmp(line, "physical", 8) == 0) {
+            num_physical_processors_ = ParseLine(line);
+        }
     }
     total_ram_ = GetPhysicalMemory();
     fclose(file);
@@ -108,8 +111,6 @@ SystemInfo::MemoryPercent() {
     return (double)(GetProcessUsedMemory()*100)/(double)total_ram_;
 }
 
-
-
 std::vector<double>
 SystemInfo::CPUCorePercent() {
     std::vector<unsigned long long> prev_work_time_array;
@@ -119,7 +120,7 @@ SystemInfo::CPUCorePercent() {
     std::vector<unsigned long long> cur_total_time_array = getTotalCpuTime(cur_work_time_array);
 
     std::vector<double> cpu_core_percent;
-    for (int i = 0; i < num_processors_; i++) {
+    for (int i = 1; i < num_processors_; i++) {
         double total_cpu_time = cur_total_time_array[i] - prev_total_time_array[i];
         double cpu_work_time = cur_work_time_array[i] - prev_work_time_array[i];
         cpu_core_percent.push_back((cpu_work_time / total_cpu_time) * 100);
@@ -181,7 +182,6 @@ SystemInfo::CPUPercent() {
         percent = (time_sample.tms_stime - last_sys_cpu_) +
             (time_sample.tms_utime - last_user_cpu_);
         percent /= (now - last_cpu_);
-        percent /= num_processors_;
         percent *= 100;
     }
     last_cpu_ = now;
@@ -205,6 +205,36 @@ SystemInfo::GPUMemoryTotal() {
         result.push_back(nvmlMemory.total);
     }
     return result;
+}
+
+std::vector<unsigned int>
+SystemInfo::GPUTemperature(){
+    if(!initialized_) Init();
+    std::vector<unsigned int > result;
+    for (int i = 0; i < num_device_; i++) {
+        nvmlDevice_t device;
+        nvmlDeviceGetHandleByIndex(i, &device);
+        unsigned int temp;
+        nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU,&temp);
+        result.push_back(temp);
+    }
+    return result;
+}
+std::vector<float>
+SystemInfo::CPUTemperature(){
+    std::vector<float> result;
+    for (int i = 0; i <= num_physical_processors_; ++i) {
+        std::string path = "/sys/class/thermal/thermal_zone" + std::to_string(i) + "/temp";
+        FILE *file = fopen(path.data(), "r");
+        if (file == NULL) {
+            perror("Could not open thermal file");
+            return result;
+        }
+        float temp;
+        fscanf(file, "%f", &temp);
+        result.push_back(temp / 1000);
+    }
+
 }
 
 std::vector<unsigned long long>

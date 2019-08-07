@@ -53,6 +53,7 @@ static const char* CONFIG_NPROBE = "nprobe";
 static const char* CONFIG_NLIST = "nlist";
 static const char* CONFIG_DCBT = "use_blas_threshold";
 static const char* CONFIG_METRICTYPE = "metric_type";
+static const char* CONFIG_OMP_THREAD_NUM = "omp_thread_num";
 
 class ServerConfig {
  public:
