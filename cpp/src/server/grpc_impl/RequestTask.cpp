@@ -106,7 +106,6 @@ CreateTableTask::CreateTableTask(const ::milvus::grpc::TableSchema& schema)
 }
 
 BaseTaskPtr CreateTableTask::Create(const ::milvus::grpc::TableSchema& schema) {
-//    return std::make_shared<BaseTask>(new CreateTableTask(schema));
     return std::shared_ptr<BaseTask>(new CreateTableTask(schema));
 }
 
