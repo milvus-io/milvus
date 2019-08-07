@@ -39,10 +39,11 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-261 - Update faiss version to 1.5.3 and add BUILD_FAISS_WITH_MKL as an option
 - MS-266 - Improve topk reduce time by using multi-threads
 - MS-275 - Avoid sqlite logic error excetion
-- MS-278 - add IndexStatsHelper
+- MS-278 - Add IndexStatsHelper
 - MS-312 - Set openmp thread number by config
-- MS-305 - add CPU core percent metric
-- MS-310 - add milvus CPU utilization ratio and CPU/GPU temperature metrics
+- MS-305 - Add CPU core percent metric
+- MS-310 - Add milvus CPU utilization ratio and CPU/GPU temperature metrics
+- MS-324 - Show error when there is not enough gpu memory to build index
 
 ## New Feature
 - MS-180 - Add new mem manager
