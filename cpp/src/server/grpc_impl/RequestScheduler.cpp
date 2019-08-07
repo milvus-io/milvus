@@ -108,8 +108,6 @@ void RequestScheduler::ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status *g
         if (err != SERVER_SUCCESS) {
             grpc_status->set_reason(task_ptr->ErrorMsg());
             grpc_status->set_error_code(ErrorMap().at(err));
-        } else {
-//            grpc_status->set_error_code(::milvus::ErrorCode((int) SERVER_SUCCESS));
         }
     }
 }
@@ -152,8 +150,9 @@ ServerError RequestScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
         return SERVER_NULL_POINTER;
     }
 
-    ServerError err = PutTaskToQueue(task_ptr);
+        ServerError err = PutTaskToQueue(task_ptr);
     if(err != SERVER_SUCCESS) {
+        SERVER_LOG_ERROR << "Put task to queue failed with code: " << err   ;
         return err;
     }
 
@@ -173,6 +172,7 @@ namespace {
         while(true) {
             BaseTaskPtr task = task_queue->Take();
             if (task == nullptr) {
+                SERVER_LOG_ERROR << "Take null from task queue, stop thread";
                 break;//stop the thread
             }
 

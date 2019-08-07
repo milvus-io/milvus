@@ -210,6 +210,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "All tables: " << std::endl;
         for(auto& table : tables) {
             int64_t row_count = 0;
+//            conn->DropTable(table);
             stat = conn->GetTableRowCount(table, row_count);
             std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
         }

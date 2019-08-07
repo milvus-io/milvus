@@ -19,6 +19,8 @@ enum class StatusCode {
 
 // function error section
     InvalidAgument = 1000,
+    RPCFailed,
+    ServerFailed,
 };
 
 /**
