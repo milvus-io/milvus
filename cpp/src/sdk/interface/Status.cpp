@@ -3,7 +3,7 @@
 * Unauthorized copying of this file, via any medium is strictly prohibited.
 * Proprietary and confidential.
 ******************************************************************************/
-#include "../include/Status.h"
+#include "Status.h"
 
 namespace milvus {
 

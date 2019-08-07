@@ -72,14 +72,9 @@ MilvusServer::StartService() {
 
 void
 MilvusServer::StopService() {
-    auto stop_server_worker = [&]{
-        if (server != nullptr) {
-            server->Shutdown();
-        }
-    };
-
-    std::shared_ptr<std::thread> stop_thread = std::make_shared<std::thread>(stop_server_worker);
-    stop_thread->join();
+    if (server != nullptr) {
+        server->Shutdown();
+    }
 }
 
 }

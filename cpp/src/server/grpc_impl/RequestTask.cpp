@@ -106,6 +106,7 @@ CreateTableTask::CreateTableTask(const ::milvus::grpc::TableSchema& schema)
 }
 
 BaseTaskPtr CreateTableTask::Create(const ::milvus::grpc::TableSchema& schema) {
+//    return std::make_shared<BaseTask>(new CreateTableTask(schema));
     return std::shared_ptr<BaseTask>(new CreateTableTask(schema));
 }
 
@@ -153,13 +154,13 @@ ServerError CreateTableTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-DescribeTableTask::DescribeTableTask(const std::string &table_name, ::milvus::grpc::TableSchema *schema)
+DescribeTableTask::DescribeTableTask(const std::string &table_name, ::milvus::grpc::TableSchema& schema)
         : BaseTask(DDL_DML_TASK_GROUP),
           table_name_(table_name),
           schema_(schema) {
 }
 
-BaseTaskPtr DescribeTableTask::Create(const std::string& table_name, ::milvus::grpc::TableSchema *schema) {
+BaseTaskPtr DescribeTableTask::Create(const std::string& table_name, ::milvus::grpc::TableSchema& schema) {
     return std::shared_ptr<BaseTask>(new DescribeTableTask(table_name, schema));
 }
 
@@ -181,11 +182,11 @@ ServerError DescribeTableTask::OnExecute() {
             return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
         }
 
-        schema_->mutable_table_name()->set_table_name(table_info.table_id_);
+        schema_.mutable_table_name()->set_table_name(table_info.table_id_);
 
-        schema_->set_index_type(IndexType((engine::EngineType)table_info.engine_type_));
-        schema_->set_dimension(table_info.dimension_);
-        schema_->set_store_raw_vector(table_info.store_raw_data_);
+        schema_.set_index_type(IndexType((engine::EngineType)table_info.engine_type_));
+        schema_.set_dimension(table_info.dimension_);
+        schema_.set_store_raw_vector(table_info.store_raw_data_);
 
     } catch (std::exception& ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
@@ -347,7 +348,9 @@ ServerError ShowTablesTask::OnExecute() {
     for(auto& schema : schema_array) {
         ::milvus::grpc::TableName tableName;
         tableName.set_table_name(schema.table_id_);
-        writer_.Write(tableName);
+        if (!writer_.Write(tableName)) {
+            return SetError(SERVER_WRITE_ERROR, "Write table name failed!");
+        }
     }
     return SERVER_SUCCESS;
 }
@@ -532,7 +535,6 @@ ServerError SearchVectorTask::OnExecute() {
         //step 3: prepare float data
         auto record_array_size = search_vector_infos_.query_record_array_size();
         std::vector<float> vec_f(record_array_size * table_info.dimension_, 0);
-        //TODO
         for (size_t i = 0; i < record_array_size; i++) {
             for (size_t j = 0; j < table_info.dimension_; j++) {
                 if (search_vector_infos_.query_record_array(i).vector_data().empty()) {
@@ -588,7 +590,9 @@ ServerError SearchVectorTask::OnExecute() {
                 grpc_result->set_id(pair.first);
                 grpc_result->set_distance(pair.second);
             }
-            writer_.Write(grpc_topk_result);
+            if (!writer_.Write(grpc_topk_result)) {
+                return SetError(SERVER_WRITE_ERROR, "Write topk result failed!");
+            }
         }
 
 #ifdef MILVUS_ENABLE_PROFILING

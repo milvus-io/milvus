@@ -5,7 +5,7 @@
 ******************************************************************************/
 #pragma once
 
-#include "src/sdk/include/MilvusApi.h"
+#include "MilvusApi.h"
 #include "GrpcClient.h"
 
 namespace milvus {
@@ -79,8 +79,7 @@ private:
     std::shared_ptr<::grpc::Channel> channel_;
 
 private:
-    GrpcClient *client_ptr;
-//    std::shared_ptr<GrpcClient> client_ptr;
+    std::shared_ptr<GrpcClient> client_ptr_;
     bool connected_ = false;
 };
 
