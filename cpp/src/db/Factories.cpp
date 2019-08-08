@@ -6,7 +6,6 @@
 
 #include "Factories.h"
 #include "DBImpl.h"
-#include "MemManager.h"
 #include "NewMemManager.h"
 #include "Exception.h"
 
@@ -103,16 +102,6 @@ DB* DBFactory::Build(const Options& options) {
 
 MemManagerAbstractPtr MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta,
                                                const Options& options) {
-    if (const char* env = getenv("MILVUS_USE_OLD_MEM_MANAGER")) {
-        std::string env_str = env;
-        std::transform(env_str.begin(), env_str.end(), env_str.begin(), ::toupper);
-        if (env_str == "ON") {
-            return std::make_shared<MemManager>(meta, options);
-        }
-        else {
-            return std::make_shared<NewMemManager>(meta, options);
-        }
-    }
     return std::make_shared<NewMemManager>(meta, options);
 }
 
