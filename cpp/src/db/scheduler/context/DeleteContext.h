@@ -6,7 +6,7 @@
 #pragma once
 
 #include "IScheduleContext.h"
-#include "db/Meta.h"
+#include "db/meta/Meta.h"
 
 namespace zilliz {
 namespace milvus {

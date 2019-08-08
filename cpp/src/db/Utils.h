@@ -6,7 +6,7 @@
 #pragma once
 
 #include "Options.h"
-#include "MetaTypes.h"
+#include "db/meta/MetaTypes.h"
 
 #include <string>
 

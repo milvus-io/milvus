@@ -8,7 +8,7 @@
 #include "DB.h"
 #include "Types.h"
 #include "utils/ThreadPool.h"
-#include "MemManagerAbstract.h"
+#include "src/db/insert/MemManager.h"
 
 #include <mutex>
 #include <condition_variable>

@@ -11,8 +11,8 @@
 //#include <src/db/MySQLMetaImpl.h>
 
 #include "db/DB.h"
-#include "db/DBMetaImpl.h"
-#include "db/MySQLMetaImpl.h"
+#include "db/meta/SqliteMetaImpl.h"
+#include "db/meta/MySQLMetaImpl.h"
 
 
 #define TIMING
@@ -71,7 +71,7 @@ class DBTest2 : public DBTest {
 
 class MetaTest : public DBTest {
  protected:
-    std::shared_ptr<zilliz::milvus::engine::meta::DBMetaImpl> impl_;
+    std::shared_ptr<zilliz::milvus::engine::meta::SqliteMetaImpl> impl_;
 
     virtual void SetUp() override;
     virtual void TearDown() override;

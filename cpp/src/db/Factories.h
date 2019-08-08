@@ -6,11 +6,10 @@
 #pragma once
 
 #include "DB.h"
-#include "DBMetaImpl.h"
-#include "MySQLMetaImpl.h"
+#include "src/db/meta/SqliteMetaImpl.h"
+#include "meta/MySQLMetaImpl.h"
 #include "Options.h"
-#include "ExecutionEngine.h"
-#include "MemManagerAbstract.h"
+#include "src/db/insert/MemManager.h"
 
 #include <string>
 #include <memory>
@@ -29,7 +28,7 @@ struct OptionsFactory {
 };
 
 struct DBMetaImplFactory {
-    static std::shared_ptr<meta::DBMetaImpl> Build();
+    static std::shared_ptr<meta::SqliteMetaImpl> Build();
     static std::shared_ptr<meta::Meta> Build(const DBMetaOptions &metaOptions, const int &mode);
 };
 
