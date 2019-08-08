@@ -66,6 +66,18 @@ DBWrapper::DBWrapper() {
     if(omp_thread > 0) {
         omp_set_num_threads(omp_thread);
         SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
+    } else {
+        uint32_t sys_thread_cnt = 8;
+        if(CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
+            omp_thread = (int32_t)ceil(sys_thread_cnt*0.5);
+            omp_set_num_threads(omp_thread);
+        }
+    }
+
+    std::string metric_type = engine_config.GetValue(CONFIG_METRICTYPE, "L2");
+    if(metric_type != "L2" && metric_type != "IP") {
+        std::cout << "ERROR! Illegal metric type: " << metric_type << ", available options: L2 or IP" << std::endl;
+        kill(0, SIGUSR1);
     }
 
     //set archive config
@@ -95,6 +107,7 @@ DBWrapper::DBWrapper() {
         }
     }
 
+    //create db instance
     std::string msg = opt.meta.path;
     try {
         zilliz::milvus::engine::DB::Open(opt, &db_);
