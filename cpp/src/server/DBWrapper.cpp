@@ -66,6 +66,12 @@ DBWrapper::DBWrapper() {
     if(omp_thread > 0) {
         omp_set_num_threads(omp_thread);
         SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
+    } else {
+        uint32_t sys_thread_cnt = 8;
+        if(CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
+            omp_thread = (int32_t)ceil(sys_thread_cnt*0.5);
+            omp_set_num_threads(omp_thread);
+        }
     }
 
     //set archive config
