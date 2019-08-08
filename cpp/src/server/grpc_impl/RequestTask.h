@@ -21,12 +21,15 @@ namespace server {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CreateTableTask : public BaseTask {
 public:
-    static BaseTaskPtr Create(const ::milvus::grpc::TableSchema& schema);
+    static BaseTaskPtr
+    Create(const ::milvus::grpc::TableSchema& schema);
 
 protected:
-    explicit CreateTableTask(const ::milvus::grpc::TableSchema& request);
+    explicit
+    CreateTableTask(const ::milvus::grpc::TableSchema& request);
 
-    ServerError OnExecute() override;
+    ServerError
+    OnExecute() override;
 
 private:
     const ::milvus::grpc::TableSchema schema_;

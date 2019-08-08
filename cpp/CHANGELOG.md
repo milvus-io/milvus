@@ -7,6 +7,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Bug
 
 ## Improvement
+- MS-327 - Clean code for milvus
 
 ## New Feature
 
