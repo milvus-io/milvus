@@ -49,6 +49,7 @@ constexpr ServerError SERVER_INVALID_TOPK = ToGlobalServerErrorCode(108);
 constexpr ServerError SERVER_ILLEGAL_VECTOR_ID = ToGlobalServerErrorCode(109);
 constexpr ServerError SERVER_ILLEGAL_SEARCH_RESULT = ToGlobalServerErrorCode(110);
 constexpr ServerError SERVER_CACHE_ERROR = ToGlobalServerErrorCode(111);
+constexpr ServerError SERVER_WRITE_ERROR = ToGlobalServerErrorCode(112);
 
 constexpr ServerError SERVER_LICENSE_FILE_NOT_EXIST = ToGlobalServerErrorCode(500);
 constexpr ServerError SERVER_LICENSE_VALIDATION_FAIL = ToGlobalServerErrorCode(501);

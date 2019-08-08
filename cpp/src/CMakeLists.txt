@@ -8,6 +8,8 @@
 aux_source_directory(cache cache_files)
 aux_source_directory(config config_files)
 aux_source_directory(server server_files)
+aux_source_directory(server/grpc_impl grpcserver_files)
+aux_source_directory(server/thrift_impl thriftserver_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_main_files)
 aux_source_directory(db/engine db_engine_files)
@@ -24,15 +26,33 @@ set(db_scheduler_files
         ${scheduler_context_files}
         ${scheduler_task_files}
         )
+set(license_check_files
+        license/LicenseLibrary.cpp
+        license/LicenseCheck.cpp
+        )
 
-set(service_files
+set(license_generator_files
+        license/LicenseGenerator.cpp
+        license/LicenseLibrary.cpp
+        )
+
+set(thrift_service_files
         thrift/gen-cpp/MilvusService.cpp
         thrift/gen-cpp/milvus_constants.cpp
         thrift/gen-cpp/milvus_types.cpp
         metrics/SystemInfo.cpp
         metrics/SystemInfo.h
-        server/ThreadPoolServer.cpp
-        server/ThreadPoolServer.h
+        server/thrift_impl/ThreadPoolServer.cpp
+        server/thrift_impl/ThreadPoolServer.h
+        )
+
+set(grpc_service_files
+        metrics/SystemInfo.cpp
+        metrics/SystemInfo.h
+        grpc/gen-milvus/milvus.grpc.pb.cc
+        grpc/gen-milvus/milvus.pb.cc
+        grpc/gen-status/status.grpc.pb.cc
+        grpc/gen-status/status.pb.cc
         )
 
 set(db_files
@@ -55,6 +75,20 @@ include_directories(/usr/include)
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 include_directories(thrift/gen-cpp)
 include_directories(/usr/include/mysql)
+include_directories(grpc/gen-status)
+include_directories(grpc/gen-milvus)
+
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
+    set(client_lib
+            thrift)
+else()
+    set(client_lib
+            grpcpp_channelz
+            grpc++
+            grpc
+            grpc_protobuf
+            grpc_protoc)
+endif()
 
 set(third_party_libs
         knowhere
@@ -66,7 +100,7 @@ set(third_party_libs
         lapack
         easyloggingpp
         sqlite
-        thrift
+        ${client_lib}
         yaml-cpp
         prometheus-cpp-push
         prometheus-cpp-pull
@@ -163,22 +197,52 @@ set(knowhere_libs
         tbb
         )
 
-add_executable(milvus_server
-        ${config_files}
-        ${server_files}
-        ${utils_files}
-        ${service_files}
-        ${metrics_files}
-        )
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
+    add_executable(milvus_thrift_server
+            ${config_files}
+            ${server_files}
+            ${thriftserver_files}
+            ${utils_files}
+            ${thrift_service_files}
+            ${metrics_files}
+            )
+else()
+    add_executable(milvus_grpc_server
+            ${config_files}
+            ${server_files}
+            ${grpcserver_files}
+            ${utils_files}
+            ${grpc_service_files}
+            ${metrics_files}
+            )
+endif()
 
+if (ENABLE_LICENSE STREQUAL "ON")
+	add_executable(get_sys_info ${get_sys_info_files})
+	add_executable(license_generator ${license_generator_files})
 
-target_link_libraries(milvus_server
-        ${server_libs}
-        ${third_party_libs}
-        ${knowhere_libs}
-        )
+	target_link_libraries(get_sys_info ${license_libs} license_check ${third_party_libs})
+	target_link_libraries(license_generator ${license_libs} ${third_party_libs})
 
-install(TARGETS milvus_server DESTINATION bin)
+    if(MILVUS_WITH_THRIFT STREQUAL "ON")
+        target_link_libraries(milvus_thrift_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
+    else()
+        target_link_libraries(milvus_grpc_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
+    endif()
+else ()
+    if(MILVUS_WITH_THRIFT STREQUAL "ON")
+        target_link_libraries(milvus_thrift_server ${server_libs} ${knowhere_libs} ${third_party_libs})
+    else()
+        target_link_libraries(milvus_grpc_server ${server_libs} ${knowhere_libs} ${third_party_libs})
+    endif()
+
+endif()
+
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
+    install(TARGETS milvus_thrift_server DESTINATION bin)
+else()
+    install(TARGETS milvus_grpc_server DESTINATION bin)
+endif()
 
 install(FILES
         ${KNOWHERE_BUILD_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}

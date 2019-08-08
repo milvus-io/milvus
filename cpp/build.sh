@@ -11,6 +11,7 @@ PROFILING="OFF"
 BUILD_FAISS_WITH_MKL="OFF"
 USE_JFROG_CACHE="OFF"
 KNOWHERE_OPTS=""
+MILVUS_WITH_THRIFT="OFF"
 
 while getopts "p:d:t:uhlrcgmj" arg
 do
@@ -50,6 +51,9 @@ do
                 USE_JFROG_CACHE="ON"
                 KNOWHERE_OPTS="${KNOWHERE_OPTS} -j"
                 ;;
+             e)
+                MILVUS_WITH_THRIFT="ON"
+                ;;
              h) # help
                 echo "
 
@@ -64,6 +68,7 @@ parameter:
 -g: profiling(default: OFF)
 -m: build faiss with MKL(default: OFF)
 -j: use jfrog cache build directory
+-e: enable thrift
 
 usage:
 ./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c] [-m] [-j]
@@ -102,6 +107,7 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DMILVUS_DB_PATH=${DB_PATH} \
     -DMILVUS_ENABLE_PROFILING=${PROFILING} \
     -DBUILD_FAISS_WITH_MKL=${BUILD_FAISS_WITH_MKL} \
+    -DMILVUS_WITH_THRIFT=${MILVUS_WITH_THRIFT} \
     -DKNOWHERE_BUILD_DIR=${KNOWHERE_BUILD_DIR} \
     -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
     $@ ../"

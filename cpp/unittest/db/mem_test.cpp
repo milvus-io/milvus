@@ -21,7 +21,7 @@ using namespace zilliz::milvus;
 
 namespace {
 
-static const std::string TABLE_NAME = "test_group";
+static const char* TABLE_NAME = "test_group";
 static constexpr int64_t TABLE_DIM = 256;
 static constexpr int64_t VECTOR_COUNT = 250000;
 static constexpr int64_t INSERT_LOOP = 10000;

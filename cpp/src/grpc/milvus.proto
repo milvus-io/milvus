@@ -1,0 +1,250 @@
+syntax = "proto3";
+
+import "status.proto";
+
+package milvus.grpc;
+
+/**
+ * @brief Table Name
+ */
+message TableName {
+    Status status = 1;
+    string table_name = 2;
+}
+
+/**
+ * @brief Table Schema
+ */
+message TableSchema {
+    TableName table_name = 1;
+    int32 index_type = 2;
+    int64 dimension = 3;
+    bool store_raw_vector = 4;
+}
+
+/**
+ * @brief Range Schema
+ */
+message Range {
+    string start_value = 1;
+    string end_value = 2;
+}
+
+/**
+ * @brief Record inserted
+ */
+message RowRecord {
+    repeated float vector_data = 1;             //binary in thrift
+}
+
+/**
+ * @brief Infos to be inserted
+ */
+message InsertInfos {
+    string table_name = 1;
+    repeated RowRecord row_record_array = 2;
+}
+
+/**
+ * @brief Vector ids
+ */
+message VectorIds {
+    Status status = 1;
+    repeated int64 vector_id_array = 2;
+}
+
+/**
+ * @brief Infos for searching vector
+ */
+message SearchVectorInfos {
+    string table_name = 1;
+    repeated RowRecord query_record_array = 2;
+    repeated Range query_range_array = 3;
+    int64 topk = 4;
+}
+
+/**
+ * @brief Infos for searching vector in files
+ */
+message SearchVectorInFilesInfos {
+    repeated string file_id_array = 1;
+    SearchVectorInfos search_vector_infos = 2;
+}
+
+/**
+ * @brief Query result infos
+ */
+message QueryResult {
+    int64 id = 1;
+    double distance = 2;
+}
+
+/**
+ * @brief TopK query result
+ */
+message TopKQueryResult {
+    Status status = 1;
+    repeated QueryResult query_result_arrays = 2;
+}
+
+/**
+ * @brief Server String Reply
+ */
+message StringReply {
+    Status status = 1;
+    string string_reply = 2;
+}
+
+/**
+ * @brief Server bool Reply
+ */
+message BoolReply {
+    Status status = 1;
+    bool bool_reply = 2;
+}
+
+/**
+ * @brief Return table row count
+ */
+message TableRowCount {
+    Status status = 1;
+    int64 table_row_count = 2;
+}
+
+/**
+ * @brief Give Server Command
+ */
+message Command {
+    string cmd = 1;
+}
+
+/**
+ * @brief Give Server Command
+ */
+message ServerStatus{
+    Status status = 1;
+    string info = 2;
+}
+
+service MilvusService {
+    /**
+     * @brief Create table method
+     *
+     * This method is used to create table
+     *
+     * @param param, use to provide table information to be created.
+     *
+     */
+    rpc CreateTable(TableSchema) returns (Status){}
+
+    /**
+     * @brief Test table existence method
+     *
+     * This method is used to test table existence.
+     *
+     * @param table_name, table name is going to be tested.
+     *
+     */
+    rpc HasTable(TableName) returns (BoolReply) {}
+
+    /**
+     * @brief Delete table method
+     *
+     * This method is used to delete table.
+     *
+     * @param table_name, table name is going to be deleted.
+     *
+     */
+    rpc DropTable(TableName) returns (Status) {}
+
+    /**
+     * @brief Build index by table method
+     *
+     * This method is used to build index by table in sync mode.
+     *
+     * @param table_name, table is going to be built index.
+     *
+     */
+    rpc BuildIndex(TableName) returns (Status) {}
+
+    /**
+     * @brief Add vector array to table
+     *
+     * This method is used to add vector array to table.
+     *
+     * @param table_name, table_name is inserted.
+     * @param record_array, vector array is inserted.
+     *
+     * @return vector id array
+     */
+    rpc InsertVector(InsertInfos) returns (VectorIds) {}
+
+    /**
+     * @brief Query vector
+     *
+     * This method is used to query vector in table.
+     *
+     * @param table_name, table_name is queried.
+     * @param query_record_array, all vector are going to be queried.
+     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+     * @param topk, how many similarity vectors will be searched.
+     *
+     * @return query result array.
+     */
+    rpc SearchVector(SearchVectorInfos) returns (stream TopKQueryResult) {}
+
+    /**
+     * @brief Internal use query interface
+     *
+     * This method is used to query vector in specified files.
+     *
+     * @param file_id_array, specified files id array, queried.
+     * @param query_record_array, all vector are going to be queried.
+     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+     * @param topk, how many similarity vectors will be searched.
+     *
+     * @return query result array.
+     */
+    rpc SearchVectorInFiles(SearchVectorInFilesInfos) returns (stream TopKQueryResult) {}
+
+    /**
+     * @brief Get table schema
+     *
+     * This method is used to get table schema.
+     *
+     * @param table_name, target table name.
+     *
+     * @return table schema
+     */
+    rpc DescribeTable(TableName) returns (TableSchema) {}
+
+    /**
+     * @brief Get table schema
+     *
+     * This method is used to get table schema.
+     *
+     * @param table_name, target table name.
+     *
+     * @return table schema
+     */
+    rpc GetTableRowCount(TableName) returns (TableRowCount) {}
+
+    /**
+     * @brief List all tables in database
+     *
+     * This method is used to list all tables.
+     *
+     *
+     * @return table names.
+     */
+    rpc ShowTables(Command) returns (stream TableName) {}
+
+    /**
+     * @brief Give the server status
+     *
+     * This method is used to give the server status.
+     *
+     * @return Server status.
+     */
+    rpc Ping(Command) returns (ServerStatus) {}
+}

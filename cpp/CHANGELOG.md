@@ -51,6 +51,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-261 - Update faiss version to 1.5.3 and add BUILD_FAISS_WITH_MKL as an option
 - MS-266 - Improve topk reduce time by using multi-threads
 - MS-275 - Avoid sqlite logic error excetion
+- MS-278 - add IndexStatsHelper
+- MS-313 - add GRPC
+- MS-325 - add grpc status return for C++ sdk and modify some format
 - MS-278 - Add IndexStatsHelper
 - MS-312 - Set openmp thread number by config
 - MS-305 - Add CPU core percent metric

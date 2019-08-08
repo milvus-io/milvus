@@ -39,7 +39,8 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         ZSTD
         AWS
         libunwind
-        gperftools)
+        gperftools
+        GRPC)
 
 message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
@@ -97,6 +98,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_libunwind()
     elseif("${DEPENDENCY_NAME}" STREQUAL "gperftools")
         build_gperftools()
+    elseif("${DEPENDENCY_NAME}" STREQUAL "GRPC")
+        build_grpc()
     else()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -450,6 +453,13 @@ else()
             "https://github.com/gperftools/gperftools/releases/download/gperftools-${GPERFTOOLS_VERSION}/gperftools-${GPERFTOOLS_VERSION}.tar.gz")
 endif()
 set(GPERFTOOLS_MD5 "c6a852a817e9160c79bdb2d3101b4601")
+
+if(DEFINED ENV{MILVUS_GRPC_URL})
+    set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
+else()
+    set(GRPC_SOURCE_URL
+            "http://git.zilliz.tech/kun.yu/grpc/-/archive/master/grpc-master.tar.gz")
+endif()
 
 # ----------------------------------------------------------------------
 # ARROW
@@ -2480,7 +2490,6 @@ endmacro()
 if(MILVUS_WITH_LIBUNWIND)
     resolve_dependency(libunwind)
 
-    # TODO: Don't use global includes but rather target_include_directories
     get_target_property(LIBUNWIND_INCLUDE_DIR libunwind INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${LIBUNWIND_INCLUDE_DIR})
 endif()
@@ -2546,8 +2555,6 @@ macro(build_gperftools)
                 ${GPERFTOOLS_STATIC_LIB})
     endif()
 
-    ExternalProject_Add_StepDependencies(gperftools_ep build libunwind_ep)
-
     file(MAKE_DIRECTORY "${GPERFTOOLS_INCLUDE_DIR}")
 
     add_library(gperftools STATIC IMPORTED)
@@ -2563,8 +2570,85 @@ endmacro()
 if(MILVUS_WITH_GPERFTOOLS)
     resolve_dependency(gperftools)
 
-    # TODO: Don't use global includes but rather target_include_directories
     get_target_property(GPERFTOOLS_INCLUDE_DIR gperftools INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${GPERFTOOLS_INCLUDE_DIR})
     link_directories(SYSTEM ${GPERFTOOLS_PREFIX}/lib)
+endif()
+
+# ----------------------------------------------------------------------
+# GRPC
+
+macro(build_grpc)
+    message(STATUS "Building GRPC-${GRPC_VERSION} from source")
+    set(GRPC_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/install")
+    set(GRPC_INCLUDE_DIR "${GRPC_PREFIX}/include")
+    set(GRPC_STATIC_LIB "${GRPC_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}grpc${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(GRPC++_STATIC_LIB "${GRPC_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}grpc++${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(GRPCPP_CHANNELZ_STATIC_LIB "${GRPC_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}grpcpp_channelz${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(GRPC_PROTOBUF_LIB_DIR "${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/libs/opt/protobuf")
+    set(GRPC_PROTOBUF_STATIC_LIB "${GRPC_PROTOBUF_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}protobuf${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(GRPC_PROTOC_STATIC_LIB "${GRPC_PROTOBUF_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}protoc${CMAKE_STATIC_LIBRARY_SUFFIX}")
+
+    externalproject_add(grpc_ep
+            URL
+            ${GRPC_SOURCE_URL}
+            ${EP_LOG_OPTIONS}
+            CONFIGURE_COMMAND
+            ""
+            BUILD_IN_SOURCE
+            1
+            BUILD_COMMAND
+            ${MAKE} ${MAKE_BUILD_ARGS} prefix=${GRPC_PREFIX}
+            INSTALL_COMMAND
+            ${MAKE} install prefix=${GRPC_PREFIX}
+            BUILD_BYPRODUCTS
+            ${GRPC_STATIC_LIB}
+            ${GRPC++_STATIC_LIB}
+            ${GRPCPP_CHANNELZ_STATIC_LIB}
+            ${GRPC_PROTOBUF_STATIC_LIB}
+            ${GRPC_PROTOC_STATIC_LIB})
+
+    file(MAKE_DIRECTORY "${GRPC_INCLUDE_DIR}")
+
+    add_library(grpc STATIC IMPORTED)
+    set_target_properties(grpc
+            PROPERTIES IMPORTED_LOCATION "${GRPC_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}")
+
+    add_library(grpc++ STATIC IMPORTED)
+    set_target_properties(grpc++
+            PROPERTIES IMPORTED_LOCATION "${GRPC++_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}")
+
+    add_library(grpcpp_channelz STATIC IMPORTED)
+    set_target_properties(grpcpp_channelz
+            PROPERTIES IMPORTED_LOCATION "${GRPCPP_CHANNELZ_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${GRPC_INCLUDE_DIR}")
+
+    add_library(grpc_protobuf STATIC IMPORTED)
+    set_target_properties(grpc_protobuf
+            PROPERTIES IMPORTED_LOCATION "${GRPC_PROTOBUF_STATIC_LIB}")
+
+    add_library(grpc_protoc STATIC IMPORTED)
+    set_target_properties(grpc_protoc
+            PROPERTIES IMPORTED_LOCATION "${GRPC_PROTOC_STATIC_LIB}")
+
+    add_dependencies(grpc grpc_ep)
+    add_dependencies(grpc++ grpc_ep)
+    add_dependencies(grpcpp_channelz grpc_ep)
+    add_dependencies(grpc_protobuf grpc_ep)
+    add_dependencies(grpc_protoc grpc_ep)
+endmacro()
+
+if(NOT MILVUS_WITH_THRIFT STREQUAL "ON")
+    resolve_dependency(GRPC)
+
+    get_target_property(GRPC_INCLUDE_DIR grpc INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${GRPC_INCLUDE_DIR})
+    link_directories(SYSTEM ${GRPC_PREFIX}/lib)
+
+    set(GRPC_THIRD_PARTY_DIR ${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/third_party)
+    include_directories(SYSTEM ${GRPC_THIRD_PARTY_DIR}/protobuf/src)
+    link_directories(SYSTEM ${GRPC_PROTOBUF_LIB_DIR})
+
 endif()
