@@ -12,8 +12,8 @@
 //#include <memory>
 //#include <fstream>
 //
-#include "faiss/AutoTune.h"
-#include "faiss/index_io.h"
+//#include "faiss/AutoTune.h"
+//#include "faiss/index_io.h"
 //
 //#include "Operand.h"
 
