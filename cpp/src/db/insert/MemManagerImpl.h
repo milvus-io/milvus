@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Meta.h"
+#include "db/meta/Meta.h"
 #include "MemTable.h"
-#include "Status.h"
-#include "MemManagerAbstract.h"
+#include "db/Status.h"
+#include "MemManager.h"
 
 #include <map>
 #include <string>
@@ -16,13 +16,13 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-class NewMemManager : public MemManagerAbstract {
+class MemManagerImpl : public MemManager {
  public:
     using MetaPtr = meta::Meta::Ptr;
-    using Ptr = std::shared_ptr<NewMemManager>;
+    using Ptr = std::shared_ptr<MemManagerImpl>;
     using MemTablePtr = typename MemTable::Ptr;
 
-    NewMemManager(const std::shared_ptr<meta::Meta> &meta, const Options &options)
+    MemManagerImpl(const std::shared_ptr<meta::Meta> &meta, const Options &options)
         : meta_(meta), options_(options) {}
 
     Status InsertVectors(const std::string &table_id,

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Status.h"
-#include "Meta.h"
-#include "IDGenerator.h"
-#include "ExecutionEngine.h"
+#include "db/Status.h"
+#include "db/meta/Meta.h"
+#include "db/IDGenerator.h"
+#include "db/engine/ExecutionEngine.h"
 
 
 namespace zilliz {

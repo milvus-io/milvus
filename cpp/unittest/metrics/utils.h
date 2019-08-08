@@ -11,8 +11,8 @@
 //#include <src/db/MySQLMetaImpl.h>
 
 #include "db/DB.h"
-#include "db/DBMetaImpl.h"
-#include "db/MySQLMetaImpl.h"
+#include "db/meta/SqliteMetaImpl.h"
+#include "db/meta/MySQLMetaImpl.h"
 
 
 #define TIMING

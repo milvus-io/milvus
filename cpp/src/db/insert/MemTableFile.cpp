@@ -1,7 +1,7 @@
 #include "MemTableFile.h"
-#include "Constants.h"
-#include "Log.h"
-#include "EngineFactory.h"
+#include "db/Constants.h"
+#include "db/Log.h"
+#include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 
 #include <cmath>

@@ -11,8 +11,8 @@
 #include "db/Exception.h"
 #include "db/Status.h"
 #include "db/Options.h"
-#include "db/DBMetaImpl.h"
-#include "db/EngineFactory.h"
+#include "db/meta/SqliteMetaImpl.h"
+#include "db/engine/EngineFactory.h"
 #include "db/Utils.h"
 
 #include <vector>
@@ -100,7 +100,7 @@ TEST(DBMiscTest, OPTIONS_TEST) {
 TEST(DBMiscTest, META_TEST) {
     engine::DBMetaOptions options;
     options.path = "/tmp/milvus_test";
-    engine::meta::DBMetaImpl impl(options);
+    engine::meta::SqliteMetaImpl impl(options);
 
     time_t tt;
     time( &tt );

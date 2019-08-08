@@ -12,6 +12,8 @@
 #include "utils/TimeRecorder.h"
 #include "utils/BlockingQueue.h"
 #include "utils/LogUtil.h"
+#include "utils/ValidationUtil.h"
+#include "db/engine/ExecutionEngine.h"
 
 using namespace zilliz::milvus;
 
@@ -148,6 +150,57 @@ TEST(UtilTest, LOG_TEST) {
     int32_t res = server::InitLog(LOG_FILE_PATH);
     ASSERT_EQ(res, 0);
 
+    EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::NewLineForContainer));
+    EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::LogDetailedCrashReason));
+
     std::string fname = server::GetFileName(LOG_FILE_PATH);
     ASSERT_EQ(fname, "log_config.conf");
 }
+
+TEST(UtilTest, VALIDATE_TABLENAME_TEST) {
+    std::string table_name = "Normal123_";
+    server:: ServerError res = server::ValidationUtil::ValidateTableName(table_name);
+    ASSERT_EQ(res, server::SERVER_SUCCESS);
+
+    table_name = "12sds";
+    res = server::ValidationUtil::ValidateTableName(table_name);
+    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+
+    table_name = "";
+    res = server::ValidationUtil::ValidateTableName(table_name);
+    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+
+    table_name = "_asdasd";
+    res = server::ValidationUtil::ValidateTableName(table_name);
+    ASSERT_EQ(res, server::SERVER_SUCCESS);
+
+    table_name = "!@#!@";
+    res = server::ValidationUtil::ValidateTableName(table_name);
+    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+
+    table_name = "中文";
+    res = server::ValidationUtil::ValidateTableName(table_name);
+    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+
+
+    table_name = std::string('a', 32768);
+    res = server::ValidationUtil::ValidateTableName(table_name);
+    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+}
+
+TEST(UtilTest, VALIDATE_DIMENSIONTEST) {
+    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(-1), server::SERVER_INVALID_VECTOR_DIMENSION);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(0), server::SERVER_INVALID_VECTOR_DIMENSION);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(16385), server::SERVER_INVALID_VECTOR_DIMENSION);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(16384), server::SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(1), server::SERVER_SUCCESS);
+}
+
+TEST(UtilTest, VALIDATE_INDEXTYPE_TEST) {
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType((int)engine::EngineType::INVALID), server::SERVER_INVALID_INDEX_TYPE);
+    for(int i = 1; i <= (int)engine::EngineType::MAX_VALUE; i++) {
+        ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType(i), server::SERVER_SUCCESS);
+    }
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType((int)engine::EngineType::MAX_VALUE + 1), server::SERVER_INVALID_INDEX_TYPE);
+}
+
