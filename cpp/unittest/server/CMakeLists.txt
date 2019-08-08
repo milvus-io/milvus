@@ -3,15 +3,15 @@
 # Unauthorized copying of this file, via any medium is strictly prohibited.
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
-include_directories(../../src)
+include_directories(${MILVUS_ENGINE_SRC}/)
 include_directories(/usr/include)
 
 include_directories(/usr/local/cuda/include)
 link_directories(/usr/local/cuda/lib64)
 
-aux_source_directory(../../src/config config_files)
-aux_source_directory(../../src/cache cache_srcs)
-aux_source_directory(../../src/wrapper wrapper_src)
+aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_src)
 aux_source_directory(./ test_srcs)
 
 set(utils_srcs

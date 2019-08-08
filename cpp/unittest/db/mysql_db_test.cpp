@@ -6,7 +6,7 @@
 #include "utils.h"
 #include "db/DB.h"
 #include "db/DBImpl.h"
-#include "db/MetaConsts.h"
+#include "db/meta/MetaConsts.h"
 #include "db/Factories.h"
 
 #include <gtest/gtest.h>

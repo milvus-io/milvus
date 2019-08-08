@@ -9,7 +9,7 @@
 #include <boost/algorithm/string.hpp>
 
 #include "Options.h"
-#include "DBMetaImpl.h"
+#include "db/meta/SqliteMetaImpl.h"
 #include "Exception.h"
 
 namespace zilliz {

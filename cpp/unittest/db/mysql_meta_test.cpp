@@ -10,10 +10,10 @@
 #include <time.h>
 
 #include "utils.h"
-#include "db/MySQLMetaImpl.h"
+#include "db/meta/MySQLMetaImpl.h"
 #include "db/Factories.h"
 #include "db/Utils.h"
-#include "db/MetaConsts.h"
+#include "db/meta/MetaConsts.h"
 
 #include "mysql++/mysql++.h"
 

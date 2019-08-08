@@ -6,7 +6,7 @@
 #pragma once
 
 #include "Meta.h"
-#include "Options.h"
+#include "db/Options.h"
 #include "MySQLConnectionPool.h"
 
 #include "mysql++/mysql++.h"

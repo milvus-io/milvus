@@ -8,7 +8,7 @@
 #include "TaskDispatchQueue.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
-#include "db/EngineFactory.h"
+#include "db/engine/EngineFactory.h"
 
 namespace zilliz {
 namespace milvus {

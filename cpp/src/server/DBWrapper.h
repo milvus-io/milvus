@@ -6,7 +6,6 @@
 #pragma once
 
 #include "db/DB.h"
-#include "db/Meta.h"
 
 namespace zilliz {
 namespace milvus {
