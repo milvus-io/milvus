@@ -36,8 +36,6 @@ ClientProxy::Connect(const ConnectParam &param) {
     }
 }
 
-
-
 Status
 ClientProxy::Connect(const std::string &uri) {
     if (!UriCheck(uri)) {

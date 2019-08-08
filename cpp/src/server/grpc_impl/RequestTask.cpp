@@ -105,11 +105,13 @@ CreateTableTask::CreateTableTask(const ::milvus::grpc::TableSchema& schema)
 
 }
 
-BaseTaskPtr CreateTableTask::Create(const ::milvus::grpc::TableSchema& schema) {
+BaseTaskPtr
+CreateTableTask::Create(const ::milvus::grpc::TableSchema& schema) {
     return std::shared_ptr<BaseTask>(new CreateTableTask(schema));
 }
 
-ServerError CreateTableTask::OnExecute() {
+ServerError
+CreateTableTask::OnExecute() {
     TimeRecorder rc("CreateTableTask");
 
     try {
@@ -159,11 +161,13 @@ DescribeTableTask::DescribeTableTask(const std::string &table_name, ::milvus::gr
           schema_(schema) {
 }
 
-BaseTaskPtr DescribeTableTask::Create(const std::string& table_name, ::milvus::grpc::TableSchema& schema) {
+BaseTaskPtr
+DescribeTableTask::Create(const std::string& table_name, ::milvus::grpc::TableSchema& schema) {
     return std::shared_ptr<BaseTask>(new DescribeTableTask(table_name, schema));
 }
 
-ServerError DescribeTableTask::OnExecute() {
+ServerError
+DescribeTableTask::OnExecute() {
     TimeRecorder rc("DescribeTableTask");
 
     try {
@@ -202,11 +206,13 @@ BuildIndexTask::BuildIndexTask(const std::string& table_name)
           table_name_(table_name) {
 }
 
-BaseTaskPtr BuildIndexTask::Create(const std::string& table_name) {
+BaseTaskPtr
+BuildIndexTask::Create(const std::string& table_name) {
     return std::shared_ptr<BaseTask>(new BuildIndexTask(table_name));
 }
 
-ServerError BuildIndexTask::OnExecute() {
+ServerError
+BuildIndexTask::OnExecute() {
     try {
         TimeRecorder rc("BuildIndexTask");
 
@@ -248,11 +254,13 @@ HasTableTask::HasTableTask(const std::string& table_name, bool& has_table)
 
 }
 
-BaseTaskPtr HasTableTask::Create(const std::string& table_name, bool& has_table) {
+BaseTaskPtr
+HasTableTask::Create(const std::string& table_name, bool& has_table) {
     return std::shared_ptr<BaseTask>(new HasTableTask(table_name, has_table));
 }
 
-ServerError HasTableTask::OnExecute() {
+ServerError
+HasTableTask::OnExecute() {
     try {
         TimeRecorder rc("HasTableTask");
 
@@ -283,11 +291,13 @@ DropTableTask::DropTableTask(const std::string& table_name)
 
 }
 
-BaseTaskPtr DropTableTask::Create(const std::string& table_name) {
+BaseTaskPtr
+DropTableTask::Create(const std::string& table_name) {
     return std::shared_ptr<BaseTask>(new DropTableTask(table_name));
 }
 
-ServerError DropTableTask::OnExecute() {
+ServerError
+DropTableTask::OnExecute() {
     try {
         TimeRecorder rc("DropTableTask");
 
@@ -333,11 +343,13 @@ ShowTablesTask::ShowTablesTask(::grpc::ServerWriter< ::milvus::grpc::TableName>&
 
 }
 
-BaseTaskPtr ShowTablesTask::Create(::grpc::ServerWriter< ::milvus::grpc::TableName>& writer) {
+BaseTaskPtr
+ShowTablesTask::Create(::grpc::ServerWriter< ::milvus::grpc::TableName>& writer) {
     return std::shared_ptr<BaseTask>(new ShowTablesTask(writer));
 }
 
-ServerError ShowTablesTask::OnExecute() {
+ServerError
+ShowTablesTask::OnExecute() {
     std::vector<engine::meta::TableSchema> schema_array;
     engine::Status stat = DBWrapper::DB()->AllTables(schema_array);
     if(!stat.ok()) {
@@ -363,12 +375,14 @@ InsertVectorTask::InsertVectorTask(const ::milvus::grpc::InsertInfos& insert_inf
     record_ids_.Clear();
 }
 
-BaseTaskPtr InsertVectorTask::Create(const ::milvus::grpc::InsertInfos& insert_infos,
+BaseTaskPtr
+InsertVectorTask::Create(const ::milvus::grpc::InsertInfos& insert_infos,
                                   ::milvus::grpc::VectorIds& record_ids) {
     return std::shared_ptr<BaseTask>(new InsertVectorTask(insert_infos, record_ids));
 }
 
-ServerError InsertVectorTask::OnExecute() {
+ServerError
+InsertVectorTask::OnExecute() {
     try {
         TimeRecorder rc("InsertVectorTask");
 
@@ -468,14 +482,16 @@ SearchVectorTask::SearchVectorTask(const ::milvus::grpc::SearchVectorInfos& sear
 
 }
 
-BaseTaskPtr SearchVectorTask::Create(const ::milvus::grpc::SearchVectorInfos& search_vector_infos,
+BaseTaskPtr
+SearchVectorTask::Create(const ::milvus::grpc::SearchVectorInfos& search_vector_infos,
                                      const std::vector<std::string>& file_id_array,
                                      ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult>& writer) {
     return std::shared_ptr<BaseTask>(new SearchVectorTask(search_vector_infos, file_id_array,
                                                           writer));
 }
 
-ServerError SearchVectorTask::OnExecute() {
+ServerError
+SearchVectorTask::OnExecute() {
     try {
         TimeRecorder rc("SearchVectorTask");
 
@@ -618,11 +634,13 @@ GetTableRowCountTask::GetTableRowCountTask(const std::string& table_name, int64_
 
 }
 
-BaseTaskPtr GetTableRowCountTask::Create(const std::string& table_name, int64_t& row_count) {
+BaseTaskPtr
+GetTableRowCountTask::Create(const std::string& table_name, int64_t& row_count) {
     return std::shared_ptr<BaseTask>(new GetTableRowCountTask(table_name, row_count));
 }
 
-ServerError GetTableRowCountTask::OnExecute() {
+ServerError
+GetTableRowCountTask::OnExecute() {
     try {
         TimeRecorder rc("GetTableRowCountTask");
 
@@ -659,15 +677,15 @@ PingTask::PingTask(const std::string& cmd, std::string& result)
 
 }
 
-BaseTaskPtr PingTask::Create(const std::string& cmd, std::string& result) {
+BaseTaskPtr
+PingTask::Create(const std::string& cmd, std::string& result) {
     return std::shared_ptr<BaseTask>(new PingTask(cmd, result));
 }
 
-ServerError PingTask::OnExecute() {
+ServerError
+PingTask::OnExecute() {
     if(cmd_ == "version") {
         result_ = MILVUS_VERSION;
-    } else if (cmd_ == "disconnect") {
-        //TODO stopservice
     } else {
         result_ = "OK";
     }

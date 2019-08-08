@@ -24,7 +24,6 @@ set(db_scheduler_files
         ${scheduler_context_files}
         ${scheduler_task_files}
         )
-
 set(license_check_files
         license/LicenseLibrary.cpp
         license/LicenseCheck.cpp
@@ -63,9 +62,6 @@ set(engine_files
         ${metrics_files}
         ${knowhere_files}
         )
-
-set(get_sys_info_files
-        license/GetSysInfo.cpp)
 
 set(s3_client_files
         storage/s3/S3ClientWrapper.cpp
@@ -163,28 +159,11 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
 	    )
 endif ()
 
-if (ENABLE_LICENSE STREQUAL "ON")
-    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs")
-    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
-    set(license_libs
-            nvidia-ml
-            crypto
-            cudart
-            cublas
-            )
-endif ()
-
-
 
 cuda_add_library(milvus_engine STATIC ${engine_files})
 target_link_libraries(milvus_engine ${engine_libs} ${third_party_libs})
 
 add_library(metrics STATIC ${metrics_files})
-
-if (ENABLE_LICENSE STREQUAL "ON")
-        add_library(license_check STATIC ${license_check_files})
-        target_link_libraries(license_check ${license_libs} ${third_party_libs})
-endif ()
 
 set(metrics_lib
         easyloggingpp
@@ -234,8 +213,13 @@ else()
             )
 endif()
 
-
 if (ENABLE_LICENSE STREQUAL "ON")
+	add_executable(get_sys_info ${get_sys_info_files})
+	add_executable(license_generator ${license_generator_files})
+
+	target_link_libraries(get_sys_info ${license_libs} license_check ${third_party_libs})
+	target_link_libraries(license_generator ${license_libs} ${third_party_libs})
+
     if(MILVUS_WITH_THRIFT STREQUAL "ON")
         target_link_libraries(milvus_thrift_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
     else()
@@ -249,17 +233,6 @@ else ()
     endif()
 
 endif()
-
-if (ENABLE_LICENSE STREQUAL "ON")
-        add_executable(get_sys_info ${get_sys_info_files})
-        add_executable(license_generator ${license_generator_files})
-
-        target_link_libraries(get_sys_info ${license_libs} license_check ${third_party_libs})
-        target_link_libraries(license_generator ${license_libs} ${third_party_libs})
-
-        install(TARGETS get_sys_info DESTINATION bin)
-        install(TARGETS license_generator DESTINATION bin)
-endif ()
 
 if (MILVUS_WITH_THRIFT STREQUAL "ON")
     install(TARGETS milvus_thrift_server DESTINATION bin)
