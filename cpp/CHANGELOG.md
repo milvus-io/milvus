@@ -44,6 +44,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-305 - Add CPU core percent metric
 - MS-310 - Add milvus CPU utilization ratio and CPU/GPU temperature metrics
 - MS-324 - Show error when there is not enough gpu memory to build index
+- MS-328 - Check metric type on server start
 
 ## New Feature
 - MS-180 - Add new mem manager
