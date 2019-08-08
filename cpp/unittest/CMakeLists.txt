@@ -40,7 +40,6 @@ set(unittest_libs
 
 add_subdirectory(server)
 add_subdirectory(db)
-add_subdirectory(index_wrapper)
+add_subdirectory(knowhere)
 add_subdirectory(metrics)
-add_subdirectory(storage)
-add_subdirectory(utils)
+#add_subdirectory(storage)

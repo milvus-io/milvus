@@ -9,8 +9,10 @@ aux_source_directory(cache cache_files)
 aux_source_directory(config config_files)
 aux_source_directory(server server_files)
 aux_source_directory(utils utils_files)
-aux_source_directory(db db_files)
-#aux_source_directory(wrapper wrapper_files)
+aux_source_directory(db db_main_files)
+aux_source_directory(db/engine db_engine_files)
+aux_source_directory(db/insert db_insert_files)
+aux_source_directory(db/meta db_meta_files)
 aux_source_directory(metrics metrics_files)
 aux_source_directory(wrapper/knowhere knowhere_files)
 
@@ -33,12 +35,14 @@ set(service_files
         server/ThreadPoolServer.h
         )
 
-set(engine_files
+set(db_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
         ${cache_files}
-        ${db_files}
+        ${db_main_files}
+        ${db_engine_files}
+        ${db_insert_files}
+        ${db_meta_files}
         ${db_scheduler_files}
-        ${wrapper_files}
         ${metrics_files}
         ${knowhere_files}
         )
@@ -126,7 +130,7 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
 endif ()
 
 
-cuda_add_library(milvus_engine STATIC ${engine_files})
+cuda_add_library(milvus_engine STATIC ${db_files})
 target_link_libraries(milvus_engine ${engine_libs} ${third_party_libs})
 
 add_library(metrics STATIC ${metrics_files})

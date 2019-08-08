@@ -1,5 +1,5 @@
 #include "MemTable.h"
-#include "Log.h"
+#include "db/Log.h"
 
 
 namespace zilliz {

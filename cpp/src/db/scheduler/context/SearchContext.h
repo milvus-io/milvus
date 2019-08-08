@@ -6,7 +6,7 @@
 #pragma once
 
 #include "IScheduleContext.h"
-#include "db/MetaTypes.h"
+#include "db/meta/MetaTypes.h"
 
 #include <unordered_map>
 #include <vector>

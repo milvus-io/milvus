@@ -6,8 +6,8 @@
 #pragma once
 
 #include "MetaTypes.h"
-#include "Options.h"
-#include "Status.h"
+#include "db/Options.h"
+#include "db/Status.h"
 
 #include <cstddef>
 #include <ctime>

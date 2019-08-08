@@ -17,7 +17,7 @@
 #include "metrics/Metrics.h"
 #include "utils.h"
 #include "db/DB.h"
-#include "db/DBMetaImpl.h"
+#include "db/meta/SqliteMetaImpl.h"
 #include "db/Factories.h"
 
 

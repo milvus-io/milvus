@@ -5,9 +5,9 @@
  ******************************************************************************/
 #include <stdexcept>
 
-#include <src/server/ServerConfig.h>
-#include <src/metrics/Metrics.h>
-#include "Log.h"
+#include "src/server/ServerConfig.h"
+#include "src/metrics/Metrics.h"
+#include "db/Log.h"
 #include "utils/CommonUtil.h"
 
 #include "src/cache/CpuCacheMgr.h"
@@ -15,7 +15,7 @@
 #include "wrapper/knowhere/vec_index.h"
 #include "wrapper/knowhere/vec_impl.h"
 #include "knowhere/common/exception.h"
-#include "Exception.h"
+#include "db/Exception.h"
 
 
 namespace zilliz {

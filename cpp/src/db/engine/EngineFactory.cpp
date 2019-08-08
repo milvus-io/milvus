@@ -6,7 +6,7 @@
 #include "EngineFactory.h"
 //#include "FaissExecutionEngine.h"
 #include "ExecutionEngineImpl.h"
-#include "Log.h"
+#include "db/Log.h"
 
 namespace zilliz {
 namespace milvus {
