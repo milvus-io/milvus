@@ -4,11 +4,11 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "MySQLMetaImpl.h"
-#include "IDGenerator.h"
-#include "Utils.h"
-#include "Log.h"
+#include "db/IDGenerator.h"
+#include "db/Utils.h"
+#include "db/Log.h"
 #include "MetaConsts.h"
-#include "Factories.h"
+#include "db/Factories.h"
 #include "metrics/Metrics.h"
 
 #include <unistd.h>

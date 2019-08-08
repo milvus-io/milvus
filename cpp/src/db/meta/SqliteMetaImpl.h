@@ -6,7 +6,7 @@
 #pragma once
 
 #include "Meta.h"
-#include "Options.h"
+#include "db/Options.h"
 
 #include <mutex>
 
@@ -17,9 +17,9 @@ namespace meta {
 
 auto StoragePrototype(const std::string &path);
 
-class DBMetaImpl : public Meta {
+class SqliteMetaImpl : public Meta {
  public:
-    explicit DBMetaImpl(const DBMetaOptions &options_);
+    explicit SqliteMetaImpl(const DBMetaOptions &options_);
 
     Status
     CreateTable(TableSchema &table_schema) override;
@@ -91,7 +91,7 @@ class DBMetaImpl : public Meta {
 
     Status Count(const std::string &table_id, uint64_t &result) override;
 
-    ~DBMetaImpl() override;
+    ~SqliteMetaImpl() override;
 
  private:
     Status NextFileId(std::string &file_id);

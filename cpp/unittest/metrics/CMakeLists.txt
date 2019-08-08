@@ -11,8 +11,10 @@
 include_directories(../../src)
 
 
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/db db_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_src)
@@ -44,7 +46,10 @@ include_directories(/usr/include/mysql)
 set(count_test_src
         ${config_files}
         ${cache_srcs}
-        ${db_srcs}
+        ${db_main_files}
+        ${db_engine_files}
+        ${db_insert_files}
+        ${db_meta_files}
         ${db_scheduler_srcs}
         ${wrapper_src}
         ${knowhere_src}
