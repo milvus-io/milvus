@@ -1,10 +1,9 @@
 /*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+* Unauthorized copying of this file, via any medium is strictly prohibited.
+* Proprietary and confidential.
+******************************************************************************/
 #include "Status.h"
-
 
 namespace milvus {
 
@@ -93,17 +92,23 @@ std::string Status::CodeAsString() const {
 
     const char *type = nullptr;
     switch (code()) {
-        case StatusCode::OK: type = "OK";
+        case StatusCode::OK:
+            type = "OK";
             break;
-        case StatusCode::InvalidAgument: type = "Invalid agument";
+        case StatusCode::InvalidAgument:
+            type = "Invalid agument";
             break;
-        case StatusCode::UnknownError: type = "Unknown error";
+        case StatusCode::UnknownError:
+            type = "Unknown error";
             break;
-        case StatusCode::NotSupported: type = "Not Supported";
+        case StatusCode::NotSupported:
+            type = "Not Supported";
             break;
-        case StatusCode::NotConnected: type = "Not Connected";
+        case StatusCode::NotConnected:
+            type = "Not Connected";
             break;
-        default: type = "Unknown";
+        default:
+            type = "Unknown";
             break;
     }
     return std::string(type);
@@ -120,3 +125,4 @@ std::string Status::ToString() const {
 }
 
 }
+
