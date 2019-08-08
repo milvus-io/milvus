@@ -13,8 +13,11 @@ namespace milvus {
 namespace server {
 class MilvusServer {
 public:
-    static void StartService();
-    static void StopService();
+    static void
+    StartService();
+
+    static void
+    StopService();
 };
 
 }
