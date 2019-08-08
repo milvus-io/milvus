@@ -9,21 +9,22 @@
 #include <iostream>
 #include <time.h>
 #include <chrono>
+#include <thread>
 #include <unistd.h>
 
-using namespace ::milvus;
+using namespace milvus;
 
 namespace {
     std::string GetTableName();
 
-    static const std::string TABLE_NAME = GetTableName();
-    static constexpr int64_t TABLE_DIMENSION = 512;
-    static constexpr int64_t BATCH_ROW_COUNT = 100000;
-    static constexpr int64_t NQ = 10;
-    static constexpr int64_t TOP_K = 10;
-    static constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    static constexpr int64_t ADD_VECTOR_LOOP = 10;
-    static constexpr int64_t SECONDS_EACH_HOUR = 3600;
+    const std::string TABLE_NAME = GetTableName();
+    constexpr int64_t TABLE_DIMENSION = 512;
+    constexpr int64_t BATCH_ROW_COUNT = 100000;
+    constexpr int64_t NQ = 10;
+    constexpr int64_t TOP_K = 10;
+    constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
+    constexpr int64_t ADD_VECTOR_LOOP = 1;
+    constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
@@ -37,7 +38,7 @@ namespace {
     }
 
     void PrintSearchResult(const std::vector<std::pair<int64_t, RowRecord>>& search_record_array,
-            const std::vector<TopKQueryResult>& topk_query_result_array) {
+                           const std::vector<TopKQueryResult>& topk_query_result_array) {
         BLOCK_SPLITER
         std::cout << "Returned result count: " << topk_query_result_array.size() << std::endl;
 
@@ -46,8 +47,8 @@ namespace {
             auto search_id = search_record_array[index].first;
             index++;
             std::cout << "No." << std::to_string(index) << " vector " << std::to_string(search_id)
-                << " top " << std::to_string(result.query_result_arrays.size())
-                << " search result:" << std::endl;
+                      << " top " << std::to_string(result.query_result_arrays.size())
+                      << " search result:" << std::endl;
             for(auto& item : result.query_result_arrays) {
                 std::cout << "\t" << std::to_string(item.id) << "\tdistance:" << std::to_string(item.distance);
                 std::cout << std::endl;
@@ -123,8 +124,8 @@ namespace {
 
     class TimeRecorder {
     public:
-        TimeRecorder(const std::string& title)
-        : title_(title) {
+        explicit TimeRecorder(const std::string& title)
+                : title_(title) {
             start_ = std::chrono::system_clock::now();
         }
 
@@ -148,9 +149,9 @@ namespace {
             auto search_id = search_record_array[index++].first;
             if(result_id != search_id) {
                 std::cout << "The top 1 result is wrong: " << result_id
-                    << " vs. " << search_id << std::endl;
+                          << " vs. " << search_id << std::endl;
             } else {
-                std::cout << "No." << index-1 << " Check result successfully" << std::endl;
+                std::cout << "Check result sucessfully" << std::endl;
             }
         }
         BLOCK_SPLITER
@@ -209,6 +210,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "All tables: " << std::endl;
         for(auto& table : tables) {
             int64_t row_count = 0;
+//            conn->DropTable(table);
             stat = conn->GetTableRowCount(table, row_count);
             std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
         }
@@ -232,23 +234,73 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "DescribeTable function call status: " << stat.ToString() << std::endl;
         PrintTableSchema(tb_schema);
     }
+//
+//    Connection::Destroy(conn);
 
-    //add vectors
+//    pid_t pid;
+//    for (int i = 0; i < 5; ++i) {
+//        pid = fork();
+//        if (pid == 0 || pid == -1) {
+//            break;
+//        }
+//    }
+//    if (pid == -1) {
+//        std::cout << "fail to fork!\n";
+//        exit(1);
+//    } else if (pid == 0) {
+//        std::shared_ptr<Connection> conn = Connection::Create();
+//
+//        {//connect server
+//            ConnectParam param = {address, port};
+//            Status stat = conn->Connect(param);
+//            std::cout << "Connect function call status: " << stat.ToString() << std::endl;
+//        }
+//
+//        {//server version
+//            std::string version = conn->ServerVersion();
+//            std::cout << "Server version: " << version << std::endl;
+//        }
+//        Connection::Destroy(conn);
+//        exit(0);
+//    } else {
+//        std::shared_ptr<Connection> conn = Connection::Create();
+//
+//        {//connect server
+//            ConnectParam param = {address, port};
+//            Status stat = conn->Connect(param);
+//            std::cout << "Connect function call status: " << stat.ToString() << std::endl;
+//        }
+//
+//        {//server version
+//            std::string version = conn->ServerVersion();
+//            std::cout << "Server version: " << version << std::endl;
+//        }
+//        Connection::Destroy(conn);
+//        std::cout << "in main process\n";
+//        exit(0);
+//    }
+
     std::vector<std::pair<int64_t, RowRecord>> search_record_array;
-    for (int i = 0; i < ADD_VECTOR_LOOP; i++) {
-        TimeRecorder recorder("Add vector No." + std::to_string(i));
-        std::vector<RowRecord> record_array;
-        int64_t begin_index = i * BATCH_ROW_COUNT;
-        BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array);
-        std::vector<int64_t> record_ids;
-        Status stat = conn->AddVector(TABLE_NAME, record_array, record_ids);
-        std::cout << "AddVector function call status: " << stat.ToString() << std::endl;
-        std::cout << "Returned id array count: " << record_ids.size() << std::endl;
+    {//insert vectors
+        for (int i = 0; i < ADD_VECTOR_LOOP; i++) {//add vectors
+            std::vector<RowRecord> record_array;
+            int64_t begin_index = i * BATCH_ROW_COUNT;
+            BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array);
+            std::vector<int64_t> record_ids;
 
-        if(i == 0) {
-            for(int64_t k = SEARCH_TARGET; k < SEARCH_TARGET + NQ; k++) {
+            auto start = std::chrono::high_resolution_clock::now();
+
+            Status stat = conn->InsertVector(TABLE_NAME, record_array, record_ids);
+            auto finish = std::chrono::high_resolution_clock::now();
+            std::cout << "InsertVector cost: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
+
+
+            std::cout << "InsertVector function call status: " << stat.ToString() << std::endl;
+            std::cout << "Returned id array count: " << record_ids.size() << std::endl;
+
+            if(search_record_array.size() < NQ) {
                 search_record_array.push_back(
-                        std::make_pair(record_ids[k], record_array[k]));
+                        std::make_pair(record_ids[SEARCH_TARGET], record_array[SEARCH_TARGET]));
             }
         }
     }
@@ -259,7 +311,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//wait unit build index finish
-        TimeRecorder recorder("Build index");
         std::cout << "Wait until build all index done" << std::endl;
         Status stat = conn->BuildIndex(TABLE_NAME);
         std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;
@@ -270,7 +321,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//delete table
-        Status stat = conn->DeleteTable(TABLE_NAME);
+        Status stat = conn->DropTable(TABLE_NAME);
         std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
     }
 
@@ -279,6 +330,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "Server status before disconnect: " << status << std::endl;
     }
     Connection::Destroy(conn);
+//    conn->Disconnect();
     {//server status
         std::string status = conn->ServerStatus();
         std::cout << "Server status after disconnect: " << status << std::endl;

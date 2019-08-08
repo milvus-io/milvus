@@ -11,14 +11,14 @@ include_directories(../../include)
 
 link_directories(${CMAKE_BINARY_DIR})
 
-add_executable(sdk_simple
+add_executable(thrift_sdk_simple
         ./main.cpp
         ${src_files}
         )
 
-target_link_libraries(sdk_simple
-        milvus_sdk
+target_link_libraries(thrift_sdk_simple
+        milvus_thrift_sdk
         pthread
         )
 
-install(TARGETS sdk_simple DESTINATION bin)
+install(TARGETS thrift_sdk_simple DESTINATION bin)

@@ -35,7 +35,7 @@ TEST_F(MetricTest, Metric_Tes) {
     zilliz::milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL*1024*1024*1024);
     std::cout<<zilliz::milvus::cache::CpuCacheMgr::GetInstance()->CacheCapacity()<<std::endl;
 
-    static const std::string group_name = "test_group";
+    static const char* group_name = "test_group";
     static const int group_dim = 256;
 
     engine::meta::TableSchema group_info;

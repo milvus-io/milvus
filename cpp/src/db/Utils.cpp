@@ -18,10 +18,10 @@ namespace utils {
 
 namespace {
 
-static const std::string TABLES_FOLDER = "/tables/";
+const char* TABLES_FOLDER = "/tables/";
 
-static uint64_t index_file_counter = 0;
-static std::mutex index_file_counter_mutex;
+uint64_t index_file_counter = 0;
+std::mutex index_file_counter_mutex;
 
 std::string ConstructParentFolder(const std::string& db_path, const meta::TableFileSchema& table_file) {
     std::string table_path = db_path + TABLES_FOLDER + table_file.table_id_;
