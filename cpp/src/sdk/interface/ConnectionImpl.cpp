@@ -4,7 +4,6 @@
 * Proprietary and confidential.
 ******************************************************************************/
 #include "ConnectionImpl.h"
-#include "version.h"
 
 namespace milvus {
 

@@ -62,14 +62,16 @@ BaseTask::~BaseTask() {
     WaitToFinish();
 }
 
-ServerError BaseTask::Execute() {
+ServerError
+BaseTask::Execute() {
     error_code_ = OnExecute();
     done_ = true;
     finish_cond_.notify_all();
     return error_code_;
 }
 
-ServerError BaseTask::SetError(ServerError error_code, const std::string& error_msg) {
+ServerError
+BaseTask::SetError(ServerError error_code, const std::string& error_msg) {
     error_code_ = error_code;
     error_msg_ = error_msg;
 
@@ -77,7 +79,8 @@ ServerError BaseTask::SetError(ServerError error_code, const std::string& error_
     return error_code_;
 }
 
-ServerError BaseTask::WaitToFinish() {
+ServerError
+BaseTask::WaitToFinish() {
     std::unique_lock <std::mutex> lock(finish_mtx_);
     finish_cond_.wait(lock, [this] { return done_; });
 
@@ -94,7 +97,8 @@ RequestScheduler::~RequestScheduler() {
     Stop();
 }
 
-void RequestScheduler::ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status *grpc_status) {
+void
+RequestScheduler::ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status *grpc_status) {
     if(task_ptr == nullptr) {
         return;
     }
@@ -112,7 +116,8 @@ void RequestScheduler::ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status *g
     }
 }
 
-void RequestScheduler::Start() {
+void
+RequestScheduler::Start() {
     if(!stopped_) {
         return;
     }
@@ -120,7 +125,8 @@ void RequestScheduler::Start() {
     stopped_ = false;
 }
 
-void RequestScheduler::Stop() {
+void
+RequestScheduler::Stop() {
     if(stopped_) {
         return;
     }
@@ -145,7 +151,8 @@ void RequestScheduler::Stop() {
     SERVER_LOG_INFO << "Scheduler stopped";
 }
 
-ServerError RequestScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
+ServerError
+RequestScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
     if(task_ptr == nullptr) {
         return SERVER_NULL_POINTER;
     }
@@ -188,7 +195,8 @@ namespace {
     }
 }
 
-ServerError RequestScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
+ServerError 
+RequestScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
 
     std::string group_name = task_ptr->TaskGroup();

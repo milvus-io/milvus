@@ -21,6 +21,7 @@ public:
      *
      * This method is used to create table
      *
+     * @param context, add context for every RPC
      * @param request, used to provide table information to be created.
      * @param response, used to get the status
      *
@@ -28,6 +29,7 @@ public:
      *
      * @param request
      * @param response
+     * @param context
      */
     ::grpc::Status
     CreateTable(::grpc::ServerContext* context,
@@ -38,6 +40,7 @@ public:
      *
      * This method is used to test table existence.
      *
+     * @param context, add context for every RPC
      * @param request, table name is going to be tested.
      * @param response, get the bool reply of hastable
      *
@@ -45,6 +48,7 @@ public:
      *
      * @param request
      * @param response
+     * @param context
      */
     ::grpc::Status
     HasTable(::grpc::ServerContext* context,
@@ -55,6 +59,7 @@ public:
      *
      * This method is used to drop table.
      *
+     * @param context, add context for every RPC
      * @param request, table name is going to be deleted.
      * @param response, get the status of droptable
      *
@@ -62,6 +67,7 @@ public:
      *
      * @param request
      * @param response
+     * @param context
      */
     ::grpc::Status
     DropTable(::grpc::ServerContext* context,
@@ -72,6 +78,7 @@ public:
      *
      * This method is used to build index by table in sync.
      *
+     * @param context, add context for every RPC
      * @param request, table name is going to be built index.
      * @param response, get the status of buildindex
      *
@@ -79,6 +86,7 @@ public:
      *
      * @param request
      * @param response
+     * @param context
      */
     ::grpc::Status
     BuildIndex(::grpc::ServerContext* context,
@@ -90,11 +98,13 @@ public:
      *
      * This method is used to insert vector array to table.
      *
+     * @param context, add context for every RPC
      * @param request, table_name is inserted.
      * @param response, vector array is inserted.
      *
      * @return status
      *
+     * @param context
      * @param request
      * @param response
      */
@@ -107,6 +117,7 @@ public:
      *
      * This method is used to query vector in table.
      *
+     * @param context, add context for every RPC
      * @param request:
      *               table_name, table_name is queried.
      *               query_record_array, all vector are going to be queried.
@@ -116,6 +127,8 @@ public:
      * @param writer, write query result array.
      *
      * @return status
+     *
+     * @param context
      * @param request
      * @param writer
      */
@@ -128,6 +141,7 @@ public:
    *
    * This method is used to query vector in specified files.
    *
+   * @param context, add context for every RPC
    * @param request:
    *                file_id_array, specified files id array, queried.
    *                query_record_array, all vector are going to be queried.
@@ -138,6 +152,7 @@ public:
    *
    * @return status
    *
+   * @param context
    * @param request
    * @param writer
    */
@@ -150,11 +165,15 @@ public:
      *
      * This method is used to get table schema.
      *
-     * @param table_name, target table name.
+     * @param context, add context for every RPC
+     * @param request, target table name.
+     * @param response, table schema
      *
-     * @return table schema
+     * @return status
      *
-     * @param table_name
+     * @param context
+     * @param request
+     * @param response
      */
     ::grpc::Status
     DescribeTable(::grpc::ServerContext* context,
@@ -165,11 +184,15 @@ public:
      *
      * This method is used to get table row count.
      *
-     * @param table_name, target table name.
+     * @param context, add context for every RPC
+     * @param request, target table name.
+     * @param response, table row count
      *
      * @return table row count
      *
-     * @param table_name
+     * @param request
+     * @param response
+     * @param context
      */
     ::grpc::Status
     GetTableRowCount(::grpc::ServerContext* context,
@@ -180,8 +203,15 @@ public:
      *
      * This method is used to list all tables.
      *
+     * @param context, add context for every RPC
+     * @param request, show table command, usually not use
+     * @param writer, write tables to client
      *
      * @return status
+     *
+     * @param context
+     * @param request
+     * @param writer
      */
     ::grpc::Status
     ShowTables(::grpc::ServerContext* context,
@@ -192,10 +222,15 @@ public:
      *
      *
      * This method is used to give the server status.
+     * @param context, add context for every RPC
+     * @param request, give server command
+     * @param response, server status
      *
      * @return status
      *
-     * @param cmd
+     * @param context
+     * @param request
+     * @param response
      */
     ::grpc::Status
     Ping(::grpc::ServerContext* context,

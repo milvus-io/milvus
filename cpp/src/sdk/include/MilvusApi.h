@@ -113,7 +113,8 @@ class Connection {
      * @return Indicate if connect is successful
      */
 
-    virtual Status Connect(const ConnectParam &param) = 0;
+    virtual Status
+    Connect(const ConnectParam &param) = 0;
 
     /**
      * @brief Connect
@@ -125,7 +126,8 @@ class Connection {
      *
      * @return Indicate if connect is successful
      */
-    virtual Status Connect(const std::string &uri) = 0;
+    virtual Status
+    Connect(const std::string &uri) = 0;
 
     /**
      * @brief connected
@@ -134,7 +136,8 @@ class Connection {
      *
      * @return Indicate if connection status
      */
-    virtual Status Connected() const = 0;
+    virtual Status
+    Connected() const = 0;
 
     /**
      * @brief Disconnect
@@ -143,7 +146,8 @@ class Connection {
      *
      * @return Indicate if disconnect is successful
      */
-    virtual Status Disconnect() = 0;
+    virtual Status
+    Disconnect() = 0;
 
 
     /**
@@ -155,7 +159,8 @@ class Connection {
      *
      * @return Indicate if table is created successfully
      */
-    virtual Status CreateTable(const TableSchema &param) = 0;
+    virtual Status
+    CreateTable(const TableSchema &param) = 0;
 
 
     /**
@@ -167,7 +172,8 @@ class Connection {
      *
      * @return Indicate if table is cexist
      */
-    virtual bool HasTable(const std::string &table_name) = 0;
+    virtual bool
+    HasTable(const std::string &table_name) = 0;
 
 
     /**
@@ -179,9 +185,11 @@ class Connection {
      *
      * @return Indicate if table is delete successfully.
      */
-    virtual Status DropTable(const std::string &table_name) = 0;
+    virtual Status
+    DropTable(const std::string &table_name) = 0;
 
-    virtual Status DeleteTable(const std::string &table_name) = 0;
+    virtual Status
+    DeleteTable(const std::string &table_name) = 0;
 
 
     /**
@@ -193,7 +201,8 @@ class Connection {
      *
      * @return Indicate if build index successfully.
      */
-    virtual Status BuildIndex(const std::string &table_name) = 0;
+    virtual Status
+    BuildIndex(const std::string &table_name) = 0;
 
     /**
      * @brief Add vector to table
@@ -206,11 +215,13 @@ class Connection {
      *
      * @return Indicate if vector array are inserted successfully
      */
-    virtual Status InsertVector(const std::string &table_name,
+    virtual Status
+    InsertVector(const std::string &table_name,
                              const std::vector<RowRecord> &record_array,
                              std::vector<int64_t> &id_array) = 0;
 
-    virtual Status AddVector(const std::string &table_name,
+    virtual Status
+    AddVector(const std::string &table_name,
                              const std::vector<RowRecord> &record_array,
                              std::vector<int64_t> &id_array) = 0;
 
@@ -228,7 +239,8 @@ class Connection {
      *
      * @return Indicate if query is successful.
      */
-    virtual Status SearchVector(const std::string &table_name,
+    virtual Status
+    SearchVector(const std::string &table_name,
                                 const std::vector<RowRecord> &query_record_array,
                                 const std::vector<Range> &query_range_array,
                                 int64_t topk,
@@ -244,7 +256,8 @@ class Connection {
      *
      * @return Indicate if this operation is successful.
      */
-    virtual Status DescribeTable(const std::string &table_name, TableSchema &table_schema) = 0;
+    virtual Status
+    DescribeTable(const std::string &table_name, TableSchema &table_schema) = 0;
 
     /**
      * @brief Get table row count
@@ -256,7 +269,8 @@ class Connection {
      *
      * @return Indicate if this operation is successful.
      */
-    virtual Status GetTableRowCount(const std::string &table_name, int64_t &row_count) = 0;
+    virtual Status
+    GetTableRowCount(const std::string &table_name, int64_t &row_count) = 0;
 
     /**
      * @brief Show all tables in database
@@ -267,7 +281,8 @@ class Connection {
      *
      * @return Indicate if this operation is successful.
      */
-    virtual Status ShowTables(std::vector<std::string> &table_array) = 0;
+    virtual Status
+    ShowTables(std::vector<std::string> &table_array) = 0;
 
     /**
      * @brief Give the client version
@@ -276,7 +291,8 @@ class Connection {
      *
      * @return Client version.
      */
-    virtual std::string ClientVersion() const = 0;
+    virtual std::string
+    ClientVersion() const = 0;
 
     /**
      * @brief Give the server version
@@ -285,7 +301,8 @@ class Connection {
      *
      * @return Server version.
      */
-    virtual std::string ServerVersion() const = 0;
+    virtual std::string
+    ServerVersion() const = 0;
 
     /**
      * @brief Give the server status
@@ -294,7 +311,8 @@ class Connection {
      *
      * @return Server status.
      */
-    virtual std::string ServerStatus() const = 0;
+    virtual std::string
+    ServerStatus() const = 0;
 };
 
 }
