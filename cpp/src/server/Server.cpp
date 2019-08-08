@@ -9,7 +9,6 @@
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
-#include "license/LicenseCheck.h"
 #include "metrics/Metrics.h"
 
 #include <fcntl.h>
@@ -152,19 +151,6 @@ Server::Start() {
             ServerConfig &config = ServerConfig::GetInstance();
             ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
 
-#ifdef ENABLE_LICENSE
-            ConfigNode license_config = config.GetConfig(CONFIG_LICENSE);
-            std::string license_file_path = license_config.GetValue(CONFIG_LICENSE_PATH);
-            SERVER_LOG_INFO << "License path: " << license_file_path;
-
-            if(server::LicenseCheck::LegalityCheck(license_file_path) != SERVER_SUCCESS) {
-                SERVER_LOG_ERROR << "License check failed";
-                exit(1);
-            }
-
-            server::LicenseCheck::GetInstance().StartCountingDown(license_file_path);
-#endif
-
             // Handle Signal
             signal(SIGINT, SignalUtil::HandleSignal);
             signal(SIGHUP, SignalUtil::HandleSignal);
@@ -216,9 +202,6 @@ Server::Stop() {
 
     StopService();
 
-#ifdef ENABLE_LICENSE
-    server::LicenseCheck::GetInstance().StopCountingDown();
-#endif
     std::cout << "Milvus server is closed!" << std::endl;
 }
 
