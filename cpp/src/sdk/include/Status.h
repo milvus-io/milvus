@@ -63,7 +63,8 @@ public:
      * @param status, status to be copied.
      *
      */
-    inline Status(const Status &status);
+    inline
+    Status(const Status &status);
 
     /**
      * @brief Status
@@ -74,7 +75,8 @@ public:
      * @return, the status is assigned.
      *
      */
-    Status &operator=(const Status &s);
+    Status
+    &operator=(const Status &s);
 
     /**
      * @brief Status
@@ -84,7 +86,8 @@ public:
      * @param status, status to be moved.
      *
      */
-    inline Status(Status &&s) noexcept : state_(s.state_) {};
+    inline
+    Status(Status &&s) noexcept : state_(s.state_) {};
 
     /**
      * @brief Status
@@ -95,7 +98,8 @@ public:
      * @return, the status is moved.
      *
      */
-    Status &operator=(Status &&s) noexcept;
+    Status
+    &operator=(Status &&s) noexcept;
 
     /**
      * @brief Status
@@ -106,7 +110,8 @@ public:
      * @return, the status after AND operation.
      *
      */
-    inline Status operator&(const Status &s) const noexcept;
+    inline
+    Status operator&(const Status &s) const noexcept;
 
     /**
      * @brief Status
@@ -117,7 +122,8 @@ public:
      * @return, the status after AND operation.
      *
      */
-    inline Status operator&(Status &&s) const noexcept;
+    inline
+    Status operator&(Status &&s) const noexcept;
 
     /**
      * @brief Status
@@ -128,7 +134,8 @@ public:
      * @return, the status after AND operation.
      *
      */
-    inline Status &operator&=(const Status &s) noexcept;
+    inline
+    Status &operator&=(const Status &s) noexcept;
 
     /**
      * @brief Status
@@ -139,7 +146,8 @@ public:
      * @return, the status after AND operation.
      *
      */
-    inline Status &operator&=(Status &&s) noexcept;
+    inline
+    Status &operator&=(Status &&s) noexcept;
 
     /**
      * @brief OK
@@ -149,7 +157,8 @@ public:
      * @return, the status with OK.
      *
      */
-    static Status OK() { return Status(); }
+    static
+    Status OK() { return Status(); }
 
     /**
      * @brief OK
@@ -161,7 +170,8 @@ public:
      *
      */
     template<typename... Args>
-    static Status OK(Args &&... args) {
+    static Status
+    OK(Args &&... args) {
         return Status(StatusCode::OK, MessageBuilder(std::forward<Args>(args)...));
 }
 
@@ -175,7 +185,8 @@ public:
  *
  */
 template<typename... Args>
-static Status Invalid(Args &&... args) {
+static Status
+Invalid(Args &&... args) {
     return Status(StatusCode::InvalidAgument,
                   MessageBuilder(std::forward<Args>(args)...));
 }
@@ -190,7 +201,8 @@ static Status Invalid(Args &&... args) {
  *
  */
 template<typename... Args>
-static Status UnknownError(Args &&... args) {
+static Status
+UnknownError(Args &&... args) {
     return Status(StatusCode::UnknownError, MessageBuilder(std::forward<Args>(args)...));
 }
 
@@ -204,7 +216,8 @@ static Status UnknownError(Args &&... args) {
  *
  */
 template<typename... Args>
-static Status NotSupported(Args &&... args) {
+static Status
+NotSupported(Args &&... args) {
     return Status(StatusCode::NotSupported, MessageBuilder(std::forward<Args>(args)...));
 }
 
@@ -216,7 +229,8 @@ static Status NotSupported(Args &&... args) {
  * @return, if the status indicates success.
  *
  */
-bool ok() const { return (state_ == nullptr); }
+bool
+ok() const { return (state_ == nullptr); }
 
 /**
  * @brief IsInvalid
@@ -226,7 +240,8 @@ bool ok() const { return (state_ == nullptr); }
  * @return, if the status indicates invalid.
  *
  */
-bool IsInvalid() const { return code() == StatusCode::InvalidAgument; }
+bool
+IsInvalid() const { return code() == StatusCode::InvalidAgument; }
 
 /**
  * @brief IsUnknownError
@@ -236,7 +251,8 @@ bool IsInvalid() const { return code() == StatusCode::InvalidAgument; }
  * @return, if the status indicates unknown error.
  *
  */
-bool IsUnknownError() const { return code() == StatusCode::UnknownError; }
+bool
+IsUnknownError() const { return code() == StatusCode::UnknownError; }
 
 /**
  * @brief IsNotSupported
@@ -246,7 +262,8 @@ bool IsUnknownError() const { return code() == StatusCode::UnknownError; }
  * @return, if the status indicates not supported.
  *
  */
-bool IsNotSupported() const { return code() == StatusCode::NotSupported; }
+bool
+IsNotSupported() const { return code() == StatusCode::NotSupported; }
 
 /**
  * @brief ToString
@@ -256,7 +273,8 @@ bool IsNotSupported() const { return code() == StatusCode::NotSupported; }
  * @return, error message string.
  *
  */
-std::string ToString() const;
+std::string
+ToString() const;
 
 /**
  * @brief CodeAsString
@@ -266,7 +284,8 @@ std::string ToString() const;
  * @return, a string representation of the status code.
  *
  */
-std::string CodeAsString() const;
+std::string
+CodeAsString() const;
 
 /**
  * @brief code
@@ -276,7 +295,8 @@ std::string CodeAsString() const;
  * @return, the status code value attached to this status.
  *
  */
-StatusCode code() const { return ok() ? StatusCode::OK : state_->code; }
+StatusCode
+code() const { return ok() ? StatusCode::OK : state_->code; }
 
 /**
  * @brief message
@@ -286,7 +306,8 @@ StatusCode code() const { return ok() ? StatusCode::OK : state_->code; }
  * @return, the specific error message attached to this status.
  *
  */
-std::string message() const { return ok() ? "" : state_->message; }
+std::string
+message() const { return ok() ? "" : state_->message; }
 
 private:
 struct State {
@@ -298,28 +319,34 @@ struct State {
 // a `State` structure containing the error code and message.
 State *state_ = nullptr;
 
-void DeleteState() {
+void
+DeleteState() {
     delete state_;
     state_ = nullptr;
 }
 
-void CopyFrom(const Status &s);
+void
+CopyFrom(const Status &s);
 
-inline void MoveFrom(Status &s);
+inline void
+MoveFrom(Status &s);
 
 template<typename Head>
-static void MessageBuilderRecursive(std::stringstream &stream, Head &&head) {
+static void
+MessageBuilderRecursive(std::stringstream &stream, Head &&head) {
     stream << head;
 }
 
 template<typename Head, typename... Tail>
-static void MessageBuilderRecursive(std::stringstream &stream, Head &&head, Tail &&... tail) {
+static void
+MessageBuilderRecursive(std::stringstream &stream, Head &&head, Tail &&... tail) {
     MessageBuilderRecursive(stream, std::forward<Head>(head));
     MessageBuilderRecursive(stream, std::forward<Tail>(tail)...);
 }
 
 template<typename... Args>
-static std::string MessageBuilder(Args &&... args) {
+static std::string
+MessageBuilder(Args &&... args) {
     std::stringstream stream;
 
     MessageBuilderRecursive(stream, std::forward<Args>(args)...);
