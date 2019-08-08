@@ -4,16 +4,16 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "DBImpl.h"
-#include "DBMetaImpl.h"
+#include "src/db/meta/SqliteMetaImpl.h"
 #include "Log.h"
-#include "EngineFactory.h"
+#include "engine/EngineFactory.h"
 #include "Factories.h"
 #include "metrics/Metrics.h"
 #include "scheduler/TaskScheduler.h"
 
 #include "scheduler/context/DeleteContext.h"
 #include "utils/TimeRecorder.h"
-#include "MetaConsts.h"
+#include "meta/MetaConsts.h"
 
 #include <assert.h>
 #include <chrono>

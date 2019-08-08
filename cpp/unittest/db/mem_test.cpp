@@ -1,16 +1,16 @@
 #include "gtest/gtest.h"
 
-#include "db/VectorSource.h"
-#include "db/MemTableFile.h"
-#include "db/MemTable.h"
+#include "db/insert/VectorSource.h"
+#include "db/insert/MemTableFile.h"
+#include "db/insert/MemTable.h"
 #include "utils.h"
 #include "db/Factories.h"
 #include "db/Constants.h"
-#include "db/EngineFactory.h"
+#include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
-#include "db/MetaConsts.h"
-#include "boost/filesystem.hpp"
+#include "db/meta/MetaConsts.h"
 
+#include <boost/filesystem.hpp>
 #include <thread>
 #include <fstream>
 #include <iostream>
@@ -47,7 +47,7 @@ void BuildVectors(int64_t n, std::vector<float> &vectors) {
 
 TEST_F(NewMemManagerTest, VECTOR_SOURCE_TEST) {
 
-    std::shared_ptr<engine::meta::DBMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
+    std::shared_ptr<engine::meta::SqliteMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
 
     engine::meta::TableSchema table_schema = BuildTableSchema();
     auto status = impl_->CreateTable(table_schema);
@@ -90,7 +90,7 @@ TEST_F(NewMemManagerTest, VECTOR_SOURCE_TEST) {
 
 TEST_F(NewMemManagerTest, MEM_TABLE_FILE_TEST) {
 
-    std::shared_ptr<engine::meta::DBMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
+    std::shared_ptr<engine::meta::SqliteMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
     auto options = engine::OptionsFactory::Build();
 
     engine::meta::TableSchema table_schema = BuildTableSchema();
@@ -134,7 +134,7 @@ TEST_F(NewMemManagerTest, MEM_TABLE_FILE_TEST) {
 
 TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
 
-    std::shared_ptr<engine::meta::DBMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
+    std::shared_ptr<engine::meta::SqliteMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
     auto options = engine::OptionsFactory::Build();
 
     engine::meta::TableSchema table_schema = BuildTableSchema();

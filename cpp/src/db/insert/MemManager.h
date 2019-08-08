@@ -7,7 +7,7 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-class MemManagerAbstract {
+class MemManager {
  public:
 
     virtual Status InsertVectors(const std::string &table_id,
@@ -25,7 +25,7 @@ class MemManagerAbstract {
 
 }; // MemManagerAbstract
 
-using MemManagerAbstractPtr = std::shared_ptr<MemManagerAbstract>;
+using MemManagerAbstractPtr = std::shared_ptr<MemManager>;
 
 } // namespace engine
 } // namespace milvus

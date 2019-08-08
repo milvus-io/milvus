@@ -3,12 +3,12 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "DBMetaImpl.h"
-#include "IDGenerator.h"
-#include "Utils.h"
-#include "Log.h"
+#include "SqliteMetaImpl.h"
+#include "db/IDGenerator.h"
+#include "db/Utils.h"
+#include "db/Log.h"
 #include "MetaConsts.h"
-#include "Factories.h"
+#include "db/Factories.h"
 #include "metrics/Metrics.h"
 
 #include <unistd.h>
@@ -83,7 +83,7 @@ using ConnectorT = decltype(StoragePrototype(""));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
 using ConditionT = decltype(c(&TableFileSchema::id_) == 1UL);
 
-Status DBMetaImpl::NextTableId(std::string &table_id) {
+Status SqliteMetaImpl::NextTableId(std::string &table_id) {
     std::stringstream ss;
     SimpleIDGenerator g;
     ss << g.GetNextIDNumber();
@@ -91,7 +91,7 @@ Status DBMetaImpl::NextTableId(std::string &table_id) {
     return Status::OK();
 }
 
-Status DBMetaImpl::NextFileId(std::string &file_id) {
+Status SqliteMetaImpl::NextFileId(std::string &file_id) {
     std::stringstream ss;
     SimpleIDGenerator g;
     ss << g.GetNextIDNumber();
@@ -99,12 +99,12 @@ Status DBMetaImpl::NextFileId(std::string &file_id) {
     return Status::OK();
 }
 
-DBMetaImpl::DBMetaImpl(const DBMetaOptions &options_)
+SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions &options_)
     : options_(options_) {
     Initialize();
 }
 
-Status DBMetaImpl::Initialize() {
+Status SqliteMetaImpl::Initialize() {
     if (!boost::filesystem::is_directory(options_.path)) {
         auto ret = boost::filesystem::create_directory(options_.path);
         if (!ret) {
@@ -125,7 +125,7 @@ Status DBMetaImpl::Initialize() {
 }
 
 // PXU TODO: Temp solution. Will fix later
-Status DBMetaImpl::DropPartitionsByDates(const std::string &table_id,
+Status SqliteMetaImpl::DropPartitionsByDates(const std::string &table_id,
                                          const DatesT &dates) {
     if (dates.size() == 0) {
         return Status::OK();
@@ -165,7 +165,7 @@ Status DBMetaImpl::DropPartitionsByDates(const std::string &table_id,
     return Status::OK();
 }
 
-Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
+Status SqliteMetaImpl::CreateTable(TableSchema &table_schema) {
 
     try {
         MetricCollector metric;
@@ -209,7 +209,7 @@ Status DBMetaImpl::CreateTable(TableSchema &table_schema) {
     return Status::OK();
 }
 
-Status DBMetaImpl::DeleteTable(const std::string& table_id) {
+Status SqliteMetaImpl::DeleteTable(const std::string& table_id) {
     try {
         MetricCollector metric;
 
@@ -244,7 +244,7 @@ Status DBMetaImpl::DeleteTable(const std::string& table_id) {
     return Status::OK();
 }
 
-Status DBMetaImpl::DeleteTableFiles(const std::string& table_id) {
+Status SqliteMetaImpl::DeleteTableFiles(const std::string& table_id) {
     try {
         MetricCollector metric;
 
@@ -269,7 +269,7 @@ Status DBMetaImpl::DeleteTableFiles(const std::string& table_id) {
     return Status::OK();
 }
 
-Status DBMetaImpl::DescribeTable(TableSchema &table_schema) {
+Status SqliteMetaImpl::DescribeTable(TableSchema &table_schema) {
     try {
         MetricCollector metric;
 
@@ -299,7 +299,7 @@ Status DBMetaImpl::DescribeTable(TableSchema &table_schema) {
     return Status::OK();
 }
 
-Status DBMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) {
+Status SqliteMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) {
     has = false;
     try {
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
@@ -353,7 +353,7 @@ Status DBMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) {
     return Status::OK();
 }
 
-Status DBMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
+Status SqliteMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
     has_or_not = false;
 
     try {
@@ -374,7 +374,7 @@ Status DBMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
     return Status::OK();
 }
 
-Status DBMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
+Status SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
     try {
         MetricCollector metric;
 
@@ -404,7 +404,7 @@ Status DBMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
     return Status::OK();
 }
 
-Status DBMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
+Status SqliteMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
     if (file_schema.date_ == EmptyDate) {
         file_schema.date_ = Meta::GetDate();
     }
@@ -440,7 +440,7 @@ Status DBMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
     return Status::OK();
 }
 
-Status DBMetaImpl::FilesToIndex(TableFilesSchema &files) {
+Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
     files.clear();
 
     try {
@@ -490,7 +490,7 @@ Status DBMetaImpl::FilesToIndex(TableFilesSchema &files) {
     return Status::OK();
 }
 
-Status DBMetaImpl::FilesToSearch(const std::string &table_id,
+Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                                  const DatesT &partition,
                                  DatePartionedTableFilesSchema &files) {
     files.clear();
@@ -589,7 +589,7 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
     return Status::OK();
 }
 
-Status DBMetaImpl::FilesToSearch(const std::string &table_id,
+Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                                  const std::vector<size_t> &ids,
                                  const DatesT &partition,
                                  DatePartionedTableFilesSchema &files) {
@@ -662,7 +662,7 @@ Status DBMetaImpl::FilesToSearch(const std::string &table_id,
     return Status::OK();
 }
 
-Status DBMetaImpl::FilesToMerge(const std::string &table_id,
+Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
                                 DatePartionedTableFilesSchema &files) {
     files.clear();
 
@@ -710,7 +710,7 @@ Status DBMetaImpl::FilesToMerge(const std::string &table_id,
     return Status::OK();
 }
 
-Status DBMetaImpl::GetTableFiles(const std::string& table_id,
+Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
                                  const std::vector<size_t>& ids,
                                  TableFilesSchema& table_files) {
     try {
@@ -754,7 +754,7 @@ Status DBMetaImpl::GetTableFiles(const std::string& table_id,
 }
 
 // PXU TODO: Support Swap
-Status DBMetaImpl::Archive() {
+Status SqliteMetaImpl::Archive() {
     auto &criterias = options_.archive_conf.GetCriterias();
     if (criterias.size() == 0) {
         return Status::OK();
@@ -794,7 +794,7 @@ Status DBMetaImpl::Archive() {
     return Status::OK();
 }
 
-Status DBMetaImpl::Size(uint64_t &result) {
+Status SqliteMetaImpl::Size(uint64_t &result) {
     result = 0;
     try {
         auto files = ConnectorPtr->select(columns(&TableFileSchema::size_,
@@ -821,7 +821,7 @@ Status DBMetaImpl::Size(uint64_t &result) {
     return Status::OK();
 }
 
-Status DBMetaImpl::DiscardFiles(long to_discard_size) {
+Status SqliteMetaImpl::DiscardFiles(long to_discard_size) {
     if (to_discard_size <= 0) {
         return Status::OK();
     }
@@ -883,7 +883,7 @@ Status DBMetaImpl::DiscardFiles(long to_discard_size) {
     return DiscardFiles(to_discard_size);
 }
 
-Status DBMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
+Status SqliteMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     file_schema.updated_time_ = utils::GetMicroSecTimeStamp();
     try {
         MetricCollector metric;
@@ -910,7 +910,7 @@ Status DBMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     return Status::OK();
 }
 
-Status DBMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
+Status SqliteMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
     try {
         MetricCollector metric;
 
@@ -932,7 +932,7 @@ Status DBMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
     return Status::OK();
 }
 
-Status DBMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
+Status SqliteMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
     try {
         MetricCollector metric;
 
@@ -977,7 +977,7 @@ Status DBMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
     return Status::OK();
 }
 
-Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
+Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
     auto now = utils::GetMicroSecTimeStamp();
     try {
         MetricCollector metric;
@@ -1052,7 +1052,7 @@ Status DBMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
     return Status::OK();
 }
 
-Status DBMetaImpl::CleanUp() {
+Status SqliteMetaImpl::CleanUp() {
     try {
         MetricCollector metric;
 
@@ -1086,7 +1086,7 @@ Status DBMetaImpl::CleanUp() {
     return Status::OK();
 }
 
-Status DBMetaImpl::Count(const std::string &table_id, uint64_t &result) {
+Status SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 
     try {
         MetricCollector metric;
@@ -1120,14 +1120,14 @@ Status DBMetaImpl::Count(const std::string &table_id, uint64_t &result) {
     return Status::OK();
 }
 
-Status DBMetaImpl::DropAll() {
+Status SqliteMetaImpl::DropAll() {
     if (boost::filesystem::is_directory(options_.path)) {
         boost::filesystem::remove_all(options_.path);
     }
     return Status::OK();
 }
 
-DBMetaImpl::~DBMetaImpl() {
+SqliteMetaImpl::~SqliteMetaImpl() {
     CleanUp();
 }
 
