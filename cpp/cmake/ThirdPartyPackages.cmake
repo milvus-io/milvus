@@ -2640,7 +2640,7 @@ macro(build_grpc)
     add_dependencies(grpc_protoc grpc_ep)
 endmacro()
 
-if(NOT MILVUS_WITH_THRIFT STREQUAL "ON")
+#if(NOT MILVUS_WITH_THRIFT STREQUAL "ON")
     resolve_dependency(GRPC)
 
     get_target_property(GRPC_INCLUDE_DIR grpc INTERFACE_INCLUDE_DIRECTORIES)
@@ -2651,4 +2651,4 @@ if(NOT MILVUS_WITH_THRIFT STREQUAL "ON")
     include_directories(SYSTEM ${GRPC_THIRD_PARTY_DIR}/protobuf/src)
     link_directories(SYSTEM ${GRPC_PROTOBUF_LIB_DIR})
 
-endif()
+#endif()
