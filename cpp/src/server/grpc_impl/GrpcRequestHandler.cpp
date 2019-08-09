@@ -1,8 +1,8 @@
 /*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+* Unauthorized copying of this file, via any medium is strictly prohibited.
+* Proprietary and confidential.
+******************************************************************************/
 
 #include "GrpcRequestHandler.h"
 #include "GrpcRequestTask.h"
@@ -11,6 +11,7 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
+namespace grpc {
 
 ::grpc::Status
 GrpcRequestHandler::CreateTable(::grpc::ServerContext *context,
@@ -38,9 +39,9 @@ GrpcRequestHandler::HasTable(::grpc::ServerContext *context,
 }
 
 ::grpc::Status
-GrpcRequestHandler::DropTable(::grpc::ServerContext* context,
-                              const ::milvus::grpc::TableName* request,
-                              ::milvus::grpc::Status* response) {
+GrpcRequestHandler::DropTable(::grpc::ServerContext *context,
+                              const ::milvus::grpc::TableName *request,
+                              ::milvus::grpc::Status *response) {
 
     BaseTaskPtr task_ptr = DropTableTask::Create(request->table_name());
     GrpcRequestScheduler::ExecTask(task_ptr, response);
@@ -48,9 +49,9 @@ GrpcRequestHandler::DropTable(::grpc::ServerContext* context,
 }
 
 ::grpc::Status
-GrpcRequestHandler::BuildIndex(::grpc::ServerContext* context,
-                               const ::milvus::grpc::TableName* request,
-                               ::milvus::grpc::Status* response) {
+GrpcRequestHandler::BuildIndex(::grpc::ServerContext *context,
+                               const ::milvus::grpc::TableName *request,
+                               ::milvus::grpc::Status *response) {
 
     BaseTaskPtr task_ptr = BuildIndexTask::Create(request->table_name());
     GrpcRequestScheduler::ExecTask(task_ptr, response);
@@ -58,9 +59,9 @@ GrpcRequestHandler::BuildIndex(::grpc::ServerContext* context,
 }
 
 ::grpc::Status
-GrpcRequestHandler::InsertVector(::grpc::ServerContext* context,
-                                 const ::milvus::grpc::InsertInfos* request,
-                                 ::milvus::grpc::VectorIds* response) {
+GrpcRequestHandler::InsertVector(::grpc::ServerContext *context,
+                                 const ::milvus::grpc::InsertInfos *request,
+                                 ::milvus::grpc::VectorIds *response) {
 
     BaseTaskPtr task_ptr = InsertVectorTask::Create(*request, *response);
     ::milvus::grpc::Status grpc_status;
@@ -71,9 +72,9 @@ GrpcRequestHandler::InsertVector(::grpc::ServerContext* context,
 }
 
 ::grpc::Status
-GrpcRequestHandler::SearchVector(::grpc::ServerContext* context,
-                                 const ::milvus::grpc::SearchVectorInfos* request,
-                                 ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult>* writer) {
+GrpcRequestHandler::SearchVector(::grpc::ServerContext *context,
+                                 const ::milvus::grpc::SearchVectorInfos *request,
+                                 ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) {
 
     std::vector<std::string> file_id_array;
     BaseTaskPtr task_ptr = SearchVectorTask::Create(*request, file_id_array, *writer);
@@ -88,9 +89,9 @@ GrpcRequestHandler::SearchVector(::grpc::ServerContext* context,
 }
 
 ::grpc::Status
-GrpcRequestHandler::SearchVectorInFiles(::grpc::ServerContext* context,
-                                        const ::milvus::grpc::SearchVectorInFilesInfos* request,
-                                        ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult>* writer) {
+GrpcRequestHandler::SearchVectorInFiles(::grpc::ServerContext *context,
+                                        const ::milvus::grpc::SearchVectorInFilesInfos *request,
+                                        ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) {
 
     std::vector<std::string> file_id_array;
     BaseTaskPtr task_ptr = SearchVectorTask::Create(request->search_vector_infos(), file_id_array, *writer);
@@ -105,9 +106,9 @@ GrpcRequestHandler::SearchVectorInFiles(::grpc::ServerContext* context,
 }
 
 ::grpc::Status
-GrpcRequestHandler::DescribeTable(::grpc::ServerContext* context,
-                                  const ::milvus::grpc::TableName* request,
-                                  ::milvus::grpc::TableSchema* response) {
+GrpcRequestHandler::DescribeTable(::grpc::ServerContext *context,
+                                  const ::milvus::grpc::TableName *request,
+                                  ::milvus::grpc::TableSchema *response) {
 
     BaseTaskPtr task_ptr = DescribeTableTask::Create(request->table_name(), *response);
     ::milvus::grpc::Status grpc_status;
@@ -118,9 +119,9 @@ GrpcRequestHandler::DescribeTable(::grpc::ServerContext* context,
 }
 
 ::grpc::Status
-GrpcRequestHandler::GetTableRowCount(::grpc::ServerContext* context,
-                                     const ::milvus::grpc::TableName* request,
-                                     ::milvus::grpc::TableRowCount* response) {
+GrpcRequestHandler::GetTableRowCount(::grpc::ServerContext *context,
+                                     const ::milvus::grpc::TableName *request,
+                                     ::milvus::grpc::TableRowCount *response) {
 
     int64_t row_count = 0;
     BaseTaskPtr task_ptr = GetTableRowCountTask::Create(request->table_name(), row_count);
@@ -133,9 +134,9 @@ GrpcRequestHandler::GetTableRowCount(::grpc::ServerContext* context,
 }
 
 ::grpc::Status
-GrpcRequestHandler::ShowTables(::grpc::ServerContext* context,
-                               const ::milvus::grpc::Command* request,
-                               ::grpc::ServerWriter<::milvus::grpc::TableName>* writer) {
+GrpcRequestHandler::ShowTables(::grpc::ServerContext *context,
+                               const ::milvus::grpc::Command *request,
+                               ::grpc::ServerWriter<::milvus::grpc::TableName> *writer) {
 
     BaseTaskPtr task_ptr = ShowTablesTask::Create(*writer);
     ::milvus::grpc::Status grpc_status;
@@ -149,9 +150,9 @@ GrpcRequestHandler::ShowTables(::grpc::ServerContext* context,
 }
 
 ::grpc::Status
-GrpcRequestHandler::Ping(::grpc::ServerContext* context,
-                         const ::milvus::grpc::Command* request,
-                         ::milvus::grpc::ServerStatus* response) {
+GrpcRequestHandler::Ping(::grpc::ServerContext *context,
+                         const ::milvus::grpc::Command *request,
+                         ::milvus::grpc::ServerStatus *response) {
 
     std::string result;
     BaseTaskPtr task_ptr = PingTask::Create(request->cmd(), result);
@@ -163,7 +164,7 @@ GrpcRequestHandler::Ping(::grpc::ServerContext* context,
     return ::grpc::Status::OK;
 }
 
-
+}
 }
 }
 }

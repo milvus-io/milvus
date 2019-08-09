@@ -1,8 +1,8 @@
 /*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+* Unauthorized copying of this file, via any medium is strictly prohibited.
+* Proprietary and confidential.
+******************************************************************************/
 #pragma once
 
 #include <cstdint>
@@ -14,6 +14,7 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
+namespace grpc {
 class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
 public:
     /**
@@ -32,8 +33,8 @@ public:
      * @param context
      */
     ::grpc::Status
-    CreateTable(::grpc::ServerContext* context,
-            const ::milvus::grpc::TableSchema* request, ::milvus::grpc::Status* response) override ;
+    CreateTable(::grpc::ServerContext *context,
+                const ::milvus::grpc::TableSchema *request, ::milvus::grpc::Status *response) override;
 
     /**
      * @brief Test table existence method
@@ -51,8 +52,8 @@ public:
      * @param context
      */
     ::grpc::Status
-    HasTable(::grpc::ServerContext* context,
-            const ::milvus::grpc::TableName* request, ::milvus::grpc::BoolReply* response) override ;
+    HasTable(::grpc::ServerContext *context,
+             const ::milvus::grpc::TableName *request, ::milvus::grpc::BoolReply *response) override;
 
     /**
      * @brief Drop table method
@@ -70,8 +71,8 @@ public:
      * @param context
      */
     ::grpc::Status
-    DropTable(::grpc::ServerContext* context,
-            const ::milvus::grpc::TableName* request, ::milvus::grpc::Status* response) override;
+    DropTable(::grpc::ServerContext *context,
+              const ::milvus::grpc::TableName *request, ::milvus::grpc::Status *response) override;
 
     /**
      * @brief build index by table method
@@ -89,8 +90,8 @@ public:
      * @param context
      */
     ::grpc::Status
-    BuildIndex(::grpc::ServerContext* context,
-            const ::milvus::grpc::TableName* request, ::milvus::grpc::Status* response) override;
+    BuildIndex(::grpc::ServerContext *context,
+               const ::milvus::grpc::TableName *request, ::milvus::grpc::Status *response) override;
 
 
     /**
@@ -109,8 +110,9 @@ public:
      * @param response
      */
     ::grpc::Status
-    InsertVector(::grpc::ServerContext* context,
-            const ::milvus::grpc::InsertInfos* request, ::milvus::grpc::VectorIds* response) override;
+    InsertVector(::grpc::ServerContext *context,
+                 const ::milvus::grpc::InsertInfos *request,
+                 ::milvus::grpc::VectorIds *response) override;
 
     /**
      * @brief Query vector
@@ -133,8 +135,9 @@ public:
      * @param writer
      */
     ::grpc::Status
-    SearchVector(::grpc::ServerContext* context,
-            const ::milvus::grpc::SearchVectorInfos* request, ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult>* writer) override;
+    SearchVector(::grpc::ServerContext *context,
+                 const ::milvus::grpc::SearchVectorInfos *request,
+                 ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) override;
 
     /**
    * @brief Internal use query interface
@@ -157,8 +160,9 @@ public:
    * @param writer
    */
     ::grpc::Status
-    SearchVectorInFiles(::grpc::ServerContext* context,
-            const ::milvus::grpc::SearchVectorInFilesInfos* request, ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult>* writer) override;
+    SearchVectorInFiles(::grpc::ServerContext *context,
+                        const ::milvus::grpc::SearchVectorInFilesInfos *request,
+                        ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) override;
 
     /**
      * @brief Get table schema
@@ -176,8 +180,9 @@ public:
      * @param response
      */
     ::grpc::Status
-    DescribeTable(::grpc::ServerContext* context,
-            const ::milvus::grpc::TableName* request, ::milvus::grpc::TableSchema* response) override;
+    DescribeTable(::grpc::ServerContext *context,
+                  const ::milvus::grpc::TableName *request,
+                  ::milvus::grpc::TableSchema *response) override;
 
     /**
      * @brief Get table row count
@@ -195,8 +200,9 @@ public:
      * @param context
      */
     ::grpc::Status
-    GetTableRowCount(::grpc::ServerContext* context,
-            const ::milvus::grpc::TableName* request, ::milvus::grpc::TableRowCount* response) override;
+    GetTableRowCount(::grpc::ServerContext *context,
+                     const ::milvus::grpc::TableName *request,
+                     ::milvus::grpc::TableRowCount *response) override;
 
     /**
      * @brief List all tables in database
@@ -214,8 +220,9 @@ public:
      * @param writer
      */
     ::grpc::Status
-    ShowTables(::grpc::ServerContext* context,
-            const ::milvus::grpc::Command* request, ::grpc::ServerWriter< ::milvus::grpc::TableName>* writer) override;
+    ShowTables(::grpc::ServerContext *context,
+               const ::milvus::grpc::Command *request,
+               ::grpc::ServerWriter<::milvus::grpc::TableName> *writer) override;
 
     /**
      * @brief Give the server status
@@ -233,13 +240,12 @@ public:
      * @param response
      */
     ::grpc::Status
-    Ping(::grpc::ServerContext* context,
-            const ::milvus::grpc::Command* request, ::milvus::grpc::ServerStatus* response) override;
+    Ping(::grpc::ServerContext *context,
+         const ::milvus::grpc::Command *request, ::milvus::grpc::ServerStatus *response) override;
 
 };
 }
 }
 }
-
-
+}
 
