@@ -5,11 +5,11 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include "Server.h"
 //#include "ServerConfig.h"
-#ifdef MILVUS_ENABLE_THRIFT
+//#ifdef MILVUS_ENABLE_THRIFT
 #include "server/thrift_impl/MilvusServer.h"
-#else
-#include "server/grpc_impl/MilvusServer.h"
-#endif
+//#else
+#include "server/grpc_impl/GrpcMilvusServer.h"
+//#endif
 
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
@@ -225,11 +225,12 @@ Server::LoadConfig() {
 void
 Server::StartService() {
     MilvusServer::StartService();
+    GrpcMilvusServer::StartService();
 }
 
 void
 Server::StopService() {
-    MilvusServer::StopService();
+    GrpcMilvusServer::StopService();
 }
 
 }

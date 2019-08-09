@@ -4,7 +4,6 @@
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
 
-
 aux_source_directory(cache cache_files)
 aux_source_directory(config config_files)
 aux_source_directory(server server_files)
@@ -78,17 +77,17 @@ include_directories(/usr/include/mysql)
 include_directories(grpc/gen-status)
 include_directories(grpc/gen-milvus)
 
-if (MILVUS_WITH_THRIFT STREQUAL "ON")
-    set(client_lib
+#if (MILVUS_WITH_THRIFT STREQUAL "ON")
+    set(client_thrift_lib
             thrift)
-else()
-    set(client_lib
+#else()
+    set(client_grpc_lib
             grpcpp_channelz
             grpc++
             grpc
             grpc_protobuf
             grpc_protoc)
-endif()
+#endif()
 
 set(third_party_libs
         knowhere
@@ -100,7 +99,8 @@ set(third_party_libs
         lapack
         easyloggingpp
         sqlite
-        ${client_lib}
+        ${client_thrift_lib}
+        ${client_grpc_lib}
         yaml-cpp
         prometheus-cpp-push
         prometheus-cpp-pull
@@ -197,7 +197,7 @@ set(knowhere_libs
         tbb
         )
 
-if (MILVUS_WITH_THRIFT STREQUAL "ON")
+#if (MILVUS_WITH_THRIFT STREQUAL "ON")
     add_executable(milvus_thrift_server
             ${config_files}
             ${server_files}
@@ -206,7 +206,7 @@ if (MILVUS_WITH_THRIFT STREQUAL "ON")
             ${thrift_service_files}
             ${metrics_files}
             )
-else()
+#else()
     add_executable(milvus_grpc_server
             ${config_files}
             ${server_files}
@@ -215,7 +215,15 @@ else()
             ${grpc_service_files}
             ${metrics_files}
             )
-endif()
+#endif()
+    add_executable(milvus_server
+            ${config_files}
+            ${server_files}
+            ${thriftserver_files}
+            ${grpcserver_files}
+            ${utils_files}
+            ${thrift_service_files}
+            ${metrics_files})
 
 if (ENABLE_LICENSE STREQUAL "ON")
 	add_executable(get_sys_info ${get_sys_info_files})
@@ -224,25 +232,28 @@ if (ENABLE_LICENSE STREQUAL "ON")
 	target_link_libraries(get_sys_info ${license_libs} license_check ${third_party_libs})
 	target_link_libraries(license_generator ${license_libs} ${third_party_libs})
 
-    if(MILVUS_WITH_THRIFT STREQUAL "ON")
+#    if(MILVUS_WITH_THRIFT STREQUAL "ON")
         target_link_libraries(milvus_thrift_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
-    else()
+#    else()
         target_link_libraries(milvus_grpc_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
-    endif()
+#    endif()
+    target_link_libraries(milvus_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
+
 else ()
-    if(MILVUS_WITH_THRIFT STREQUAL "ON")
+#    if(MILVUS_WITH_THRIFT STREQUAL "ON")
         target_link_libraries(milvus_thrift_server ${server_libs} ${knowhere_libs} ${third_party_libs})
-    else()
+#    else()
         target_link_libraries(milvus_grpc_server ${server_libs} ${knowhere_libs} ${third_party_libs})
-    endif()
-
+#    endif()
+        target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_party_libs})
 endif()
 
-if (MILVUS_WITH_THRIFT STREQUAL "ON")
+#if (MILVUS_WITH_THRIFT STREQUAL "ON")
     install(TARGETS milvus_thrift_server DESTINATION bin)
-else()
+#else()
     install(TARGETS milvus_grpc_server DESTINATION bin)
-endif()
+#endif()
+    install(TARGETS milvus_server DESTINATION bin)
 
 install(FILES
         ${KNOWHERE_BUILD_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}

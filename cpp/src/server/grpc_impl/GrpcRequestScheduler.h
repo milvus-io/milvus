@@ -17,10 +17,10 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-class BaseTask {
+class GrpcBaseTask {
 protected:
-    BaseTask(const std::string& task_group, bool async = false);
-    virtual ~BaseTask();
+    GrpcBaseTask(const std::string& task_group, bool async = false);
+    virtual ~GrpcBaseTask();
 
 public:
     ServerError
@@ -59,15 +59,15 @@ protected:
     std::string error_msg_;
 };
 
-using BaseTaskPtr = std::shared_ptr<BaseTask>;
+using BaseTaskPtr = std::shared_ptr<GrpcBaseTask>;
 using TaskQueue = BlockingQueue<BaseTaskPtr>;
 using TaskQueuePtr = std::shared_ptr<TaskQueue>;
 using ThreadPtr = std::shared_ptr<std::thread>;
 
-class RequestScheduler {
+class GrpcRequestScheduler {
 public:
-    static RequestScheduler& GetInstance() {
-        static RequestScheduler scheduler;
+    static GrpcRequestScheduler& GetInstance() {
+        static GrpcRequestScheduler scheduler;
         return scheduler;
     }
 
@@ -81,8 +81,8 @@ public:
     ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status* grpc_status);
 
 protected:
-    RequestScheduler();
-    virtual ~RequestScheduler();
+    GrpcRequestScheduler();
+    virtual ~GrpcRequestScheduler();
 
     ServerError
     PutTaskToQueue(const BaseTaskPtr& task_ptr);

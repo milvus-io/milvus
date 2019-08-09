@@ -3,7 +3,7 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "RequestTask.h"
+#include "GrpcRequestTask.h"
 #include "../ServerConfig.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -11,7 +11,7 @@
 #include "utils/ValidationUtil.h"
 #include "../DBWrapper.h"
 #include "version.h"
-#include "MilvusServer.h"
+#include "GrpcMilvusServer.h"
 
 #include "src/server/Server.h"
 
@@ -100,7 +100,7 @@ namespace {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 CreateTableTask::CreateTableTask(const ::milvus::grpc::TableSchema& schema)
-        : BaseTask(DDL_DML_TASK_GROUP),
+        : GrpcBaseTask(DDL_DML_TASK_GROUP),
           schema_(schema) {
 
 }
@@ -109,7 +109,7 @@ BaseTaskPtr
 CreateTableTask::Create(const ::milvus::grpc::TableSchema& schema) {
 //    BaseTaskPtr create_table_task_ptr = std::make_shared<CreateTableTask>(schema);
 //    return create_table_task_ptr;
-    return std::shared_ptr<BaseTask>(new CreateTableTask(schema));
+    return std::shared_ptr<GrpcBaseTask>(new CreateTableTask(schema));
 }
 
 ServerError
@@ -158,14 +158,14 @@ CreateTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DescribeTableTask::DescribeTableTask(const std::string &table_name, ::milvus::grpc::TableSchema& schema)
-        : BaseTask(DDL_DML_TASK_GROUP),
+        : GrpcBaseTask(DDL_DML_TASK_GROUP),
           table_name_(table_name),
           schema_(schema) {
 }
 
 BaseTaskPtr
 DescribeTableTask::Create(const std::string& table_name, ::milvus::grpc::TableSchema& schema) {
-    return std::shared_ptr<BaseTask>(new DescribeTableTask(table_name, schema));
+    return std::shared_ptr<GrpcBaseTask>(new DescribeTableTask(table_name, schema));
 }
 
 ServerError
@@ -204,13 +204,13 @@ DescribeTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 BuildIndexTask::BuildIndexTask(const std::string& table_name)
-        : BaseTask(DDL_DML_TASK_GROUP),
+        : GrpcBaseTask(DDL_DML_TASK_GROUP),
           table_name_(table_name) {
 }
 
 BaseTaskPtr
 BuildIndexTask::Create(const std::string& table_name) {
-    return std::shared_ptr<BaseTask>(new BuildIndexTask(table_name));
+    return std::shared_ptr<GrpcBaseTask>(new BuildIndexTask(table_name));
 }
 
 ServerError
@@ -250,7 +250,7 @@ BuildIndexTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 HasTableTask::HasTableTask(const std::string& table_name, bool& has_table)
-        : BaseTask(DDL_DML_TASK_GROUP),
+        : GrpcBaseTask(DDL_DML_TASK_GROUP),
           table_name_(table_name),
           has_table_(has_table) {
 
@@ -258,7 +258,7 @@ HasTableTask::HasTableTask(const std::string& table_name, bool& has_table)
 
 BaseTaskPtr
 HasTableTask::Create(const std::string& table_name, bool& has_table) {
-    return std::shared_ptr<BaseTask>(new HasTableTask(table_name, has_table));
+    return std::shared_ptr<GrpcBaseTask>(new HasTableTask(table_name, has_table));
 }
 
 ServerError
@@ -288,14 +288,14 @@ HasTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DropTableTask::DropTableTask(const std::string& table_name)
-        : BaseTask(DDL_DML_TASK_GROUP),
+        : GrpcBaseTask(DDL_DML_TASK_GROUP),
           table_name_(table_name) {
 
 }
 
 BaseTaskPtr
 DropTableTask::Create(const std::string& table_name) {
-    return std::shared_ptr<BaseTask>(new DropTableTask(table_name));
+    return std::shared_ptr<GrpcBaseTask>(new DropTableTask(table_name));
 }
 
 ServerError
@@ -340,14 +340,14 @@ DropTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ShowTablesTask::ShowTablesTask(::grpc::ServerWriter< ::milvus::grpc::TableName>& writer)
-        : BaseTask(DDL_DML_TASK_GROUP),
+        : GrpcBaseTask(DDL_DML_TASK_GROUP),
           writer_(writer) {
 
 }
 
 BaseTaskPtr
 ShowTablesTask::Create(::grpc::ServerWriter< ::milvus::grpc::TableName>& writer) {
-    return std::shared_ptr<BaseTask>(new ShowTablesTask(writer));
+    return std::shared_ptr<GrpcBaseTask>(new ShowTablesTask(writer));
 }
 
 ServerError
@@ -371,7 +371,7 @@ ShowTablesTask::OnExecute() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 InsertVectorTask::InsertVectorTask(const ::milvus::grpc::InsertInfos& insert_infos,
                                    ::milvus::grpc::VectorIds& record_ids)
-        : BaseTask(DDL_DML_TASK_GROUP),
+        : GrpcBaseTask(DDL_DML_TASK_GROUP),
           insert_infos_(insert_infos),
           record_ids_(record_ids) {
     record_ids_.Clear();
@@ -380,7 +380,7 @@ InsertVectorTask::InsertVectorTask(const ::milvus::grpc::InsertInfos& insert_inf
 BaseTaskPtr
 InsertVectorTask::Create(const ::milvus::grpc::InsertInfos& insert_infos,
                                   ::milvus::grpc::VectorIds& record_ids) {
-    return std::shared_ptr<BaseTask>(new InsertVectorTask(insert_infos, record_ids));
+    return std::shared_ptr<GrpcBaseTask>(new InsertVectorTask(insert_infos, record_ids));
 }
 
 ServerError
@@ -477,7 +477,7 @@ InsertVectorTask::OnExecute() {
 SearchVectorTask::SearchVectorTask(const ::milvus::grpc::SearchVectorInfos& search_vector_infos,
                                    const std::vector<std::string>& file_id_array,
                                    ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult>& writer)
-        : BaseTask(DQL_TASK_GROUP),
+        : GrpcBaseTask(DQL_TASK_GROUP),
           search_vector_infos_(search_vector_infos),
           file_id_array_(file_id_array),
           writer_(writer) {
@@ -488,7 +488,7 @@ BaseTaskPtr
 SearchVectorTask::Create(const ::milvus::grpc::SearchVectorInfos& search_vector_infos,
                                      const std::vector<std::string>& file_id_array,
                                      ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult>& writer) {
-    return std::shared_ptr<BaseTask>(new SearchVectorTask(search_vector_infos, file_id_array,
+    return std::shared_ptr<GrpcBaseTask>(new SearchVectorTask(search_vector_infos, file_id_array,
                                                           writer));
 }
 
@@ -630,7 +630,7 @@ SearchVectorTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 GetTableRowCountTask::GetTableRowCountTask(const std::string& table_name, int64_t& row_count)
-        : BaseTask(DDL_DML_TASK_GROUP),
+        : GrpcBaseTask(DDL_DML_TASK_GROUP),
           table_name_(table_name),
           row_count_(row_count) {
 
@@ -638,7 +638,7 @@ GetTableRowCountTask::GetTableRowCountTask(const std::string& table_name, int64_
 
 BaseTaskPtr
 GetTableRowCountTask::Create(const std::string& table_name, int64_t& row_count) {
-    return std::shared_ptr<BaseTask>(new GetTableRowCountTask(table_name, row_count));
+    return std::shared_ptr<GrpcBaseTask>(new GetTableRowCountTask(table_name, row_count));
 }
 
 ServerError
@@ -673,7 +673,7 @@ GetTableRowCountTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 PingTask::PingTask(const std::string& cmd, std::string& result)
-        : BaseTask(PING_TASK_GROUP),
+        : GrpcBaseTask(PING_TASK_GROUP),
           cmd_(cmd),
           result_(result) {
 
@@ -681,7 +681,7 @@ PingTask::PingTask(const std::string& cmd, std::string& result)
 
 BaseTaskPtr
 PingTask::Create(const std::string& cmd, std::string& result) {
-    return std::shared_ptr<BaseTask>(new PingTask(cmd, result));
+    return std::shared_ptr<GrpcBaseTask>(new PingTask(cmd, result));
 }
 
 ServerError

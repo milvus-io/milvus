@@ -14,7 +14,7 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
-class RequestHandler final : public ::milvus::grpc::MilvusService::Service {
+class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
 public:
     /**
      * @brief Create table method
