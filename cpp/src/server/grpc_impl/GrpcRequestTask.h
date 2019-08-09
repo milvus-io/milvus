@@ -4,7 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #pragma once
-#include "RequestScheduler.h"
+#include "GrpcRequestScheduler.h"
 #include "utils/Error.h"
 #include "db/Types.h"
 
@@ -19,7 +19,7 @@ namespace milvus {
 namespace server {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class CreateTableTask : public BaseTask {
+class CreateTableTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const ::milvus::grpc::TableSchema& schema);
@@ -36,7 +36,7 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class HasTableTask : public BaseTask {
+class HasTableTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const std::string& table_name, bool& has_table);
@@ -54,7 +54,7 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class DescribeTableTask : public BaseTask {
+class DescribeTableTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const std::string& table_name, ::milvus::grpc::TableSchema& schema);
@@ -72,7 +72,7 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class DropTableTask : public BaseTask {
+class DropTableTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const std::string& table_name);
@@ -90,7 +90,7 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class BuildIndexTask : public BaseTask {
+class BuildIndexTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const std::string& table_name);
@@ -108,7 +108,7 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class ShowTablesTask : public BaseTask {
+class ShowTablesTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(::grpc::ServerWriter< ::milvus::grpc::TableName>& writer);
@@ -125,7 +125,7 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class InsertVectorTask : public BaseTask {
+class InsertVectorTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const ::milvus::grpc::InsertInfos& insert_infos,
@@ -144,7 +144,7 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class SearchVectorTask : public BaseTask {
+class SearchVectorTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const ::milvus::grpc::SearchVectorInfos& searchVectorInfos,
@@ -166,7 +166,7 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class GetTableRowCountTask : public BaseTask {
+class GetTableRowCountTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const std::string& table_name, int64_t& row_count);
@@ -183,7 +183,7 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class PingTask : public BaseTask {
+class PingTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const std::string& cmd, std::string& result);

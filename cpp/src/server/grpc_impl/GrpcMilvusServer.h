@@ -11,7 +11,7 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
-class MilvusServer {
+class GrpcMilvusServer {
 public:
     static void
     StartService();
