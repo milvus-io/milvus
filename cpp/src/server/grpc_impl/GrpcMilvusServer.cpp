@@ -1,15 +1,15 @@
 /*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+* Unauthorized copying of this file, via any medium is strictly prohibited.
+* Proprietary and confidential.
+******************************************************************************/
 #include "milvus.grpc.pb.h"
-#include "MilvusServer.h"
+#include "GrpcMilvusServer.h"
 #include "../ServerConfig.h"
 #include "../DBWrapper.h"
 #include "utils/Log.h"
 #include "faiss/utils.h"
-#include "RequestHandler.h"
+#include "GrpcRequestHandler.h"
 
 #include <chrono>
 #include <iostream>
@@ -28,14 +28,15 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
+namespace grpc {
 
-static std::unique_ptr<grpc::Server> server;
+static std::unique_ptr<::grpc::Server> server;
 
 constexpr long MESSAGE_SIZE = -1;
 
 void
-MilvusServer::StartService() {
-    if (server != nullptr){
+GrpcMilvusServer::StartService() {
+    if (server != nullptr) {
         std::cout << "stopservice!\n";
         StopService();
     }
@@ -50,9 +51,9 @@ MilvusServer::StartService() {
 
     DBWrapper::DB();//initialize db
 
-    std::string server_address(address + ":" + std::to_string(port));
+    std::string server_address(address + ":" + std::to_string(port + 1));
 
-    grpc::ServerBuilder builder;
+    ::grpc::ServerBuilder builder;
     builder.SetMaxReceiveMessageSize(MESSAGE_SIZE); //default 4 * 1024 * 1024
     builder.SetMaxSendMessageSize(MESSAGE_SIZE);
 
@@ -60,9 +61,9 @@ MilvusServer::StartService() {
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_STREAM_GZIP);
     builder.SetDefaultCompressionLevel(GRPC_COMPRESS_LEVEL_HIGH);
 
-    RequestHandler service;
+    GrpcRequestHandler service;
 
-    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
 
     server = builder.BuildAndStart();
@@ -71,12 +72,13 @@ MilvusServer::StartService() {
 }
 
 void
-MilvusServer::StopService() {
+GrpcMilvusServer::StopService() {
     if (server != nullptr) {
         server->Shutdown();
     }
 }
 
+}
 }
 }
 }
