@@ -229,9 +229,6 @@ Server::StartService() {
     std::thread grpc_thread = std::thread(&grpc::GrpcMilvusServer::StartService);
     thrift_thread.join();
     grpc_thread.join();
-//
-//    MilvusServer::StartService();
-//    grpc::GrpcMilvusServer::StartService();
 }
 
 void
