@@ -60,6 +60,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-310 - Add milvus CPU utilization ratio and CPU/GPU temperature metrics
 - MS-324 - Show error when there is not enough gpu memory to build index
 - MS-328 - Check metric type on server start
+- MS-332 - Set grpc and thrift server run concurrently
 
 ## New Feature
 - MS-180 - Add new mem manager

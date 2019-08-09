@@ -223,6 +223,7 @@ set(knowhere_libs
             ${grpcserver_files}
             ${utils_files}
             ${thrift_service_files}
+            ${grpc_service_files}
             ${metrics_files})
 
 if (ENABLE_LICENSE STREQUAL "ON")

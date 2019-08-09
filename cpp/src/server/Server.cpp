@@ -3,6 +3,7 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
+#include <thread>
 #include "Server.h"
 //#include "ServerConfig.h"
 //#ifdef MILVUS_ENABLE_THRIFT
@@ -224,13 +225,19 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
-    MilvusServer::StartService();
-    GrpcMilvusServer::StartService();
+    std::thread thrift_thread = std::thread(&MilvusServer::StartService);
+    std::thread grpc_thread = std::thread(&grpc::GrpcMilvusServer::StartService);
+    thrift_thread.join();
+    grpc_thread.join();
+//
+//    MilvusServer::StartService();
+//    grpc::GrpcMilvusServer::StartService();
 }
 
 void
 Server::StopService() {
-    GrpcMilvusServer::StopService();
+    MilvusServer::StartService();
+    grpc::GrpcMilvusServer::StopService();
 }
 
 }
