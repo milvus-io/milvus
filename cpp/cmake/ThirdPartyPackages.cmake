@@ -460,6 +460,7 @@ else()
     set(GRPC_SOURCE_URL
             "http://git.zilliz.tech/kun.yu/grpc/-/archive/master/grpc-master.tar.gz")
 endif()
+set(GRPC_MD5 "7ec59ad54c85a12dcbbfede09bf413a9")
 
 # ----------------------------------------------------------------------
 # ARROW
