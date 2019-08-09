@@ -1,8 +1,8 @@
 /*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+* Unauthorized copying of this file, via any medium is strictly prohibited.
+* Proprietary and confidential.
+******************************************************************************/
 #pragma once
 
 #include "utils/BlockingQueue.h"
@@ -16,10 +16,12 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
+namespace grpc {
 
 class GrpcBaseTask {
 protected:
-    GrpcBaseTask(const std::string& task_group, bool async = false);
+    GrpcBaseTask(const std::string &task_group, bool async = false);
+
     virtual ~GrpcBaseTask();
 
 public:
@@ -46,7 +48,7 @@ protected:
     OnExecute() = 0;
 
     ServerError
-    SetError(ServerError error_code, const std::string& msg);
+    SetError(ServerError error_code, const std::string &msg);
 
 protected:
     mutable std::mutex finish_mtx_;
@@ -66,26 +68,28 @@ using ThreadPtr = std::shared_ptr<std::thread>;
 
 class GrpcRequestScheduler {
 public:
-    static GrpcRequestScheduler& GetInstance() {
+    static GrpcRequestScheduler &GetInstance() {
         static GrpcRequestScheduler scheduler;
         return scheduler;
     }
 
     void Start();
+
     void Stop();
 
     ServerError
-    ExecuteTask(const BaseTaskPtr& task_ptr);
+    ExecuteTask(const BaseTaskPtr &task_ptr);
 
     static void
-    ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status* grpc_status);
+    ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Status *grpc_status);
 
 protected:
     GrpcRequestScheduler();
+
     virtual ~GrpcRequestScheduler();
 
     ServerError
-    PutTaskToQueue(const BaseTaskPtr& task_ptr);
+    PutTaskToQueue(const BaseTaskPtr &task_ptr);
 
 private:
     mutable std::mutex queue_mtx_;
@@ -97,7 +101,7 @@ private:
     bool stopped_;
 };
 
-
+}
 }
 }
 }
