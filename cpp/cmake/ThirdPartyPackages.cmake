@@ -460,6 +460,7 @@ else()
     set(GRPC_SOURCE_URL
             "http://git.zilliz.tech/kun.yu/grpc/-/archive/master/grpc-master.tar.gz")
 endif()
+set(GRPC_MD5 "7ec59ad54c85a12dcbbfede09bf413a9")
 
 # ----------------------------------------------------------------------
 # ARROW
@@ -2589,24 +2590,62 @@ macro(build_grpc)
     set(GRPC_PROTOBUF_STATIC_LIB "${GRPC_PROTOBUF_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}protobuf${CMAKE_STATIC_LIBRARY_SUFFIX}")
     set(GRPC_PROTOC_STATIC_LIB "${GRPC_PROTOBUF_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}protoc${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-    externalproject_add(grpc_ep
-            URL
-            ${GRPC_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CONFIGURE_COMMAND
-            ""
-            BUILD_IN_SOURCE
-            1
-            BUILD_COMMAND
-            ${MAKE} ${MAKE_BUILD_ARGS} prefix=${GRPC_PREFIX}
-            INSTALL_COMMAND
-            ${MAKE} install prefix=${GRPC_PREFIX}
-            BUILD_BYPRODUCTS
-            ${GRPC_STATIC_LIB}
-            ${GRPC++_STATIC_LIB}
-            ${GRPCPP_CHANNELZ_STATIC_LIB}
-            ${GRPC_PROTOBUF_STATIC_LIB}
-            ${GRPC_PROTOC_STATIC_LIB})
+    if(USE_JFROG_CACHE STREQUAL "ON")
+        set(GRPC_CACHE_PACKAGE_NAME "grpc_${GRPC_MD5}.tar.gz")
+        set(GRPC_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${GRPC_CACHE_PACKAGE_NAME}")
+        set(GRPC_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${GRPC_CACHE_PACKAGE_NAME}")
+
+        execute_process(COMMAND wget -q --method HEAD ${GRPC_CACHE_URL} RESULT_VARIABLE return_code)
+        message(STATUS "Check the remote file ${GRPC_CACHE_URL}. return code = ${return_code}")
+        if (NOT return_code EQUAL 0)
+            externalproject_add(grpc_ep
+                    URL
+                    ${GRPC_SOURCE_URL}
+                    ${EP_LOG_OPTIONS}
+                    CONFIGURE_COMMAND
+                    ""
+                    BUILD_IN_SOURCE
+                    1
+                    BUILD_COMMAND
+                    ${MAKE} ${MAKE_BUILD_ARGS} prefix=${GRPC_PREFIX}
+                    INSTALL_COMMAND
+                    ${MAKE} install prefix=${GRPC_PREFIX}
+                    BUILD_BYPRODUCTS
+                    ${GRPC_STATIC_LIB}
+                    ${GRPC++_STATIC_LIB}
+                    ${GRPCPP_CHANNELZ_STATIC_LIB}
+                    ${GRPC_PROTOBUF_STATIC_LIB}
+                    ${GRPC_PROTOC_STATIC_LIB})
+
+            ExternalProject_Create_Cache(grpc_ep ${GRPC_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${GRPC_CACHE_URL})
+        else()
+            file(DOWNLOAD ${GRPC_CACHE_URL} ${GRPC_CACHE_PACKAGE_PATH} STATUS status)
+            list(GET status 0 status_code)
+            message(STATUS "DOWNLOADING FROM ${GRPC_CACHE_URL} TO ${GRPC_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
+            if (status_code EQUAL 0)
+                ExternalProject_Use_Cache(grpc_ep ${GRPC_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+            endif()
+        endif()
+    else()
+        externalproject_add(grpc_ep
+                URL
+                ${GRPC_SOURCE_URL}
+                ${EP_LOG_OPTIONS}
+                CONFIGURE_COMMAND
+                ""
+                BUILD_IN_SOURCE
+                1
+                BUILD_COMMAND
+                ${MAKE} ${MAKE_BUILD_ARGS} prefix=${GRPC_PREFIX}
+                INSTALL_COMMAND
+                ${MAKE} install prefix=${GRPC_PREFIX}
+                BUILD_BYPRODUCTS
+                ${GRPC_STATIC_LIB}
+                ${GRPC++_STATIC_LIB}
+                ${GRPCPP_CHANNELZ_STATIC_LIB}
+                ${GRPC_PROTOBUF_STATIC_LIB}
+                ${GRPC_PROTOC_STATIC_LIB})
+    endif()
 
     file(MAKE_DIRECTORY "${GRPC_INCLUDE_DIR}")
 
