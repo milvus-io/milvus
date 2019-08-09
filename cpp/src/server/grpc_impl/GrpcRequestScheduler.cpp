@@ -1,9 +1,9 @@
 /*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
-#include "RequestScheduler.h"
+* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
+* Unauthorized copying of this file, via any medium is strictly prohibited.
+* Proprietary and confidential.
+******************************************************************************/
+#include "GrpcRequestScheduler.h"
 #include "utils/Log.h"
 
 #include "src/grpc/gen-status/status.pb.h"
@@ -11,11 +11,12 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
+namespace grpc {
 
 using namespace ::milvus;
 
 namespace {
-    const std::map<ServerError, ::milvus::grpc::ErrorCode > &ErrorMap() {
+    const std::map<ServerError, ::milvus::grpc::ErrorCode> &ErrorMap() {
         static const std::map<ServerError, ::milvus::grpc::ErrorCode> code_map = {
                 {SERVER_UNEXPECTED_ERROR,         ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
                 {SERVER_UNSUPPORTED_ERROR,        ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
@@ -50,7 +51,7 @@ namespace {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-BaseTask::BaseTask(const std::string& task_group, bool async)
+GrpcBaseTask::GrpcBaseTask(const std::string &task_group, bool async)
         : task_group_(task_group),
           async_(async),
           done_(false),
@@ -58,12 +59,12 @@ BaseTask::BaseTask(const std::string& task_group, bool async)
 
 }
 
-BaseTask::~BaseTask() {
+GrpcBaseTask::~GrpcBaseTask() {
     WaitToFinish();
 }
 
 ServerError
-BaseTask::Execute() {
+GrpcBaseTask::Execute() {
     error_code_ = OnExecute();
     done_ = true;
     finish_cond_.notify_all();
@@ -71,7 +72,7 @@ BaseTask::Execute() {
 }
 
 ServerError
-BaseTask::SetError(ServerError error_code, const std::string& error_msg) {
+GrpcBaseTask::SetError(ServerError error_code, const std::string &error_msg) {
     error_code_ = error_code;
     error_msg_ = error_msg;
 
@@ -80,33 +81,33 @@ BaseTask::SetError(ServerError error_code, const std::string& error_msg) {
 }
 
 ServerError
-BaseTask::WaitToFinish() {
-    std::unique_lock <std::mutex> lock(finish_mtx_);
+GrpcBaseTask::WaitToFinish() {
+    std::unique_lock<std::mutex> lock(finish_mtx_);
     finish_cond_.wait(lock, [this] { return done_; });
 
     return error_code_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-RequestScheduler::RequestScheduler()
+GrpcRequestScheduler::GrpcRequestScheduler()
         : stopped_(false) {
     Start();
 }
 
-RequestScheduler::~RequestScheduler() {
+GrpcRequestScheduler::~GrpcRequestScheduler() {
     Stop();
 }
 
 void
-RequestScheduler::ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status *grpc_status) {
-    if(task_ptr == nullptr) {
+GrpcRequestScheduler::ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Status *grpc_status) {
+    if (task_ptr == nullptr) {
         return;
     }
 
-    RequestScheduler& scheduler = RequestScheduler::GetInstance();
+    GrpcRequestScheduler &scheduler = GrpcRequestScheduler::GetInstance();
     scheduler.ExecuteTask(task_ptr);
 
-    if(!task_ptr->IsAsync()) {
+    if (!task_ptr->IsAsync()) {
         task_ptr->WaitToFinish();
         ServerError err = task_ptr->ErrorCode();
         if (err != SERVER_SUCCESS) {
@@ -117,8 +118,8 @@ RequestScheduler::ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status *grpc_s
 }
 
 void
-RequestScheduler::Start() {
-    if(!stopped_) {
+GrpcRequestScheduler::Start() {
+    if (!stopped_) {
         return;
     }
 
@@ -126,23 +127,23 @@ RequestScheduler::Start() {
 }
 
 void
-RequestScheduler::Stop() {
-    if(stopped_) {
+GrpcRequestScheduler::Stop() {
+    if (stopped_) {
         return;
     }
 
     SERVER_LOG_INFO << "Scheduler gonna stop...";
     {
         std::lock_guard<std::mutex> lock(queue_mtx_);
-        for(auto iter : task_groups_) {
-            if(iter.second != nullptr) {
+        for (auto iter : task_groups_) {
+            if (iter.second != nullptr) {
                 iter.second->Put(nullptr);
             }
         }
     }
 
-    for(auto iter : execute_threads_) {
-        if(iter == nullptr)
+    for (auto iter : execute_threads_) {
+        if (iter == nullptr)
             continue;
 
         iter->join();
@@ -152,18 +153,18 @@ RequestScheduler::Stop() {
 }
 
 ServerError
-RequestScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
-    if(task_ptr == nullptr) {
+GrpcRequestScheduler::ExecuteTask(const BaseTaskPtr &task_ptr) {
+    if (task_ptr == nullptr) {
         return SERVER_NULL_POINTER;
     }
 
-        ServerError err = PutTaskToQueue(task_ptr);
-    if(err != SERVER_SUCCESS) {
-        SERVER_LOG_ERROR << "Put task to queue failed with code: " << err   ;
+    ServerError err = PutTaskToQueue(task_ptr);
+    if (err != SERVER_SUCCESS) {
+        SERVER_LOG_ERROR << "Put task to queue failed with code: " << err;
         return err;
     }
 
-    if(task_ptr->IsAsync()) {
+    if (task_ptr->IsAsync()) {
         return SERVER_SUCCESS;//async execution, caller need to call WaitToFinish at somewhere
     }
 
@@ -172,11 +173,11 @@ RequestScheduler::ExecuteTask(const BaseTaskPtr& task_ptr) {
 
 namespace {
     void TakeTaskToExecute(TaskQueuePtr task_queue) {
-        if(task_queue == nullptr) {
+        if (task_queue == nullptr) {
             return;
         }
 
-        while(true) {
+        while (true) {
             BaseTaskPtr task = task_queue->Take();
             if (task == nullptr) {
                 SERVER_LOG_ERROR << "Take null from task queue, stop thread";
@@ -185,22 +186,22 @@ namespace {
 
             try {
                 ServerError err = task->Execute();
-                if(err != SERVER_SUCCESS) {
+                if (err != SERVER_SUCCESS) {
                     SERVER_LOG_ERROR << "Task failed with code: " << err;
                 }
-            } catch (std::exception& ex) {
+            } catch (std::exception &ex) {
                 SERVER_LOG_ERROR << "Task failed to execute: " << ex.what();
             }
         }
     }
 }
 
-ServerError 
-RequestScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
+ServerError
+GrpcRequestScheduler::PutTaskToQueue(const BaseTaskPtr &task_ptr) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
 
     std::string group_name = task_ptr->TaskGroup();
-    if(task_groups_.count(group_name) > 0) {
+    if (task_groups_.count(group_name) > 0) {
         task_groups_[group_name]->Put(task_ptr);
     } else {
         TaskQueuePtr queue = std::make_shared<TaskQueue>();
@@ -216,6 +217,7 @@ RequestScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
     return SERVER_SUCCESS;
 }
 
+}
 }
 }
 }
