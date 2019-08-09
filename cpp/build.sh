@@ -18,6 +18,7 @@ do
         case $arg in
              t)
                 BUILD_TYPE=$OPTARG # BUILD_TYPE
+                KNOWHERE_OPTS="${KNOWHERE_OPTS} -t $OPTARG"
                 ;;
              u)
                 echo "Build and run unittest cases" ;
