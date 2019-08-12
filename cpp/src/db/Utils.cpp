@@ -131,7 +131,9 @@ Status GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& tab
         }
     }
 
-    return Status::Error("Table file doesn't exist: " + table_file.file_id_);
+    std::string msg = "Table file doesn't exist: " + table_file.file_id_;
+    ENGINE_LOG_ERROR << msg;
+    return Status::Error(msg);
 }
 
 Status DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
