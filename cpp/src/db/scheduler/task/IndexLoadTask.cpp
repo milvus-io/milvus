@@ -46,7 +46,20 @@ std::shared_ptr<IScheduleTask> IndexLoadTask::Execute() {
     ExecutionEnginePtr index_ptr = EngineFactory::Build(file_->dimension_,
                                                         file_->location_,
                                                         (EngineType)file_->engine_type_);
-    index_ptr->Load();
+
+    try {
+        index_ptr->Load();
+    } catch (std::exception& ex) {
+        //typical error: out of disk space or permition denied
+        std::string msg = "Failed to load index file: " + std::string(ex.what());
+        ENGINE_LOG_ERROR << msg;
+
+        for(auto& context : search_contexts_) {
+            context->IndexSearchDone(file_->id_);//mark as done avoid dead lock, even failed
+        }
+
+        return nullptr;
+    }
 
     size_t file_size = index_ptr->PhysicalSize();
 
