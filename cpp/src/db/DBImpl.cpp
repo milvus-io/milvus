@@ -482,7 +482,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
 
     meta_ptr_->Archive();
 
-    int ttl = 1;
+    int ttl = 5*meta::M_SEC;//default: file will be deleted after 5 minutes
     if (options_.mode == Options::MODE::CLUSTER) {
         ttl = meta::D_SEC;
     }
