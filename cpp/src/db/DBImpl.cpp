@@ -370,6 +370,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         const meta::TableFilesSchema& files) {
     ENGINE_LOG_DEBUG << "Merge files for table " << table_id;
 
+    //step 1: create table file
     meta::TableFileSchema table_file;
     table_file.table_id_ = table_id;
     table_file.date_ = date;
@@ -381,6 +382,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         return status;
     }
 
+    //step 2: merge files
     ExecutionEnginePtr index =
             EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_);
 
@@ -404,9 +406,25 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         if (index_size >= options_.index_trigger_size) break;
     }
 
+    //step 3: serialize to disk
+    try {
+        index->Serialize();
+    } catch (std::exception& ex) {
+        //typical error: out of disk space or permition denied
+        std::string msg = "Serialize merged index encounter exception" + std::string(ex.what());
+        ENGINE_LOG_ERROR << msg;
 
-    index->Serialize();
+        table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+        status = meta_ptr_->UpdateTableFile(table_file);
+        ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
 
+        std::cout << "ERROR: failed to persist merged index file: " << table_file.location_
+                  << ", possible out of disk space" << std::endl;
+
+        return Status::Error(msg);
+    }
+
+    //step 4: update table files state
     if (index_size >= options_.index_trigger_size) {
         table_file.file_type_ = meta::TableFileSchema::TO_INDEX;
     } else {
@@ -471,7 +489,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
 
     meta_ptr_->Archive();
 
-    int ttl = 1;
+    int ttl = 5*meta::M_SEC;//default: file will be deleted after 5 minutes
     if (options_.mode == Options::MODE::CLUSTER) {
         ttl = meta::D_SEC;
     }
