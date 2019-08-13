@@ -42,29 +42,41 @@ public:
     DropTable(const grpc::TableName& table_name);
 
     Status
-    BuildIndex(const grpc::TableName& table_name);
+    CreateIndex(const grpc::IndexParam& index_param);
 
     void
-    InsertVector(grpc::VectorIds& vector_ids,
-                      const grpc::InsertInfos& insert_infos,
+    Insert(grpc::VectorIds& vector_ids,
+                      const grpc::InsertParam& insert_param,
                       Status& status);
 
     Status
-    SearchVector(std::vector<grpc::TopKQueryResult>& result_array,
-                      const grpc::SearchVectorInfos& search_vector_infos);
+    Search(std::vector<grpc::TopKQueryResult>& result_array,
+                      const grpc::SearchParam& search_param);
 
     Status
     DescribeTable(grpc::TableSchema& grpc_schema,
                         const std::string& table_name);
 
     int64_t
-    GetTableRowCount(const std::string& table_name, Status& status);
+    CountTable(const std::string& table_name, Status& status);
 
     Status
     ShowTables(std::vector<std::string> &table_array);
 
     Status
-    Ping(std::string &result, const std::string& cmd);
+    Cmd(std::string &result, const std::string& cmd);
+
+    Status
+    DeleteByRange(grpc::DeleteByRangeParam &delete_by_range_param);
+
+    Status
+    PreloadTable(grpc::TableName &table_name);
+
+    Status
+    DescribeIndex(grpc::TableName &table_name, grpc::IndexParam &index_param);
+
+    Status
+    DropIndex(grpc::TableName &table_name);
 
     Status
     Disconnect();

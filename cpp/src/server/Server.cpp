@@ -225,15 +225,14 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
-    std::thread thrift_thread = std::thread(&MilvusServer::StartService);
-    std::thread grpc_thread = std::thread(&grpc::GrpcMilvusServer::StartService);
-    thrift_thread.join();
-    grpc_thread.join();
+//    std::thread thrift_thread = std::thread(&MilvusServer::StartService);
+    grpc::GrpcMilvusServer::StartService();
+//    thrift_thread.join();
 }
 
 void
 Server::StopService() {
-    MilvusServer::StartService();
+//    MilvusServer::StartService();
     grpc::GrpcMilvusServer::StopService();
 }
 

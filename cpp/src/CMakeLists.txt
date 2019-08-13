@@ -36,6 +36,7 @@ set(license_generator_files
         license/LicenseLibrary.cpp
         )
 
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
 set(thrift_service_files
         thrift/gen-cpp/MilvusService.cpp
         thrift/gen-cpp/milvus_constants.cpp
@@ -45,7 +46,7 @@ set(thrift_service_files
         server/thrift_impl/ThreadPoolServer.cpp
         server/thrift_impl/ThreadPoolServer.h
         )
-
+else()
 set(grpc_service_files
         metrics/SystemInfo.cpp
         metrics/SystemInfo.h
@@ -54,6 +55,7 @@ set(grpc_service_files
         grpc/gen-status/status.grpc.pb.cc
         grpc/gen-status/status.pb.cc
         )
+endif()
 
 set(db_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -79,17 +81,17 @@ include_directories(/usr/include/mysql)
 include_directories(grpc/gen-status)
 include_directories(grpc/gen-milvus)
 
-#if (MILVUS_WITH_THRIFT STREQUAL "ON")
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
     set(client_thrift_lib
             thrift)
-#else()
+else()
     set(client_grpc_lib
             grpcpp_channelz
             grpc++
             grpc
             grpc_protobuf
             grpc_protoc)
-#endif()
+endif()
 
 set(third_party_libs
         knowhere
@@ -199,34 +201,25 @@ set(knowhere_libs
         tbb
         )
 
-#if (MILVUS_WITH_THRIFT STREQUAL "ON")
-#    add_executable(milvus_thrift_server
-#            ${config_files}
-#            ${server_files}
-#            ${thriftserver_files}
-#            ${utils_files}
-#            ${thrift_service_files}
-#            ${metrics_files}
-#            )
-#else()
-#    add_executable(milvus_grpc_server
-#            ${config_files}
-#            ${server_files}
-#            ${grpcserver_files}
-#            ${utils_files}
-#            ${grpc_service_files}
-#            ${metrics_files}
-#            )
-#endif()
-add_executable(milvus_server
-        ${config_files}
-        ${server_files}
-        ${thriftserver_files}
-        ${grpcserver_files}
-        ${utils_files}
-        ${thrift_service_files}
-        ${grpc_service_files}
-        ${metrics_files})
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
+    add_executable(milvus_thrift_server
+            ${config_files}
+            ${server_files}
+            ${thriftserver_files}
+            ${utils_files}
+            ${thrift_service_files}
+            ${metrics_files}
+            )
+else()
+    add_executable(milvus_grpc_server
+            ${config_files}
+            ${server_files}
+            ${grpcserver_files}
+            ${utils_files}
+            ${grpc_service_files}
+            ${metrics_files}
+            )
+endif()
 
 if (ENABLE_LICENSE STREQUAL "ON")
 	add_executable(get_sys_info ${get_sys_info_files})
@@ -235,28 +228,25 @@ if (ENABLE_LICENSE STREQUAL "ON")
 	target_link_libraries(get_sys_info ${license_libs} license_check ${third_party_libs})
 	target_link_libraries(license_generator ${license_libs} ${third_party_libs})
 
-#    if(MILVUS_WITH_THRIFT STREQUAL "ON")
-#        target_link_libraries(milvus_thrift_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
-#    else()
-#        target_link_libraries(milvus_grpc_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
-#    endif()
-    target_link_libraries(milvus_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
+    if(MILVUS_WITH_THRIFT STREQUAL "ON")
+        target_link_libraries(milvus_thrift_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
+    else()
+        target_link_libraries(milvus_grpc_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
+    endif()
 
 else ()
-#    if(MILVUS_WITH_THRIFT STREQUAL "ON")
-#        target_link_libraries(milvus_thrift_server ${server_libs} ${knowhere_libs} ${third_party_libs})
-#    else()
-#        target_link_libraries(milvus_grpc_server ${server_libs} ${knowhere_libs} ${third_party_libs})
-#    endif()
-        target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_party_libs})
+    if(MILVUS_WITH_THRIFT STREQUAL "ON")
+        target_link_libraries(milvus_thrift_server ${server_libs} ${knowhere_libs} ${third_party_libs})
+    else()
+        target_link_libraries(milvus_grpc_server ${server_libs} ${knowhere_libs} ${third_party_libs})
+    endif()
 endif()
 
-#if (MILVUS_WITH_THRIFT STREQUAL "ON")
-#    install(TARGETS milvus_thrift_server DESTINATION bin)
-#else()
-#    install(TARGETS milvus_grpc_server DESTINATION bin)
-#endif()
-    install(TARGETS milvus_server DESTINATION bin)
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
+    install(TARGETS milvus_thrift_server DESTINATION bin)
+else()
+    install(TARGETS milvus_grpc_server DESTINATION bin)
+endif()
 
 install(FILES
         ${KNOWHERE_BUILD_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}

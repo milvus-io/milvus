@@ -90,8 +90,8 @@ public:
      * @param context
      */
     ::grpc::Status
-    BuildIndex(::grpc::ServerContext *context,
-               const ::milvus::grpc::TableName *request, ::milvus::grpc::Status *response) override;
+    CreateIndex(::grpc::ServerContext *context,
+               const ::milvus::grpc::IndexParam *request, ::milvus::grpc::Status *response) override;
 
 
     /**
@@ -110,8 +110,8 @@ public:
      * @param response
      */
     ::grpc::Status
-    InsertVector(::grpc::ServerContext *context,
-                 const ::milvus::grpc::InsertInfos *request,
+    Insert(::grpc::ServerContext *context,
+                 const ::milvus::grpc::InsertParam *request,
                  ::milvus::grpc::VectorIds *response) override;
 
     /**
@@ -135,8 +135,8 @@ public:
      * @param writer
      */
     ::grpc::Status
-    SearchVector(::grpc::ServerContext *context,
-                 const ::milvus::grpc::SearchVectorInfos *request,
+    Search(::grpc::ServerContext *context,
+                 const ::milvus::grpc::SearchParam *request,
                  ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) override;
 
     /**
@@ -160,8 +160,8 @@ public:
    * @param writer
    */
     ::grpc::Status
-    SearchVectorInFiles(::grpc::ServerContext *context,
-                        const ::milvus::grpc::SearchVectorInFilesInfos *request,
+    SearchInFiles(::grpc::ServerContext *context,
+                        const ::milvus::grpc::SearchInFilesParam *request,
                         ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) override;
 
     /**
@@ -200,7 +200,7 @@ public:
      * @param context
      */
     ::grpc::Status
-    GetTableRowCount(::grpc::ServerContext *context,
+    CountTable(::grpc::ServerContext *context,
                      const ::milvus::grpc::TableName *request,
                      ::milvus::grpc::TableRowCount *response) override;
 
@@ -240,8 +240,85 @@ public:
      * @param response
      */
     ::grpc::Status
-    Ping(::grpc::ServerContext *context,
-         const ::milvus::grpc::Command *request, ::milvus::grpc::ServerStatus *response) override;
+    Cmd(::grpc::ServerContext *context,
+         const ::milvus::grpc::Command *request,
+         ::milvus::grpc::StringReply *response) override;
+
+    /**
+     * @brief delete table by range
+     *
+     * This method is used to delete table by range.
+     * @param context, add context for every RPC
+     * @param request, table name and range
+     * @param response, status
+     *
+     * @return status
+     *
+     * @param context
+     * @param request
+     * @param response
+     */
+    ::grpc::Status
+    DeleteByRange(::grpc::ServerContext *context,
+                  const ::milvus::grpc::DeleteByRangeParam *request,
+                  ::milvus::grpc::Status *response) override;
+
+    /**
+     * @brief preload table
+     *
+     * This method is used to preload table.
+     * @param context, add context for every RPC
+     * @param request, table name
+     * @param response, status
+     *
+     * @return status
+     *
+     * @param context
+     * @param request
+     * @param response
+     */
+    ::grpc::Status
+    PreloadTable(::grpc::ServerContext *context,
+                  const ::milvus::grpc::TableName *request,
+                  ::milvus::grpc::Status *response) override;
+
+    /**
+     * @brief Describe index
+     *
+     * This method is used to describe index.
+     * @param context, add context for every RPC
+     * @param request, table name
+     * @param response, index informations
+     *
+     * @return status
+     *
+     * @param context
+     * @param request
+     * @param response
+     */
+    ::grpc::Status
+    DescribeIndex(::grpc::ServerContext *context,
+                 const ::milvus::grpc::TableName *request,
+                 ::milvus::grpc::IndexParam *response) override;
+
+    /**
+     * @brief Drop index
+     *
+     * This method is used to drop index.
+     * @param context, add context for every RPC
+     * @param request, table name
+     * @param response, status
+     *
+     * @return status
+     *
+     * @param context
+     * @param request
+     * @param response
+     */
+    ::grpc::Status
+    DropIndex(::grpc::ServerContext *context,
+                 const ::milvus::grpc::TableName *request,
+                 ::milvus::grpc::Status *response) override;
 
 };
 }
