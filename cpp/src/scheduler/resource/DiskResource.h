@@ -14,6 +14,17 @@ namespace milvus {
 namespace engine {
 
 class DiskResource : public Resource {
+public:
+    explicit
+    DiskResource(std::string name)
+        : Resource(std::move(name), ResourceType::DISK) {}
+
+protected:
+    void
+    LoadFile(TaskPtr task) override {}
+
+    void
+    Process(TaskPtr task) override {}
 };
 
 }
