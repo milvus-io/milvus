@@ -7,7 +7,9 @@
 
 #include <vector>
 #include "Task.h"
+#include "TaskTable.h"
 #include "CacheMgr.h"
+
 
 namespace zilliz {
 namespace milvus {
@@ -20,8 +22,8 @@ namespace engine {
  * select tasks to move;
  * call from scheduler;
  */
-std::vector<TaskPtr>
-PickToMove(const TaskTable &task_table, const CacheMgr &cache_mgr, double limit) {}
+std::vector<uint64_t>
+PickToMove(const TaskTable &task_table, const CacheMgr &cache_mgr, double limit);
 
 
 /*
@@ -29,16 +31,16 @@ PickToMove(const TaskTable &task_table, const CacheMgr &cache_mgr, double limit)
  * call from resource;
  * I DONT SURE NEED THIS;
  */
-std::vector<TaskPtr>
-PickToLoad(TaskTable task_table, uint64_t limit) {}
+std::vector<uint64_t>
+PickToLoad(const TaskTable &task_table, uint64_t limit);
 
 /*
  * select task to execute;
  * call from resource;
  * I DONT SURE NEED THIS;
  */
-std::vector<TaskPtr>
-PickToExecute(TaskTable task_table, uint64_t limit) {}
+std::vector<uint64_t>
+PickToExecute(const TaskTable &task_table, uint64_t limit);
 
 
 }
