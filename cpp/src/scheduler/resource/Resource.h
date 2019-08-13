@@ -143,11 +143,11 @@ private:
      */
     TaskPtr
     pick_task_load() {
-        auto tasks = PickToLoad(task_table_, 3);
-        for (uint64_t i = 0; i < tasks.size(); ++i) {
+        auto indexes = PickToLoad(task_table_, 3);
+        for (auto index : indexes) {
             // try to set one task loading, then return
-            if (task_table_.Load(i))
-                return task_table_.Get(i).task;
+            if (task_table_.Load(index))
+                return task_table_.Get(index).task;
             // else try next
         }
         return nullptr;
@@ -159,11 +159,11 @@ private:
      */
     TaskPtr
     pick_task_execute() {
-        auto tasks = PickToExecute(task_table_, 3);
-        for (uint64_t i = 0; i < tasks.size(); ++i) {
+        auto indexes = PickToExecute(task_table_, 3);
+        for (auto index : indexes) {
             // try to set one task executing, then return
-            if (task_table_.Execute(i))
-                return task_table_.Get(i).task;
+            if (task_table_.Execute(index))
+                return task_table_.Get(index).task;
             // else try next
         }
         return nullptr;

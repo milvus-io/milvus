@@ -10,6 +10,9 @@
 #include <thread>
 #include <queue>
 
+#include "resource/Resource.h"
+#include "ResourceMgr.h"
+
 
 namespace zilliz {
 namespace milvus {
@@ -18,8 +21,7 @@ namespace engine {
 class Event {
 public:
     explicit
-    Event(ResourceWPtr &resource)
-        : resource_(resource) {}
+    Event(ResourceWPtr &resource) : resource_(resource) {}
 
 public:
     virtual void
@@ -34,8 +36,7 @@ using EventPtr = std::shared_ptr<Event>;
 class StartUpEvent : public Event {
 public:
     explicit
-    StartUpEvent(ResourceWPtr &resource)
-        : Event(resource) {}
+    StartUpEvent(ResourceWPtr &resource) : Event(resource) {}
 
 public:
     void
@@ -45,25 +46,17 @@ public:
 class FinishTaskEvent : public Event {
 public:
     explicit
-    FinishTaskEvent(ResourceWPtr &resource)
-        : Event(resource) {}
+    FinishTaskEvent(ResourceWPtr &resource) : Event(resource) {}
 
 public:
     void
-    Process() override {
-//        for (nei : res->neighbours) {
-//            tasks = cost(nei->task_table(), nei->connection, limit = 3)
-//            res->task_table()->PutTasks(tasks);
-//        }
-//        res->WakeUpExec();
-    }
+    Process() override;
 };
 
 class CopyCompletedEvent : public Event {
 public:
     explicit
-    CopyCompletedEvent(ResourceWPtr &resource)
-        : Event(resource) {}
+    CopyCompletedEvent(ResourceWPtr &resource) : Event(resource) {}
 
 public:
     void
@@ -73,8 +66,7 @@ public:
 class TaskTableUpdatedEvent : public Event {
 public:
     explicit
-    TaskTableUpdatedEvent(ResourceWPtr &resource)
-        : Event(resource) {}
+    TaskTableUpdatedEvent(ResourceWPtr &resource) : Event(resource) {}
 
 public:
     void
@@ -94,16 +86,16 @@ public:
     }
 
     void
-    Start() {}
+    Start();
 
+public:
     /******** Events ********/
 
     /*
      * Process start up events;
      */
-    void
+    inline void
     OnStartUp(ResourceWPtr &resource) {
-        // call from res_mgr, non-blocking, if queue size over limit, exception!
         auto event = std::make_shared<StartUpEvent>(resource);
         event_queue_.push(event);
     }
@@ -111,20 +103,29 @@ public:
     /*
      * Process finish task events;
      */
-    void
-    OnFinishTask(ResourceWPtr);
+    inline void
+    OnFinishTask(ResourceWPtr &resource) {
+        auto event = std::make_shared<FinishTaskEvent>(resource);
+        event_queue_.push(event);
+    }
 
     /*
      * Process copy completed events;
      */
-    void
-    OnCopyCompleted(ResourceWPtr);
+    inline void
+    OnCopyCompleted(ResourceWPtr &resource) {
+        auto event = std::make_shared<CopyCompletedEvent>(resource);
+        event_queue_.push(event);
+    }
 
     /*
      * Process task table updated events;
      */
-    void
-    OnTaskTableUpdated(ResourceWPtr);
+    inline void
+    OnTaskTableUpdated(ResourceWPtr &resource) {
+        auto event = std::make_shared<TaskTableUpdatedEvent>(resource);
+        event_queue_.push(event);
+    }
 
 
 public:
@@ -133,13 +134,11 @@ public:
 
 
 private:
+    /*
+     * Called by worker_thread_;
+     */
     void
-    worker_function() {
-        while (running_) {
-            auto event = event_queue_.front();
-            event->Process();
-        }
-    }
+    worker_function();
 
 private:
     bool running_;

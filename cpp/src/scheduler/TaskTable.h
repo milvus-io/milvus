@@ -47,26 +47,26 @@ public:
     TaskTable() = default;
 
     explicit
-    TaskTable(std::vector<TaskPtr> &&tasks) {}
+    TaskTable(std::vector<TaskPtr> &&tasks);
 
     /*
      * Put one task;
      */
     void
-    Put(TaskPtr task) {}
+    Put(TaskPtr task);
 
     /*
      * Put tasks back of task table;
      * Called by DBImpl;
      */
     void
-    Put(std::vector<TaskPtr> &tasks) {}
+    Put(std::vector<TaskPtr> &tasks);
 
     /*
      * Return task table item reference;
      */
     TaskTableItem &
-    Get(uint64_t index) {}
+    Get(uint64_t index);
 
     /*
      * TODO
@@ -74,14 +74,7 @@ public:
      * Called by ?
      */
     void
-    Clear() {
-        // find first task is NOT (done or moved), erase from begin to it;
-//        auto iterator = table_.begin();
-//        while (iterator->state == TaskTableItemState::EXECUTED or
-//            iterator->state == TaskTableItemState::MOVED)
-//            iterator++;
-//        table_.erase(table_.begin(), iterator);
-    }
+    Clear();
 
 
 public:
@@ -95,16 +88,7 @@ public:
 
     // TODO: bool to Status
     bool
-    Move(uint64_t index) {
-        auto &task = table_[index];
-
-        std::lock_guard<std::mutex> lock(task.mutex);
-        if (task.state == TaskTableItemState::START) {
-            task.state = TaskTableItemState::LOADING;
-            return true;
-        }
-        return false;
-    }
+    Move(uint64_t index);
 
     /*
      * Move task finished;
@@ -112,7 +96,7 @@ public:
      * Called by scheduler;
      */
     bool
-    Moved(uint64_t index) {}
+    Moved(uint64_t index);
 
     /*
      * Load a task;
@@ -120,7 +104,7 @@ public:
      * Called by loader;
      */
     bool
-    Load(uint64_t index) {}
+    Load(uint64_t index);
 
     /*
      * Load task finished;
@@ -128,7 +112,7 @@ public:
      * Called by loader;
      */
     bool
-    Loaded(uint64_t index) {}
+    Loaded(uint64_t index);
 
     /*
      * Execute a task;
@@ -136,7 +120,7 @@ public:
      * Called by executor;
      */
     bool
-    Execute(uint64_t index) {}
+    Execute(uint64_t index);
 
     /*
      * Execute task finished;
@@ -144,7 +128,7 @@ public:
      * Called by executor;
      */
     bool
-    Executed(uint64_t index) {}
+    Executed(uint64_t index);
 
 public:
     /*
