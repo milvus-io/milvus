@@ -37,6 +37,14 @@ ResourceMgr::Add(ResourcePtr &&resource) {
         finish_task_event_[index] = true;
         event_cv_.notify_one();
     });
+    resource->RegisterOnCopyCompleted([&] {
+        copy_completed_event_[index] = true;
+        event_cv_.notify_one();
+    });
+    resource->RegisterOnTaskTableUpdated([&] {
+        task_table_updated_event_[index] = true;
+        event_cv_.notify_one();
+    });
     return ret;
 }
 
@@ -110,7 +118,7 @@ ResourceMgr::Dump() {
 
     for (uint64_t i = 0; i < resources_.size(); ++i) {
         str += "Resource No." + std::to_string(i) + ":\n";
-        str += resources_[i]->Dump();
+        //str += resources_[i]->Dump();
     }
 
     return str;
