@@ -3,6 +3,9 @@
 Please mark all change in change log and use the ticket from JIRA.
 
 # Milvus 0.4.0 (2019-07-28)
+- MS-336 - Scheduler interface
+- MS-344 - Add TaskTable Test
+- MS-345 - Add Node Test
 
 ## Bug
 
