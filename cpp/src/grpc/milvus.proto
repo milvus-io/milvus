@@ -38,9 +38,9 @@ message RowRecord {
 }
 
 /**
- * @brief Infos to be inserted
+ * @brief params to be inserted
  */
-message InsertInfos {
+message InsertParam {
     string table_name = 1;
     repeated RowRecord row_record_array = 2;
 }
@@ -54,9 +54,9 @@ message VectorIds {
 }
 
 /**
- * @brief Infos for searching vector
+ * @brief params for searching vector
  */
-message SearchVectorInfos {
+message SearchParam {
     string table_name = 1;
     repeated RowRecord query_record_array = 2;
     repeated Range query_range_array = 3;
@@ -64,15 +64,15 @@ message SearchVectorInfos {
 }
 
 /**
- * @brief Infos for searching vector in files
+ * @brief params for searching vector in files
  */
-message SearchVectorInFilesInfos {
+message SearchInFilesParam {
     repeated string file_id_array = 1;
-    SearchVectorInfos search_vector_infos = 2;
+    SearchParam search_param = 2;
 }
 
 /**
- * @brief Query result infos
+ * @brief Query result params
  */
 message QueryResult {
     int64 id = 1;
@@ -119,11 +119,28 @@ message Command {
 }
 
 /**
- * @brief Give Server Command
+ * @brief Index
  */
-message ServerStatus{
-    Status status = 1;
-    string info = 2;
+message Index {
+    int32 index_type = 1;
+    int64 nlist = 2;
+    int32 index_file_size = 3;
+}
+
+/**
+ * @brief Index params
+ */
+message IndexParam {
+    TableName table_name = 1;
+    Index index = 2;
+}
+
+/**
+ * @brief table name and range for DeleteByRange
+ */
+message DeleteByRangeParam {
+    Range range = 1;
+    string table_name = 2;
 }
 
 service MilvusService {
@@ -165,7 +182,7 @@ service MilvusService {
      * @param table_name, table is going to be built index.
      *
      */
-    rpc BuildIndex(TableName) returns (Status) {}
+    rpc CreateIndex(IndexParam) returns (Status) {}
 
     /**
      * @brief Add vector array to table
@@ -177,7 +194,7 @@ service MilvusService {
      *
      * @return vector id array
      */
-    rpc InsertVector(InsertInfos) returns (VectorIds) {}
+    rpc Insert(InsertParam) returns (VectorIds) {}
 
     /**
      * @brief Query vector
@@ -191,7 +208,7 @@ service MilvusService {
      *
      * @return query result array.
      */
-    rpc SearchVector(SearchVectorInfos) returns (stream TopKQueryResult) {}
+    rpc Search(SearchParam) returns (stream TopKQueryResult) {}
 
     /**
      * @brief Internal use query interface
@@ -205,7 +222,7 @@ service MilvusService {
      *
      * @return query result array.
      */
-    rpc SearchVectorInFiles(SearchVectorInFilesInfos) returns (stream TopKQueryResult) {}
+    rpc SearchInFiles(SearchInFilesParam) returns (stream TopKQueryResult) {}
 
     /**
      * @brief Get table schema
@@ -227,7 +244,7 @@ service MilvusService {
      *
      * @return table schema
      */
-    rpc GetTableRowCount(TableName) returns (TableRowCount) {}
+    rpc CountTable(TableName) returns (TableRowCount) {}
 
     /**
      * @brief List all tables in database
@@ -246,5 +263,42 @@ service MilvusService {
      *
      * @return Server status.
      */
-    rpc Ping(Command) returns (ServerStatus) {}
+    rpc Cmd(Command) returns (StringReply) {}
+
+     /**
+     * @brief delete table by range
+     *
+     * This method is used to delete vector by range
+     *
+     * @return rpc status.
+     */
+     rpc DeleteByRange(DeleteByRangeParam) returns (Status) {}
+
+     /**
+      * @brief preload table
+      *
+      * This method is used to preload table
+      *
+      * @return Status.
+      */
+     rpc PreloadTable(TableName) returns (Status) {}
+
+     /**
+      * @brief describe index
+      *
+      * This method is used to describe index
+      *
+      * @return Status.
+      */
+     rpc DescribeIndex(TableName) returns (IndexParam) {}
+
+     /**
+      * @brief drop index
+      *
+      * This method is used to drop index
+      *
+      * @return Status.
+      */
+     rpc DropIndex(TableName) returns (Status) {}
+
 }
