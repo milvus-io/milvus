@@ -75,25 +75,33 @@ public:
      * Register on start up event;
      */
     void
-    RegisterOnStartUp(std::function<void(void)> func);
+    RegisterOnStartUp(std::function<void(void)> func) {
+        on_start_up_ = func;
+    }
 
     /*
      * Register on finish one task event;
      */
     void
-    RegisterOnFinishTask(std::function<void(void)> func);
+    RegisterOnFinishTask(std::function<void(void)> func) {
+        on_finish_task_ = func;
+    }
 
     /*
      * Register on copy task data completed event;
      */
     void
-    RegisterOnCopyCompleted(std::function<void(void)> func);
+    RegisterOnCopyCompleted(std::function<void(void)> func) {
+        on_copy_completed_ = func;
+    }
 
     /*
      * Register on task table updated event;
      */
     void
-    RegisterOnTaskTableUpdated(std::function<void(void)> func);
+    RegisterOnTaskTableUpdated(std::function<void(void)> func) {
+        on_task_table_updated_ = func;
+    }
 
 protected:
     Resource(std::string name, ResourceType type)
