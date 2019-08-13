@@ -6,7 +6,7 @@
 
 using namespace zilliz::milvus::engine;
 
-int main() {
+TEST(normal_test, DISABLED_test1) {
 
     // ResourceMgr only compose resources, provide unified event
     auto res_mgr = std::make_shared<ResourceMgr>();
