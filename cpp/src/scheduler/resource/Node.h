@@ -21,6 +21,9 @@ class Node;
 using NeighbourNodePtr = std::weak_ptr<Node>;
 
 struct Neighbour {
+    Neighbour(NeighbourNodePtr nei, Connection conn) 
+    : neighbour_node(nei), connection(conn) {}
+
     NeighbourNodePtr neighbour_node;
     Connection connection;
 };
@@ -29,18 +32,18 @@ class Node {
 public:
     void
     AddNeighbour(const NeighbourNodePtr &neighbour_node, Connection &connection) {
-        Neighbour neighbour{.neighbour_node = neighbour_node, .connection = connection};
-        neighbours_.push_back(neighbour);
+        Neighbour neighbour(neighbour_node, connection);
+        neighbours_.emplace_back(neighbour);
     }
 
     void
-    DelNeighbour(NeighbourNodePtr &neighbour_ptr);
+    DelNeighbour(NeighbourNodePtr neighbour_ptr) {}
 
     bool
-    IsNeighbour(NeighbourNodePtr &neighbour_ptr);
+    IsNeighbour(NeighbourNodePtr neighbour_ptr) {}
 
-    std::vector<NeighbourNodePtr>
-    GetNeighbours();
+    const std::vector<Neighbour> &
+    GetNeighbours() {}
 
 public:
     std::string
@@ -49,6 +52,9 @@ public:
 private:
     std::vector<Neighbour> neighbours_;
 };
+
+using NodePtr = std::shared_ptr<Node>;
+using NodeWPtr = std::weak_ptr<Node>;
 
 }
 }

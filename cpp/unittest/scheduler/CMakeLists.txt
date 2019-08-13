@@ -15,6 +15,7 @@ include_directories(/usr/include/mysql)
 #add_definitions(-DBOOST_ERROR_CODE_HEADER_ONLY)
 
 set(scheduler_test_src
+        ${unittest_srcs}
         ${scheduler_resource_srcs}
         ${scheduler_srcs}
         ${test_srcs}
