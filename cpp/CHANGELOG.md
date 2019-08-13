@@ -7,6 +7,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-344 - Add TaskTable Test
 - MS-345 - Add Node Test
 - MS-346 - Add some implementation of scheduler to solve compile error
+- MS-348 - Add ResourceFactory Test
 
 ## Bug
 
