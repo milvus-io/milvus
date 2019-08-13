@@ -91,21 +91,21 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class BuildIndexTask : public GrpcBaseTask {
+class CreateIndexTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
-    Create(const std::string &table_name);
+    Create(const ::milvus::grpc::IndexParam &index_Param);
 
 protected:
     explicit
-    BuildIndexTask(const std::string &table_name);
+    CreateIndexTask(const ::milvus::grpc::IndexParam &index_Param);
 
     ServerError
     OnExecute() override;
 
 
 private:
-    std::string table_name_;
+    ::milvus::grpc::IndexParam index_param_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -126,34 +126,34 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class InsertVectorTask : public GrpcBaseTask {
+class InsertTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
-    Create(const ::milvus::grpc::InsertInfos &insert_infos,
+    Create(const ::milvus::grpc::InsertParam &insert_Param,
            ::milvus::grpc::VectorIds &record_ids_);
 
 protected:
-    InsertVectorTask(const ::milvus::grpc::InsertInfos &insert_infos,
+    InsertTask(const ::milvus::grpc::InsertParam &insert_Param,
                      ::milvus::grpc::VectorIds &record_ids_);
 
     ServerError
     OnExecute() override;
 
 private:
-    const ::milvus::grpc::InsertInfos insert_infos_;
+    const ::milvus::grpc::InsertParam insert_param_;
     ::milvus::grpc::VectorIds &record_ids_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class SearchVectorTask : public GrpcBaseTask {
+class SearchTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
-    Create(const ::milvus::grpc::SearchVectorInfos &searchVectorInfos,
+    Create(const ::milvus::grpc::SearchParam &search_param,
            const std::vector<std::string> &file_id_array,
            ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> &writer);
 
 protected:
-    SearchVectorTask(const ::milvus::grpc::SearchVectorInfos &searchVectorInfos,
+    SearchTask(const ::milvus::grpc::SearchParam &search_param,
                      const std::vector<std::string> &file_id_array,
                      ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> &writer);
 
@@ -161,19 +161,19 @@ protected:
     OnExecute() override;
 
 private:
-    const ::milvus::grpc::SearchVectorInfos search_vector_infos_;
+    const ::milvus::grpc::SearchParam search_param_;
     std::vector<std::string> file_id_array_;
     ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> writer_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class GetTableRowCountTask : public GrpcBaseTask {
+class CountTableTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const std::string &table_name, int64_t &row_count);
 
 protected:
-    GetTableRowCountTask(const std::string &table_name, int64_t &row_count);
+    CountTableTask(const std::string &table_name, int64_t &row_count);
 
     ServerError
     OnExecute() override;
@@ -184,13 +184,13 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class PingTask : public GrpcBaseTask {
+class CmdTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
     Create(const std::string &cmd, std::string &result);
 
 protected:
-    PingTask(const std::string &cmd, std::string &result);
+    CmdTask(const std::string &cmd, std::string &result);
 
     ServerError
     OnExecute() override;
@@ -199,6 +199,72 @@ private:
     std::string cmd_;
     std::string &result_;
 };
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class DeleteByRangeTask : public GrpcBaseTask {
+public:
+    static BaseTaskPtr
+    Create(const ::milvus::grpc::DeleteByRangeParam &delete_by_range_param);
+
+protected:
+    DeleteByRangeTask(const ::milvus::grpc::DeleteByRangeParam &delete_by_range_param);
+
+    ServerError
+    OnExecute() override;
+
+private:
+    ::milvus::grpc::DeleteByRangeParam delete_by_range_param_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class PreloadTableTask : public GrpcBaseTask {
+public:
+    static BaseTaskPtr
+    Create(const std::string &table_name);
+
+protected:
+    PreloadTableTask(const std::string &table_name);
+
+    ServerError
+    OnExecute() override;
+
+private:
+    std::string table_name_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class DescribeIndexTask : public GrpcBaseTask {
+public:
+    static BaseTaskPtr
+    Create(const std::string &table_name,
+            ::milvus::grpc::IndexParam &index_param);
+
+protected:
+    DescribeIndexTask(const std::string &table_name,
+            ::milvus::grpc::IndexParam &index_param);
+
+    ServerError
+    OnExecute() override;
+
+private:
+    std::string table_name_;
+    ::milvus::grpc::IndexParam& index_param_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class DropIndexTask : public GrpcBaseTask {
+public:
+    static BaseTaskPtr
+    Create(const std::string &table_name);
+
+protected:
+    DropIndexTask(const std::string &table_name);
+
+private:
+    std::string table_name_;
+
+};
+
 }
 }
 }

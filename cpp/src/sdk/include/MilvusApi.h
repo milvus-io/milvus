@@ -71,6 +71,15 @@ struct TopKQueryResult {
     std::vector<QueryResult> query_result_arrays;           ///< TopK query result
 };
 
+/**
+ * @brief index parameters
+ */
+struct IndexParam {
+    std::string table_name;
+    int32_t index_type;
+    int64_t nlist;
+    int32_t index_file_size;
+};
 
 /**
  * @brief SDK main class
@@ -188,21 +197,21 @@ class Connection {
     virtual Status
     DropTable(const std::string &table_name) = 0;
 
-    virtual Status
-    DeleteTable(const std::string &table_name) = 0;
-
-
     /**
-     * @brief Build index method
+     * @brief Create index method
      *
-     * This method is used to build index for whole table
+     * This method is used to create index for whole table
      *
-     * @param table_name, table name is going to be build index.
+     * @param IndexParam
+     *  table_name, table name is going to be create index.
+     *  index type,
+     *  nlist,
+     *  index file size
      *
      * @return Indicate if build index successfully.
      */
     virtual Status
-    BuildIndex(const std::string &table_name) = 0;
+    CreateIndex(const IndexParam &index_param) = 0;
 
     /**
      * @brief Add vector to table
@@ -216,15 +225,9 @@ class Connection {
      * @return Indicate if vector array are inserted successfully
      */
     virtual Status
-    InsertVector(const std::string &table_name,
-                             const std::vector<RowRecord> &record_array,
-                             std::vector<int64_t> &id_array) = 0;
-
-    virtual Status
-    AddVector(const std::string &table_name,
-                             const std::vector<RowRecord> &record_array,
-                             std::vector<int64_t> &id_array) = 0;
-
+    Insert(const std::string &table_name,
+                 const std::vector<RowRecord> &record_array,
+                 std::vector<int64_t> &id_array) = 0;
 
     /**
      * @brief Search vector
@@ -240,11 +243,11 @@ class Connection {
      * @return Indicate if query is successful.
      */
     virtual Status
-    SearchVector(const std::string &table_name,
-                                const std::vector<RowRecord> &query_record_array,
-                                const std::vector<Range> &query_range_array,
-                                int64_t topk,
-                                std::vector<TopKQueryResult> &topk_query_result_array) = 0;
+    Search(const std::string &table_name,
+                 const std::vector<RowRecord> &query_record_array,
+                 const std::vector<Range> &query_range_array,
+                 int64_t topk,
+                 std::vector<TopKQueryResult> &topk_query_result_array) = 0;
 
     /**
      * @brief Show table description
@@ -270,7 +273,8 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    GetTableRowCount(const std::string &table_name, int64_t &row_count) = 0;
+    CountTable(const std::string &table_name,
+            int64_t &row_count) = 0;
 
     /**
      * @brief Show all tables in database
@@ -313,6 +317,56 @@ class Connection {
      */
     virtual std::string
     ServerStatus() const = 0;
+
+    /**
+     * @brief delete tables by range
+     *
+     * This method is used to delete tables by range.
+     *
+     * @param Range, table range to delete.
+     * @param table_name
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    DeleteByRange(Range &range,
+                  const std::string &table_name) = 0;
+
+    /**
+     * @brief preload table
+     *
+     * This method is used to preload table
+     *
+     * @param table_name
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    PreloadTable(const std::string &table_name) const = 0;
+
+    /**
+     * @brief describe index
+     *
+     * This method is used to describe index
+     *
+     * @param table_name
+     *
+     * @return index informations and indicate if this operation is successful.
+     */
+    virtual IndexParam
+    DescribeIndex(const std::string &table_name) const = 0;
+
+    /**
+     * @brief drop index
+     *
+     * This method is used to drop index
+     *
+     * @param table_name
+     *
+     * @return Indicate if this operation is successful.
+     */
+    virtual Status
+    DropIndex(const std::string &table_name) const = 0;
 };
 
 }

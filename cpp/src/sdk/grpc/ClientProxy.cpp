@@ -54,7 +54,7 @@ Status
 ClientProxy::Connected() const {
     try {
         std::string info;
-        return client_ptr_->Ping(info, "");
+        return client_ptr_->Cmd(info, "");
     } catch (std::exception &ex) {
         return Status(StatusCode::NotConnected, "connection lost: " + std::string(ex.what()));
     }
@@ -102,11 +102,6 @@ ClientProxy::HasTable(const std::string &table_name) {
 }
 
 Status
-ClientProxy::DeleteTable(const std::string &table_name) {
-    return this->DropTable(table_name);
-}
-
-Status
 ClientProxy::DropTable(const std::string &table_name) {
     try {
         ::milvus::grpc::TableName grpc_table_name;
@@ -118,11 +113,13 @@ ClientProxy::DropTable(const std::string &table_name) {
 }
 
 Status
-ClientProxy::BuildIndex(const std::string &table_name) {
+ClientProxy::CreateIndex(const IndexParam &index_param) {
     try {
-        ::milvus::grpc::TableName grpc_table_name;
-        grpc_table_name.set_table_name(table_name);
-        return client_ptr_->BuildIndex(grpc_table_name);
+        //TODO:add index params
+        ::milvus::grpc::IndexParam grpc_index_param;
+        grpc_index_param.mutable_table_name()->set_table_name(
+                index_param.table_name);
+        return client_ptr_->CreateIndex(grpc_index_param);
 
     } catch (std::exception &ex) {
         return Status(StatusCode::UnknownError, "failed to build index: " + std::string(ex.what()));
@@ -130,14 +127,7 @@ ClientProxy::BuildIndex(const std::string &table_name) {
 }
 
 Status
-ClientProxy::AddVector(const std::string &table_name,
-                          const std::vector<RowRecord> &record_array,
-                          std::vector<int64_t> &id_array) {
-    return InsertVector(table_name, record_array, id_array);
-}
-
-Status
-ClientProxy::InsertVector(const std::string &table_name,
+ClientProxy::Insert(const std::string &table_name,
                           const std::vector<RowRecord> &record_array,
                           std::vector<int64_t> &id_array) {
     Status status = Status::OK();
@@ -187,11 +177,11 @@ ClientProxy::InsertVector(const std::string &table_name,
             }
         }
 #else
-        ::milvus::grpc::InsertInfos insert_infos;
-        insert_infos.set_table_name(table_name);
+        ::milvus::grpc::InsertParam insert_param;
+        insert_param.set_table_name(table_name);
 
         for (auto &record : record_array) {
-            ::milvus::grpc::RowRecord *grpc_record = insert_infos.add_row_record_array();
+            ::milvus::grpc::RowRecord *grpc_record = insert_param.add_row_record_array();
             for (size_t i = 0; i < record.data.size(); i++) {
                 grpc_record->add_vector_data(record.data[i]);
             }
@@ -200,7 +190,7 @@ ClientProxy::InsertVector(const std::string &table_name,
         ::milvus::grpc::VectorIds vector_ids;
 
         //Single thread
-        client_ptr_->InsertVector(vector_ids, insert_infos, status);
+        client_ptr_->Insert(vector_ids, insert_param, status);
         auto finish = std::chrono::high_resolution_clock::now();
 
         for (size_t i = 0; i < vector_ids.vector_id_array_size(); i++) {
@@ -216,18 +206,18 @@ ClientProxy::InsertVector(const std::string &table_name,
 }
 
 Status
-ClientProxy::SearchVector(const std::string &table_name,
+ClientProxy::Search(const std::string &table_name,
                           const std::vector<RowRecord> &query_record_array,
                           const std::vector<Range> &query_range_array,
                           int64_t topk,
                           std::vector<TopKQueryResult> &topk_query_result_array) {
     try {
         //step 1: convert vectors data
-        ::milvus::grpc::SearchVectorInfos search_vector_infos;
-        search_vector_infos.set_table_name(table_name);
-        search_vector_infos.set_topk(topk);
+        ::milvus::grpc::SearchParam search_param;
+        search_param.set_table_name(table_name);
+        search_param.set_topk(topk);
         for (auto &record : query_record_array) {
-            ::milvus::grpc::RowRecord *row_record = search_vector_infos.add_query_record_array();
+            ::milvus::grpc::RowRecord *row_record = search_param.add_query_record_array();
             for (auto &rec : record.data) {
                 row_record->add_vector_data(rec);
             }
@@ -235,14 +225,14 @@ ClientProxy::SearchVector(const std::string &table_name,
 
         //step 2: convert range array
         for (auto &range : query_range_array) {
-            ::milvus::grpc::Range *grpc_range = search_vector_infos.add_query_range_array();
+            ::milvus::grpc::Range *grpc_range = search_param.add_query_range_array();
             grpc_range->set_start_value(range.start_value);
             grpc_range->set_end_value(range.end_value);
         }
 
         //step 3: search vectors
         std::vector<::milvus::grpc::TopKQueryResult> result_array;
-        Status status = client_ptr_->SearchVector(result_array, search_vector_infos);
+        Status status = client_ptr_->Search(result_array, search_param);
 
         //step 4: convert result array
         for (auto &grpc_topk_result : result_array) {
@@ -284,10 +274,10 @@ ClientProxy::DescribeTable(const std::string &table_name, TableSchema &table_sch
 }
 
 Status
-ClientProxy::GetTableRowCount(const std::string &table_name, int64_t &row_count) {
+ClientProxy::CountTable(const std::string &table_name, int64_t &row_count) {
     try {
         Status status;
-        row_count = client_ptr_->GetTableRowCount(table_name, status);
+        row_count = client_ptr_->CountTable(table_name, status);
         return status;
     } catch (std::exception &ex) {
         return Status(StatusCode::UnknownError, "fail to show tables: " + std::string(ex.what()));
@@ -309,7 +299,7 @@ ClientProxy::ServerVersion() const {
     Status status = Status::OK();
     try {
         std::string version;
-        Status status = client_ptr_->Ping(version, "version");
+        Status status = client_ptr_->Cmd(version, "version");
         return version;
     } catch (std::exception &ex) {
         return "";
@@ -324,11 +314,31 @@ ClientProxy::ServerStatus() const {
 
     try {
         std::string dummy;
-        Status status = client_ptr_->Ping(dummy, "");
+        Status status = client_ptr_->Cmd(dummy, "");
         return "server alive";
     } catch (std::exception &ex) {
         return "connection lost";
     }
+}
+
+Status
+ClientProxy::DeleteByRange(milvus::Range &range, const std::string &table_name) {
+
+}
+
+Status
+ClientProxy::PreloadTable(const std::string &table_name) const {
+
+}
+
+IndexParam
+ClientProxy::DescribeIndex(const std::string &table_name) const {
+
+}
+
+Status
+ClientProxy::DropIndex(const std::string &table_name) const {
+
 }
 
 }
