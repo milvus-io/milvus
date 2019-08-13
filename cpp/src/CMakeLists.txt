@@ -211,7 +211,7 @@ if (MILVUS_WITH_THRIFT STREQUAL "ON")
             ${metrics_files}
             )
 else()
-    add_executable(milvus_grpc_server
+    add_executable(milvus_server
             ${config_files}
             ${server_files}
             ${grpcserver_files}
@@ -231,21 +231,21 @@ if (ENABLE_LICENSE STREQUAL "ON")
     if(MILVUS_WITH_THRIFT STREQUAL "ON")
         target_link_libraries(milvus_thrift_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
     else()
-        target_link_libraries(milvus_grpc_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
+        target_link_libraries(milvus_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
     endif()
 
 else ()
     if(MILVUS_WITH_THRIFT STREQUAL "ON")
         target_link_libraries(milvus_thrift_server ${server_libs} ${knowhere_libs} ${third_party_libs})
     else()
-        target_link_libraries(milvus_grpc_server ${server_libs} ${knowhere_libs} ${third_party_libs})
+        target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_party_libs})
     endif()
 endif()
 
 if (MILVUS_WITH_THRIFT STREQUAL "ON")
     install(TARGETS milvus_thrift_server DESTINATION bin)
 else()
-    install(TARGETS milvus_grpc_server DESTINATION bin)
+    install(TARGETS milvus_server DESTINATION bin)
 endif()
 
 install(FILES
