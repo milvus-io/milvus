@@ -63,15 +63,19 @@ ResourceMgr::EventProcess() {
             ResourceWPtr res(resources_[i]);
             if (start_up_event_[i]) {
                 on_start_up_(res);
+                start_up_event_[i] = false;
             }
             if (finish_task_event_[i]) {
                 on_finish_task_(res);
+                finish_task_event_[i] = false;
             }
             if (copy_completed_event_[i]) {
                 on_copy_completed_(res);
+                copy_completed_event_[i] = false;
             }
             if (task_table_updated_event_[i]) {
                 on_task_table_updated_(res);
+                task_table_updated_event_[i] = false;
             }
         }
     }
@@ -98,6 +102,18 @@ ResourceMgr::Stop() {
     for (auto &resource : resources_) {
         resource->Stop();
     }
+}
+
+std::string
+ResourceMgr::Dump() {
+    std::string str = "ResourceMgr contains " + std::to_string(resources_.size()) + " resources.\n";
+
+    for (uint64_t i = 0; i < resources_.size(); ++i) {
+        str += "Resource No." + std::to_string(i) + ":\n";
+        str += resources_[i]->Dump();
+    }
+
+    return str;
 }
 
 }
