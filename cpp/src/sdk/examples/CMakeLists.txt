@@ -4,8 +4,8 @@
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
 
-#if (MILVUS_WITH_THRIFT STREQUAL "ON")
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
     add_subdirectory(thriftsimple)
-#else()
+else()
     add_subdirectory(grpcsimple)
-#endif()
+endif()

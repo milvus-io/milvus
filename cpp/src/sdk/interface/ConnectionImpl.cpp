@@ -66,36 +66,25 @@ ConnectionImpl::DropTable(const std::string &table_name) {
 }
 
 Status
-ConnectionImpl::DeleteTable(const std::string &table_name) {
-    return client_proxy_->DropTable(table_name);
+ConnectionImpl::CreateIndex(const IndexParam &index_param) {
+    return client_proxy_->CreateIndex(index_param);
 }
 
 Status
-ConnectionImpl::BuildIndex(const std::string &table_name) {
-    return client_proxy_->BuildIndex(table_name);
-}
-
-Status
-ConnectionImpl::InsertVector(const std::string &table_name,
+ConnectionImpl::Insert(const std::string &table_name,
                           const std::vector<RowRecord> &record_array,
                           std::vector<int64_t> &id_array) {
-    return client_proxy_->InsertVector(table_name, record_array, id_array);
+    return client_proxy_->Insert(table_name, record_array, id_array);
 }
 
-Status
-ConnectionImpl::AddVector(const std::string &table_name,
-                             const std::vector<RowRecord> &record_array,
-                             std::vector<int64_t> &id_array) {
-    return client_proxy_->InsertVector(table_name, record_array, id_array);
-}
 
 Status
-ConnectionImpl::SearchVector(const std::string &table_name,
+ConnectionImpl::Search(const std::string &table_name,
                              const std::vector<RowRecord> &query_record_array,
                              const std::vector<Range> &query_range_array,
                              int64_t topk,
                              std::vector<TopKQueryResult> &topk_query_result_array) {
-    return client_proxy_->SearchVector(table_name, query_record_array, query_range_array, topk,
+    return client_proxy_->Search(table_name, query_record_array, query_range_array, topk,
                                        topk_query_result_array);
 }
 
@@ -105,8 +94,8 @@ ConnectionImpl::DescribeTable(const std::string &table_name, TableSchema &table_
 }
 
 Status
-ConnectionImpl::GetTableRowCount(const std::string &table_name, int64_t &row_count) {
-    return client_proxy_->GetTableRowCount(table_name, row_count);
+ConnectionImpl::CountTable(const std::string &table_name, int64_t &row_count) {
+    return client_proxy_->CountTable(table_name, row_count);
 }
 
 Status
@@ -122,6 +111,27 @@ ConnectionImpl::ServerVersion() const {
 std::string
 ConnectionImpl::ServerStatus() const {
     return client_proxy_->ServerStatus();
+}
+
+Status
+ConnectionImpl::DeleteByRange(Range &range,
+              const std::string &table_name) {
+
+}
+
+Status
+ConnectionImpl::PreloadTable(const std::string &table_name) const {
+
+}
+
+IndexParam
+ConnectionImpl::DescribeIndex(const std::string &table_name) const {
+
+}
+
+Status
+ConnectionImpl::DropIndex(const std::string &table_name) const {
+
 }
 
 }

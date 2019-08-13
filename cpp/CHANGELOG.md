@@ -13,6 +13,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-327 - Clean code for milvus
 
 ## New Feature
+- MS-343 - Implement ResourceMgr
 
 ## Task
 - MS-297 - disable mysql unit test

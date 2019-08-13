@@ -82,10 +82,10 @@ GrpcClient::DropTable(const ::milvus::grpc::TableName& table_name) {
 }
 
 Status
-GrpcClient::BuildIndex(const ::milvus::grpc::TableName& table_name) {
+GrpcClient::CreateIndex(const ::milvus::grpc::IndexParam& index_param) {
     ClientContext context;
     grpc::Status response;
-    ::grpc::Status grpc_status = stub_->BuildIndex(&context, table_name, &response);
+    ::grpc::Status grpc_status = stub_->CreateIndex(&context, index_param, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "BuildIndex rpc failed!" << std::endl;
@@ -100,11 +100,11 @@ GrpcClient::BuildIndex(const ::milvus::grpc::TableName& table_name) {
 }
 
 void
-GrpcClient::InsertVector(::milvus::grpc::VectorIds& vector_ids,
-                         const ::milvus::grpc::InsertInfos& insert_infos,
+GrpcClient::Insert(::milvus::grpc::VectorIds& vector_ids,
+                         const ::milvus::grpc::InsertParam& insert_param,
                          Status& status) {
     ClientContext context;
-    ::grpc::Status grpc_status = stub_->InsertVector(&context, insert_infos, &vector_ids);
+    ::grpc::Status grpc_status = stub_->Insert(&context, insert_param, &vector_ids);
 
     if (!grpc_status.ok()) {
         std::cerr << "InsertVector rpc failed!" << std::endl;
@@ -121,12 +121,12 @@ GrpcClient::InsertVector(::milvus::grpc::VectorIds& vector_ids,
 }
 
 Status
-GrpcClient::SearchVector(std::vector<::milvus::grpc::TopKQueryResult>& result_array,
-                         const ::milvus::grpc::SearchVectorInfos& search_vector_infos) {
+GrpcClient::Search(std::vector<::milvus::grpc::TopKQueryResult>& result_array,
+                         const ::milvus::grpc::SearchParam& search_param) {
     ::milvus::grpc::TopKQueryResult query_result;
     ClientContext context;
     std::unique_ptr<ClientReader<::milvus::grpc::TopKQueryResult> > reader(
-            stub_->SearchVector(&context, search_vector_infos));
+            stub_->Search(&context, search_param));
 
     while (reader->Read(&query_result)) {
         result_array.emplace_back(query_result);
@@ -172,12 +172,12 @@ GrpcClient::DescribeTable(::milvus::grpc::TableSchema& grpc_schema,
 }
 
 int64_t
-GrpcClient::GetTableRowCount(const std::string& table_name, Status& status) {
+GrpcClient::CountTable(const std::string& table_name, Status& status) {
     ClientContext context;
     ::milvus::grpc::TableRowCount response;
     ::milvus::grpc::TableName grpc_tablename;
     grpc_tablename.set_table_name(table_name);
-    ::grpc::Status grpc_status = stub_->GetTableRowCount(&context, grpc_tablename, &response);
+    ::grpc::Status grpc_status = stub_->CountTable(&context, grpc_tablename, &response);
 
     if (!grpc_status.ok()) {
         std::cerr << "DescribeTable rpc failed!" << std::endl;
@@ -224,15 +224,15 @@ GrpcClient::ShowTables(std::vector<std::string> &table_array) {
 }
 
 Status
-GrpcClient::Ping(std::string &result,
+GrpcClient::Cmd(std::string &result,
                  const std::string& cmd) {
     ClientContext context;
-    ::milvus::grpc::ServerStatus response;
+    ::milvus::grpc::StringReply response;
     ::milvus::grpc::Command command;
     command.set_cmd(cmd);
-    ::grpc::Status grpc_status = stub_->Ping(&context, command, &response);
+    ::grpc::Status grpc_status = stub_->Cmd(&context, command, &response);
 
-    result = response.info();
+    result = response.string_reply();
     if (!grpc_status.ok()) {
         std::cerr << "Ping gRPC failed!" << std::endl;
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
