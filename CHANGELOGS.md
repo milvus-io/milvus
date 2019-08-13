@@ -19,5 +19,3 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-202 - Add Milvus Jenkins project email notification
 - MS-215 - Add Milvus cluster CI/CD groovy file 
 - MS-277 - Update CUDA Version to V10.1
-- MS-336 - Scheduler interface
-- MS-344 - Add TaskTable Test
