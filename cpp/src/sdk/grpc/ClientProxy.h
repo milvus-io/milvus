@@ -32,26 +32,18 @@ public:
     HasTable(const std::string &table_name) override;
 
     virtual Status
-    DeleteTable(const std::string &table_name) override;
-
-    virtual Status
     DropTable(const std::string &table_name) override;
 
     virtual Status
-    BuildIndex(const std::string &table_name) override;
+    CreateIndex(const IndexParam &index_param) override;
 
     virtual Status
-    AddVector(const std::string &table_name,
-                 const std::vector<RowRecord> &record_array,
-                 std::vector<int64_t> &id_array) override;
-
-    virtual Status
-    InsertVector(const std::string &table_name,
+    Insert(const std::string &table_name,
                     const std::vector<RowRecord> &record_array,
                     std::vector<int64_t> &id_array) override;
 
     virtual Status
-    SearchVector(const std::string &table_name,
+    Search(const std::string &table_name,
                     const std::vector<RowRecord> &query_record_array,
                     const std::vector<Range> &query_range_array,
                     int64_t topk,
@@ -61,7 +53,7 @@ public:
     DescribeTable(const std::string &table_name, TableSchema &table_schema) override;
 
     virtual Status
-    GetTableRowCount(const std::string &table_name, int64_t &row_count) override;
+    CountTable(const std::string &table_name, int64_t &row_count) override;
 
     virtual Status
     ShowTables(std::vector<std::string> &table_array) override;
@@ -74,6 +66,19 @@ public:
 
     virtual std::string
     ServerStatus() const override;
+
+    virtual Status
+    DeleteByRange(Range &range,
+                  const std::string &table_name) override;
+
+    virtual Status
+    PreloadTable(const std::string &table_name) const override;
+
+    virtual IndexParam
+    DescribeIndex(const std::string &table_name) const override;
+
+    virtual Status
+    DropIndex(const std::string &table_name) const override;
 
 private:
     std::shared_ptr<::grpc::Channel> channel_;

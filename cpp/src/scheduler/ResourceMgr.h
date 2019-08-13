@@ -9,7 +9,10 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <mutex>
+#include <condition_variable>
 
+#include "resource/Resource.h"
 
 namespace zilliz {
 namespace milvus {
@@ -17,7 +20,7 @@ namespace engine {
 
 class ResourceMgr {
 public:
-    ResourceMgr() : running_(false) {}
+    ResourceMgr();
 
     /******** Management Interface ********/
 
@@ -27,42 +30,24 @@ public:
      * Functions only modify bool variable, like event trigger;
      */
     ResourceWPtr
-    Add(ResourcePtr &&resource) {
-        ResourceWPtr ret(resource);
-        resources_.emplace_back(resource);
-
-//        resource->RegisterOnStartUp([] {
-//            start_up_event_[index] = true;
-//        });
-//        resource.RegisterOnFinishTask([] {
-//            finish_task_event_[index] = true;
-//        });
-        return ret;
-    }
+    Add(ResourcePtr &&resource);
 
     /*
      * Create connection between A and B;
      */
     void
-    Connect(ResourceWPtr &A, ResourceWPtr &B, Connection &connection) {
-        if (auto observe_a = A.lock()) {
-            if (auto observe_b = B.lock()) {
-                observe_a->AddNeighbour(std::static_pointer_cast<Node>(observe_b), connection);
-            }
-        }
-    }
+    Connect(ResourceWPtr &res1, ResourceWPtr &res2, Connection &connection);
 
     /*
      * Synchronous start all resource;
      * Last, start event process thread;
      */
     void
-    StartAll() {
-        for (auto &resource : resources_) {
-            resource->Start();
-        }
-        worker_thread_ = std::thread(&ResourceMgr::EventProcess, this);
-    }
+    Start();
+
+    void
+    Stop();
+
 
     // TODO: add stats interface(low)
 
@@ -89,13 +74,17 @@ public:
      * Register on copy task data completed event;
      */
     void
-    RegisterOnCopyCompleted(std::function<void(ResourceWPtr)> &func);
+    RegisterOnCopyCompleted(std::function<void(ResourceWPtr)> &func) {
+        on_copy_completed_ = func;
+    }
 
     /*
      * Register on task table updated event;
      */
     void
-    RegisterOnTaskTableUpdated(std::function<void(ResourceWPtr)> &func);
+    RegisterOnTaskTableUpdated(std::function<void(ResourceWPtr)> &func) {
+        on_task_table_updated_ = func;
+    }
 
 public:
     /******** Utlitity Functions ********/
@@ -105,23 +94,16 @@ public:
 
 private:
     void
-    EventProcess() {
-        while (running_) {
-            for (uint64_t i = 0; i < resources_.size(); ++i) {
-                if (start_up_event_[i]) {
-                    on_start_up_(resources_[i]);
-                }
-            }
-        }
-
-    }
+    EventProcess();
 
 private:
     bool running_;
 
     std::vector<ResourcePtr> resources_;
+    mutable std::mutex resources_mutex_;
     std::thread worker_thread_;
 
+    std::condition_variable event_cv_;
     std::vector<bool> start_up_event_;
     std::vector<bool> finish_task_event_;
     std::vector<bool> copy_completed_event_;

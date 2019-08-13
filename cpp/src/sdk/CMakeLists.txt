@@ -12,7 +12,7 @@ include_directories(/usr/include)
 include_directories(include)
 include_directories(/usr/local/include)
 
-#if (MILVUS_WITH_THRIFT STREQUAL "ON")
+if (MILVUS_WITH_THRIFT STREQUAL "ON")
     aux_source_directory(thrift thrift_client_files)
     include_directories(thrift)
     include_directories(${CMAKE_SOURCE_DIR}/src/thrift/gen-cpp)
@@ -34,7 +34,7 @@ include_directories(/usr/local/include)
             ${third_party_libs}
             )
     install(TARGETS milvus_thrift_sdk DESTINATION lib)
-#else()
+else()
     aux_source_directory(grpc grpc_client_files)
 
     include_directories(${CMAKE_SOURCE_DIR}/src/grpc/gen-milvus)
@@ -58,6 +58,6 @@ include_directories(/usr/local/include)
             ${third_party_libs}
             )
     install(TARGETS milvus_grpc_sdk DESTINATION lib)
-#endif()
+endif()
 
 add_subdirectory(examples)
