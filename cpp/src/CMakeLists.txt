@@ -16,6 +16,7 @@ aux_source_directory(db/insert db_insert_files)
 aux_source_directory(db/meta db_meta_files)
 aux_source_directory(metrics metrics_files)
 aux_source_directory(wrapper/knowhere knowhere_files)
+aux_source_directory(scheduler new_scheduler_files)
 
 aux_source_directory(db/scheduler scheduler_files)
 aux_source_directory(db/scheduler/context scheduler_context_files)
@@ -64,6 +65,7 @@ set(db_files
         ${db_insert_files}
         ${db_meta_files}
         ${db_scheduler_files}
+        ${new_scheduler_files}
         ${metrics_files}
         ${knowhere_files}
         )
