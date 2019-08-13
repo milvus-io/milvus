@@ -23,7 +23,7 @@ namespace {
     constexpr int64_t NQ = 10;
     constexpr int64_t TOP_K = 10;
     constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    constexpr int64_t ADD_VECTOR_LOOP = 1;
+    constexpr int64_t ADD_VECTOR_LOOP = 5;
     constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
