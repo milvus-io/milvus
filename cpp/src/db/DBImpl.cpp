@@ -89,7 +89,6 @@ DBImpl::DBImpl(const Options& options)
     meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
     if (options.mode != Options::MODE::READ_ONLY) {
-        std::cout << "StartTimerTasks\n";
         ENGINE_LOG_TRACE << "StartTimerTasks";
         StartTimerTasks();
     }
