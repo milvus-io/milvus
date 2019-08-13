@@ -174,7 +174,7 @@ namespace {
         std::vector<TopKQueryResult> topk_query_result_array;
         {
             TimeRecorder rc(phase_name);
-            Status stat = conn->SearchVector(TABLE_NAME, record_array, query_range_array, TOP_K, topk_query_result_array);
+            Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, topk_query_result_array);
             std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
         }
 
@@ -211,7 +211,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         for(auto& table : tables) {
             int64_t row_count = 0;
 //            conn->DropTable(table);
-            stat = conn->GetTableRowCount(table, row_count);
+            stat = conn->CountTable(table, row_count);
             std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
         }
     }
@@ -290,7 +290,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
             auto start = std::chrono::high_resolution_clock::now();
 
-            Status stat = conn->InsertVector(TABLE_NAME, record_array, record_ids);
+            Status stat = conn->Insert(TABLE_NAME, record_array, record_ids);
             auto finish = std::chrono::high_resolution_clock::now();
             std::cout << "InsertVector cost: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
 
@@ -311,9 +311,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//wait unit build index finish
-        std::cout << "Wait until build all index done" << std::endl;
-        Status stat = conn->BuildIndex(TABLE_NAME);
-        std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;
+//        std::cout << "Wait until build all index done" << std::endl;
+//        Status stat = conn->CreateIndex();
+//        std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;
     }
 
     {//search vectors after build index finish

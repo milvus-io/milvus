@@ -205,22 +205,23 @@ DescribeTableTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-BuildIndexTask::BuildIndexTask(const std::string &table_name)
+CreateIndexTask::CreateIndexTask(const ::milvus::grpc::IndexParam &index_param)
         : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          table_name_(table_name) {
+          index_param_(index_param) {
 }
 
 BaseTaskPtr
-BuildIndexTask::Create(const std::string &table_name) {
-    return std::shared_ptr<GrpcBaseTask>(new BuildIndexTask(table_name));
+CreateIndexTask::Create(const ::milvus::grpc::IndexParam &index_param) {
+    return std::shared_ptr<GrpcBaseTask>(new CreateIndexTask(index_param));
 }
 
 ServerError
-BuildIndexTask::OnExecute() {
+CreateIndexTask::OnExecute() {
     try {
-        TimeRecorder rc("BuildIndexTask");
+        TimeRecorder rc("CreateIndexTask");
 
         //step 1: check arguments
+        std::string table_name_ = index_param_.table_name().table_name();
         ServerError res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
@@ -371,42 +372,42 @@ ShowTablesTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-InsertVectorTask::InsertVectorTask(const ::milvus::grpc::InsertInfos &insert_infos,
+InsertTask::InsertTask(const ::milvus::grpc::InsertParam &insert_param,
                                    ::milvus::grpc::VectorIds &record_ids)
         : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          insert_infos_(insert_infos),
+          insert_param_(insert_param),
           record_ids_(record_ids) {
     record_ids_.Clear();
 }
 
 BaseTaskPtr
-InsertVectorTask::Create(const ::milvus::grpc::InsertInfos &insert_infos,
+InsertTask::Create(const ::milvus::grpc::InsertParam &insert_infos,
                          ::milvus::grpc::VectorIds &record_ids) {
-    return std::shared_ptr<GrpcBaseTask>(new InsertVectorTask(insert_infos, record_ids));
+    return std::shared_ptr<GrpcBaseTask>(new InsertTask(insert_infos, record_ids));
 }
 
 ServerError
-InsertVectorTask::OnExecute() {
+InsertTask::OnExecute() {
     try {
         TimeRecorder rc("InsertVectorTask");
 
         //step 1: check arguments
-        ServerError res = ValidationUtil::ValidateTableName(insert_infos_.table_name());
+        ServerError res = ValidationUtil::ValidateTableName(insert_param_.table_name());
         if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + insert_infos_.table_name());
+            return SetError(res, "Invalid table name: " + insert_param_.table_name());
         }
-        if (insert_infos_.row_record_array().empty()) {
+        if (insert_param_.row_record_array().empty()) {
             return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
         }
 
         //step 2: check table existence
         engine::meta::TableSchema table_info;
-        table_info.table_id_ = insert_infos_.table_name();
+        table_info.table_id_ = insert_param_.table_name();
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
             if (stat.IsNotFound()) {
                 return SetError(SERVER_TABLE_NOT_EXIST,
-                                "Table " + insert_infos_.table_name() + " not exists");
+                                "Table " + insert_param_.table_name() + " not exists");
             } else {
                 return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
             }
@@ -421,15 +422,15 @@ InsertVectorTask::OnExecute() {
 #endif
 
         //step 3: prepare float data
-        std::vector<float> vec_f(insert_infos_.row_record_array_size() * table_info.dimension_, 0);
+        std::vector<float> vec_f(insert_param_.row_record_array_size() * table_info.dimension_, 0);
 
         // TODO: change to one dimension array in protobuf or use multiple-thread to copy the data
-        for (size_t i = 0; i < insert_infos_.row_record_array_size(); i++) {
+        for (size_t i = 0; i < insert_param_.row_record_array_size(); i++) {
             for (size_t j = 0; j < table_info.dimension_; j++) {
-                if (insert_infos_.row_record_array(i).vector_data().empty()) {
+                if (insert_param_.row_record_array(i).vector_data().empty()) {
                     return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record float array is empty");
                 }
-                uint64_t vec_dim = insert_infos_.row_record_array(i).vector_data().size();
+                uint64_t vec_dim = insert_param_.row_record_array(i).vector_data().size();
                 if (vec_dim != table_info.dimension_) {
                     ServerError error_code = SERVER_INVALID_VECTOR_DIMENSION;
                     std::string error_msg = "Invalid rowrecord dimension: " + std::to_string(vec_dim)
@@ -437,17 +438,17 @@ InsertVectorTask::OnExecute() {
                                             std::to_string(table_info.dimension_);
                     return SetError(error_code, error_msg);
                 }
-                vec_f[i * table_info.dimension_ + j] = insert_infos_.row_record_array(i).vector_data(j);
+                vec_f[i * table_info.dimension_ + j] = insert_param_.row_record_array(i).vector_data(j);
             }
         }
 
         rc.ElapseFromBegin("prepare vectors data");
 
         //step 4: insert vectors
-        auto vec_count = (uint64_t) insert_infos_.row_record_array_size();
+        auto vec_count = (uint64_t) insert_param_.row_record_array_size();
         std::vector<int64_t> vec_ids(record_ids_.vector_id_array_size(), 0);
 
-        stat = DBWrapper::DB()->InsertVectors(insert_infos_.table_name(), vec_count, vec_f.data(),
+        stat = DBWrapper::DB()->InsertVectors(insert_param_.table_name(), vec_count, vec_f.data(),
                                               vec_ids);
         rc.ElapseFromBegin("add vectors to engine");
         if (!stat.ok()) {
@@ -479,43 +480,43 @@ InsertVectorTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-SearchVectorTask::SearchVectorTask(const ::milvus::grpc::SearchVectorInfos &search_vector_infos,
+SearchTask::SearchTask(const ::milvus::grpc::SearchParam &search_vector_infos,
                                    const std::vector<std::string> &file_id_array,
                                    ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> &writer)
         : GrpcBaseTask(DQL_TASK_GROUP),
-          search_vector_infos_(search_vector_infos),
+          search_param_(search_vector_infos),
           file_id_array_(file_id_array),
           writer_(writer) {
 
 }
 
 BaseTaskPtr
-SearchVectorTask::Create(const ::milvus::grpc::SearchVectorInfos &search_vector_infos,
+SearchTask::Create(const ::milvus::grpc::SearchParam &search_vector_infos,
                          const std::vector<std::string> &file_id_array,
                          ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> &writer) {
-    return std::shared_ptr<GrpcBaseTask>(new SearchVectorTask(search_vector_infos, file_id_array,
+    return std::shared_ptr<GrpcBaseTask>(new SearchTask(search_vector_infos, file_id_array,
                                                               writer));
 }
 
 ServerError
-SearchVectorTask::OnExecute() {
+SearchTask::OnExecute() {
     try {
-        TimeRecorder rc("SearchVectorTask");
+        TimeRecorder rc("SearchTask");
 
         //step 1: check arguments
-        std::string table_name_ = search_vector_infos_.table_name();
+        std::string table_name_ = search_param_.table_name();
         ServerError res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
 
-        int top_k_ = search_vector_infos_.topk();
+        int top_k_ = search_param_.topk();
 
         if (top_k_ <= 0 || top_k_ > 1024) {
             return SetError(SERVER_INVALID_TOPK, "Invalid topk: " + std::to_string(
                     top_k_));
         }
-        if (search_vector_infos_.query_record_array().empty()) {
+        if (search_param_.query_record_array().empty()) {
             return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
         }
 
@@ -537,8 +538,8 @@ SearchVectorTask::OnExecute() {
         std::string error_msg;
 
         std::vector<::milvus::grpc::Range> range_array;
-        for (size_t i = 0; i < search_vector_infos_.query_range_array_size(); i++) {
-            range_array.emplace_back(search_vector_infos_.query_range_array(i));
+        for (size_t i = 0; i < search_param_.query_range_array_size(); i++) {
+            range_array.emplace_back(search_param_.query_range_array(i));
         }
         ConvertTimeRangeToDBDates(range_array, dates, error_code, error_msg);
         if (error_code != SERVER_SUCCESS) {
@@ -555,15 +556,15 @@ SearchVectorTask::OnExecute() {
 #endif
 
         //step 3: prepare float data
-        auto record_array_size = search_vector_infos_.query_record_array_size();
+        auto record_array_size = search_param_.query_record_array_size();
         std::vector<float> vec_f(record_array_size * table_info.dimension_, 0);
         for (size_t i = 0; i < record_array_size; i++) {
             for (size_t j = 0; j < table_info.dimension_; j++) {
-                if (search_vector_infos_.query_record_array(i).vector_data().empty()) {
+                if (search_param_.query_record_array(i).vector_data().empty()) {
                     return SetError(SERVER_INVALID_ROWRECORD_ARRAY,
                                     "Query record float array is empty");
                 }
-                uint64_t query_vec_dim = search_vector_infos_.query_record_array(
+                uint64_t query_vec_dim = search_param_.query_record_array(
                         i).vector_data().size();
                 if (query_vec_dim != table_info.dimension_) {
                     ServerError error_code = SERVER_INVALID_VECTOR_DIMENSION;
@@ -572,7 +573,7 @@ SearchVectorTask::OnExecute() {
                             + " vs. table dimension:" + std::to_string(table_info.dimension_);
                     return SetError(error_code, error_msg);
                 }
-                vec_f[i * table_info.dimension_ + j] = search_vector_infos_.query_record_array(
+                vec_f[i * table_info.dimension_ + j] = search_param_.query_record_array(
                         i).vector_data(j);
             }
         }
@@ -580,7 +581,7 @@ SearchVectorTask::OnExecute() {
 
         //step 4: search vectors
         engine::QueryResults results;
-        auto record_count = (uint64_t) search_vector_infos_.query_record_array().size();
+        auto record_count = (uint64_t) search_param_.query_record_array().size();
 
         if (file_id_array_.empty()) {
             stat = DBWrapper::DB()->Query(table_name_, (size_t) top_k_, record_count, vec_f.data(),
@@ -610,7 +611,7 @@ SearchVectorTask::OnExecute() {
         //step 5: construct result array
         for (uint64_t i = 0; i < record_count; i++) {
             auto &result = results[i];
-            const auto &record = search_vector_infos_.query_record_array(i);
+            const auto &record = search_param_.query_record_array(i);
             ::milvus::grpc::TopKQueryResult grpc_topk_result;
             for (auto &pair : result) {
                 ::milvus::grpc::QueryResult *grpc_result = grpc_topk_result.add_query_result_arrays();
@@ -639,7 +640,7 @@ SearchVectorTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-GetTableRowCountTask::GetTableRowCountTask(const std::string &table_name, int64_t &row_count)
+CountTableTask::CountTableTask(const std::string &table_name, int64_t &row_count)
         : GrpcBaseTask(DDL_DML_TASK_GROUP),
           table_name_(table_name),
           row_count_(row_count) {
@@ -647,12 +648,12 @@ GetTableRowCountTask::GetTableRowCountTask(const std::string &table_name, int64_
 }
 
 BaseTaskPtr
-GetTableRowCountTask::Create(const std::string &table_name, int64_t &row_count) {
-    return std::shared_ptr<GrpcBaseTask>(new GetTableRowCountTask(table_name, row_count));
+CountTableTask::Create(const std::string &table_name, int64_t &row_count) {
+    return std::shared_ptr<GrpcBaseTask>(new CountTableTask(table_name, row_count));
 }
 
 ServerError
-GetTableRowCountTask::OnExecute() {
+CountTableTask::OnExecute() {
     try {
         TimeRecorder rc("GetTableRowCountTask");
 
@@ -682,7 +683,7 @@ GetTableRowCountTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-PingTask::PingTask(const std::string &cmd, std::string &result)
+CmdTask::CmdTask(const std::string &cmd, std::string &result)
         : GrpcBaseTask(PING_TASK_GROUP),
           cmd_(cmd),
           result_(result) {
@@ -690,12 +691,12 @@ PingTask::PingTask(const std::string &cmd, std::string &result)
 }
 
 BaseTaskPtr
-PingTask::Create(const std::string &cmd, std::string &result) {
-    return std::shared_ptr<GrpcBaseTask>(new PingTask(cmd, result));
+CmdTask::Create(const std::string &cmd, std::string &result) {
+    return std::shared_ptr<GrpcBaseTask>(new CmdTask(cmd, result));
 }
 
 ServerError
-PingTask::OnExecute() {
+CmdTask::OnExecute() {
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
     } else {
