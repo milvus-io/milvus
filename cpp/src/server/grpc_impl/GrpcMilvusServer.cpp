@@ -37,7 +37,7 @@ constexpr long MESSAGE_SIZE = -1;
 void
 GrpcMilvusServer::StartService() {
     if (server != nullptr) {
-        std::cout << "stopservice!\n";
+        std::cout << "stop service!\n";
         StopService();
     }
 
@@ -51,7 +51,7 @@ GrpcMilvusServer::StartService() {
 
     DBWrapper::DB();//initialize db
 
-    std::string server_address(address + ":" + std::to_string(port + 1));
+    std::string server_address(address + ":" + std::to_string(port));
 
     ::grpc::ServerBuilder builder;
     builder.SetMaxReceiveMessageSize(MESSAGE_SIZE); //default 4 * 1024 * 1024
@@ -68,7 +68,6 @@ GrpcMilvusServer::StartService() {
 
     server = builder.BuildAndStart();
     server->Wait();
-
 }
 
 void
