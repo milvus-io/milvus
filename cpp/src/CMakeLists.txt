@@ -80,9 +80,12 @@ include_directories(grpc/gen-status)
 include_directories(grpc/gen-milvus)
 
 if (MILVUS_WITH_THRIFT STREQUAL "ON")
+    message("Build thrift server")
+    add_definitions("-DMILVUS_ENABLE_THRIFT")
     set(client_thrift_lib
             thrift)
 else()
+    message("Build grpc server")
     set(client_grpc_lib
             grpcpp_channelz
             grpc++
@@ -200,7 +203,7 @@ set(knowhere_libs
         )
 
 if (MILVUS_WITH_THRIFT STREQUAL "ON")
-    add_executable(milvus_thrift_server
+    add_executable(milvus_server
             ${config_files}
             ${server_files}
             ${thriftserver_files}
@@ -219,32 +222,14 @@ else()
             )
 endif()
 
-if (ENABLE_LICENSE STREQUAL "ON")
-	add_executable(get_sys_info ${get_sys_info_files})
-	add_executable(license_generator ${license_generator_files})
-
-	target_link_libraries(get_sys_info ${license_libs} license_check ${third_party_libs})
-	target_link_libraries(license_generator ${license_libs} ${third_party_libs})
-
-    if(MILVUS_WITH_THRIFT STREQUAL "ON")
-        target_link_libraries(milvus_thrift_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
-    else()
-        target_link_libraries(milvus_server ${server_libs} license_check ${knowhere_libs} ${third_party_libs})
-    endif()
-
-else ()
-    if(MILVUS_WITH_THRIFT STREQUAL "ON")
-        target_link_libraries(milvus_thrift_server ${server_libs} ${knowhere_libs} ${third_party_libs})
-    else()
-        target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_party_libs})
-    endif()
-endif()
-
-if (MILVUS_WITH_THRIFT STREQUAL "ON")
-    install(TARGETS milvus_thrift_server DESTINATION bin)
+if(MILVUS_WITH_THRIFT STREQUAL "ON")
+    target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_party_libs})
 else()
-    install(TARGETS milvus_server DESTINATION bin)
+    target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_party_libs})
 endif()
+
+
+install(TARGETS milvus_server DESTINATION bin)
 
 install(FILES
         ${KNOWHERE_BUILD_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}
