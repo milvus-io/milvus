@@ -112,7 +112,7 @@ ClientProxy::HasTable(const std::string &table_name) {
 }
 
 Status
-ClientProxy::DeleteTable(const std::string &table_name) {
+ClientProxy::DropTable(const std::string &table_name) {
     if(!IsConnected()) {
         return Status(StatusCode::NotConnected, "not connected to server");
     }
@@ -128,18 +128,13 @@ ClientProxy::DeleteTable(const std::string &table_name) {
 }
 
 Status
-ClientProxy::DropTable(const std::string &table_name) {
-    return this->DeleteTable(table_name);
-}
-
-Status
-ClientProxy::BuildIndex(const std::string &table_name) {
+ClientProxy::CreateIndex(const IndexParam &index_param) {
     if(!IsConnected()) {
         return Status(StatusCode::NotConnected, "not connected to server");
     }
 
     try {
-        ClientPtr()->interface()->BuildIndex(table_name);
+        ClientPtr()->interface()->BuildIndex(index_param.table_name);
 
     }  catch ( std::exception& ex) {
         return Status(StatusCode::UnknownError, "failed to build index: " + std::string(ex.what()));
@@ -149,7 +144,7 @@ ClientProxy::BuildIndex(const std::string &table_name) {
 }
 
 Status
-ClientProxy::AddVector(const std::string &table_name,
+ClientProxy::Insert(const std::string &table_name,
                           const std::vector<RowRecord> &record_array,
                           std::vector<int64_t> &id_array) {
     if(!IsConnected()) {
@@ -179,14 +174,7 @@ ClientProxy::AddVector(const std::string &table_name,
 }
 
 Status
-ClientProxy::InsertVector(const std::string &table_name,
-                       const std::vector<RowRecord> &record_array,
-                       std::vector<int64_t> &id_array) {
-    return this->AddVector(table_name, record_array, id_array);
-}
-
-Status
-ClientProxy::SearchVector(const std::string &table_name,
+ClientProxy::Search(const std::string &table_name,
                           const std::vector<RowRecord> &query_record_array,
                           const std::vector<Range> &query_range_array,
                           int64_t topk,
@@ -277,7 +265,7 @@ ClientProxy::DescribeTable(const std::string &table_name, TableSchema &table_sch
 }
 
 Status
-ClientProxy::GetTableRowCount(const std::string &table_name, int64_t &row_count) {
+ClientProxy::CountTable(const std::string &table_name, int64_t &row_count) {
     if(!IsConnected()) {
         return Status(StatusCode::NotConnected, "not connected to server");
     }
@@ -336,6 +324,24 @@ ClientProxy::ServerStatus() const {
     }  catch ( std::exception& ex) {
         return "connection lost";
     }
+}
+
+Status ClientProxy::DeleteByRange(Range &range, const std::string &table_name) {
+    return Status::OK();
+}
+
+Status ClientProxy::PreloadTable(const std::string &table_name) const {
+    return Status::OK();
+}
+
+IndexParam ClientProxy::DescribeIndex(const std::string &table_name) const {
+    IndexParam index_param;
+    index_param.table_name = table_name;
+    return index_param;
+}
+
+Status ClientProxy::DropIndex(const std::string &table_name) const {
+    return Status::OK();
 }
     
 }

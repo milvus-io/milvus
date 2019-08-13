@@ -23,17 +23,12 @@ if (MILVUS_WITH_THRIFT STREQUAL "ON")
             ${CMAKE_SOURCE_DIR}/src/thrift/gen-cpp/milvus_types.cpp
             )
 
-    add_library(milvus_thrift_sdk STATIC
+    add_library(milvus_sdk STATIC
             ${interface_files}
             ${thrift_client_files}
             ${util_files}
             ${thrift_service_files}
             )
-
-    target_link_libraries(milvus_thrift_sdk
-            ${third_party_libs}
-            )
-    install(TARGETS milvus_thrift_sdk DESTINATION lib)
 else()
     aux_source_directory(grpc grpc_client_files)
 
@@ -47,17 +42,18 @@ else()
             ${CMAKE_SOURCE_DIR}/src/grpc/gen-status/status.pb.cc
             )
 
-    add_library(milvus_grpc_sdk STATIC
+    add_library(milvus_sdk STATIC
             ${interface_files}
             ${grpc_client_files}
             ${util_files}
             ${grpc_service_files}
             )
-
-    target_link_libraries(milvus_grpc_sdk
-            ${third_party_libs}
-            )
-    install(TARGETS milvus_grpc_sdk DESTINATION lib)
 endif()
+
+target_link_libraries(milvus_sdk
+        ${third_party_libs}
+        )
+
+install(TARGETS milvus_sdk DESTINATION lib)
 
 add_subdirectory(examples)
