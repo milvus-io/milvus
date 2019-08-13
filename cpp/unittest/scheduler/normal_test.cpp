@@ -21,7 +21,7 @@ TEST(normal_test, DISABLED_test1) {
     res_mgr->Connect(cpu, gpu1, PCIE);
     res_mgr->Connect(cpu, gpu2, PCIE);
 
-    res_mgr->StartAll();
+    res_mgr->Start();
 
     auto task1 = std::make_shared<Task>("123456789");
     auto task2 = std::make_shared<Task>("222222222");
