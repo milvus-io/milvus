@@ -22,7 +22,7 @@ namespace {
     constexpr int64_t NQ = 10;
     constexpr int64_t TOP_K = 10;
     constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    constexpr int64_t ADD_VECTOR_LOOP = 10;
+    constexpr int64_t ADD_VECTOR_LOOP = 5;
     constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
@@ -173,7 +173,7 @@ namespace {
         std::vector<TopKQueryResult> topk_query_result_array;
         {
             TimeRecorder rc(phase_name);
-            Status stat = conn->SearchVector(TABLE_NAME, record_array, query_range_array, TOP_K, topk_query_result_array);
+            Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, topk_query_result_array);
             std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
         }
 
@@ -209,7 +209,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "All tables: " << std::endl;
         for(auto& table : tables) {
             int64_t row_count = 0;
-            stat = conn->GetTableRowCount(table, row_count);
+            stat = conn->CountTable(table, row_count);
             std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
         }
     }
@@ -241,7 +241,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         int64_t begin_index = i * BATCH_ROW_COUNT;
         BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array);
         std::vector<int64_t> record_ids;
-        Status stat = conn->AddVector(TABLE_NAME, record_array, record_ids);
+        Status stat = conn->Insert(TABLE_NAME, record_array, record_ids);
         std::cout << "AddVector function call status: " << stat.ToString() << std::endl;
         std::cout << "Returned id array count: " << record_ids.size() << std::endl;
 
@@ -261,7 +261,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {//wait unit build index finish
         TimeRecorder recorder("Build index");
         std::cout << "Wait until build all index done" << std::endl;
-        Status stat = conn->BuildIndex(TABLE_NAME);
+        IndexParam index_param;
+        index_param.table_name = TABLE_NAME;
+        Status stat = conn->CreateIndex(index_param);
         std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;
     }
 
@@ -270,7 +272,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//delete table
-        Status stat = conn->DeleteTable(TABLE_NAME);
+        Status stat = conn->DropTable(TABLE_NAME);
         std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
     }
 
