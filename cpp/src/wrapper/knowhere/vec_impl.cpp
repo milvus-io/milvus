@@ -134,6 +134,24 @@ IndexType VecIndexImpl::GetType() {
     return type;
 }
 
+VecIndexPtr VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg) {
+    //if (auto new_type = GetGpuIndexType(type)) {
+    //    auto device_index = index_->CopyToGpu(device_id);
+    //    return std::make_shared<VecIndexImpl>(device_index, new_type);
+    //}
+    //return nullptr;
+
+    // TODO(linxj): update type
+    auto gpu_index = zilliz::knowhere::CopyCpuToGpu(index_, device_id, cfg);
+    return std::make_shared<VecIndexImpl>(gpu_index, type);
+}
+
+// TODO(linxj): rename copytocpu => copygputocpu
+VecIndexPtr VecIndexImpl::CopyToCpu(const Config &cfg) {
+    auto cpu_index = zilliz::knowhere::CopyGpuToCpu(index_, cfg);
+    return std::make_shared<VecIndexImpl>(cpu_index, type);
+}
+
 float *BFIndex::GetRawVectors() {
     auto raw_index = std::dynamic_pointer_cast<IDMAP>(index_);
     if (raw_index) { return raw_index->GetRawVectors(); }
