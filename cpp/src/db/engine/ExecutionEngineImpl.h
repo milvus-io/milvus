@@ -18,7 +18,7 @@ namespace engine {
 
 
 class ExecutionEngineImpl : public ExecutionEngine {
- public:
+public:
 
     ExecutionEngineImpl(uint16_t dimension,
                         const std::string &location,
@@ -42,6 +42,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status Load(bool to_cache) override;
 
+    Status CopyToGpu(uint64_t device_id) override;
+
+    Status CopyToCpu() override;
+
     Status Merge(const std::string &location) override;
 
     Status Search(long n,
@@ -56,12 +60,12 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status Init() override;
 
- private:
+private:
     VecIndexPtr CreatetVecIndex(EngineType type);
 
     VecIndexPtr Load(const std::string &location);
 
- protected:
+protected:
     VecIndexPtr index_ = nullptr;
     EngineType build_type;
     EngineType current_type;
