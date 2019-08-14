@@ -10,15 +10,13 @@ DB_PATH="/opt/milvus"
 PROFILING="OFF"
 BUILD_FAISS_WITH_MKL="OFF"
 USE_JFROG_CACHE="OFF"
-KNOWHERE_OPTS=""
-KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere/knowhere"
+KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere/cmake_build"
 
 while getopts "p:d:t:k:uhlrcgmj" arg
 do
         case $arg in
              t)
                 BUILD_TYPE=$OPTARG # BUILD_TYPE
-                KNOWHERE_OPTS="${KNOWHERE_OPTS} -t $OPTARG"
                 ;;
              u)
                 echo "Build and run unittest cases" ;
@@ -53,7 +51,6 @@ do
                 ;;
              j)
                 USE_JFROG_CACHE="ON"
-                KNOWHERE_OPTS="${KNOWHERE_OPTS} -j"
                 ;;
              h) # help
                 echo "
