@@ -14,7 +14,7 @@ container('milvus-build-env') {
                     dir ("cpp") {
                         sh "git config --global user.email \"test@zilliz.com\""
                         sh "git config --global user.name \"test\""
-                        sh "./build.sh -t ${params.BUILD_TYPE} -j -u -c"
+                        sh "./build.sh -t ${params.BUILD_TYPE} -k ${knowhere_build_dir} -j -u -c"
                     }
                 } catch (exc) {
                     updateGitlabCommitStatus name: 'Build Engine', state: 'failed'
