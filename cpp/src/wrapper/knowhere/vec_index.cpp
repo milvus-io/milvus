@@ -191,7 +191,9 @@ server::KnowhereError write_index(VecIndexPtr index, const std::string &location
 
 // TODO(linxj): redo here.
 void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Config &cfg) {
-    if (!cfg.contains("nlist")) { cfg["nlist"] = int(size / 1000000.0 * 16384); }
+    auto nlist = cfg.get_with_default("nlist", 0);
+    if (int(size/1000000.0) * nlist == 0) { cfg["nlist"] = int(size / 1000000.0 * 16384); }
+
     if (!cfg.contains("gpu_id")) { cfg["gpu_id"] = int(0); }
     if (!cfg.contains("metric_type")) { cfg["metric_type"] = "L2"; }
 

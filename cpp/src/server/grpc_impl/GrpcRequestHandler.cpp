@@ -175,7 +175,12 @@ GrpcRequestHandler::DeleteByRange(::grpc::ServerContext *context,
 GrpcRequestHandler::PreloadTable(::grpc::ServerContext *context,
              const ::milvus::grpc::TableName *request,
              ::milvus::grpc::Status *response) {
-
+    BaseTaskPtr task_ptr = PreloadTableTask::Create(request->table_name());
+    ::milvus::grpc::Status grpc_status;
+    GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
+    response->set_reason(grpc_status.reason());
+    response->set_error_code(grpc_status.error_code());
+    return ::grpc::Status::OK;
 }
 
 ::grpc::Status
