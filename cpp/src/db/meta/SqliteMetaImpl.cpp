@@ -404,6 +404,40 @@ Status SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
     return Status::OK();
 }
 
+Status SqliteMetaImpl::PreloadTable(const std::string &table_id, TableFilesSchema &files_schema) {
+    try {
+        MetricCollector metric;
+
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::size_,
+                                                     &TableFileSchema::dimension_,
+                                                     &TableFileSchema::location_,
+                                                     &TableFileSchema::engine_type_),
+                                             where(c(&TableFileSchema::table_id_) == table_id));
+
+        TableSchema table_schema;
+        table_schema.table_id_ = table_id;
+        auto status = DescribeTable(table_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
+        int64_t size = 0;
+        for (auto &file : selected) {
+            TableFileSchema file_schema;
+            file_schema.size_ = std::get<0>(file);
+            file_schema.dimension_ = std::get<1>(file);
+            file_schema.location_ = std::get<2>(file);
+            file_schema.engine_type_ = std::get<3>(file);
+            files_schema.push_back(file_schema);
+        }
+
+
+    } catch (std::exception &e) {
+        return HandleException("Encounter exception when lookup all tables", e);
+    }
+    return Status::OK();
+}
+
 Status SqliteMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
     if (file_schema.date_ == EmptyDate) {
         file_schema.date_ = Meta::GetDate();

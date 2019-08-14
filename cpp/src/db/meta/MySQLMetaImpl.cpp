@@ -690,6 +690,11 @@ Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
     return Status::OK();
 }
 
+Status
+MySQLMetaImpl::PreloadTable(const std::string &table_id, meta::TableFilesSchema &files_schema) {
+
+}
+
 Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
 
 
