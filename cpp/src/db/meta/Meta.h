@@ -39,6 +39,9 @@ class Meta {
     AllTables(std::vector<TableSchema> &table_schema_array) = 0;
 
     virtual Status
+    PreloadTable(const std::string &table_id, meta::TableFilesSchema &files) = 0;
+
+    virtual Status
     DeleteTable(const std::string &table_id) = 0;
 
     virtual Status

@@ -32,6 +32,7 @@ namespace {
 constexpr uint64_t METRIC_ACTION_INTERVAL = 1;
 constexpr uint64_t COMPACT_ACTION_INTERVAL = 1;
 constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
+constexpr int64_t unit = 1024 * 1024 * 1024;
 
 void CollectInsertMetrics(double total_time, size_t n, bool succeed) {
     double avg_time = total_time / n;
@@ -125,6 +126,36 @@ Status DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
 
 Status DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
     return meta_ptr_->AllTables(table_schema_array);
+}
+
+Status DBImpl::PreloadTable(const std::string &table_id) {
+    meta::TableFilesSchema files;
+    auto status = meta_ptr_->PreloadTable(table_id, files);
+
+    int64_t size = 0;
+
+    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+    int64_t cap = config.GetInt64Value(server::CONFIG_CPU_CACHE_CAPACITY, 16);
+    cap *= unit;
+    for(auto &file : files) {
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
+        if(engine == nullptr) {
+            ENGINE_LOG_ERROR << "Invalid engine type";
+            return Status::Error("Invalid engine type");
+        }
+
+        size += engine->PhysicalSize();
+        if (size <= cap) {
+            try {
+                //step 1: load index
+                engine->Load(options_.insert_cache_immediately_);
+            } catch (std::exception &ex) {
+                std::string msg = "load to cache exception" + std::string(ex.what());
+                ENGINE_LOG_ERROR << msg;
+                return Status::Error(msg);
+            }
+        }
+    }
 }
 
 Status DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {

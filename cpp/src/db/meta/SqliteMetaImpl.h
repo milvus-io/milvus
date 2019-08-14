@@ -34,6 +34,9 @@ class SqliteMetaImpl : public Meta {
     AllTables(std::vector<TableSchema> &table_schema_array) override;
 
     Status
+    PreloadTable(const std::string &table_id, meta::TableFilesSchema &files_schema) override;
+
+    Status
     DeleteTable(const std::string &table_id) override;
 
     Status
