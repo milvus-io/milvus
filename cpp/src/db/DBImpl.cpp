@@ -32,7 +32,6 @@ namespace {
 constexpr uint64_t METRIC_ACTION_INTERVAL = 1;
 constexpr uint64_t COMPACT_ACTION_INTERVAL = 1;
 constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
-constexpr int64_t unit = 1024 * 1024 * 1024;
 
 void CollectInsertMetrics(double total_time, size_t n, bool succeed) {
     double avg_time = total_time / n;
@@ -139,6 +138,8 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
 
     int64_t size = 0;
     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+    int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
+    int64_t available_size = cache_total - cache_usage;
 
     for(auto &day_files : files) {
         for (auto &file : day_files.second) {
@@ -149,12 +150,12 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
             }
 
             size += engine->PhysicalSize();
-            if (size > cache_total) {
+            if (size > available_size) {
                 break;
             } else {
                 try {
                     //step 1: load index
-                    engine->Load(options_.insert_cache_immediately_);
+                    engine->Load(true);
                 } catch (std::exception &ex) {
                     std::string msg = "load to cache exception" + std::string(ex.what());
                     ENGINE_LOG_ERROR << msg;
