@@ -29,7 +29,6 @@ class MySQLMetaImpl : public Meta {
     Status DescribeTable(TableSchema &group_info_) override;
     Status HasTable(const std::string &table_id, bool &has_or_not) override;
     Status AllTables(std::vector<TableSchema> &table_schema_array) override;
-    Status PreloadTable(const std::string &table_id, meta::TableFilesSchema &files_schema) override;
 
     Status DeleteTable(const std::string &table_id) override;
     Status DeleteTableFiles(const std::string &table_id) override;

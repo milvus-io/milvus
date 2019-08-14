@@ -129,33 +129,41 @@ Status DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
 }
 
 Status DBImpl::PreloadTable(const std::string &table_id) {
-    meta::TableFilesSchema files;
-    auto status = meta_ptr_->PreloadTable(table_id, files);
+    meta::DatePartionedTableFilesSchema files;
+
+    meta::DatesT dates;
+    auto status = meta_ptr_->FilesToSearch(table_id, dates, files);
+    if (!status.ok()) {
+        return status;
+    }
 
     int64_t size = 0;
+    int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
 
-    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-    int64_t cap = config.GetInt64Value(server::CONFIG_CPU_CACHE_CAPACITY, 16);
-    cap *= unit;
-    for(auto &file : files) {
-        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
-        if(engine == nullptr) {
-            ENGINE_LOG_ERROR << "Invalid engine type";
-            return Status::Error("Invalid engine type");
-        }
+    for(auto &day_files : files) {
+        for (auto &file : day_files.second) {
+            ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
+            if(engine == nullptr) {
+                ENGINE_LOG_ERROR << "Invalid engine type";
+                return Status::Error("Invalid engine type");
+            }
 
-        size += engine->PhysicalSize();
-        if (size <= cap) {
-            try {
-                //step 1: load index
-                engine->Load(options_.insert_cache_immediately_);
-            } catch (std::exception &ex) {
-                std::string msg = "load to cache exception" + std::string(ex.what());
-                ENGINE_LOG_ERROR << msg;
-                return Status::Error(msg);
+            size += engine->PhysicalSize();
+            if (size > cache_total) {
+                break;
+            } else {
+                try {
+                    //step 1: load index
+                    engine->Load(options_.insert_cache_immediately_);
+                } catch (std::exception &ex) {
+                    std::string msg = "load to cache exception" + std::string(ex.what());
+                    ENGINE_LOG_ERROR << msg;
+                    return Status::Error(msg);
+                }
             }
         }
     }
+    return Status::OK();
 }
 
 Status DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
