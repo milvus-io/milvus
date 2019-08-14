@@ -234,7 +234,7 @@ GrpcClient::Cmd(std::string &result,
 
     result = response.string_reply();
     if (!grpc_status.ok()) {
-        std::cerr << "Ping gRPC failed!" << std::endl;
+        std::cerr << "Cmd gRPC failed!" << std::endl;
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
 
@@ -243,6 +243,24 @@ GrpcClient::Cmd(std::string &result,
         return Status(StatusCode::ServerFailed, response.status().reason());
     }
 
+    return Status::OK();
+}
+
+Status
+GrpcClient::PreloadTable(milvus::grpc::TableName &table_name) {
+    ClientContext context;
+    ::milvus::grpc::Status response;
+    ::grpc::Status grpc_status = stub_->PreloadTable(&context, table_name, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "PreloadTable gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (response.error_code() != grpc::SUCCESS) {
+        std::cerr << response.reason() << std::endl;
+        return Status(StatusCode::ServerFailed, response.reason());
+    }
     return Status::OK();
 }
 
