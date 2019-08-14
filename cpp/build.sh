@@ -85,6 +85,9 @@ fi
 
 # Knowhere build output path
 KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere/knowhere"
+pushd `pwd`/thirdparty/knowhere
+./build.sh -t ${BUILD_TYPE} -p ${KNOWHERE_BUILD_DIR} ${KNOWHERE_OPTS}
+popd
 
 cd cmake_build
 
