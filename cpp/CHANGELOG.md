@@ -3,15 +3,16 @@
 Please mark all change in change log and use the ticket from JIRA.
 
 # Milvus 0.4.0 (2019-07-28)
-- MS-336 - Scheduler interface
-- MS-344 - Add TaskTable Test
-- MS-345 - Add Node Test
-- MS-346 - Add some implementation of scheduler to solve compile error
 
 ## Bug
 
 ## Improvement
 - MS-327 - Clean code for milvus
+- MS-336 - Scheduler interface
+- MS-344 - Add TaskTable Test
+- MS-345 - Add Node Test
+- MS-346 - Add some implementation of scheduler to solve compile error
+- MS-350 - Remove knowhere submodule
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

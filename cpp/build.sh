@@ -83,11 +83,8 @@ if [[ ! -d cmake_build ]]; then
 	MAKE_CLEAN="ON"
 fi
 
-# Build Knowhere
-KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere_build"
-pushd `pwd`/thirdparty/knowhere
-./build.sh -t Release -p ${KNOWHERE_BUILD_DIR} ${KNOWHERE_OPTS}
-popd
+# Knowhere build output path
+KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere/knowhere"
 
 cd cmake_build
 
