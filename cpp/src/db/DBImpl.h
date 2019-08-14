@@ -52,6 +52,9 @@ class DBImpl : public DB {
     AllTables(std::vector<meta::TableSchema> &table_schema_array) override;
 
     Status
+    PreloadTable(const std::string &table_id) override;
+
+    Status
     GetTableRowCount(const std::string &table_id, uint64_t &row_count) override;
 
     Status
