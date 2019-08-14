@@ -58,6 +58,14 @@ public:
 
     }
 
+    engine::VecIndexPtr CopyToGpu(const int64_t &device_id, const engine::Config &cfg) override {
+
+    }
+
+    engine::VecIndexPtr CopyToCpu(const engine::Config &cfg) override {
+
+    }
+
     virtual int64_t Dimension() {
         return dimension_;
     }
