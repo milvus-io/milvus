@@ -2556,6 +2556,8 @@ macro(build_gperftools)
                 ${GPERFTOOLS_STATIC_LIB})
     endif()
 
+    ExternalProject_Add_StepDependencies(gperftools_ep build libunwind_ep)
+
     file(MAKE_DIRECTORY "${GPERFTOOLS_INCLUDE_DIR}")
 
     add_library(gperftools STATIC IMPORTED)
