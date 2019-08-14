@@ -127,6 +127,46 @@ Status DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
     return meta_ptr_->AllTables(table_schema_array);
 }
 
+Status DBImpl::PreloadTable(const std::string &table_id) {
+    meta::DatePartionedTableFilesSchema files;
+
+    meta::DatesT dates;
+    auto status = meta_ptr_->FilesToSearch(table_id, dates, files);
+    if (!status.ok()) {
+        return status;
+    }
+
+    int64_t size = 0;
+    int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
+    int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
+    int64_t available_size = cache_total - cache_usage;
+
+    for(auto &day_files : files) {
+        for (auto &file : day_files.second) {
+            ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
+            if(engine == nullptr) {
+                ENGINE_LOG_ERROR << "Invalid engine type";
+                return Status::Error("Invalid engine type");
+            }
+
+            size += engine->PhysicalSize();
+            if (size > available_size) {
+                break;
+            } else {
+                try {
+                    //step 1: load index
+                    engine->Load(true);
+                } catch (std::exception &ex) {
+                    std::string msg = "load to cache exception" + std::string(ex.what());
+                    ENGINE_LOG_ERROR << msg;
+                    return Status::Error(msg);
+                }
+            }
+        }
+    }
+    return Status::OK();
+}
+
 Status DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
     return meta_ptr_->Count(table_id, row_count);
 }
