@@ -52,7 +52,7 @@ if(MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_MINOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
-    set(MILVUS_VERSION "0.3.1")
+    set(MILVUS_VERSION "0.4.0")
 endif()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
@@ -71,6 +71,7 @@ set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
 message("CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}")
 message("CUDA_NVCC_FLAGS=${CUDA_NVCC_FLAGS}")
 
+set(MILVUS_WITH_THRIFT "OFF")
 set(GPU_VERSION "ON")
 add_definitions("-DGPU_VERSION")
 

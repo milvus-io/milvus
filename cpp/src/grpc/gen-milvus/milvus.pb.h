@@ -838,6 +838,7 @@ class InsertParam :
 
   enum : int {
     kRowRecordArrayFieldNumber = 2,
+    kRowIdArrayFieldNumber = 3,
     kTableNameFieldNumber = 1,
   };
   // repeated .milvus.grpc.RowRecord row_record_array = 2;
@@ -850,6 +851,17 @@ class InsertParam :
   ::milvus::grpc::RowRecord* add_row_record_array();
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::RowRecord >&
       row_record_array() const;
+
+  // repeated int64 row_id_array = 3;
+  int row_id_array_size() const;
+  void clear_row_id_array();
+  ::PROTOBUF_NAMESPACE_ID::int64 row_id_array(int index) const;
+  void set_row_id_array(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_row_id_array(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      row_id_array() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_row_id_array();
 
   // string table_name = 1;
   void clear_table_name();
@@ -868,6 +880,8 @@ class InsertParam :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::RowRecord > row_record_array_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > row_id_array_;
+  mutable std::atomic<int> _row_id_array_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr table_name_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -1139,6 +1153,7 @@ class SearchParam :
     kQueryRangeArrayFieldNumber = 3,
     kTableNameFieldNumber = 1,
     kTopkFieldNumber = 4,
+    kNprobeFieldNumber = 5,
   };
   // repeated .milvus.grpc.RowRecord query_record_array = 2;
   int query_record_array_size() const;
@@ -1178,6 +1193,11 @@ class SearchParam :
   ::PROTOBUF_NAMESPACE_ID::int64 topk() const;
   void set_topk(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // int64 nprobe = 5;
+  void clear_nprobe();
+  ::PROTOBUF_NAMESPACE_ID::int64 nprobe() const;
+  void set_nprobe(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.grpc.SearchParam)
  private:
   class _Internal;
@@ -1187,6 +1207,7 @@ class SearchParam :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::grpc::Range > query_range_array_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr table_name_;
   ::PROTOBUF_NAMESPACE_ID::int64 topk_;
+  ::PROTOBUF_NAMESPACE_ID::int64 nprobe_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -2312,6 +2333,7 @@ class Index :
     kNlistFieldNumber = 2,
     kIndexTypeFieldNumber = 1,
     kIndexFileSizeFieldNumber = 3,
+    kMetricTypeFieldNumber = 4,
   };
   // int64 nlist = 2;
   void clear_nlist();
@@ -2328,6 +2350,11 @@ class Index :
   ::PROTOBUF_NAMESPACE_ID::int32 index_file_size() const;
   void set_index_file_size(::PROTOBUF_NAMESPACE_ID::int32 value);
 
+  // int32 metric_type = 4;
+  void clear_metric_type();
+  ::PROTOBUF_NAMESPACE_ID::int32 metric_type() const;
+  void set_metric_type(::PROTOBUF_NAMESPACE_ID::int32 value);
+
   // @@protoc_insertion_point(class_scope:milvus.grpc.Index)
  private:
   class _Internal;
@@ -2336,6 +2363,7 @@ class Index :
   ::PROTOBUF_NAMESPACE_ID::int64 nlist_;
   ::PROTOBUF_NAMESPACE_ID::int32 index_type_;
   ::PROTOBUF_NAMESPACE_ID::int32 index_file_size_;
+  ::PROTOBUF_NAMESPACE_ID::int32 metric_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -3059,6 +3087,36 @@ InsertParam::row_record_array() const {
   return row_record_array_;
 }
 
+// repeated int64 row_id_array = 3;
+inline int InsertParam::row_id_array_size() const {
+  return row_id_array_.size();
+}
+inline void InsertParam::clear_row_id_array() {
+  row_id_array_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 InsertParam::row_id_array(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.InsertParam.row_id_array)
+  return row_id_array_.Get(index);
+}
+inline void InsertParam::set_row_id_array(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  row_id_array_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.grpc.InsertParam.row_id_array)
+}
+inline void InsertParam::add_row_id_array(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  row_id_array_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.grpc.InsertParam.row_id_array)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+InsertParam::row_id_array() const {
+  // @@protoc_insertion_point(field_list:milvus.grpc.InsertParam.row_id_array)
+  return row_id_array_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+InsertParam::mutable_row_id_array() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.grpc.InsertParam.row_id_array)
+  return &row_id_array_;
+}
+
 // -------------------------------------------------------------------
 
 // VectorIds
@@ -3265,6 +3323,20 @@ inline void SearchParam::set_topk(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   topk_ = value;
   // @@protoc_insertion_point(field_set:milvus.grpc.SearchParam.topk)
+}
+
+// int64 nprobe = 5;
+inline void SearchParam::clear_nprobe() {
+  nprobe_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 SearchParam::nprobe() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.SearchParam.nprobe)
+  return nprobe_;
+}
+inline void SearchParam::set_nprobe(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  nprobe_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.SearchParam.nprobe)
 }
 
 // -------------------------------------------------------------------
@@ -3823,6 +3895,20 @@ inline void Index::set_index_file_size(::PROTOBUF_NAMESPACE_ID::int32 value) {
   
   index_file_size_ = value;
   // @@protoc_insertion_point(field_set:milvus.grpc.Index.index_file_size)
+}
+
+// int32 metric_type = 4;
+inline void Index::clear_metric_type() {
+  metric_type_ = 0;
+}
+inline ::PROTOBUF_NAMESPACE_ID::int32 Index::metric_type() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.Index.metric_type)
+  return metric_type_;
+}
+inline void Index::set_metric_type(::PROTOBUF_NAMESPACE_ID::int32 value) {
+  
+  metric_type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.Index.metric_type)
 }
 
 // -------------------------------------------------------------------

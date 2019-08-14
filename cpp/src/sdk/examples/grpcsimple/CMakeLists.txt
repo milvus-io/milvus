@@ -11,14 +11,14 @@ include_directories(../../include)
 
 link_directories(${CMAKE_BINARY_DIR})
 
-add_executable(grpc_sdk_simple
+add_executable(sdk_simple
         main.cpp
         ${src_files}
         )
 
-target_link_libraries(grpc_sdk_simple
-        milvus_grpc_sdk
+target_link_libraries(sdk_simple
+        milvus_sdk
         pthread
         )
 
-install(TARGETS grpc_sdk_simple DESTINATION bin)
+install(TARGETS sdk_simple DESTINATION bin)

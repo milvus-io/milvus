@@ -25,6 +25,8 @@ class VecIndexImpl : public VecIndex {
                                    const Config &cfg,
                                    const long &nt,
                                    const float *xt) override;
+    VecIndexPtr CopyToGpu(const int64_t &device_id, const Config &cfg) override;
+    VecIndexPtr CopyToCpu(const Config &cfg) override;
     IndexType GetType() override;
     int64_t Dimension() override;
     int64_t Count() override;

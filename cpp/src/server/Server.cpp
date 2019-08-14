@@ -6,11 +6,11 @@
 #include <thread>
 #include "Server.h"
 //#include "ServerConfig.h"
-//#ifdef MILVUS_ENABLE_THRIFT
+#ifdef MILVUS_ENABLE_THRIFT
 #include "server/thrift_impl/MilvusServer.h"
-//#else
+#else
 #include "server/grpc_impl/GrpcMilvusServer.h"
-//#endif
+#endif
 
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
@@ -225,15 +225,20 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
-//    std::thread thrift_thread = std::thread(&MilvusServer::StartService);
+#ifdef MILVUS_ENABLE_THRIFT
+    MilvusServer::StartService();
+#else
     grpc::GrpcMilvusServer::StartService();
-//    thrift_thread.join();
+#endif
 }
 
 void
 Server::StopService() {
-//    MilvusServer::StartService();
+#ifdef MILVUS_ENABLE_THRIFT
+    MilvusServer::StopService();
+#else
     grpc::GrpcMilvusServer::StopService();
+#endif
 }
 
 }
