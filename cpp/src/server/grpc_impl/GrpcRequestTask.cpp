@@ -706,6 +706,45 @@ CmdTask::OnExecute() {
     return SERVER_SUCCESS;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PreloadTableTask::PreloadTableTask(const std::string &table_name)
+        : GrpcBaseTask(DDL_DML_TASK_GROUP),
+          table_name_(table_name) {
+
+}
+
+BaseTaskPtr
+PreloadTableTask::Create(const std::string &table_name){
+    return std::shared_ptr<GrpcBaseTask>(new PreloadTableTask(table_name));
+}
+
+ServerError
+PreloadTableTask::OnExecute() {
+    try {
+        TimeRecorder rc("PreloadTableTask");
+
+        //step 1: check arguments
+        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        if (res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
+        }
+
+        //step 2: check table existence
+        engine::Status stat = DBWrapper::DB()->PreloadTable(table_name_);
+        if (!stat.ok()) {
+            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+        }
+
+        rc.ElapseFromBegin("totally cost");
+    } catch (std::exception &ex) {
+        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
+
+    return SERVER_SUCCESS;
+}
+
+
+
 }
 }
 }
