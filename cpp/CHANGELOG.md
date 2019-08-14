@@ -13,6 +13,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Improvement
 - MS-327 - Clean code for milvus
+- MS-354 - Add task class and interface in scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
