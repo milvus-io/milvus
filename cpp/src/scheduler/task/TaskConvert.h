@@ -3,26 +3,18 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#pragma once
 
-#include <string>
-#include <memory>
-
+#include "src/db/scheduler/task/IndexLoadTask.h"
+#include "Task.h"
+#include "SearchTask.h"
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-// dummy task
-class Task {
-public:
-    Task(const std::string &name) {}
 
-    void
-    Execute() {}
-};
-
-using TaskPtr = std::shared_ptr<Task>;
+TaskPtr
+TaskConvert(const ScheduleTaskPtr &schedule_task);
 
 }
 }
