@@ -43,8 +43,8 @@ protected:
     void
     SetUp() override {
         invalid_task_ = nullptr;
-        task1_ = std::make_shared<Task>("1");
-        task2_ = std::make_shared<Task>("2");
+        task1_ = std::make_shared<XSearchTask>();
+        task2_ = std::make_shared<XSearchTask>();
 
         empty_table_ = TaskTable();
     }
@@ -85,7 +85,7 @@ protected:
     void
     SetUp() override {
         for (uint64_t i = 0; i < 8; ++i) {
-            auto task = std::make_shared<Task>(std::to_string(i));
+            auto task = std::make_shared<XSearchTask>();
             table1_.Put(task);
         }
 
