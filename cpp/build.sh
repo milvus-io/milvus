@@ -10,14 +10,13 @@ DB_PATH="/opt/milvus"
 PROFILING="OFF"
 BUILD_FAISS_WITH_MKL="OFF"
 USE_JFROG_CACHE="OFF"
-KNOWHERE_OPTS=""
+KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere/cmake_build"
 
-while getopts "p:d:t:uhlrcgmj" arg
+while getopts "p:d:t:k:uhlrcgmj" arg
 do
         case $arg in
              t)
                 BUILD_TYPE=$OPTARG # BUILD_TYPE
-                KNOWHERE_OPTS="${KNOWHERE_OPTS} -t $OPTARG"
                 ;;
              u)
                 echo "Build and run unittest cases" ;
@@ -44,12 +43,14 @@ do
              g)
                 PROFILING="ON"
                 ;;
+             k)
+                KNOWHERE_BUILD_DIR=$OPTARG
+                ;;
              m)
                 BUILD_FAISS_WITH_MKL="ON"
                 ;;
              j)
                 USE_JFROG_CACHE="ON"
-                KNOWHERE_OPTS="${KNOWHERE_OPTS} -j"
                 ;;
              h) # help
                 echo "
@@ -63,11 +64,12 @@ parameter:
 -r: remove previous build directory(default: OFF)
 -c: code coverage(default: OFF)
 -g: profiling(default: OFF)
+-k: specify knowhere header/binary path
 -m: build faiss with MKL(default: OFF)
 -j: use jfrog cache build directory
 
 usage:
-./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c] [-m] [-j]
+./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c] [-k] [-m] [-j]
                 "
                 exit 0
                 ;;
@@ -82,9 +84,6 @@ if [[ ! -d cmake_build ]]; then
 	mkdir cmake_build
 	MAKE_CLEAN="ON"
 fi
-
-# Knowhere build output path
-KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere/knowhere"
 
 cd cmake_build
 
