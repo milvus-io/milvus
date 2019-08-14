@@ -9,7 +9,7 @@
 #include <deque>
 #include <mutex>
 
-#include "Task.h"
+#include "task/SearchTask.h"
 
 
 namespace zilliz {
