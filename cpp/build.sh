@@ -101,7 +101,7 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DBUILD_FAISS_WITH_MKL=${BUILD_FAISS_WITH_MKL} \
     -DKNOWHERE_BUILD_DIR=${KNOWHERE_BUILD_DIR} \
     -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
-    $@ ../"
+    ../"
     echo ${CMAKE_CMD}
 
     ${CMAKE_CMD}
