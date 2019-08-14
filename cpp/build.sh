@@ -13,7 +13,7 @@ USE_JFROG_CACHE="OFF"
 KNOWHERE_OPTS=""
 KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere/knowhere"
 
-while getopts "p:d:t:uhlrcgkmj" arg
+while getopts "p:d:t:k:uhlrcgmj" arg
 do
         case $arg in
              t)
