@@ -9,6 +9,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "db/engine/EngineFactory.h"
+#include "scheduler/task/TaskConvert.h"
 
 namespace zilliz {
 namespace milvus {
@@ -85,6 +86,9 @@ TaskScheduler::TaskDispatchWorker() {
             return true;
         }
 
+        // TODO: Put task into Disk-TaskTable
+//        auto task = TaskConvert(task_ptr);
+//        DiskResourcePtr->task_table().Put(task)
         //execute task
         ScheduleTaskPtr next_task = task_ptr->Execute();
         if(next_task != nullptr) {
@@ -98,6 +102,7 @@ TaskScheduler::TaskDispatchWorker() {
 bool
 TaskScheduler::TaskWorker() {
     while(true) {
+        // TODO: expected blocking forever
         ScheduleTaskPtr task_ptr = task_queue_.Take();
         if(task_ptr == nullptr) {
             SERVER_LOG_INFO << "Stop db task worker thread";
