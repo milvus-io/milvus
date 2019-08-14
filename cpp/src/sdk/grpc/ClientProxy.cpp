@@ -328,7 +328,14 @@ ClientProxy::DeleteByRange(milvus::Range &range, const std::string &table_name) 
 
 Status
 ClientProxy::PreloadTable(const std::string &table_name) const {
-
+    try {
+        ::milvus::grpc::TableName grpc_table_name;
+        grpc_table_name.set_table_name(table_name);
+        Status status = client_ptr_->PreloadTable(grpc_table_name);
+        return status;
+    } catch (std::exception &ex) {
+        return Status(StatusCode::UnknownError, "fail to show tables: " + std::string(ex.what()));
+    }
 }
 
 IndexParam
