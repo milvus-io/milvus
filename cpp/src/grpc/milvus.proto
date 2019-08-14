@@ -43,6 +43,7 @@ message RowRecord {
 message InsertParam {
     string table_name = 1;
     repeated RowRecord row_record_array = 2;
+    repeated int64 row_id_array = 3;            //optional
 }
 
 /**
@@ -61,6 +62,7 @@ message SearchParam {
     repeated RowRecord query_record_array = 2;
     repeated Range query_range_array = 3;
     int64 topk = 4;
+    int64 nprobe = 5;
 }
 
 /**
@@ -125,6 +127,7 @@ message Index {
     int32 index_type = 1;
     int64 nlist = 2;
     int32 index_file_size = 3;
+    int32 metric_type = 4;
 }
 
 /**
