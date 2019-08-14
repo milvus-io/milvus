@@ -15,6 +15,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-348 - Add ResourceFactory Test
 - MS-350 - Remove knowhere submodule
 - MS-354 - Add task class and interface in scheduler
+- MS-355 - Add copy interface in ExcutionEngine
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
