@@ -12,7 +12,7 @@ namespace milvus {
 namespace engine {
 
 std::vector<uint64_t>
-PickToMove(const TaskTable &task_table, const CacheMgr &cache_mgr, double limit) {
+PickToMove(const TaskTable &task_table, const CacheMgr &cache_mgr, uint64_t limit) {
     std::vector<uint64_t> indexes;
     return indexes;
 }
