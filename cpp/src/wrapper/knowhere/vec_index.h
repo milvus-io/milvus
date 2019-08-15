@@ -35,6 +35,9 @@ enum class IndexType {
     NSG_MIX,
 };
 
+class VecIndex;
+using VecIndexPtr = std::shared_ptr<VecIndex>;
+
 class VecIndex {
  public:
     virtual server::KnowhereError BuildAll(const long &nb,
@@ -55,6 +58,11 @@ class VecIndex {
                                          long *ids,
                                          const Config &cfg = Config()) = 0;
 
+    virtual VecIndexPtr CopyToGpu(const int64_t& device_id,
+                                  const Config &cfg = Config()) = 0;
+
+    virtual VecIndexPtr CopyToCpu(const Config &cfg = Config()) = 0;
+
     virtual IndexType GetType() = 0;
 
     virtual int64_t Dimension() = 0;
@@ -65,8 +73,6 @@ class VecIndex {
 
     virtual server::KnowhereError Load(const zilliz::knowhere::BinarySet &index_binary) = 0;
 };
-
-using VecIndexPtr = std::shared_ptr<VecIndex>;
 
 extern server::KnowhereError write_index(VecIndexPtr index, const std::string &location);
 

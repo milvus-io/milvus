@@ -143,6 +143,32 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
     return Status::OK();
 }
 
+Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
+    try {
+        index_ = index_->CopyToGpu(device_id);
+        ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
+    } catch (knowhere::KnowhereException &e) {
+        ENGINE_LOG_ERROR << e.what();
+        return Status::Error(e.what());
+    } catch (std::exception &e) {
+        return Status::Error(e.what());
+    }
+    return Status::OK();
+}
+
+Status ExecutionEngineImpl::CopyToCpu() {
+    try {
+        index_ = index_->CopyToCpu();
+        ENGINE_LOG_DEBUG << "GPU to CPU";
+    } catch (knowhere::KnowhereException &e) {
+        ENGINE_LOG_ERROR << e.what();
+        return Status::Error(e.what());
+    } catch (std::exception &e) {
+        return Status::Error(e.what());
+    }
+    return Status::OK();
+}
+
 Status ExecutionEngineImpl::Merge(const std::string &location) {
     if (location == location_) {
         return Status::Error("Cannot Merge Self");

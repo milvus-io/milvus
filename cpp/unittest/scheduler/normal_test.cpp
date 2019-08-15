@@ -23,8 +23,8 @@ TEST(normal_test, DISABLED_test1) {
 
     res_mgr->Start();
 
-    auto task1 = std::make_shared<Task>("123456789");
-    auto task2 = std::make_shared<Task>("222222222");
+    auto task1 = std::make_shared<XSearchTask>();
+    auto task2 = std::make_shared<XSearchTask>();
     if (auto observe = disk.lock()) {
         observe->task_table().Put(task1);
         observe->task_table().Put(task2);
