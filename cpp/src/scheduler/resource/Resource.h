@@ -15,8 +15,9 @@
 #include "../TaskTable.h"
 #include "../task/Task.h"
 #include "../Cost.h"
-#include "Node.h"
 #include "Connection.h"
+#include "Node.h"
+#include "RegisterHandler.h"
 
 
 namespace zilliz {
@@ -29,92 +30,50 @@ enum class ResourceType {
     GPU = 2
 };
 
+enum class RegisterType {
+    START_UP,
+    ON_FINISH_TASK,
+    ON_COPY_COMPLETED,
+    ON_TASK_TABLE_UPDATED,
+};
+
 class Resource : public Node {
 public:
-    void
-    Start() {
-        loader_thread_ = std::thread(&Resource::loader_function, this);
-        executor_thread_ = std::thread(&Resource::executor_function, this);
+    /*
+     * Event function MUST be a short function, never blocking;
+     */
+    template <typename T>
+    void Register_T(const RegisterType& type) {
+        register_table_.emplace(type, [] { return std::make_shared<T>(); });
     }
 
+    RegisterHandlerPtr
+    GetRegisterFunc(const RegisterType& type);
+
     void
-    Stop() {
-        running_ = false;
-        WakeupLoader();
-        WakeupExecutor();
-    }
+    Start();
+
+    void
+    Stop();
 
     TaskTable &
-    task_table() {
-        return task_table_;
-    }
+    task_table();
 
 public:
     /*
      * wake up executor;
      */
     void
-    WakeupExecutor() {
-        exec_cv_.notify_one();
-    }
+    WakeupExecutor();
 
     /* 
      * wake up loader;
      */
     void
-    WakeupLoader() {
-        load_cv_.notify_one();
-    }
-
-public:
-    /*
-     * Event function MUST be a short function, never blocking;
-     */
-
-    /*
-     * Register on start up event;
-     */
-    void
-    RegisterOnStartUp(std::function<void(void)> func) {
-        on_start_up_ = func;
-    }
-
-    /*
-     * Register on finish one task event;
-     */
-    void
-    RegisterOnFinishTask(std::function<void(void)> func) {
-        on_finish_task_ = func;
-    }
-
-    /*
-     * Register on copy task data completed event;
-     */
-    void
-    RegisterOnCopyCompleted(std::function<void(void)> func) {
-        on_copy_completed_ = func;
-    }
-
-    /*
-     * Register on task table updated event;
-     */
-    void
-    RegisterOnTaskTableUpdated(std::function<void(void)> func) {
-        on_task_table_updated_ = func;
-    }
+    WakeupLoader();
 
 protected:
-    Resource(std::string name, ResourceType type)
-        : name_(std::move(name)),
-          type_(type),
-          on_start_up_(nullptr),
-          on_finish_task_(nullptr),
-          on_copy_completed_(nullptr),
-          on_task_table_updated_(nullptr),
-          running_(false),
-          load_flag_(false),
-          exec_flag_(false) {
-    }
+    Resource(std::string name, ResourceType type);
 
     // TODO: SearchContextPtr to TaskPtr
     /*
@@ -142,67 +101,27 @@ private:
      * Order by start time;
      */
     TaskPtr
-    pick_task_load() {
-        auto indexes = PickToLoad(task_table_, 3);
-        for (auto index : indexes) {
-            // try to set one task loading, then return
-            if (task_table_.Load(index))
-                return task_table_.Get(index).task;
-            // else try next
-        }
-        return nullptr;
-    }
+    pick_task_load();
 
     /*
      * Pick one task to execute;
      * Pick by start time and priority;
      */
     TaskPtr
-    pick_task_execute() {
-        auto indexes = PickToExecute(task_table_, 3);
-        for (auto index : indexes) {
-            // try to set one task executing, then return
-            if (task_table_.Execute(index))
-                return task_table_.Get(index).task;
-            // else try next
-        }
-        return nullptr;
-    }
+    pick_task_execute();
 
 private:
     /*
      * Only called by load thread;
      */
     void
-    loader_function() {
-        while (running_) {
-            std::unique_lock<std::mutex> lock(load_mutex_);
-            load_cv_.wait(lock, [&] { return load_flag_; });
-            auto task = pick_task_load();
-            if (task) {
-                LoadFile(task);
-                on_copy_completed_();
-            }
-        }
-
-    }
+    loader_function();
 
     /*
      * Only called by worker thread;
      */
     void
-    executor_function() {
-        on_start_up_();
-        while (running_) {
-            std::unique_lock<std::mutex> lock(exec_mutex_);
-            exec_cv_.wait(lock, [&] { return exec_flag_; });
-            auto task = pick_task_execute();
-            if (task) {
-                Process(task);
-                on_finish_task_();
-            }
-        }
-    }
+    executor_function();
 
 
 private:
@@ -211,10 +130,7 @@ private:
 
     TaskTable task_table_;
 
-    std::function<void(void)> on_start_up_;
-    std::function<void(void)> on_finish_task_;
-    std::function<void(void)> on_copy_completed_;
-    std::function<void(void)> on_task_table_updated_;
+    std::map<RegisterType, std::function<RegisterHandlerPtr()>> register_table_;
 
     bool running_;
     std::thread loader_thread_;
