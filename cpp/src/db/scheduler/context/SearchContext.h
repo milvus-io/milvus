@@ -21,12 +21,13 @@ using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
 
 class SearchContext : public IScheduleContext {
 public:
-    SearchContext(uint64_t topk, uint64_t nq, const float* vectors);
+    SearchContext(uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors);
 
     bool AddIndexFile(TableFileSchemaPtr& index_file);
 
     uint64_t topk() const { return topk_; }
     uint64_t nq() const  { return nq_; }
+    uint64_t nprobe() const { return nprobe_; }
     const float* vectors() const { return vectors_; }
 
     using Id2IndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
@@ -53,6 +54,7 @@ public:
 private:
     uint64_t topk_ = 0;
     uint64_t nq_ = 0;
+    uint64_t nprobe_ = 10;
     const float* vectors_ = nullptr;
 
     Id2IndexMap map_index_files_;

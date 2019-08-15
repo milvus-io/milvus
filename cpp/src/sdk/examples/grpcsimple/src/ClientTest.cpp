@@ -5,6 +5,7 @@
  ******************************************************************************/
 #include "ClientTest.h"
 #include "MilvusApi.h"
+#include "cache/CpuCacheMgr.h"
 
 #include <iostream>
 #include <time.h>
@@ -23,7 +24,7 @@ namespace {
     constexpr int64_t NQ = 10;
     constexpr int64_t TOP_K = 10;
     constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    constexpr int64_t ADD_VECTOR_LOOP = 5;
+    constexpr int64_t ADD_VECTOR_LOOP = 1;
     constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
@@ -174,7 +175,7 @@ namespace {
         std::vector<TopKQueryResult> topk_query_result_array;
         {
             TimeRecorder rc(phase_name);
-            Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, topk_query_result_array);
+            Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, 10, topk_query_result_array);
             std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
         }
 
@@ -314,6 +315,11 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 //        std::cout << "Wait until build all index done" << std::endl;
 //        Status stat = conn->CreateIndex();
 //        std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;
+    }
+
+    {//preload table
+        Status stat = conn->PreloadTable(TABLE_NAME);
+        std::cout << "PreloadTable function call status: " << stat.ToString() << std::endl;
     }
 
     {//search vectors after build index finish
