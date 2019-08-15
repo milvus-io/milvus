@@ -90,7 +90,7 @@ TEST_F(DISABLED_MySQLDBTest, DB_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(TABLE_NAME, k, qb, qxb.data(), results);
+            stat = db_->Query(TABLE_NAME, k, qb, 10, qxb.data(), results);
             ss << "Search " << j << " With Size " << count/engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
@@ -190,7 +190,7 @@ TEST_F(DISABLED_MySQLDBTest, SEARCH_TEST) {
     sleep(2); // wait until build index finish
 
     engine::QueryResults results;
-    stat = db_->Query(TABLE_NAME, k, nq, xq.data(), results);
+    stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
     ASSERT_STATS(stat);
 
     delete db_;

@@ -243,7 +243,7 @@ TEST_F(NewMemManagerTest, SERIAL_INSERT_SEARCH_TEST) {
     for (auto &pair : search_vectors) {
         auto &search = pair.second;
         engine::QueryResults results;
-        stat = db_->Query(TABLE_NAME, k, 1, search.data(), results);
+        stat = db_->Query(TABLE_NAME, k, 1, 10, search.data(), results);
         ASSERT_EQ(results[0][0].first, pair.first);
         ASSERT_LT(results[0][0].second, 0.00001);
     }
@@ -332,7 +332,7 @@ TEST_F(NewMemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(TABLE_NAME, k, qb, qxb.data(), results);
+            stat = db_->Query(TABLE_NAME, k, qb, 10, qxb.data(), results);
             ss << "Search " << j << " With Size " << count / engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
