@@ -27,7 +27,7 @@ public:
     virtual void
     Process() = 0;
 
-private:
+protected:
     ResourceWPtr resource_;
 };
 
@@ -86,7 +86,9 @@ public:
     }
 
     void
-    Start();
+    Start() {
+        worker_thread_ = std::thread(&Scheduler::worker_thread_, this);
+    }
 
 public:
     /******** Events ********/
@@ -138,7 +140,12 @@ private:
      * Called by worker_thread_;
      */
     void
-    worker_function();
+    worker_function() {
+        while (running_) {
+            auto event = event_queue_.front();
+            event->Process();
+        }
+    }
 
 private:
     bool running_;
