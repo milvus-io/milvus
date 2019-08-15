@@ -189,11 +189,11 @@ Status DBImpl::InsertVectors(const std::string& table_id_,
 
 }
 
-Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq,
+Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
                       const float *vectors, QueryResults &results) {
     auto start_time = METRICS_NOW_TIME;
     meta::DatesT dates = {meta::Meta::GetDate()};
-    Status result = Query(table_id, k, nq, vectors, dates, results);
+    Status result = Query(table_id, k, nq, nprobe, vectors, dates, results);
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time,end_time);
 
@@ -202,7 +202,7 @@ Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq,
     return result;
 }
 
-Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq,
+Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
     ENGINE_LOG_DEBUG << "Query by vectors";
 
@@ -219,13 +219,13 @@ Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq,
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info before query
-    status = QueryAsync(table_id, file_id_array, k, nq, vectors, dates, results);
+    status = QueryAsync(table_id, file_id_array, k, nq, nprobe, vectors, dates, results);
     cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info after query
     return status;
 }
 
 Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>& file_ids,
-        uint64_t k, uint64_t nq, const float* vectors,
+        uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
         const meta::DatesT& dates, QueryResults& results) {
     ENGINE_LOG_DEBUG << "Query by file ids";
 
@@ -256,20 +256,20 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info before query
-    status = QueryAsync(table_id, file_id_array, k, nq, vectors, dates, results);
+    status = QueryAsync(table_id, file_id_array, k, nq, nprobe, vectors, dates, results);
     cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info after query
     return status;
 }
 
 Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
-                          uint64_t k, uint64_t nq, const float* vectors,
+                          uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
                           const meta::DatesT& dates, QueryResults& results) {
     auto start_time = METRICS_NOW_TIME;
     server::TimeRecorder rc("");
 
     //step 1: get files to search
     ENGINE_LOG_DEBUG << "Engine query begin, index file count:" << files.size() << " date range count:" << dates.size();
-    SearchContextPtr context = std::make_shared<SearchContext>(k, nq, vectors);
+    SearchContextPtr context = std::make_shared<SearchContext>(k, nq, nprobe, vectors);
     for (auto &file : files) {
         TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         context->AddIndexFile(file_ptr);

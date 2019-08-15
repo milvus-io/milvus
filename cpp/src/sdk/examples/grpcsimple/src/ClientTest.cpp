@@ -174,7 +174,7 @@ namespace {
         std::vector<TopKQueryResult> topk_query_result_array;
         {
             TimeRecorder rc(phase_name);
-            Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, topk_query_result_array);
+            Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, 0, topk_query_result_array);
             std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
         }
 
