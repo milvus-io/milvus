@@ -5,6 +5,7 @@
  ******************************************************************************/
 
 #include "Scheduler.h"
+#include "Cost.h"
 
 
 namespace zilliz {
@@ -12,46 +13,60 @@ namespace milvus {
 namespace engine {
 
 void
-StartUpEvent::Process() {
+push_task(ResourcePtr &self, ResourcePtr &other) {
+    auto self_task_table = self->task_table();
+    auto other_task_table = other->task_table();
+    if (!other_task_table.Empty()) {
+        CacheMgr cache;
+        auto indexes = PickToMove(self_task_table, cache, 1);
+        for (auto index : indexes) {
+            if (self_task_table.Move(index)) {
+                auto task = self_task_table.Get(index).task;
+                other_task_table.Put(task);
+                // TODO: mark moved future
+                other->WakeupLoader();
+                other->WakeupExecutor();
+            }
+        }
+    }
+}
 
+void
+schedule(const ResourceWPtr &res) {
+    if (auto self = res.lock()) {
+        for (auto &nei : self->GetNeighbours()) {
+            if (auto n = nei.neighbour_node.lock()) {
+                auto neighbour = std::static_pointer_cast<Resource>(n);
+                push_task(self, neighbour);
+            }
+        }
+
+    }
+}
+
+void
+StartUpEvent::Process() {
+    schedule(resource_);
 }
 
 void
 FinishTaskEvent::Process() {
-//        for (nei : res->neighbours) {
-//            tasks = cost(nei->task_table(), nei->connection, limit = 3)
-//            res->task_table()->PutTasks(tasks);
-//        }
-//        res->WakeUpExec();
+    schedule(resource_);
 }
 
 void
 CopyCompletedEvent::Process() {
-
+    schedule(resource_);
 }
 
 void
 TaskTableUpdatedEvent::Process() {
-
-}
-
-
-void
-Scheduler::Start() {
-    worker_thread_ = std::thread(&Scheduler::worker_thread_, this);
+    schedule(resource_);
 }
 
 std::string
 Scheduler::Dump() {
     return std::string();
-}
-
-void
-Scheduler::worker_function() {
-    while (running_) {
-        auto event = event_queue_.front();
-        event->Process();
-    }
 }
 
 }
