@@ -83,9 +83,10 @@ ConnectionImpl::Search(const std::string &table_name,
                              const std::vector<RowRecord> &query_record_array,
                              const std::vector<Range> &query_range_array,
                              int64_t topk,
+                             int64_t nprobe,
                              std::vector<TopKQueryResult> &topk_query_result_array) {
     return client_proxy_->Search(table_name, query_record_array, query_range_array, topk,
-                                       topk_query_result_array);
+                                 nprobe, topk_query_result_array);
 }
 
 Status
@@ -121,7 +122,7 @@ ConnectionImpl::DeleteByRange(Range &range,
 
 Status
 ConnectionImpl::PreloadTable(const std::string &table_name) const {
-
+    return client_proxy_->PreloadTable(table_name);
 }
 
 IndexParam

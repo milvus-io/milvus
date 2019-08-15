@@ -13,10 +13,11 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-SearchContext::SearchContext(uint64_t topk, uint64_t nq, const float* vectors)
+SearchContext::SearchContext(uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors)
     : IScheduleContext(ScheduleContextType::kSearch),
       topk_(topk),
       nq_(nq),
+      nprobe_(nprobe),
       vectors_(vectors) {
     //use current time to identify this context
     std::chrono::system_clock::time_point tp = std::chrono::system_clock::now();
