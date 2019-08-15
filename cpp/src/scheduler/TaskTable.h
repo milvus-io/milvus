@@ -75,7 +75,22 @@ public:
      */
     void
     Clear();
-
+    
+    /*
+     * Return true if task table empty, otherwise false;
+     */
+    inline bool
+    Empty() {
+        return table_.empty();
+    }
+    
+    /*
+     * Return size of task table;
+     */
+    inline size_t 
+    Size() {
+        return table_.size();
+    }
 
 public:
 
