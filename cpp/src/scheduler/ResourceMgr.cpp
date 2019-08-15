@@ -29,22 +29,23 @@ ResourceMgr::Add(ResourcePtr &&resource) {
     resources_.emplace_back(resource);
 
     size_t index = resources_.size() - 1;
-    resource->RegisterOnStartUp([&] {
-        start_up_event_[index] = true;
-        event_cv_.notify_one();
-    });
-    resource->RegisterOnFinishTask([&] {
-        finish_task_event_[index] = true;
-        event_cv_.notify_one();
-    });
-    resource->RegisterOnCopyCompleted([&] {
-        copy_completed_event_[index] = true;
-        event_cv_.notify_one();
-    });
-    resource->RegisterOnTaskTableUpdated([&] {
-        task_table_updated_event_[index] = true;
-        event_cv_.notify_one();
-    });
+    // TODO: update interface
+//    resource->RegisterOnStartUp([&] {
+//        start_up_event_[index] = true;
+//        event_cv_.notify_one();
+//    });
+//    resource->RegisterOnFinishTask([&] {
+//        finish_task_event_[index] = true;
+//        event_cv_.notify_one();
+//    });
+//    resource->RegisterOnCopyCompleted([&] {
+//        copy_completed_event_[index] = true;
+//        event_cv_.notify_one();
+//    });
+//    resource->RegisterOnTaskTableUpdated([&] {
+//        task_table_updated_event_[index] = true;
+//        event_cv_.notify_one();
+//    });
     return ret;
 }
 
