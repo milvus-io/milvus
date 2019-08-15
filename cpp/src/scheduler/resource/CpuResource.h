@@ -17,29 +17,14 @@ namespace engine {
 class CpuResource : public Resource {
 public:
     explicit
-    CpuResource(std::string name)
-        : Resource(std::move(name), ResourceType::CPU) {}
+    CpuResource(std::string name);
 
 protected:
     void
-    LoadFile(TaskPtr task) override {
-//        if (src.type == DISK) {
-//            fd = open(filename);
-//            content = fd.read();
-//            close(fd);
-//        } else if (src.type == CPU) {
-//            memcpy(src, dest, len);
-//        } else if (src.type == GPU) {
-//            cudaMemcpyD2H(src, dest);
-//        } else {
-//            // unknown type, exception
-//        }
-    }
+    LoadFile(TaskPtr task) override;
 
     void
-    Process(TaskPtr task) override {
-        task->Execute();
-    }
+    Process(TaskPtr task) override;
 };
 
 }
