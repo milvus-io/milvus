@@ -42,6 +42,10 @@ public:
 
     virtual Status Load(bool to_cache = true) = 0;
 
+    virtual Status CopyToGpu(uint64_t device_id) = 0;
+
+    virtual Status CopyToCpu() = 0;
+
     virtual Status Merge(const std::string& location) = 0;
 
     virtual Status Search(long n,

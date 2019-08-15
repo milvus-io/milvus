@@ -13,7 +13,7 @@
 #include <condition_variable>
 
 #include "../TaskTable.h"
-#include "../Task.h"
+#include "../task/Task.h"
 #include "../Cost.h"
 #include "Node.h"
 #include "Connection.h"
