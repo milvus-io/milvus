@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <memory>
+#include <map>
 
 #include "../TaskTable.h"
 #include "Connection.h"
@@ -28,29 +29,31 @@ struct Neighbour {
     Connection connection;
 };
 
+// TODO(linxj): return type void -> Status
 class Node {
 public:
-    void
-    AddNeighbour(const NeighbourNodePtr &neighbour_node, Connection &connection) {
-        Neighbour neighbour(neighbour_node, connection);
-        neighbours_.emplace_back(neighbour);
-    }
+    Node();
 
     void
-    DelNeighbour(NeighbourNodePtr neighbour_ptr) {}
+    AddNeighbour(const NeighbourNodePtr &neighbour_node, Connection &connection);
+
+    void
+    DelNeighbour(const NeighbourNodePtr &neighbour_ptr);
 
     bool
-    IsNeighbour(NeighbourNodePtr neighbour_ptr) {}
+    IsNeighbour(const NeighbourNodePtr& neighbour_ptr);
 
-    const std::vector<Neighbour> &
-    GetNeighbours() {}
+    std::vector<Neighbour>
+    GetNeighbours();
 
 public:
     std::string
     Dump();
 
 private:
-    std::vector<Neighbour> neighbours_;
+    std::mutex mutex_;
+    uint8_t id_;
+    std::map<uint8_t, Neighbour> neighbours_;
 };
 
 using NodePtr = std::shared_ptr<Node>;

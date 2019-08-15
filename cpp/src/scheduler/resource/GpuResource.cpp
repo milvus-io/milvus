@@ -3,28 +3,25 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#pragma once
 
-
-#include "Resource.h"
+#include "GpuResource.h"
 
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-class DiskResource : public Resource {
-public:
-    explicit
-    DiskResource(std::string name);
 
-protected:
-    void
-    LoadFile(TaskPtr task) override;
+GpuResource::GpuResource(std::string name)
+    : Resource(std::move(name), ResourceType::GPU) {}
 
-    void
-    Process(TaskPtr task) override;
-};
+void GpuResource::LoadFile(TaskPtr task) {
+
+}
+
+void GpuResource::Process(TaskPtr task) {
+
+}
 
 }
 }

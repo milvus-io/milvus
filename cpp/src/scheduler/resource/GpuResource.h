@@ -16,15 +16,14 @@ namespace engine {
 class GpuResource : public Resource {
 public:
     explicit
-    GpuResource(std::string name)
-        : Resource(std::move(name), ResourceType::GPU) {}
+    GpuResource(std::string name);
 
 protected:
     void
-    LoadFile(TaskPtr task) override {}
+    LoadFile(TaskPtr task) override;
 
     void
-    Process(TaskPtr task) override {}
+    Process(TaskPtr task) override;
 };
 
 }
