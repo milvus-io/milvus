@@ -35,6 +35,7 @@ include_directories(/usr/include/mysql)
 
 set(scheduler_test_src
         ${unittest_srcs}
+        ${test_srcs}
         ${scheduler_resource_srcs}
         ${scheduler_task_srcs}
         ${scheduler_srcs}

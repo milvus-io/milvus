@@ -17,6 +17,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-354 - Add task class and interface in scheduler
 - MS-355 - Add copy interface in ExcutionEngine
 - MS-357 - Add minimum schedule function
+- MS-359 - Add cost test in new scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
