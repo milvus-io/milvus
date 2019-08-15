@@ -61,12 +61,18 @@ class DBImpl : public DB {
     InsertVectors(const std::string &table_id, uint64_t n, const float *vectors, IDNumbers &vector_ids) override;
 
     Status
-    Query(const std::string &table_id, uint64_t k, uint64_t nq, const float *vectors, QueryResults &results) override;
+    Query(const std::string &table_id,
+            uint64_t k,
+            uint64_t nq,
+            uint64_t nprobe,
+            const float *vectors,
+            QueryResults &results) override;
 
     Status
     Query(const std::string &table_id,
           uint64_t k,
           uint64_t nq,
+          uint64_t nprobe,
           const float *vectors,
           const meta::DatesT &dates,
           QueryResults &results) override;
@@ -76,6 +82,7 @@ class DBImpl : public DB {
           const std::vector<std::string> &file_ids,
           uint64_t k,
           uint64_t nq,
+          uint64_t nprobe,
           const float *vectors,
           const meta::DatesT &dates,
           QueryResults &results) override;
@@ -94,6 +101,7 @@ class DBImpl : public DB {
                const meta::TableFilesSchema &files,
                uint64_t k,
                uint64_t nq,
+               uint64_t nprobe,
                const float *vectors,
                const meta::DatesT &dates,
                QueryResults &results);
