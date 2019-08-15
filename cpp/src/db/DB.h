@@ -33,14 +33,14 @@ public:
     virtual Status InsertVectors(const std::string& table_id_,
             uint64_t n, const float* vectors, IDNumbers& vector_ids_) = 0;
 
-    virtual Status Query(const std::string& table_id, uint64_t k, uint64_t nq,
+    virtual Status Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
             const float* vectors, QueryResults& results) = 0;
 
-    virtual Status Query(const std::string& table_id, uint64_t k, uint64_t nq,
+    virtual Status Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
             const float* vectors, const meta::DatesT& dates, QueryResults& results) = 0;
 
     virtual Status Query(const std::string& table_id, const std::vector<std::string>& file_ids,
-            uint64_t k, uint64_t nq, const float* vectors,
+            uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
             const meta::DatesT& dates, QueryResults& results) = 0;
 
     virtual Status Size(uint64_t& result) = 0;

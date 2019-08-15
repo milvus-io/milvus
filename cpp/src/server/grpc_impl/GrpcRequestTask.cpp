@@ -510,12 +510,17 @@ SearchTask::OnExecute() {
             return SetError(res, "Invalid table name: " + table_name_);
         }
 
-        int top_k_ = search_param_.topk();
+        int64_t top_k_ = search_param_.topk();
 
         if (top_k_ <= 0 || top_k_ > 1024) {
-            return SetError(SERVER_INVALID_TOPK, "Invalid topk: " + std::to_string(
-                    top_k_));
+            return SetError(SERVER_INVALID_TOPK, "Invalid topk: " + std::to_string(top_k_));
         }
+
+        int64_t nprobe = search_param_.nprobe();
+        if (nprobe <= 0) {
+            return SetError(SERVER_INVALID_NPROBE, "Invalid nprobe: " + std::to_string(nprobe));
+        }
+
         if (search_param_.query_record_array().empty()) {
             return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
         }
@@ -584,11 +589,11 @@ SearchTask::OnExecute() {
         auto record_count = (uint64_t) search_param_.query_record_array().size();
 
         if (file_id_array_.empty()) {
-            stat = DBWrapper::DB()->Query(table_name_, (size_t) top_k_, record_count, vec_f.data(),
+            stat = DBWrapper::DB()->Query(table_name_, (size_t) top_k_, record_count, nprobe, vec_f.data(),
                                           dates, results);
         } else {
-            stat = DBWrapper::DB()->Query(table_name_, file_id_array_,
-                                          (size_t) top_k_, record_count, vec_f.data(), dates, results);
+            stat = DBWrapper::DB()->Query(table_name_, file_id_array_, (size_t) top_k_,
+                                          record_count, nprobe, vec_f.data(), dates, results);
         }
 
         rc.ElapseFromBegin("search vectors from engine");

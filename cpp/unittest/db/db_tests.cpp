@@ -226,6 +226,39 @@ TEST_F(DBTest, SEARCH_TEST) {
     // TODO(linxj): add groundTruth assert
 };
 
+TEST_F(DBTest, PRELOADTABLE_TEST) {
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
+
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = TABLE_NAME;
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_STATS(stat);
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    engine::IDNumbers vector_ids;
+    engine::IDNumbers target_ids;
+
+    int64_t nb = 50;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
+
+    int loop = INSERT_LOOP;
+
+    for (auto i=0; i<loop; ++i) {
+        db_->InsertVectors(TABLE_NAME, qb, qxb.data(), target_ids);
+        ASSERT_EQ(target_ids.size(), qb);
+    }
+
+    int64_t prev_cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
+
+    stat = db_->PreloadTable(TABLE_NAME);
+    ASSERT_STATS(stat);
+    int64_t cur_cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
+    ASSERT_TRUE(prev_cache_usage < cur_cache_usage);
+
+}
+
 TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     engine::meta::TableSchema table_info = BuildTableSchema();
