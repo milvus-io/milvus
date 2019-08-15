@@ -122,7 +122,7 @@ ConnectionImpl::DeleteByRange(Range &range,
 
 Status
 ConnectionImpl::PreloadTable(const std::string &table_name) const {
-
+    return client_proxy_->PreloadTable(table_name);
 }
 
 IndexParam

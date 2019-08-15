@@ -228,10 +228,11 @@ ExecutionEngineImpl::BuildIndex(const std::string &location) {
 Status ExecutionEngineImpl::Search(long n,
                                    const float *data,
                                    long k,
+                                   long nprobe,
                                    float *distances,
                                    long *labels) const {
-    ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe_;
-    auto ec = index_->Search(n, data, distances, labels, Config::object{{"k", k}, {"nprobe", nprobe_}});
+    ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
+    auto ec = index_->Search(n, data, distances, labels, Config::object{{"k", k}, {"nprobe", nprobe}});
     if (ec != server::KNOWHERE_SUCCESS) {
         ENGINE_LOG_ERROR << "Search error";
         return Status::Error("Search: Search Error");
@@ -256,7 +257,6 @@ Status ExecutionEngineImpl::Init() {
         case EngineType::FAISS_IVFSQ8:
         case EngineType::FAISS_IVFFLAT: {
             ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
-            nprobe_ = engine_config.GetInt32Value(CONFIG_NPROBE, 1);
             nlist_ = engine_config.GetInt32Value(CONFIG_NLIST, 16384);
             break;
         }

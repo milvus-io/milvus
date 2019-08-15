@@ -38,7 +38,7 @@ TEST(DBSchedulerTest, TASK_QUEUE_TEST) {
     ASSERT_EQ(ptr, nullptr);
     ASSERT_TRUE(queue.Empty());
 
-    engine::SearchContextPtr context_ptr = std::make_shared<engine::SearchContext>(1, 1, nullptr);
+    engine::SearchContextPtr context_ptr = std::make_shared<engine::SearchContext>(1, 1, 10, nullptr);
     for(size_t i = 0; i < 10; i++) {
         auto file = CreateTabileFileStruct(i, "tbl");
         context_ptr->AddIndexFile(file);
@@ -69,7 +69,7 @@ TEST(DBSchedulerTest, SEARCH_SCHEDULER_TEST) {
         task_list.push_back(task_ptr);
     }
 
-    engine::SearchContextPtr context_ptr = std::make_shared<engine::SearchContext>(1, 1, nullptr);
+    engine::SearchContextPtr context_ptr = std::make_shared<engine::SearchContext>(1, 1, 10, nullptr);
     for(size_t i = 0; i < 20; i++) {
         auto file = CreateTabileFileStruct(i, "tbl");
         context_ptr->AddIndexFile(file);
