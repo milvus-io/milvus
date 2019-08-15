@@ -51,6 +51,7 @@ public:
     Status Search(long n,
                   const float *data,
                   long k,
+                  long nprobe,
                   float *distances,
                   long *labels) const override;
 
@@ -73,7 +74,6 @@ protected:
     int64_t dim;
     std::string location_;
 
-    size_t nprobe_ = 0;
     size_t nlist_ = 0;
     int64_t gpu_num = 0;
 };

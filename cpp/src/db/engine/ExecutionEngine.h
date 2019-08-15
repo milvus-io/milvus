@@ -51,6 +51,7 @@ public:
     virtual Status Search(long n,
                   const float *data,
                   long k,
+                  long nprobe,
                   float *distances,
                   long *labels) const = 0;
 

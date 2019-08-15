@@ -109,12 +109,13 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
     for(auto& context : search_contexts_) {
         //step 1: allocate memory
         auto inner_k = context->topk();
+        auto nprobe = context->nprobe();
         output_ids.resize(inner_k*context->nq());
         output_distence.resize(inner_k*context->nq());
 
         try {
             //step 2: search
-            index_engine_->Search(context->nq(), context->vectors(), inner_k, output_distence.data(),
+            index_engine_->Search(context->nq(), context->vectors(), inner_k, nprobe, output_distence.data(),
                                   output_ids.data());
 
             double span = rc.RecordSection("do search for context:" + context->Identity());

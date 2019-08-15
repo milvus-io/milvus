@@ -8,6 +8,7 @@
 #include "db/DBImpl.h"
 #include "db/meta/MetaConsts.h"
 #include "db/Factories.h"
+#include "cache/CpuCacheMgr.h"
 
 #include <gtest/gtest.h>
 #include <easylogging++.h>
@@ -128,7 +129,7 @@ TEST_F(DBTest, DB_TEST) {
             prev_count = count;
 
             START_TIMER;
-            stat = db_->Query(TABLE_NAME, k, qb, qxb.data(), results);
+            stat = db_->Query(TABLE_NAME, k, qb, 10, qxb.data(), results);
             ss << "Search " << j << " With Size " << count/engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
@@ -211,7 +212,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     {
         engine::QueryResults results;
-        stat = db_->Query(TABLE_NAME, k, nq, xq.data(), results);
+        stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
         ASSERT_STATS(stat);
     }
 
@@ -219,7 +220,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         engine::meta::DatesT dates;
         std::vector<std::string> file_ids = {"4", "5", "6"};
         engine::QueryResults results;
-        stat = db_->Query(TABLE_NAME, file_ids, k, nq, xq.data(), dates, results);
+        stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
         ASSERT_STATS(stat);
     }
 
@@ -239,19 +240,19 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     engine::IDNumbers vector_ids;
     engine::IDNumbers target_ids;
 
-    int64_t nb = 50;
+    int64_t nb = 100000;
     std::vector<float> xb;
     BuildVectors(nb, xb);
 
-    int loop = INSERT_LOOP;
+    int loop = 5;
 
     for (auto i=0; i<loop; ++i) {
-        db_->InsertVectors(TABLE_NAME, qb, qxb.data(), target_ids);
-        ASSERT_EQ(target_ids.size(), qb);
+        db_->InsertVectors(TABLE_NAME, nb, xb.data(), target_ids);
+        ASSERT_EQ(target_ids.size(), nb);
     }
+    db_->BuildIndex(TABLE_NAME);
 
     int64_t prev_cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
-
     stat = db_->PreloadTable(TABLE_NAME);
     ASSERT_STATS(stat);
     int64_t cur_cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
