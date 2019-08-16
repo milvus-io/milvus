@@ -10,9 +10,11 @@
 #include <vector>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <condition_variable>
 
 #include "resource/Resource.h"
+
 
 namespace zilliz {
 namespace milvus {
@@ -23,6 +25,15 @@ public:
     ResourceMgr();
 
     /******** Management Interface ********/
+    inline void
+    RegisterSubscriber(std::function<void(EventPtr)> subscriber) {
+        subscriber_ = std::move(subscriber);
+    }
+
+    std::vector<ResourceWPtr> &
+    GetDiskResources() {
+        return disk_resources_;
+    }
 
     /*
      * Add resource into Resource Management;
@@ -52,41 +63,6 @@ public:
     // TODO: add stats interface(low)
 
 public:
-    /******** Event Register Interface ********/
-
-    /*
-     * Register on start up event;
-     */
-    void
-    RegisterOnStartUp(std::function<void(ResourceWPtr)> &func) {
-        on_start_up_ = func;
-    }
-
-    /*
-     * Register on finish one task event;
-     */
-    void
-    RegisterOnFinishTask(std::function<void(ResourceWPtr)> &func) {
-        on_finish_task_ = func;
-    }
-
-    /*
-     * Register on copy task data completed event;
-     */
-    void
-    RegisterOnCopyCompleted(std::function<void(ResourceWPtr)> &func) {
-        on_copy_completed_ = func;
-    }
-
-    /*
-     * Register on task table updated event;
-     */
-    void
-    RegisterOnTaskTableUpdated(std::function<void(ResourceWPtr)> &func) {
-        on_task_table_updated_ = func;
-    }
-
-public:
     /******** Utlitity Functions ********/
 
     std::string
@@ -97,22 +73,19 @@ private:
     EventProcess();
 
 private:
+    std::queue<EventPtr> queue_;
+    std::function<void(EventPtr)> subscriber_ = nullptr;
+
     bool running_;
 
+    std::vector<ResourceWPtr> disk_resources_;
     std::vector<ResourcePtr> resources_;
     mutable std::mutex resources_mutex_;
     std::thread worker_thread_;
 
+    std::mutex event_mutex_;
     std::condition_variable event_cv_;
-    std::vector<bool> start_up_event_;
-    std::vector<bool> finish_task_event_;
-    std::vector<bool> copy_completed_event_;
-    std::vector<bool> task_table_updated_event_;
 
-    std::function<void(ResourceWPtr)> on_start_up_;
-    std::function<void(ResourceWPtr)> on_finish_task_;
-    std::function<void(ResourceWPtr)> on_copy_completed_;
-    std::function<void(ResourceWPtr)> on_task_table_updated_;
 };
 
 using ResourceMgrWPtr = std::weak_ptr<ResourceMgr>;
