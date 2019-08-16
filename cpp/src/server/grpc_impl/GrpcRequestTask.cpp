@@ -381,9 +381,9 @@ InsertTask::InsertTask(const ::milvus::grpc::InsertParam &insert_param,
 }
 
 BaseTaskPtr
-InsertTask::Create(const ::milvus::grpc::InsertParam &insert_infos,
+InsertTask::Create(const ::milvus::grpc::InsertParam &insert_param,
                          ::milvus::grpc::VectorIds &record_ids) {
-    return std::shared_ptr<GrpcBaseTask>(new InsertTask(insert_infos, record_ids));
+    return std::shared_ptr<GrpcBaseTask>(new InsertTask(insert_param, record_ids));
 }
 
 ServerError
@@ -398,6 +398,13 @@ InsertTask::OnExecute() {
         }
         if (insert_param_.row_record_array().empty()) {
             return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
+        }
+
+        if (!record_ids_.vector_id_array().empty()) {
+            if (record_ids_.vector_id_array().size() != insert_param_.row_record_array_size()) {
+                return SetError(SERVER_ILLEGAL_VECTOR_ID,
+                        "Size of vector ids is not equal to row record array size");
+            }
         }
 
         //step 2: check table existence
