@@ -41,23 +41,23 @@ void Resource::WakeupLoader() {
     load_cv_.notify_one();
 }
 
-TaskPtr Resource::pick_task_load() {
+TaskTableItemPtr Resource::pick_task_load() {
     auto indexes = PickToLoad(task_table_, 3);
     for (auto index : indexes) {
         // try to set one task loading, then return
         if (task_table_.Load(index))
-            return task_table_.Get(index)->task;
+            return task_table_.Get(index);
         // else try next
     }
     return nullptr;
 }
 
-TaskPtr Resource::pick_task_execute() {
+TaskTableItemPtr Resource::pick_task_execute() {
     auto indexes = PickToExecute(task_table_, 3);
     for (auto index : indexes) {
         // try to set one task executing, then return
         if (task_table_.Execute(index))
-            return task_table_.Get(index)->task;
+            return task_table_.Get(index);
         // else try next
     }
     return nullptr;
@@ -67,12 +67,12 @@ void Resource::loader_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(load_mutex_);
         load_cv_.wait(lock, [&] { return load_flag_; });
-        auto task = pick_task_load();
-        if (task) {
-            LoadFile(task);
+        auto task_item = pick_task_load();
+        if (task_item) {
+            LoadFile(task_item->task);
             if (subscriber_) {
-//                auto event = std::make_shared<CopyCompletedEvent>(shared_from_this(), task);
-//                subscriber_(std::static_pointer_cast<Event>(event));
+                auto event = std::make_shared<CopyCompletedEvent>(shared_from_this(), task_item);
+                subscriber_(std::static_pointer_cast<Event>(event));
             }
         }
     }
@@ -81,18 +81,18 @@ void Resource::loader_function() {
 void Resource::executor_function() {
     GetRegisterFunc(RegisterType::START_UP)->Exec();
     if (subscriber_) {
-//        auto event = std::make_shared<StartUpEvent>(shared_from_this());
-//        subscriber_(std::static_pointer_cast<Event>(event));
+        auto event = std::make_shared<StartUpEvent>(shared_from_this());
+        subscriber_(std::static_pointer_cast<Event>(event));
     }
     while (running_) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
         exec_cv_.wait(lock, [&] { return exec_flag_; });
-        auto task = pick_task_execute();
-        if (task) {
-            Process(task);
+        auto task_item = pick_task_execute();
+        if (task_item) {
+            Process(task_item->task);
             if (subscriber_) {
-//                auto event = std::make_shared<FinishTaskEvent>(shared_from_this(), task);
-//                subscriber_(std::static_pointer_cast<Event>(event));
+                auto event = std::make_shared<FinishTaskEvent>(shared_from_this(), task_item);
+                subscriber_(std::static_pointer_cast<Event>(event));
             }
         }
     }
