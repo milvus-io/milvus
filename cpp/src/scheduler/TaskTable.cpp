@@ -27,7 +27,7 @@ TaskTable::Put(std::vector<TaskPtr> &tasks) {
 }
 
 
-TaskTableItem &
+TaskTableItemPtr
 TaskTable::Get(uint64_t index) {
     return table_[index];
 }
@@ -46,9 +46,9 @@ bool
 TaskTable::Move(uint64_t index) {
     auto &task = table_[index];
 
-    std::lock_guard<std::mutex> lock(task.mutex);
-    if (task.state == TaskTableItemState::START) {
-        task.state = TaskTableItemState::LOADING;
+    std::lock_guard<std::mutex> lock(task->mutex);
+    if (task->state == TaskTableItemState::START) {
+        task->state = TaskTableItemState::LOADING;
         return true;
     }
     return false;

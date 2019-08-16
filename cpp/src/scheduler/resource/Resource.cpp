@@ -46,7 +46,7 @@ TaskPtr Resource::pick_task_load() {
     for (auto index : indexes) {
         // try to set one task loading, then return
         if (task_table_.Load(index))
-            return task_table_.Get(index).task;
+            return task_table_.Get(index)->task;
         // else try next
     }
     return nullptr;
@@ -57,7 +57,7 @@ TaskPtr Resource::pick_task_execute() {
     for (auto index : indexes) {
         // try to set one task executing, then return
         if (task_table_.Execute(index))
-            return task_table_.Get(index).task;
+            return task_table_.Get(index)->task;
         // else try next
     }
     return nullptr;
