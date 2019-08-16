@@ -15,11 +15,11 @@ namespace engine {
 
 class CopyCompletedEvent : public Event {
 public:
-    CopyCompletedEvent(std::weak_ptr<Resource> resource, TaskTableItem &task_table_item)
+    CopyCompletedEvent(std::weak_ptr<Resource> resource, TaskTableItemPtr task_table_item)
         : Event(EventType::COPY_COMPLETED, std::move(resource)),
-          task_table_item_(task_table_item) {}
+          task_table_item_(std::move(task_table_item)) {}
 public:
-    TaskTableItem &task_table_item_;
+    TaskTableItemPtr task_table_item_;
 };
 
 }
