@@ -48,9 +48,6 @@ class TaskTable {
 public:
     TaskTable() = default;
 
-    explicit
-    TaskTable(std::vector<TaskPtr> &&tasks);
-
     /*
      * Put one task;
      */

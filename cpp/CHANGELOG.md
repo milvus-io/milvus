@@ -21,6 +21,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-361 - Add event in resource
 - MS-364 - Modify tasktableitem in tasktable
 - MS-365 - Use tasktableitemptr instead in event
+- MS-366 - Implement TaskTable
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
