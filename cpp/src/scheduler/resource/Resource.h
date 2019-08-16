@@ -114,14 +114,14 @@ private:
      * Pick one task to load;
      * Order by start time;
      */
-    TaskPtr
+    TaskTableItemPtr
     pick_task_load();
 
     /*
      * Pick one task to execute;
      * Pick by start time and priority;
      */
-    TaskPtr
+    TaskTableItemPtr
     pick_task_execute();
 
 private:

@@ -14,12 +14,12 @@ namespace engine {
 
 class FinishTaskEvent : public Event {
 public:
-    FinishTaskEvent(std::weak_ptr<Resource> resource, TaskTableItem &task_table_item)
+    FinishTaskEvent(std::weak_ptr<Resource> resource, TaskTableItemPtr task_table_item)
         : Event(EventType::FINISH_TASK, std::move(resource)),
-          task_table_item_(task_table_item) {}
+          task_table_item_(std::move(task_table_item)) {}
 
 public:
-    TaskTableItem &task_table_item_;
+    TaskTableItemPtr task_table_item_;
 };
 
 }
