@@ -13,14 +13,14 @@ protected:
             auto task = std::make_shared<XSearchTask>();
             table_.Put(task);
         }
-        table_.Get(0).state = TaskTableItemState::INVALID;
-        table_.Get(1).state = TaskTableItemState::START;
-        table_.Get(2).state = TaskTableItemState::LOADING;
-        table_.Get(3).state = TaskTableItemState::LOADED;
-        table_.Get(4).state = TaskTableItemState::EXECUTING;
-        table_.Get(5).state = TaskTableItemState::EXECUTED;
-        table_.Get(6).state = TaskTableItemState::MOVING;
-        table_.Get(7).state = TaskTableItemState::MOVED;
+        table_.Get(0)->state = TaskTableItemState::INVALID;
+        table_.Get(1)->state = TaskTableItemState::START;
+        table_.Get(2)->state = TaskTableItemState::LOADING;
+        table_.Get(3)->state = TaskTableItemState::LOADED;
+        table_.Get(4)->state = TaskTableItemState::EXECUTING;
+        table_.Get(5)->state = TaskTableItemState::EXECUTED;
+        table_.Get(6)->state = TaskTableItemState::MOVING;
+        table_.Get(7)->state = TaskTableItemState::MOVED;
     }
 
 
