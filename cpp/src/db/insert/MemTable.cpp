@@ -15,7 +15,7 @@ MemTable::MemTable(const std::string &table_id,
 
 }
 
-Status MemTable::Add(VectorSource::Ptr &source) {
+Status MemTable::Add(VectorSource::Ptr &source, IDNumbers &vector_ids) {
 
     while (!source->AllAdded()) {
 
