@@ -23,7 +23,7 @@ namespace engine {
  * call from scheduler;
  */
 std::vector<uint64_t>
-PickToMove(const TaskTable &task_table, const CacheMgr &cache_mgr, uint64_t limit);
+PickToMove(TaskTable &task_table, const CacheMgr &cache_mgr, uint64_t limit);
 
 
 /*
@@ -32,7 +32,7 @@ PickToMove(const TaskTable &task_table, const CacheMgr &cache_mgr, uint64_t limi
  * I DONT SURE NEED THIS;
  */
 std::vector<uint64_t>
-PickToLoad(const TaskTable &task_table, uint64_t limit);
+PickToLoad(TaskTable &task_table, uint64_t limit);
 
 /*
  * select task to execute;
@@ -40,7 +40,7 @@ PickToLoad(const TaskTable &task_table, uint64_t limit);
  * I DONT SURE NEED THIS;
  */
 std::vector<uint64_t>
-PickToExecute(const TaskTable &task_table, uint64_t limit);
+PickToExecute(TaskTable &task_table, uint64_t limit);
 
 
 }
