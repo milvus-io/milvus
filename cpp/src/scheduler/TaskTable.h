@@ -31,7 +31,7 @@ struct TaskTableItem {
     TaskTableItem() : id(0), state(TaskTableItemState::INVALID), mutex(), priority(0) {}
 
     TaskTableItem(const TaskTableItem &src)
-    : id(src.id), state(src.state), mutex(), priority(src.priority) {}
+        : id(src.id), state(src.state), mutex(), priority(src.priority) {}
 
     uint64_t id; // auto increment from 0;
     // TODO: add tag into task
@@ -41,6 +41,8 @@ struct TaskTableItem {
 
     uint8_t priority; // just a number, meaningless;
 };
+
+using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
 
 class TaskTable {
 public:
@@ -65,7 +67,7 @@ public:
     /*
      * Return task table item reference;
      */
-    TaskTableItem &
+    TaskTableItemPtr
     Get(uint64_t index);
 
     /*
@@ -75,7 +77,7 @@ public:
      */
     void
     Clear();
-    
+
     /*
      * Return true if task table empty, otherwise false;
      */
@@ -83,11 +85,11 @@ public:
     Empty() {
         return table_.empty();
     }
-    
+
     /*
      * Return size of task table;
      */
-    inline size_t 
+    inline size_t
     Size() {
         return table_.size();
     }
@@ -154,7 +156,7 @@ public:
 
 private:
     // TODO: map better ?
-    std::deque<TaskTableItem> table_;
+    std::deque<TaskTableItemPtr> table_;
 };
 
 

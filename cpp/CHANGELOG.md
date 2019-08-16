@@ -19,6 +19,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-357 - Add minimum schedule function
 - MS-359 - Add cost test in new scheduler
 - MS-361 - Add event in resource
+- MS-364 - Modify tasktableitem in tasktable
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
