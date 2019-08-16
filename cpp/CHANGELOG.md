@@ -18,6 +18,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-355 - Add copy interface in ExcutionEngine
 - MS-357 - Add minimum schedule function
 - MS-359 - Add cost test in new scheduler
+- MS-361 - Add event in resource
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
