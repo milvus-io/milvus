@@ -12,9 +12,9 @@ namespace engine {
 
 VectorSource::VectorSource(const size_t &n,
                            const float *vectors) :
-    n_(n),
-    vectors_(vectors),
-    id_generator_(new SimpleIDGenerator()) {
+        n_(n),
+        vectors_(vectors),
+        id_generator_(std::make_shared<SimpleIDGenerator>()) {
     current_num_vectors_added = 0;
 }
 
