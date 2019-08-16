@@ -21,7 +21,7 @@ push_task(ResourcePtr &self, ResourcePtr &other) {
         auto indexes = PickToMove(self_task_table, cache, 1);
         for (auto index : indexes) {
             if (self_task_table.Move(index)) {
-                auto task = self_task_table.Get(index).task;
+                auto task = self_task_table.Get(index)->task;
                 other_task_table.Put(task);
                 // TODO: mark moved future
                 other->WakeupLoader();
