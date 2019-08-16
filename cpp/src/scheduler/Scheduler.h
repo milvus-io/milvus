@@ -18,60 +18,6 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-class Event {
-public:
-    explicit
-    Event(ResourceWPtr &resource) : resource_(resource) {}
-
-public:
-    virtual void
-    Process() = 0;
-
-protected:
-    ResourceWPtr resource_;
-};
-
-using EventPtr = std::shared_ptr<Event>;
-
-class StartUpEvent : public Event {
-public:
-    explicit
-    StartUpEvent(ResourceWPtr &resource) : Event(resource) {}
-
-public:
-    void
-    Process() override;
-};
-
-class FinishTaskEvent : public Event {
-public:
-    explicit
-    FinishTaskEvent(ResourceWPtr &resource) : Event(resource) {}
-
-public:
-    void
-    Process() override;
-};
-
-class CopyCompletedEvent : public Event {
-public:
-    explicit
-    CopyCompletedEvent(ResourceWPtr &resource) : Event(resource) {}
-
-public:
-    void
-    Process() override;
-};
-
-class TaskTableUpdatedEvent : public Event {
-public:
-    explicit
-    TaskTableUpdatedEvent(ResourceWPtr &resource) : Event(resource) {}
-
-public:
-    void
-    Process() override;
-};
 
 class Scheduler {
 public:
@@ -90,52 +36,65 @@ public:
         worker_thread_ = std::thread(&Scheduler::worker_thread_, this);
     }
 
-public:
+    std::string
+    Dump();
+
+private:
     /******** Events ********/
 
     /*
      * Process start up events;
      */
-    inline void
-    OnStartUp(ResourceWPtr &resource) {
-        auto event = std::make_shared<StartUpEvent>(resource);
-        event_queue_.push(event);
-    }
+    void
+    OnStartUp(const EventPtr &event);
 
     /*
      * Process finish task events;
      */
-    inline void
-    OnFinishTask(ResourceWPtr &resource) {
-        auto event = std::make_shared<FinishTaskEvent>(resource);
-        event_queue_.push(event);
-    }
+    void
+    OnFinishTask(const EventPtr &event);
 
     /*
      * Process copy completed events;
      */
-    inline void
-    OnCopyCompleted(ResourceWPtr &resource) {
-        auto event = std::make_shared<CopyCompletedEvent>(resource);
-        event_queue_.push(event);
-    }
+    void
+    OnCopyCompleted(const EventPtr &event);
 
     /*
      * Process task table updated events;
      */
-    inline void
-    OnTaskTableUpdated(ResourceWPtr &resource) {
-        auto event = std::make_shared<TaskTableUpdatedEvent>(resource);
-        event_queue_.push(event);
-    }
-
-
-public:
-    std::string
-    Dump();
-
+    void
+    OnTaskTableUpdated(const EventPtr &event);
 
 private:
+    /*
+     * Dispatch event to event handler;
+     */
+    void
+    Process(const EventPtr &event) {
+        switch (event->Type()) {
+            case EventType::START_UP: {
+                OnStartUp(event);
+                break;
+            }
+            case EventType::COPY_COMPLETED: {
+                OnCopyCompleted(event);
+                break;
+            }
+            case EventType::FINISH_TASK: {
+                OnFinishTask(event);
+                break;
+            }
+            case EventType::TASK_TABLE_UPDATED: {
+                OnTaskTableUpdated(event);
+                break;
+            }
+            default: {
+                break;
+            }
+        }
+    }
+
     /*
      * Called by worker_thread_;
      */
@@ -143,7 +102,7 @@ private:
     worker_function() {
         while (running_) {
             auto event = event_queue_.front();
-            event->Process();
+            Process(event);
         }
     }
 
