@@ -90,6 +90,14 @@ public:
     Size() {
         return table_.size();
     }
+public:
+    TaskTableItemPtr &
+    operator[](uint64_t index) {
+        return table_[index];
+    }
+
+    std::deque<TaskTableItemPtr>::iterator begin() { return table_.begin(); }
+    std::deque<TaskTableItemPtr>::iterator end() { return table_.end(); }
 
 public:
 
