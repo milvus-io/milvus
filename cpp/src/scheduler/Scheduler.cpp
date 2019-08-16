@@ -45,23 +45,23 @@ schedule(const ResourceWPtr &res) {
 }
 
 void
-StartUpEvent::Process() {
-    schedule(resource_);
+Scheduler::OnStartUp(const EventPtr &event) {
+    schedule(event->resource_);
 }
 
 void
-FinishTaskEvent::Process() {
-    schedule(resource_);
+Scheduler::OnFinishTask(const EventPtr &event) {
+    schedule(event->resource_);
 }
 
 void
-CopyCompletedEvent::Process() {
-    schedule(resource_);
+Scheduler::OnCopyCompleted(const EventPtr &event) {
+    schedule(event->resource_);
 }
 
 void
-TaskTableUpdatedEvent::Process() {
-    schedule(resource_);
+Scheduler::OnTaskTableUpdated(const EventPtr &event) {
+    schedule(event->resource_);
 }
 
 std::string

@@ -70,20 +70,30 @@ void Resource::loader_function() {
         auto task = pick_task_load();
         if (task) {
             LoadFile(task);
-            GetRegisterFunc(RegisterType::ON_COPY_COMPLETED)->Exec();
+            if (subscriber_) {
+//                auto event = std::make_shared<CopyCompletedEvent>(shared_from_this(), task);
+//                subscriber_(std::static_pointer_cast<Event>(event));
+            }
         }
     }
 }
 
 void Resource::executor_function() {
     GetRegisterFunc(RegisterType::START_UP)->Exec();
+    if (subscriber_) {
+//        auto event = std::make_shared<StartUpEvent>(shared_from_this());
+//        subscriber_(std::static_pointer_cast<Event>(event));
+    }
     while (running_) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
         exec_cv_.wait(lock, [&] { return exec_flag_; });
         auto task = pick_task_execute();
         if (task) {
             Process(task);
-            GetRegisterFunc(RegisterType::ON_FINISH_TASK)->Exec();
+            if (subscriber_) {
+//                auto event = std::make_shared<FinishTaskEvent>(shared_from_this(), task);
+//                subscriber_(std::static_pointer_cast<Event>(event));
+            }
         }
     }
 }
