@@ -16,11 +16,11 @@ GpuResource::GpuResource(std::string name)
     : Resource(std::move(name), ResourceType::GPU) {}
 
 void GpuResource::LoadFile(TaskPtr task) {
-
+    task->Load(LoadType::CPU2GPU, 0);
 }
 
 void GpuResource::Process(TaskPtr task) {
-
+    task->Execute();
 }
 
 }

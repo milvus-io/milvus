@@ -16,6 +16,7 @@ CpuResource::CpuResource(std::string name)
     : Resource(std::move(name), ResourceType::CPU) {}
 
 void CpuResource::LoadFile(TaskPtr task) {
+    task->Load(LoadType::DISK2CPU, 0);
     //if (src.type == DISK) {
     //    fd = open(filename);
     //    content = fd.read();
@@ -30,7 +31,7 @@ void CpuResource::LoadFile(TaskPtr task) {
 }
 
 void CpuResource::Process(TaskPtr task) {
-
+    task->Execute();
 }
 
 }
