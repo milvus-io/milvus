@@ -10,6 +10,7 @@
 #include <mutex>
 
 #include "task/SearchTask.h"
+#include "event/Event.h"
 
 
 namespace zilliz {
@@ -47,6 +48,11 @@ using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
 class TaskTable {
 public:
     TaskTable() = default;
+
+    inline void
+    RegisterSubscriber(std::function<void(void)> subscriber) {
+        subscriber_ = std::move(subscriber);
+    }
 
     /*
      * Put one task;
@@ -162,6 +168,7 @@ public:
 private:
     // TODO: map better ?
     std::deque<TaskTableItemPtr> table_;
+    std::function<void(void)> subscriber_ = nullptr;
 };
 
 
