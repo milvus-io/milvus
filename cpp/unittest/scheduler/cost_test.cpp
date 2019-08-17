@@ -9,7 +9,7 @@ class CostTest : public ::testing::Test {
 protected:
     void
     SetUp() override {
-        for (uint64_t i = 0; i < 7; ++i) {
+        for (uint64_t i = 0; i < 8; ++i) {
             auto task = std::make_shared<XSearchTask>();
             table_.Put(task);
         }

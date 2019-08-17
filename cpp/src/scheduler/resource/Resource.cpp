@@ -25,6 +25,7 @@ Resource::Resource(std::string name, ResourceType type)
 }
 
 void Resource::Start() {
+    running_ = true;
     loader_thread_ = std::thread(&Resource::loader_function, this);
     executor_thread_ = std::thread(&Resource::executor_function, this);
 }
@@ -33,18 +34,24 @@ void Resource::Stop() {
     running_ = false;
     WakeupLoader();
     WakeupExecutor();
+    loader_thread_.join();
+    executor_thread_.join();
 }
 
 TaskTable &Resource::task_table() {
     return task_table_;
 }
 
-void Resource::WakeupExecutor() {
-    exec_cv_.notify_one();
+void Resource::WakeupLoader() {
+    std::lock_guard<std::mutex> lock(load_mutex_);
+    load_flag_ = true;
+    load_cv_.notify_one();
 }
 
-void Resource::WakeupLoader() {
-    load_cv_.notify_one();
+void Resource::WakeupExecutor() {
+    std::lock_guard<std::mutex> lock(exec_mutex_);
+    exec_flag_ = true;
+    exec_cv_.notify_one();
 }
 
 TaskTableItemPtr Resource::pick_task_load() {
@@ -73,9 +80,12 @@ void Resource::loader_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(load_mutex_);
         load_cv_.wait(lock, [&] { return load_flag_; });
+        load_flag_ = false;
         auto task_item = pick_task_load();
         if (task_item) {
             LoadFile(task_item->task);
+            // TODO: wrapper loaded
+            task_item->state = TaskTableItemState::LOADED;
             if (subscriber_) {
                 auto event = std::make_shared<CopyCompletedEvent>(shared_from_this(), task_item);
                 subscriber_(std::static_pointer_cast<Event>(event));
@@ -85,7 +95,6 @@ void Resource::loader_function() {
 }
 
 void Resource::executor_function() {
-    GetRegisterFunc(RegisterType::START_UP)->Exec();
     if (subscriber_) {
         auto event = std::make_shared<StartUpEvent>(shared_from_this());
         subscriber_(std::static_pointer_cast<Event>(event));
@@ -93,6 +102,7 @@ void Resource::executor_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
         exec_cv_.wait(lock, [&] { return exec_flag_; });
+        exec_flag_ = false;
         auto task_item = pick_task_execute();
         if (task_item) {
             Process(task_item->task);
