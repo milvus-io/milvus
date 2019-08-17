@@ -5,6 +5,7 @@
  ******************************************************************************/
 
 #include "TaskTable.h"
+#include "event/TaskTableUpdatedEvent.h"
 #include <vector>
 
 
@@ -19,6 +20,9 @@ TaskTable::Put(TaskPtr task) {
     item->task = std::move(task);
     item->state = TaskTableItemState::LOADED;
     table_.push_back(item);
+    if (subscriber_) {
+        subscriber_();
+    }
 }
 
 void
@@ -28,6 +32,9 @@ TaskTable::Put(std::vector<TaskPtr> &tasks) {
         item->task = std::move(task);
         item->state = TaskTableItemState::LOADED;
         table_.push_back(item);
+    }
+    if (subscriber_) {
+        subscriber_();
     }
 }
 
