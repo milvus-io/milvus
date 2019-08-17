@@ -8,6 +8,7 @@
 #include "knowhere/index/vector_index/idmap.h"
 #include "knowhere/index/vector_index/gpu_ivf.h"
 #include "knowhere/common/exception.h"
+#include "knowhere/index/vector_index/cloner.h"
 
 #include "vec_impl.h"
 #include "data_transfer.h"
@@ -150,6 +151,22 @@ VecIndexPtr VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg)
 VecIndexPtr VecIndexImpl::CopyToCpu(const Config &cfg) {
     auto cpu_index = zilliz::knowhere::CopyGpuToCpu(index_, cfg);
     return std::make_shared<VecIndexImpl>(cpu_index, type);
+}
+
+VecIndexPtr VecIndexImpl::Clone() {
+    auto clone_index = std::make_shared<VecIndexImpl>(index_->Clone(), type);
+    clone_index->dim = dim;
+    return clone_index;
+}
+
+int64_t VecIndexImpl::GetDeviceId() {
+    if (auto device_idx = std::dynamic_pointer_cast<GPUIndex>(index_)){
+        return device_idx->GetGpuDevice();
+    }
+    else {
+        return -1; // -1 == cpu
+    }
+    return 0;
 }
 
 float *BFIndex::GetRawVectors() {
