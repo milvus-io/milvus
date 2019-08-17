@@ -63,6 +63,10 @@ class VecIndex {
 
     virtual VecIndexPtr CopyToCpu(const Config &cfg = Config()) = 0;
 
+    virtual VecIndexPtr Clone() = 0;
+
+    virtual int64_t GetDeviceId() = 0;
+
     virtual IndexType GetType() = 0;
 
     virtual int64_t Dimension() = 0;
