@@ -5,6 +5,7 @@
  ******************************************************************************/
 #pragma once
 
+#include <memory>
 #include <string>
 #include <mutex>
 #include <thread>
@@ -113,6 +114,8 @@ private:
     std::queue<EventPtr> event_queue_;
     std::thread worker_thread_;
 };
+
+using SchedulerPtr = std::shared_ptr<Scheduler>;
 
 }
 }

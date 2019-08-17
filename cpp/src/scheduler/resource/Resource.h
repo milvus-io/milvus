@@ -16,6 +16,7 @@
 #include "../event/StartUpEvent.h"
 #include "../event/CopyCompletedEvent.h"
 #include "../event/FinishTaskEvent.h"
+#include "../event/TaskTableUpdatedEvent.h"
 #include "../TaskTable.h"
 #include "../task/Task.h"
 #include "../Cost.h"
