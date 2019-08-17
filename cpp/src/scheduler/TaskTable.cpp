@@ -18,7 +18,7 @@ void
 TaskTable::Put(TaskPtr task) {
     auto item = std::make_shared<TaskTableItem>();
     item->task = std::move(task);
-    item->state = TaskTableItemState::LOADED;
+    item->state = TaskTableItemState::START;
     table_.push_back(item);
     if (subscriber_) {
         subscriber_();
@@ -30,7 +30,7 @@ TaskTable::Put(std::vector<TaskPtr> &tasks) {
     for (auto &task : tasks) {
         auto item = std::make_shared<TaskTableItem>();
         item->task = std::move(task);
-        item->state = TaskTableItemState::LOADED;
+        item->state = TaskTableItemState::START;
         table_.push_back(item);
     }
     if (subscriber_) {
@@ -59,8 +59,8 @@ TaskTable::Move(uint64_t index) {
     auto &task = table_[index];
 
     std::lock_guard<std::mutex> lock(task->mutex);
-    if (task->state == TaskTableItemState::START) {
-        task->state = TaskTableItemState::LOADING;
+    if (task->state == TaskTableItemState::LOADED) {
+        task->state = TaskTableItemState::MOVING;
         return true;
     }
     return false;

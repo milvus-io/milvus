@@ -76,16 +76,16 @@ public:
 
 public:
     /*
-     * wake up executor;
-     */
-    void
-    WakeupExecutor();
-
-    /* 
      * wake up loader;
      */
     void
     WakeupLoader();
+
+    /*
+     * wake up executor;
+     */
+    void
+    WakeupExecutor();
 
 protected:
     Resource(std::string name, ResourceType type);
@@ -137,7 +137,6 @@ private:
      */
     void
     executor_function();
-
 
 private:
     std::string name_;
