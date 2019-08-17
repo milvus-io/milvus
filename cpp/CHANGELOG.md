@@ -23,6 +23,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-365 - Use tasktableitemptr instead in event
 - MS-366 - Implement TaskTable
 - MS-368 - Implement cost.cpp
+- MS-371 - Add TaskTableUpdatedEvent
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
