@@ -16,6 +16,12 @@ Resource::Resource(std::string name, ResourceType type)
       running_(false),
       load_flag_(false),
       exec_flag_(false) {
+    task_table_.RegisterSubscriber([&] {
+        if (subscriber_) {
+            auto event = std::make_shared<TaskTableUpdatedEvent>(shared_from_this());
+            subscriber_(std::static_pointer_cast<Event>(event));
+        }
+    });
 }
 
 void Resource::Start() {

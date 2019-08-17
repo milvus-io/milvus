@@ -88,6 +88,7 @@ private:
 
 };
 
+using ResourceMgrPtr = std::shared_ptr<ResourceMgr>;
 using ResourceMgrWPtr = std::weak_ptr<ResourceMgr>;
 
 }
