@@ -26,6 +26,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-371 - Add TaskTableUpdatedEvent
 - MS-373 - Add resource test
 - MS-374 - Add action definition
+- MS-375 - Add Dump implementation for Event
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
