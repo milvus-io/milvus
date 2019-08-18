@@ -76,19 +76,22 @@ public:
 
 public:
     /*
-     * wake up executor;
-     */
-    void
-    WakeupExecutor();
-
-    /* 
      * wake up loader;
      */
     void
     WakeupLoader();
 
+    /*
+     * wake up executor;
+     */
+    void
+    WakeupExecutor();
+
 protected:
-    Resource(std::string name, ResourceType type);
+    Resource(std::string name,
+             ResourceType type,
+             bool enable_loader = true,
+             bool enable_executor = true);
 
     // TODO: SearchContextPtr to TaskPtr
     /*
@@ -138,7 +141,6 @@ private:
     void
     executor_function();
 
-
 private:
     std::string name_;
     ResourceType type_;
@@ -149,8 +151,8 @@ private:
     std::function<void(EventPtr)> subscriber_ = nullptr;
 
     bool running_;
-    bool loader_running_ = false;
-    bool executor_running_ = false;
+    bool enable_loader_ = true;
+    bool enable_executor_ = true;
     std::thread loader_thread_;
     std::thread executor_thread_;
 

@@ -12,7 +12,8 @@ namespace engine {
 
 
 DiskResource::DiskResource(std::string name)
-    : Resource(std::move(name), ResourceType::DISK) {}
+    : Resource(std::move(name), ResourceType::DISK, true, false) {
+}
 
 void DiskResource::LoadFile(TaskPtr task) {
 
