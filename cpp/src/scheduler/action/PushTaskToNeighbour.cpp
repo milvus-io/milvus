@@ -13,19 +13,15 @@ namespace engine {
 
 void
 push_task(ResourcePtr &self, ResourcePtr &other) {
-    auto self_task_table = self->task_table();
-    auto other_task_table = other->task_table();
-    if (!other_task_table.Empty()) {
-        CacheMgr cache;
-        auto indexes = PickToMove(self_task_table, cache, 1);
-        for (auto index : indexes) {
-            if (self_task_table.Move(index)) {
-                auto task = self_task_table.Get(index)->task;
-                other_task_table.Put(task);
-                // TODO: mark moved future
-                other->WakeupLoader();
-                other->WakeupExecutor();
-            }
+    auto &self_task_table = self->task_table();
+    auto &other_task_table = other->task_table();
+    CacheMgr cache;
+    auto indexes = PickToMove(self_task_table, cache, 1);
+    for (auto index : indexes) {
+        if (self_task_table.Move(index)) {
+            auto task = self_task_table.Get(index)->task;
+            other_task_table.Put(task);
+            // TODO: mark moved future
         }
     }
 }
