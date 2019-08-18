@@ -14,6 +14,7 @@
 #include <condition_variable>
 
 #include "resource/Resource.h"
+#include "utils/Log.h"
 
 
 namespace zilliz {
@@ -59,6 +60,8 @@ public:
     void
     Stop();
 
+    void
+    PostEvent(const EventPtr& event);
 
     // TODO: add stats interface(low)
 
@@ -70,7 +73,7 @@ public:
 
 private:
     void
-    EventProcess();
+    event_process();
 
 private:
     std::queue<EventPtr> queue_;

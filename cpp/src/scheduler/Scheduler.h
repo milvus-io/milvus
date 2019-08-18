@@ -13,6 +13,7 @@
 
 #include "resource/Resource.h"
 #include "ResourceMgr.h"
+#include "utils/Log.h"
 
 
 namespace zilliz {
@@ -23,20 +24,32 @@ namespace engine {
 class Scheduler {
 public:
     explicit
-    Scheduler(ResourceMgrWPtr res_mgr)
-        : running_(false),
-          res_mgr_(std::move(res_mgr)) {
-//        res_mgr.Register();
-//        res_mgr.Register();
-//        res_mgr.Register();
-//        res_mgr.Register();
-    }
+    Scheduler(ResourceMgrWPtr res_mgr);
 
+    Scheduler(const Scheduler &) = delete;
+    Scheduler(Scheduler &&) = delete;
+
+    /*
+     * Start worker thread;
+     */
     void
-    Start() {
-        worker_thread_ = std::thread(&Scheduler::worker_thread_, this);
-    }
+    Start();
 
+    /*
+     * Stop worker thread, join it;
+     */
+    void
+    Stop();
+
+    /*
+     * Post event to scheduler event queue;
+     */
+    void
+    PostEvent(const EventPtr &event);
+
+    /*
+     * Dump as string;
+     */
     std::string
     Dump();
 
@@ -45,24 +58,37 @@ private:
 
     /*
      * Process start up events;
+     *
+     * Actions:
+     * Pull task from neighbours;
      */
     void
     OnStartUp(const EventPtr &event);
 
     /*
      * Process finish task events;
+     *
+     * Actions:
+     * Pull task from neighbours;
      */
     void
     OnFinishTask(const EventPtr &event);
 
     /*
      * Process copy completed events;
+     *
+     * Actions:
+     * Mark task source MOVED;
+     * Pull task from neighbours;
      */
     void
     OnCopyCompleted(const EventPtr &event);
 
     /*
-     * Process task table updated events;
+     * Process task table updated events, which happened on task_table->put;
+     *
+     * Actions:
+     * Push task to neighbours;
      */
     void
     OnTaskTableUpdated(const EventPtr &event);
@@ -72,40 +98,13 @@ private:
      * Dispatch event to event handler;
      */
     void
-    Process(const EventPtr &event) {
-        switch (event->Type()) {
-            case EventType::START_UP: {
-                OnStartUp(event);
-                break;
-            }
-            case EventType::COPY_COMPLETED: {
-                OnCopyCompleted(event);
-                break;
-            }
-            case EventType::FINISH_TASK: {
-                OnFinishTask(event);
-                break;
-            }
-            case EventType::TASK_TABLE_UPDATED: {
-                OnTaskTableUpdated(event);
-                break;
-            }
-            default: {
-                break;
-            }
-        }
-    }
+    Process(const EventPtr &event);
 
     /*
      * Called by worker_thread_;
      */
     void
-    worker_function() {
-        while (running_) {
-            auto event = event_queue_.front();
-            Process(event);
-        }
-    }
+    worker_function();
 
 private:
     bool running_;
@@ -113,6 +112,8 @@ private:
     ResourceMgrWPtr res_mgr_;
     std::queue<EventPtr> event_queue_;
     std::thread worker_thread_;
+    std::mutex event_mutex_;
+    std::condition_variable event_cv_;
 };
 
 using SchedulerPtr = std::shared_ptr<Scheduler>;

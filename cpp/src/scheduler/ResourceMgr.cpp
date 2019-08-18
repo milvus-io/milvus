@@ -33,11 +33,7 @@ ResourceMgr::Add(ResourcePtr &&resource) {
     resources_.emplace_back(resource);
 
     size_t index = resources_.size() - 1;
-    resource->RegisterSubscriber([&](EventPtr event) {
-        queue_.emplace(event);
-        std::unique_lock<std::mutex> lock(event_mutex_);
-        event_cv_.notify_one();
-    });
+    resource->RegisterSubscriber(std::bind(&ResourceMgr::PostEvent, this, std::placeholders::_1));
     return ret;
 }
 
@@ -46,27 +42,11 @@ ResourceMgr::Connect(ResourceWPtr &res1, ResourceWPtr &res2, Connection &connect
     if (auto observe_a = res1.lock()) {
         if (auto observe_b = res2.lock()) {
             observe_a->AddNeighbour(std::static_pointer_cast<Node>(observe_b), connection);
+            observe_b->AddNeighbour(std::static_pointer_cast<Node>(observe_a), connection);
         }
     }
 }
 
-void
-ResourceMgr::EventProcess() {
-    while (running_) {
-        std::unique_lock<std::mutex> lock(event_mutex_);
-        event_cv_.wait(lock, [this] { return !queue_.empty(); });
-
-        if (!running_) {
-            break;
-        }
-
-        auto event = queue_.front();
-        queue_.pop();
-        if (subscriber_) {
-            subscriber_(event);
-        }
-    }
-}
 
 void
 ResourceMgr::Start() {
@@ -74,21 +54,31 @@ ResourceMgr::Start() {
     for (auto &resource : resources_) {
         resource->Start();
     }
-    worker_thread_ = std::thread(&ResourceMgr::EventProcess, this);
-
     running_ = true;
+    worker_thread_ = std::thread(&ResourceMgr::event_process, this);
 }
 
 void
 ResourceMgr::Stop() {
-    std::lock_guard<std::mutex> lck(resources_mutex_);
-
-    running_ = false;
+    {
+        std::lock_guard<std::mutex> lock(event_mutex_);
+        running_ = false;
+        queue_.push(nullptr);
+        event_cv_.notify_one();
+    }
     worker_thread_.join();
 
+    std::lock_guard<std::mutex> lck(resources_mutex_);
     for (auto &resource : resources_) {
         resource->Stop();
     }
+}
+
+void
+ResourceMgr::PostEvent(const EventPtr &event) {
+    std::unique_lock<std::mutex> lock(event_mutex_);
+    queue_.emplace(event);
+    event_cv_.notify_one();
 }
 
 std::string
@@ -101,6 +91,26 @@ ResourceMgr::Dump() {
     }
 
     return str;
+}
+
+void
+ResourceMgr::event_process() {
+    while (running_) {
+        std::unique_lock<std::mutex> lock(event_mutex_);
+        event_cv_.wait(lock, [this] { return !queue_.empty(); });
+
+        auto event = queue_.front();
+        if (event == nullptr) {
+            break;
+        }
+
+//        ENGINE_LOG_DEBUG << "ResourceMgr process " << *event;
+
+        queue_.pop();
+        if (subscriber_) {
+            subscriber_(event);
+        }
+    }
 }
 
 }
