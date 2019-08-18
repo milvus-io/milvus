@@ -45,8 +45,6 @@ protected:
         invalid_task_ = nullptr;
         task1_ = std::make_shared<XSearchTask>();
         task2_ = std::make_shared<XSearchTask>();
-
-        empty_table_ = TaskTable();
     }
 
     TaskPtr invalid_task_;
