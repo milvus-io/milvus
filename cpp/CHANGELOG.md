@@ -23,6 +23,13 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-365 - Use tasktableitemptr instead in event
 - MS-366 - Implement TaskTable
 - MS-368 - Implement cost.cpp
+- MS-371 - Add TaskTableUpdatedEvent
+- MS-373 - Add resource test
+- MS-374 - Add action definition
+- MS-375 - Add Dump implementation for Event
+- MS-376 - Add loader and executor enable flag in Resource avoid diskresource execute task
+- MS-377 - Improve process thread trigger in ResourceMgr, Scheduler and TaskTable
+- MS-378 - Debug and Update normal_test in scheduler unittest
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

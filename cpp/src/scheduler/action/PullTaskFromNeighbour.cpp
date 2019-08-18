@@ -4,25 +4,21 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
-#include "CpuResource.h"
+#include "Action.h"
 
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-
-CpuResource::CpuResource(std::string name)
-    : Resource(std::move(name), ResourceType::CPU) {}
-
-void CpuResource::LoadFile(TaskPtr task) {
-    task->Load(LoadType::DISK2CPU, 0);
+void
+Action::PullTaskFromNeighbour(const ResourceWPtr &self) {
+    // TODO: implement
 }
 
-void CpuResource::Process(TaskPtr task) {
-    task->Execute();
-}
 
 }
 }
 }
+
+

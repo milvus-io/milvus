@@ -27,15 +27,28 @@ protected:
         gpu_resource_ = ResourceFactory::Create("gpu");
         flag_ = false;
 
-        auto subscriber = [&](EventPtr) {
+        auto subscriber = [&](EventPtr  event) {
             std::unique_lock<std::mutex> lock(mutex_);
-            flag_ = true;
-            cv_.notify_one();
+            if (event->Type() == EventType::COPY_COMPLETED || event->Type() == EventType::FINISH_TASK) {
+                flag_ = true;
+                cv_.notify_one();
+            }
         };
 
         disk_resource_->RegisterSubscriber(subscriber);
         cpu_resource_->RegisterSubscriber(subscriber);
         gpu_resource_->RegisterSubscriber(subscriber);
+
+        disk_resource_->Start();
+        cpu_resource_->Start();
+        gpu_resource_->Start();
+    }
+
+    void
+    TearDown() override {
+        disk_resource_->Stop();
+        cpu_resource_->Stop();
+        gpu_resource_->Stop();
     }
 
     void

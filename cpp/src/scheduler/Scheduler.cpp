@@ -4,69 +4,129 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
+#include <iostream>
 #include "Scheduler.h"
 #include "Cost.h"
+#include "action/Action.h"
 
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-void
-push_task(ResourcePtr &self, ResourcePtr &other) {
-    auto self_task_table = self->task_table();
-    auto other_task_table = other->task_table();
-    if (!other_task_table.Empty()) {
-        CacheMgr cache;
-        auto indexes = PickToMove(self_task_table, cache, 1);
-        for (auto index : indexes) {
-            if (self_task_table.Move(index)) {
-                auto task = self_task_table.Get(index)->task;
-                other_task_table.Put(task);
-                // TODO: mark moved future
-                other->WakeupLoader();
-                other->WakeupExecutor();
-            }
-        }
+Scheduler::Scheduler(ResourceMgrWPtr res_mgr)
+    : running_(false),
+      res_mgr_(std::move(res_mgr)) {
+    if (auto mgr = res_mgr_.lock()) {
+        mgr->RegisterSubscriber(std::bind(&Scheduler::PostEvent, this, std::placeholders::_1));
     }
 }
 
-void
-schedule(const ResourceWPtr &res) {
-    if (auto self = res.lock()) {
-        for (auto &nei : self->GetNeighbours()) {
-            if (auto n = nei.neighbour_node.lock()) {
-                auto neighbour = std::static_pointer_cast<Resource>(n);
-                push_task(self, neighbour);
-            }
-        }
 
+void
+Scheduler::Start() {
+    running_ = true;
+    worker_thread_ = std::thread(&Scheduler::worker_function, this);
+}
+
+void
+Scheduler::Stop() {
+    {
+        std::lock_guard<std::mutex> lock(event_mutex_);
+        running_ = false;
+        event_queue_.push(nullptr);
+        event_cv_.notify_one();
     }
+    worker_thread_.join();
 }
 
 void
-Scheduler::OnStartUp(const EventPtr &event) {
-    schedule(event->resource_);
-}
-
-void
-Scheduler::OnFinishTask(const EventPtr &event) {
-    schedule(event->resource_);
-}
-
-void
-Scheduler::OnCopyCompleted(const EventPtr &event) {
-    schedule(event->resource_);
-}
-
-void
-Scheduler::OnTaskTableUpdated(const EventPtr &event) {
-    schedule(event->resource_);
+Scheduler::PostEvent(const EventPtr &event) {
+    std::lock_guard<std::mutex> lock(event_mutex_);
+    event_queue_.push(event);
+    event_cv_.notify_one();
+//    SERVER_LOG_DEBUG << "Scheduler post " << *event;
 }
 
 std::string
 Scheduler::Dump() {
     return std::string();
+}
+
+void
+Scheduler::worker_function() {
+    while (running_) {
+        std::unique_lock<std::mutex> lock(event_mutex_);
+        event_cv_.wait(lock, [this] { return !event_queue_.empty(); });
+        auto event = event_queue_.front();
+        if (event == nullptr) {
+            break;
+        }
+
+//        SERVER_LOG_DEBUG << "Scheduler process " << *event;
+        event_queue_.pop();
+        Process(event);
+    }
+}
+
+void
+Scheduler::Process(const EventPtr &event) {
+    switch (event->Type()) {
+        case EventType::START_UP: {
+            OnStartUp(event);
+            break;
+        }
+        case EventType::COPY_COMPLETED: {
+            OnCopyCompleted(event);
+            break;
+        }
+        case EventType::FINISH_TASK: {
+            OnFinishTask(event);
+            break;
+        }
+        case EventType::TASK_TABLE_UPDATED: {
+            OnTaskTableUpdated(event);
+            break;
+        }
+        default: {
+            // TODO: logging
+            break;
+        }
+    }
+}
+
+
+void
+Scheduler::OnStartUp(const EventPtr &event) {
+    if (auto resource = event->resource_.lock()) {
+        resource->WakeupLoader();
+    }
+}
+
+void
+Scheduler::OnFinishTask(const EventPtr &event) {
+    if (auto resource = event->resource_.lock()) {
+        resource->WakeupExecutor();
+    }
+}
+
+void
+Scheduler::OnCopyCompleted(const EventPtr &event) {
+    if (auto resource = event->resource_.lock()) {
+        resource->WakeupLoader();
+        resource->WakeupExecutor();
+        if (resource->Type()== ResourceType::DISK) {
+            Action::PushTaskToNeighbour(event->resource_);
+        }
+    }
+}
+
+void
+Scheduler::OnTaskTableUpdated(const EventPtr &event) {
+//    Action::PushTaskToNeighbour(event->resource_);
+    if (auto resource = event->resource_.lock()) {
+        resource->WakeupLoader();
+    }
 }
 
 }

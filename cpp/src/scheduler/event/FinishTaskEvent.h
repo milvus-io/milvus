@@ -18,6 +18,13 @@ public:
         : Event(EventType::FINISH_TASK, std::move(resource)),
           task_table_item_(std::move(task_table_item)) {}
 
+    inline std::string
+    Dump() const override {
+        return "<FinishTaskEvent>";
+    }
+
+    friend std::ostream &operator<<(std::ostream &out, const FinishTaskEvent &event);
+
 public:
     TaskTableItemPtr task_table_item_;
 };
