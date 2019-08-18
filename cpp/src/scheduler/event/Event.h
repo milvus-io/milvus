@@ -5,6 +5,8 @@
  ******************************************************************************/
 #pragma once
 
+#include <memory>
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
@@ -29,6 +31,13 @@ public:
     Type() const {
         return type_;
     }
+
+    inline virtual std::string
+    Dump() const {
+        return "<Event>";
+    }
+
+    friend std::ostream &operator<<(std::ostream &out, const Event &event);
 
 public:
     EventType type_;
