@@ -49,6 +49,9 @@ class TaskTable {
 public:
     TaskTable() = default;
 
+    TaskTable(const TaskTable &) = delete;
+    TaskTable(TaskTable &&) = delete;
+
     inline void
     RegisterSubscriber(std::function<void(void)> subscriber) {
         subscriber_ = std::move(subscriber);
@@ -167,6 +170,8 @@ public:
 
 private:
     // TODO: map better ?
+    std::uint64_t id_ = 0;
+    mutable std::mutex id_mutex_;
     std::deque<TaskTableItemPtr> table_;
     std::function<void(void)> subscriber_ = nullptr;
 };

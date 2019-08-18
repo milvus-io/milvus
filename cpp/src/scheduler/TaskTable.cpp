@@ -7,6 +7,7 @@
 #include "TaskTable.h"
 #include "event/TaskTableUpdatedEvent.h"
 #include <vector>
+#include <sstream>
 
 
 namespace zilliz {
@@ -16,7 +17,9 @@ namespace engine {
 
 void
 TaskTable::Put(TaskPtr task) {
+    std::lock_guard<std::mutex> lock(id_mutex_);
     auto item = std::make_shared<TaskTableItem>();
+    item->id = id_++;
     item->task = std::move(task);
     item->state = TaskTableItemState::START;
     table_.push_back(item);
@@ -27,8 +30,10 @@ TaskTable::Put(TaskPtr task) {
 
 void
 TaskTable::Put(std::vector<TaskPtr> &tasks) {
+    std::lock_guard<std::mutex> lock(id_mutex_);
     for (auto &task : tasks) {
         auto item = std::make_shared<TaskTableItem>();
+        item->id = id_++;
         item->task = std::move(task);
         item->state = TaskTableItemState::START;
         table_.push_back(item);
@@ -127,8 +132,29 @@ TaskTable::Executed(uint64_t index) {
 }
 
 std::string
+ToString(TaskTableItemState state) {
+    switch (state) {
+        case TaskTableItemState::INVALID: return "INVALID";
+        case TaskTableItemState::START: return "START";
+        case TaskTableItemState::LOADING: return "LOADING";
+        case TaskTableItemState::LOADED: return "LOADED";
+        case TaskTableItemState::EXECUTING: return "EXECUTING";
+        case TaskTableItemState::EXECUTED: return "EXECUTED";
+        case TaskTableItemState::MOVING: return "MOVING";
+        case TaskTableItemState::MOVED: return "MOVED";
+        default: return "";
+    }
+}
+
+std::string
 TaskTable::Dump() {
-    return std::string();
+    std::stringstream ss;
+    for (auto &item : table_) {
+        ss << "<" << item->id;
+        ss << ", " << ToString(item->state);
+        ss << ">" << std::endl;
+    }
+    return ss.str();
 }
 
 }
