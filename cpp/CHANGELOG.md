@@ -25,6 +25,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-368 - Implement cost.cpp
 - MS-371 - Add TaskTableUpdatedEvent
 - MS-373 - Add resource test
+- MS-374 - Add action definition
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
