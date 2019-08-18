@@ -10,10 +10,15 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-Resource::Resource(std::string name, ResourceType type)
+Resource::Resource(std::string name,
+                   ResourceType type,
+                   bool enable_loader,
+                   bool enable_executor)
     : name_(std::move(name)),
       type_(type),
       running_(false),
+      enable_loader_(enable_loader),
+      enable_executor_(enable_executor),
       load_flag_(false),
       exec_flag_(false) {
     task_table_.RegisterSubscriber([&] {
@@ -26,16 +31,24 @@ Resource::Resource(std::string name, ResourceType type)
 
 void Resource::Start() {
     running_ = true;
-    loader_thread_ = std::thread(&Resource::loader_function, this);
-    executor_thread_ = std::thread(&Resource::executor_function, this);
+    if (enable_loader_) {
+        loader_thread_ = std::thread(&Resource::loader_function, this);
+    }
+    if (enable_executor_) {
+        executor_thread_ = std::thread(&Resource::executor_function, this);
+    }
 }
 
 void Resource::Stop() {
     running_ = false;
-    WakeupLoader();
-    WakeupExecutor();
-    loader_thread_.join();
-    executor_thread_.join();
+    if (enable_loader_) {
+        WakeupLoader();
+        loader_thread_.join();
+    }
+    if (enable_executor_) {
+        WakeupExecutor();
+        executor_thread_.join();
+    }
 }
 
 TaskTable &Resource::task_table() {
@@ -106,6 +119,7 @@ void Resource::executor_function() {
         auto task_item = pick_task_execute();
         if (task_item) {
             Process(task_item->task);
+            task_item->state = TaskTableItemState::EXECUTED;
             if (subscriber_) {
                 auto event = std::make_shared<FinishTaskEvent>(shared_from_this(), task_item);
                 subscriber_(std::static_pointer_cast<Event>(event));
