@@ -12,6 +12,11 @@
 #include <functional>
 #include <condition_variable>
 
+#include "../event/Event.h"
+#include "../event/StartUpEvent.h"
+#include "../event/CopyCompletedEvent.h"
+#include "../event/FinishTaskEvent.h"
+#include "../event/TaskTableUpdatedEvent.h"
 #include "../TaskTable.h"
 #include "../task/Task.h"
 #include "../Cost.h"
@@ -37,18 +42,28 @@ enum class RegisterType {
     ON_TASK_TABLE_UPDATED,
 };
 
-class Resource : public Node {
+class Resource : public Node, public std::enable_shared_from_this<Resource> {
 public:
     /*
      * Event function MUST be a short function, never blocking;
      */
-    template <typename T>
-    void Register_T(const RegisterType& type) {
+    template<typename T>
+    void Register_T(const RegisterType &type) {
         register_table_.emplace(type, [] { return std::make_shared<T>(); });
     }
 
     RegisterHandlerPtr
-    GetRegisterFunc(const RegisterType& type);
+    GetRegisterFunc(const RegisterType &type);
+
+    inline void
+    RegisterSubscriber(std::function<void(EventPtr)> subscriber) {
+        subscriber_ = std::move(subscriber);
+    }
+
+    inline ResourceType
+    Type() const {
+        return type_;
+    }
 
     void
     Start();
@@ -59,21 +74,31 @@ public:
     TaskTable &
     task_table();
 
+    inline virtual std::string
+    Dump() const {
+        return "<Resource>";
+    }
+
+    friend std::ostream &operator<<(std::ostream &out, const Resource &resource);
+
 public:
+    /*
+     * wake up loader;
+     */
+    void
+    WakeupLoader();
+
     /*
      * wake up executor;
      */
     void
     WakeupExecutor();
 
-    /* 
-     * wake up loader;
-     */
-    void
-    WakeupLoader();
-
 protected:
-    Resource(std::string name, ResourceType type);
+    Resource(std::string name,
+             ResourceType type,
+             bool enable_loader = true,
+             bool enable_executor = true);
 
     // TODO: SearchContextPtr to TaskPtr
     /*
@@ -100,14 +125,14 @@ private:
      * Pick one task to load;
      * Order by start time;
      */
-    TaskPtr
+    TaskTableItemPtr
     pick_task_load();
 
     /*
      * Pick one task to execute;
      * Pick by start time and priority;
      */
-    TaskPtr
+    TaskTableItemPtr
     pick_task_execute();
 
 private:
@@ -123,7 +148,6 @@ private:
     void
     executor_function();
 
-
 private:
     std::string name_;
     ResourceType type_;
@@ -131,8 +155,11 @@ private:
     TaskTable task_table_;
 
     std::map<RegisterType, std::function<RegisterHandlerPtr()>> register_table_;
+    std::function<void(EventPtr)> subscriber_ = nullptr;
 
     bool running_;
+    bool enable_loader_ = true;
+    bool enable_executor_ = true;
     std::thread loader_thread_;
     std::thread executor_thread_;
 

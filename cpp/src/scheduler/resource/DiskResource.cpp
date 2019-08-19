@@ -10,9 +10,14 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+std::ostream &operator<<(std::ostream &out, const DiskResource &resource) {
+    out << resource.Dump();
+    return out;
+}
 
 DiskResource::DiskResource(std::string name)
-    : Resource(std::move(name), ResourceType::DISK) {}
+    : Resource(std::move(name), ResourceType::DISK, true, false) {
+}
 
 void DiskResource::LoadFile(TaskPtr task) {
 

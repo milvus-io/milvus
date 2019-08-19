@@ -10,6 +10,8 @@ protected:
     SetUp() override {
         node1_ = std::make_shared<Node>();
         node2_ = std::make_shared<Node>();
+        node3_ = std::make_shared<Node>();
+        node4_ = std::make_shared<Node>();
 
         auto pcie = Connection("PCIe", 11.0);
 
