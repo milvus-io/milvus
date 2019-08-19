@@ -7,6 +7,7 @@
 #include "ResourceMgr.h"
 #include "db/Log.h"
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
@@ -21,30 +22,18 @@ ResourceMgr::Add(ResourcePtr &&resource) {
     ResourceWPtr ret(resource);
 
     std::lock_guard<std::mutex> lck(resources_mutex_);
-    if(running_) {
+    if (running_) {
         ENGINE_LOG_ERROR << "ResourceMgr is running, not allow to add resource";
         return ret;
     }
 
+    if (resource->Type() == ResourceType::DISK) {
+        disk_resources_.emplace_back(ResourceWPtr(resource));
+    }
     resources_.emplace_back(resource);
 
     size_t index = resources_.size() - 1;
-    resource->RegisterOnStartUp([&] {
-        start_up_event_[index] = true;
-        event_cv_.notify_one();
-    });
-    resource->RegisterOnFinishTask([&] {
-        finish_task_event_[index] = true;
-        event_cv_.notify_one();
-    });
-    resource->RegisterOnCopyCompleted([&] {
-        copy_completed_event_[index] = true;
-        event_cv_.notify_one();
-    });
-    resource->RegisterOnTaskTableUpdated([&] {
-        task_table_updated_event_[index] = true;
-        event_cv_.notify_one();
-    });
+    resource->RegisterSubscriber(std::bind(&ResourceMgr::PostEvent, this, std::placeholders::_1));
     return ret;
 }
 
@@ -53,41 +42,11 @@ ResourceMgr::Connect(ResourceWPtr &res1, ResourceWPtr &res2, Connection &connect
     if (auto observe_a = res1.lock()) {
         if (auto observe_b = res2.lock()) {
             observe_a->AddNeighbour(std::static_pointer_cast<Node>(observe_b), connection);
+            observe_b->AddNeighbour(std::static_pointer_cast<Node>(observe_a), connection);
         }
     }
 }
 
-void
-ResourceMgr::EventProcess() {
-    while (running_) {
-        std::unique_lock <std::mutex> lock(resources_mutex_);
-        event_cv_.wait(lock, [this] { return !resources_.empty(); });
-
-        if(!running_) {
-            break;
-        }
-
-        for (uint64_t i = 0; i < resources_.size(); ++i) {
-            ResourceWPtr res(resources_[i]);
-            if (start_up_event_[i]) {
-                on_start_up_(res);
-                start_up_event_[i] = false;
-            }
-            if (finish_task_event_[i]) {
-                on_finish_task_(res);
-                finish_task_event_[i] = false;
-            }
-            if (copy_completed_event_[i]) {
-                on_copy_completed_(res);
-                copy_completed_event_[i] = false;
-            }
-            if (task_table_updated_event_[i]) {
-                on_task_table_updated_(res);
-                task_table_updated_event_[i] = false;
-            }
-        }
-    }
-}
 
 void
 ResourceMgr::Start() {
@@ -95,21 +54,31 @@ ResourceMgr::Start() {
     for (auto &resource : resources_) {
         resource->Start();
     }
-    worker_thread_ = std::thread(&ResourceMgr::EventProcess, this);
-
     running_ = true;
+    worker_thread_ = std::thread(&ResourceMgr::event_process, this);
 }
 
 void
 ResourceMgr::Stop() {
-    std::lock_guard<std::mutex> lck(resources_mutex_);
-
-    running_ = false;
+    {
+        std::lock_guard<std::mutex> lock(event_mutex_);
+        running_ = false;
+        queue_.push(nullptr);
+        event_cv_.notify_one();
+    }
     worker_thread_.join();
 
+    std::lock_guard<std::mutex> lck(resources_mutex_);
     for (auto &resource : resources_) {
         resource->Stop();
     }
+}
+
+void
+ResourceMgr::PostEvent(const EventPtr &event) {
+    std::unique_lock<std::mutex> lock(event_mutex_);
+    queue_.emplace(event);
+    event_cv_.notify_one();
 }
 
 std::string
@@ -122,6 +91,26 @@ ResourceMgr::Dump() {
     }
 
     return str;
+}
+
+void
+ResourceMgr::event_process() {
+    while (running_) {
+        std::unique_lock<std::mutex> lock(event_mutex_);
+        event_cv_.wait(lock, [this] { return !queue_.empty(); });
+
+        auto event = queue_.front();
+        if (event == nullptr) {
+            break;
+        }
+
+//        ENGINE_LOG_DEBUG << "ResourceMgr process " << *event;
+
+        queue_.pop();
+        if (subscriber_) {
+            subscriber_(event);
+        }
+    }
 }
 
 }

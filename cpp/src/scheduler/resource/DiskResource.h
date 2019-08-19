@@ -18,6 +18,13 @@ public:
     explicit
     DiskResource(std::string name);
 
+    inline std::string
+    Dump() const override {
+        return "<DiskResource>";
+    }
+
+    friend std::ostream &operator<<(std::ostream &out, const DiskResource &resource);
+
 protected:
     void
     LoadFile(TaskPtr task) override;

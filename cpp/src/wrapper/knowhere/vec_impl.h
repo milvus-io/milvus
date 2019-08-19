@@ -33,6 +33,8 @@ class VecIndexImpl : public VecIndex {
     server::KnowhereError Add(const long &nb, const float *xb, const long *ids, const Config &cfg) override;
     zilliz::knowhere::BinarySet Serialize() override;
     server::KnowhereError Load(const zilliz::knowhere::BinarySet &index_binary) override;
+    VecIndexPtr Clone() override;
+    int64_t GetDeviceId() override;
     server::KnowhereError Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) override;
 
  protected:

@@ -10,6 +10,7 @@
 #include <mutex>
 
 #include "task/SearchTask.h"
+#include "event/Event.h"
 
 
 namespace zilliz {
@@ -31,7 +32,7 @@ struct TaskTableItem {
     TaskTableItem() : id(0), state(TaskTableItemState::INVALID), mutex(), priority(0) {}
 
     TaskTableItem(const TaskTableItem &src)
-    : id(src.id), state(src.state), mutex(), priority(src.priority) {}
+        : id(src.id), state(src.state), mutex(), priority(src.priority) {}
 
     uint64_t id; // auto increment from 0;
     // TODO: add tag into task
@@ -42,12 +43,19 @@ struct TaskTableItem {
     uint8_t priority; // just a number, meaningless;
 };
 
+using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
+
 class TaskTable {
 public:
     TaskTable() = default;
 
-    explicit
-    TaskTable(std::vector<TaskPtr> &&tasks);
+    TaskTable(const TaskTable &) = delete;
+    TaskTable(TaskTable &&) = delete;
+
+    inline void
+    RegisterSubscriber(std::function<void(void)> subscriber) {
+        subscriber_ = std::move(subscriber);
+    }
 
     /*
      * Put one task;
@@ -65,7 +73,7 @@ public:
     /*
      * Return task table item reference;
      */
-    TaskTableItem &
+    TaskTableItemPtr
     Get(uint64_t index);
 
     /*
@@ -76,6 +84,29 @@ public:
     void
     Clear();
 
+    /*
+     * Return true if task table empty, otherwise false;
+     */
+    inline bool
+    Empty() {
+        return table_.empty();
+    }
+
+    /*
+     * Return size of task table;
+     */
+    inline size_t
+    Size() {
+        return table_.size();
+    }
+public:
+    TaskTableItemPtr &
+    operator[](uint64_t index) {
+        return table_[index];
+    }
+
+    std::deque<TaskTableItemPtr>::iterator begin() { return table_.begin(); }
+    std::deque<TaskTableItemPtr>::iterator end() { return table_.end(); }
 
 public:
 
@@ -139,7 +170,10 @@ public:
 
 private:
     // TODO: map better ?
-    std::deque<TaskTableItem> table_;
+    std::uint64_t id_ = 0;
+    mutable std::mutex id_mutex_;
+    std::deque<TaskTableItemPtr> table_;
+    std::function<void(void)> subscriber_ = nullptr;
 };
 
 

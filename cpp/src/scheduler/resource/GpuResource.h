@@ -18,6 +18,13 @@ public:
     explicit
     GpuResource(std::string name);
 
+    inline std::string
+    Dump() const override {
+        return "<GpuResource>";
+    }
+
+    friend std::ostream &operator<<(std::ostream &out, const GpuResource &resource);
+
 protected:
     void
     LoadFile(TaskPtr task) override;
