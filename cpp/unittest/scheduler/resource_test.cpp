@@ -25,12 +25,20 @@ protected:
         disk_resource_ = ResourceFactory::Create("disk");
         cpu_resource_ = ResourceFactory::Create("cpu");
         gpu_resource_ = ResourceFactory::Create("gpu");
-        flag_ = false;
+        resources_.push_back(disk_resource_);
+        resources_.push_back(cpu_resource_);
+        resources_.push_back(gpu_resource_);
 
-        auto subscriber = [&](EventPtr  event) {
-            std::unique_lock<std::mutex> lock(mutex_);
-            if (event->Type() == EventType::COPY_COMPLETED || event->Type() == EventType::FINISH_TASK) {
-                flag_ = true;
+        auto subscriber = [&](EventPtr event) {
+            if (event->Type() == EventType::COPY_COMPLETED) {
+                std::lock_guard<std::mutex> lock(load_mutex_);
+                ++load_count_;
+                cv_.notify_one();
+            }
+
+            if (event->Type() == EventType::FINISH_TASK) {
+                std::lock_guard<std::mutex> lock(load_mutex_);
+                ++exec_count_;
                 cv_.notify_one();
             }
         };
@@ -52,42 +60,82 @@ protected:
     }
 
     void
-    Wait() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [&] { return flag_; });
+    WaitLoader(uint64_t count) {
+        std::unique_lock<std::mutex> lock(load_mutex_);
+        cv_.wait(lock, [&] { return load_count_ == count; });
+    }
+
+    void
+    WaitExecutor(uint64_t count) {
+        std::unique_lock<std::mutex> lock(exec_mutex_);
+        cv_.wait(lock, [&] { return exec_count_ == count; });
     }
 
     ResourcePtr disk_resource_;
     ResourcePtr cpu_resource_;
     ResourcePtr gpu_resource_;
-    bool flag_;
-    std::mutex mutex_;
+    std::vector<ResourcePtr> resources_;
+    uint64_t load_count_ = 0;
+    uint64_t exec_count_ = 0;
+    std::mutex load_mutex_;
+    std::mutex exec_mutex_;
     std::condition_variable cv_;
 };
 
-
 TEST_F(ResourceTest, cpu_resource_test) {
-    auto task = std::make_shared<TestTask>();
-    cpu_resource_->task_table().Put(task);
+    const uint64_t NUM = 100;
+    std::vector<std::shared_ptr<TestTask>> tasks;
+    for (uint64_t i = 0; i < NUM; ++i) {
+        auto task = std::make_shared<TestTask>();
+        tasks.push_back(task);
+        cpu_resource_->task_table().Put(task);
+    }
+
     cpu_resource_->WakeupLoader();
-    Wait();
-    ASSERT_EQ(task->load_count_, 1);
-    flag_ = false;
+    WaitLoader(NUM);
+//    std::cout << "after WakeupLoader" << std::endl;
+//    std::cout << cpu_resource_->task_table().Dump();
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        ASSERT_EQ(tasks[i]->load_count_, 1);
+    }
+
     cpu_resource_->WakeupExecutor();
-    Wait();
-    ASSERT_EQ(task->exec_count_, 1);
+    WaitExecutor(NUM);
+//    std::cout << "after WakeupExecutor" << std::endl;
+//    std::cout << cpu_resource_->task_table().Dump();
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        ASSERT_EQ(tasks[i]->exec_count_, 1);
+    }
 }
 
 TEST_F(ResourceTest, gpu_resource_test) {
-    auto task = std::make_shared<TestTask>();
-    gpu_resource_->task_table().Put(task);
+    const uint64_t NUM = 100;
+    std::vector<std::shared_ptr<TestTask>> tasks;
+    for (uint64_t i = 0; i < NUM; ++i) {
+        auto task = std::make_shared<TestTask>();
+        tasks.push_back(task);
+        gpu_resource_->task_table().Put(task);
+    }
+
     gpu_resource_->WakeupLoader();
-    Wait();
-    ASSERT_EQ(task->load_count_, 1);
-    flag_ = false;
+    WaitLoader(NUM);
+//    std::cout << "after WakeupLoader" << std::endl;
+//    std::cout << cpu_resource_->task_table().Dump();
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        ASSERT_EQ(tasks[i]->load_count_, 1);
+    }
+
     gpu_resource_->WakeupExecutor();
-    Wait();
-    ASSERT_EQ(task->exec_count_, 1);
+    WaitExecutor(NUM);
+//    std::cout << "after WakeupExecutor" << std::endl;
+//    std::cout << cpu_resource_->task_table().Dump();
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        ASSERT_EQ(tasks[i]->exec_count_, 1);
+    }
 }
 
 
