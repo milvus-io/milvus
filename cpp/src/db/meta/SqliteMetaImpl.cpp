@@ -606,9 +606,9 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                                       &TableFileSchema::engine_type_);
 
         auto match_tableid = c(&TableFileSchema::table_id_) == table_id;
-        auto is_raw = c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW;
-        auto is_toindex = c(&TableFileSchema::file_type_) == (int) TableFileSchema::TO_INDEX;
-        auto is_index = c(&TableFileSchema::file_type_) == (int) TableFileSchema::INDEX;
+
+        std::vector<int> file_type = {(int) TableFileSchema::RAW, (int) TableFileSchema::TO_INDEX, (int) TableFileSchema::INDEX};
+        auto match_type = in(&TableFileSchema::file_type_, file_type);
 
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
@@ -617,23 +617,23 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
 
         decltype(ConnectorPtr->select(select_columns)) result;
         if (partition.empty() && ids.empty()) {
-            auto filter = where(match_tableid and (is_raw or is_toindex or is_index));
+            auto filter = where(match_tableid and match_type);
             result = ConnectorPtr->select(select_columns, filter);
         }
         else if (partition.empty() && !ids.empty()) {
             auto match_fileid = in(&TableFileSchema::id_, ids);
-            auto filter = where(match_tableid and match_fileid and (is_raw or is_toindex or is_index));
+            auto filter = where(match_tableid and match_fileid and match_type);
             result = ConnectorPtr->select(select_columns, filter);
         }
         else if (!partition.empty() && ids.empty()) {
             auto match_date = in(&TableFileSchema::date_, partition);
-            auto filter = where(match_tableid and match_date and (is_raw or is_toindex or is_index));
+            auto filter = where(match_tableid and match_date and match_type);
             result = ConnectorPtr->select(select_columns, filter);
         }
         else if (!partition.empty() && !ids.empty()) {
             auto match_fileid = in(&TableFileSchema::id_, ids);
             auto match_date = in(&TableFileSchema::date_, partition);
-            auto filter = where(match_tableid and match_fileid and match_date and (is_raw or is_toindex or is_index));
+            auto filter = where(match_tableid and match_fileid and match_date and match_type);
             result = ConnectorPtr->select(select_columns, filter);
         }
 

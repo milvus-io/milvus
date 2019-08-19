@@ -45,8 +45,6 @@ protected:
         invalid_task_ = nullptr;
         task1_ = std::make_shared<XSearchTask>();
         task2_ = std::make_shared<XSearchTask>();
-
-        empty_table_ = TaskTable();
     }
 
     TaskPtr invalid_task_;
@@ -58,19 +56,19 @@ protected:
 
 TEST_F(TaskTableBaseTest, put_task) {
     empty_table_.Put(task1_);
-    ASSERT_EQ(empty_table_.Get(0).task, task1_);
+    ASSERT_EQ(empty_table_.Get(0)->task, task1_);
 }
 
 TEST_F(TaskTableBaseTest, put_invalid_test) {
     empty_table_.Put(invalid_task_);
-    ASSERT_EQ(empty_table_.Get(0).task, invalid_task_);
+    ASSERT_EQ(empty_table_.Get(0)->task, invalid_task_);
 }
 
 TEST_F(TaskTableBaseTest, put_batch) {
     std::vector<TaskPtr> tasks{task1_, task2_};
     empty_table_.Put(tasks);
-    ASSERT_EQ(empty_table_.Get(0).task, task1_);
-    ASSERT_EQ(empty_table_.Get(1).task, task2_);
+    ASSERT_EQ(empty_table_.Get(0)->task, task1_);
+    ASSERT_EQ(empty_table_.Get(1)->task, task2_);
 }
 
 TEST_F(TaskTableBaseTest, put_empty_batch) {
@@ -89,14 +87,14 @@ protected:
             table1_.Put(task);
         }
 
-        table1_.Get(0).state = TaskTableItemState::INVALID;
-        table1_.Get(1).state = TaskTableItemState::START;
-        table1_.Get(2).state = TaskTableItemState::LOADING;
-        table1_.Get(3).state = TaskTableItemState::LOADED;
-        table1_.Get(4).state = TaskTableItemState::EXECUTING;
-        table1_.Get(5).state = TaskTableItemState::EXECUTED;
-        table1_.Get(6).state = TaskTableItemState::MOVING;
-        table1_.Get(7).state = TaskTableItemState::MOVED;
+        table1_.Get(0)->state = TaskTableItemState::INVALID;
+        table1_.Get(1)->state = TaskTableItemState::START;
+        table1_.Get(2)->state = TaskTableItemState::LOADING;
+        table1_.Get(3)->state = TaskTableItemState::LOADED;
+        table1_.Get(4)->state = TaskTableItemState::EXECUTING;
+        table1_.Get(5)->state = TaskTableItemState::EXECUTED;
+        table1_.Get(6)->state = TaskTableItemState::MOVING;
+        table1_.Get(7)->state = TaskTableItemState::MOVED;
     }
 
     TaskTable table1_;
@@ -106,22 +104,22 @@ TEST_F(TaskTableAdvanceTest, load) {
     table1_.Load(1);
     table1_.Loaded(2);
 
-    ASSERT_EQ(table1_.Get(1).state, TaskTableItemState::LOADING);
-    ASSERT_EQ(table1_.Get(2).state, TaskTableItemState::LOADED);
+    ASSERT_EQ(table1_.Get(1)->state, TaskTableItemState::LOADING);
+    ASSERT_EQ(table1_.Get(2)->state, TaskTableItemState::LOADED);
 }
 
 TEST_F(TaskTableAdvanceTest, execute) {
     table1_.Execute(3);
     table1_.Executed(4);
 
-    ASSERT_EQ(table1_.Get(3).state, TaskTableItemState::EXECUTING);
-    ASSERT_EQ(table1_.Get(4).state, TaskTableItemState::EXECUTED);
+    ASSERT_EQ(table1_.Get(3)->state, TaskTableItemState::EXECUTING);
+    ASSERT_EQ(table1_.Get(4)->state, TaskTableItemState::EXECUTED);
 }
 
 TEST_F(TaskTableAdvanceTest, move) {
     table1_.Move(3);
     table1_.Moved(6);
 
-    ASSERT_EQ(table1_.Get(3).state, TaskTableItemState::MOVING);
-    ASSERT_EQ(table1_.Get(6).state, TaskTableItemState::MOVED);
+    ASSERT_EQ(table1_.Get(3)->state, TaskTableItemState::MOVING);
+    ASSERT_EQ(table1_.Get(6)->state, TaskTableItemState::MOVED);
 }

@@ -16,6 +16,22 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-350 - Remove knowhere submodule
 - MS-354 - Add task class and interface in scheduler
 - MS-355 - Add copy interface in ExcutionEngine
+- MS-357 - Add minimum schedule function
+- MS-359 - Add cost test in new scheduler
+- MS-361 - Add event in resource
+- MS-364 - Modify tasktableitem in tasktable
+- MS-365 - Use tasktableitemptr instead in event
+- MS-366 - Implement TaskTable
+- MS-368 - Implement cost.cpp
+- MS-371 - Add TaskTableUpdatedEvent
+- MS-373 - Add resource test
+- MS-374 - Add action definition
+- MS-375 - Add Dump implementation for Event
+- MS-376 - Add loader and executor enable flag in Resource avoid diskresource execute task
+- MS-377 - Improve process thread trigger in ResourceMgr, Scheduler and TaskTable
+- MS-378 - Debug and Update normal_test in scheduler unittest
+- MS-379 - Add Dump implementation in Resource
+- MS-380 - Update resource loader and executor, work util all finished
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

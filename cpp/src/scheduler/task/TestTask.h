@@ -3,29 +3,31 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#pragma once
 
-#include "CpuResource.h"
+#include "Task.h"
 
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-std::ostream &operator<<(std::ostream &out, const CpuResource &resource) {
-    out << resource.Dump();
-    return out;
-}
+class TestTask : public Task {
+public:
+    TestTask() = default;
 
-CpuResource::CpuResource(std::string name)
-    : Resource(std::move(name), ResourceType::CPU) {}
+public:
+    void
+    Load(LoadType type, uint8_t device_id) override;
 
-void CpuResource::LoadFile(TaskPtr task) {
-    task->Load(LoadType::DISK2CPU, 0);
-}
+    void
+    Execute() override;
 
-void CpuResource::Process(TaskPtr task) {
-    task->Execute();
-}
+public:
+    uint64_t load_count_;
+    uint64_t exec_count_;
+};
+
 
 }
 }
