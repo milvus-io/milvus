@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
+#include <iostream>
 #include "Action.h"
 
 
@@ -16,7 +17,7 @@ push_task(const ResourcePtr &self, const ResourcePtr &other) {
     auto &self_task_table = self->task_table();
     auto &other_task_table = other->task_table();
     CacheMgr cache;
-    auto indexes = PickToMove(self_task_table, cache, 1);
+    auto indexes = PickToMove(self_task_table, cache, 10);
     for (auto index : indexes) {
         if (self_task_table.Move(index)) {
             auto task = self_task_table.Get(index)->task;
