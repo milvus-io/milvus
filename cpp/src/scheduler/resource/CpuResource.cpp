@@ -11,6 +11,10 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+std::ostream &operator<<(std::ostream &out, const CpuResource &resource) {
+    out << resource.Dump();
+    return out;
+}
 
 CpuResource::CpuResource(std::string name)
     : Resource(std::move(name), ResourceType::CPU) {}
