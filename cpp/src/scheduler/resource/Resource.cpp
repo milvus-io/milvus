@@ -3,6 +3,7 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#include <iostream>
 #include "Resource.h"
 
 
@@ -61,19 +62,23 @@ TaskTable &Resource::task_table() {
 }
 
 void Resource::WakeupLoader() {
-    std::lock_guard<std::mutex> lock(load_mutex_);
-    load_flag_ = true;
+    {
+        std::lock_guard<std::mutex> lock(load_mutex_);
+        load_flag_ = true;
+    }
     load_cv_.notify_one();
 }
 
 void Resource::WakeupExecutor() {
-    std::lock_guard<std::mutex> lock(exec_mutex_);
-    exec_flag_ = true;
+    {
+        std::lock_guard<std::mutex> lock(exec_mutex_);
+        exec_flag_ = true;
+    }
     exec_cv_.notify_one();
 }
 
 TaskTableItemPtr Resource::pick_task_load() {
-    auto indexes = PickToLoad(task_table_, 3);
+    auto indexes = PickToLoad(task_table_, 10);
     for (auto index : indexes) {
         // try to set one task loading, then return
         if (task_table_.Load(index))
@@ -99,6 +104,7 @@ void Resource::loader_function() {
         std::unique_lock<std::mutex> lock(load_mutex_);
         load_cv_.wait(lock, [&] { return load_flag_; });
         load_flag_ = false;
+        lock.unlock();
         while (true) {
             auto task_item = pick_task_load();
             if (task_item == nullptr) {
@@ -125,6 +131,7 @@ void Resource::executor_function() {
         std::unique_lock<std::mutex> lock(exec_mutex_);
         exec_cv_.wait(lock, [&] { return exec_flag_; });
         exec_flag_ = false;
+        lock.unlock();
         while (true) {
             auto task_item = pick_task_execute();
             if (task_item == nullptr) {
