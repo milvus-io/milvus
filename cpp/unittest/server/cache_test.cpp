@@ -39,6 +39,14 @@ public:
 
     }
 
+    engine::VecIndexPtr Clone() override {
+        return zilliz::milvus::engine::VecIndexPtr();
+    }
+
+    int64_t GetDeviceId() override {
+        return 0;
+    }
+
     engine::IndexType GetType() override {
         return engine::IndexType::INVALID;
     }
