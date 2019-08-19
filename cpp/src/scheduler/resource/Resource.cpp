@@ -10,6 +10,11 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+std::ostream &operator<<(std::ostream &out, const Resource &resource) {
+    out << resource.Dump();
+    return out;
+}
+
 Resource::Resource(std::string name,
                    ResourceType type,
                    bool enable_loader,

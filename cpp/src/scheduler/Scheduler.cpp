@@ -4,7 +4,6 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
-#include <iostream>
 #include "Scheduler.h"
 #include "Cost.h"
 #include "action/Action.h"
