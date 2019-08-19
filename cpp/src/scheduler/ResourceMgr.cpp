@@ -76,7 +76,7 @@ ResourceMgr::Stop() {
 
 void
 ResourceMgr::PostEvent(const EventPtr &event) {
-    std::unique_lock<std::mutex> lock(event_mutex_);
+    std::lock_guard<std::mutex> lock(event_mutex_);
     queue_.emplace(event);
     event_cv_.notify_one();
 }
@@ -100,13 +100,14 @@ ResourceMgr::event_process() {
         event_cv_.wait(lock, [this] { return !queue_.empty(); });
 
         auto event = queue_.front();
+        queue_.pop();
+        lock.unlock();
         if (event == nullptr) {
             break;
         }
 
 //        ENGINE_LOG_DEBUG << "ResourceMgr process " << *event;
 
-        queue_.pop();
         if (subscriber_) {
             subscriber_(event);
         }
