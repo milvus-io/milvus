@@ -31,6 +31,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-377 - Improve process thread trigger in ResourceMgr, Scheduler and TaskTable
 - MS-378 - Debug and Update normal_test in scheduler unittest
 - MS-379 - Add Dump implementation in Resource
+- MS-380 - Update resource loader and executor, work util all finished
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

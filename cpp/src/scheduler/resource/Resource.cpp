@@ -99,8 +99,11 @@ void Resource::loader_function() {
         std::unique_lock<std::mutex> lock(load_mutex_);
         load_cv_.wait(lock, [&] { return load_flag_; });
         load_flag_ = false;
-        auto task_item = pick_task_load();
-        if (task_item) {
+        while (true) {
+            auto task_item = pick_task_load();
+            if (task_item == nullptr) {
+                break;
+            }
             LoadFile(task_item->task);
             // TODO: wrapper loaded
             task_item->state = TaskTableItemState::LOADED;
@@ -109,6 +112,7 @@ void Resource::loader_function() {
                 subscriber_(std::static_pointer_cast<Event>(event));
             }
         }
+
     }
 }
 
@@ -121,8 +125,11 @@ void Resource::executor_function() {
         std::unique_lock<std::mutex> lock(exec_mutex_);
         exec_cv_.wait(lock, [&] { return exec_flag_; });
         exec_flag_ = false;
-        auto task_item = pick_task_execute();
-        if (task_item) {
+        while (true) {
+            auto task_item = pick_task_execute();
+            if (task_item == nullptr) {
+                break;
+            }
             Process(task_item->task);
             task_item->state = TaskTableItemState::EXECUTED;
             if (subscriber_) {
@@ -130,6 +137,7 @@ void Resource::executor_function() {
                 subscriber_(std::static_pointer_cast<Event>(event));
             }
         }
+
     }
 }
 
