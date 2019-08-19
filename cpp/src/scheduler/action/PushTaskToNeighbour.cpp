@@ -12,7 +12,7 @@ namespace milvus {
 namespace engine {
 
 void
-push_task(ResourcePtr &self, ResourcePtr &other) {
+push_task(const ResourcePtr &self, const ResourcePtr &other) {
     auto &self_task_table = self->task_table();
     auto &other_task_table = other->task_table();
     CacheMgr cache;
@@ -31,8 +31,7 @@ Action::PushTaskToNeighbour(const ResourceWPtr &res) {
     if (auto self = res.lock()) {
         for (auto &neighbour : self->GetNeighbours()) {
             if (auto n = neighbour.neighbour_node.lock()) {
-                auto neighbour = std::static_pointer_cast<Resource>(n);
-                push_task(self, neighbour);
+                push_task(self, std::static_pointer_cast<Resource>(n));
             }
         }
     }
