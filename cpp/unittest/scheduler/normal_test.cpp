@@ -36,20 +36,47 @@ TEST(normal_test, test1) {
         observe->task_table().Put(task2);
         observe->task_table().Put(task3);
         observe->task_table().Put(task4);
-        std::cout << "disk:" << std::endl;
-        std::cout << observe->task_table().Dump() << std::endl;
     }
+
+//    if (auto disk_r = disk.lock()) {
+//        if (auto cpu_r = cpu.lock()) {
+//            if (auto gpu1_r = gpu1.lock()) {
+//                if (auto gpu2_r = gpu2.lock()) {
+//                    std::cout << "<<<<<<<<<<before<<<<<<<<<<" << std::endl;
+//                    std::cout << "disk:" << std::endl;
+//                    std::cout << disk_r->task_table().Dump() << std::endl;
+//                    std::cout << "cpu:" << std::endl;
+//                    std::cout << cpu_r->task_table().Dump() << std::endl;
+//                    std::cout << "gpu1:" << std::endl;
+//                    std::cout << gpu1_r->task_table().Dump() << std::endl;
+//                    std::cout << "gpu2:" << std::endl;
+//                    std::cout << gpu2_r->task_table().Dump() << std::endl;
+//                    std::cout << ">>>>>>>>>>before>>>>>>>>>>" << std::endl;
+//                }
+//            }
+//        }
+//    }
 
     sleep(5);
 
-    if (auto observe = disk.lock()) {
-        std::cout << "disk:" << std::endl;
-        std::cout << observe->task_table().Dump() << std::endl;
-    }
-    if (auto observe = cpu.lock()) {
-        std::cout << "cpu:" << std::endl;
-        std::cout << observe->task_table().Dump() << std::endl;
-    }
+//    if (auto disk_r = disk.lock()) {
+//        if (auto cpu_r = cpu.lock()) {
+//            if (auto gpu1_r = gpu1.lock()) {
+//                if (auto gpu2_r = gpu2.lock()) {
+//                    std::cout << "<<<<<<<<<<after<<<<<<<<<<" << std::endl;
+//                    std::cout << "disk:" << std::endl;
+//                    std::cout << disk_r->task_table().Dump() << std::endl;
+//                    std::cout << "cpu:" << std::endl;
+//                    std::cout << cpu_r->task_table().Dump() << std::endl;
+//                    std::cout << "gpu1:" << std::endl;
+//                    std::cout << gpu1_r->task_table().Dump() << std::endl;
+//                    std::cout << "gpu2:" << std::endl;
+//                    std::cout << gpu2_r->task_table().Dump() << std::endl;
+//                    std::cout << ">>>>>>>>>>after>>>>>>>>>>" << std::endl;
+//                }
+//            }
+//        }
+//    }
     scheduler->Stop();
     res_mgr->Stop();
 

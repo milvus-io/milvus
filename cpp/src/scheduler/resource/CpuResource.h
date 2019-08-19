@@ -19,6 +19,13 @@ public:
     explicit
     CpuResource(std::string name);
 
+    inline std::string
+    Dump() const override {
+        return "<CpuResource>";
+    }
+
+    friend std::ostream &operator<<(std::ostream &out, const CpuResource &resource);
+
 protected:
     void
     LoadFile(TaskPtr task) override;

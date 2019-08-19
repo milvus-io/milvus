@@ -74,6 +74,13 @@ public:
     TaskTable &
     task_table();
 
+    inline virtual std::string
+    Dump() const {
+        return "<Resource>";
+    }
+
+    friend std::ostream &operator<<(std::ostream &out, const Resource &resource);
+
 public:
     /*
      * wake up loader;
