@@ -432,4 +432,17 @@ TEST_F(DBTest, VECTOR_IDS_TEST)
     vector_ids.clear();
     stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
     ASSERT_STATS(stat);
+
+    nb = 100;
+    xb.clear();
+    BuildVectors(nb, xb);
+    vector_ids.clear();
+    vector_ids.resize(nb);
+    for (auto i = 0; i < nb; i++) {
+        vector_ids[i] = i + nb;
+    }
+    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    for (auto i = 0; i < nb; i++) {
+        ASSERT_EQ(vector_ids[i], i + nb);
+    }
 }
