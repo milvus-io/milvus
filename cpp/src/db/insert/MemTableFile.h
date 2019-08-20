@@ -19,7 +19,7 @@ class MemTableFile {
 
     MemTableFile(const std::string &table_id, const std::shared_ptr<meta::Meta> &meta, const Options &options);
 
-    Status Add(const VectorSource::Ptr &source);
+    Status Add(const VectorSource::Ptr &source, IDNumbers& vector_ids);
 
     size_t GetCurrentMem();
 

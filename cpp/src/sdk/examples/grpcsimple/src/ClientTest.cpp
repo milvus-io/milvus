@@ -15,6 +15,8 @@
 
 using namespace milvus;
 
+//#define SET_VECTOR_IDS;
+
 namespace {
     std::string GetTableName();
 
@@ -211,9 +213,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "All tables: " << std::endl;
         for(auto& table : tables) {
             int64_t row_count = 0;
-//            conn->DropTable(table);
-            stat = conn->CountTable(table, row_count);
-            std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
+            conn->DropTable(table);
+//            stat = conn->CountTable(table, row_count);
+//            std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
         }
     }
 
@@ -235,59 +237,21 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "DescribeTable function call status: " << stat.ToString() << std::endl;
         PrintTableSchema(tb_schema);
     }
-//
-//    Connection::Destroy(conn);
-
-//    pid_t pid;
-//    for (int i = 0; i < 5; ++i) {
-//        pid = fork();
-//        if (pid == 0 || pid == -1) {
-//            break;
-//        }
-//    }
-//    if (pid == -1) {
-//        std::cout << "fail to fork!\n";
-//        exit(1);
-//    } else if (pid == 0) {
-//        std::shared_ptr<Connection> conn = Connection::Create();
-//
-//        {//connect server
-//            ConnectParam param = {address, port};
-//            Status stat = conn->Connect(param);
-//            std::cout << "Connect function call status: " << stat.ToString() << std::endl;
-//        }
-//
-//        {//server version
-//            std::string version = conn->ServerVersion();
-//            std::cout << "Server version: " << version << std::endl;
-//        }
-//        Connection::Destroy(conn);
-//        exit(0);
-//    } else {
-//        std::shared_ptr<Connection> conn = Connection::Create();
-//
-//        {//connect server
-//            ConnectParam param = {address, port};
-//            Status stat = conn->Connect(param);
-//            std::cout << "Connect function call status: " << stat.ToString() << std::endl;
-//        }
-//
-//        {//server version
-//            std::string version = conn->ServerVersion();
-//            std::cout << "Server version: " << version << std::endl;
-//        }
-//        Connection::Destroy(conn);
-//        std::cout << "in main process\n";
-//        exit(0);
-//    }
 
     std::vector<std::pair<int64_t, RowRecord>> search_record_array;
     {//insert vectors
+        std::vector<int64_t> record_ids;
         for (int i = 0; i < ADD_VECTOR_LOOP; i++) {//add vectors
             std::vector<RowRecord> record_array;
             int64_t begin_index = i * BATCH_ROW_COUNT;
             BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array);
-            std::vector<int64_t> record_ids;
+
+#ifdef SET_VECTOR_IDS
+            record_ids.resize(ADD_VECTOR_LOOP * BATCH_ROW_COUNT);
+            for (auto j = begin_index; j <begin_index + BATCH_ROW_COUNT; j++) {
+                record_ids[i * BATCH_ROW_COUNT + j] = i * BATCH_ROW_COUNT + j;
+            }
+#endif
 
             auto start = std::chrono::high_resolution_clock::now();
 

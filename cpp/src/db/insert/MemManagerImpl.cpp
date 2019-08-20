@@ -42,9 +42,11 @@ Status MemManagerImpl::InsertVectorsNoLock(const std::string &table_id,
     MemTablePtr mem = GetMemByTable(table_id);
     VectorSource::Ptr source = std::make_shared<VectorSource>(n, vectors);
 
-    auto status = mem->Add(source);
+    auto status = mem->Add(source, vector_ids);
     if (status.ok()) {
-        vector_ids = source->GetVectorIds();
+        if (vector_ids.empty()) {
+            vector_ids = source->GetVectorIds();
+        }
     }
     return status;
 }
