@@ -1,4 +1,3 @@
-
 /*******************************************************************************
  * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
  * Unauthorized copying of this file, via any medium is strictly prohibited.
@@ -61,7 +60,7 @@ public:
     Stop();
 
     void
-    PostEvent(const EventPtr& event);
+    PostEvent(const EventPtr &event);
 
     // TODO: add stats interface(low)
 

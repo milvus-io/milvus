@@ -8,7 +8,7 @@ container('publish-docker') {
                         sh "curl -O -u anonymous: ftp://192.168.1.126/data/${PROJECT_NAME}/engine/${JOB_NAME}-${BUILD_ID}/${PROJECT_NAME}-engine-${PACKAGE_VERSION}.tar.gz"
                         sh "tar zxvf ${PROJECT_NAME}-engine-${PACKAGE_VERSION}.tar.gz"
                         try {
-                            docker.withRegistry('https://registry.zilliz.com', '${params.DOCKER_PUBLISH_USER}') {
+                            docker.withRegistry('https://registry.zilliz.com', "${params.DOCKER_PUBLISH_USER}") {
                                 def customImage = docker.build("${PROJECT_NAME}/engine:${DOCKER_VERSION}")
                                 customImage.push()
                             }

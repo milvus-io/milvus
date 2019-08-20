@@ -32,6 +32,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-378 - Debug and Update normal_test in scheduler unittest
 - MS-379 - Add Dump implementation in Resource
 - MS-380 - Update resource loader and executor, work util all finished
+- MS-383 - Modify condition variable usage in scheduler
+- MS-384 - Add global instance of ResourceMgr and Scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
