@@ -54,4 +54,7 @@ TEST(PrometheusTest, PROMETHEUS_TEST){
     instance.ConnectionGaugeDecrement();
     instance.KeepingAliveCounterIncrement();
     instance.OctetsSet();
+    instance.CPUCoreUsagePercentSet();
+    instance.GPUTemperature();
+    instance.CPUTemperature();
 }
