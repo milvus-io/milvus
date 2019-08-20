@@ -187,15 +187,20 @@ ClientProxy::Insert(const std::string &table_name,
             }
         }
 
-        ::milvus::grpc::VectorIds vector_ids;
-
         //Single thread
-        client_ptr_->Insert(vector_ids, insert_param, status);
-        auto finish = std::chrono::high_resolution_clock::now();
-
-        for (size_t i = 0; i < vector_ids.vector_id_array_size(); i++) {
-            id_array.push_back(vector_ids.vector_id_array(i));
+        ::milvus::grpc::VectorIds vector_ids;
+        if (!id_array.empty()) {
+            for (auto i = 0; i < id_array.size(); i++) {
+                insert_param.add_row_id_array(id_array[i]);
+            }
+            client_ptr_->Insert(vector_ids, insert_param, status);
+        } else {
+            client_ptr_->Insert(vector_ids, insert_param, status);
+            for (size_t i = 0; i < vector_ids.vector_id_array_size(); i++) {
+                id_array.push_back(vector_ids.vector_id_array(i));
+            }
         }
+
 #endif
 
     } catch (std::exception &ex) {
