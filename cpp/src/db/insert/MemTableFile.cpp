@@ -41,7 +41,7 @@ Status MemTableFile::CreateTableFile() {
     return status;
 }
 
-Status MemTableFile::Add(const VectorSource::Ptr &source) {
+Status MemTableFile::Add(const VectorSource::Ptr &source, IDNumbers& vector_ids) {
 
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg = "MemTableFile::Add: table_file_schema dimension = " +
@@ -55,7 +55,7 @@ Status MemTableFile::Add(const VectorSource::Ptr &source) {
     if (mem_left >= single_vector_mem_size) {
         size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
         size_t num_vectors_added;
-        auto status = source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added);
+        auto status = source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added, vector_ids);
         if (status.ok()) {
             current_mem_ += (num_vectors_added * single_vector_mem_size);
         }
