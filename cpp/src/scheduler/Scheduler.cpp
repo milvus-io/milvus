@@ -41,10 +41,11 @@ Scheduler::Stop() {
 
 void
 Scheduler::PostEvent(const EventPtr &event) {
-    std::lock_guard<std::mutex> lock(event_mutex_);
-    event_queue_.push(event);
+    {
+        std::lock_guard<std::mutex> lock(event_mutex_);
+        event_queue_.push(event);
+    }
     event_cv_.notify_one();
-//    SERVER_LOG_DEBUG << "Scheduler post " << *event;
 }
 
 std::string
@@ -58,12 +59,11 @@ Scheduler::worker_function() {
         std::unique_lock<std::mutex> lock(event_mutex_);
         event_cv_.wait(lock, [this] { return !event_queue_.empty(); });
         auto event = event_queue_.front();
+        event_queue_.pop();
         if (event == nullptr) {
             break;
         }
 
-//        SERVER_LOG_DEBUG << "Scheduler process " << *event;
-        event_queue_.pop();
         Process(event);
     }
 }
@@ -105,16 +105,14 @@ Scheduler::OnStartUp(const EventPtr &event) {
 void
 Scheduler::OnFinishTask(const EventPtr &event) {
     if (auto resource = event->resource_.lock()) {
-        resource->WakeupExecutor();
     }
 }
 
 void
 Scheduler::OnCopyCompleted(const EventPtr &event) {
     if (auto resource = event->resource_.lock()) {
-        resource->WakeupLoader();
         resource->WakeupExecutor();
-        if (resource->Type()== ResourceType::DISK) {
+        if (resource->Type() == ResourceType::DISK) {
             Action::PushTaskToNeighbour(event->resource_);
         }
     }
