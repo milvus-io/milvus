@@ -130,17 +130,10 @@ CreateTableTask::OnExecute() {
             return SetError(res, "Invalid table dimension: " + std::to_string(schema_.dimension()));
         }
 
-        res = ValidationUtil::ValidateTableIndexType(schema_.index_type());
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid index type: " + std::to_string(schema_.index_type()));
-        }
-
         //step 2: construct table schema
         engine::meta::TableSchema table_info;
         table_info.dimension_ = (uint16_t) schema_.dimension();
         table_info.table_id_ = schema_.table_name().table_name();
-        table_info.engine_type_ = (int) EngineType(schema_.index_type());
-        table_info.store_raw_data_ = schema_.store_raw_vector();
 
         //step 3: create table
         engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
@@ -190,10 +183,7 @@ DescribeTableTask::OnExecute() {
         }
 
         schema_.mutable_table_name()->set_table_name(table_info.table_id_);
-
-        schema_.set_index_type(IndexType((engine::EngineType) table_info.engine_type_));
         schema_.set_dimension(table_info.dimension_);
-        schema_.set_store_raw_vector(table_info.store_raw_data_);
 
     } catch (std::exception &ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
@@ -238,7 +228,12 @@ CreateIndexTask::OnExecute() {
         }
 
         //step 2: check table existence
-        stat = DBWrapper::DB()->BuildIndex(table_name_);
+        engine::TableIndex index;
+        index.engine_type_ = index_param_.mutable_index()->index_type();
+        index.nlist = index_param_.mutable_index()->nlist();
+        index.index_file_size = index_param_.mutable_index()->index_file_size();
+        index.metric_type = index_param_.mutable_index()->metric_type();
+        stat = DBWrapper::DB()->CreateIndex(table_name_, index);
         if (!stat.ok()) {
             return SetError(SERVER_BUILD_INDEX_ERROR, "Engine failed: " + stat.ToString());
         }
@@ -825,7 +820,89 @@ PreloadTableTask::OnExecute() {
     return SERVER_SUCCESS;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+DescribeIndexTask::DescribeIndexTask(const std::string &table_name,
+                                     ::milvus::grpc::IndexParam &index_param)
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      table_name_(table_name),
+      index_param_(index_param) {
 
+}
+
+BaseTaskPtr
+DescribeIndexTask::Create(const std::string &table_name,
+                          ::milvus::grpc::IndexParam &index_param){
+    return std::shared_ptr<GrpcBaseTask>(new DescribeIndexTask(table_name, index_param));
+}
+
+ServerError
+DescribeIndexTask::OnExecute() {
+    try {
+        TimeRecorder rc("DescribeIndexTask");
+
+        //step 1: check arguments
+        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        if (res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
+        }
+
+        //step 2: check table existence
+        engine::TableIndex index;
+        engine::Status stat = DBWrapper::DB()->DescribeIndex(table_name_, index);
+        if (!stat.ok()) {
+            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+        }
+
+        index_param_.mutable_table_name()->set_table_name(table_name_);
+        index_param_.mutable_index()->set_index_type(index.engine_type_);
+        index_param_.mutable_index()->set_nlist(index.nlist);
+        index_param_.mutable_index()->set_index_file_size(index.index_file_size);
+        index_param_.mutable_index()->set_metric_type(index.metric_type);
+
+        rc.ElapseFromBegin("totally cost");
+    } catch (std::exception &ex) {
+        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
+
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+DropIndexTask::DropIndexTask(const std::string &table_name)
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      table_name_(table_name) {
+
+}
+
+BaseTaskPtr
+DropIndexTask::Create(const std::string &table_name){
+    return std::shared_ptr<GrpcBaseTask>(new DropIndexTask(table_name));
+}
+
+ServerError
+DropIndexTask::OnExecute() {
+    try {
+        TimeRecorder rc("DropIndexTask");
+
+        //step 1: check arguments
+        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        if (res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name_);
+        }
+
+        //step 2: check table existence
+        engine::Status stat = DBWrapper::DB()->DropIndex(table_name_);
+        if (!stat.ok()) {
+            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+        }
+
+        rc.ElapseFromBegin("totally cost");
+    } catch (std::exception &ex) {
+        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
+
+    return SERVER_SUCCESS;
+}
 
 }
 }

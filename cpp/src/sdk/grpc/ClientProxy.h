@@ -75,8 +75,8 @@ public:
     virtual Status
     PreloadTable(const std::string &table_name) const override;
 
-    virtual IndexParam
-    DescribeIndex(const std::string &table_name) const override;
+    virtual Status
+    DescribeIndex(const std::string &table_name, IndexParam &index_param) const override;
 
     virtual Status
     DropIndex(const std::string &table_name) const override;

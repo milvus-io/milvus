@@ -56,6 +56,8 @@ TEST(DBSchedulerTest, TASK_QUEUE_TEST) {
 
     ptr = queue.Back();
     ASSERT_EQ(ptr->type(), engine::ScheduleTaskType::kIndexLoad);
+    load_task->Execute();
+
 }
 
 TEST(DBSchedulerTest, SEARCH_SCHEDULER_TEST) {

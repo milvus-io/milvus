@@ -204,3 +204,12 @@ TEST(UtilTest, VALIDATE_INDEXTYPE_TEST) {
     ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType((int)engine::EngineType::MAX_VALUE + 1), server::SERVER_INVALID_INDEX_TYPE);
 }
 
+TEST(UtilTest, TIMERECORDER_TEST) {
+    for(int64_t log_level = 0; log_level <= 6; log_level++) {
+        if(log_level == 5) {
+            continue; //skip fatal
+        }
+        server::TimeRecorder rc("time", log_level);
+        rc.RecordSection("end");
+    }
+}

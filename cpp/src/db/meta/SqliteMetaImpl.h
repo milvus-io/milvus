@@ -52,6 +52,15 @@ class SqliteMetaImpl : public Meta {
     HasNonIndexFiles(const std::string &table_id, bool &has) override;
 
     Status
+    UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) override;
+
+    Status
+    DescribeTableIndex(const std::string &table_id, TableIndex& index) override;
+
+    Status
+    DropTableIndex(const std::string &table_id) override;
+
+    Status
     UpdateTableFilesToIndex(const std::string &table_id) override;
 
     Status

@@ -180,7 +180,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     for (auto i=0; i<cnt; ++i) {
         status = impl.CreateTableFile(table_file);
         table_file.file_type_ = meta::TableFileSchema::NEW;
-        table_file.size_ = each_size * meta::G;
+        table_file.file_size_ = each_size * meta::G;
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
         ids.push_back(table_file.id_);
