@@ -23,9 +23,19 @@ public:
     void
     Execute() override;
 
+    TaskPtr
+    Clone() override;
+
+    void
+    Wait();
+
 public:
-    uint64_t load_count_;
-    uint64_t exec_count_;
+    uint64_t load_count_ = 0;
+    uint64_t exec_count_ = 0;
+
+    bool done_ = false;
+    std::mutex mutex_;
+    std::condition_variable cv_;
 };
 
 
