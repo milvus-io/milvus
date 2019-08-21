@@ -114,13 +114,14 @@ Scheduler::OnCopyCompleted(const EventPtr &event) {
         resource->WakeupExecutor();
         if (resource->Type() == ResourceType::DISK) {
             Action::PushTaskToNeighbour(event->resource_);
+        } else {
+            Action::PushTaskToNeighbourHasExecutor(event->resource_);
         }
     }
 }
 
 void
 Scheduler::OnTaskTableUpdated(const EventPtr &event) {
-//    Action::PushTaskToNeighbour(event->resource_);
     if (auto resource = event->resource_.lock()) {
         resource->WakeupLoader();
     }
