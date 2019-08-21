@@ -17,7 +17,7 @@ namespace engine {
 class CpuResource : public Resource {
 public:
     explicit
-    CpuResource(std::string name);
+    CpuResource(std::string name, bool enable_loader, bool enable_executor);
 
     inline std::string
     Dump() const override {
