@@ -93,6 +93,7 @@ TEST_F(DBTest, CONFIG_TEST) {
 
 
 TEST_F(DBTest, DB_TEST) {
+    db_->Open(GetOptions(), &db_);
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -161,6 +162,11 @@ TEST_F(DBTest, DB_TEST) {
     }
 
     search.join();
+
+    uint64_t count;
+    stat = db_->GetTableRowCount(TABLE_NAME, count);
+    ASSERT_STATS(stat);
+    ASSERT_TRUE(count > 0);
 };
 
 TEST_F(DBTest, SEARCH_TEST) {
