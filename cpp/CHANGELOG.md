@@ -36,6 +36,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-384 - Add global instance of ResourceMgr and Scheduler
 - MS-389 - Add clone interface in Task
 - MS-390 - Update resource construct function
+- MS-391 - Add PushTaskToNeighbourHasExecutor action
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
