@@ -8,6 +8,7 @@
 #include "MetaTypes.h"
 #include "db/Options.h"
 #include "db/Status.h"
+#include "db/Types.h"
 
 #include <cstddef>
 #include <ctime>
@@ -37,6 +38,9 @@ class Meta {
 
     virtual Status
     AllTables(std::vector<TableSchema> &table_schema_array) = 0;
+
+    virtual Status
+    UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) = 0;
 
     virtual Status
     DeleteTable(const std::string &table_id) = 0;
@@ -82,6 +86,12 @@ class Meta {
 
     virtual Status
     HasNonIndexFiles(const std::string &table_id, bool &has) = 0;
+
+    virtual Status
+    DescribeTableIndex(const std::string &table_id, TableIndex& index) = 0;
+
+    virtual Status
+    DropTableIndex(const std::string &table_id) = 0;
 
     virtual Status
     CleanUp() = 0;

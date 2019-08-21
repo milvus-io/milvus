@@ -260,6 +260,9 @@ public:
 protected:
     DropIndexTask(const std::string &table_name);
 
+    ServerError
+    OnExecute() override;
+
 private:
     std::string table_name_;
 
