@@ -289,11 +289,6 @@ GrpcClient::Disconnect() {
 }
 
 Status
-GrpcClient::DeleteByRange(grpc::DeleteByRangeParam &delete_by_range_param) {
-    return Status::OK();
-}
-
-Status
 GrpcClient::DescribeIndex(grpc::TableName &table_name, grpc::IndexParam &index_param) {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->DescribeIndex(&context, table_name, &index_param);
