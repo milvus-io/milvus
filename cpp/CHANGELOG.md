@@ -34,6 +34,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-380 - Update resource loader and executor, work util all finished
 - MS-383 - Modify condition variable usage in scheduler
 - MS-384 - Add global instance of ResourceMgr and Scheduler
+- MS-389 - Add clone interface in Task
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
