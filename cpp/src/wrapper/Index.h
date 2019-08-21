@@ -83,7 +83,6 @@ void write_index(const Index_ptr &index, const std::string &file_name);
 extern Index_ptr read_index(const std::string &file_name);
 #endif
 
-
 }
 }
 }

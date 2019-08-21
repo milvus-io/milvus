@@ -84,6 +84,7 @@ TEST_F(NewMemManagerTest, VECTOR_SOURCE_TEST) {
     vector_ids = source.GetVectorIds();
     ASSERT_EQ(vector_ids.size(), 100);
 
+
     status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
 }
@@ -197,6 +198,8 @@ TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
 
     status = mem_table.Serialize();
     ASSERT_TRUE(status.ok());
+
+
 
     status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
@@ -372,7 +375,6 @@ TEST_F(NewMemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
 
     delete db_;
     boost::filesystem::remove_all(options.meta.path);
-
 };
 
 TEST_F(DBTest, VECTOR_IDS_TEST)
@@ -446,3 +448,4 @@ TEST_F(DBTest, VECTOR_IDS_TEST)
         ASSERT_EQ(vector_ids[i], i + nb);
     }
 }
+

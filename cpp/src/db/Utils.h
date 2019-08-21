@@ -19,7 +19,7 @@ namespace utils {
 long GetMicroSecTimeStamp();
 
 Status CreateTablePath(const DBMetaOptions& options, const std::string& table_id);
-Status DeleteTablePath(const DBMetaOptions& options, const std::string& table_id);
+Status DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool force = true);
 
 Status CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
 Status GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);

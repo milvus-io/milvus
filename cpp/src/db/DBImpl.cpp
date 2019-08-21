@@ -60,6 +60,7 @@ void CollectQueryMetrics(double total_time, size_t nq) {
     server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq) / total_time);
 }
 
+#if 0
 void CollectFileMetrics(int file_type, size_t file_size, double total_time) {
     switch(file_type) {
         case meta::TableFileSchema::RAW:
@@ -79,6 +80,7 @@ void CollectFileMetrics(int file_type, size_t file_size, double total_time) {
         }
     }
 }
+#endif
 }
 
 
@@ -205,7 +207,7 @@ Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint6
 
 Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
-    ENGINE_LOG_DEBUG << "Query by vectors";
+    ENGINE_LOG_DEBUG << "Query by vectors " << table_id;
 
     //get all table files from table
     meta::DatePartionedTableFilesSchema files;
@@ -568,7 +570,7 @@ Status DBImpl::BuildIndex(const std::string& table_id) {
     int times = 1;
 
     while (has) {
-        ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
+        ENGINE_LOG_DEBUG << "Non index files detected in " << table_id << "! Will build index " << times;
         meta_ptr_->UpdateTableFilesToIndex(table_id);
         /* StartBuildIndexTask(true); */
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10*1000, times*100)));

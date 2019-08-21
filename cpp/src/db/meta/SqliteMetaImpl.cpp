@@ -311,6 +311,7 @@ Status SqliteMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) 
             has = true;
 
             int raw_count = 0, new_count = 0, new_merge_count = 0, new_index_count = 0, to_index_count = 0;
+            std::vector<std::string> file_ids;
             for (auto &file : selected) {
                 switch (std::get<1>(file)) {
                     case (int) TableFileSchema::RAW:
@@ -1069,6 +1070,9 @@ Status SqliteMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
 
 Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
     auto now = utils::GetMicroSecTimeStamp();
+    std::set<std::string> table_ids;
+
+    //remove to_delete files
     try {
         MetricCollector metric;
 
@@ -1098,6 +1102,7 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 ENGINE_LOG_DEBUG << "Removing file id:" << table_file.file_id_ << " location:" << table_file.location_;
                 ConnectorPtr->remove<TableFileSchema>(table_file.id_);
 
+                table_ids.insert(table_file.table_id_);
             }
             return true;
         });
@@ -1111,6 +1116,7 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         return HandleException("Encounter exception when clean table files", e);
     }
 
+    //remove to_delete tables
     try {
         MetricCollector metric;
 
@@ -1123,7 +1129,7 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
             for (auto &table : tables) {
-                utils::DeleteTablePath(options_, std::get<1>(table));
+                utils::DeleteTablePath(options_, std::get<1>(table), false);//only delete empty folder
                 ConnectorPtr->remove<TableSchema>(std::get<0>(table));
             }
 
@@ -1137,6 +1143,23 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
     } catch (std::exception &e) {
         return HandleException("Encounter exception when clean table files", e);
+    }
+
+    //remove deleted table folder
+    //don't remove table folder until all its files has been deleted
+    try {
+        MetricCollector metric;
+
+        for(auto& table_id : table_ids) {
+            auto selected = ConnectorPtr->select(columns(&TableFileSchema::file_id_),
+                                                 where(c(&TableFileSchema::table_id_) == table_id));
+            if(selected.size() == 0) {
+                utils::DeleteTablePath(options_, table_id);
+            }
+        }
+
+    } catch (std::exception &e) {
+        return HandleException("Encounter exception when delete table folder", e);
     }
 
     return Status::OK();

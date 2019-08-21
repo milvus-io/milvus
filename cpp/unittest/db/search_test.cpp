@@ -4,6 +4,7 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include "db/scheduler/task/SearchTask.h"
+#include "server/ServerConfig.h"
 #include "utils/TimeRecorder.h"
 
 #include <gtest/gtest.h>
@@ -213,6 +214,10 @@ TEST(DBSearchTest, MERGE_TEST) {
 }
 
 TEST(DBSearchTest, PARALLEL_CLUSTER_TEST) {
+    server::ServerConfig &config = server::ServerConfig::GetInstance();
+    server::ConfigNode& db_config = config.GetConfig(server::CONFIG_DB);
+    db_config.SetValue(server::CONFIG_DB_PARALLEL_REDUCE, "true");
+
     bool ascending = true;
     std::vector<long> target_ids;
     std::vector<float> target_distence;
@@ -245,6 +250,10 @@ TEST(DBSearchTest, PARALLEL_CLUSTER_TEST) {
 }
 
 TEST(DBSearchTest, PARALLEL_TOPK_TEST) {
+    server::ServerConfig &config = server::ServerConfig::GetInstance();
+    server::ConfigNode& db_config = config.GetConfig(server::CONFIG_DB);
+    db_config.SetValue(server::CONFIG_DB_PARALLEL_REDUCE, "true");
+
     std::vector<long> target_ids;
     std::vector<float> target_distence;
     engine::SearchContext::ResultSet src_result;
