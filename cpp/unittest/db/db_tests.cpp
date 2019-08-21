@@ -432,7 +432,6 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     }
 
     std::vector<engine::meta::DateT> dates;
-    engine::meta::DateT date;
     std::string start_value = CurrentTmDate(-3);
     std::string end_value = CurrentTmDate(-2);
     ConvertTimeRangeToDBDates(start_value, end_value, dates);
