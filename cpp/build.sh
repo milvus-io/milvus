@@ -86,7 +86,7 @@ if [[ ! -d cmake_build ]]; then
 fi
 
 cd cmake_build
-
+git
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
 if [[ ${MAKE_CLEAN} == "ON" ]]; then

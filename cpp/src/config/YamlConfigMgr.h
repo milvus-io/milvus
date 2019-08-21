@@ -33,10 +33,10 @@ class YamlConfigMgr : public IConfigMgr {
                         const std::string &name,
                         ConfigNode &config);
 
-    bool
-    SetSequence(const YAML::Node &node,
-                const std::string &child_name,
-                ConfigNode &config);
+//    bool
+//    SetSequence(const YAML::Node &node,
+//                const std::string &child_name,
+//                ConfigNode &config);
 
     void LoadConfigNode(const YAML::Node& node, ConfigNode& config);
 

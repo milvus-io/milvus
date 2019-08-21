@@ -90,11 +90,11 @@ std::shared_ptr<meta::Meta> DBMetaImplFactory::Build(const DBMetaOptions& metaOp
     }
 }
 
-std::shared_ptr<DB> DBFactory::Build() {
-    auto options = OptionsFactory::Build();
-    auto db = DBFactory::Build(options);
-    return std::shared_ptr<DB>(db);
-}
+//std::shared_ptr<DB> DBFactory::Build() {
+//    auto options = OptionsFactory::Build();
+//    auto db = DBFactory::Build(options);
+//    return std::shared_ptr<DB>(db);
+//}
 
 DB* DBFactory::Build(const Options& options) {
     return new DBImpl(options);

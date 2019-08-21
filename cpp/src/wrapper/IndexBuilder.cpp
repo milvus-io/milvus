@@ -17,40 +17,16 @@
 
 #include <faiss/IndexFlat.h>
 #include <easylogging++.h>
-
+#include "faiss/IndexScalarQuantizer.h"
 
 #include "server/ServerConfig.h"
 #include "IndexBuilder.h"
+#include "FaissGpuResources.h"
 
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
-
-class GpuResources {
- public:
-    static GpuResources &GetInstance() {
-        static GpuResources instance;
-        return instance;
-    }
-
-    void SelectGpu() {
-        using namespace zilliz::milvus::server;
-        ServerConfig &config = ServerConfig::GetInstance();
-        ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-        gpu_num = server_config.GetInt32Value(server::CONFIG_GPU_INDEX, 0);
-    }
-
-    int32_t GetGpu() {
-        return gpu_num;
-    }
-
- private:
-    GpuResources() : gpu_num(0) { SelectGpu(); }
-
- private:
-    int32_t gpu_num;
-};
 
 using std::vector;
 
@@ -59,6 +35,12 @@ static std::mutex cpu_resource;
 
 IndexBuilder::IndexBuilder(const Operand_ptr &opd) {
     opd_ = opd;
+
+    using namespace zilliz::milvus::server;
+    ServerConfig &config = ServerConfig::GetInstance();
+    ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
+    use_hybrid_index_ = engine_config.GetBoolValue(CONFIG_USE_HYBRID_INDEX, false);
+    hybrid_index_device_id_ = engine_config.GetInt32Value(server::CONFIG_HYBRID_INDEX_GPU, 0);
 }
 
 // Default: build use gpu
@@ -76,13 +58,47 @@ Index_ptr IndexBuilder::build_all(const long &nb,
         faiss::Index *ori_index = faiss::index_factory(opd_->d, opd_->get_index_type(nb).c_str(), metric_type);
 
         std::lock_guard<std::mutex> lk(gpu_resource);
+
+#ifdef UNITTEST_ONLY
         faiss::gpu::StandardGpuResources res;
-        auto device_index = faiss::gpu::index_cpu_to_gpu(&res, GpuResources::GetInstance().GetGpu(), ori_index);
+        int device_id = 0;
+        faiss::gpu::GpuClonerOptions clone_option;
+        clone_option.storeInCpu = use_hybrid_index_;
+        auto device_index = faiss::gpu::index_cpu_to_gpu(&res, device_id, ori_index, &clone_option);
+#else
+        engine::FaissGpuResources res;
+        int device_id = res.GetGpu();
+        auto gpu_resources = engine::FaissGpuResources::GetGpuResources(device_id);
+        faiss::gpu::GpuClonerOptions clone_option;
+        clone_option.storeInCpu = use_hybrid_index_;
+        auto device_index = faiss::gpu::index_cpu_to_gpu(gpu_resources.get(), device_id, ori_index, &clone_option);
+#endif
+
         if (!device_index->is_trained) {
             nt == 0 || xt == nullptr ? device_index->train(nb, xb)
                                      : device_index->train(nt, xt);
         }
         device_index->add_with_ids(nb, xb, ids); // TODO: support with add_with_IDMAP
+
+        if (dynamic_cast<faiss::IndexIVFScalarQuantizer*>(ori_index) != nullptr
+            && use_hybrid_index_) {
+            std::shared_ptr<faiss::Index> device_hybrid_index = nullptr;
+            if (hybrid_index_device_id_ != device_id) {
+                auto host_hybrid_index = faiss::gpu::index_gpu_to_cpu(device_index);
+                auto hybrid_gpu_resources = engine::FaissGpuResources::GetGpuResources(hybrid_index_device_id_);
+                auto another_device_index = faiss::gpu::index_cpu_to_gpu(hybrid_gpu_resources.get(),
+                                                                         hybrid_index_device_id_,
+                                                                         host_hybrid_index,
+                                                                         &clone_option);
+                device_hybrid_index.reset(another_device_index);
+                delete device_index;
+                delete host_hybrid_index;
+            } else {
+                device_hybrid_index.reset(device_index);
+            }
+            delete ori_index;
+            return std::make_shared<Index>(device_hybrid_index);
+        }
 
         host_index.reset(faiss::gpu::index_gpu_to_cpu(device_index));
 
