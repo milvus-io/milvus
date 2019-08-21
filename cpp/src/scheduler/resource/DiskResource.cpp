@@ -15,8 +15,8 @@ std::ostream &operator<<(std::ostream &out, const DiskResource &resource) {
     return out;
 }
 
-DiskResource::DiskResource(std::string name)
-    : Resource(std::move(name), ResourceType::DISK, true, false) {
+DiskResource::DiskResource(std::string name, bool enable_loader, bool enable_executor)
+    : Resource(std::move(name), ResourceType::DISK, enable_loader, enable_executor) {
 }
 
 void DiskResource::LoadFile(TaskPtr task) {

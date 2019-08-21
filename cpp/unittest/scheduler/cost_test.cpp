@@ -1,6 +1,7 @@
 #include "scheduler/TaskTable.h"
 #include "scheduler/Cost.h"
 #include <gtest/gtest.h>
+#include "scheduler/task/TestTask.h"
 
 
 using namespace zilliz::milvus::engine;
@@ -10,7 +11,7 @@ protected:
     void
     SetUp() override {
         for (uint64_t i = 0; i < 8; ++i) {
-            auto task = std::make_shared<XSearchTask>();
+            auto task = std::make_shared<TestTask>();
             table_.Put(task);
         }
         table_.Get(0)->state = TaskTableItemState::INVALID;

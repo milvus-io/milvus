@@ -20,6 +20,11 @@ public:
     static void
     PushTaskToNeighbour(const ResourceWPtr &self);
 
+    /*
+     * Push task to neighbour that has executor;
+     */
+    static void
+    PushTaskToNeighbourHasExecutor(const ResourceWPtr &self);
 
     /*
      * Pull task From neighbour;
