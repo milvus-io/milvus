@@ -30,13 +30,13 @@ namespace meta {
         }
     }
 
-    int MySQLConnectionPool::getConnectionsInUse() {
-        return conns_in_use_;
-    }
-
-    void MySQLConnectionPool::set_max_idle_time(int max_idle) {
-        max_idle_time_ = max_idle;
-    }
+//    int MySQLConnectionPool::getConnectionsInUse() {
+//        return conns_in_use_;
+//    }
+//
+//    void MySQLConnectionPool::set_max_idle_time(int max_idle) {
+//        max_idle_time_ = max_idle;
+//    }
 
     std::string MySQLConnectionPool::getDB() {
         return db_;

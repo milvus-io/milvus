@@ -395,9 +395,7 @@ class TableSchema :
 
   enum : int {
     kTableNameFieldNumber = 1,
-    kDimensionFieldNumber = 3,
-    kIndexTypeFieldNumber = 2,
-    kStoreRawVectorFieldNumber = 4,
+    kDimensionFieldNumber = 2,
   };
   // .milvus.grpc.TableName table_name = 1;
   bool has_table_name() const;
@@ -407,20 +405,10 @@ class TableSchema :
   ::milvus::grpc::TableName* mutable_table_name();
   void set_allocated_table_name(::milvus::grpc::TableName* table_name);
 
-  // int64 dimension = 3;
+  // int64 dimension = 2;
   void clear_dimension();
   ::PROTOBUF_NAMESPACE_ID::int64 dimension() const;
   void set_dimension(::PROTOBUF_NAMESPACE_ID::int64 value);
-
-  // int32 index_type = 2;
-  void clear_index_type();
-  ::PROTOBUF_NAMESPACE_ID::int32 index_type() const;
-  void set_index_type(::PROTOBUF_NAMESPACE_ID::int32 value);
-
-  // bool store_raw_vector = 4;
-  void clear_store_raw_vector();
-  bool store_raw_vector() const;
-  void set_store_raw_vector(bool value);
 
   // @@protoc_insertion_point(class_scope:milvus.grpc.TableSchema)
  private:
@@ -429,8 +417,6 @@ class TableSchema :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::milvus::grpc::TableName* table_name_;
   ::PROTOBUF_NAMESPACE_ID::int64 dimension_;
-  ::PROTOBUF_NAMESPACE_ID::int32 index_type_;
-  bool store_raw_vector_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -2820,21 +2806,7 @@ inline void TableSchema::set_allocated_table_name(::milvus::grpc::TableName* tab
   // @@protoc_insertion_point(field_set_allocated:milvus.grpc.TableSchema.table_name)
 }
 
-// int32 index_type = 2;
-inline void TableSchema::clear_index_type() {
-  index_type_ = 0;
-}
-inline ::PROTOBUF_NAMESPACE_ID::int32 TableSchema::index_type() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TableSchema.index_type)
-  return index_type_;
-}
-inline void TableSchema::set_index_type(::PROTOBUF_NAMESPACE_ID::int32 value) {
-  
-  index_type_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.TableSchema.index_type)
-}
-
-// int64 dimension = 3;
+// int64 dimension = 2;
 inline void TableSchema::clear_dimension() {
   dimension_ = PROTOBUF_LONGLONG(0);
 }
@@ -2846,20 +2818,6 @@ inline void TableSchema::set_dimension(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   dimension_ = value;
   // @@protoc_insertion_point(field_set:milvus.grpc.TableSchema.dimension)
-}
-
-// bool store_raw_vector = 4;
-inline void TableSchema::clear_store_raw_vector() {
-  store_raw_vector_ = false;
-}
-inline bool TableSchema::store_raw_vector() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.TableSchema.store_raw_vector)
-  return store_raw_vector_;
-}
-inline void TableSchema::set_store_raw_vector(bool value) {
-  
-  store_raw_vector_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.TableSchema.store_raw_vector)
 }
 
 // -------------------------------------------------------------------
