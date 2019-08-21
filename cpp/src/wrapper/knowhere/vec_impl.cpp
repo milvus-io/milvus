@@ -144,7 +144,9 @@ VecIndexPtr VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg)
 
     // TODO(linxj): update type
     auto gpu_index = zilliz::knowhere::CopyCpuToGpu(index_, device_id, cfg);
-    return std::make_shared<VecIndexImpl>(gpu_index, type);
+    auto new_index = std::make_shared<VecIndexImpl>(gpu_index, type);
+    new_index->dim = dim;
+    return new_index;
 }
 
 // TODO(linxj): rename copytocpu => copygputocpu
