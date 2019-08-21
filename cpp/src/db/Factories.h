@@ -33,7 +33,7 @@ struct DBMetaImplFactory {
 };
 
 struct DBFactory {
-    static std::shared_ptr<DB> Build();
+    //static std::shared_ptr<DB> Build();
     static DB *Build(const Options &);
 };
 

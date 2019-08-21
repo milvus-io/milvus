@@ -45,6 +45,8 @@ class IndexBuilder {
 
  protected:
     Operand_ptr opd_ = nullptr;
+    bool use_hybrid_index_;
+    int hybrid_index_device_id_;
 };
 
 class BgCpuBuilder : public IndexBuilder {

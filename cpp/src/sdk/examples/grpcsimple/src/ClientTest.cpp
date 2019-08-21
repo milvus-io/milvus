@@ -34,9 +34,7 @@ namespace {
     void PrintTableSchema(const TableSchema& tb_schema) {
         BLOCK_SPLITER
         std::cout << "Table name: " << tb_schema.table_name << std::endl;
-        std::cout << "Table index type: " << (int)tb_schema.index_type << std::endl;
         std::cout << "Table dimension: " << tb_schema.dimension << std::endl;
-        std::cout << "Table store raw data: " << (tb_schema.store_raw_vector ? "true" : "false") << std::endl;
         BLOCK_SPLITER
     }
 
@@ -88,16 +86,15 @@ namespace {
     }
 
     std::string GetTableName() {
-        static std::string s_id(CurrentTime());
-        return "tbl_" + s_id;
+//        static std::string s_id(CurrentTime());
+//        return "tbl_" + s_id;
+        return "test";
     }
 
     TableSchema BuildTableSchema() {
         TableSchema tb_schema;
         tb_schema.table_name = TABLE_NAME;
-        tb_schema.index_type = IndexType::gpu_ivfflat;
         tb_schema.dimension = TABLE_DIMENSION;
-        tb_schema.store_raw_vector = true;
 
         return tb_schema;
     }
@@ -276,9 +273,19 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//wait unit build index finish
-//        std::cout << "Wait until build all index done" << std::endl;
-//        Status stat = conn->CreateIndex();
-//        std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;
+        std::cout << "Wait until create all index done" << std::endl;
+        IndexParam index;
+        index.table_name = TABLE_NAME;
+        index.index_type = IndexType::gpu_ivfflat;
+        index.nlist = 1000;
+        index.index_file_size = 1024;
+        index.metric_type = 1;
+        Status stat = conn->CreateIndex(index);
+        std::cout << "CreateIndex function call status: " << stat.ToString() << std::endl;
+
+        IndexParam index2;
+        stat = conn->DescribeIndex(TABLE_NAME, index2);
+        std::cout << "DescribeIndex function call status: " << stat.ToString() << std::endl;
     }
 
     {//preload table
@@ -288,6 +295,11 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//search vectors after build index finish
         DoSearch(conn, search_record_array, "Search after build index finish");
+    }
+
+    {//delete index
+        Status stat = conn->DropIndex(TABLE_NAME);
+        std::cout << "DropIndex function call status: " << stat.ToString() << std::endl;
     }
 
     {//delete table

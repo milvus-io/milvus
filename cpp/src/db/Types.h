@@ -5,7 +5,10 @@
  ******************************************************************************/
 #pragma once
 
+#include "db/engine/ExecutionEngine.h"
+
 #include <vector>
+#include <stdint.h>
 
 namespace zilliz {
 namespace milvus {
@@ -18,6 +21,12 @@ typedef std::vector<IDNumber> IDNumbers;
 typedef std::vector<std::pair<IDNumber, double>> QueryResult;
 typedef std::vector<QueryResult> QueryResults;
 
+struct TableIndex {
+    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
+    int32_t nlist = 16384;
+    int32_t index_file_size = 1024; //MB
+    int32_t metric_type = (int)MetricType::L2;
+};
 
 } // namespace engine
 } // namespace milvus

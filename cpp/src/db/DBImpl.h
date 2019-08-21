@@ -93,6 +93,12 @@ class DBImpl : public DB {
 
     Status BuildIndex(const std::string& table_id) override;
 
+    Status CreateIndex(const std::string& table_id, const TableIndex& index) override;
+
+    Status DescribeIndex(const std::string& table_id, TableIndex& index) override;
+
+    Status DropIndex(const std::string& table_id) override;
+
     ~DBImpl() override;
 
  private:
@@ -122,8 +128,6 @@ class DBImpl : public DB {
     void StartBuildIndexTask(bool force=false);
     void BackgroundBuildIndex();
 
-    Status
-    BuildIndexByTable(const std::string& table_id);
     Status
     BuildIndex(const meta::TableFileSchema &);
 
