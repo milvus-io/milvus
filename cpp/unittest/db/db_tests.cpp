@@ -9,6 +9,7 @@
 #include "db/meta/MetaConsts.h"
 #include "db/Factories.h"
 #include "cache/CpuCacheMgr.h"
+#include "utils/CommonUtil.h"
 
 #include <gtest/gtest.h>
 #include <easylogging++.h>
@@ -26,6 +27,8 @@ namespace {
     static constexpr int64_t TABLE_DIM = 256;
     static constexpr int64_t VECTOR_COUNT = 250000;
     static constexpr int64_t INSERT_LOOP = 10000;
+    static constexpr int64_t SECONDS_EACH_HOUR = 3600;
+    static constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
 
     engine::meta::TableSchema BuildTableSchema() {
         engine::meta::TableSchema table_info;
@@ -42,6 +45,52 @@ namespace {
         for(int i = 0; i < n; i++) {
             for(int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
             data[TABLE_DIM * i] += i / 2000.;
+        }
+    }
+
+    std::string CurrentTmDate(int64_t offset_day = 0) {
+        time_t tt;
+        time( &tt );
+        tt = tt + 8*SECONDS_EACH_HOUR;
+        tt = tt + 24*SECONDS_EACH_HOUR*offset_day;
+        tm* t= gmtime( &tt );
+
+        std::string str = std::to_string(t->tm_year + 1900) + "-" + std::to_string(t->tm_mon + 1)
+                          + "-" + std::to_string(t->tm_mday);
+
+        return str;
+    }
+
+    void
+    ConvertTimeRangeToDBDates(const std::string &start_value,
+                              const std::string &end_value,
+                              std::vector<engine::meta::DateT > &dates) {
+        dates.clear();
+
+        time_t tt_start, tt_end;
+        tm tm_start, tm_end;
+        if (!zilliz::milvus::server::CommonUtil::TimeStrToTime(start_value, tt_start, tm_start)) {
+            return;
+        }
+
+        if (!zilliz::milvus::server::CommonUtil::TimeStrToTime(end_value, tt_end, tm_end)) {
+            return;
+        }
+
+        long days = (tt_end > tt_start) ? (tt_end - tt_start) / DAY_SECONDS : (tt_start - tt_end) /
+                                                                              DAY_SECONDS;
+        if (days == 0) {
+            return;
+        }
+
+        for (long i = 0; i < days; i++) {
+            time_t tt_day = tt_start + DAY_SECONDS * i;
+            tm tm_day;
+            zilliz::milvus::server::CommonUtil::ConvertTime(tt_day, tm_day);
+
+            long date = tm_day.tm_year * 10000 + tm_day.tm_mon * 100 +
+                        tm_day.tm_mday;//according to db logic
+            dates.push_back(date);
         }
     }
 
@@ -307,8 +356,6 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 };
 
 TEST_F(DBTest2, DELETE_TEST) {
-
-
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -344,3 +391,45 @@ TEST_F(DBTest2, DELETE_TEST) {
     db_->HasTable(TABLE_NAME, has_table);
     ASSERT_FALSE(has_table);
 };
+
+TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
+    auto options = engine::OptionsFactory::Build();
+    options.meta.path = "/tmp/milvus_test";
+    options.meta.backend_uri = "sqlite://:@:/";
+    auto db_ = engine::DBFactory::Build(options);
+
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
+
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = TABLE_NAME;
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_STATS(stat);
+
+    bool has_table = false;
+    db_->HasTable(TABLE_NAME, has_table);
+    ASSERT_TRUE(has_table);
+
+    engine::IDNumbers vector_ids;
+
+    uint64_t size;
+    db_->Size(size);
+
+    int64_t nb = INSERT_LOOP;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
+
+    int loop = 20;
+    for (auto i=0; i<loop; ++i) {
+        db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+
+    std::vector<engine::meta::DateT> dates;
+    engine::meta::DateT date;
+    std::string start_value = CurrentTmDate(-3);
+    std::string end_value = CurrentTmDate(-2);
+    ConvertTimeRangeToDBDates(start_value, end_value, dates);
+
+    db_->DeleteTable(TABLE_NAME, dates);
+}
