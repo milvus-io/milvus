@@ -7,6 +7,7 @@
 
 #include "Options.h"
 #include "db/meta/MetaTypes.h"
+#include "db/Types.h"
 
 #include <string>
 
@@ -23,6 +24,8 @@ Status DeleteTablePath(const DBMetaOptions& options, const std::string& table_id
 Status CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
 Status GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
 Status DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
+
+bool IsSameIndex(const TableIndex& index1, const TableIndex& index2);
 
 } // namespace utils
 } // namespace engine

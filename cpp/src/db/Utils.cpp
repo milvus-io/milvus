@@ -142,6 +142,13 @@ Status DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& 
     return Status::OK();
 }
 
+bool IsSameIndex(const TableIndex& index1, const TableIndex& index2) {
+    return index1.engine_type_ == index2.engine_type_
+        && index1.nlist == index2.nlist
+        && index1.index_file_size == index2.index_file_size
+        && index1.metric_type == index2.metric_type;
+}
+
 } // namespace utils
 } // namespace engine
 } // namespace milvus

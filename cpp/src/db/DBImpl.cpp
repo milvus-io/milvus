@@ -6,6 +6,7 @@
 #include "DBImpl.h"
 #include "src/db/meta/SqliteMetaImpl.h"
 #include "Log.h"
+#include "Utils.h"
 #include "engine/EngineFactory.h"
 #include "Factories.h"
 #include "metrics/Metrics.h"
@@ -470,7 +471,8 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     } else {
         table_file.file_type_ = meta::TableFileSchema::RAW;
     }
-    table_file.size_ = index_size;
+    table_file.file_size_ = index->PhysicalSize();
+    table_file.row_count_ = index->Count();
     updated.push_back(table_file);
     status = meta_ptr_->UpdateTableFiles(updated);
     ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ <<
@@ -574,7 +576,58 @@ Status DBImpl::BuildIndex(const std::string& table_id) {
         times++;
     }
     return Status::OK();
-    /* return BuildIndexByTable(table_id); */
+}
+
+Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
+    {
+        std::unique_lock<std::mutex> lock(build_index_mutex_);
+
+        //step 1: check index difference
+        TableIndex old_index;
+        auto status = DescribeIndex(table_id, old_index);
+        if(!status.ok()) {
+            ENGINE_LOG_ERROR << "Failed to get table index info";
+            return status;
+        }
+
+        if(utils::IsSameIndex(old_index, index)) {
+            ENGINE_LOG_DEBUG << "Same index setting, no need to create index again";
+            return Status::OK();
+        }
+
+        //step 2: drop old index files
+        DropIndex(table_id);
+
+        //step 3: update index info
+
+        status = meta_ptr_->UpdateTableIndexParam(table_id, index);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Failed to update table index info";
+            return status;
+        }
+    }
+
+    bool has = false;
+    auto status = meta_ptr_->HasNonIndexFiles(table_id, has);
+    int times = 1;
+
+    while (has) {
+        ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
+        status = meta_ptr_->UpdateTableFilesToIndex(table_id);
+        /* StartBuildIndexTask(true); */
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10*1000, times*100)));
+        status = meta_ptr_->HasNonIndexFiles(table_id, has);
+        times++;
+    }
+    return Status::OK();
+}
+
+Status DBImpl::DescribeIndex(const std::string& table_id, TableIndex& index) {
+    return meta_ptr_->DescribeTableIndex(table_id, index);
+}
+
+Status DBImpl::DropIndex(const std::string& table_id) {
+    return meta_ptr_->DropTableIndex(table_id);
 }
 
 Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
@@ -650,26 +703,27 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
         //step 6: update meta
         table_file.file_type_ = meta::TableFileSchema::INDEX;
-        table_file.size_ = index->Size();
+        table_file.file_size_ = index->PhysicalSize();
+        table_file.row_count_ = index->Count();
 
-        auto to_remove = file;
-        to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
+        auto origin_file = file;
+        origin_file.file_type_ = meta::TableFileSchema::BACKUP;
 
-        meta::TableFilesSchema update_files = {table_file, to_remove};
+        meta::TableFilesSchema update_files = {table_file, origin_file};
         status = meta_ptr_->UpdateTableFiles(update_files);
         if(status.ok()) {
             ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size "
                              << index->PhysicalSize() << " bytes"
-                             << " from file " << to_remove.file_id_;
+                             << " from file " << origin_file.file_id_;
 
             if(options_.insert_cache_immediately_) {
                 index->Cache();
             }
         } else {
             //failed to update meta, mark the new file as to_delete, don't delete old file
-            to_remove.file_type_ = meta::TableFileSchema::TO_INDEX;
-            status = meta_ptr_->UpdateTableFile(to_remove);
-            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << to_remove.file_id_ << " to to_index";
+            origin_file.file_type_ = meta::TableFileSchema::TO_INDEX;
+            status = meta_ptr_->UpdateTableFile(origin_file);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << origin_file.file_id_ << " to to_index";
 
             table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
             status = meta_ptr_->UpdateTableFile(table_file);
@@ -683,30 +737,6 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
     }
 
     return Status::OK();
-}
-
-Status DBImpl::BuildIndexByTable(const std::string& table_id) {
-    std::unique_lock<std::mutex> lock(build_index_mutex_);
-    meta::TableFilesSchema to_index_files;
-    meta_ptr_->FilesToIndex(to_index_files);
-
-    Status status;
-
-    for (auto& file : to_index_files) {
-        status = BuildIndex(file);
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
-            return status;
-        }
-        ENGINE_LOG_DEBUG << "Sync building index for " << file.id_ << " passed";
-
-        if (shutting_down_.load(std::memory_order_acquire)){
-            ENGINE_LOG_DEBUG << "Server will shutdown, skip build index action for table " << table_id;
-            break;
-        }
-    }
-
-    return status;
 }
 
 void DBImpl::BackgroundBuildIndex() {
