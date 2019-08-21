@@ -14,11 +14,17 @@ namespace engine {
 
 class XSearchTask : public Task {
 public:
+    explicit
+    XSearchTask(TableFileSchemaPtr file);
+
     void
     Load(LoadType type, uint8_t device_id) override;
 
     void
     Execute() override;
+
+    TaskPtr
+    Clone() override;
 
 public:
     static Status ClusterResult(const std::vector<long> &output_ids,

@@ -21,7 +21,10 @@ namespace engine {
 class ResourceFactory {
 public:
     static std::shared_ptr<Resource>
-    Create(const std::string &name, const std::string &alias = "");
+    Create(const std::string &name,
+           const std::string &alias = "",
+           bool enable_loader = true,
+           bool enable_executor = true);
 };
 
 

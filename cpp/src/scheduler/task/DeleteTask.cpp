@@ -20,6 +20,11 @@ XDeleteTask::Execute() {
 
 }
 
+TaskPtr
+XDeleteTask::Clone() {
+    return nullptr;
+}
+
 }
 }
 }
