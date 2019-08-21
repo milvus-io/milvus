@@ -99,16 +99,27 @@ CollectDurationMetrics(int index_type, double total_time) {
     }
 }
 
+XSearchTask::XSearchTask(TableFileSchemaPtr file) : file_(file) {
+    index_engine_ = EngineFactory::Build(file_->dimension_,
+                                         file_->location_,
+                                         (EngineType) file_->engine_type_);
+}
+
 void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
     server::TimeRecorder rc("");
-    //step 1: load index
-    ExecutionEnginePtr index_ptr = EngineFactory::Build(file_->dimension_,
-                                                        file_->location_,
-                                                        (EngineType) file_->engine_type_);
 
     try {
-        index_ptr->Load();
+        if (type == LoadType::DISK2CPU) {
+            index_engine_->Load();
+        } else if (type == LoadType::CPU2GPU) {
+            index_engine_->Load();
+            index_engine_->CopyToGpu(device_id);
+        } else if (type == LoadType::GPU2CPU) {
+            index_engine_->CopyToCpu();
+        } else {
+            // TODO: exception
+        }
     } catch (std::exception &ex) {
         //typical error: out of disk space or permition denied
         std::string msg = "Failed to load index file: " + std::string(ex.what());
@@ -121,7 +132,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
         return;
     }
 
-    size_t file_size = index_ptr->PhysicalSize();
+    size_t file_size = index_engine_->PhysicalSize();
 
     std::string info = "Load file id:" + std::to_string(file_->id_) + " file type:" + std::to_string(file_->file_type_)
         + " size:" + std::to_string(file_size) + " bytes from location: " + file_->location_ + " totally cost";
@@ -135,7 +146,6 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     //step 2: return search task for later execution
     index_id_ = file_->id_;
     index_type_ = file_->file_type_;
-    index_engine_ = index_ptr;
     search_contexts_.swap(search_contexts_);
 }
 
@@ -157,12 +167,13 @@ XSearchTask::Execute() {
     for (auto &context : search_contexts_) {
         //step 1: allocate memory
         auto inner_k = context->topk();
+        auto nprobe = context->nprobe();
         output_ids.resize(inner_k * context->nq());
         output_distence.resize(inner_k * context->nq());
 
         try {
             //step 2: search
-            index_engine_->Search(context->nq(), context->vectors(), inner_k, output_distence.data(),
+            index_engine_->Search(context->nq(), context->vectors(), inner_k, nprobe, output_distence.data(),
                                   output_ids.data());
 
             double span = rc.RecordSection("do search for context:" + context->Identity());
@@ -197,6 +208,16 @@ XSearchTask::Execute() {
     CollectDurationMetrics(index_type_, total_time);
 
     rc.ElapseFromBegin("totally cost");
+}
+
+TaskPtr
+XSearchTask::Clone() {
+    auto ret = std::make_shared<XSearchTask>(file_);
+    ret->index_id_ = index_id_;
+    ret->index_engine_ = index_engine_->Clone();
+    ret->search_contexts_ = search_contexts_;
+    ret->metric_l2 = metric_l2;
+    return ret;
 }
 
 Status XSearchTask::ClusterResult(const std::vector<long> &output_ids,
@@ -342,6 +363,7 @@ Status XSearchTask::TopkResult(SearchContext::ResultSet &result_src,
 
     return Status::OK();
 }
+
 
 }
 }
