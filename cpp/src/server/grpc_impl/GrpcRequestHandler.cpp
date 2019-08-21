@@ -168,7 +168,12 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext *context,
 GrpcRequestHandler::DeleteByRange(::grpc::ServerContext *context,
               const ::milvus::grpc::DeleteByRangeParam *request,
               ::milvus::grpc::Status *response) {
-
+    BaseTaskPtr task_ptr = DeleteByRangeTask::Create(*request);
+    ::milvus::grpc::Status grpc_status;
+    GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
+    response->set_error_code(grpc_status.error_code());
+    response->set_reason(grpc_status.reason());
+    return ::grpc::Status::OK;
 }
 
 ::grpc::Status

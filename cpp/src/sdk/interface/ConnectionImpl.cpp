@@ -117,7 +117,7 @@ ConnectionImpl::ServerStatus() const {
 Status
 ConnectionImpl::DeleteByRange(Range &range,
               const std::string &table_name) {
-
+    return client_proxy_->DeleteByRange(range, table_name);
 }
 
 Status

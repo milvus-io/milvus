@@ -302,6 +302,15 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "DropIndex function call status: " << stat.ToString() << std::endl;
     }
 
+    {//delete by range
+        Range rg;
+        rg.start_value = CurrentTmDate(-2);
+        rg.end_value = CurrentTmDate(-3);
+
+        Status stat = conn->DeleteByRange(rg, TABLE_NAME);
+        std::cout << "DeleteByRange function call status: " << stat.ToString() << std::endl;
+    }
+
     {//delete table
         Status stat = conn->DropTable(TABLE_NAME);
         std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;

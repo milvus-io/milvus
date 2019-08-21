@@ -107,13 +107,18 @@ Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& date
     //dates partly delete files of the table but currently we don't support
     ENGINE_LOG_DEBUG << "Prepare to delete table " << table_id;
 
-    mem_mgr_->EraseMemVector(table_id); //not allow insert
-    meta_ptr_->DeleteTable(table_id); //soft delete table
+    if (dates.empty()) {
+        mem_mgr_->EraseMemVector(table_id); //not allow insert
+        meta_ptr_->DeleteTable(table_id); //soft delete table
 
-    //scheduler will determine when to delete table files
-    TaskScheduler& scheduler = TaskScheduler::GetInstance();
-    DeleteContextPtr context = std::make_shared<DeleteContext>(table_id, meta_ptr_);
-    scheduler.Schedule(context);
+        //scheduler will determine when to delete table files
+        TaskScheduler& scheduler = TaskScheduler::GetInstance();
+        DeleteContextPtr context = std::make_shared<DeleteContext>(table_id, meta_ptr_);
+        scheduler.Schedule(context);
+    } else {
+        meta_ptr_->DropPartitionsByDates(table_id, dates);
+    }
+
 
     return Status::OK();
 }
