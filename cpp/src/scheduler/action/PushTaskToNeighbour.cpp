@@ -13,7 +13,7 @@ namespace milvus {
 namespace engine {
 
 void
-next(std::list<ResourcePtr> neighbours, std::list<ResourcePtr>::iterator &it) {
+next(std::list<ResourcePtr> &neighbours, std::list<ResourcePtr>::iterator &it) {
     it++;
     if (neighbours.end() == it) {
         it = neighbours.begin();

@@ -13,10 +13,10 @@ TEST(normal_test, test1) {
     // ResourceMgr only compose resources, provide unified event
 //    auto res_mgr = std::make_shared<ResourceMgr>();
     auto res_mgr = ResMgrInst::GetInstance();
-    auto disk = res_mgr->Add(ResourceFactory::Create("disk", "ssd"));
+    auto disk = res_mgr->Add(ResourceFactory::Create("disk", "ssd", true, false));
     auto cpu = res_mgr->Add(ResourceFactory::Create("cpu"));
-    auto gpu1 = res_mgr->Add(ResourceFactory::Create("gpu"));
-    auto gpu2 = res_mgr->Add(ResourceFactory::Create("gpu"));
+    auto gpu1 = res_mgr->Add(ResourceFactory::Create("gpu", "gpu0", false, false));
+    auto gpu2 = res_mgr->Add(ResourceFactory::Create("gpu", "gpu2", false, false));
 
     auto IO = Connection("IO", 500.0);
     auto PCIE = Connection("IO", 11000.0);
@@ -30,7 +30,7 @@ TEST(normal_test, test1) {
     auto scheduler = SchedInst::GetInstance();
     scheduler->Start();
 
-    const uint64_t NUM_TASK = 100;
+    const uint64_t NUM_TASK = 1000;
     std::vector<std::shared_ptr<TestTask>> tasks;
     for (uint64_t i = 0; i < NUM_TASK; ++i) {
         if (auto observe = disk.lock()) {
@@ -45,8 +45,10 @@ TEST(normal_test, test1) {
     scheduler->Stop();
     res_mgr->Stop();
 
-    for (uint64_t i = 0 ; i < NUM_TASK; ++i) {
-        ASSERT_EQ(tasks[i]->load_count_, 1);
-        ASSERT_EQ(tasks[i]->exec_count_, 1);
+    auto pcpu = cpu.lock();
+    for (uint64_t i = 0; i < NUM_TASK; ++i) {
+        auto task = std::static_pointer_cast<TestTask>(pcpu->task_table()[i]->task);
+        ASSERT_EQ(task->load_count_, 1);
+        ASSERT_EQ(task->exec_count_, 1);
     }
 }

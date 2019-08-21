@@ -37,6 +37,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-389 - Add clone interface in Task
 - MS-390 - Update resource construct function
 - MS-391 - Add PushTaskToNeighbourHasExecutor action
+- MS-394 - Update scheduler unittest
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
