@@ -86,7 +86,7 @@ Status MemTableFile::Serialize() {
     execution_engine_->Serialize();
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    table_file_schema_.size_ = size;
+    table_file_schema_.row_count_ = execution_engine_->Count();
 
     server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double) size / total_time);
 

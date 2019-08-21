@@ -135,4 +135,8 @@ TEST(DBMiscTest, UTILS_TEST) {
     status = engine::utils::DeleteTablePath(options, TABLE_NAME);
     ASSERT_TRUE(status.ok());
 
+    status = engine::utils::DeleteTableFilePath(options, file);
+    ASSERT_TRUE(status.ok());
+
+
 }

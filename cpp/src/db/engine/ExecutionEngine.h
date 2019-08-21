@@ -23,6 +23,11 @@ enum class EngineType {
     MAX_VALUE = NSG_MIX,
 };
 
+enum class MetricType {
+    L2 = 1,
+    IP = 2,
+};
+
 class ExecutionEngine {
 public:
 

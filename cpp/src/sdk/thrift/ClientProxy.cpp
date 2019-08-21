@@ -334,8 +334,7 @@ Status ClientProxy::PreloadTable(const std::string &table_name) const {
     return Status::OK();
 }
 
-IndexParam ClientProxy::DescribeIndex(const std::string &table_name) const {
-    IndexParam index_param;
+Status ClientProxy::DescribeIndex(const std::string &table_name, IndexParam &index_param) const {
     index_param.table_name = table_name;
     return index_param;
 }

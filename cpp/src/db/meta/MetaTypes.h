@@ -28,12 +28,13 @@ struct TableSchema {
 
     size_t id_ = 0;
     std::string table_id_;
-    int state_ = (int)NORMAL;
-    size_t files_cnt_ = 0;
+    int32_t state_ = (int)NORMAL;
     uint16_t dimension_ = 0;
-    long created_on_ = 0;
-    int engine_type_ = (int)EngineType::FAISS_IDMAP;
-    bool store_raw_data_ = false;
+    int64_t created_on_ = 0;
+    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
+    int32_t nlist_ = 16384;
+    int32_t index_file_size_ = 1024; //MB
+    int32_t metric_type_ = (int)MetricType::L2;
 }; // TableSchema
 
 struct TableFileSchema {
@@ -45,19 +46,21 @@ struct TableFileSchema {
         TO_DELETE,
         NEW_MERGE,
         NEW_INDEX,
+        BACKUP,
     } FILE_TYPE;
 
     size_t id_ = 0;
     std::string table_id_;
-    int engine_type_ = (int)EngineType::FAISS_IDMAP;
+    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
     std::string file_id_;
-    int file_type_ = NEW;
-    size_t size_ = 0;
+    int32_t file_type_ = NEW;
+    size_t file_size_ = 0;
+    size_t row_count_ = 0;
     DateT date_ = EmptyDate;
     uint16_t dimension_ = 0;
     std::string location_;
-    long updated_time_ = 0;
-    long created_on_ = 0;
+    int64_t updated_time_ = 0;
+    int64_t created_on_ = 0;
 }; // TableFileSchema
 
 typedef std::vector<TableFileSchema> TableFilesSchema;
