@@ -551,9 +551,11 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
                                                      &TableFileSchema::table_id_,
                                                      &TableFileSchema::file_id_,
                                                      &TableFileSchema::file_type_,
+                                                     &TableFileSchema::file_size_,
                                                      &TableFileSchema::row_count_,
                                                      &TableFileSchema::date_,
-                                                     &TableFileSchema::engine_type_),
+                                                     &TableFileSchema::engine_type_,
+                                                     &TableFileSchema::created_on_),
                                              where(c(&TableFileSchema::file_type_)
                                                        == (int) TableFileSchema::TO_INDEX));
 
@@ -565,9 +567,11 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
             table_file.table_id_ = std::get<1>(file);
             table_file.file_id_ = std::get<2>(file);
             table_file.file_type_ = std::get<3>(file);
-            table_file.row_count_ = std::get<4>(file);
-            table_file.date_ = std::get<5>(file);
-            table_file.engine_type_ = std::get<6>(file);
+            table_file.file_size_ = std::get<4>(file);
+            table_file.row_count_ = std::get<5>(file);
+            table_file.date_ = std::get<6>(file);
+            table_file.engine_type_ = std::get<7>(file);
+            table_file.created_on_ = std::get<8>(file);
 
             utils::GetTableFilePath(options_, table_file);
             auto groupItr = groups.find(table_file.table_id_);
@@ -605,6 +609,7 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                                                          &TableFileSchema::table_id_,
                                                          &TableFileSchema::file_id_,
                                                          &TableFileSchema::file_type_,
+                                                         &TableFileSchema::file_size_,
                                                          &TableFileSchema::row_count_,
                                                          &TableFileSchema::date_,
                                                          &TableFileSchema::engine_type_),
@@ -625,9 +630,10 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                 table_file.table_id_ = std::get<1>(file);
                 table_file.file_id_ = std::get<2>(file);
                 table_file.file_type_ = std::get<3>(file);
-                table_file.row_count_ = std::get<4>(file);
-                table_file.date_ = std::get<5>(file);
-                table_file.engine_type_ = std::get<6>(file);
+                table_file.file_size_ = std::get<4>(file);
+                table_file.row_count_ = std::get<5>(file);
+                table_file.date_ = std::get<6>(file);
+                table_file.engine_type_ = std::get<7>(file);
                 table_file.dimension_ = table_schema.dimension_;
                 utils::GetTableFilePath(options_, table_file);
                 auto dateItr = files.find(table_file.date_);
@@ -643,6 +649,7 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                                                          &TableFileSchema::table_id_,
                                                          &TableFileSchema::file_id_,
                                                          &TableFileSchema::file_type_,
+                                                         &TableFileSchema::file_size_,
                                                          &TableFileSchema::row_count_,
                                                          &TableFileSchema::date_,
                                                          &TableFileSchema::engine_type_),
@@ -664,9 +671,10 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                 table_file.table_id_ = std::get<1>(file);
                 table_file.file_id_ = std::get<2>(file);
                 table_file.file_type_ = std::get<3>(file);
-                table_file.row_count_ = std::get<4>(file);
-                table_file.date_ = std::get<5>(file);
-                table_file.engine_type_ = std::get<6>(file);
+                table_file.file_size_ = std::get<4>(file);
+                table_file.row_count_ = std::get<5>(file);
+                table_file.date_ = std::get<6>(file);
+                table_file.engine_type_ = std::get<7>(file);
                 table_file.dimension_ = table_schema.dimension_;
                 utils::GetTableFilePath(options_, table_file);
                 auto dateItr = files.find(table_file.date_);
@@ -696,6 +704,7 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                                       &TableFileSchema::table_id_,
                                       &TableFileSchema::file_id_,
                                       &TableFileSchema::file_type_,
+                                      &TableFileSchema::file_size_,
                                       &TableFileSchema::row_count_,
                                       &TableFileSchema::date_,
                                       &TableFileSchema::engine_type_);
@@ -738,9 +747,10 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
             table_file.table_id_ = std::get<1>(file);
             table_file.file_id_ = std::get<2>(file);
             table_file.file_type_ = std::get<3>(file);
-            table_file.row_count_ = std::get<4>(file);
-            table_file.date_ = std::get<5>(file);
-            table_file.engine_type_ = std::get<6>(file);
+            table_file.file_size_ = std::get<4>(file);
+            table_file.row_count_ = std::get<5>(file);
+            table_file.date_ = std::get<6>(file);
+            table_file.engine_type_ = std::get<7>(file);
             table_file.dimension_ = table_schema.dimension_;
             utils::GetTableFilePath(options_, table_file);
             auto dateItr = files.find(table_file.date_);
@@ -769,7 +779,9 @@ Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
                                                      &TableFileSchema::file_id_,
                                                      &TableFileSchema::file_type_,
                                                      &TableFileSchema::file_size_,
-                                                     &TableFileSchema::date_),
+                                                     &TableFileSchema::row_count_,
+                                                     &TableFileSchema::date_,
+                                                     &TableFileSchema::created_on_),
                                              where(c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW and
                                                  c(&TableFileSchema::table_id_) == table_id),
                                              order_by(&TableFileSchema::file_size_).desc());
@@ -789,7 +801,9 @@ Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
             table_file.file_id_ = std::get<2>(file);
             table_file.file_type_ = std::get<3>(file);
             table_file.file_size_ = std::get<4>(file);
-            table_file.date_ = std::get<5>(file);
+            table_file.row_count_ = std::get<5>(file);
+            table_file.date_ = std::get<6>(file);
+            table_file.created_on_ = std::get<7>(file);
             table_file.dimension_ = table_schema.dimension_;
             utils::GetTableFilePath(options_, table_file);
             auto dateItr = files.find(table_file.date_);
@@ -816,7 +830,8 @@ Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
                                                   &TableFileSchema::file_size_,
                                                   &TableFileSchema::row_count_,
                                                   &TableFileSchema::date_,
-                                                  &TableFileSchema::engine_type_),
+                                                  &TableFileSchema::engine_type_,
+                                                  &TableFileSchema::created_on_),
                                           where(c(&TableFileSchema::table_id_) == table_id and
                                                   in(&TableFileSchema::id_, ids)
                                           ));
@@ -838,6 +853,7 @@ Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
             file_schema.row_count_ = std::get<4>(file);
             file_schema.date_ = std::get<5>(file);
             file_schema.engine_type_ = std::get<6>(file);
+            file_schema.created_on_ = std::get<7>(file);
             file_schema.dimension_ = table_schema.dimension_;
             utils::GetTableFilePath(options_, file_schema);
 
@@ -1217,9 +1233,6 @@ Status SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
         for (auto &file : selected) {
             result += std::get<0>(file);
         }
-
-        result /= table_schema.dimension_;
-        result /= sizeof(float);
 
     } catch (std::exception &e) {
         return HandleException("Encounter exception when calculate table file size", e);
