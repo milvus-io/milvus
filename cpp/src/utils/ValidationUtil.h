@@ -18,6 +18,15 @@ public:
     ValidateTableIndexType(int32_t index_type);
 
     static ServerError
+    ValidateTableIndexNlist(int32_t nlist);
+
+    static ServerError
+    ValidateTableIndexFileSize(int32_t index_file_size);
+
+    static ServerError
+    ValidateTableIndexMetricType(int32_t metric_type);
+
+    static ServerError
     ValidateGpuIndex(uint32_t gpu_index);
 
     static ServerError

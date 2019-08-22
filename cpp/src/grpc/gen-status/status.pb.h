@@ -91,12 +91,14 @@ enum ErrorCode : int {
   CANNOT_DELETE_FOLDER = 19,
   CANNOT_DELETE_FILE = 20,
   BUILD_INDEX_ERROR = 21,
+  ILLEGAL_NLIST = 22,
+  ILLEGAL_METRIC_TYPE = 23,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ErrorCode_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool ErrorCode_IsValid(int value);
 constexpr ErrorCode ErrorCode_MIN = SUCCESS;
-constexpr ErrorCode ErrorCode_MAX = BUILD_INDEX_ERROR;
+constexpr ErrorCode ErrorCode_MAX = ILLEGAL_METRIC_TYPE;
 constexpr int ErrorCode_ARRAYSIZE = ErrorCode_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ErrorCode_descriptor();
