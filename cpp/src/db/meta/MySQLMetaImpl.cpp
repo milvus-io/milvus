@@ -1794,6 +1794,8 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
     }
 
+    //remove deleted table folder
+    //don't remove table folder until all its files has been deleted
     try {
         MetricCollector metric;
 
