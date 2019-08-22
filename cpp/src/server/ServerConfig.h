@@ -38,6 +38,8 @@ static const char* CONFIG_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
 static const char* CONFIG_GPU_CACHE_CAPACITY = "gpu_cache_capacity";
 static const char* CACHE_FREE_PERCENT = "cache_free_percent";
 static const char* CONFIG_INSERT_CACHE_IMMEDIATELY = "insert_cache_immediately";
+static const char* CONFIG_GPU_IDS = "gpu_ids";
+static const char *GPU_CACHE_FREE_PERCENT = "gpu_cache_free_percent";
 
 static const char* CONFIG_LICENSE = "license_config";
 static const char* CONFIG_LICENSE_PATH = "license_path";
