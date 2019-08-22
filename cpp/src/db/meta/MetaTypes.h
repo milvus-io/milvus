@@ -6,6 +6,7 @@
 #pragma once
 
 #include "db/engine/ExecutionEngine.h"
+#include "db/Constants.h"
 
 #include <vector>
 #include <map>
@@ -33,7 +34,7 @@ struct TableSchema {
     int64_t created_on_ = 0;
     int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
     int32_t nlist_ = 16384;
-    int32_t index_file_size_ = 1024; //MB
+    int32_t index_file_size_ = 1024*ONE_MB;
     int32_t metric_type_ = (int)MetricType::L2;
 }; // TableSchema
 

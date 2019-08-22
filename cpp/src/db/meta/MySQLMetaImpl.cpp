@@ -424,7 +424,7 @@ Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const T
                                            "created_on = " << created_on << ", " <<
                                            "engine_type_ = " << index.engine_type_ << ", " <<
                                            "nlist = " << index.nlist_ << ", " <<
-                                           "index_file_size = " << index.index_file_size_ << ", " <<
+                                           "index_file_size = " << index.index_file_size_*ONE_MB << ", " <<
                                            "metric_type = " << index.metric_type_ << ", " <<
                                            "WHERE id = " << quote << table_id << ";";
 
@@ -481,7 +481,7 @@ Status MySQLMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex
 
                 index.engine_type_ = resRow["engine_type"];
                 index.nlist_ = resRow["nlist"];
-                index.index_file_size_ = resRow["index_file_size"];
+                index.index_file_size_ = resRow["index_file_size"]/ONE_MB;
                 index.metric_type_ = resRow["metric_type"];
             } else {
                 return Status::NotFound("Table " + table_id + " not found");
@@ -652,7 +652,7 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
             }
 
             Query describeTableQuery = connectionPtr->query();
-            describeTableQuery << "SELECT id, dimension, engine_type " <<
+            describeTableQuery << "SELECT id, state, dimension, engine_type, nlist, index_file_size, metric_type " <<
                                "FROM Tables " <<
                                "WHERE table_id = " << quote << table_schema.table_id_ << " " <<
                                "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
@@ -667,9 +667,17 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
 
             table_schema.id_ = resRow["id"]; //implicit conversion
 
+            table_schema.state_ = resRow["state"];
+
             table_schema.dimension_ = resRow["dimension"];
 
             table_schema.engine_type_ = resRow["engine_type"];
+
+            table_schema.nlist_ = resRow["nlist"];
+
+            table_schema.index_file_size_ = resRow["index_file_size"];
+
+            table_schema.metric_type_ = resRow["metric_type"];
         } else {
             return Status::NotFound("Table " + table_schema.table_id_ + " not found");
         }
@@ -1152,6 +1160,15 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
 
     try {
         MetricCollector metric;
+
+        //check table existence
+        TableSchema table_schema;
+        table_schema.table_id_ = table_id;
+        auto status = DescribeTable(table_schema);
+        if (!status.ok()) {
+            return status;
+        }
+
         StoreQueryResult res;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -1172,16 +1189,12 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
             res = filesToMergeQuery.store();
         } //Scoped Connection
 
-        TableSchema table_schema;
-        table_schema.table_id_ = table_id;
-        auto status = DescribeTable(table_schema);
-
-        if (!status.ok()) {
-            return status;
-        }
-
-        TableFileSchema table_file;
         for (auto &resRow : res) {
+            TableFileSchema table_file;
+            table_file.file_size_ = resRow["file_size"];
+            if(table_file.file_size_ >= table_schema.index_file_size_) {
+                continue;//skip large file
+            }
 
             table_file.id_ = resRow["id"]; //implicit conversion
 
@@ -1194,8 +1207,6 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
             table_file.file_id_ = file_id;
 
             table_file.file_type_ = resRow["file_type"];
-
-            table_file.file_size_ = resRow["file_size"];
 
             table_file.row_count_ = resRow["row_count"];
 
