@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "wrapper/Index.h"
+#include "wrapper/knowhere/vec_index.h"
 
 #include <memory>
 
@@ -16,17 +16,17 @@ namespace cache {
 
 class DataObj {
 public:
-    DataObj(const engine::Index_ptr& index)
+    DataObj(const engine::VecIndexPtr& index)
             : index_(index)
     {}
 
-    DataObj(const engine::Index_ptr& index, int64_t size)
+    DataObj(const engine::VecIndexPtr& index, int64_t size)
             : index_(index),
               size_(size)
     {}
 
-    engine::Index_ptr data() { return index_; }
-    const engine::Index_ptr& data() const { return index_; }
+    engine::VecIndexPtr data() { return index_; }
+    const engine::VecIndexPtr& data() const { return index_; }
 
     int64_t size() const {
         if(index_ == nullptr) {
@@ -41,7 +41,7 @@ public:
     }
 
 private:
-    engine::Index_ptr index_ = nullptr;
+    engine::VecIndexPtr index_ = nullptr;
     int64_t size_ = 0;
 };
 
