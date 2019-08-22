@@ -10,6 +10,7 @@ namespace server {
 
 constexpr size_t table_name_size_limit = 255;
 constexpr int64_t table_dimension_limit = 16384;
+constexpr int32_t index_file_size_limit = 4096; //index trigger size max = 4096 MB
 
 ServerError
 ValidationUtil::ValidateTableName(const std::string &table_name) {
@@ -62,6 +63,32 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
         return SERVER_INVALID_INDEX_TYPE;
     }
 
+    return SERVER_SUCCESS;
+}
+
+ServerError
+ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
+    if(nlist <= 0) {
+        return SERVER_INVALID_INDEX_NLIST;
+    }
+
+    return SERVER_SUCCESS;
+}
+
+ServerError
+ValidationUtil::ValidateTableIndexFileSize(int32_t index_file_size) {
+    if(index_file_size <= 0 || index_file_size > index_file_size_limit) {
+        return SERVER_INVALID_INDEX_FILE_SIZE;
+    }
+
+    return SERVER_SUCCESS;
+}
+
+ServerError
+ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
+    if(metric_type != (int32_t)engine::MetricType::L2 && metric_type != (int32_t)engine::MetricType::IP) {
+        return SERVER_INVALID_INDEX_METRIC_TYPE;
+    }
     return SERVER_SUCCESS;
 }
 

@@ -51,6 +51,9 @@ constexpr ServerError SERVER_ILLEGAL_SEARCH_RESULT = ToGlobalServerErrorCode(110
 constexpr ServerError SERVER_CACHE_ERROR = ToGlobalServerErrorCode(111);
 constexpr ServerError SERVER_WRITE_ERROR = ToGlobalServerErrorCode(112);
 constexpr ServerError SERVER_INVALID_NPROBE = ToGlobalServerErrorCode(113);
+constexpr ServerError SERVER_INVALID_INDEX_NLIST = ToGlobalServerErrorCode(114);
+constexpr ServerError SERVER_INVALID_INDEX_METRIC_TYPE = ToGlobalServerErrorCode(115);
+constexpr ServerError SERVER_INVALID_INDEX_FILE_SIZE = ToGlobalServerErrorCode(116);
 
 
 constexpr ServerError SERVER_LICENSE_FILE_NOT_EXIST = ToGlobalServerErrorCode(500);
