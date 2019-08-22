@@ -54,7 +54,8 @@ class PrometheusMetrics: public MetricsBase {
     void RawFileSizeHistogramObserve(double value) override { if(startup_) raw_files_size_histogram_.Observe(value);};
     void IndexFileSizeHistogramObserve(double value) override { if(startup_) index_files_size_histogram_.Observe(value);};
     void BuildIndexDurationSecondsHistogramObserve(double value) override { if(startup_) build_index_duration_seconds_histogram_.Observe(value);};
-    void CacheUsageGaugeSet(double value) override { if(startup_) cache_usage_gauge_.Set(value);};
+    void CpuCacheUsageGaugeSet(double value) override { if(startup_) cpu_cache_usage_gauge_.Set(value);};
+    void GpuCacheUsageGaugeSet(double value) override; 
 
     void MetaAccessTotalIncrement(double value = 1) override { if(startup_) meta_access_total_.Increment(value);};
     void MetaAccessDurationSecondsHistogramObserve(double value) override { if(startup_) meta_access_duration_seconds_histogram_.Observe(value);};
@@ -336,12 +337,18 @@ class PrometheusMetrics: public MetricsBase {
         .Register(*registry_);
     prometheus::Counter &cache_access_total_ = cache_access_.Add({});
 
-    // record cache usage and %
-    prometheus::Family<prometheus::Gauge> &cache_usage_ = prometheus::BuildGauge()
+    // record CPU cache usage and %
+    prometheus::Family<prometheus::Gauge> &cpu_cache_usage_ = prometheus::BuildGauge()
         .Name("cache_usage_bytes")
         .Help("current cache usage by bytes")
         .Register(*registry_);
-    prometheus::Gauge &cache_usage_gauge_ = cache_usage_.Add({});
+    prometheus::Gauge &cpu_cache_usage_gauge_ = cpu_cache_usage_.Add({});
+    
+    //record GPU cache usage and %
+    prometheus::Family<prometheus::Gauge> &gpu_cache_usage_ = prometheus::BuildGauge()
+            .Name("gpu_cache_usage_bytes")
+            .Help("current gpu cache usage by bytes")
+            .Register(*registry_);
 
     // record query response
     using Quantiles = std::vector<prometheus::detail::CKMSQuantiles::Quantile>;
@@ -360,8 +367,7 @@ class PrometheusMetrics: public MetricsBase {
     prometheus::Family<prometheus::Gauge> &query_vector_response_per_second_ = prometheus::BuildGauge()
         .Name("query_vector_response_per_microsecond")
         .Help("the number of vectors can be queried every second ")
-        .Register(*registry_);
-    prometheus::Gauge &query_vector_response_per_second_gauge_ = query_vector_response_per_second_.Add({});
+        .Register(*registry_); prometheus::Gauge &query_vector_response_per_second_gauge_ = query_vector_response_per_second_.Add({});
 
     prometheus::Family<prometheus::Gauge> &query_response_per_second_ = prometheus::BuildGauge()
         .Name("query_response_per_microsecond")

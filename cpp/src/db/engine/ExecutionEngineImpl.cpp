@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include <stdexcept>
+#include "src/cache/GpuCacheMgr.h"
 
 #include "src/server/ServerConfig.h"
 #include "src/metrics/Metrics.h"
@@ -144,28 +145,60 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
 }
 
 Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
-    try {
-        index_ = index_->CopyToGpu(device_id);
-        ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
-    } catch (knowhere::KnowhereException &e) {
-        ENGINE_LOG_ERROR << e.what();
-        return Status::Error(e.what());
-    } catch (std::exception &e) {
-        return Status::Error(e.what());
+    index_ = zilliz::milvus::cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
+    bool already_in_cache = (index_ != nullptr);
+    auto start_time = METRICS_NOW_TIME;
+    if (!index_) {
+        try {
+            index_ = index_->CopyToGpu(device_id);
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
+        } catch (knowhere::KnowhereException &e) {
+            ENGINE_LOG_ERROR << e.what();
+            return Status::Error(e.what());
+        } catch (std::exception &e) {
+            return Status::Error(e.what());
+        }
     }
+
+    if (!already_in_cache) {
+        GpuCache(device_id);
+        auto end_time = METRICS_NOW_TIME;
+        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+        double physical_size = PhysicalSize();
+
+        server::Metrics::GetInstance().FaissDiskLoadDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(physical_size);
+    }
+
     return Status::OK();
 }
 
 Status ExecutionEngineImpl::CopyToCpu() {
-    try {
-        index_ = index_->CopyToCpu();
-        ENGINE_LOG_DEBUG << "GPU to CPU";
-    } catch (knowhere::KnowhereException &e) {
-        ENGINE_LOG_ERROR << e.what();
-        return Status::Error(e.what());
-    } catch (std::exception &e) {
-        return Status::Error(e.what());
+    index_ = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    bool already_in_cache = (index_ != nullptr);
+    auto start_time = METRICS_NOW_TIME;
+    if (!index_) {
+        try {
+            index_ = index_->CopyToCpu();
+            ENGINE_LOG_DEBUG << "GPU to CPU";
+        } catch (knowhere::KnowhereException &e) {
+            ENGINE_LOG_ERROR << e.what();
+            return Status::Error(e.what());
+        } catch (std::exception &e) {
+            return Status::Error(e.what());
+        }
     }
+
+    if(!already_in_cache) {
+        Cache();
+        auto end_time = METRICS_NOW_TIME;
+        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+        double physical_size = PhysicalSize();
+
+        server::Metrics::GetInstance().FaissDiskLoadDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(physical_size);
+    }
+
     return Status::OK();
 }
 
@@ -244,6 +277,10 @@ Status ExecutionEngineImpl::Cache() {
     zilliz::milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, index_);
 
     return Status::OK();
+}
+
+Status ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
+    zilliz::milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, index_);
 }
 
 // TODO(linxj): remove.

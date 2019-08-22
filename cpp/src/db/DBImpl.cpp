@@ -363,7 +363,7 @@ void DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
-    server::Metrics::GetInstance().CacheUsageGaugeSet(cache_usage*100/cache_total);
+    server::Metrics::GetInstance().CpuCacheUsageGaugeSet(cache_usage*100/cache_total);
     uint64_t size;
     Size(size);
     server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
