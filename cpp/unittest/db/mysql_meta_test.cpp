@@ -194,6 +194,13 @@ TEST_F(DISABLED_MySQLTest, ARCHIVE_TEST_DAYS) {
         i++;
     }
 
+    bool has;
+    status = impl.HasNonIndexFiles(table_id, has);
+    ASSERT_TRUE(status.ok());
+
+    status = impl.UpdateTableFilesToIndex(table_id);
+    ASSERT_TRUE(status.ok());
+
     status = impl.DropAll();
     ASSERT_TRUE(status.ok());
 }

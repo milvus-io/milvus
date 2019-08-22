@@ -1652,15 +1652,14 @@ Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
 }
 
 Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
-
-
     auto now = utils::GetMicroSecTimeStamp();
+    std::set<std::string> table_ids;
+
+    //remove to_delete files
     try {
         MetricCollector metric;
 
         {
-
-
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
@@ -1700,6 +1699,8 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 ENGINE_LOG_DEBUG << "Removing file id:" << table_file.id_ << " location:" << table_file.location_;
 
                 idsToDelete.emplace_back(std::to_string(table_file.id_));
+
+                table_ids.insert(table_file.table_id_);
             }
 
             if (!idsToDelete.empty()) {
@@ -1734,12 +1735,11 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
     }
 
+    //remove to_delete tables
     try {
         MetricCollector metric;
 
         {
-
-
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
@@ -1765,7 +1765,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                     std::string table_id;
                     resRow["table_id"].to_string(table_id);
 
-                    utils::DeleteTablePath(options_, table_id);
+                    utils::DeleteTablePath(options_, table_id, false);//only delete empty folder
 
                     idsToDeleteSS << "id = " << std::to_string(id) << " OR ";
                 }
@@ -1792,6 +1792,39 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         // Catch-all for any other MySQL++ exceptions
         ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
         return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
+    }
+
+    //remove deleted table folder
+    //don't remove table folder until all its files has been deleted
+    try {
+        MetricCollector metric;
+
+        {
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+
+            if (connectionPtr == nullptr) {
+                return Status::Error("Failed to connect to database server");
+            }
+
+            for(auto& table_id : table_ids) {
+                Query cleanUpFilesWithTTLQuery = connectionPtr->query();
+                cleanUpFilesWithTTLQuery << "SELECT file_id " <<
+                                         "FROM TableFiles " <<
+                                         "WHERE table_id = " << table_id << ";";
+
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
+
+                StoreQueryResult res = cleanUpFilesWithTTLQuery.store();
+
+                if (res.empty()) {
+                    utils::DeleteTablePath(options_, table_id);
+                }
+            }
+        }
+    } catch (const Exception &er) {
+        // Catch-all for any other MySQL++ exceptions
+        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL" << ": " << er.what();
+        return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", er.what());
     }
 
     return Status::OK();
