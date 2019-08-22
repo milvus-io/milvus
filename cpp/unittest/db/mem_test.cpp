@@ -446,3 +446,40 @@ TEST_F(DBTest, VECTOR_IDS_TEST)
         ASSERT_EQ(vector_ids[i], i + nb);
     }
 }
+
+TEST_F(NewMemManagerTest, MEMMANAGER_TEST) {
+    int setenv_res = setenv("MILVUS_USE_OLD_MEM_MANAGER", "ON", 1);
+    ASSERT_TRUE(setenv_res == 0);
+
+    auto options = engine::OptionsFactory::Build();
+    options.meta.path = "/tmp/milvus_test";
+    options.meta.backend_uri = "sqlite://:@:/";
+    auto db_ = engine::DBFactory::Build(options);
+
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
+
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = TABLE_NAME;
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_STATS(stat);
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    auto start_time = METRICS_NOW_TIME;
+
+    int insert_loop = 20;
+    for (int i = 0; i < insert_loop; ++i) {
+        int64_t nb = 40960;
+        std::vector<float> xb;
+        BuildVectors(nb, xb);
+        engine::IDNumbers vector_ids;
+        engine::Status status = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        ASSERT_TRUE(status.ok());
+    }
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
+
+    delete db_;
+    boost::filesystem::remove_all(options.meta.path);
+}
