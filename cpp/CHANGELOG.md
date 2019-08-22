@@ -38,6 +38,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-390 - Update resource construct function
 - MS-391 - Add PushTaskToNeighbourHasExecutor action
 - MS-394 - Update scheduler unittest
+- MS-400 - Add timestamp record in task state change function
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
