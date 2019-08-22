@@ -70,6 +70,9 @@ struct TaskTableItem {
 
     bool
     Moved();
+
+    std::string
+    Dump();
 };
 
 using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
