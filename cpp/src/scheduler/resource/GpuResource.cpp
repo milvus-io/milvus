@@ -16,8 +16,8 @@ std::ostream &operator<<(std::ostream &out, const GpuResource &resource) {
     return out;
 }
 
-GpuResource::GpuResource(std::string name)
-    : Resource(std::move(name), ResourceType::GPU) {}
+GpuResource::GpuResource(std::string name, bool enable_loader, bool enable_executor)
+    : Resource(std::move(name), ResourceType::GPU, enable_loader, enable_executor) {}
 
 void GpuResource::LoadFile(TaskPtr task) {
     task->Load(LoadType::CPU2GPU, 0);

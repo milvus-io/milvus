@@ -34,6 +34,10 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-380 - Update resource loader and executor, work util all finished
 - MS-383 - Modify condition variable usage in scheduler
 - MS-384 - Add global instance of ResourceMgr and Scheduler
+- MS-389 - Add clone interface in Task
+- MS-390 - Update resource construct function
+- MS-391 - Add PushTaskToNeighbourHasExecutor action
+- MS-394 - Update scheduler unittest
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
@@ -62,6 +66,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-288 - Update compile scripts
 - MS-330 - Stability test failed caused by server core dumped
 - MS-347 - Build index hangs again
+- MS-382 - fix MySQLMetaImpl::CleanUpFilesWithTTL unknown column bug
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
@@ -90,6 +95,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-324 - Show error when there is not enough gpu memory to build index
 - MS-328 - Check metric type on server start
 - MS-332 - Set grpc and thrift server run concurrently
+- MS-352 - Add hybrid index
 
 ## New Feature
 - MS-180 - Add new mem manager
@@ -149,8 +155,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-130 - Add prometheus_test
 - MS-144 - Add nprobe config
 - MS-147 - Enable IVF
-
 - MS-130 - Add prometheus_test
+
 ## Task
 - MS-74 - Change README.md in cpp
 - MS-88 - Add support for arm architecture

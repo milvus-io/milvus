@@ -5,39 +5,31 @@
  ******************************************************************************/
 #pragma once
 
-#include "Task.h"
+#include "faiss/gpu/GpuResources.h"
+#include "faiss/gpu/StandardGpuResources.h"
 
+#include "server/ServerConfig.h"
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-class TestTask : public Task {
-public:
-    TestTask() = default;
+class FaissGpuResources {
 
-public:
-    void
-    Load(LoadType type, uint8_t device_id) override;
+ public:
+    using Ptr = std::shared_ptr<faiss::gpu::GpuResources>;
 
-    void
-    Execute() override;
+    static FaissGpuResources::Ptr& GetGpuResources(int device_id);
 
-    TaskPtr
-    Clone() override;
+    void SelectGpu();
 
-    void
-    Wait();
+    int32_t GetGpu();
 
-public:
-    uint64_t load_count_ = 0;
-    uint64_t exec_count_ = 0;
+    FaissGpuResources() : gpu_num_(0) { SelectGpu(); }
 
-    bool done_ = false;
-    std::mutex mutex_;
-    std::condition_variable cv_;
+ private:
+    int32_t gpu_num_;
 };
-
 
 }
 }

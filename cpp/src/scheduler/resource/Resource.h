@@ -45,8 +45,30 @@ enum class RegisterType {
 class Resource : public Node, public std::enable_shared_from_this<Resource> {
 public:
     /*
-     * Event function MUST be a short function, never blocking;
+     * Start loader and executor if enable;
      */
+    void
+    Start();
+
+    /*
+     * Stop loader and executor, join it, blocking util thread exited;
+     */
+    void
+    Stop();
+
+    /*
+     * wake up loader;
+     */
+    void
+    WakeupLoader();
+
+    /*
+     * wake up executor;
+     */
+    void
+    WakeupExecutor();
+
+public:
     template<typename T>
     void Register_T(const RegisterType &type) {
         register_table_.emplace(type, [] { return std::make_shared<T>(); });
@@ -65,11 +87,17 @@ public:
         return type_;
     }
 
-    void
-    Start();
+    // TODO: better name?
+    inline bool
+    HasLoader() {
+        return enable_loader_;
+    }
 
-    void
-    Stop();
+    // TODO: better name?
+    inline bool
+    HasExecutor() {
+        return enable_executor_;
+    }
 
     TaskTable &
     task_table();
@@ -81,24 +109,11 @@ public:
 
     friend std::ostream &operator<<(std::ostream &out, const Resource &resource);
 
-public:
-    /*
-     * wake up loader;
-     */
-    void
-    WakeupLoader();
-
-    /*
-     * wake up executor;
-     */
-    void
-    WakeupExecutor();
-
 protected:
     Resource(std::string name,
              ResourceType type,
-             bool enable_loader = true,
-             bool enable_executor = true);
+             bool enable_loader,
+             bool enable_executor);
 
     // TODO: SearchContextPtr to TaskPtr
     /*
