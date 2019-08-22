@@ -367,9 +367,9 @@ Status SqliteMetaImpl::UpdateTableIndexParam(const std::string &table_id, const 
             table_schema.dimension_ = std::get<2>(tables[0]);
             table_schema.created_on_ = std::get<3>(tables[0]);
             table_schema.engine_type_ = index.engine_type_;
-            table_schema.nlist_ = index.nlist;
-            table_schema.index_file_size_ = index.index_file_size;
-            table_schema.metric_type_ = index.metric_type;
+            table_schema.nlist_ = index.nlist_;
+            table_schema.index_file_size_ = index.index_file_size_;
+            table_schema.metric_type_ = index.metric_type_;
 
             ConnectorPtr->update(table_schema);
         } else {
@@ -407,9 +407,9 @@ Status SqliteMetaImpl::DescribeTableIndex(const std::string &table_id, TableInde
 
         if (groups.size() == 1) {
             index.engine_type_ = std::get<0>(groups[0]);
-            index.nlist = std::get<1>(groups[0]);
-            index.index_file_size = std::get<2>(groups[0]);
-            index.metric_type = std::get<3>(groups[0]);
+            index.nlist_ = std::get<1>(groups[0]);
+            index.index_file_size_ = std::get<2>(groups[0]);
+            index.metric_type_ = std::get<3>(groups[0]);
         } else {
             return Status::NotFound("Table " + table_id + " not found");
         }

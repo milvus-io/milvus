@@ -42,7 +42,6 @@ GrpcRequestHandler::HasTable(::grpc::ServerContext *context,
 GrpcRequestHandler::DropTable(::grpc::ServerContext *context,
                               const ::milvus::grpc::TableName *request,
                               ::milvus::grpc::Status *response) {
-
     BaseTaskPtr task_ptr = DropTableTask::Create(request->table_name());
     GrpcRequestScheduler::ExecTask(task_ptr, response);
     return ::grpc::Status::OK;
