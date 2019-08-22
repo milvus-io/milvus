@@ -112,7 +112,7 @@ void Resource::loader_function() {
             }
             LoadFile(task_item->task);
             // TODO: wrapper loaded
-            task_item->state = TaskTableItemState::LOADED;
+            task_item->Loaded();
             if (subscriber_) {
                 auto event = std::make_shared<CopyCompletedEvent>(shared_from_this(), task_item);
                 subscriber_(std::static_pointer_cast<Event>(event));
@@ -138,7 +138,7 @@ void Resource::executor_function() {
                 break;
             }
             Process(task_item->task);
-            task_item->state = TaskTableItemState::EXECUTED;
+            task_item->Executed();
             if (subscriber_) {
                 auto event = std::make_shared<FinishTaskEvent>(shared_from_this(), task_item);
                 subscriber_(std::static_pointer_cast<Event>(event));
