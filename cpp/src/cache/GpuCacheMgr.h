@@ -6,33 +6,34 @@
 
 #include "CacheMgr.h"
 #include <unordered_map>
+#include <memory>
 
 namespace zilliz {
 namespace milvus {
 namespace cache {
 
+class GpuCacheMgr;
+using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
+
 class GpuCacheMgr : public CacheMgr {
-private:
+public:
     GpuCacheMgr();
 
 public:
     static CacheMgr* GetInstance(uint64_t gpu_id) {
-        if (!instance_[gpu_id]) {
+        if (instance_.find(gpu_id) == instance_.end()) {
             std::lock_guard<std::mutex> lock(mutex_);
-            if(!instance_[gpu_id]) {
-                instance_.insert(std::pair<uint64_t, GpuCacheMgr* >(gpu_id, new GpuCacheMgr()));
-            }
+            instance_.insert(std::pair<uint64_t, GpuCacheMgrPtr>(gpu_id, std::make_shared<GpuCacheMgr>()));
+//            instance_[gpu_id] = std::make_shared<GpuCacheMgr>();
         }
-        return instance_.at(gpu_id);
-//        static GpuCacheMgr s_mgr;
-//        return &s_mgr;
+        return instance_[gpu_id].get();
     }
 
     void InsertItem(const std::string& key, const DataObjPtr& data) override;
 
 private:
     static std::mutex mutex_;
-    static std::unordered_map<uint64_t, GpuCacheMgr* > instance_;
+    static std::unordered_map<uint64_t, GpuCacheMgrPtr> instance_;
 };
 
 }
