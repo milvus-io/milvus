@@ -2316,20 +2316,20 @@ class Index :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kNlistFieldNumber = 2,
     kIndexTypeFieldNumber = 1,
+    kNlistFieldNumber = 2,
     kIndexFileSizeFieldNumber = 3,
     kMetricTypeFieldNumber = 4,
   };
-  // int64 nlist = 2;
-  void clear_nlist();
-  ::PROTOBUF_NAMESPACE_ID::int64 nlist() const;
-  void set_nlist(::PROTOBUF_NAMESPACE_ID::int64 value);
-
   // int32 index_type = 1;
   void clear_index_type();
   ::PROTOBUF_NAMESPACE_ID::int32 index_type() const;
   void set_index_type(::PROTOBUF_NAMESPACE_ID::int32 value);
+
+  // int32 nlist = 2;
+  void clear_nlist();
+  ::PROTOBUF_NAMESPACE_ID::int32 nlist() const;
+  void set_nlist(::PROTOBUF_NAMESPACE_ID::int32 value);
 
   // int32 index_file_size = 3;
   void clear_index_file_size();
@@ -2346,8 +2346,8 @@ class Index :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::int64 nlist_;
   ::PROTOBUF_NAMESPACE_ID::int32 index_type_;
+  ::PROTOBUF_NAMESPACE_ID::int32 nlist_;
   ::PROTOBUF_NAMESPACE_ID::int32 index_file_size_;
   ::PROTOBUF_NAMESPACE_ID::int32 metric_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -3827,15 +3827,15 @@ inline void Index::set_index_type(::PROTOBUF_NAMESPACE_ID::int32 value) {
   // @@protoc_insertion_point(field_set:milvus.grpc.Index.index_type)
 }
 
-// int64 nlist = 2;
+// int32 nlist = 2;
 inline void Index::clear_nlist() {
-  nlist_ = PROTOBUF_LONGLONG(0);
+  nlist_ = 0;
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 Index::nlist() const {
+inline ::PROTOBUF_NAMESPACE_ID::int32 Index::nlist() const {
   // @@protoc_insertion_point(field_get:milvus.grpc.Index.nlist)
   return nlist_;
 }
-inline void Index::set_nlist(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline void Index::set_nlist(::PROTOBUF_NAMESPACE_ID::int32 value) {
   
   nlist_ = value;
   // @@protoc_insertion_point(field_set:milvus.grpc.Index.nlist)
