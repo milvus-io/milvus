@@ -545,7 +545,7 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "_reply\030\002 \001(\010\"M\n\rTableRowCount\022#\n\006status\030"
   "\001 \001(\0132\023.milvus.grpc.Status\022\027\n\017table_row_"
   "count\030\002 \001(\003\"\026\n\007Command\022\013\n\003cmd\030\001 \001(\t\"X\n\005I"
-  "ndex\022\022\n\nindex_type\030\001 \001(\005\022\r\n\005nlist\030\002 \001(\003\022"
+  "ndex\022\022\n\nindex_type\030\001 \001(\005\022\r\n\005nlist\030\002 \001(\005\022"
   "\027\n\017index_file_size\030\003 \001(\005\022\023\n\013metric_type\030"
   "\004 \001(\005\"[\n\nIndexParam\022*\n\ntable_name\030\001 \001(\0132"
   "\026.milvus.grpc.TableName\022!\n\005index\030\002 \001(\0132\022"
@@ -5268,16 +5268,16 @@ Index::Index(const Index& from)
   : ::PROTOBUF_NAMESPACE_ID::Message(),
       _internal_metadata_(nullptr) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
-  ::memcpy(&nlist_, &from.nlist_,
+  ::memcpy(&index_type_, &from.index_type_,
     static_cast<size_t>(reinterpret_cast<char*>(&metric_type_) -
-    reinterpret_cast<char*>(&nlist_)) + sizeof(metric_type_));
+    reinterpret_cast<char*>(&index_type_)) + sizeof(metric_type_));
   // @@protoc_insertion_point(copy_constructor:milvus.grpc.Index)
 }
 
 void Index::SharedCtor() {
-  ::memset(&nlist_, 0, static_cast<size_t>(
+  ::memset(&index_type_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&metric_type_) -
-      reinterpret_cast<char*>(&nlist_)) + sizeof(metric_type_));
+      reinterpret_cast<char*>(&index_type_)) + sizeof(metric_type_));
 }
 
 Index::~Index() {
@@ -5303,9 +5303,9 @@ void Index::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  ::memset(&nlist_, 0, static_cast<size_t>(
+  ::memset(&index_type_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&metric_type_) -
-      reinterpret_cast<char*>(&nlist_)) + sizeof(metric_type_));
+      reinterpret_cast<char*>(&index_type_)) + sizeof(metric_type_));
   _internal_metadata_.Clear();
 }
 
@@ -5324,7 +5324,7 @@ const char* Index::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::inte
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 nlist = 2;
+      // int32 nlist = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
           nlist_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -5388,12 +5388,12 @@ bool Index::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 nlist = 2;
+      // int32 nlist = 2;
       case 2: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                   ::PROTOBUF_NAMESPACE_ID::int32, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT32>(
                  input, &nlist_)));
         } else {
           goto handle_unusual;
@@ -5459,9 +5459,9 @@ void Index::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32(1, this->index_type(), output);
   }
 
-  // int64 nlist = 2;
+  // int32 nlist = 2;
   if (this->nlist() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->nlist(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32(2, this->nlist(), output);
   }
 
   // int32 index_file_size = 3;
@@ -5492,9 +5492,9 @@ void Index::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(1, this->index_type(), target);
   }
 
-  // int64 nlist = 2;
+  // int32 nlist = 2;
   if (this->nlist() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->nlist(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(2, this->nlist(), target);
   }
 
   // int32 index_file_size = 3;
@@ -5528,18 +5528,18 @@ size_t Index::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // int64 nlist = 2;
-  if (this->nlist() != 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
-        this->nlist());
-  }
-
   // int32 index_type = 1;
   if (this->index_type() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
         this->index_type());
+  }
+
+  // int32 nlist = 2;
+  if (this->nlist() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
+        this->nlist());
   }
 
   // int32 index_file_size = 3;
@@ -5583,11 +5583,11 @@ void Index::MergeFrom(const Index& from) {
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  if (from.nlist() != 0) {
-    set_nlist(from.nlist());
-  }
   if (from.index_type() != 0) {
     set_index_type(from.index_type());
+  }
+  if (from.nlist() != 0) {
+    set_nlist(from.nlist());
   }
   if (from.index_file_size() != 0) {
     set_index_file_size(from.index_file_size());
@@ -5618,8 +5618,8 @@ bool Index::IsInitialized() const {
 void Index::InternalSwap(Index* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
-  swap(nlist_, other->nlist_);
   swap(index_type_, other->index_type_);
+  swap(nlist_, other->nlist_);
   swap(index_file_size_, other->index_file_size_);
   swap(metric_type_, other->metric_type_);
 }

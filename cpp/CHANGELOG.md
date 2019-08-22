@@ -41,6 +41,9 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
+- MS-338 - NewAPI: refine code to support CreateIndex
+- MS-339 - NewAPI: refine code to support DropIndex
+- MS-340 - NewAPI: implement DescribeIndex
 
 ## Task
 - MS-297 - disable mysql unit test
