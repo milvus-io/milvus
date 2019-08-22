@@ -93,6 +93,17 @@ ResourceMgr::Dump() {
     return str;
 }
 
+std::string
+ResourceMgr::DumpTaskTables() {
+    std::stringstream ss;
+    ss << ">>>>>>>>>>>>>>>ResourceMgr::DumpTaskTable<<<<<<<<<<<<<<<" << std::endl;
+    for (auto &resource : resources_) {
+        ss << resource->Dump() << std::endl;
+        ss << resource->task_table().Dump() << std::endl;
+    }
+    return ss.str();
+}
+
 void
 ResourceMgr::event_process() {
     while (running_) {
