@@ -48,12 +48,14 @@ static const char* CONFIG_METRIC_COLLECTOR = "collector";
 static const char* CONFIG_PROMETHEUS = "prometheus_config";
 static const char* CONFIG_METRIC_PROMETHEUS_PORT = "port";
 
-static const char* CONFIG_ENGINE = "engine_config";
-static const char* CONFIG_NPROBE = "nprobe";
-static const char* CONFIG_NLIST = "nlist";
-static const char* CONFIG_DCBT = "use_blas_threshold";
-static const char* CONFIG_METRICTYPE = "metric_type";
-static const char* CONFIG_OMP_THREAD_NUM = "omp_thread_num";
+static const std::string CONFIG_ENGINE = "engine_config";
+static const std::string CONFIG_NPROBE = "nprobe";
+static const std::string CONFIG_NLIST = "nlist";
+static const std::string CONFIG_DCBT = "use_blas_threshold";
+static const std::string CONFIG_METRICTYPE = "metric_type";
+static const std::string CONFIG_OMP_THREAD_NUM = "omp_thread_num";
+static const std::string CONFIG_USE_HYBRID_INDEX = "use_hybrid_index";
+static const std::string CONFIG_HYBRID_INDEX_GPU = "hybrid_index_gpu";
 
 class ServerConfig {
  public:

@@ -1810,7 +1810,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 Query cleanUpFilesWithTTLQuery = connectionPtr->query();
                 cleanUpFilesWithTTLQuery << "SELECT file_id " <<
                                          "FROM TableFiles " <<
-                                         "WHERE table_id = " << table_id << ";";
+                                         "WHERE table_id = " << quote << table_id << ";";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
@@ -1821,6 +1821,10 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 }
             }
         }
+    } catch (const BadQuery &er) {
+        // Handle any query errors
+        ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
+        return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
     } catch (const Exception &er) {
         // Catch-all for any other MySQL++ exceptions
         ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL" << ": " << er.what();

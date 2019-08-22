@@ -4,9 +4,12 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
+#include <gtest/gtest-death-test.h>
 
 #include "config/IConfigMgr.h"
 #include "server/ServerConfig.h"
+#include "utils/CommonUtil.h"
+#include "utils/ValidationUtil.h"
 
 using namespace zilliz::milvus;
 
@@ -14,6 +17,10 @@ namespace {
 
 static const char* CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
 static const char* LOG_FILE_PATH = "./milvus/conf/log_config.conf";
+
+static constexpr uint64_t KB = 1024;
+static constexpr uint64_t MB = KB*1024;
+static constexpr uint64_t GB = MB*1024;
 
 }
 
@@ -103,6 +110,43 @@ TEST(ConfigTest, SERVER_CONFIG_TEST) {
 
     config.PrintAll();
 
-    const server::ServerConfig const_config = config;
-    server::ConfigNode node = const_config.GetConfig("aaa");
+    unsigned long total_mem = 0, free_mem = 0;
+    server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
+
+    size_t gpu_mem = 0;
+    server::ValidationUtil::GetGpuMemory(0, gpu_mem);
+
+    server::ConfigNode& server_config = config.GetConfig("server_config");
+    server::ConfigNode& db_config = config.GetConfig("db_config");
+    server::ConfigNode& cache_config = config.GetConfig(server::CONFIG_CACHE);
+    cache_config.SetValue(server::CACHE_FREE_PERCENT, "2.0");
+    err = config.ValidateConfig();
+    ASSERT_NE(err, server::SERVER_SUCCESS);
+
+    size_t cache_cap = 16;
+    size_t insert_buffer_size = (total_mem - cache_cap*GB + 1*GB)/GB;
+    db_config.SetValue(server::CONFIG_DB_INSERT_BUFFER_SIZE, std::to_string(insert_buffer_size));
+    cache_config.SetValue(server::CONFIG_CPU_CACHE_CAPACITY, std::to_string(cache_cap));
+    err = config.ValidateConfig();
+    ASSERT_NE(err, server::SERVER_SUCCESS);
+
+    cache_cap = total_mem/GB + 2;
+    cache_config.SetValue(server::CONFIG_CPU_CACHE_CAPACITY, std::to_string(cache_cap));
+    err = config.ValidateConfig();
+    ASSERT_NE(err, server::SERVER_SUCCESS);
+
+    size_t index_building_threshold = (gpu_mem + 1*MB)/MB;
+    db_config.SetValue(server::CONFIG_DB_INDEX_TRIGGER_SIZE,
+            std::to_string(index_building_threshold));
+    err = config.ValidateConfig();
+    ASSERT_NE(err, server::SERVER_SUCCESS);
+
+    insert_buffer_size = total_mem/GB + 2;
+    db_config.SetValue(server::CONFIG_DB_INSERT_BUFFER_SIZE, std::to_string(insert_buffer_size));
+    err = config.ValidateConfig();
+    ASSERT_NE(err, server::SERVER_SUCCESS);
+
+    server_config.SetValue(server::CONFIG_GPU_INDEX, "9999");
+    err = config.ValidateConfig();
+    ASSERT_NE(err, server::SERVER_SUCCESS);
 }

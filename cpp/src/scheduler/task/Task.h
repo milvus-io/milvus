@@ -35,6 +35,9 @@ public:
     virtual void
     Execute() = 0;
 
+    virtual TaskPtr
+    Clone() = 0;
+
 public:
     std::vector<SearchContextPtr> search_contexts_;
     ScheduleTaskPtr task_;

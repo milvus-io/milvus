@@ -60,6 +60,7 @@ void CollectQueryMetrics(double total_time, size_t nq) {
     server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq) / total_time);
 }
 
+#if 0
 void CollectFileMetrics(int file_type, size_t file_size, double total_time) {
     switch(file_type) {
         case meta::TableFileSchema::RAW:
@@ -79,6 +80,7 @@ void CollectFileMetrics(int file_type, size_t file_size, double total_time) {
         }
     }
 }
+#endif
 }
 
 
@@ -105,13 +107,18 @@ Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& date
     //dates partly delete files of the table but currently we don't support
     ENGINE_LOG_DEBUG << "Prepare to delete table " << table_id;
 
-    mem_mgr_->EraseMemVector(table_id); //not allow insert
-    meta_ptr_->DeleteTable(table_id); //soft delete table
+    if (dates.empty()) {
+        mem_mgr_->EraseMemVector(table_id); //not allow insert
+        meta_ptr_->DeleteTable(table_id); //soft delete table
 
-    //scheduler will determine when to delete table files
-    TaskScheduler& scheduler = TaskScheduler::GetInstance();
-    DeleteContextPtr context = std::make_shared<DeleteContext>(table_id, meta_ptr_);
-    scheduler.Schedule(context);
+        //scheduler will determine when to delete table files
+        TaskScheduler& scheduler = TaskScheduler::GetInstance();
+        DeleteContextPtr context = std::make_shared<DeleteContext>(table_id, meta_ptr_);
+        scheduler.Schedule(context);
+    } else {
+        meta_ptr_->DropPartitionsByDates(table_id, dates);
+    }
+
 
     return Status::OK();
 }
@@ -205,7 +212,7 @@ Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint6
 
 Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
-    ENGINE_LOG_DEBUG << "Query by vectors";
+    ENGINE_LOG_DEBUG << "Query by vectors " << table_id;
 
     //get all table files from table
     meta::DatePartionedTableFilesSchema files;
@@ -568,7 +575,7 @@ Status DBImpl::BuildIndex(const std::string& table_id) {
     int times = 1;
 
     while (has) {
-        ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
+        ENGINE_LOG_DEBUG << "Non index files detected in " << table_id << "! Will build index " << times;
         meta_ptr_->UpdateTableFilesToIndex(table_id);
         /* StartBuildIndexTask(true); */
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10*1000, times*100)));

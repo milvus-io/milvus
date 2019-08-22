@@ -16,8 +16,8 @@ std::ostream &operator<<(std::ostream &out, const CpuResource &resource) {
     return out;
 }
 
-CpuResource::CpuResource(std::string name)
-    : Resource(std::move(name), ResourceType::CPU) {}
+CpuResource::CpuResource(std::string name, bool enable_loader, bool enable_executor)
+    : Resource(std::move(name), ResourceType::CPU, enable_loader, enable_executor) {}
 
 void CpuResource::LoadFile(TaskPtr task) {
     task->Load(LoadType::DISK2CPU, 0);
