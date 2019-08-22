@@ -265,13 +265,26 @@ GrpcClient::PreloadTable(milvus::grpc::TableName &table_name) {
 }
 
 Status
-GrpcClient::Disconnect() {
-    stub_.release();
+GrpcClient::DeleteByRange(grpc::DeleteByRangeParam &delete_by_range_param) {
+    ClientContext context;
+    ::milvus::grpc::Status response;
+    ::grpc::Status grpc_status = stub_->DeleteByRange(&context, delete_by_range_param, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "DeleteByRange gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (response.error_code() != grpc::SUCCESS) {
+        std::cerr << response.reason() << std::endl;
+        return Status(StatusCode::ServerFailed, response.reason());
+    }
     return Status::OK();
 }
 
 Status
-GrpcClient::DeleteByRange(grpc::DeleteByRangeParam &delete_by_range_param) {
+GrpcClient::Disconnect() {
+    stub_.release();
     return Status::OK();
 }
 

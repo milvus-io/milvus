@@ -16,7 +16,7 @@ namespace engine {
 class GpuResource : public Resource {
 public:
     explicit
-    GpuResource(std::string name);
+    GpuResource(std::string name, bool enable_loader, bool enable_executor);
 
     inline std::string
     Dump() const override {

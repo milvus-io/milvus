@@ -16,7 +16,7 @@ namespace engine {
 class DiskResource : public Resource {
 public:
     explicit
-    DiskResource(std::string name);
+    DiskResource(std::string name, bool enable_loader, bool enable_executor);
 
     inline std::string
     Dump() const override {

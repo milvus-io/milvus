@@ -717,6 +717,73 @@ CmdTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+DeleteByRangeTask::DeleteByRangeTask(const ::milvus::grpc::DeleteByRangeParam &delete_by_range_param)
+        : GrpcBaseTask(DDL_DML_TASK_GROUP),
+          delete_by_range_param_(delete_by_range_param){
+}
+
+BaseTaskPtr
+DeleteByRangeTask::Create(const ::milvus::grpc::DeleteByRangeParam &delete_by_range_param) {
+    return std::shared_ptr<GrpcBaseTask>(new DeleteByRangeTask(delete_by_range_param));
+}
+
+ServerError
+DeleteByRangeTask::OnExecute() {
+    try {
+        TimeRecorder rc("DeleteByRangeTask");
+
+        //step 1: check arguments
+        std::string table_name = delete_by_range_param_.table_name();
+        ServerError res = ValidationUtil::ValidateTableName(table_name);
+        if (res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid table name: " + table_name);
+        }
+
+        //step 2: check table existence
+        engine::meta::TableSchema table_info;
+        table_info.table_id_ = table_name;
+        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
+        if (!stat.ok()) {
+            if (stat.IsNotFound()) {
+                return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name + " not exists");
+            } else {
+                return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            }
+        }
+
+        rc.ElapseFromBegin("check validation");
+
+        //step 3: check date range, and convert to db dates
+        std::vector<DB_DATE> dates;
+        ServerError error_code = SERVER_SUCCESS;
+        std::string error_msg;
+
+        std::vector<::milvus::grpc::Range> range_array;
+        range_array.emplace_back(delete_by_range_param_.range());
+        ConvertTimeRangeToDBDates(range_array, dates, error_code, error_msg);
+        if (error_code != SERVER_SUCCESS) {
+            return SetError(error_code, error_msg);
+        }
+
+#ifdef MILVUS_ENABLE_PROFILING
+        std::string fname = "/tmp/search_nq_" + std::to_string(this->record_array_.size()) +
+                            "_top_" + std::to_string(this->top_k_) + "_" +
+                            GetCurrTimeStr() + ".profiling";
+        ProfilerStart(fname.c_str());
+#endif
+        engine::Status status = DBWrapper::DB()->DeleteTable(table_name, dates);
+        if (!status.ok()) {
+            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+        }
+
+    } catch (std::exception &ex) {
+        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+    }
+    
+    return SERVER_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 PreloadTableTask::PreloadTableTask(const std::string &table_name)
         : GrpcBaseTask(DDL_DML_TASK_GROUP),
           table_name_(table_name) {

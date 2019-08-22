@@ -91,9 +91,10 @@ zilliz::milvus::engine::DBMetaOptions DISABLED_MySQLTest::getDBMetaOptions() {
     zilliz::milvus::engine::DBMetaOptions options;
     options.path = "/tmp/milvus_test";
     options.backend_uri = DBTestEnvironment::getURI();
-    
+
     if(options.backend_uri.empty()) {
-        throw std::exception();
+//        throw std::exception();
+        options.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
     }
 
     return options;
@@ -123,6 +124,10 @@ int main(int argc, char **argv) {
     if (argc > 1) {
         uri = argv[1];
     }
+
+//    if(uri.empty()) {
+//        uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
+//    }
 //    std::cout << uri << std::endl;
     ::testing::AddGlobalTestEnvironment(new DBTestEnvironment);
     return RUN_ALL_TESTS();

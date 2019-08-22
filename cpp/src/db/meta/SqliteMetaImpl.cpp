@@ -311,6 +311,7 @@ Status SqliteMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) 
             has = true;
 
             int raw_count = 0, new_count = 0, new_merge_count = 0, new_index_count = 0, to_index_count = 0;
+            std::vector<std::string> file_ids;
             for (auto &file : selected) {
                 switch (std::get<1>(file)) {
                     case (int) TableFileSchema::RAW:

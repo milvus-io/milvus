@@ -225,4 +225,3 @@ TEST(UtilTest, TIMERECORDER_TEST) {
         rc.RecordSection("end");
     }
 }
-
