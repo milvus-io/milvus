@@ -26,7 +26,7 @@ namespace {
     constexpr int64_t NQ = 10;
     constexpr int64_t TOP_K = 10;
     constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    constexpr int64_t ADD_VECTOR_LOOP = 1;
+    constexpr int64_t ADD_VECTOR_LOOP = 10;
     constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
@@ -86,9 +86,8 @@ namespace {
     }
 
     std::string GetTableName() {
-//        static std::string s_id(CurrentTime());
-//        return "tbl_" + s_id;
-        return "test";
+        static std::string s_id(CurrentTime());
+        return "tbl_" + s_id;
     }
 
     TableSchema BuildTableSchema() {
@@ -272,6 +271,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//search vectors without index
         Sleep(2);
+
+        int64_t row_count = 0;
+        Status stat = conn->CountTable(TABLE_NAME, row_count);
+        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
         DoSearch(conn, search_record_array, "Search without index");
     }
 
@@ -303,6 +306,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {//delete index
         Status stat = conn->DropIndex(TABLE_NAME);
         std::cout << "DropIndex function call status: " << stat.ToString() << std::endl;
+
+        int64_t row_count = 0;
+        stat = conn->CountTable(TABLE_NAME, row_count);
+        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
     }
 
     {//delete by range

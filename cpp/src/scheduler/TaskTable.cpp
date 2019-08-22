@@ -23,6 +23,35 @@ get_now_timestamp() {
     return millis;
 }
 
+std::string
+ToString(TaskTableItemState state) {
+    switch (state) {
+        case TaskTableItemState::INVALID: return "INVALID";
+        case TaskTableItemState::START: return "START";
+        case TaskTableItemState::LOADING: return "LOADING";
+        case TaskTableItemState::LOADED: return "LOADED";
+        case TaskTableItemState::EXECUTING: return "EXECUTING";
+        case TaskTableItemState::EXECUTED: return "EXECUTED";
+        case TaskTableItemState::MOVING: return "MOVING";
+        case TaskTableItemState::MOVED: return "MOVED";
+        default: return "";
+    }
+}
+
+std::string
+ToString(const TaskTimestamp &timestamp) {
+    std::stringstream ss;
+    ss << "<start=" << timestamp.start;
+    ss << ", load=" << timestamp.load;
+    ss << ", loaded=" << timestamp.loaded;
+    ss << ", execute=" << timestamp.execute;
+    ss << ", executed=" << timestamp.executed;
+    ss << ", move=" << timestamp.move;
+    ss << ", moved=" << timestamp.moved;
+    ss << ">";
+    return ss.str();
+}
+
 bool
 TaskTableItem::Load() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -90,6 +119,16 @@ TaskTableItem::Moved() {
     return false;
 }
 
+std::string
+TaskTableItem::Dump() {
+    std::stringstream ss;
+    ss << "<id=" << id;
+    ss << ", task=" << task;
+    ss << ", state=" << ToString(state);
+    ss << ", timestamp=" << ToString(timestamp);
+    ss << ">";
+    return ss.str();
+}
 
 void
 TaskTable::Put(TaskPtr task) {
@@ -98,6 +137,7 @@ TaskTable::Put(TaskPtr task) {
     item->id = id_++;
     item->task = std::move(task);
     item->state = TaskTableItemState::START;
+    item->timestamp.start = get_now_timestamp();
     table_.push_back(item);
     if (subscriber_) {
         subscriber_();
@@ -112,6 +152,7 @@ TaskTable::Put(std::vector<TaskPtr> &tasks) {
         item->id = id_++;
         item->task = std::move(task);
         item->state = TaskTableItemState::START;
+        item->timestamp.start = get_now_timestamp();
         table_.push_back(item);
     }
     if (subscriber_) {
@@ -135,43 +176,12 @@ TaskTable::Clear() {
 //        table_.erase(table_.begin(), iterator);
 }
 
-std::string
-ToString(TaskTableItemState state) {
-    switch (state) {
-        case TaskTableItemState::INVALID: return "INVALID";
-        case TaskTableItemState::START: return "START";
-        case TaskTableItemState::LOADING: return "LOADING";
-        case TaskTableItemState::LOADED: return "LOADED";
-        case TaskTableItemState::EXECUTING: return "EXECUTING";
-        case TaskTableItemState::EXECUTED: return "EXECUTED";
-        case TaskTableItemState::MOVING: return "MOVING";
-        case TaskTableItemState::MOVED: return "MOVED";
-        default: return "";
-    }
-}
-
-std::string
-ToString(const TaskTimestamp &timestamp) {
-    std::stringstream ss;
-    ss << "<start=" << timestamp.start;
-    ss << ", load=" << timestamp.load;
-    ss << ", loaded=" << timestamp.loaded;
-    ss << ", execute=" << timestamp.execute;
-    ss << ", executed=" << timestamp.executed;
-    ss << ", move=" << timestamp.move;
-    ss << ", moved=" << timestamp.moved;
-    ss << ">";
-    return ss.str();
-}
 
 std::string
 TaskTable::Dump() {
     std::stringstream ss;
     for (auto &item : table_) {
-        ss << "<id=" << item->id;
-        ss << ", state=" << ToString(item->state);
-        ss << ", timestamp=" << ToString(item->timestamp);
-        ss << ">" << std::endl;
+        ss << item->Dump() << std::endl;
     }
     return ss.str();
 }
