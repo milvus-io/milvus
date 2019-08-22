@@ -46,7 +46,8 @@ public:
 
     double freemem_percent() const { return freemem_percent_; };
     void set_freemem_percent(double percent) { freemem_percent_ = percent; }
-    void set_gpu_ids(std::vector<uint64_t> gpu_ids) { gpu_ids_.assign(gpu_ids.begin(), gpu_ids.end()); }
+    void set_gpu_ids(std::vector<uint64_t>& gpu_ids) { gpu_ids_ = gpu_ids; }
+
     std::vector<uint64_t> gpu_ids() const { return gpu_ids_; }
 
     size_t size() const;

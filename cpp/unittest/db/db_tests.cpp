@@ -9,7 +9,6 @@
 #include "db/meta/MetaConsts.h"
 #include "db/Factories.h"
 #include "cache/CpuCacheMgr.h"
-#include "cache/GpuCacheMgr.h
 #include "utils/CommonUtil.h"
 
 #include <gtest/gtest.h>
@@ -438,9 +437,4 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     ConvertTimeRangeToDBDates(start_value, end_value, dates);
 
     db_->DeleteTable(TABLE_NAME, dates);
-}
-
-TEST_F(DBTest, GPU_CACHE_MGR_TEST) {
-    std::vector<uint64_t > gpu_ids = cache::
-    cache::CpuCacheMgr::GetInstance()->CacheUsage();
 }

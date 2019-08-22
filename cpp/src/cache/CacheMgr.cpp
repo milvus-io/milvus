@@ -56,6 +56,7 @@ engine::VecIndexPtr CacheMgr::GetIndex(const std::string& key) {
 }
 
 void CacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
+    std::cout << "dashalk\n";
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
@@ -128,6 +129,24 @@ void CacheMgr::SetCapacity(int64_t capacity) {
         return;
     }
     cache_->set_capacity(capacity);
+}
+
+std::vector<uint64_t> CacheMgr::GpuIds() const {
+    if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
+        std::vector<uint64_t> gpu_ids;
+        return gpu_ids;
+    }
+
+    return cache_->gpu_ids();
+}
+
+void CacheMgr::SetGpuIds(std::vector<uint64_t> gpu_ids){
+    if(cache_ == nullptr) {
+        SERVER_LOG_ERROR << "Cache doesn't exist";
+        return;
+    }
+    cache_->set_gpu_ids(gpu_ids);
 }
 
 }
