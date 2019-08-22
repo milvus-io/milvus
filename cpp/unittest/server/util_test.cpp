@@ -178,12 +178,15 @@ TEST(UtilTest, VALIDATE_TABLENAME_TEST) {
     res = server::ValidationUtil::ValidateTableName(table_name);
     ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
 
+    table_name = "_!@#!@";
+    res = server::ValidationUtil::ValidateTableName(table_name);
+    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+
     table_name = "中文";
     res = server::ValidationUtil::ValidateTableName(table_name);
     ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
 
-
-    table_name = std::string('a', 32768);
+    table_name = std::string(10000, 'a');
     res = server::ValidationUtil::ValidateTableName(table_name);
     ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
 }
@@ -202,5 +205,24 @@ TEST(UtilTest, VALIDATE_INDEXTYPE_TEST) {
         ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType(i), server::SERVER_SUCCESS);
     }
     ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType((int)engine::EngineType::MAX_VALUE + 1), server::SERVER_INVALID_INDEX_TYPE);
+}
+
+TEST(ValidationUtilTest, ValidateGpuTest) {
+    ASSERT_EQ(server::ValidationUtil::ValidateGpuIndex(0), server::SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateGpuIndex(100), server::SERVER_SUCCESS);
+
+    size_t memory = 0;
+    ASSERT_EQ(server::ValidationUtil::GetGpuMemory(0, memory), server::SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::GetGpuMemory(100, memory), server::SERVER_SUCCESS);
+}
+
+TEST(UtilTest, TIMERECORDER_TEST) {
+    for(int64_t log_level = 0; log_level <= 6; log_level++) {
+        if(log_level == 5) {
+            continue; //skip fatal
+        }
+        server::TimeRecorder rc("time", log_level);
+        rc.RecordSection("end");
+    }
 }
 

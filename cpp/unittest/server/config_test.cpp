@@ -87,6 +87,9 @@ TEST(ConfigTest, SERVER_CONFIG_TEST) {
     server::ServerError err = config.LoadConfigFile(CONFIG_FILE_PATH);
     ASSERT_EQ(err, server::SERVER_SUCCESS);
 
+    err = server::ServerConfig::GetInstance().ValidateConfig();
+    ASSERT_EQ(err, server::SERVER_SUCCESS);
+
     server::ConfigNode node1 = config.GetConfig("server_config");
     server::ConfigNode& node2 = config.GetConfig("cache_config");
     node1.Combine(node2);

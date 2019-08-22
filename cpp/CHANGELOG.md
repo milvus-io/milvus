@@ -61,6 +61,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-257 - Update bzip2 download url
 - MS-288 - Update compile scripts
 - MS-330 - Stability test failed caused by server core dumped
+- MS-347 - Build index hangs again
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
