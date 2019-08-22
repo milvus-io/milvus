@@ -5,6 +5,8 @@
  ******************************************************************************/
 #pragma once
 
+#include "Constants.h"
+
 #include <string>
 #include <memory>
 #include <map>
@@ -15,10 +17,6 @@ namespace milvus {
 namespace engine {
 
 class Env;
-
-static constexpr uint64_t ONE_KB = 1024;
-static constexpr uint64_t ONE_MB = ONE_KB*ONE_KB;
-static constexpr uint64_t ONE_GB = ONE_KB*ONE_MB;
 
 static const char* ARCHIVE_CONF_DISK = "disk";
 static const char* ARCHIVE_CONF_DAYS = "days";
