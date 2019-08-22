@@ -3,36 +3,29 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-
-
 #include "Metrics.h"
 #include "PrometheusMetrics.h"
+
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 
 MetricsBase &
-Metrics::CreateMetricsCollector(MetricCollectorType collector_type) {
-    switch (collector_type) {
-        case MetricCollectorType::PROMETHEUS:
-            static PrometheusMetrics instance = PrometheusMetrics::GetInstance();
-            return instance;
-        default:return MetricsBase::GetInstance();
-    }
+Metrics::GetInstance() {
+    static MetricsBase &instance = CreateMetricsCollector();
+    return instance;
 }
 
 MetricsBase &
-Metrics::GetInstance() {
+Metrics::CreateMetricsCollector() {
     ConfigNode &config = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);
-    std::string collector_typr_str = config.GetValue(CONFIG_METRIC_COLLECTOR);
+    std::string collector_type_str = config.GetValue(CONFIG_METRIC_COLLECTOR);
 
-    if (collector_typr_str == "prometheus") {
-        return CreateMetricsCollector(MetricCollectorType::PROMETHEUS);
-    } else if (collector_typr_str == "zabbix") {
-        return CreateMetricsCollector(MetricCollectorType::ZABBIX);
+    if (collector_type_str == "prometheus") {
+        return PrometheusMetrics::GetInstance();
     } else {
-        return CreateMetricsCollector(MetricCollectorType::INVALID);
+        return MetricsBase::GetInstance();
     }
 }
 
