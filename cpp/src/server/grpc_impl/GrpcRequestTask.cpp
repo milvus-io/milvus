@@ -227,12 +227,32 @@ CreateIndexTask::OnExecute() {
             return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
         }
 
+        res = ValidationUtil::ValidateTableIndexType(index_param_.mutable_index()->index_type());
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid index type: " + std::to_string(index_param_.mutable_index()->index_type()));
+        }
+
+        res = ValidationUtil::ValidateTableIndexNlist(index_param_.mutable_index()->nlist());
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid index nlist: " + std::to_string(index_param_.mutable_index()->nlist()));
+        }
+
+        res = ValidationUtil::ValidateTableIndexMetricType(index_param_.mutable_index()->metric_type());
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid index metric type: " + std::to_string(index_param_.mutable_index()->metric_type()));
+        }
+
+        res = ValidationUtil::ValidateTableIndexFileSize(index_param_.mutable_index()->index_file_size());
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid index file size: " + std::to_string(index_param_.mutable_index()->index_file_size()));
+        }
+
         //step 2: check table existence
         engine::TableIndex index;
         index.engine_type_ = index_param_.mutable_index()->index_type();
-        index.nlist = index_param_.mutable_index()->nlist();
-        index.index_file_size = index_param_.mutable_index()->index_file_size();
-        index.metric_type = index_param_.mutable_index()->metric_type();
+        index.nlist_ = index_param_.mutable_index()->nlist();
+        index.index_file_size_ = index_param_.mutable_index()->index_file_size();
+        index.metric_type_ = index_param_.mutable_index()->metric_type();
         stat = DBWrapper::DB()->CreateIndex(table_name_, index);
         if (!stat.ok()) {
             return SetError(SERVER_BUILD_INDEX_ERROR, "Engine failed: " + stat.ToString());
@@ -855,9 +875,9 @@ DescribeIndexTask::OnExecute() {
 
         index_param_.mutable_table_name()->set_table_name(table_name_);
         index_param_.mutable_index()->set_index_type(index.engine_type_);
-        index_param_.mutable_index()->set_nlist(index.nlist);
-        index_param_.mutable_index()->set_index_file_size(index.index_file_size);
-        index_param_.mutable_index()->set_metric_type(index.metric_type);
+        index_param_.mutable_index()->set_nlist(index.nlist_);
+        index_param_.mutable_index()->set_index_file_size(index.index_file_size_);
+        index_param_.mutable_index()->set_metric_type(index.metric_type_);
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception &ex) {
