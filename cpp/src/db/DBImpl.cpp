@@ -60,27 +60,6 @@ void CollectQueryMetrics(double total_time, size_t nq) {
     server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq) / total_time);
 }
 
-#if 0
-void CollectFileMetrics(int file_type, size_t file_size, double total_time) {
-    switch(file_type) {
-        case meta::TableFileSchema::RAW:
-        case meta::TableFileSchema::TO_INDEX: {
-            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-            server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size);
-            server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size);
-            server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size);
-            break;
-        }
-        default: {
-            server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
-            server::Metrics::GetInstance().IndexFileSizeHistogramObserve(file_size);
-            server::Metrics::GetInstance().IndexFileSizeTotalIncrement(file_size);
-            server::Metrics::GetInstance().IndexFileSizeGaugeSet(file_size);
-            break;
-        }
-    }
-}
-#endif
 }
 
 
@@ -473,11 +452,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     }
 
     //step 4: update table files state
-    if (index_size >= options_.index_trigger_size) {
-        table_file.file_type_ = meta::TableFileSchema::TO_INDEX;
-    } else {
-        table_file.file_type_ = meta::TableFileSchema::RAW;
-    }
+    table_file.file_type_ = meta::TableFileSchema::RAW;
     table_file.file_size_ = index->PhysicalSize();
     table_file.row_count_ = index->Count();
     updated.push_back(table_file);
