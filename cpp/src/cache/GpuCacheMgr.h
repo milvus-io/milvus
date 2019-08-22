@@ -5,6 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "CacheMgr.h"
+#include <unordered_map>
 
 namespace zilliz {
 namespace milvus {
@@ -15,12 +16,23 @@ private:
     GpuCacheMgr();
 
 public:
-    static CacheMgr* GetInstance() {
-        static GpuCacheMgr s_mgr;
-        return &s_mgr;
+    static CacheMgr* GetInstance(uint64_t gpu_id) {
+        if (!instance_[gpu_id]) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if(!instance_[gpu_id]) {
+                instance_.insert(std::pair<uint64_t, GpuCacheMgr* >(gpu_id, new GpuCacheMgr()));
+            }
+        }
+        return instance_.at(gpu_id);
+//        static GpuCacheMgr s_mgr;
+//        return &s_mgr;
     }
 
     void InsertItem(const std::string& key, const DataObjPtr& data) override;
+
+private:
+    static std::mutex mutex_;
+    static std::unordered_map<uint64_t, GpuCacheMgr* > instance_;
 };
 
 }
