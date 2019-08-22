@@ -46,7 +46,7 @@ DataObjPtr CacheMgr::GetItem(const std::string& key) {
     return cache_->get(key);
 }
 
-engine::Index_ptr CacheMgr::GetIndex(const std::string& key) {
+engine::VecIndexPtr CacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
     if(obj != nullptr) {
         return obj->data();
@@ -65,7 +65,7 @@ void CacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
     server::Metrics::GetInstance().CacheAccessTotalIncrement();
 }
 
-void CacheMgr::InsertItem(const std::string& key, const engine::Index_ptr& index) {
+void CacheMgr::InsertItem(const std::string& key, const engine::VecIndexPtr& index) {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;

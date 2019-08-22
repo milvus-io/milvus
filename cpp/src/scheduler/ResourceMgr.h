@@ -70,6 +70,9 @@ public:
     std::string
     Dump();
 
+    std::string
+    DumpTaskTables();
+
 private:
     void
     event_process();

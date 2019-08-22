@@ -8,11 +8,87 @@
 #include "event/TaskTableUpdatedEvent.h"
 #include <vector>
 #include <sstream>
+#include <ctime>
 
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
+
+uint64_t
+get_now_timestamp() {
+    std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
+    auto duration = now.time_since_epoch();
+    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+    return millis;
+}
+
+bool
+TaskTableItem::Load() {
+    std::unique_lock<std::mutex> lock(mutex);
+    if (state == TaskTableItemState::START) {
+        state = TaskTableItemState::LOADING;
+        lock.unlock();
+        timestamp.load = get_now_timestamp();
+        return true;
+    }
+    return false;
+}
+bool
+TaskTableItem::Loaded() {
+    std::unique_lock<std::mutex> lock(mutex);
+    if (state == TaskTableItemState::LOADING) {
+        state = TaskTableItemState::LOADED;
+        lock.unlock();
+        timestamp.loaded = get_now_timestamp();
+        return true;
+    }
+    return false;
+}
+bool
+TaskTableItem::Execute() {
+    std::unique_lock<std::mutex> lock(mutex);
+    if (state == TaskTableItemState::LOADED) {
+        state = TaskTableItemState::EXECUTING;
+        lock.unlock();
+        timestamp.execute = get_now_timestamp();
+        return true;
+    }
+    return false;
+}
+bool
+TaskTableItem::Executed() {
+    std::unique_lock<std::mutex> lock(mutex);
+    if (state == TaskTableItemState::EXECUTING) {
+        state = TaskTableItemState::EXECUTED;
+        lock.unlock();
+        timestamp.executed = get_now_timestamp();
+        return true;
+    }
+    return false;
+}
+bool
+TaskTableItem::Move() {
+    std::unique_lock<std::mutex> lock(mutex);
+    if (state == TaskTableItemState::LOADED) {
+        state = TaskTableItemState::MOVING;
+        lock.unlock();
+        timestamp.move = get_now_timestamp();
+        return true;
+    }
+    return false;
+}
+bool
+TaskTableItem::Moved() {
+    std::unique_lock<std::mutex> lock(mutex);
+    if (state == TaskTableItemState::MOVING) {
+        state = TaskTableItemState::MOVED;
+        lock.unlock();
+        timestamp.moved = get_now_timestamp();
+        return true;
+    }
+    return false;
+}
 
 
 void
@@ -59,78 +135,6 @@ TaskTable::Clear() {
 //        table_.erase(table_.begin(), iterator);
 }
 
-bool
-TaskTable::Move(uint64_t index) {
-    auto &task = table_[index];
-
-    std::lock_guard<std::mutex> lock(task->mutex);
-    if (task->state == TaskTableItemState::LOADED) {
-        task->state = TaskTableItemState::MOVING;
-        return true;
-    }
-    return false;
-}
-
-bool
-TaskTable::Moved(uint64_t index) {
-    auto &task = table_[index];
-
-    std::lock_guard<std::mutex> lock(task->mutex);
-    if (task->state == TaskTableItemState::MOVING) {
-        task->state = TaskTableItemState::MOVED;
-        return true;
-    }
-    return false;
-}
-
-bool
-TaskTable::Load(uint64_t index) {
-    auto &task = table_[index];
-
-    std::lock_guard<std::mutex> lock(task->mutex);
-    if (task->state == TaskTableItemState::START) {
-        task->state = TaskTableItemState::LOADING;
-        return true;
-    }
-    return false;
-}
-
-bool
-TaskTable::Loaded(uint64_t index) {
-    auto &task = table_[index];
-
-    std::lock_guard<std::mutex> lock(task->mutex);
-    if (task->state == TaskTableItemState::LOADING) {
-        task->state = TaskTableItemState::LOADED;
-        return true;
-    }
-    return false;
-}
-
-bool
-TaskTable::Execute(uint64_t index) {
-    auto &task = table_[index];
-
-    std::lock_guard<std::mutex> lock(task->mutex);
-    if (task->state == TaskTableItemState::LOADED) {
-        task->state = TaskTableItemState::EXECUTING;
-        return true;
-    }
-    return false;
-}
-
-bool
-TaskTable::Executed(uint64_t index) {
-    auto &task = table_[index];
-
-    std::lock_guard<std::mutex> lock(task->mutex);
-    if (task->state == TaskTableItemState::EXECUTING) {
-        task->state = TaskTableItemState::EXECUTED;
-        return true;
-    }
-    return false;
-}
-
 std::string
 ToString(TaskTableItemState state) {
     switch (state) {
@@ -147,11 +151,26 @@ ToString(TaskTableItemState state) {
 }
 
 std::string
+ToString(const TaskTimestamp &timestamp) {
+    std::stringstream ss;
+    ss << "<start=" << timestamp.start;
+    ss << ", load=" << timestamp.load;
+    ss << ", loaded=" << timestamp.loaded;
+    ss << ", execute=" << timestamp.execute;
+    ss << ", executed=" << timestamp.executed;
+    ss << ", move=" << timestamp.move;
+    ss << ", moved=" << timestamp.moved;
+    ss << ">";
+    return ss.str();
+}
+
+std::string
 TaskTable::Dump() {
     std::stringstream ss;
     for (auto &item : table_) {
-        ss << "<" << item->id;
-        ss << ", " << ToString(item->state);
+        ss << "<id=" << item->id;
+        ss << ", state=" << ToString(item->state);
+        ss << ", timestamp=" << ToString(item->timestamp);
         ss << ">" << std::endl;
     }
     return ss.str();
