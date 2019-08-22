@@ -113,7 +113,6 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
         if (type == LoadType::DISK2CPU) {
             index_engine_->Load();
         } else if (type == LoadType::CPU2GPU) {
-            index_engine_->Load();
             index_engine_->CopyToGpu(device_id);
         } else if (type == LoadType::GPU2CPU) {
             index_engine_->CopyToCpu();

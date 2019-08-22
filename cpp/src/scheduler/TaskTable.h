@@ -28,6 +28,16 @@ enum class TaskTableItemState {
     MOVED, // moved, termination state
 };
 
+struct TaskTimestamp {
+    uint64_t start = 0;
+    uint64_t move = 0;
+    uint64_t moved = 0;
+    uint64_t load = 0;
+    uint64_t loaded = 0;
+    uint64_t execute = 0;
+    uint64_t executed = 0;
+};
+
 struct TaskTableItem {
     TaskTableItem() : id(0), state(TaskTableItemState::INVALID), mutex(), priority(0) {}
 
@@ -39,8 +49,27 @@ struct TaskTableItem {
     TaskPtr task; // the task;
     TaskTableItemState state; // the state;
     std::mutex mutex;
+    TaskTimestamp timestamp;
 
     uint8_t priority; // just a number, meaningless;
+
+    bool
+    Load();
+
+    bool
+    Loaded();
+
+    bool
+    Execute();
+
+    bool
+    Executed();
+
+    bool
+    Move();
+
+    bool
+    Moved();
 };
 
 using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
@@ -111,55 +140,68 @@ public:
 public:
 
     /******** Action ********/
-    /*
-     * Move a task;
-     * Set state moving;
-     * Called by scheduler;
-     */
 
     // TODO: bool to Status
-    bool
-    Move(uint64_t index);
-
-    /*
-     * Move task finished;
-     * Set state moved;
-     * Called by scheduler;
-     */
-    bool
-    Moved(uint64_t index);
-
     /*
      * Load a task;
      * Set state loading;
      * Called by loader;
      */
-    bool
-    Load(uint64_t index);
+    inline bool
+    Load(uint64_t index) {
+        return table_[index]->Load();
+    }
 
     /*
      * Load task finished;
      * Set state loaded;
      * Called by loader;
      */
-    bool
-    Loaded(uint64_t index);
+    inline bool
+    Loaded(uint64_t index) {
+        return table_[index]->Loaded();
+    }
 
     /*
      * Execute a task;
      * Set state executing;
      * Called by executor;
      */
-    bool
-    Execute(uint64_t index);
+    inline bool
+    Execute(uint64_t index) {
+        return table_[index]->Execute();
+    }
 
     /*
      * Execute task finished;
      * Set state executed;
      * Called by executor;
      */
-    bool
-    Executed(uint64_t index);
+    inline bool
+    Executed(uint64_t index){
+        return table_[index]->Executed();
+    }
+
+    /*
+     * Move a task;
+     * Set state moving;
+     * Called by scheduler;
+     */
+
+    inline bool
+    Move(uint64_t index){
+        return table_[index]->Move();
+    }
+
+    /*
+     * Move task finished;
+     * Set state moved;
+     * Called by scheduler;
+     */
+    inline bool
+    Moved(uint64_t index){
+        return table_[index]->Moved();
+    }
 
 public:
     /*
