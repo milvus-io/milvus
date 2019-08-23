@@ -116,13 +116,12 @@ Status ExecutionEngineImpl::Serialize() {
 }
 
 Status ExecutionEngineImpl::Load(bool to_cache) {
-    double physical_size;
-    server::CollectExecutionEngineMetrics metrics(physical_size);
-
     index_ = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool already_in_cache = (index_ != nullptr);
     if (!index_) {
         try {
+            double physical_size = PhysicalSize();
+            server::CollectExecutionEngineMetrics metrics(physical_size);
             index_ = read_index(location_);
             ENGINE_LOG_DEBUG << "Disk io from: " << location_;
         } catch (knowhere::KnowhereException &e) {
@@ -135,14 +134,11 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
 
     if (!already_in_cache && to_cache) {
         Cache();
-        physical_size = PhysicalSize();
     }
     return Status::OK();
 }
 
 Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
-    double physical_size;
-    server::CollectExecutionEngineMetrics metrics(physical_size);
     index_ = zilliz::milvus::cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
     bool already_in_cache = (index_ != nullptr);
     if (!index_) {
@@ -159,15 +155,12 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 
     if (!already_in_cache) {
         GpuCache(device_id);
-        physical_size = PhysicalSize();
     }
 
     return Status::OK();
 }
 
 Status ExecutionEngineImpl::CopyToCpu() {
-    double physical_size;
-    server::CollectExecutionEngineMetrics metrics(physical_size);
     index_ = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool already_in_cache = (index_ != nullptr);
     if (!index_) {
@@ -184,7 +177,6 @@ Status ExecutionEngineImpl::CopyToCpu() {
 
     if(!already_in_cache) {
         Cache();
-        physical_size = PhysicalSize();
     }
     return Status::OK();
 }
@@ -198,6 +190,8 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
     auto to_merge = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
     if (!to_merge) {
         try {
+            double physical_size = server::CommonUtil::GetFileSize(location);
+            server::CollectExecutionEngineMetrics metrics(physical_size);
             to_merge = read_index(location);
         } catch (knowhere::KnowhereException &e) {
             ENGINE_LOG_ERROR << e.what();

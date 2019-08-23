@@ -80,12 +80,10 @@ bool MemTableFile::IsFull() {
 }
 
 Status MemTableFile::Serialize() {
-    size_t size;
+    size_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
-    size = GetCurrentMem();
 
     execution_engine_->Serialize();
-
     table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
     table_file_schema_.row_count_ = execution_engine_->Count();
 
