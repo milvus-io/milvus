@@ -44,6 +44,7 @@ inline auto StoragePrototype(const std::string &path) {
                                    make_column("state", &TableSchema::state_),
                                    make_column("dimension", &TableSchema::dimension_),
                                    make_column("created_on", &TableSchema::created_on_),
+                                   make_column("flag", &TableSchema::flag_, default_value(0)),
                                    make_column("engine_type", &TableSchema::engine_type_),
                                    make_column("nlist", &TableSchema::nlist_),
                                    make_column("index_file_size", &TableSchema::index_file_size_),
@@ -249,6 +250,7 @@ Status SqliteMetaImpl::DescribeTable(TableSchema &table_schema) {
                                                    &TableSchema::state_,
                                                    &TableSchema::dimension_,
                                                    &TableSchema::created_on_,
+                                                   &TableSchema::flag_,
                                                    &TableSchema::engine_type_,
                                                    &TableSchema::nlist_,
                                                    &TableSchema::index_file_size_,
@@ -261,10 +263,11 @@ Status SqliteMetaImpl::DescribeTable(TableSchema &table_schema) {
             table_schema.state_ = std::get<1>(groups[0]);
             table_schema.dimension_ = std::get<2>(groups[0]);
             table_schema.created_on_ = std::get<3>(groups[0]);
-            table_schema.engine_type_ = std::get<4>(groups[0]);
-            table_schema.nlist_ = std::get<5>(groups[0]);
-            table_schema.index_file_size_ = std::get<6>(groups[0]);
-            table_schema.metric_type_ = std::get<7>(groups[0]);
+            table_schema.flag_ = std::get<4>(groups[0]);
+            table_schema.engine_type_ = std::get<5>(groups[0]);
+            table_schema.nlist_ = std::get<6>(groups[0]);
+            table_schema.index_file_size_ = std::get<7>(groups[0]);
+            table_schema.metric_type_ = std::get<8>(groups[0]);
         } else {
             return Status::NotFound("Table " + table_schema.table_id_ + " not found");
         }
@@ -340,7 +343,8 @@ Status SqliteMetaImpl::UpdateTableIndexParam(const std::string &table_id, const 
         auto tables = ConnectorPtr->select(columns(&TableSchema::id_,
                                                    &TableSchema::state_,
                                                    &TableSchema::dimension_,
-                                                   &TableSchema::created_on_),
+                                                   &TableSchema::created_on_,
+                                                   &TableSchema::flag_),
                                            where(c(&TableSchema::table_id_) == table_id
                                                  and c(&TableSchema::state_) != (int) TableSchema::TO_DELETE));
 
@@ -351,6 +355,7 @@ Status SqliteMetaImpl::UpdateTableIndexParam(const std::string &table_id, const 
             table_schema.state_ = std::get<1>(tables[0]);
             table_schema.dimension_ = std::get<2>(tables[0]);
             table_schema.created_on_ = std::get<3>(tables[0]);
+            table_schema.flag_ = std::get<4>(tables[0]);
             table_schema.engine_type_ = index.engine_type_;
             table_schema.nlist_ = index.nlist_;
             table_schema.index_file_size_ = index.index_file_size_*ONE_MB;
@@ -376,6 +381,28 @@ Status SqliteMetaImpl::UpdateTableIndexParam(const std::string &table_id, const 
         std::string msg = "Encounter exception when update table index: table_id = " + table_id;
         return HandleException(msg, e);
     }
+
+    return Status::OK();
+}
+
+Status SqliteMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag) {
+    try {
+        server::MetricCollector metric;
+
+        //set all backup file to raw
+        ConnectorPtr->update_all(
+                set(
+                        c(&TableSchema::flag_) = flag
+                ),
+                where(
+                        c(&TableSchema::table_id_) == table_id
+                ));
+
+    } catch (std::exception &e) {
+        std::string msg = "Encounter exception when update table flag: table_id = " + table_id;
+        return HandleException(msg, e);
+    }
+
     return Status::OK();
 }
 
@@ -471,6 +498,7 @@ Status SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
                                                      &TableSchema::table_id_,
                                                      &TableSchema::dimension_,
                                                      &TableSchema::created_on_,
+                                                     &TableSchema::flag_,
                                                      &TableSchema::engine_type_,
                                                      &TableSchema::nlist_,
                                                      &TableSchema::index_file_size_,
@@ -480,12 +508,13 @@ Status SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
             TableSchema schema;
             schema.id_ = std::get<0>(table);
             schema.table_id_ = std::get<1>(table);
-            schema.created_on_ = std::get<2>(table);
-            schema.dimension_ = std::get<3>(table);
-            schema.engine_type_ = std::get<4>(table);
-            schema.nlist_ = std::get<5>(table);
-            schema.index_file_size_ = std::get<6>(table);
-            schema.metric_type_ = std::get<7>(table);
+            schema.dimension_ = std::get<2>(table);
+            schema.created_on_ = std::get<3>(table);
+            schema.flag_ = std::get<4>(table);
+            schema.engine_type_ = std::get<5>(table);
+            schema.nlist_ = std::get<6>(table);
+            schema.index_file_size_ = std::get<7>(table);
+            schema.metric_type_ = std::get<8>(table);
 
             table_schema_array.emplace_back(schema);
         }
