@@ -36,40 +36,32 @@ class DBImpl : public DB {
 
     explicit DBImpl(const Options &options);
 
-    Status
-    CreateTable(meta::TableSchema &table_schema) override;
+    Status CreateTable(meta::TableSchema &table_schema) override;
 
-    Status
-    DeleteTable(const std::string &table_id, const meta::DatesT &dates) override;
+    Status DeleteTable(const std::string &table_id, const meta::DatesT &dates) override;
 
-    Status
-    DescribeTable(meta::TableSchema &table_schema) override;
+    Status DescribeTable(meta::TableSchema &table_schema) override;
 
-    Status
-    HasTable(const std::string &table_id, bool &has_or_not) override;
+    Status HasTable(const std::string &table_id, bool &has_or_not) override;
 
-    Status
-    AllTables(std::vector<meta::TableSchema> &table_schema_array) override;
+    Status AllTables(std::vector<meta::TableSchema> &table_schema_array) override;
 
-    Status
-    PreloadTable(const std::string &table_id) override;
+    Status PreloadTable(const std::string &table_id) override;
 
-    Status
-    GetTableRowCount(const std::string &table_id, uint64_t &row_count) override;
+    Status UpdateTableFlag(const std::string &table_id, int64_t flag);
 
-    Status
-    InsertVectors(const std::string &table_id, uint64_t n, const float *vectors, IDNumbers &vector_ids) override;
+    Status GetTableRowCount(const std::string &table_id, uint64_t &row_count) override;
 
-    Status
-    Query(const std::string &table_id,
+    Status InsertVectors(const std::string &table_id, uint64_t n, const float *vectors, IDNumbers &vector_ids) override;
+
+    Status Query(const std::string &table_id,
             uint64_t k,
             uint64_t nq,
             uint64_t nprobe,
             const float *vectors,
             QueryResults &results) override;
 
-    Status
-    Query(const std::string &table_id,
+    Status Query(const std::string &table_id,
           uint64_t k,
           uint64_t nq,
           uint64_t nprobe,
@@ -77,8 +69,7 @@ class DBImpl : public DB {
           const meta::DatesT &dates,
           QueryResults &results) override;
 
-    Status
-    Query(const std::string &table_id,
+    Status Query(const std::string &table_id,
           const std::vector<std::string> &file_ids,
           uint64_t k,
           uint64_t nq,
