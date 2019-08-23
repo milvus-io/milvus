@@ -22,8 +22,9 @@ TaskConvert(const ScheduleTaskPtr &schedule_task) {
             return task;
         }
         case ScheduleTaskType::kDelete: {
-            // TODO: convert to delete task
-            return nullptr;
+            auto delete_task = std::static_pointer_cast<DeleteTask>(schedule_task);
+            auto task = std::make_shared<XDeleteTask>(delete_task->context_);
+            return task;
         }
         default: {
             // TODO: unexpected !!!

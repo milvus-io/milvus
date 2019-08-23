@@ -35,6 +35,7 @@ public:
     virtual void
     Execute() = 0;
 
+    // TODO: dont use this method to support task move
     virtual TaskPtr
     Clone() = 0;
 
