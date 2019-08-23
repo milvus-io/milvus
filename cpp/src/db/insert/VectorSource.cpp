@@ -24,7 +24,7 @@ Status VectorSource::Add(const ExecutionEnginePtr &execution_engine,
                          size_t &num_vectors_added,
                          IDNumbers &vector_ids) {
 
-    auto start_time = METRICS_NOW_TIME;
+    server::CollectAddMetrics metrics(n_, table_file_schema.dimension_);
 
     num_vectors_added = current_num_vectors_added + num_vectors_to_add <= n_ ?
                         num_vectors_to_add : n_ - current_num_vectors_added;
@@ -48,12 +48,6 @@ Status VectorSource::Add(const ExecutionEnginePtr &execution_engine,
     } else {
         ENGINE_LOG_ERROR << "VectorSource::Add failed: " + status.ToString();
     }
-
-    auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_),
-                                                               static_cast<int>(table_file_schema.dimension_),
-                                                               total_time);
 
     return status;
 }
