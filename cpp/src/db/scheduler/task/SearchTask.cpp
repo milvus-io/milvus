@@ -76,20 +76,10 @@ void CollectDurationMetrics(int index_type, double total_time) {
     }
 }
 
-std::string GetMetricType() {
-    server::ServerConfig &config = server::ServerConfig::GetInstance();
-    server::ConfigNode& engine_config = config.GetConfig(server::CONFIG_ENGINE);
-    return engine_config.GetValue(server::CONFIG_METRICTYPE, "L2");
-}
-
 }
 
 SearchTask::SearchTask()
 : IScheduleTask(ScheduleTaskType::kSearch) {
-    std::string metric_type = GetMetricType();
-    if(metric_type != "L2") {
-        metric_l2 = false;
-    }
 }
 
 std::shared_ptr<IScheduleTask> SearchTask::Execute() {
@@ -103,6 +93,8 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
     server::TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
 
     auto start_time = METRICS_NOW_TIME;
+
+    bool metric_l2 = (index_engine_->IndexMetricType() == MetricType::L2);
 
     std::vector<long> output_ids;
     std::vector<float> output_distence;
@@ -147,7 +139,7 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
 
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    CollectDurationMetrics(index_type_, total_time);
+    CollectDurationMetrics(file_type_, total_time);
 
     rc.ElapseFromBegin("totally cost");
 

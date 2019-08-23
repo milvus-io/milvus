@@ -17,6 +17,11 @@ namespace milvus {
 namespace engine {
 namespace meta {
 
+constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
+constexpr int32_t DEFAULT_NLIST = 16384;
+constexpr int32_t DEFAULT_INDEX_FILE_SIZE = 1024*ONE_MB;
+constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
+
 typedef int DateT;
 const DateT EmptyDate = -1;
 typedef std::vector<DateT> DatesT;
@@ -32,10 +37,10 @@ struct TableSchema {
     int32_t state_ = (int)NORMAL;
     uint16_t dimension_ = 0;
     int64_t created_on_ = 0;
-    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
-    int32_t nlist_ = 16384;
-    int32_t index_file_size_ = 1024*ONE_MB;
-    int32_t metric_type_ = (int)MetricType::L2;
+    int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
+    int32_t nlist_ = DEFAULT_NLIST;
+    int32_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;
+    int32_t metric_type_ = DEFAULT_METRIC_TYPE;
 }; // TableSchema
 
 struct TableFileSchema {
@@ -52,7 +57,6 @@ struct TableFileSchema {
 
     size_t id_ = 0;
     std::string table_id_;
-    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
     std::string file_id_;
     int32_t file_type_ = NEW;
     size_t file_size_ = 0;
@@ -62,6 +66,9 @@ struct TableFileSchema {
     std::string location_;
     int64_t updated_time_ = 0;
     int64_t created_on_ = 0;
+    int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
+    int32_t nlist_ = DEFAULT_NLIST; //not persist to meta
+    int32_t metric_type_ = DEFAULT_METRIC_TYPE; //not persist to meta
 }; // TableFileSchema
 
 typedef std::vector<TableFileSchema> TableFilesSchema;
