@@ -25,6 +25,8 @@ enum ErrorCode {
     CANNOT_DELETE_FOLDER = 19;
     CANNOT_DELETE_FILE = 20;
     BUILD_INDEX_ERROR = 21;
+    ILLEGAL_NLIST = 22;
+    ILLEGAL_METRIC_TYPE = 23;
 }
 
 message Status {

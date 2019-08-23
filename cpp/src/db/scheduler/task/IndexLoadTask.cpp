@@ -45,7 +45,9 @@ std::shared_ptr<IScheduleTask> IndexLoadTask::Execute() {
     //step 1: load index
     ExecutionEnginePtr index_ptr = EngineFactory::Build(file_->dimension_,
                                                         file_->location_,
-                                                        (EngineType)file_->engine_type_);
+                                                        (EngineType)file_->engine_type_,
+                                                        (MetricType)file_->metric_type_,
+                                                        file_->nlist_);
 
     try {
         index_ptr->Load();
@@ -75,7 +77,7 @@ std::shared_ptr<IScheduleTask> IndexLoadTask::Execute() {
     //step 2: return search task for later execution
     SearchTaskPtr task_ptr = std::make_shared<SearchTask>();
     task_ptr->index_id_ = file_->id_;
-    task_ptr->index_type_ = file_->file_type_;
+    task_ptr->file_type_ = file_->file_type_;
     task_ptr->index_engine_ = index_ptr;
     task_ptr->search_contexts_.swap(search_contexts_);
     return std::static_pointer_cast<IScheduleTask>(task_ptr);

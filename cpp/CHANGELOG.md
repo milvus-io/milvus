@@ -40,12 +40,16 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-394 - Update scheduler unittest
 - MS-400 - Add timestamp record in task state change function
 - MS-402 - Add dump implementation for TaskTableItem
+- MS-403 - Add GpuCacheMgr
 - MS-404 - Release index after search task done avoid memory increment continues
 - MS-405 - Add delete task support
 - MS-408 - Add device_id in resource construct function
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
+- MS-338 - NewAPI: refine code to support CreateIndex
+- MS-339 - NewAPI: refine code to support DropIndex
+- MS-340 - NewAPI: implement DescribeIndex
 
 ## Task
 - MS-297 - disable mysql unit test
@@ -70,6 +74,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-257 - Update bzip2 download url
 - MS-288 - Update compile scripts
 - MS-330 - Stability test failed caused by server core dumped
+- MS-347 - Build index hangs again
+- MS-382 - fix MySQLMetaImpl::CleanUpFilesWithTTL unknown column bug
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
@@ -98,6 +104,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-324 - Show error when there is not enough gpu memory to build index
 - MS-328 - Check metric type on server start
 - MS-332 - Set grpc and thrift server run concurrently
+- MS-352 - Add hybrid index
 
 ## New Feature
 - MS-180 - Add new mem manager
@@ -157,8 +164,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-130 - Add prometheus_test
 - MS-144 - Add nprobe config
 - MS-147 - Enable IVF
-
 - MS-130 - Add prometheus_test
+
 ## Task
 - MS-74 - Change README.md in cpp
 - MS-88 - Add support for arm architecture

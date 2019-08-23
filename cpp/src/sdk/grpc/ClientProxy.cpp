@@ -82,9 +82,7 @@ ClientProxy::CreateTable(const TableSchema &param) {
     try {
         ::milvus::grpc::TableSchema schema;
         schema.mutable_table_name()->set_table_name(param.table_name);
-        schema.set_index_type((int) param.index_type);
         schema.set_dimension(param.dimension);
-        schema.set_store_raw_vector(param.store_raw_vector);
 
         return client_ptr_->CreateTable(schema);
     } catch (std::exception &ex) {
@@ -119,6 +117,10 @@ ClientProxy::CreateIndex(const IndexParam &index_param) {
         ::milvus::grpc::IndexParam grpc_index_param;
         grpc_index_param.mutable_table_name()->set_table_name(
                 index_param.table_name);
+        grpc_index_param.mutable_index()->set_index_type((int32_t)index_param.index_type);
+        grpc_index_param.mutable_index()->set_nlist(index_param.nlist);
+        grpc_index_param.mutable_index()->set_index_file_size(index_param.index_file_size);
+        grpc_index_param.mutable_index()->set_metric_type(index_param.metric_type);
         return client_ptr_->CreateIndex(grpc_index_param);
 
     } catch (std::exception &ex) {
@@ -187,15 +189,20 @@ ClientProxy::Insert(const std::string &table_name,
             }
         }
 
-        ::milvus::grpc::VectorIds vector_ids;
-
         //Single thread
-        client_ptr_->Insert(vector_ids, insert_param, status);
-        auto finish = std::chrono::high_resolution_clock::now();
-
-        for (size_t i = 0; i < vector_ids.vector_id_array_size(); i++) {
-            id_array.push_back(vector_ids.vector_id_array(i));
+        ::milvus::grpc::VectorIds vector_ids;
+        if (!id_array.empty()) {
+            for (auto i = 0; i < id_array.size(); i++) {
+                insert_param.add_row_id_array(id_array[i]);
+            }
+            client_ptr_->Insert(vector_ids, insert_param, status);
+        } else {
+            client_ptr_->Insert(vector_ids, insert_param, status);
+            for (size_t i = 0; i < vector_ids.vector_id_array_size(); i++) {
+                id_array.push_back(vector_ids.vector_id_array(i));
+            }
         }
+
 #endif
 
     } catch (std::exception &ex) {
@@ -264,9 +271,7 @@ ClientProxy::DescribeTable(const std::string &table_name, TableSchema &table_sch
         Status status = client_ptr_->DescribeTable(grpc_schema, table_name);
 
         table_schema.table_name = grpc_schema.table_name().table_name();
-        table_schema.index_type = (IndexType) grpc_schema.index_type();
         table_schema.dimension = grpc_schema.dimension();
-        table_schema.store_raw_vector = grpc_schema.store_raw_vector();
 
         return status;
     } catch (std::exception &ex) {
@@ -325,7 +330,15 @@ ClientProxy::ServerStatus() const {
 
 Status
 ClientProxy::DeleteByRange(milvus::Range &range, const std::string &table_name) {
-
+    try {
+        ::milvus::grpc::DeleteByRangeParam delete_by_range_param;
+        delete_by_range_param.set_table_name(table_name);
+        delete_by_range_param.mutable_range()->set_start_value(range.start_value);
+        delete_by_range_param.mutable_range()->set_end_value(range.end_value);
+        return client_ptr_->DeleteByRange(delete_by_range_param);
+    } catch (std::exception &ex) {
+        return Status(StatusCode::UnknownError, "fail to delete by range: " + std::string(ex.what()));
+    }
 }
 
 Status
@@ -336,18 +349,39 @@ ClientProxy::PreloadTable(const std::string &table_name) const {
         Status status = client_ptr_->PreloadTable(grpc_table_name);
         return status;
     } catch (std::exception &ex) {
-        return Status(StatusCode::UnknownError, "fail to show tables: " + std::string(ex.what()));
+        return Status(StatusCode::UnknownError, "fail to preload tables: " + std::string(ex.what()));
     }
 }
 
-IndexParam
-ClientProxy::DescribeIndex(const std::string &table_name) const {
+Status
+ClientProxy::DescribeIndex(const std::string &table_name, IndexParam &index_param) const {
+    try {
+        ::milvus::grpc::TableName grpc_table_name;
+        grpc_table_name.set_table_name(table_name);
+        ::milvus::grpc::IndexParam grpc_index_param;
+        Status status = client_ptr_->DescribeIndex(grpc_table_name, grpc_index_param);
+        index_param.index_type = (IndexType)(grpc_index_param.mutable_index()->index_type());
+        index_param.nlist = grpc_index_param.mutable_index()->nlist();
+        index_param.index_file_size = grpc_index_param.mutable_index()->index_file_size();
+        index_param.metric_type = grpc_index_param.mutable_index()->metric_type();
 
+        return status;
+
+    } catch (std::exception &ex) {
+        return Status(StatusCode::UnknownError, "fail to describe index: " + std::string(ex.what()));
+    }
 }
 
 Status
 ClientProxy::DropIndex(const std::string &table_name) const {
-
+    try {
+        ::milvus::grpc::TableName grpc_table_name;
+        grpc_table_name.set_table_name(table_name);
+        Status status = client_ptr_->DropIndex(grpc_table_name);
+        return status;
+    } catch (std::exception &ex) {
+        return Status(StatusCode::UnknownError, "fail to drop index: " + std::string(ex.what()));
+    }
 }
 
 }

@@ -42,7 +42,6 @@ GrpcRequestHandler::HasTable(::grpc::ServerContext *context,
 GrpcRequestHandler::DropTable(::grpc::ServerContext *context,
                               const ::milvus::grpc::TableName *request,
                               ::milvus::grpc::Status *response) {
-
     BaseTaskPtr task_ptr = DropTableTask::Create(request->table_name());
     GrpcRequestScheduler::ExecTask(task_ptr, response);
     return ::grpc::Status::OK;
@@ -168,7 +167,12 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext *context,
 GrpcRequestHandler::DeleteByRange(::grpc::ServerContext *context,
               const ::milvus::grpc::DeleteByRangeParam *request,
               ::milvus::grpc::Status *response) {
-
+    BaseTaskPtr task_ptr = DeleteByRangeTask::Create(*request);
+    ::milvus::grpc::Status grpc_status;
+    GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
+    response->set_error_code(grpc_status.error_code());
+    response->set_reason(grpc_status.reason());
+    return ::grpc::Status::OK;
 }
 
 ::grpc::Status
@@ -187,14 +191,24 @@ GrpcRequestHandler::PreloadTable(::grpc::ServerContext *context,
 GrpcRequestHandler::DescribeIndex(::grpc::ServerContext *context,
               const ::milvus::grpc::TableName *request,
               ::milvus::grpc::IndexParam *response) {
-
+    BaseTaskPtr task_ptr = DescribeIndexTask::Create(request->table_name(), *response);
+    ::milvus::grpc::Status grpc_status;
+    GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
+    response->mutable_table_name()->mutable_status()->set_reason(grpc_status.reason());
+    response->mutable_table_name()->mutable_status()->set_error_code(grpc_status.error_code());
+    return ::grpc::Status::OK;
 }
 
 ::grpc::Status
 GrpcRequestHandler::DropIndex(::grpc::ServerContext *context,
           const ::milvus::grpc::TableName *request,
           ::milvus::grpc::Status *response) {
-
+    BaseTaskPtr task_ptr = DropIndexTask::Create(request->table_name());
+    ::milvus::grpc::Status grpc_status;
+    GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
+    response->set_reason(grpc_status.reason());
+    response->set_error_code(grpc_status.error_code());
+    return ::grpc::Status::OK;
 }
 
 
