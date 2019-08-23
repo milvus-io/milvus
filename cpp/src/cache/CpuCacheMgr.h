@@ -16,6 +16,7 @@ private:
     CpuCacheMgr();
 
 public:
+    //TODO: use smart pointer instead
     static CacheMgr* GetInstance() {
         static CpuCacheMgr s_mgr;
         return &s_mgr;
