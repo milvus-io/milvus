@@ -16,7 +16,7 @@ namespace engine {
 
 namespace {
 
-static constexpr size_t PARALLEL_REDUCE_THRESHOLD = 10000;
+static constexpr size_t PARALLEL_REDUCE_THRESHOLD = 1000000;
 static constexpr size_t PARALLEL_REDUCE_BATCH = 1000;
 
 bool NeedParallelReduce(uint64_t nq, uint64_t topk) {
@@ -59,23 +59,6 @@ void ParallelReduce(std::function<void(size_t, size_t)>& reduce_function, size_t
     }
 }
 
-void CollectDurationMetrics(int index_type, double total_time) {
-    switch(index_type) {
-        case meta::TableFileSchema::RAW: {
-            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-            break;
-        }
-        case meta::TableFileSchema::TO_INDEX: {
-            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-            break;
-        }
-        default: {
-            server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
-            break;
-        }
-    }
-}
-
 }
 
 SearchTask::SearchTask()
@@ -92,7 +75,7 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
 
     server::TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
 
-    auto start_time = METRICS_NOW_TIME;
+    server::CollectSearchTaskMetrics metrics(file_type_);
 
     bool metric_l2 = (index_engine_->IndexMetricType() == MetricType::L2);
 
@@ -136,10 +119,6 @@ std::shared_ptr<IScheduleTask> SearchTask::Execute() {
         //step 5: notify to send result to client
         context->IndexSearchDone(index_id_);
     }
-
-    auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    CollectDurationMetrics(file_type_, total_time);
 
     rc.ElapseFromBegin("totally cost");
 

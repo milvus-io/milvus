@@ -22,7 +22,8 @@ TEST(PrometheusTest, PROMETHEUS_TEST){
     instance.RawFileSizeHistogramObserve(1.0);
     instance.IndexFileSizeHistogramObserve(1.0);
     instance.BuildIndexDurationSecondsHistogramObserve(1.0);
-    instance.CacheUsageGaugeSet(1.0);
+    instance.CpuCacheUsageGaugeSet(1.0);
+    instance.GpuCacheUsageGaugeSet(1.0);
     instance.MetaAccessTotalIncrement();
     instance.MetaAccessDurationSecondsHistogramObserve(1.0);
     instance.FaissDiskLoadDurationSecondsHistogramObserve(1.0);

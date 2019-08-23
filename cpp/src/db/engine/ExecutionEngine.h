@@ -62,7 +62,7 @@ public:
                   float *distances,
                   long *labels) const = 0;
 
-    virtual std::shared_ptr<ExecutionEngine> BuildIndex(const std::string&) = 0;
+    virtual std::shared_ptr<ExecutionEngine> BuildIndex(const std::string& location, EngineType engine_type) = 0;
 
     virtual Status Cache() = 0;
 

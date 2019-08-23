@@ -39,24 +39,6 @@ Status HandleException(const std::string &desc, std::exception &e) {
     return Status::DBTransactionError(desc, e.what());
 }
 
-class MetricCollector {
- public:
-    MetricCollector() {
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        start_time_ = METRICS_NOW_TIME;
-    }
-
-    ~MetricCollector() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
-        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
-    }
-
- private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
-};
-
 }
 
 Status MySQLMetaImpl::NextTableId(std::string &table_id) {
@@ -155,6 +137,7 @@ Status MySQLMetaImpl::Initialize() {
                                 "state INT NOT NULL, " <<
                                 "dimension SMALLINT NOT NULL, " <<
                                 "created_on BIGINT NOT NULL, " <<
+                                "flag BIGINT DEFAULT 0 NOT NULL, " <<
                                 "engine_type INT DEFAULT 1 NOT NULL, " <<
                                 "nlist INT DEFAULT 16384 NOT NULL, " <<
                                 "index_file_size INT DEFAULT 1024 NOT NULL, " <<
@@ -272,7 +255,7 @@ Status MySQLMetaImpl::DropPartitionsByDates(const std::string &table_id,
 
 Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
@@ -390,7 +373,7 @@ Status MySQLMetaImpl::HasNonIndexFiles(const std::string &table_id, bool &has) {
 
 Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -425,7 +408,7 @@ Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const T
                                            "engine_type_ = " << index.engine_type_ << ", " <<
                                            "nlist = " << index.nlist_ << ", " <<
                                            "index_file_size = " << index.index_file_size_*ONE_MB << ", " <<
-                                           "metric_type = " << index.metric_type_ << ", " <<
+                                           "metric_type = " << index.metric_type_ << " " <<
                                            "WHERE id = " << quote << table_id << ";";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableIndexParam: " << updateTableIndexParamQuery.str();
@@ -455,9 +438,49 @@ Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const T
     return Status::OK();
 }
 
+Status MySQLMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag) {
+    try {
+        server::MetricCollector metric;
+
+        {
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+
+            if (connectionPtr == nullptr) {
+                return Status::Error("Failed to connect to database server");
+            }
+
+            Query updateTableFlagQuery = connectionPtr->query();
+            updateTableFlagQuery << "UPDATE Tables " <<
+                                 "SET flag = " << flag << " " <<
+                                 "WHERE id = " << quote << table_id << ";";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFlag: " << updateTableFlagQuery.str();
+
+
+            if (!updateTableFlagQuery.exec()) {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FLAG";
+                return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FLAG",
+                                                  updateTableFlagQuery.error());
+            }
+
+        } //Scoped Connection
+
+    } catch (const BadQuery &er) {
+        // Handle any query errors
+        ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FLAG" << ": " << er.what();
+        return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FLAG", er.what());
+    } catch (const Exception &er) {
+        // Catch-all for any other MySQL++ exceptions
+        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN UPDATING TABLE FLAG" << ": " << er.what();
+        return Status::DBTransactionError("GENERAL ERROR WHEN UPDATING TABLE FLAG", er.what());
+    }
+
+    return Status::OK();
+}
+
 Status MySQLMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex& index) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -504,7 +527,7 @@ Status MySQLMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex
 
 Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -560,7 +583,7 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
 
 Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
@@ -603,7 +626,7 @@ Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
 
 Status MySQLMetaImpl::DeleteTableFiles(const std::string &table_id) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
@@ -642,7 +665,7 @@ Status MySQLMetaImpl::DeleteTableFiles(const std::string &table_id) {
 
 Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         StoreQueryResult res;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -697,7 +720,7 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
 
 Status MySQLMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         StoreQueryResult res;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -737,7 +760,7 @@ Status MySQLMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
 
 Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         StoreQueryResult res;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -802,7 +825,7 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
     }
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         NextFileId(file_schema.file_id_);
         file_schema.dimension_ = table_schema.dimension_;
@@ -812,6 +835,7 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.engine_type_ = table_schema.engine_type_;
         file_schema.nlist_ = table_schema.nlist_;
+        file_schema.index_file_size_ = table_schema.index_file_size_;
         file_schema.metric_type_ = table_schema.metric_type_;
         utils::GetTableFilePath(options_, file_schema);
 
@@ -870,7 +894,7 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
     files.clear();
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         StoreQueryResult res;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -926,8 +950,9 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
                 groups[table_file.table_id_] = table_schema;
 
             }
-            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
             table_file.nlist_ = groups[table_file.table_id_].nlist_;
+            table_file.index_file_size_ = groups[table_file.table_id_].index_file_size_;
+            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
             table_file.dimension_ = groups[table_file.table_id_].dimension_;
 
             utils::GetTableFilePath(options_, table_file);
@@ -953,7 +978,7 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
     files.clear();
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         StoreQueryResult res;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -1020,9 +1045,11 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
 
             table_file.engine_type_ = resRow["engine_type"];
 
-            table_file.metric_type_ = table_schema.metric_type_;
-
             table_file.nlist_ = table_schema.nlist_;
+
+            table_file.index_file_size_ = table_schema.index_file_size_;
+
+            table_file.metric_type_ = table_schema.metric_type_;
 
             std::string file_id;
             resRow["file_id"].to_string(file_id);
@@ -1067,7 +1094,7 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
     files.clear();
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         StoreQueryResult res;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -1132,9 +1159,11 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
 
             table_file.engine_type_ = resRow["engine_type"];
 
-            table_file.metric_type_ = table_schema.metric_type_;
-
             table_file.nlist_ = table_schema.nlist_;
+
+            table_file.index_file_size_ = table_schema.index_file_size_;
+
+            table_file.metric_type_ = table_schema.metric_type_;
 
             std::string file_id;
             resRow["file_id"].to_string(file_id);
@@ -1177,7 +1206,7 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
     files.clear();
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //check table existence
         TableSchema table_schema;
@@ -1232,9 +1261,11 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
 
             table_file.engine_type_ = resRow["engine_type"];
 
-            table_file.metric_type_ = table_schema.metric_type_;
-
             table_file.nlist_ = table_schema.nlist_;
+
+            table_file.index_file_size_ = table_schema.index_file_size_;
+
+            table_file.metric_type_ = table_schema.metric_type_;
 
             table_file.created_on_ = resRow["created_on"];
 
@@ -1315,9 +1346,11 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
 
             file_schema.engine_type_ = resRow["engine_type"];
 
-            file_schema.metric_type_ = table_schema.metric_type_;
-
             file_schema.nlist_ = table_schema.nlist_;
+
+            file_schema.index_file_size_ = table_schema.index_file_size_;
+
+            file_schema.metric_type_ = table_schema.metric_type_;
 
             std::string file_id;
             resRow["file_id"].to_string(file_id);
@@ -1457,7 +1490,7 @@ Status MySQLMetaImpl::DiscardFiles(long long to_discard_size) {
     ENGINE_LOG_DEBUG << "About to discard size=" << to_discard_size;
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         bool status;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -1529,7 +1562,7 @@ Status MySQLMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     file_schema.updated_time_ = utils::GetMicroSecTimeStamp();
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
@@ -1643,7 +1676,7 @@ Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string &table_id) {
 
 Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
@@ -1733,7 +1766,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
     //remove to_delete files
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -1812,7 +1845,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
     //remove to_delete tables
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -1870,7 +1903,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
     //remove deleted table folder
     //don't remove table folder until all its files has been deleted
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -1955,7 +1988,7 @@ Status MySQLMetaImpl::CleanUp() {
 
 Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
