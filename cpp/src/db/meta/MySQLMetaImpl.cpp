@@ -747,7 +747,7 @@ Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
             }
 
             Query allTablesQuery = connectionPtr->query();
-            allTablesQuery << "SELECT id, table_id, dimension, engine_type " <<
+            allTablesQuery << "SELECT id, table_id, dimension, engine_type, nlist, index_file_size, metric_type " <<
                            "FROM Tables " <<
                            "WHERE state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
@@ -768,6 +768,12 @@ Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
             table_schema.dimension_ = resRow["dimension"];
 
             table_schema.engine_type_ = resRow["engine_type"];
+
+            table_schema.nlist_ = resRow["nlist"];
+
+            table_schema.index_file_size_ = resRow["index_file_size"];
+
+            table_schema.metric_type_ = resRow["metric_type"];
 
             table_schema_array.emplace_back(table_schema);
         }
@@ -805,6 +811,8 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.engine_type_ = table_schema.engine_type_;
+        file_schema.nlist_ = table_schema.nlist_;
+        file_schema.metric_type_ = table_schema.metric_type_;
         utils::GetTableFilePath(options_, file_schema);
 
         std::string id = "NULL"; //auto-increment
@@ -918,6 +926,8 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
                 groups[table_file.table_id_] = table_schema;
 
             }
+            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
+            table_file.nlist_ = groups[table_file.table_id_].nlist_;
             table_file.dimension_ = groups[table_file.table_id_].dimension_;
 
             utils::GetTableFilePath(options_, table_file);
@@ -1009,6 +1019,10 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
             table_file.table_id_ = table_id_str;
 
             table_file.engine_type_ = resRow["engine_type"];
+
+            table_file.metric_type_ = table_schema.metric_type_;
+
+            table_file.nlist_ = table_schema.nlist_;
 
             std::string file_id;
             resRow["file_id"].to_string(file_id);
@@ -1118,6 +1132,10 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
 
             table_file.engine_type_ = resRow["engine_type"];
 
+            table_file.metric_type_ = table_schema.metric_type_;
+
+            table_file.nlist_ = table_schema.nlist_;
+
             std::string file_id;
             resRow["file_id"].to_string(file_id);
             table_file.file_id_ = file_id;
@@ -1214,6 +1232,10 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
 
             table_file.engine_type_ = resRow["engine_type"];
 
+            table_file.metric_type_ = table_schema.metric_type_;
+
+            table_file.nlist_ = table_schema.nlist_;
+
             table_file.created_on_ = resRow["created_on"];
 
             table_file.dimension_ = table_schema.dimension_;
@@ -1292,6 +1314,10 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
             file_schema.table_id_ = table_id;
 
             file_schema.engine_type_ = resRow["engine_type"];
+
+            file_schema.metric_type_ = table_schema.metric_type_;
+
+            file_schema.nlist_ = table_schema.nlist_;
 
             std::string file_id;
             resRow["file_id"].to_string(file_id);
