@@ -165,8 +165,8 @@ TEST(CacheTest, GPU_CACHE_TEST) {
     gpu_mgr->ClearCache();
     ASSERT_EQ(gpu_mgr->ItemCount(), 0);
 
-    gpu_mgr->SetCapacity(4096000000);
     for (auto i = 0; i < 3; i++) {
+        // TODO: use gpu index to mock
         MockVecIndex *mock_index = new MockVecIndex();
         mock_index->ntotal_ = 1000000;  //2G
         engine::VecIndexPtr index(mock_index);
