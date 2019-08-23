@@ -141,9 +141,9 @@ Status DBImpl::InsertVectors(const std::string& table_id_,
         uint64_t n, const float* vectors, IDNumbers& vector_ids_) {
     ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
 
-    auto start_time = METRICS_NOW_TIME;
-    Status status = mem_mgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
-    zilliz::milvus::server::CollectInsertMetrics metrics(start_time, n, status.ok());
+    Status status;
+    zilliz::milvus::server::CollectInsertMetrics metrics(n, status);
+    status = mem_mgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
 //    std::chrono::microseconds time_span = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
 //    double average_time = double(time_span.count()) / n;
 

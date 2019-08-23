@@ -32,8 +32,8 @@ class Metrics {
 
 class CollectInsertMetrics {
 public:
-    CollectInsertMetrics(std::chrono::system_clock::time_point start_time,
-                         size_t n, bool succeed) : start_time_(start_time), n_(n), succeed_(succeed) {
+    CollectInsertMetrics(size_t n, engine::Status& status) : n_(n), status_(status) {
+        start_time_ = METRICS_NOW_TIME;
     }
 
     ~CollectInsertMetrics() {
@@ -45,7 +45,7 @@ public:
         }
 
         //    server::Metrics::GetInstance().add_vector_duration_seconds_quantiles().Observe((average_time));
-        if (succeed_) {
+        if (status_.ok()) {
             server::Metrics::GetInstance().AddVectorsSuccessTotalIncrement(n_);
             server::Metrics::GetInstance().AddVectorsSuccessGaugeSet(n_);
         }
@@ -59,7 +59,7 @@ private:
     using TIME_POINT = std::chrono::system_clock::time_point;
     TIME_POINT start_time_;
     size_t n_;
-    bool succeed_;
+    engine::Status& status_;
 };
 
 class CollectQueryMetrics {
