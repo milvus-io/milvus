@@ -16,7 +16,9 @@ class EngineFactory {
 public:
     static ExecutionEnginePtr Build(uint16_t dimension,
                                     const std::string& location,
-                                    EngineType type);
+                                    EngineType index_type,
+                                    MetricType metric_type,
+                                    int32_t nlist);
 };
 
 }

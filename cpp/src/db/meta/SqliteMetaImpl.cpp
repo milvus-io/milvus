@@ -218,22 +218,15 @@ Status SqliteMetaImpl::DeleteTable(const std::string& table_id) {
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         //soft delete table
-        auto tables = ConnectorPtr->select(columns(&TableSchema::id_,
-                                                   &TableSchema::dimension_,
-                                                   &TableSchema::engine_type_,
-                                                   &TableSchema::created_on_),
-                                           where(c(&TableSchema::table_id_) == table_id));
-        for (auto &table : tables) {
-            TableSchema table_schema;
-            table_schema.table_id_ = table_id;
-            table_schema.state_ = (int)TableSchema::TO_DELETE;
-            table_schema.id_ = std::get<0>(table);
-            table_schema.dimension_ = std::get<1>(table);
-            table_schema.engine_type_ = std::get<2>(table);
-            table_schema.created_on_ = std::get<3>(table);
+        ConnectorPtr->update_all(
+                set(
+                        c(&TableSchema::state_) = (int) TableSchema::TO_DELETE
+                ),
+                where(
+                        c(&TableSchema::table_id_) == table_id and
+                        c(&TableSchema::state_) != (int) TableSchema::TO_DELETE
+                ));
 
-            ConnectorPtr->update<TableSchema>(table_schema);
-        }
     } catch (std::exception &e) {
         return HandleException("Encounter exception when delete table", e);
     }
@@ -493,16 +486,24 @@ Status SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
         MetricCollector metric;
 
         auto selected = ConnectorPtr->select(columns(&TableSchema::id_,
-                                                   &TableSchema::table_id_,
-                                                   &TableSchema::dimension_,
-                                                   &TableSchema::engine_type_),
+                                                     &TableSchema::table_id_,
+                                                     &TableSchema::dimension_,
+                                                     &TableSchema::created_on_,
+                                                     &TableSchema::engine_type_,
+                                                     &TableSchema::nlist_,
+                                                     &TableSchema::index_file_size_,
+                                                     &TableSchema::metric_type_),
                                              where(c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
         for (auto &table : selected) {
             TableSchema schema;
             schema.id_ = std::get<0>(table);
             schema.table_id_ = std::get<1>(table);
-            schema.dimension_ = std::get<2>(table);
-            schema.engine_type_ = std::get<3>(table);
+            schema.created_on_ = std::get<2>(table);
+            schema.dimension_ = std::get<3>(table);
+            schema.engine_type_ = std::get<4>(table);
+            schema.nlist_ = std::get<5>(table);
+            schema.index_file_size_ = std::get<6>(table);
+            schema.metric_type_ = std::get<7>(table);
 
             table_schema_array.emplace_back(schema);
         }
@@ -535,6 +536,8 @@ Status SqliteMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.engine_type_ = table_schema.engine_type_;
+        file_schema.nlist_ = table_schema.nlist_;
+        file_schema.metric_type_ = table_schema.metric_type_;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -594,6 +597,8 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
                 }
                 groups[table_file.table_id_] = table_schema;
             }
+            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
+            table_file.nlist_ = groups[table_file.table_id_].nlist_;
             table_file.dimension_ = groups[table_file.table_id_].dimension_;
             files.push_back(table_file);
         }
@@ -644,6 +649,8 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                 table_file.row_count_ = std::get<5>(file);
                 table_file.date_ = std::get<6>(file);
                 table_file.engine_type_ = std::get<7>(file);
+                table_file.metric_type_ = table_schema.metric_type_;
+                table_file.nlist_ = table_schema.nlist_;
                 table_file.dimension_ = table_schema.dimension_;
                 utils::GetTableFilePath(options_, table_file);
                 auto dateItr = files.find(table_file.date_);
@@ -685,6 +692,8 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                 table_file.row_count_ = std::get<5>(file);
                 table_file.date_ = std::get<6>(file);
                 table_file.engine_type_ = std::get<7>(file);
+                table_file.metric_type_ = table_schema.metric_type_;
+                table_file.nlist_ = table_schema.nlist_;
                 table_file.dimension_ = table_schema.dimension_;
                 utils::GetTableFilePath(options_, table_file);
                 auto dateItr = files.find(table_file.date_);
@@ -762,6 +771,8 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
             table_file.date_ = std::get<6>(file);
             table_file.engine_type_ = std::get<7>(file);
             table_file.dimension_ = table_schema.dimension_;
+            table_file.metric_type_ = table_schema.metric_type_;
+            table_file.nlist_ = table_schema.nlist_;
             utils::GetTableFilePath(options_, table_file);
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
@@ -820,6 +831,8 @@ Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
             table_file.date_ = std::get<6>(file);
             table_file.created_on_ = std::get<7>(file);
             table_file.dimension_ = table_schema.dimension_;
+            table_file.metric_type_ = table_schema.metric_type_;
+            table_file.nlist_ = table_schema.nlist_;
             utils::GetTableFilePath(options_, table_file);
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
@@ -868,8 +881,11 @@ Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
             file_schema.row_count_ = std::get<4>(file);
             file_schema.date_ = std::get<5>(file);
             file_schema.engine_type_ = std::get<6>(file);
+            file_schema.metric_type_ = table_schema.metric_type_;
+            file_schema.nlist_ = table_schema.nlist_;
             file_schema.created_on_ = std::get<7>(file);
             file_schema.dimension_ = table_schema.dimension_;
+
             utils::GetTableFilePath(options_, file_schema);
 
             table_files.emplace_back(file_schema);

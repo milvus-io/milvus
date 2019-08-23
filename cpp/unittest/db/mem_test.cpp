@@ -65,9 +65,13 @@ TEST_F(NewMemManagerTest, VECTOR_SOURCE_TEST) {
     engine::VectorSource source(n, vectors.data());
 
     size_t num_vectors_added;
-    engine::ExecutionEnginePtr execution_engine_ = engine::EngineFactory::Build(table_file_schema.dimension_,
-                                                                                table_file_schema.location_,
-                                                                                (engine::EngineType) table_file_schema.engine_type_);
+    engine::ExecutionEnginePtr execution_engine_ =
+            engine::EngineFactory::Build(table_file_schema.dimension_,
+                    table_file_schema.location_,
+                    (engine::EngineType) table_file_schema.engine_type_,
+                    (engine::MetricType)table_file_schema.metric_type_,
+                    table_schema.nlist_);
+
     engine::IDNumbers vector_ids;
     status = source.Add(execution_engine_, table_file_schema, 50, num_vectors_added, vector_ids);
     ASSERT_TRUE(status.ok());

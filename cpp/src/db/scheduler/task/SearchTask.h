@@ -37,10 +37,9 @@ public:
 
 public:
     size_t index_id_ = 0;
-    int index_type_ = 0; //for metrics
+    int file_type_ = 0; //for metrics
     ExecutionEnginePtr index_engine_;
     std::vector<SearchContextPtr> search_contexts_;
-    bool metric_l2 = true;
 };
 
 using SearchTaskPtr = std::shared_ptr<SearchTask>;
