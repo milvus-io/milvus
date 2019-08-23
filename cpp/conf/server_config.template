@@ -1,5 +1,5 @@
 server_config:
-  address: 0.0.0.0
+  address: 0.0.0.0            # milvus server ip address
   port: 19530                 # the port milvus listen to, default: 19530, range: 1025 ~ 65534
   gpu_index: 0                # the gpu milvus use, default: 0, range: 0 ~ gpu number - 1
   mode: single                # milvus deployment type: single, cluster, read_only
@@ -7,44 +7,35 @@ server_config:
 db_config:
   db_path: @MILVUS_DB_PATH@             # milvus data storage path
   db_slave_path:                        # secondry data storage path, split by semicolon
-
-  parallel_reduce: false                 # use multi-threads to reduce topk result
+  parallel_reduce: false                # use multi-threads to reduce topk result
 
   # URI format: dialect://username:password@host:port/database
   # All parts except dialect are optional, but you MUST include the delimiters
   # Currently dialect supports mysql or sqlite
   db_backend_url: sqlite://:@:/
 
-  index_building_threshold: 1024   # index building trigger threshold, default: 1024, unit: MB
   archive_disk_threshold: 0        # triger archive action if storage size exceed this value, 0 means no limit, unit: GB
   archive_days_threshold: 0        # files older than x days will be archived, 0 means no limit, unit: day
   insert_buffer_size: 4            # maximum insert buffer size allowed, default: 4, unit: GB, should be at least 1 GB.
                                    # the sum of insert_buffer_size and cpu_cache_capacity should be less than total memory, unit: GB
 
 metric_config:
-  is_startup: off      # if monitoring start: on, off
-  collector: prometheus # metrics collector: prometheus
-  prometheus_config:    # following are prometheus configure
-    collect_type: pull  # prometheus collect data method
-    port: 8080          # the port prometheus use to fetch metrics
-    push_gateway_ip_address: 127.0.0.1 # push method configure: push gateway ip address
-    push_gateway_port: 9091            # push method configure: push gateway port
+  is_startup: off                       # if monitoring start: on, off
+  collector: prometheus                 # metrics collector: prometheus
+  prometheus_config:                    # following are prometheus configure
+    port: 8080                          # the port prometheus use to fetch metrics
+    push_gateway_ip_address: 127.0.0.1  # push method configure: push gateway ip address
+    push_gateway_port: 9091             # push method configure: push gateway port
 
-
-license_config:         # license configure
-  license_path: "@MILVUS_DB_PATH@/system.license" # license file path
-
-cache_config:           # cache configure
-  cpu_cache_capacity: 16   # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory
-  cpu_cache_free_percent: 0.85 # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
-  insert_cache_immediately: false  # insert data will be load into cache immediately for hot query
-  gpu_cache_capacity: 5    # how many memory are used as cache in gpu, unit: GB, RANGE: 0 ~ less than total memory
-  gpu_cache_free_percent: 0.85     # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
-  gpu_ids: 0,1             # gpu id
+cache_config:
+  cpu_cache_capacity: 16            # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory
+  cpu_cache_free_percent: 0.85      # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
+  insert_cache_immediately: false   # insert data will be load into cache immediately for hot query
+  gpu_cache_capacity: 5             # how many memory are used as cache in gpu, unit: GB, RANGE: 0 ~ less than total memory
+  gpu_cache_free_percent: 0.85      # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
+  gpu_ids: 0,1                      # gpu id
 
 engine_config:
-  nprobe: 10
-  nlist: 16384
   use_blas_threshold: 20
   metric_type: L2               # compare vectors by euclidean distance(L2) or inner product(IP), optional: L2 or IP
   omp_thread_num: 0             # how many compute threads be used by engine, 0 means use all cpu core to compute

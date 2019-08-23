@@ -24,6 +24,7 @@
 #include <cache/CpuCacheMgr.h>
 #include <boost/filesystem.hpp>
 #include "scheduler/SchedInst.h"
+#include <src/cache/GpuCacheMgr.h>
 
 namespace zilliz {
 namespace milvus {
@@ -34,32 +35,6 @@ namespace {
 constexpr uint64_t METRIC_ACTION_INTERVAL = 1;
 constexpr uint64_t COMPACT_ACTION_INTERVAL = 1;
 constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
-
-void CollectInsertMetrics(double total_time, size_t n, bool succeed) {
-    double avg_time = total_time / n;
-    for (int i = 0; i < n; ++i) {
-        server::Metrics::GetInstance().AddVectorsDurationHistogramOberve(avg_time);
-    }
-
-//    server::Metrics::GetInstance().add_vector_duration_seconds_quantiles().Observe((average_time));
-    if (succeed) {
-        server::Metrics::GetInstance().AddVectorsSuccessTotalIncrement(n);
-        server::Metrics::GetInstance().AddVectorsSuccessGaugeSet(n);
-    }
-    else {
-        server::Metrics::GetInstance().AddVectorsFailTotalIncrement(n);
-        server::Metrics::GetInstance().AddVectorsFailGaugeSet(n);
-    }
-}
-
-void CollectQueryMetrics(double total_time, size_t nq) {
-    for (int i = 0; i < nq; ++i) {
-        server::Metrics::GetInstance().QueryResponseSummaryObserve(total_time);
-    }
-    auto average_time = total_time / nq;
-    server::Metrics::GetInstance().QueryVectorResponseSummaryObserve(average_time, nq);
-    server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq) / total_time);
-}
 
 }
 
@@ -157,6 +132,10 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
     return Status::OK();
 }
 
+Status DBImpl::UpdateTableFlag(const std::string &table_id, int64_t flag) {
+    return meta_ptr_->UpdateTableFlag(table_id, flag);
+}
+
 Status DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
     return meta_ptr_->Count(table_id, row_count);
 }
@@ -165,29 +144,23 @@ Status DBImpl::InsertVectors(const std::string& table_id_,
         uint64_t n, const float* vectors, IDNumbers& vector_ids_) {
     ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
 
-    auto start_time = METRICS_NOW_TIME;
-    Status status = mem_mgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
-    auto end_time = METRICS_NOW_TIME;
-    double total_time = METRICS_MICROSECONDS(start_time,end_time);
+    Status status;
+    zilliz::milvus::server::CollectInsertMetrics metrics(n, status);
+    status = mem_mgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
 //    std::chrono::microseconds time_span = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
 //    double average_time = double(time_span.count()) / n;
 
     ENGINE_LOG_DEBUG << "Insert vectors to cache finished";
 
-    CollectInsertMetrics(total_time, n, status.ok());
     return status;
-
 }
 
 Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
                       const float *vectors, QueryResults &results) {
-    auto start_time = METRICS_NOW_TIME;
+    server::CollectQueryMetrics metrics(nq);
+
     meta::DatesT dates = {meta::Meta::GetDate()};
     Status result = Query(table_id, k, nq, nprobe, vectors, dates, results);
-    auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-
-    CollectQueryMetrics(total_time, nq);
 
     return result;
 }
@@ -254,7 +227,8 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
 Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
                           uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
                           const meta::DatesT& dates, QueryResults& results) {
-    auto start_time = METRICS_NOW_TIME;
+    server::CollectQueryMetrics metrics(nq);
+
     server::TimeRecorder rc("");
 
     //step 1: get files to search
@@ -296,11 +270,6 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
     //step 4: construct results
     results = context->GetResult();
     rc.ElapseFromBegin("Engine query totally cost");
-
-    auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-
-    CollectQueryMetrics(total_time, nq);
 
     return Status::OK();
 }
@@ -421,20 +390,16 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     long  index_size = 0;
 
     for (auto& file : files) {
+        server::CollectMergeFilesMetrics metrics;
 
-        auto start_time = METRICS_NOW_TIME;
         index->Merge(file.location_);
         auto file_schema = file;
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time,end_time);
-        server::Metrics::GetInstance().MemTableMergeDurationSecondsHistogramObserve(total_time);
-
         file_schema.file_type_ = meta::TableFileSchema::TO_DELETE;
         updated.push_back(file_schema);
         ENGINE_LOG_DEBUG << "Merging file " << file_schema.file_id_;
         index_size = index->Size();
 
-        if (index_size >= options_.index_trigger_size) break;
+        if (index_size >= file_schema.index_file_size_) break;
     }
 
     //step 3: serialize to disk
@@ -584,6 +549,11 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
         //step 2: drop old index files
         DropIndex(table_id);
 
+        if(index.engine_type_ == (int)EngineType::FAISS_IDMAP) {
+            ENGINE_LOG_DEBUG << "index type = IDMAP, no need to build index";
+            return Status::OK();
+        }
+
         //step 3: update index info
 
         status = meta_ptr_->UpdateTableIndexParam(table_id, index);
@@ -644,11 +614,8 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         std::shared_ptr<ExecutionEngine> index;
 
         try {
-            auto start_time = METRICS_NOW_TIME;
-            index = to_index->BuildIndex(table_file.location_);
-            auto end_time = METRICS_NOW_TIME;
-            auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-            server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
+            server::CollectBuildIndexMetrics metrics;
+            index = to_index->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
         } catch (std::exception& ex) {
             //typical error: out of gpu memory
             std::string msg = "BuildIndex encounter exception" + std::string(ex.what());
