@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
+#include <cache/GpuCacheMgr.h>
 #include "PrometheusMetrics.h"
 #include "utils/Log.h"
 #include "SystemInfo.h"
@@ -163,6 +164,18 @@ void PrometheusMetrics::CPUTemperature() {
     for (int i = 0; i < CPU_temperatures.size(); ++i) {
         prometheus::Gauge &cpu_temp = CPU_temperature_.Add({{"CPU", std::to_string(i)}});
         cpu_temp.Set(CPU_temperatures[i]);
+    }
+}
+
+void PrometheusMetrics::GpuCacheUsageGaugeSet(double value) {
+    if(!startup_) return;
+    int64_t num_processors = server::SystemInfo::GetInstance().num_processor();
+
+    for (auto i = 0; i < num_processors; ++i) {
+//        int gpu_cache_usage = cache::GpuCacheMgr::GetInstance(i)->CacheUsage();
+//        int gpu_cache_total = cache::GpuCacheMgr::GetInstance(i)->CacheCapacity();
+//        prometheus::Gauge &gpu_cache = gpu_cache_usage_.Add({{"GPU_Cache", std::to_string(i)}});
+//        gpu_cache.Set(gpu_cache_usage * 100 / gpu_cache_total);
     }
 }
 

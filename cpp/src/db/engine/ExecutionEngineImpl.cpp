@@ -4,8 +4,8 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include <stdexcept>
+#include "src/cache/GpuCacheMgr.h"
 
-#include "src/server/ServerConfig.h"
 #include "src/metrics/Metrics.h"
 #include "db/Log.h"
 #include "utils/CommonUtil.h"
@@ -22,26 +22,23 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-namespace {
-std::string GetMetricType() {
-    server::ServerConfig &config = server::ServerConfig::GetInstance();
-    server::ConfigNode engine_config = config.GetConfig(server::CONFIG_ENGINE);
-    return engine_config.GetValue(server::CONFIG_METRICTYPE, "L2");
-}
-}
-
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
                                          const std::string &location,
-                                         EngineType type)
-    : location_(location), dim(dimension), build_type(type) {
-    current_type = EngineType::FAISS_IDMAP;
+                                         EngineType index_type,
+                                         MetricType metric_type,
+                                         int32_t nlist)
+    : location_(location),
+      dim_(dimension),
+      index_type_(index_type),
+      metric_type_(metric_type),
+      nlist_(nlist) {
 
     index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
     if (!index_) throw Exception("Create Empty VecIndex");
 
     Config build_cfg;
     build_cfg["dim"] = dimension;
-    build_cfg["metric_type"] = GetMetricType();
+    build_cfg["metric_type"] = (metric_type_ == MetricType::IP) ? "IP" : "L2";
     AutoGenParams(index_->GetType(), 0, build_cfg);
     auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(build_cfg);
     if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
@@ -49,9 +46,14 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
 
 ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index,
                                          const std::string &location,
-                                         EngineType type)
-    : index_(std::move(index)), location_(location), build_type(type) {
-    current_type = type;
+                                         EngineType index_type,
+                                         MetricType metric_type,
+                                         int32_t nlist)
+    : index_(std::move(index)),
+      location_(location),
+      index_type_(index_type),
+      metric_type_(metric_type),
+      nlist_(nlist) {
 }
 
 VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
@@ -144,28 +146,60 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
 }
 
 Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
-    try {
-        index_ = index_->CopyToGpu(device_id);
-        ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
-    } catch (knowhere::KnowhereException &e) {
-        ENGINE_LOG_ERROR << e.what();
-        return Status::Error(e.what());
-    } catch (std::exception &e) {
-        return Status::Error(e.what());
+    index_ = zilliz::milvus::cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
+    bool already_in_cache = (index_ != nullptr);
+    auto start_time = METRICS_NOW_TIME;
+    if (!index_) {
+        try {
+            index_ = index_->CopyToGpu(device_id);
+            ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
+        } catch (knowhere::KnowhereException &e) {
+            ENGINE_LOG_ERROR << e.what();
+            return Status::Error(e.what());
+        } catch (std::exception &e) {
+            return Status::Error(e.what());
+        }
     }
+
+    if (!already_in_cache) {
+        GpuCache(device_id);
+        auto end_time = METRICS_NOW_TIME;
+        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+        double physical_size = PhysicalSize();
+
+        server::Metrics::GetInstance().FaissDiskLoadDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(physical_size);
+    }
+
     return Status::OK();
 }
 
 Status ExecutionEngineImpl::CopyToCpu() {
-    try {
-        index_ = index_->CopyToCpu();
-        ENGINE_LOG_DEBUG << "GPU to CPU";
-    } catch (knowhere::KnowhereException &e) {
-        ENGINE_LOG_ERROR << e.what();
-        return Status::Error(e.what());
-    } catch (std::exception &e) {
-        return Status::Error(e.what());
+    index_ = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    bool already_in_cache = (index_ != nullptr);
+    auto start_time = METRICS_NOW_TIME;
+    if (!index_) {
+        try {
+            index_ = index_->CopyToCpu();
+            ENGINE_LOG_DEBUG << "GPU to CPU";
+        } catch (knowhere::KnowhereException &e) {
+            ENGINE_LOG_ERROR << e.what();
+            return Status::Error(e.what());
+        } catch (std::exception &e) {
+            return Status::Error(e.what());
+        }
     }
+
+    if(!already_in_cache) {
+        Cache();
+        auto end_time = METRICS_NOW_TIME;
+        auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+        double physical_size = PhysicalSize();
+
+        server::Metrics::GetInstance().FaissDiskLoadDurationSecondsHistogramObserve(total_time);
+        server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(physical_size);
+    }
+
     return Status::OK();
 }
 
@@ -204,15 +238,15 @@ ExecutionEngineImpl::BuildIndex(const std::string &location) {
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
-    auto to_index = CreatetVecIndex(build_type);
+    auto to_index = CreatetVecIndex(index_type_);
     if (!to_index) {
         throw Exception("Create Empty VecIndex");
     }
 
     Config build_cfg;
     build_cfg["dim"] = Dimension();
-    build_cfg["metric_type"] = GetMetricType();
-    build_cfg["gpu_id"] = gpu_num;
+    build_cfg["metric_type"] = (metric_type_ == MetricType::IP) ? "IP" : "L2";
+    build_cfg["gpu_id"] = gpu_num_;
     build_cfg["nlist"] = nlist_;
     AutoGenParams(to_index->GetType(), Count(), build_cfg);
 
@@ -222,7 +256,7 @@ ExecutionEngineImpl::BuildIndex(const std::string &location) {
                                  build_cfg);
     if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
 
-    return std::make_shared<ExecutionEngineImpl>(to_index, location, build_type);
+    return std::make_shared<ExecutionEngineImpl>(to_index, location, index_type_, metric_type_, nlist_);
 }
 
 Status ExecutionEngineImpl::Search(long n,
@@ -246,21 +280,16 @@ Status ExecutionEngineImpl::Cache() {
     return Status::OK();
 }
 
+Status ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
+    zilliz::milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, index_);
+}
+
 // TODO(linxj): remove.
 Status ExecutionEngineImpl::Init() {
     using namespace zilliz::milvus::server;
     ServerConfig &config = ServerConfig::GetInstance();
     ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-    gpu_num = server_config.GetInt32Value("gpu_index", 0);
-
-    switch (build_type) {
-        case EngineType::FAISS_IVFSQ8:
-        case EngineType::FAISS_IVFFLAT: {
-            ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
-            nlist_ = engine_config.GetInt32Value(CONFIG_NLIST, 16384);
-            break;
-        }
-    }
+        gpu_num_ = server_config.GetInt32Value("gpu_index", 0);
 
     return Status::OK();
 }

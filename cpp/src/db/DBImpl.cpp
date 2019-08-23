@@ -6,6 +6,7 @@
 #include "DBImpl.h"
 #include "src/db/meta/SqliteMetaImpl.h"
 #include "Log.h"
+#include "Utils.h"
 #include "engine/EngineFactory.h"
 #include "Factories.h"
 #include "metrics/Metrics.h"
@@ -59,25 +60,6 @@ void CollectQueryMetrics(double total_time, size_t nq) {
     server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq) / total_time);
 }
 
-void CollectFileMetrics(int file_type, size_t file_size, double total_time) {
-    switch(file_type) {
-        case meta::TableFileSchema::RAW:
-        case meta::TableFileSchema::TO_INDEX: {
-            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-            server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size);
-            server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size);
-            server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size);
-            break;
-        }
-        default: {
-            server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
-            server::Metrics::GetInstance().IndexFileSizeHistogramObserve(file_size);
-            server::Metrics::GetInstance().IndexFileSizeTotalIncrement(file_size);
-            server::Metrics::GetInstance().IndexFileSizeGaugeSet(file_size);
-            break;
-        }
-    }
-}
 }
 
 
@@ -104,13 +86,18 @@ Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& date
     //dates partly delete files of the table but currently we don't support
     ENGINE_LOG_DEBUG << "Prepare to delete table " << table_id;
 
-    mem_mgr_->EraseMemVector(table_id); //not allow insert
-    meta_ptr_->DeleteTable(table_id); //soft delete table
+    if (dates.empty()) {
+        mem_mgr_->EraseMemVector(table_id); //not allow insert
+        meta_ptr_->DeleteTable(table_id); //soft delete table
 
-    //scheduler will determine when to delete table files
-    TaskScheduler& scheduler = TaskScheduler::GetInstance();
-    DeleteContextPtr context = std::make_shared<DeleteContext>(table_id, meta_ptr_);
-    scheduler.Schedule(context);
+        //scheduler will determine when to delete table files
+        TaskScheduler& scheduler = TaskScheduler::GetInstance();
+        DeleteContextPtr context = std::make_shared<DeleteContext>(table_id, meta_ptr_);
+        scheduler.Schedule(context);
+    } else {
+        meta_ptr_->DropPartitionsByDates(table_id, dates);
+    }
+
 
     return Status::OK();
 }
@@ -143,7 +130,7 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
 
     for(auto &day_files : files) {
         for (auto &file : day_files.second) {
-            ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
+            ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_, (MetricType)file.metric_type_, file.nlist_);
             if(engine == nullptr) {
                 ENGINE_LOG_ERROR << "Invalid engine type";
                 return Status::Error("Invalid engine type");
@@ -204,7 +191,7 @@ Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint6
 
 Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
-    ENGINE_LOG_DEBUG << "Query by vectors";
+    ENGINE_LOG_DEBUG << "Query by vectors " << table_id;
 
     //get all table files from table
     meta::DatePartionedTableFilesSchema files;
@@ -355,7 +342,7 @@ void DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
-    server::Metrics::GetInstance().CacheUsageGaugeSet(cache_usage*100/cache_total);
+    server::Metrics::GetInstance().CpuCacheUsageGaugeSet(cache_usage*100/cache_total);
     uint64_t size;
     Size(size);
     server::Metrics::GetInstance().DataFileSizeGaugeSet(size);
@@ -424,7 +411,8 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
 
     //step 2: merge files
     ExecutionEnginePtr index =
-            EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_);
+            EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_,
+                    (MetricType)table_file.metric_type_, table_file.nlist_);
 
     meta::TableFilesSchema updated;
     long  index_size = 0;
@@ -465,12 +453,9 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     }
 
     //step 4: update table files state
-    if (index_size >= options_.index_trigger_size) {
-        table_file.file_type_ = meta::TableFileSchema::TO_INDEX;
-    } else {
-        table_file.file_type_ = meta::TableFileSchema::RAW;
-    }
-    table_file.size_ = index_size;
+    table_file.file_type_ = meta::TableFileSchema::RAW;
+    table_file.file_size_ = index->PhysicalSize();
+    table_file.row_count_ = index->Count();
     updated.push_back(table_file);
     status = meta_ptr_->UpdateTableFiles(updated);
     ENGINE_LOG_DEBUG << "New merged file " << table_file.file_id_ <<
@@ -566,7 +551,7 @@ Status DBImpl::BuildIndex(const std::string& table_id) {
     int times = 1;
 
     while (has) {
-        ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
+        ENGINE_LOG_DEBUG << "Non index files detected in " << table_id << "! Will build index " << times;
         meta_ptr_->UpdateTableFilesToIndex(table_id);
         /* StartBuildIndexTask(true); */
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10*1000, times*100)));
@@ -574,11 +559,64 @@ Status DBImpl::BuildIndex(const std::string& table_id) {
         times++;
     }
     return Status::OK();
-    /* return BuildIndexByTable(table_id); */
+}
+
+Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
+    {
+        std::unique_lock<std::mutex> lock(build_index_mutex_);
+
+        //step 1: check index difference
+        TableIndex old_index;
+        auto status = DescribeIndex(table_id, old_index);
+        if(!status.ok()) {
+            ENGINE_LOG_ERROR << "Failed to get table index info";
+            return status;
+        }
+
+        if(utils::IsSameIndex(old_index, index)) {
+            ENGINE_LOG_DEBUG << "Same index setting, no need to create index again";
+            return Status::OK();
+        }
+
+        //step 2: drop old index files
+        DropIndex(table_id);
+
+        //step 3: update index info
+
+        status = meta_ptr_->UpdateTableIndexParam(table_id, index);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Failed to update table index info";
+            return status;
+        }
+    }
+
+    bool has = false;
+    auto status = meta_ptr_->HasNonIndexFiles(table_id, has);
+    int times = 1;
+
+    while (has) {
+        ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
+        status = meta_ptr_->UpdateTableFilesToIndex(table_id);
+        /* StartBuildIndexTask(true); */
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10*1000, times*100)));
+        status = meta_ptr_->HasNonIndexFiles(table_id, has);
+        times++;
+    }
+    return Status::OK();
+}
+
+Status DBImpl::DescribeIndex(const std::string& table_id, TableIndex& index) {
+    return meta_ptr_->DescribeTableIndex(table_id, index);
+}
+
+Status DBImpl::DropIndex(const std::string& table_id) {
+    return meta_ptr_->DropTableIndex(table_id);
 }
 
 Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
-    ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
+    ExecutionEnginePtr to_index =
+            EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_,
+                    (MetricType)file.metric_type_, file.nlist_);
     if(to_index == nullptr) {
         ENGINE_LOG_ERROR << "Invalid engine type";
         return Status::Error("Invalid engine type");
@@ -650,26 +688,27 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
         //step 6: update meta
         table_file.file_type_ = meta::TableFileSchema::INDEX;
-        table_file.size_ = index->Size();
+        table_file.file_size_ = index->PhysicalSize();
+        table_file.row_count_ = index->Count();
 
-        auto to_remove = file;
-        to_remove.file_type_ = meta::TableFileSchema::TO_DELETE;
+        auto origin_file = file;
+        origin_file.file_type_ = meta::TableFileSchema::BACKUP;
 
-        meta::TableFilesSchema update_files = {table_file, to_remove};
+        meta::TableFilesSchema update_files = {table_file, origin_file};
         status = meta_ptr_->UpdateTableFiles(update_files);
         if(status.ok()) {
             ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size "
                              << index->PhysicalSize() << " bytes"
-                             << " from file " << to_remove.file_id_;
+                             << " from file " << origin_file.file_id_;
 
             if(options_.insert_cache_immediately_) {
                 index->Cache();
             }
         } else {
             //failed to update meta, mark the new file as to_delete, don't delete old file
-            to_remove.file_type_ = meta::TableFileSchema::TO_INDEX;
-            status = meta_ptr_->UpdateTableFile(to_remove);
-            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << to_remove.file_id_ << " to to_index";
+            origin_file.file_type_ = meta::TableFileSchema::TO_INDEX;
+            status = meta_ptr_->UpdateTableFile(origin_file);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << origin_file.file_id_ << " to to_index";
 
             table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
             status = meta_ptr_->UpdateTableFile(table_file);
@@ -683,30 +722,6 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
     }
 
     return Status::OK();
-}
-
-Status DBImpl::BuildIndexByTable(const std::string& table_id) {
-    std::unique_lock<std::mutex> lock(build_index_mutex_);
-    meta::TableFilesSchema to_index_files;
-    meta_ptr_->FilesToIndex(to_index_files);
-
-    Status status;
-
-    for (auto& file : to_index_files) {
-        status = BuildIndex(file);
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
-            return status;
-        }
-        ENGINE_LOG_DEBUG << "Sync building index for " << file.id_ << " passed";
-
-        if (shutting_down_.load(std::memory_order_acquire)){
-            ENGINE_LOG_DEBUG << "Server will shutdown, skip build index action for table " << table_id;
-            break;
-        }
-    }
-
-    return status;
 }
 
 void DBImpl::BackgroundBuildIndex() {
