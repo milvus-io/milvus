@@ -49,6 +49,9 @@ public:
     ResourceWPtr
     Add(ResourcePtr &&resource);
 
+    void
+    Connect(const std::string &res1, const std::string &res2, Connection &connection);
+
     /*
      * Create connection between A and B;
      */
@@ -80,6 +83,9 @@ public:
     DumpTaskTables();
 
 private:
+    ResourcePtr
+    get_resource_by_name(const std::string &name);
+
     void
     event_process();
 

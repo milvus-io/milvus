@@ -48,6 +48,7 @@ ToString(const TaskTimestamp &timestamp) {
     ss << ", executed=" << timestamp.executed;
     ss << ", move=" << timestamp.move;
     ss << ", moved=" << timestamp.moved;
+    ss << ", finish=" << timestamp.finish;
     ss << ">";
     return ss.str();
 }
@@ -92,6 +93,7 @@ TaskTableItem::Executed() {
         state = TaskTableItemState::EXECUTED;
         lock.unlock();
         timestamp.executed = get_now_timestamp();
+        timestamp.finish = get_now_timestamp();
         return true;
     }
     return false;
@@ -114,6 +116,7 @@ TaskTableItem::Moved() {
         state = TaskTableItemState::MOVED;
         lock.unlock();
         timestamp.moved = get_now_timestamp();
+        timestamp.finish = get_now_timestamp();
         return true;
     }
     return false;
