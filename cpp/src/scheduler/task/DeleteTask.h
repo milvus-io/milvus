@@ -5,6 +5,7 @@
  ******************************************************************************/
 #pragma once
 
+#include <src/db/scheduler/context/DeleteContext.h>
 #include "Task.h"
 
 
@@ -14,6 +15,9 @@ namespace engine {
 
 class XDeleteTask : public Task {
 public:
+    explicit
+    XDeleteTask(DeleteContextPtr &delete_context);
+
     void
     Load(LoadType type, uint8_t device_id) override;
 
@@ -22,6 +26,9 @@ public:
 
     TaskPtr
     Clone() override;
+
+public:
+    DeleteContextPtr delete_context_ptr_;
 };
 
 }
