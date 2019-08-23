@@ -100,7 +100,7 @@ TEST(DBSchedulerTest, DELETE_SCHEDULER_TEST) {
     }
 
     engine::meta::Meta::Ptr meta_ptr;
-    engine::DeleteContextPtr context_ptr = std::make_shared<engine::DeleteContext>(table_id, meta_ptr);
+    engine::DeleteContextPtr context_ptr = std::make_shared<engine::DeleteContext>(table_id, meta_ptr, 0);
     ret = engine::TaskDispatchStrategy::Schedule(context_ptr, task_list);
     ASSERT_TRUE(ret);
     ASSERT_EQ(task_list.size(), 21);
@@ -115,7 +115,7 @@ TEST(DBSchedulerTest, DELETE_SCHEDULER_TEST) {
         }
     }
 
-    context_ptr = std::make_shared<engine::DeleteContext>("no_task_table", meta_ptr);
+    context_ptr = std::make_shared<engine::DeleteContext>("no_task_table", meta_ptr, 0);
     ret = engine::TaskDispatchStrategy::Schedule(context_ptr, task_list);
     ASSERT_TRUE(ret);
     ASSERT_EQ(task_list.size(), 22);

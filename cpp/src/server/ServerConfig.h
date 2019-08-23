@@ -49,6 +49,16 @@ static const std::string CONFIG_ENGINE = "engine_config";
 static const std::string CONFIG_DCBT = "use_blas_threshold";
 static const std::string CONFIG_OMP_THREAD_NUM = "omp_thread_num";
 
+static const char* CONFIG_RESOURCE = "resource_config";
+static const char* CONFIG_RESOURCES = "resources";
+static const char* CONFIG_RESOURCE_TYPE = "type";
+static const char* CONFIG_RESOURCE_MEMORY = "memory";
+static const char* CONFIG_RESOURCE_DEVICE_ID = "device_id";
+static const char* CONFIG_RESOURCE_ENABLE_LOADER = "enable_loader";
+static const char* CONFIG_RESOURCE_ENABLE_EXECUTOR = "enable_executor";
+static const char* CONFIG_RESOURCE_CONNECTIONS = "connections";
+
+
 class ServerConfig {
  public:
     static ServerConfig &GetInstance();

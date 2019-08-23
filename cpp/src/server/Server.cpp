@@ -24,6 +24,7 @@
 //#include <numaif.h>
 #include <unistd.h>
 #include <string.h>
+#include <src/scheduler/SchedInst.h>
 
 #include "metrics/Metrics.h"
 
@@ -163,6 +164,7 @@ Server::Start() {
             signal(SIGTERM, SignalUtil::HandleSignal);
             server::Metrics::GetInstance().Init();
             server::SystemInfo::GetInstance().Init();
+            engine::SchedServInit();
             std::cout << "Milvus server start successfully." << std::endl;
             StartService();
 

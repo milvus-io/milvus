@@ -52,6 +52,9 @@ private:
     static std::mutex mutex_;
 };
 
+void
+SchedServInit();
+
 }
 }
 }
