@@ -41,6 +41,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-400 - Add timestamp record in task state change function
 - MS-402 - Add dump implementation for TaskTableItem
 - MS-403 - Add GpuCacheMgr
+- MS-407 - Reconstruct MetricsCollector
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
