@@ -22,7 +22,8 @@ class ResourceFactory {
 public:
     static std::shared_ptr<Resource>
     Create(const std::string &name,
-           const std::string &alias = "",
+           const std::string &type,
+           uint64_t device_id,
            bool enable_loader = true,
            bool enable_executor = true);
 };

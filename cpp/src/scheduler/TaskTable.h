@@ -36,6 +36,7 @@ struct TaskTimestamp {
     uint64_t loaded = 0;
     uint64_t execute = 0;
     uint64_t executed = 0;
+    uint64_t finish = 0;
 };
 
 struct TaskTableItem {
