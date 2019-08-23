@@ -265,8 +265,61 @@ GrpcClient::PreloadTable(milvus::grpc::TableName &table_name) {
 }
 
 Status
+GrpcClient::DeleteByRange(grpc::DeleteByRangeParam &delete_by_range_param) {
+    ClientContext context;
+    ::milvus::grpc::Status response;
+    ::grpc::Status grpc_status = stub_->DeleteByRange(&context, delete_by_range_param, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "DeleteByRange gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (response.error_code() != grpc::SUCCESS) {
+        std::cerr << response.reason() << std::endl;
+        return Status(StatusCode::ServerFailed, response.reason());
+    }
+    return Status::OK();
+}
+
+Status
 GrpcClient::Disconnect() {
     stub_.release();
+    return Status::OK();
+}
+
+Status
+GrpcClient::DescribeIndex(grpc::TableName &table_name, grpc::IndexParam &index_param) {
+    ClientContext context;
+    ::grpc::Status grpc_status = stub_->DescribeIndex(&context, table_name, &index_param);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "DescribeIndex rpc failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+    if (index_param.mutable_table_name()->status().error_code() != grpc::SUCCESS) {
+        std::cerr << index_param.mutable_table_name()->status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, index_param.mutable_table_name()->status().reason());
+    }
+
+    return Status::OK();
+}
+
+Status
+GrpcClient::DropIndex(grpc::TableName &table_name) {
+    ClientContext context;
+    ::milvus::grpc::Status response;
+    ::grpc::Status grpc_status = stub_->DropIndex(&context, table_name, &response);
+
+    if (!grpc_status.ok()) {
+        std::cerr << "DropIndex gRPC failed!" << std::endl;
+        return Status(StatusCode::RPCFailed, grpc_status.error_message());
+    }
+
+    if (response.error_code() != grpc::SUCCESS) {
+        std::cerr << response.reason() << std::endl;
+        return Status(StatusCode::ServerFailed, response.reason());
+    }
     return Status::OK();
 }
 

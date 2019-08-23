@@ -85,16 +85,20 @@ Status CreateTablePath(const DBMetaOptions& options, const std::string& table_id
     return Status::OK();
 }
 
-Status DeleteTablePath(const DBMetaOptions& options, const std::string& table_id) {
-    std::string db_path = options.path;
-    std::string table_path = db_path + TABLES_FOLDER + table_id;
-    boost::filesystem::remove_all(table_path);
-    ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+Status DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool force) {
+    std::vector<std::string> paths = options.slave_paths;
+    paths.push_back(options.path);
 
-    for(auto& path : options.slave_paths) {
-        table_path = path + TABLES_FOLDER + table_id;
-        boost::filesystem::remove_all(table_path);
-        ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+    for(auto& path : paths) {
+        std::string table_path = path + TABLES_FOLDER + table_id;
+        if(force) {
+            boost::filesystem::remove_all(table_path);
+            ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+        } else if(boost::filesystem::exists(table_path) &&
+                  boost::filesystem::is_empty(table_path)) {
+            boost::filesystem::remove_all(table_path);
+            ENGINE_LOG_DEBUG << "Remove table folder: " << table_path;
+        }
     }
 
     return Status::OK();
@@ -140,6 +144,13 @@ Status DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& 
     utils::GetTableFilePath(options, table_file);
     boost::filesystem::remove(table_file.location_);
     return Status::OK();
+}
+
+bool IsSameIndex(const TableIndex& index1, const TableIndex& index2) {
+    return index1.engine_type_ == index2.engine_type_
+        && index1.nlist_ == index2.nlist_
+        && index1.index_file_size_ == index2.index_file_size_
+        && index1.metric_type_ == index2.metric_type_;
 }
 
 } // namespace utils

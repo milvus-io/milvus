@@ -117,7 +117,7 @@ ConnectionImpl::ServerStatus() const {
 Status
 ConnectionImpl::DeleteByRange(Range &range,
               const std::string &table_name) {
-
+    return client_proxy_->DeleteByRange(range, table_name);
 }
 
 Status
@@ -125,14 +125,14 @@ ConnectionImpl::PreloadTable(const std::string &table_name) const {
     return client_proxy_->PreloadTable(table_name);
 }
 
-IndexParam
-ConnectionImpl::DescribeIndex(const std::string &table_name) const {
-
+Status
+ConnectionImpl::DescribeIndex(const std::string &table_name, IndexParam& index_param) const {
+    return client_proxy_->DescribeIndex(table_name, index_param);
 }
 
 Status
 ConnectionImpl::DropIndex(const std::string &table_name) const {
-
+    return client_proxy_->DropIndex(table_name);
 }
 
 }

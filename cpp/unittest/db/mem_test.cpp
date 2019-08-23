@@ -65,24 +65,29 @@ TEST_F(NewMemManagerTest, VECTOR_SOURCE_TEST) {
     engine::VectorSource source(n, vectors.data());
 
     size_t num_vectors_added;
-    engine::ExecutionEnginePtr execution_engine_ = engine::EngineFactory::Build(table_file_schema.dimension_,
-                                                                                table_file_schema.location_,
-                                                                                (engine::EngineType) table_file_schema.engine_type_);
-    status = source.Add(execution_engine_, table_file_schema, 50, num_vectors_added);
-    ASSERT_TRUE(status.ok());
+    engine::ExecutionEnginePtr execution_engine_ =
+            engine::EngineFactory::Build(table_file_schema.dimension_,
+                    table_file_schema.location_,
+                    (engine::EngineType) table_file_schema.engine_type_,
+                    (engine::MetricType)table_file_schema.metric_type_,
+                    table_schema.nlist_);
 
+    engine::IDNumbers vector_ids;
+    status = source.Add(execution_engine_, table_file_schema, 50, num_vectors_added, vector_ids);
+    ASSERT_TRUE(status.ok());
+    vector_ids = source.GetVectorIds();
+    ASSERT_EQ(vector_ids.size(), 50);
     ASSERT_EQ(num_vectors_added, 50);
 
-    engine::IDNumbers vector_ids = source.GetVectorIds();
-    ASSERT_EQ(vector_ids.size(), 50);
-
-    status = source.Add(execution_engine_, table_file_schema, 60, num_vectors_added);
+    vector_ids.clear();
+    status = source.Add(execution_engine_, table_file_schema, 60, num_vectors_added, vector_ids);
     ASSERT_TRUE(status.ok());
 
     ASSERT_EQ(num_vectors_added, 50);
 
     vector_ids = source.GetVectorIds();
     ASSERT_EQ(vector_ids.size(), 100);
+
 
     status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
@@ -105,12 +110,13 @@ TEST_F(NewMemManagerTest, MEM_TABLE_FILE_TEST) {
 
     engine::VectorSource::Ptr source = std::make_shared<engine::VectorSource>(n_100, vectors_100.data());
 
-    status = mem_table_file.Add(source);
+    engine::IDNumbers vector_ids;
+    status = mem_table_file.Add(source, vector_ids);
     ASSERT_TRUE(status.ok());
 
 //    std::cout << mem_table_file.GetCurrentMem() << " " << mem_table_file.GetMemLeft() << std::endl;
 
-    engine::IDNumbers vector_ids = source->GetVectorIds();
+    vector_ids = source->GetVectorIds();
     ASSERT_EQ(vector_ids.size(), 100);
 
     size_t singleVectorMem = sizeof(float) * TABLE_DIM;
@@ -121,7 +127,8 @@ TEST_F(NewMemManagerTest, MEM_TABLE_FILE_TEST) {
     BuildVectors(n_max, vectors_128M);
 
     engine::VectorSource::Ptr source_128M = std::make_shared<engine::VectorSource>(n_max, vectors_128M.data());
-    status = mem_table_file.Add(source_128M);
+    vector_ids.clear();
+    status = mem_table_file.Add(source_128M, vector_ids);
 
     vector_ids = source_128M->GetVectorIds();
     ASSERT_EQ(vector_ids.size(), n_max - n_100);
@@ -149,9 +156,10 @@ TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
 
     engine::MemTable mem_table(TABLE_NAME, impl_, options);
 
-    status = mem_table.Add(source_100);
+    engine::IDNumbers vector_ids;
+    status = mem_table.Add(source_100, vector_ids);
     ASSERT_TRUE(status.ok());
-    engine::IDNumbers vector_ids = source_100->GetVectorIds();
+    vector_ids = source_100->GetVectorIds();
     ASSERT_EQ(vector_ids.size(), 100);
 
     engine::MemTableFile::Ptr mem_table_file;
@@ -163,8 +171,9 @@ TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
     std::vector<float> vectors_128M;
     BuildVectors(n_max, vectors_128M);
 
+    vector_ids.clear();
     engine::VectorSource::Ptr source_128M = std::make_shared<engine::VectorSource>(n_max, vectors_128M.data());
-    status = mem_table.Add(source_128M);
+    status = mem_table.Add(source_128M, vector_ids);
     ASSERT_TRUE(status.ok());
 
     vector_ids = source_128M->GetVectorIds();
@@ -181,7 +190,8 @@ TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
 
     engine::VectorSource::Ptr source_1G = std::make_shared<engine::VectorSource>(n_1G, vectors_1G.data());
 
-    status = mem_table.Add(source_1G);
+    vector_ids.clear();
+    status = mem_table.Add(source_1G, vector_ids);
     ASSERT_TRUE(status.ok());
 
     vector_ids = source_1G->GetVectorIds();
@@ -192,6 +202,8 @@ TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
 
     status = mem_table.Serialize();
     ASSERT_TRUE(status.ok());
+
+
 
     status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
@@ -367,6 +379,113 @@ TEST_F(NewMemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
 
     delete db_;
     boost::filesystem::remove_all(options.meta.path);
-
 };
 
+TEST_F(DBTest, VECTOR_IDS_TEST)
+{
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
+
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = TABLE_NAME;
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_STATS(stat);
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    engine::IDNumbers vector_ids;
+
+
+    int64_t nb = 100000;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
+
+    vector_ids.resize(nb);
+    for (auto i = 0; i < nb; i++) {
+        vector_ids[i] = i;
+    }
+
+    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    ASSERT_EQ(vector_ids[0], 0);
+    ASSERT_STATS(stat);
+
+    nb = 25000;
+    xb.clear();
+    BuildVectors(nb, xb);
+    vector_ids.clear();
+    vector_ids.resize(nb);
+    for (auto i = 0; i < nb; i++) {
+        vector_ids[i] = i + nb;
+    }
+    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    ASSERT_EQ(vector_ids[0], nb);
+    ASSERT_STATS(stat);
+
+    nb = 262144; //512M
+    xb.clear();
+    BuildVectors(nb, xb);
+    vector_ids.clear();
+    vector_ids.resize(nb);
+    for (auto i = 0; i < nb; i++) {
+        vector_ids[i] = i + nb / 2;
+    }
+    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    ASSERT_EQ(vector_ids[0], nb/2);
+    ASSERT_STATS(stat);
+
+    nb = 65536; //128M
+    xb.clear();
+    BuildVectors(nb, xb);
+    vector_ids.clear();
+    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    ASSERT_STATS(stat);
+
+    nb = 100;
+    xb.clear();
+    BuildVectors(nb, xb);
+    vector_ids.clear();
+    vector_ids.resize(nb);
+    for (auto i = 0; i < nb; i++) {
+        vector_ids[i] = i + nb;
+    }
+    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    for (auto i = 0; i < nb; i++) {
+        ASSERT_EQ(vector_ids[i], i + nb);
+    }
+}
+
+TEST_F(NewMemManagerTest, MEMMANAGER_TEST) {
+    int setenv_res = setenv("MILVUS_USE_OLD_MEM_MANAGER", "ON", 1);
+    ASSERT_TRUE(setenv_res == 0);
+
+    auto options = engine::OptionsFactory::Build();
+    options.meta.path = "/tmp/milvus_test";
+    options.meta.backend_uri = "sqlite://:@:/";
+    auto db_ = engine::DBFactory::Build(options);
+
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
+
+    engine::meta::TableSchema table_info_get;
+    table_info_get.table_id_ = TABLE_NAME;
+    stat = db_->DescribeTable(table_info_get);
+    ASSERT_STATS(stat);
+    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
+
+    auto start_time = METRICS_NOW_TIME;
+
+    int insert_loop = 20;
+    for (int i = 0; i < insert_loop; ++i) {
+        int64_t nb = 40960;
+        std::vector<float> xb;
+        BuildVectors(nb, xb);
+        engine::IDNumbers vector_ids;
+        engine::Status status = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        ASSERT_TRUE(status.ok());
+    }
+    auto end_time = METRICS_NOW_TIME;
+    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
+    LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
+
+    delete db_;
+    boost::filesystem::remove_all(options.meta.path);
+}
