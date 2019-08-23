@@ -64,6 +64,8 @@ public:
 
     virtual Status Cache() = 0;
 
+    virtual Status GpuCache(uint64_t gpu_id) = 0;
+
     virtual Status Init() = 0;
 };
 
