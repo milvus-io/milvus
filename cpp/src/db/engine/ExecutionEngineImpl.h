@@ -50,6 +50,8 @@ public:
 
     Status CopyToCpu() override;
 
+    ExecutionEnginePtr Clone() override;
+
     Status Merge(const std::string &location) override;
 
     Status Search(long n,

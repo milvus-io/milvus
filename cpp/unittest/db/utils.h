@@ -13,6 +13,8 @@
 #include "db/DB.h"
 #include "db/meta/SqliteMetaImpl.h"
 #include "db/meta/MySQLMetaImpl.h"
+#include "scheduler/SchedInst.h"
+#include "scheduler/ResourceFactory.h"
 
 
 #define TIMING
@@ -91,4 +93,5 @@ class DISABLED_MySQLDBTest : public ::testing::Test {
 class NewMemManagerTest : public ::testing::Test {
     void InitLog();
     void SetUp() override;
+    void TearDown() override;
 };
