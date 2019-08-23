@@ -263,9 +263,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
                 search_record_array.push_back(
                         std::make_pair(record_ids[SEARCH_TARGET], record_array[SEARCH_TARGET]));
             }
-            int64_t row_count;
-            conn->CountTable(TABLE_NAME, row_count);
-            std::cout << "\t" << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
         }
     }
 
