@@ -18,10 +18,12 @@ std::ostream &operator<<(std::ostream &out, const Resource &resource) {
 
 Resource::Resource(std::string name,
                    ResourceType type,
+                   uint64_t device_id,
                    bool enable_loader,
                    bool enable_executor)
     : name_(std::move(name)),
       type_(type),
+      device_id_(device_id),
       running_(false),
       enable_loader_(enable_loader),
       enable_executor_(enable_executor),
