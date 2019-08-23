@@ -29,6 +29,7 @@ public:
     virtual Status AllTables(std::vector<meta::TableSchema>& table_schema_array) = 0;
     virtual Status GetTableRowCount(const std::string& table_id, uint64_t& row_count) = 0;
     virtual Status PreloadTable(const std::string& table_id) = 0;
+    virtual Status UpdateTableFlag(const std::string &table_id, int64_t flag) = 0;
 
     virtual Status InsertVectors(const std::string& table_id_,
             uint64_t n, const float* vectors, IDNumbers& vector_ids_) = 0;

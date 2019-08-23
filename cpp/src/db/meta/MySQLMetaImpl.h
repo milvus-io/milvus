@@ -26,14 +26,19 @@ class MySQLMetaImpl : public Meta {
     MySQLMetaImpl(const DBMetaOptions &options_, const int &mode);
 
     Status CreateTable(TableSchema &table_schema) override;
+
     Status DescribeTable(TableSchema &group_info_) override;
+
     Status HasTable(const std::string &table_id, bool &has_or_not) override;
+
     Status AllTables(std::vector<TableSchema> &table_schema_array) override;
 
     Status DeleteTable(const std::string &table_id) override;
+
     Status DeleteTableFiles(const std::string &table_id) override;
 
     Status CreateTableFile(TableFileSchema &file_schema) override;
+
     Status DropPartitionsByDates(const std::string &table_id,
                                  const DatesT &dates) override;
 
@@ -44,6 +49,8 @@ class MySQLMetaImpl : public Meta {
     Status HasNonIndexFiles(const std::string &table_id, bool &has) override;
 
     Status UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) override;
+
+    Status UpdateTableFlag(const std::string &table_id, int64_t flag);
 
     Status DescribeTableIndex(const std::string &table_id, TableIndex& index) override;
 
