@@ -40,6 +40,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-394 - Update scheduler unittest
 - MS-400 - Add timestamp record in task state change function
 - MS-402 - Add dump implementation for TaskTableItem
+- MS-404 - Release index after search task done avoid memory increment continues
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
