@@ -120,7 +120,7 @@ private:
 
 class CollectExecutionEngineMetrics {
 public:
-    CollectExecutionEngineMetrics(double& physical_size) : physical_size_(physical_size) {
+    CollectExecutionEngineMetrics(double physical_size) : physical_size_(physical_size) {
         start_time_ = METRICS_NOW_TIME;
     }
 
@@ -137,12 +137,12 @@ public:
 private:
     using TIME_POINT = std::chrono::system_clock::time_point;
     TIME_POINT start_time_;
-    double& physical_size_;
+    double physical_size_;
 };
 
 class CollectSerializeMetrics {
 public:
-    CollectSerializeMetrics(size_t& size) : size_(size) {
+    CollectSerializeMetrics(size_t size) : size_(size) {
         start_time_ = METRICS_NOW_TIME;
     }
 
@@ -154,7 +154,7 @@ public:
 private:
     using TIME_POINT = std::chrono::system_clock::time_point;
     TIME_POINT start_time_;
-    size_t& size_;
+    size_t size_;
 };
 
 class CollectorAddMetrics {
