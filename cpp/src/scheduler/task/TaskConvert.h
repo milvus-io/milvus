@@ -4,9 +4,11 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
-#include "src/db/scheduler/task/IndexLoadTask.h"
+#include "db/scheduler/task/DeleteTask.h"
+#include "db/scheduler/task/IndexLoadTask.h"
 #include "Task.h"
 #include "SearchTask.h"
+#include "DeleteTask.h"
 
 namespace zilliz {
 namespace milvus {
