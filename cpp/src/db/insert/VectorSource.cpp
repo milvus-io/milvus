@@ -24,7 +24,7 @@ Status VectorSource::Add(const ExecutionEnginePtr &execution_engine,
                          size_t &num_vectors_added,
                          IDNumbers &vector_ids) {
 
-    server::CollectorAddMetrics metrics(n_, table_file_schema.dimension_);
+    server::CollectAddMetrics metrics(n_, table_file_schema.dimension_);
 
     num_vectors_added = current_num_vectors_added + num_vectors_to_add <= n_ ?
                         num_vectors_to_add : n_ - current_num_vectors_added;
