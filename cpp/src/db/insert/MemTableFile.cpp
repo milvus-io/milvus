@@ -94,7 +94,7 @@ Status MemTableFile::Serialize() {
 
     server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double) size / total_time);
 
-    table_file_schema_.file_type_ = (size >= options_.index_trigger_size) ?
+    table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ?
                                     meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
 
     auto status = meta_->UpdateTableFile(table_file_schema_);
