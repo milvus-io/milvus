@@ -49,6 +49,16 @@ ResourceMgr::Add(ResourcePtr &&resource) {
 }
 
 void
+ResourceMgr::Connect(const std::string &name1, const std::string &name2, Connection &connection) {
+    auto res1 = get_resource_by_name(name1);
+    auto res2 = get_resource_by_name(name2);
+    if (res1 && res2) {
+        res1->AddNeighbour(std::static_pointer_cast<Node>(res2), connection);
+        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
+    }
+}
+
+void
 ResourceMgr::Connect(ResourceWPtr &res1, ResourceWPtr &res2, Connection &connection) {
     if (auto observe_a = res1.lock()) {
         if (auto observe_b = res2.lock()) {
@@ -114,6 +124,16 @@ ResourceMgr::DumpTaskTables() {
         ss << resource->Dump() << std::endl << std::endl;
     }
     return ss.str();
+}
+
+ResourcePtr
+ResourceMgr::get_resource_by_name(const std::string &name) {
+    for (auto &res : resources_) {
+        if (res->Name() == name) {
+            return res;
+        }
+    }
+    return nullptr;
 }
 
 void

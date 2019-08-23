@@ -119,4 +119,33 @@ TEST_F(MetricTest, Metric_Tes) {
     delete [] qxb;
 };
 
+TEST_F(MetricTest, Collector_Metrics_Test){
+    engine::Status status = engine::Status::OK();
+    server::CollectInsertMetrics insert_metrics0(0, status);
+    status = engine::Status::Error("error");
+    server::CollectInsertMetrics insert_metrics1(0, status);
+
+    server::CollectQueryMetrics query_metrics(10);
+
+    server::CollectMergeFilesMetrics merge_metrics();
+
+    server::CollectBuildIndexMetrics build_index_metrics();
+
+    server::CollectExecutionEngineMetrics execution_metrics(10);
+
+    server::CollectSerializeMetrics serialize_metrics(10);
+
+    server::CollectAddMetrics add_metrics(10, 128);
+
+    server::CollectDurationMetrics duration_metrics_raw(engine::meta::TableFileSchema::RAW);
+    server::CollectDurationMetrics duration_metrics_index(engine::meta::TableFileSchema::TO_INDEX);
+    server::CollectDurationMetrics duration_metrics_delete(engine::meta::TableFileSchema::TO_DELETE);
+
+    server::CollectSearchTaskMetrics search_metrics_raw(engine::meta::TableFileSchema::RAW);
+    server::CollectSearchTaskMetrics search_metrics_index(engine::meta::TableFileSchema::TO_INDEX);
+    server::CollectSearchTaskMetrics search_metrics_delete(engine::meta::TableFileSchema::TO_DELETE);
+
+    server::MetricCollector metric_collector();
+}
+
 
