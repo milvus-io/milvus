@@ -59,7 +59,7 @@ public:
                   float *distances,
                   long *labels) const override;
 
-    ExecutionEnginePtr BuildIndex(const std::string &) override;
+    ExecutionEnginePtr BuildIndex(const std::string &location, EngineType engine_type) override;
 
     Status Cache() override;
 

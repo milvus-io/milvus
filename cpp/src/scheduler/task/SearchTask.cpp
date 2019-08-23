@@ -81,24 +81,6 @@ CollectFileMetrics(int file_type, size_t file_size) {
     }
 }
 
-void
-CollectDurationMetrics(int index_type, double total_time) {
-    switch (index_type) {
-        case meta::TableFileSchema::RAW: {
-            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-            break;
-        }
-        case meta::TableFileSchema::TO_INDEX: {
-            server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
-            break;
-        }
-        default: {
-            server::Metrics::GetInstance().SearchIndexDataDurationSecondsHistogramObserve(total_time);
-            break;
-        }
-    }
-}
-
 XSearchTask::XSearchTask(TableFileSchemaPtr file) : file_(file) {
     index_engine_ = EngineFactory::Build(file_->dimension_,
                                          file_->location_,
@@ -159,7 +141,7 @@ XSearchTask::Execute() {
 
     server::TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
 
-    auto start_time = METRICS_NOW_TIME;
+    server::CollectDurationMetrics metrics(index_type_);
 
     std::vector<long> output_ids;
     std::vector<float> output_distence;
@@ -201,10 +183,6 @@ XSearchTask::Execute() {
         //step 5: notify to send result to client
         context->IndexSearchDone(index_id_);
     }
-
-    auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    CollectDurationMetrics(index_type_, total_time);
 
     rc.ElapseFromBegin("totally cost");
 
