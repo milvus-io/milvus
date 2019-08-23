@@ -46,6 +46,9 @@ public:
 
     double freemem_percent() const { return freemem_percent_; };
     void set_freemem_percent(double percent) { freemem_percent_ = percent; }
+    void set_gpu_ids(std::vector<uint64_t>& gpu_ids) { gpu_ids_ = gpu_ids; }
+
+    std::vector<uint64_t> gpu_ids() const { return gpu_ids_; }
 
     size_t size() const;
     bool exists(const std::string& key);
@@ -60,6 +63,7 @@ private:
     int64_t usage_;
     int64_t capacity_;
     double freemem_percent_;
+    std::vector<uint64_t> gpu_ids_;
 
     LRU<std::string, CacheObjPtr> lru_;
     mutable std::mutex mutex_;

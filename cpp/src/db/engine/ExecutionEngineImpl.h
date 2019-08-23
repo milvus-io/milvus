@@ -59,6 +59,8 @@ public:
 
     Status Cache() override;
 
+    Status GpuCache(uint64_t gpu_id) override;
+
     Status Init() override;
 
 private:

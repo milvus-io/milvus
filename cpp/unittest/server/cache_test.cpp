@@ -146,7 +146,7 @@ TEST(CacheTest, CPU_CACHE_TEST) {
 }
 
 TEST(CacheTest, GPU_CACHE_TEST) {
-    cache::CacheMgr* gpu_mgr = cache::GpuCacheMgr::GetInstance();
+    cache::CacheMgr* gpu_mgr = cache::GpuCacheMgr::GetInstance(0);
 
     const int dim = 256;
 
@@ -164,6 +164,25 @@ TEST(CacheTest, GPU_CACHE_TEST) {
 
     gpu_mgr->ClearCache();
     ASSERT_EQ(gpu_mgr->ItemCount(), 0);
+
+    gpu_mgr->SetCapacity(4096000000);
+    for (auto i = 0; i < 3; i++) {
+        MockVecIndex *mock_index = new MockVecIndex();
+        mock_index->ntotal_ = 1000000;  //2G
+        engine::VecIndexPtr index(mock_index);
+        cache::DataObjPtr data_obj = std::make_shared<cache::DataObj>(index);
+        std::cout << data_obj->size() <<std::endl;
+        gpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
+    }
+
+//    ASSERT_EQ(gpu_mgr->ItemCount(), 2);
+//    auto obj0 = gpu_mgr->GetItem("index_0");
+//    ASSERT_EQ(obj0, nullptr);
+//    auto obj1 = gpu_mgr->GetItem("index_1");
+//    auto obj2 = gpu_mgr->GetItem("index_2");
+    gpu_mgr->ClearCache();
+    ASSERT_EQ(gpu_mgr->ItemCount(), 0);
+
 }
 
 TEST(CacheTest, INVALID_TEST) {
