@@ -130,7 +130,7 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
 
     for(auto &day_files : files) {
         for (auto &file : day_files.second) {
-            ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
+            ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_, (MetricType)file.metric_type_, file.nlist_);
             if(engine == nullptr) {
                 ENGINE_LOG_ERROR << "Invalid engine type";
                 return Status::Error("Invalid engine type");
@@ -411,7 +411,8 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
 
     //step 2: merge files
     ExecutionEnginePtr index =
-            EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_);
+            EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_,
+                    (MetricType)table_file.metric_type_, table_file.nlist_);
 
     meta::TableFilesSchema updated;
     long  index_size = 0;
@@ -613,7 +614,9 @@ Status DBImpl::DropIndex(const std::string& table_id) {
 }
 
 Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
-    ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_);
+    ExecutionEnginePtr to_index =
+            EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_,
+                    (MetricType)file.metric_type_, file.nlist_);
     if(to_index == nullptr) {
         ENGINE_LOG_ERROR << "Invalid engine type";
         return Status::Error("Invalid engine type");
