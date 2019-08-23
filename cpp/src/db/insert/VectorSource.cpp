@@ -12,23 +12,31 @@ namespace engine {
 
 VectorSource::VectorSource(const size_t &n,
                            const float *vectors) :
-    n_(n),
-    vectors_(vectors),
-    id_generator_(new SimpleIDGenerator()) {
+        n_(n),
+        vectors_(vectors),
+        id_generator_(std::make_shared<SimpleIDGenerator>()) {
     current_num_vectors_added = 0;
 }
 
 Status VectorSource::Add(const ExecutionEnginePtr &execution_engine,
                          const meta::TableFileSchema &table_file_schema,
                          const size_t &num_vectors_to_add,
-                         size_t &num_vectors_added) {
+                         size_t &num_vectors_added,
+                         IDNumbers &vector_ids) {
 
     auto start_time = METRICS_NOW_TIME;
 
     num_vectors_added = current_num_vectors_added + num_vectors_to_add <= n_ ?
                         num_vectors_to_add : n_ - current_num_vectors_added;
     IDNumbers vector_ids_to_add;
-    id_generator_->GetNextIDNumbers(num_vectors_added, vector_ids_to_add);
+    if (vector_ids.empty()) {
+        id_generator_->GetNextIDNumbers(num_vectors_added, vector_ids_to_add);
+    } else {
+        vector_ids_to_add.resize(num_vectors_added);
+        for (int pos = current_num_vectors_added; pos < current_num_vectors_added + num_vectors_added; pos++) {
+            vector_ids_to_add[pos-current_num_vectors_added] = vector_ids[pos];
+        }
+    }
     Status status = execution_engine->AddWithIds(num_vectors_added,
                                                  vectors_ + current_num_vectors_added * table_file_schema.dimension_,
                                                  vector_ids_to_add.data());

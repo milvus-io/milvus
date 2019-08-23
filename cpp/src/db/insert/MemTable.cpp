@@ -15,7 +15,7 @@ MemTable::MemTable(const std::string &table_id,
 
 }
 
-Status MemTable::Add(VectorSource::Ptr &source) {
+Status MemTable::Add(VectorSource::Ptr &source, IDNumbers &vector_ids) {
 
     while (!source->AllAdded()) {
 
@@ -27,12 +27,12 @@ Status MemTable::Add(VectorSource::Ptr &source) {
         Status status;
         if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
             MemTableFile::Ptr new_mem_table_file = std::make_shared<MemTableFile>(table_id_, meta_, options_);
-            status = new_mem_table_file->Add(source);
+            status = new_mem_table_file->Add(source, vector_ids);
             if (status.ok()) {
                 mem_table_file_list_.emplace_back(new_mem_table_file);
             }
         } else {
-            status = current_mem_table_file->Add(source);
+            status = current_mem_table_file->Add(source, vector_ids);
         }
 
         if (!status.ok()) {

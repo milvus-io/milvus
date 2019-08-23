@@ -5,22 +5,14 @@
  ******************************************************************************/
 #pragma once
 
-#include "utils/Error.h"
-#include <memory>
-#include <vector>
-
-
-#pragma once
-
 #include "MetricBase.h"
-//#include "PrometheusMetrics.h"
+
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 
 #define METRICS_NOW_TIME std::chrono::system_clock::now()
-//#define server::Metrics::GetInstance() server::Metrics::GetInstance()
 #define METRICS_MICROSECONDS(a, b) (std::chrono::duration_cast<std::chrono::microseconds> (b-a)).count();
 
 enum class MetricCollectorType {
@@ -31,13 +23,11 @@ enum class MetricCollectorType {
 
 class Metrics {
  public:
-    static MetricsBase &
-    CreateMetricsCollector(MetricCollectorType collector_type);
+    static MetricsBase &GetInstance();
 
-    static MetricsBase &
-    GetInstance();
+ private:
+    static MetricsBase &CreateMetricsCollector();
 };
-
 
 
 }

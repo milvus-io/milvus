@@ -44,9 +44,9 @@ public:
     // Other half of in-use conn count limit
     void release(const mysqlpp::Connection *pc) override;
 
-    int getConnectionsInUse();
-
-    void set_max_idle_time(int max_idle);
+//    int getConnectionsInUse();
+//
+//    void set_max_idle_time(int max_idle);
 
     std::string getDB();
 

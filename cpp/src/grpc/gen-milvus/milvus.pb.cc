@@ -365,9 +365,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_milvus_2eproto::offsets[] PROT
   ~0u,  // no _oneof_case_
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::TableSchema, table_name_),
-  PROTOBUF_FIELD_OFFSET(::milvus::grpc::TableSchema, index_type_),
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::TableSchema, dimension_),
-  PROTOBUF_FIELD_OFFSET(::milvus::grpc::TableSchema, store_raw_vector_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::grpc::Range, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -481,21 +479,21 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_milvus_2eproto::offsets[] PROT
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, sizeof(::milvus::grpc::TableName)},
   { 7, -1, sizeof(::milvus::grpc::TableSchema)},
-  { 16, -1, sizeof(::milvus::grpc::Range)},
-  { 23, -1, sizeof(::milvus::grpc::RowRecord)},
-  { 29, -1, sizeof(::milvus::grpc::InsertParam)},
-  { 37, -1, sizeof(::milvus::grpc::VectorIds)},
-  { 44, -1, sizeof(::milvus::grpc::SearchParam)},
-  { 54, -1, sizeof(::milvus::grpc::SearchInFilesParam)},
-  { 61, -1, sizeof(::milvus::grpc::QueryResult)},
-  { 68, -1, sizeof(::milvus::grpc::TopKQueryResult)},
-  { 75, -1, sizeof(::milvus::grpc::StringReply)},
-  { 82, -1, sizeof(::milvus::grpc::BoolReply)},
-  { 89, -1, sizeof(::milvus::grpc::TableRowCount)},
-  { 96, -1, sizeof(::milvus::grpc::Command)},
-  { 102, -1, sizeof(::milvus::grpc::Index)},
-  { 111, -1, sizeof(::milvus::grpc::IndexParam)},
-  { 118, -1, sizeof(::milvus::grpc::DeleteByRangeParam)},
+  { 14, -1, sizeof(::milvus::grpc::Range)},
+  { 21, -1, sizeof(::milvus::grpc::RowRecord)},
+  { 27, -1, sizeof(::milvus::grpc::InsertParam)},
+  { 35, -1, sizeof(::milvus::grpc::VectorIds)},
+  { 42, -1, sizeof(::milvus::grpc::SearchParam)},
+  { 52, -1, sizeof(::milvus::grpc::SearchInFilesParam)},
+  { 59, -1, sizeof(::milvus::grpc::QueryResult)},
+  { 66, -1, sizeof(::milvus::grpc::TopKQueryResult)},
+  { 73, -1, sizeof(::milvus::grpc::StringReply)},
+  { 80, -1, sizeof(::milvus::grpc::BoolReply)},
+  { 87, -1, sizeof(::milvus::grpc::TableRowCount)},
+  { 94, -1, sizeof(::milvus::grpc::Command)},
+  { 100, -1, sizeof(::milvus::grpc::Index)},
+  { 109, -1, sizeof(::milvus::grpc::IndexParam)},
+  { 116, -1, sizeof(::milvus::grpc::DeleteByRangeParam)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -521,65 +519,64 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
 const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\014milvus.proto\022\013milvus.grpc\032\014status.prot"
   "o\"D\n\tTableName\022#\n\006status\030\001 \001(\0132\023.milvus."
-  "grpc.Status\022\022\n\ntable_name\030\002 \001(\t\"z\n\013Table"
+  "grpc.Status\022\022\n\ntable_name\030\002 \001(\t\"L\n\013Table"
   "Schema\022*\n\ntable_name\030\001 \001(\0132\026.milvus.grpc"
-  ".TableName\022\022\n\nindex_type\030\002 \001(\005\022\021\n\tdimens"
-  "ion\030\003 \001(\003\022\030\n\020store_raw_vector\030\004 \001(\010\"/\n\005R"
-  "ange\022\023\n\013start_value\030\001 \001(\t\022\021\n\tend_value\030\002"
-  " \001(\t\" \n\tRowRecord\022\023\n\013vector_data\030\001 \003(\002\"i"
-  "\n\013InsertParam\022\022\n\ntable_name\030\001 \001(\t\0220\n\020row"
-  "_record_array\030\002 \003(\0132\026.milvus.grpc.RowRec"
-  "ord\022\024\n\014row_id_array\030\003 \003(\003\"I\n\tVectorIds\022#"
-  "\n\006status\030\001 \001(\0132\023.milvus.grpc.Status\022\027\n\017v"
-  "ector_id_array\030\002 \003(\003\"\242\001\n\013SearchParam\022\022\n\n"
-  "table_name\030\001 \001(\t\0222\n\022query_record_array\030\002"
-  " \003(\0132\026.milvus.grpc.RowRecord\022-\n\021query_ra"
-  "nge_array\030\003 \003(\0132\022.milvus.grpc.Range\022\014\n\004t"
-  "opk\030\004 \001(\003\022\016\n\006nprobe\030\005 \001(\003\"[\n\022SearchInFil"
-  "esParam\022\025\n\rfile_id_array\030\001 \003(\t\022.\n\014search"
-  "_param\030\002 \001(\0132\030.milvus.grpc.SearchParam\"+"
-  "\n\013QueryResult\022\n\n\002id\030\001 \001(\003\022\020\n\010distance\030\002 "
-  "\001(\001\"m\n\017TopKQueryResult\022#\n\006status\030\001 \001(\0132\023"
-  ".milvus.grpc.Status\0225\n\023query_result_arra"
-  "ys\030\002 \003(\0132\030.milvus.grpc.QueryResult\"H\n\013St"
-  "ringReply\022#\n\006status\030\001 \001(\0132\023.milvus.grpc."
-  "Status\022\024\n\014string_reply\030\002 \001(\t\"D\n\tBoolRepl"
-  "y\022#\n\006status\030\001 \001(\0132\023.milvus.grpc.Status\022\022"
-  "\n\nbool_reply\030\002 \001(\010\"M\n\rTableRowCount\022#\n\006s"
-  "tatus\030\001 \001(\0132\023.milvus.grpc.Status\022\027\n\017tabl"
-  "e_row_count\030\002 \001(\003\"\026\n\007Command\022\013\n\003cmd\030\001 \001("
-  "\t\"X\n\005Index\022\022\n\nindex_type\030\001 \001(\005\022\r\n\005nlist\030"
-  "\002 \001(\003\022\027\n\017index_file_size\030\003 \001(\005\022\023\n\013metric"
-  "_type\030\004 \001(\005\"[\n\nIndexParam\022*\n\ntable_name\030"
-  "\001 \001(\0132\026.milvus.grpc.TableName\022!\n\005index\030\002"
-  " \001(\0132\022.milvus.grpc.Index\"K\n\022DeleteByRang"
-  "eParam\022!\n\005range\030\001 \001(\0132\022.milvus.grpc.Rang"
-  "e\022\022\n\ntable_name\030\002 \001(\t2\352\007\n\rMilvusService\022"
-  ">\n\013CreateTable\022\030.milvus.grpc.TableSchema"
-  "\032\023.milvus.grpc.Status\"\000\022<\n\010HasTable\022\026.mi"
-  "lvus.grpc.TableName\032\026.milvus.grpc.BoolRe"
-  "ply\"\000\022:\n\tDropTable\022\026.milvus.grpc.TableNa"
-  "me\032\023.milvus.grpc.Status\"\000\022=\n\013CreateIndex"
-  "\022\027.milvus.grpc.IndexParam\032\023.milvus.grpc."
-  "Status\"\000\022<\n\006Insert\022\030.milvus.grpc.InsertP"
-  "aram\032\026.milvus.grpc.VectorIds\"\000\022D\n\006Search"
-  "\022\030.milvus.grpc.SearchParam\032\034.milvus.grpc"
-  ".TopKQueryResult\"\0000\001\022R\n\rSearchInFiles\022\037."
-  "milvus.grpc.SearchInFilesParam\032\034.milvus."
-  "grpc.TopKQueryResult\"\0000\001\022C\n\rDescribeTabl"
-  "e\022\026.milvus.grpc.TableName\032\030.milvus.grpc."
-  "TableSchema\"\000\022B\n\nCountTable\022\026.milvus.grp"
-  "c.TableName\032\032.milvus.grpc.TableRowCount\""
-  "\000\022>\n\nShowTables\022\024.milvus.grpc.Command\032\026."
-  "milvus.grpc.TableName\"\0000\001\0227\n\003Cmd\022\024.milvu"
-  "s.grpc.Command\032\030.milvus.grpc.StringReply"
-  "\"\000\022G\n\rDeleteByRange\022\037.milvus.grpc.Delete"
-  "ByRangeParam\032\023.milvus.grpc.Status\"\000\022=\n\014P"
-  "reloadTable\022\026.milvus.grpc.TableName\032\023.mi"
-  "lvus.grpc.Status\"\000\022B\n\rDescribeIndex\022\026.mi"
-  "lvus.grpc.TableName\032\027.milvus.grpc.IndexP"
-  "aram\"\000\022:\n\tDropIndex\022\026.milvus.grpc.TableN"
-  "ame\032\023.milvus.grpc.Status\"\000b\006proto3"
+  ".TableName\022\021\n\tdimension\030\002 \001(\003\"/\n\005Range\022\023"
+  "\n\013start_value\030\001 \001(\t\022\021\n\tend_value\030\002 \001(\t\" "
+  "\n\tRowRecord\022\023\n\013vector_data\030\001 \003(\002\"i\n\013Inse"
+  "rtParam\022\022\n\ntable_name\030\001 \001(\t\0220\n\020row_recor"
+  "d_array\030\002 \003(\0132\026.milvus.grpc.RowRecord\022\024\n"
+  "\014row_id_array\030\003 \003(\003\"I\n\tVectorIds\022#\n\006stat"
+  "us\030\001 \001(\0132\023.milvus.grpc.Status\022\027\n\017vector_"
+  "id_array\030\002 \003(\003\"\242\001\n\013SearchParam\022\022\n\ntable_"
+  "name\030\001 \001(\t\0222\n\022query_record_array\030\002 \003(\0132\026"
+  ".milvus.grpc.RowRecord\022-\n\021query_range_ar"
+  "ray\030\003 \003(\0132\022.milvus.grpc.Range\022\014\n\004topk\030\004 "
+  "\001(\003\022\016\n\006nprobe\030\005 \001(\003\"[\n\022SearchInFilesPara"
+  "m\022\025\n\rfile_id_array\030\001 \003(\t\022.\n\014search_param"
+  "\030\002 \001(\0132\030.milvus.grpc.SearchParam\"+\n\013Quer"
+  "yResult\022\n\n\002id\030\001 \001(\003\022\020\n\010distance\030\002 \001(\001\"m\n"
+  "\017TopKQueryResult\022#\n\006status\030\001 \001(\0132\023.milvu"
+  "s.grpc.Status\0225\n\023query_result_arrays\030\002 \003"
+  "(\0132\030.milvus.grpc.QueryResult\"H\n\013StringRe"
+  "ply\022#\n\006status\030\001 \001(\0132\023.milvus.grpc.Status"
+  "\022\024\n\014string_reply\030\002 \001(\t\"D\n\tBoolReply\022#\n\006s"
+  "tatus\030\001 \001(\0132\023.milvus.grpc.Status\022\022\n\nbool"
+  "_reply\030\002 \001(\010\"M\n\rTableRowCount\022#\n\006status\030"
+  "\001 \001(\0132\023.milvus.grpc.Status\022\027\n\017table_row_"
+  "count\030\002 \001(\003\"\026\n\007Command\022\013\n\003cmd\030\001 \001(\t\"X\n\005I"
+  "ndex\022\022\n\nindex_type\030\001 \001(\005\022\r\n\005nlist\030\002 \001(\005\022"
+  "\027\n\017index_file_size\030\003 \001(\005\022\023\n\013metric_type\030"
+  "\004 \001(\005\"[\n\nIndexParam\022*\n\ntable_name\030\001 \001(\0132"
+  "\026.milvus.grpc.TableName\022!\n\005index\030\002 \001(\0132\022"
+  ".milvus.grpc.Index\"K\n\022DeleteByRangeParam"
+  "\022!\n\005range\030\001 \001(\0132\022.milvus.grpc.Range\022\022\n\nt"
+  "able_name\030\002 \001(\t2\352\007\n\rMilvusService\022>\n\013Cre"
+  "ateTable\022\030.milvus.grpc.TableSchema\032\023.mil"
+  "vus.grpc.Status\"\000\022<\n\010HasTable\022\026.milvus.g"
+  "rpc.TableName\032\026.milvus.grpc.BoolReply\"\000\022"
+  ":\n\tDropTable\022\026.milvus.grpc.TableName\032\023.m"
+  "ilvus.grpc.Status\"\000\022=\n\013CreateIndex\022\027.mil"
+  "vus.grpc.IndexParam\032\023.milvus.grpc.Status"
+  "\"\000\022<\n\006Insert\022\030.milvus.grpc.InsertParam\032\026"
+  ".milvus.grpc.VectorIds\"\000\022D\n\006Search\022\030.mil"
+  "vus.grpc.SearchParam\032\034.milvus.grpc.TopKQ"
+  "ueryResult\"\0000\001\022R\n\rSearchInFiles\022\037.milvus"
+  ".grpc.SearchInFilesParam\032\034.milvus.grpc.T"
+  "opKQueryResult\"\0000\001\022C\n\rDescribeTable\022\026.mi"
+  "lvus.grpc.TableName\032\030.milvus.grpc.TableS"
+  "chema\"\000\022B\n\nCountTable\022\026.milvus.grpc.Tabl"
+  "eName\032\032.milvus.grpc.TableRowCount\"\000\022>\n\nS"
+  "howTables\022\024.milvus.grpc.Command\032\026.milvus"
+  ".grpc.TableName\"\0000\001\0227\n\003Cmd\022\024.milvus.grpc"
+  ".Command\032\030.milvus.grpc.StringReply\"\000\022G\n\r"
+  "DeleteByRange\022\037.milvus.grpc.DeleteByRang"
+  "eParam\032\023.milvus.grpc.Status\"\000\022=\n\014Preload"
+  "Table\022\026.milvus.grpc.TableName\032\023.milvus.g"
+  "rpc.Status\"\000\022B\n\rDescribeIndex\022\026.milvus.g"
+  "rpc.TableName\032\027.milvus.grpc.IndexParam\"\000"
+  "\022:\n\tDropIndex\022\026.milvus.grpc.TableName\032\023."
+  "milvus.grpc.Status\"\000b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_milvus_2eproto_deps[1] = {
   &::descriptor_table_status_2eproto,
@@ -606,7 +603,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mil
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_milvus_2eproto_once;
 static bool descriptor_table_milvus_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_milvus_2eproto = {
-  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 2434,
+  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 2388,
   &descriptor_table_milvus_2eproto_once, descriptor_table_milvus_2eproto_sccs, descriptor_table_milvus_2eproto_deps, 17, 1,
   schemas, file_default_instances, TableStruct_milvus_2eproto::offsets,
   file_level_metadata_milvus_2eproto, 17, file_level_enum_descriptors_milvus_2eproto, file_level_service_descriptors_milvus_2eproto,
@@ -981,17 +978,15 @@ TableSchema::TableSchema(const TableSchema& from)
   } else {
     table_name_ = nullptr;
   }
-  ::memcpy(&dimension_, &from.dimension_,
-    static_cast<size_t>(reinterpret_cast<char*>(&store_raw_vector_) -
-    reinterpret_cast<char*>(&dimension_)) + sizeof(store_raw_vector_));
+  dimension_ = from.dimension_;
   // @@protoc_insertion_point(copy_constructor:milvus.grpc.TableSchema)
 }
 
 void TableSchema::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_TableSchema_milvus_2eproto.base);
   ::memset(&table_name_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&store_raw_vector_) -
-      reinterpret_cast<char*>(&table_name_)) + sizeof(store_raw_vector_));
+      reinterpret_cast<char*>(&dimension_) -
+      reinterpret_cast<char*>(&table_name_)) + sizeof(dimension_));
 }
 
 TableSchema::~TableSchema() {
@@ -1022,9 +1017,7 @@ void TableSchema::Clear() {
     delete table_name_;
   }
   table_name_ = nullptr;
-  ::memset(&dimension_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&store_raw_vector_) -
-      reinterpret_cast<char*>(&dimension_)) + sizeof(store_raw_vector_));
+  dimension_ = PROTOBUF_LONGLONG(0);
   _internal_metadata_.Clear();
 }
 
@@ -1043,24 +1036,10 @@ const char* TableSchema::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int32 index_type = 2;
+      // int64 dimension = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
-          index_type_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // int64 dimension = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24)) {
           dimension_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-        } else goto handle_unusual;
-        continue;
-      // bool store_raw_vector = 4;
-      case 4:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 32)) {
-          store_raw_vector_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -1105,39 +1084,13 @@ bool TableSchema::MergePartialFromCodedStream(
         break;
       }
 
-      // int32 index_type = 2;
+      // int64 dimension = 2;
       case 2: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int32, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT32>(
-                 input, &index_type_)));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // int64 dimension = 3;
-      case 3: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (24 & 0xFF)) {
-
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
                  input, &dimension_)));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // bool store_raw_vector = 4;
-      case 4: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (32 & 0xFF)) {
-
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   bool, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_BOOL>(
-                 input, &store_raw_vector_)));
         } else {
           goto handle_unusual;
         }
@@ -1177,19 +1130,9 @@ void TableSchema::SerializeWithCachedSizes(
       1, _Internal::table_name(this), output);
   }
 
-  // int32 index_type = 2;
-  if (this->index_type() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32(2, this->index_type(), output);
-  }
-
-  // int64 dimension = 3;
+  // int64 dimension = 2;
   if (this->dimension() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(3, this->dimension(), output);
-  }
-
-  // bool store_raw_vector = 4;
-  if (this->store_raw_vector() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBool(4, this->store_raw_vector(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->dimension(), output);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -1212,19 +1155,9 @@ void TableSchema::SerializeWithCachedSizes(
         1, _Internal::table_name(this), target);
   }
 
-  // int32 index_type = 2;
-  if (this->index_type() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(2, this->index_type(), target);
-  }
-
-  // int64 dimension = 3;
+  // int64 dimension = 2;
   if (this->dimension() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(3, this->dimension(), target);
-  }
-
-  // bool store_raw_vector = 4;
-  if (this->store_raw_vector() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(4, this->store_raw_vector(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->dimension(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -1255,23 +1188,11 @@ size_t TableSchema::ByteSizeLong() const {
         *table_name_);
   }
 
-  // int64 dimension = 3;
+  // int64 dimension = 2;
   if (this->dimension() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->dimension());
-  }
-
-  // int32 index_type = 2;
-  if (this->index_type() != 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
-        this->index_type());
-  }
-
-  // bool store_raw_vector = 4;
-  if (this->store_raw_vector() != 0) {
-    total_size += 1 + 1;
   }
 
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
@@ -1307,12 +1228,6 @@ void TableSchema::MergeFrom(const TableSchema& from) {
   if (from.dimension() != 0) {
     set_dimension(from.dimension());
   }
-  if (from.index_type() != 0) {
-    set_index_type(from.index_type());
-  }
-  if (from.store_raw_vector() != 0) {
-    set_store_raw_vector(from.store_raw_vector());
-  }
 }
 
 void TableSchema::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
@@ -1338,8 +1253,6 @@ void TableSchema::InternalSwap(TableSchema* other) {
   _internal_metadata_.Swap(&other->_internal_metadata_);
   swap(table_name_, other->table_name_);
   swap(dimension_, other->dimension_);
-  swap(index_type_, other->index_type_);
-  swap(store_raw_vector_, other->store_raw_vector_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata TableSchema::GetMetadata() const {
@@ -5355,16 +5268,16 @@ Index::Index(const Index& from)
   : ::PROTOBUF_NAMESPACE_ID::Message(),
       _internal_metadata_(nullptr) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
-  ::memcpy(&nlist_, &from.nlist_,
+  ::memcpy(&index_type_, &from.index_type_,
     static_cast<size_t>(reinterpret_cast<char*>(&metric_type_) -
-    reinterpret_cast<char*>(&nlist_)) + sizeof(metric_type_));
+    reinterpret_cast<char*>(&index_type_)) + sizeof(metric_type_));
   // @@protoc_insertion_point(copy_constructor:milvus.grpc.Index)
 }
 
 void Index::SharedCtor() {
-  ::memset(&nlist_, 0, static_cast<size_t>(
+  ::memset(&index_type_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&metric_type_) -
-      reinterpret_cast<char*>(&nlist_)) + sizeof(metric_type_));
+      reinterpret_cast<char*>(&index_type_)) + sizeof(metric_type_));
 }
 
 Index::~Index() {
@@ -5390,9 +5303,9 @@ void Index::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  ::memset(&nlist_, 0, static_cast<size_t>(
+  ::memset(&index_type_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&metric_type_) -
-      reinterpret_cast<char*>(&nlist_)) + sizeof(metric_type_));
+      reinterpret_cast<char*>(&index_type_)) + sizeof(metric_type_));
   _internal_metadata_.Clear();
 }
 
@@ -5411,7 +5324,7 @@ const char* Index::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::inte
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 nlist = 2;
+      // int32 nlist = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
           nlist_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
@@ -5475,12 +5388,12 @@ bool Index::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 nlist = 2;
+      // int32 nlist = 2;
       case 2: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                   ::PROTOBUF_NAMESPACE_ID::int32, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT32>(
                  input, &nlist_)));
         } else {
           goto handle_unusual;
@@ -5546,9 +5459,9 @@ void Index::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32(1, this->index_type(), output);
   }
 
-  // int64 nlist = 2;
+  // int32 nlist = 2;
   if (this->nlist() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->nlist(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32(2, this->nlist(), output);
   }
 
   // int32 index_file_size = 3;
@@ -5579,9 +5492,9 @@ void Index::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(1, this->index_type(), target);
   }
 
-  // int64 nlist = 2;
+  // int32 nlist = 2;
   if (this->nlist() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->nlist(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(2, this->nlist(), target);
   }
 
   // int32 index_file_size = 3;
@@ -5615,18 +5528,18 @@ size_t Index::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // int64 nlist = 2;
-  if (this->nlist() != 0) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
-        this->nlist());
-  }
-
   // int32 index_type = 1;
   if (this->index_type() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
         this->index_type());
+  }
+
+  // int32 nlist = 2;
+  if (this->nlist() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
+        this->nlist());
   }
 
   // int32 index_file_size = 3;
@@ -5670,11 +5583,11 @@ void Index::MergeFrom(const Index& from) {
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  if (from.nlist() != 0) {
-    set_nlist(from.nlist());
-  }
   if (from.index_type() != 0) {
     set_index_type(from.index_type());
+  }
+  if (from.nlist() != 0) {
+    set_nlist(from.nlist());
   }
   if (from.index_file_size() != 0) {
     set_index_file_size(from.index_file_size());
@@ -5705,8 +5618,8 @@ bool Index::IsInitialized() const {
 void Index::InternalSwap(Index* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
-  swap(nlist_, other->nlist_);
   swap(index_type_, other->index_type_);
+  swap(nlist_, other->nlist_);
   swap(index_file_size_, other->index_file_size_);
   swap(metric_type_, other->metric_type_);
 }
