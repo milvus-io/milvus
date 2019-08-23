@@ -22,6 +22,8 @@ constexpr int32_t DEFAULT_NLIST = 16384;
 constexpr int32_t DEFAULT_INDEX_FILE_SIZE = 1024*ONE_MB;
 constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
 
+constexpr int64_t FLAG_MASK_USERID = 1;
+
 typedef int DateT;
 const DateT EmptyDate = -1;
 typedef std::vector<DateT> DatesT;
@@ -37,6 +39,7 @@ struct TableSchema {
     int32_t state_ = (int)NORMAL;
     uint16_t dimension_ = 0;
     int64_t created_on_ = 0;
+    int64_t flag_ = 0;
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     int32_t nlist_ = DEFAULT_NLIST;
     int32_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;
