@@ -17,9 +17,7 @@ message TableName {
  */
 message TableSchema {
     TableName table_name = 1;
-    int32 index_type = 2;
-    int64 dimension = 3;
-    bool store_raw_vector = 4;
+    int64 dimension = 2;
 }
 
 /**
@@ -122,10 +120,12 @@ message Command {
 
 /**
  * @brief Index
+ * @index_type: 0-invalid, 1-idmap, 2-ivflat, 3-ivfsq8, 4-nsgmix
+ * @metric_type: 1-L2, 2-IP
  */
 message Index {
     int32 index_type = 1;
-    int64 nlist = 2;
+    int32 nlist = 2;
     int32 index_file_size = 3;
     int32 metric_type = 4;
 }

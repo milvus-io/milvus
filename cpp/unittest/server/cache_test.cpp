@@ -8,7 +8,6 @@
 #include "cache/GpuCacheMgr.h"
 
 #include "utils/Error.h"
-#include "wrapper/Index.h"
 #include "wrapper/knowhere/vec_index.h"
 
 using namespace zilliz::milvus;
@@ -112,7 +111,7 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     for (int i = 0; i < 20; i++) {
         MockVecIndex* mock_index = new MockVecIndex();
         mock_index->ntotal_ = 1000000;//less 1G per index
-        engine::Index_ptr index(mock_index);
+        engine::VecIndexPtr index(mock_index);
 
         cpu_mgr->InsertItem("index_" + std::to_string(i), index);
     }
@@ -137,7 +136,7 @@ TEST(CacheTest, CPU_CACHE_TEST) {
 
         MockVecIndex* mock_index = new MockVecIndex();
         mock_index->ntotal_ = 6000000;//6G less
-        engine::Index_ptr index(mock_index);
+        engine::VecIndexPtr index(mock_index);
 
         cpu_mgr->InsertItem("index_6g", index);
         ASSERT_EQ(cpu_mgr->ItemCount(), 0);//data greater than capacity can not be inserted sucessfully
@@ -147,14 +146,14 @@ TEST(CacheTest, CPU_CACHE_TEST) {
 }
 
 TEST(CacheTest, GPU_CACHE_TEST) {
-    cache::CacheMgr* gpu_mgr = cache::GpuCacheMgr::GetInstance();
+    cache::CacheMgr* gpu_mgr = cache::GpuCacheMgr::GetInstance(0);
 
     const int dim = 256;
 
     for(int i = 0; i < 20; i++) {
         MockVecIndex* mock_index = new MockVecIndex();
         mock_index->ntotal_ = 1000;
-        engine::Index_ptr index(mock_index);
+        engine::VecIndexPtr index(mock_index);
 
         cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index);
 
@@ -165,6 +164,25 @@ TEST(CacheTest, GPU_CACHE_TEST) {
 
     gpu_mgr->ClearCache();
     ASSERT_EQ(gpu_mgr->ItemCount(), 0);
+
+    for (auto i = 0; i < 3; i++) {
+        // TODO: use gpu index to mock
+        MockVecIndex *mock_index = new MockVecIndex();
+        mock_index->ntotal_ = 1000000;  //2G
+        engine::VecIndexPtr index(mock_index);
+        cache::DataObjPtr data_obj = std::make_shared<cache::DataObj>(index);
+        std::cout << data_obj->size() <<std::endl;
+        gpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
+    }
+
+//    ASSERT_EQ(gpu_mgr->ItemCount(), 2);
+//    auto obj0 = gpu_mgr->GetItem("index_0");
+//    ASSERT_EQ(obj0, nullptr);
+//    auto obj1 = gpu_mgr->GetItem("index_1");
+//    auto obj2 = gpu_mgr->GetItem("index_2");
+    gpu_mgr->ClearCache();
+    ASSERT_EQ(gpu_mgr->ItemCount(), 0);
+
 }
 
 TEST(CacheTest, INVALID_TEST) {
@@ -175,7 +193,7 @@ TEST(CacheTest, INVALID_TEST) {
         ASSERT_EQ(mgr.GetItem("test"), nullptr);
 
         mgr.InsertItem("test", cache::DataObjPtr());
-        mgr.InsertItem("test", engine::Index_ptr(nullptr));
+        mgr.InsertItem("test", engine::VecIndexPtr(nullptr));
         mgr.EraseItem("test");
         mgr.PrintInfo();
         mgr.ClearCache();
@@ -189,7 +207,7 @@ TEST(CacheTest, INVALID_TEST) {
         for(int i = 0; i < 20; i++) {
             MockVecIndex* mock_index = new MockVecIndex();
             mock_index->ntotal_ = 2;
-            engine::Index_ptr index(mock_index);
+            engine::VecIndexPtr index(mock_index);
 
             cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index);
             mgr.InsertItem("index_" + std::to_string(i), obj);

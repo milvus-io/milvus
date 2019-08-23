@@ -23,7 +23,9 @@ MemTableFile::MemTableFile(const std::string &table_id,
     if (status.ok()) {
         execution_engine_ = EngineFactory::Build(table_file_schema_.dimension_,
                                                  table_file_schema_.location_,
-                                                 (EngineType) table_file_schema_.engine_type_);
+                                                 (EngineType) table_file_schema_.engine_type_,
+                                                 (MetricType)table_file_schema_.metric_type_,
+                                                 table_file_schema_.nlist_);
     }
 }
 
@@ -41,7 +43,7 @@ Status MemTableFile::CreateTableFile() {
     return status;
 }
 
-Status MemTableFile::Add(const VectorSource::Ptr &source) {
+Status MemTableFile::Add(const VectorSource::Ptr &source, IDNumbers& vector_ids) {
 
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg = "MemTableFile::Add: table_file_schema dimension = " +
@@ -55,7 +57,7 @@ Status MemTableFile::Add(const VectorSource::Ptr &source) {
     if (mem_left >= single_vector_mem_size) {
         size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
         size_t num_vectors_added;
-        auto status = source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added);
+        auto status = source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added, vector_ids);
         if (status.ok()) {
             current_mem_ += (num_vectors_added * single_vector_mem_size);
         }
@@ -86,7 +88,9 @@ Status MemTableFile::Serialize() {
     execution_engine_->Serialize();
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    table_file_schema_.size_ = size;
+
+    table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
+    table_file_schema_.row_count_ = execution_engine_->Count();
 
     server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double) size / total_time);
 

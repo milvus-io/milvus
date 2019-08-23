@@ -15,6 +15,8 @@
 
 using namespace milvus;
 
+//#define SET_VECTOR_IDS;
+
 namespace {
     std::string GetTableName();
 
@@ -24,7 +26,7 @@ namespace {
     constexpr int64_t NQ = 10;
     constexpr int64_t TOP_K = 10;
     constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    constexpr int64_t ADD_VECTOR_LOOP = 1;
+    constexpr int64_t ADD_VECTOR_LOOP = 10;
     constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
@@ -32,9 +34,7 @@ namespace {
     void PrintTableSchema(const TableSchema& tb_schema) {
         BLOCK_SPLITER
         std::cout << "Table name: " << tb_schema.table_name << std::endl;
-        std::cout << "Table index type: " << (int)tb_schema.index_type << std::endl;
         std::cout << "Table dimension: " << tb_schema.dimension << std::endl;
-        std::cout << "Table store raw data: " << (tb_schema.store_raw_vector ? "true" : "false") << std::endl;
         BLOCK_SPLITER
     }
 
@@ -93,9 +93,7 @@ namespace {
     TableSchema BuildTableSchema() {
         TableSchema tb_schema;
         tb_schema.table_name = TABLE_NAME;
-        tb_schema.index_type = IndexType::gpu_ivfflat;
         tb_schema.dimension = TABLE_DIMENSION;
-        tb_schema.store_raw_vector = true;
 
         return tb_schema;
     }
@@ -235,59 +233,21 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "DescribeTable function call status: " << stat.ToString() << std::endl;
         PrintTableSchema(tb_schema);
     }
-//
-//    Connection::Destroy(conn);
-
-//    pid_t pid;
-//    for (int i = 0; i < 5; ++i) {
-//        pid = fork();
-//        if (pid == 0 || pid == -1) {
-//            break;
-//        }
-//    }
-//    if (pid == -1) {
-//        std::cout << "fail to fork!\n";
-//        exit(1);
-//    } else if (pid == 0) {
-//        std::shared_ptr<Connection> conn = Connection::Create();
-//
-//        {//connect server
-//            ConnectParam param = {address, port};
-//            Status stat = conn->Connect(param);
-//            std::cout << "Connect function call status: " << stat.ToString() << std::endl;
-//        }
-//
-//        {//server version
-//            std::string version = conn->ServerVersion();
-//            std::cout << "Server version: " << version << std::endl;
-//        }
-//        Connection::Destroy(conn);
-//        exit(0);
-//    } else {
-//        std::shared_ptr<Connection> conn = Connection::Create();
-//
-//        {//connect server
-//            ConnectParam param = {address, port};
-//            Status stat = conn->Connect(param);
-//            std::cout << "Connect function call status: " << stat.ToString() << std::endl;
-//        }
-//
-//        {//server version
-//            std::string version = conn->ServerVersion();
-//            std::cout << "Server version: " << version << std::endl;
-//        }
-//        Connection::Destroy(conn);
-//        std::cout << "in main process\n";
-//        exit(0);
-//    }
 
     std::vector<std::pair<int64_t, RowRecord>> search_record_array;
     {//insert vectors
+        std::vector<int64_t> record_ids;
         for (int i = 0; i < ADD_VECTOR_LOOP; i++) {//add vectors
             std::vector<RowRecord> record_array;
             int64_t begin_index = i * BATCH_ROW_COUNT;
             BuildVectors(begin_index, begin_index + BATCH_ROW_COUNT, record_array);
-            std::vector<int64_t> record_ids;
+
+#ifdef SET_VECTOR_IDS
+            record_ids.resize(ADD_VECTOR_LOOP * BATCH_ROW_COUNT);
+            for (auto j = begin_index; j <begin_index + BATCH_ROW_COUNT; j++) {
+                record_ids[i * BATCH_ROW_COUNT + j] = i * BATCH_ROW_COUNT + j;
+            }
+#endif
 
             auto start = std::chrono::high_resolution_clock::now();
 
@@ -308,13 +268,27 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//search vectors without index
         Sleep(2);
+
+        int64_t row_count = 0;
+        Status stat = conn->CountTable(TABLE_NAME, row_count);
+        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
         DoSearch(conn, search_record_array, "Search without index");
     }
 
     {//wait unit build index finish
-//        std::cout << "Wait until build all index done" << std::endl;
-//        Status stat = conn->CreateIndex();
-//        std::cout << "BuildIndex function call status: " << stat.ToString() << std::endl;
+        std::cout << "Wait until create all index done" << std::endl;
+        IndexParam index;
+        index.table_name = TABLE_NAME;
+        index.index_type = IndexType::gpu_ivfflat;
+        index.nlist = 1000;
+        index.index_file_size = 1024;
+        index.metric_type = 1;
+        Status stat = conn->CreateIndex(index);
+        std::cout << "CreateIndex function call status: " << stat.ToString() << std::endl;
+
+        IndexParam index2;
+        stat = conn->DescribeIndex(TABLE_NAME, index2);
+        std::cout << "DescribeIndex function call status: " << stat.ToString() << std::endl;
     }
 
     {//preload table
@@ -324,6 +298,24 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//search vectors after build index finish
         DoSearch(conn, search_record_array, "Search after build index finish");
+    }
+
+    {//delete index
+        Status stat = conn->DropIndex(TABLE_NAME);
+        std::cout << "DropIndex function call status: " << stat.ToString() << std::endl;
+
+        int64_t row_count = 0;
+        stat = conn->CountTable(TABLE_NAME, row_count);
+        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
+    }
+
+    {//delete by range
+        Range rg;
+        rg.start_value = CurrentTmDate(-2);
+        rg.end_value = CurrentTmDate(-3);
+
+        Status stat = conn->DeleteByRange(rg, TABLE_NAME);
+        std::cout << "DeleteByRange function call status: " << stat.ToString() << std::endl;
     }
 
     {//delete table
