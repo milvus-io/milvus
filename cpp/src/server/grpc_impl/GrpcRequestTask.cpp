@@ -12,8 +12,11 @@
 #include "../DBWrapper.h"
 #include "version.h"
 #include "GrpcMilvusServer.h"
+#include "db/Utils.h"
 
 #include "src/server/Server.h"
+
+#include <string.h>
 
 namespace zilliz {
 namespace milvus {
@@ -435,6 +438,23 @@ InsertTask::OnExecute() {
             }
         }
 
+        //all user provide id, or all internal id
+        uint64_t row_count = 0;
+        DBWrapper::DB()->GetTableRowCount(table_info.table_id_, row_count);
+        bool empty_table = (row_count == 0);
+        bool user_provide_ids = !insert_param_.row_id_array().empty();
+        if(!empty_table) {
+            //user already provided id before, all insert action require user id
+            if(engine::utils::UserDefinedId(table_info.flag_) && !user_provide_ids) {
+                return SetError(SERVER_INVALID_ARGUMENT, "Table vector ids are user defined, please provide id for this batch");
+            }
+
+            //user didn't provided id before, no need to provide user id
+            if(!engine::utils::UserDefinedId(table_info.flag_) && user_provide_ids) {
+                return SetError(SERVER_INVALID_ARGUMENT, "Table vector ids are auto generated, no need to provide id for this batch");
+            }
+        }
+
         rc.RecordSection("check validation");
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -469,8 +489,10 @@ InsertTask::OnExecute() {
         //step 4: insert vectors
         auto vec_count = (uint64_t) insert_param_.row_record_array_size();
         std::vector<int64_t> vec_ids(insert_param_.row_id_array_size(), 0);
-        for (auto i = 0; i < insert_param_.row_id_array_size(); i++) {
-            vec_ids[i] = insert_param_.row_id_array(i);
+        if(!insert_param_.row_id_array().empty()) {
+            const int64_t* src_data = insert_param_.row_id_array().data();
+            int64_t* target_data = vec_ids.data();
+            memcpy(target_data, src_data, (size_t)(sizeof(int64_t)*insert_param_.row_id_array_size()));
         }
 
         stat = DBWrapper::DB()->InsertVectors(insert_param_.table_name(), vec_count, vec_f.data(), vec_ids);
@@ -487,6 +509,12 @@ InsertTask::OnExecute() {
             std::string msg = "Add " + std::to_string(vec_count) + " vectors but only return "
                               + std::to_string(ids_size) + " id";
             return SetError(SERVER_ILLEGAL_VECTOR_ID, msg);
+        }
+
+        //step 5: update table flag
+        if(empty_table && user_provide_ids) {
+            stat = DBWrapper::DB()->UpdateTableFlag(insert_param_.table_name(),
+                                                    table_info.flag_ | engine::meta::FLAG_MASK_USERID);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING

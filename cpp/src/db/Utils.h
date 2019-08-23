@@ -27,6 +27,8 @@ Status DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& 
 
 bool IsSameIndex(const TableIndex& index1, const TableIndex& index2);
 
+bool UserDefinedId(int64_t flag);
+
 } // namespace utils
 } // namespace engine
 } // namespace milvus

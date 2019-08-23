@@ -16,7 +16,7 @@ namespace engine {
 
 namespace {
 
-static constexpr size_t PARALLEL_REDUCE_THRESHOLD = 10000;
+static constexpr size_t PARALLEL_REDUCE_THRESHOLD = 1000000;
 static constexpr size_t PARALLEL_REDUCE_BATCH = 1000;
 
 bool NeedParallelReduce(uint64_t nq, uint64_t topk) {

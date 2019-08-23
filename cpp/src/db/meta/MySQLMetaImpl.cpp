@@ -155,6 +155,7 @@ Status MySQLMetaImpl::Initialize() {
                                 "state INT NOT NULL, " <<
                                 "dimension SMALLINT NOT NULL, " <<
                                 "created_on BIGINT NOT NULL, " <<
+                                "flag BIGINT DEFAULT 0 NOT NULL, " <<
                                 "engine_type INT DEFAULT 1 NOT NULL, " <<
                                 "nlist INT DEFAULT 16384 NOT NULL, " <<
                                 "index_file_size INT DEFAULT 1024 NOT NULL, " <<
@@ -425,7 +426,7 @@ Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const T
                                            "engine_type_ = " << index.engine_type_ << ", " <<
                                            "nlist = " << index.nlist_ << ", " <<
                                            "index_file_size = " << index.index_file_size_*ONE_MB << ", " <<
-                                           "metric_type = " << index.metric_type_ << ", " <<
+                                           "metric_type = " << index.metric_type_ << " " <<
                                            "WHERE id = " << quote << table_id << ";";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableIndexParam: " << updateTableIndexParamQuery.str();
@@ -450,6 +451,46 @@ Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const T
         // Catch-all for any other MySQL++ exceptions
         ENGINE_LOG_ERROR << "GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM" << ": " << er.what();
         return Status::DBTransactionError("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", er.what());
+    }
+
+    return Status::OK();
+}
+
+Status MySQLMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag) {
+    try {
+        MetricCollector metric;
+
+        {
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+
+            if (connectionPtr == nullptr) {
+                return Status::Error("Failed to connect to database server");
+            }
+
+            Query updateTableFlagQuery = connectionPtr->query();
+            updateTableFlagQuery << "UPDATE Tables " <<
+                                 "SET flag = " << flag << " " <<
+                                 "WHERE id = " << quote << table_id << ";";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFlag: " << updateTableFlagQuery.str();
+
+
+            if (!updateTableFlagQuery.exec()) {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FLAG";
+                return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FLAG",
+                                                  updateTableFlagQuery.error());
+            }
+
+        } //Scoped Connection
+
+    } catch (const BadQuery &er) {
+        // Handle any query errors
+        ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FLAG" << ": " << er.what();
+        return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FLAG", er.what());
+    } catch (const Exception &er) {
+        // Catch-all for any other MySQL++ exceptions
+        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN UPDATING TABLE FLAG" << ": " << er.what();
+        return Status::DBTransactionError("GENERAL ERROR WHEN UPDATING TABLE FLAG", er.what());
     }
 
     return Status::OK();
