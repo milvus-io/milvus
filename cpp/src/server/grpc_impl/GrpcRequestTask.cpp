@@ -459,7 +459,8 @@ InsertTask::OnExecute() {
                                         std::to_string(table_info.dimension_);
                 return SetError(error_code, error_msg);
             }
-            memcpy(static_cast<void *>(&vec_f[i * table_info.dimension_]), static_cast<const void *>(insert_param_.row_record_array(i).vector_data().data()),
+            memcpy(&vec_f[i * table_info.dimension_],
+                   insert_param_.row_record_array(i).vector_data().data(),
                    table_info.dimension_ * sizeof(float));
         }
 
@@ -472,8 +473,7 @@ InsertTask::OnExecute() {
             vec_ids[i] = insert_param_.row_id_array(i);
         }
 
-        stat = DBWrapper::DB()->InsertVectors(insert_param_.table_name(), vec_count, vec_f.data(),
-                                              vec_ids);
+        stat = DBWrapper::DB()->InsertVectors(insert_param_.table_name(), vec_count, vec_f.data(), vec_ids);
         rc.ElapseFromBegin("add vectors to engine");
         if (!stat.ok()) {
             return SetError(SERVER_CACHE_ERROR, "Cache error: " + stat.ToString());
