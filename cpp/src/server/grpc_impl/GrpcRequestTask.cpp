@@ -459,7 +459,6 @@ InsertTask::OnExecute() {
                                         std::to_string(table_info.dimension_);
                 return SetError(error_code, error_msg);
             }
-
             memcpy(&vec_f[i * table_info.dimension_],
                    insert_param_.row_record_array(i).vector_data().data(),
                    table_info.dimension_ * sizeof(float));
