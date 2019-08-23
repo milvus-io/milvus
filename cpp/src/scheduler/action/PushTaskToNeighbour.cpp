@@ -20,7 +20,7 @@ next(std::list<ResourcePtr> &neighbours, std::list<ResourcePtr>::iterator &it) {
     }
 }
 
-
+// TODO: this function called with only on tasks, so it will always push task to first neighbour
 void
 push_task_round_robin(TaskTable &self_task_table, std::list<ResourcePtr> &neighbours) {
     CacheMgr cache;
@@ -31,7 +31,7 @@ push_task_round_robin(TaskTable &self_task_table, std::list<ResourcePtr> &neighb
     for (auto index : indexes) {
         if (self_task_table.Move(index)) {
             auto task = self_task_table.Get(index)->task;
-            task = task->Clone();
+//            task = task->Clone();
             (*it)->task_table().Put(task);
             next(neighbours, it);
         }
