@@ -23,6 +23,7 @@
 #include <cstring>
 #include <cache/CpuCacheMgr.h>
 #include <boost/filesystem.hpp>
+#include "scheduler/SchedInst.h"
 
 namespace zilliz {
 namespace milvus {
@@ -92,12 +93,14 @@ Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& date
 
         //scheduler will determine when to delete table files
         TaskScheduler& scheduler = TaskScheduler::GetInstance();
-        DeleteContextPtr context = std::make_shared<DeleteContext>(table_id, meta_ptr_);
+        DeleteContextPtr context = std::make_shared<DeleteContext>(table_id,
+                                                               meta_ptr_,
+                                                               ResMgrInst::GetInstance()->GetNumOfComputeResource());
         scheduler.Schedule(context);
+        context->WaitAndDelete();
     } else {
         meta_ptr_->DropPartitionsByDates(table_id, dates);
     }
-
 
     return Status::OK();
 }

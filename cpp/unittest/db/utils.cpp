@@ -59,12 +59,27 @@ engine::Options DBTest::GetOptions() {
 
 void DBTest::SetUp() {
     InitLog();
+
+    auto res_mgr = engine::ResMgrInst::GetInstance();
+    res_mgr->Clear();
+    res_mgr->Add(engine::ResourceFactory::Create("disk", "DISK", 0, true, false));
+    res_mgr->Add(engine::ResourceFactory::Create("cpu", "CPU", 0, true, true));
+
+    auto default_conn = engine::Connection("IO", 500.0);
+    res_mgr->Connect("disk", "cpu", default_conn);
+    res_mgr->Start();
+    engine::SchedInst::GetInstance()->Start();
+
     auto options = GetOptions();
     db_ = engine::DBFactory::Build(options);
 }
 
 void DBTest::TearDown() {
     delete db_;
+
+    engine::ResMgrInst::GetInstance()->Stop();
+    engine::SchedInst::GetInstance()->Stop();
+
     boost::filesystem::remove_all("/tmp/milvus_test");
 }
 
@@ -117,6 +132,21 @@ void NewMemManagerTest::InitLog() {
 
 void NewMemManagerTest::SetUp() {
     InitLog();
+
+    auto res_mgr = engine::ResMgrInst::GetInstance();
+    res_mgr->Clear();
+    res_mgr->Add(engine::ResourceFactory::Create("disk", "DISK", 0, true, false));
+    res_mgr->Add(engine::ResourceFactory::Create("cpu", "CPU", 0, true, true));
+
+    auto default_conn = engine::Connection("IO", 500.0);
+    res_mgr->Connect("disk", "cpu", default_conn);
+    res_mgr->Start();
+    engine::SchedInst::GetInstance()->Start();
+}
+
+void NewMemManagerTest::TearDown() {
+    engine::ResMgrInst::GetInstance()->Stop();
+    engine::SchedInst::GetInstance()->Stop();
 }
 
 int main(int argc, char **argv) {

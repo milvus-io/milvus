@@ -69,6 +69,9 @@ public:
     Stop();
 
     void
+    Clear();
+
+    void
     PostEvent(const EventPtr &event);
 
     // TODO: add stats interface(low)

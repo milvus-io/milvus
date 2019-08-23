@@ -10,6 +10,12 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere knowhere_src)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_srcs)
+
 aux_source_directory(./ test_srcs)
 
 set(util_files
@@ -40,6 +46,11 @@ set(db_test_src
     ${db_meta_files}
     ${db_scheduler_srcs}
     ${wrapper_src}
+    ${scheduler_action_srcs}
+    ${scheduler_event_srcs}
+    ${scheduler_resource_srcs}
+    ${scheduler_task_srcs}
+    ${scheduler_srcs}
     ${knowhere_src}
     ${util_files}
     ${require_files}
