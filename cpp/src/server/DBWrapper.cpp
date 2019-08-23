@@ -74,12 +74,6 @@ DBWrapper::DBWrapper() {
         }
     }
 
-    std::string metric_type = engine_config.GetValue(CONFIG_METRICTYPE, "L2");
-    if(metric_type != "L2" && metric_type != "IP") {
-        std::cout << "ERROR! Illegal metric type: " << metric_type << ", available options: L2 or IP" << std::endl;
-        kill(0, SIGUSR1);
-    }
-
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
     int64_t disk = db_config.GetInt64Value(CONFIG_DB_ARCHIVE_DISK, 0);

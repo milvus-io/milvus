@@ -43,6 +43,9 @@ class Meta {
     UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) = 0;
 
     virtual Status
+    UpdateTableFlag(const std::string &table_id, int64_t flag) = 0;
+
+    virtual Status
     DeleteTable(const std::string &table_id) = 0;
 
     virtual Status

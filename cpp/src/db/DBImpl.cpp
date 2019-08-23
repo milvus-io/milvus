@@ -154,6 +154,10 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
     return Status::OK();
 }
 
+Status DBImpl::UpdateTableFlag(const std::string &table_id, int64_t flag) {
+    return meta_ptr_->UpdateTableFlag(table_id, flag);
+}
+
 Status DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
     return meta_ptr_->Count(table_id, row_count);
 }
