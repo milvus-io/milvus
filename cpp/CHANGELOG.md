@@ -40,9 +40,11 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-394 - Update scheduler unittest
 - MS-400 - Add timestamp record in task state change function
 - MS-402 - Add dump implementation for TaskTableItem
+- MS-406 - Add table flag for meta
 - MS-403 - Add GpuCacheMgr
 - MS-404 - Release index after search task done avoid memory increment continues
 - MS-405 - Add delete task support
+- MS-407 - Reconstruct MetricsCollector
 - MS-408 - Add device_id in resource construct function
 - MS-409 - Using new scheduler
 
