@@ -459,10 +459,8 @@ InsertTask::OnExecute() {
                                         std::to_string(table_info.dimension_);
                 return SetError(error_code, error_msg);
             }
-            //TODO: use memcpy
-            for (size_t j = 0; j < table_info.dimension_; j++) {
-                vec_f[i * table_info.dimension_ + j] = insert_param_.row_record_array(i).vector_data(j);
-            }
+            memcpy(static_cast<void *>(&vec_f[i * table_info.dimension_]), static_cast<const void *>(insert_param_.row_record_array(i).vector_data().data()),
+                   table_info.dimension_ * sizeof(float));
         }
 
         rc.ElapseFromBegin("prepare vectors data");
