@@ -34,24 +34,6 @@ Status HandleException(const std::string& desc, std::exception &e) {
     return Status::DBTransactionError(desc, e.what());
 }
 
-class MetricCollector {
-public:
-    MetricCollector() {
-        server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        start_time_ = METRICS_NOW_TIME;
-    }
-
-    ~MetricCollector() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
-        server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
-    }
-
-private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
-};
-
 }
 
 inline auto StoragePrototype(const std::string &path) {
@@ -170,7 +152,7 @@ Status SqliteMetaImpl::DropPartitionsByDates(const std::string &table_id,
 Status SqliteMetaImpl::CreateTable(TableSchema &table_schema) {
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -212,7 +194,7 @@ Status SqliteMetaImpl::CreateTable(TableSchema &table_schema) {
 
 Status SqliteMetaImpl::DeleteTable(const std::string& table_id) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -236,7 +218,7 @@ Status SqliteMetaImpl::DeleteTable(const std::string& table_id) {
 
 Status SqliteMetaImpl::DeleteTableFiles(const std::string& table_id) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -261,7 +243,7 @@ Status SqliteMetaImpl::DeleteTableFiles(const std::string& table_id) {
 
 Status SqliteMetaImpl::DescribeTable(TableSchema &table_schema) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         auto groups = ConnectorPtr->select(columns(&TableSchema::id_,
                                                    &TableSchema::state_,
@@ -350,7 +332,7 @@ Status SqliteMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) 
 
 Status SqliteMetaImpl::UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -399,7 +381,7 @@ Status SqliteMetaImpl::UpdateTableIndexParam(const std::string &table_id, const 
 
 Status SqliteMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex& index) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         auto groups = ConnectorPtr->select(columns(&TableSchema::engine_type_,
                                                    &TableSchema::nlist_,
@@ -426,7 +408,7 @@ Status SqliteMetaImpl::DescribeTableIndex(const std::string &table_id, TableInde
 
 Status SqliteMetaImpl::DropTableIndex(const std::string &table_id) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -464,7 +446,7 @@ Status SqliteMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
     has_or_not = false;
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
         auto tables = ConnectorPtr->select(columns(&TableSchema::id_),
                                            where(c(&TableSchema::table_id_) == table_id
                                            and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
@@ -483,7 +465,7 @@ Status SqliteMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
 
 Status SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         auto selected = ConnectorPtr->select(columns(&TableSchema::id_,
                                                      &TableSchema::table_id_,
@@ -527,7 +509,7 @@ Status SqliteMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
     }
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         NextFileId(file_schema.file_id_);
         file_schema.dimension_ = table_schema.dimension_;
@@ -558,7 +540,7 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
     files.clear();
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
                                                      &TableFileSchema::table_id_,
@@ -616,7 +598,7 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
     files.clear();
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         if (partition.empty()) {
             std::vector<int> file_type = {(int) TableFileSchema::RAW, (int) TableFileSchema::TO_INDEX, (int) TableFileSchema::INDEX};
@@ -716,7 +698,7 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                                  const DatesT &partition,
                                  DatePartionedTableFilesSchema &files) {
     files.clear();
-    MetricCollector metric;
+    server::MetricCollector metric;
 
     try {
         auto select_columns = columns(&TableFileSchema::id_,
@@ -793,7 +775,7 @@ Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
     files.clear();
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //check table existence
         TableSchema table_schema;
@@ -967,7 +949,7 @@ Status SqliteMetaImpl::DiscardFiles(long to_discard_size) {
     ENGINE_LOG_DEBUG << "About to discard size=" << to_discard_size;
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -1024,7 +1006,7 @@ Status SqliteMetaImpl::DiscardFiles(long to_discard_size) {
 Status SqliteMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     file_schema.updated_time_ = utils::GetMicroSecTimeStamp();
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -1050,7 +1032,7 @@ Status SqliteMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
 
 Status SqliteMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -1072,7 +1054,7 @@ Status SqliteMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
 
 Status SqliteMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -1121,7 +1103,7 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
     //remove to_delete files
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -1165,7 +1147,7 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
     //remove to_delete tables
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -1195,7 +1177,7 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
     //remove deleted table folder
     //don't remove table folder until all its files has been deleted
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         for(auto& table_id : table_ids) {
             auto selected = ConnectorPtr->select(columns(&TableFileSchema::file_id_),
@@ -1214,7 +1196,7 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
 Status SqliteMetaImpl::CleanUp() {
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
@@ -1245,7 +1227,7 @@ Status SqliteMetaImpl::CleanUp() {
 Status SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 
     try {
-        MetricCollector metric;
+        server::MetricCollector metric;
 
         std::vector<int> file_type = {(int) TableFileSchema::RAW, (int) TableFileSchema::TO_INDEX, (int) TableFileSchema::INDEX};
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::row_count_),
