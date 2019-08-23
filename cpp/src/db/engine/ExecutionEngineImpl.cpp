@@ -214,11 +214,11 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
 }
 
 ExecutionEnginePtr
-ExecutionEngineImpl::BuildIndex(const std::string &location) {
+ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_type) {
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
-    auto to_index = CreatetVecIndex(index_type_);
+    auto to_index = CreatetVecIndex(engine_type);
     if (!to_index) {
         throw Exception("Create Empty VecIndex");
     }
@@ -236,7 +236,7 @@ ExecutionEngineImpl::BuildIndex(const std::string &location) {
                                  build_cfg);
     if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
 
-    return std::make_shared<ExecutionEngineImpl>(to_index, location, index_type_, metric_type_, nlist_);
+    return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
 
 Status ExecutionEngineImpl::Search(long n,

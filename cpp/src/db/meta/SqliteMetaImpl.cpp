@@ -548,6 +548,7 @@ Status SqliteMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         file_schema.updated_time_ = file_schema.created_on_;
         file_schema.engine_type_ = table_schema.engine_type_;
         file_schema.nlist_ = table_schema.nlist_;
+        file_schema.index_file_size_ = table_schema.index_file_size_;
         file_schema.metric_type_ = table_schema.metric_type_;
 
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
@@ -608,8 +609,9 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
                 }
                 groups[table_file.table_id_] = table_schema;
             }
-            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
             table_file.nlist_ = groups[table_file.table_id_].nlist_;
+            table_file.index_file_size_ = groups[table_file.table_id_].index_file_size_;
+            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
             table_file.dimension_ = groups[table_file.table_id_].dimension_;
             files.push_back(table_file);
         }
@@ -703,9 +705,11 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                 table_file.row_count_ = std::get<5>(file);
                 table_file.date_ = std::get<6>(file);
                 table_file.engine_type_ = std::get<7>(file);
-                table_file.metric_type_ = table_schema.metric_type_;
                 table_file.nlist_ = table_schema.nlist_;
+                table_file.index_file_size_ = table_schema.index_file_size_;
+                table_file.metric_type_ = table_schema.metric_type_;
                 table_file.dimension_ = table_schema.dimension_;
+
                 utils::GetTableFilePath(options_, table_file);
                 auto dateItr = files.find(table_file.date_);
                 if (dateItr == files.end()) {
@@ -782,8 +786,10 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
             table_file.date_ = std::get<6>(file);
             table_file.engine_type_ = std::get<7>(file);
             table_file.dimension_ = table_schema.dimension_;
-            table_file.metric_type_ = table_schema.metric_type_;
             table_file.nlist_ = table_schema.nlist_;
+            table_file.index_file_size_ = table_schema.index_file_size_;
+            table_file.metric_type_ = table_schema.metric_type_;
+
             utils::GetTableFilePath(options_, table_file);
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
@@ -842,8 +848,10 @@ Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
             table_file.date_ = std::get<6>(file);
             table_file.created_on_ = std::get<7>(file);
             table_file.dimension_ = table_schema.dimension_;
-            table_file.metric_type_ = table_schema.metric_type_;
             table_file.nlist_ = table_schema.nlist_;
+            table_file.index_file_size_ = table_schema.index_file_size_;
+            table_file.metric_type_ = table_schema.metric_type_;
+
             utils::GetTableFilePath(options_, table_file);
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
@@ -892,8 +900,9 @@ Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
             file_schema.row_count_ = std::get<4>(file);
             file_schema.date_ = std::get<5>(file);
             file_schema.engine_type_ = std::get<6>(file);
-            file_schema.metric_type_ = table_schema.metric_type_;
             file_schema.nlist_ = table_schema.nlist_;
+            file_schema.index_file_size_ = table_schema.index_file_size_;
+            file_schema.metric_type_ = table_schema.metric_type_;
             file_schema.created_on_ = std::get<7>(file);
             file_schema.dimension_ = table_schema.dimension_;
 

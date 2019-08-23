@@ -27,19 +27,6 @@ DBWrapper::DBWrapper() {
     std::string db_slave_path = db_config.GetValue(CONFIG_DB_SLAVE_PATH);
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta.slave_paths);
 
-    int64_t index_size = db_config.GetInt64Value(CONFIG_DB_INDEX_TRIGGER_SIZE);
-    if(index_size > 0) {//ensure larger than zero, unit is MB
-        opt.index_trigger_size = (size_t)index_size * engine::ONE_MB;
-    }
-    int64_t insert_buffer_size = db_config.GetInt64Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
-    if (insert_buffer_size >= 1) {
-        opt.insert_buffer_size = insert_buffer_size * engine::ONE_GB;
-    }
-    else {
-        std::cout << "ERROR: insert_buffer_size should be at least 1 GB" << std::endl;
-        kill(0, SIGUSR1);
-    }
-
     // cache config
     ConfigNode& cache_config = ServerConfig::GetInstance().GetConfig(CONFIG_CACHE);
     opt.insert_cache_immediately_ = cache_config.GetBoolValue(CONFIG_INSERT_CACHE_IMMEDIATELY, false);

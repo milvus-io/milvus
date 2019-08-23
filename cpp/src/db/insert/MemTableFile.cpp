@@ -87,7 +87,7 @@ Status MemTableFile::Serialize() {
     table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
     table_file_schema_.row_count_ = execution_engine_->Count();
 
-    table_file_schema_.file_type_ = (size >= options_.index_trigger_size) ?
+    table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ?
                                     meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
 
     auto status = meta_->UpdateTableFile(table_file_schema_);
