@@ -16,6 +16,8 @@
 
 #include "src/server/Server.h"
 
+#include <string.h>
+
 namespace zilliz {
 namespace milvus {
 namespace server {
@@ -466,20 +468,20 @@ InsertTask::OnExecute() {
 
         // TODO: change to one dimension array in protobuf or use multiple-thread to copy the data
         for (size_t i = 0; i < insert_param_.row_record_array_size(); i++) {
-            for (size_t j = 0; j < table_info.dimension_; j++) {
-                if (insert_param_.row_record_array(i).vector_data().empty()) {
-                    return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record float array is empty");
-                }
-                uint64_t vec_dim = insert_param_.row_record_array(i).vector_data().size();
-                if (vec_dim != table_info.dimension_) {
-                    ServerError error_code = SERVER_INVALID_VECTOR_DIMENSION;
-                    std::string error_msg = "Invalid rowrecord dimension: " + std::to_string(vec_dim)
-                                            + " vs. table dimension:" +
-                                            std::to_string(table_info.dimension_);
-                    return SetError(error_code, error_msg);
-                }
-                vec_f[i * table_info.dimension_ + j] = insert_param_.row_record_array(i).vector_data(j);
+            if (insert_param_.row_record_array(i).vector_data().empty()) {
+                return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record float array is empty");
             }
+            uint64_t vec_dim = insert_param_.row_record_array(i).vector_data().size();
+            if (vec_dim != table_info.dimension_) {
+                ServerError error_code = SERVER_INVALID_VECTOR_DIMENSION;
+                std::string error_msg = "Invalid rowrecord dimension: " + std::to_string(vec_dim)
+                                        + " vs. table dimension:" +
+                                        std::to_string(table_info.dimension_);
+                return SetError(error_code, error_msg);
+            }
+            memcpy(&vec_f[i * table_info.dimension_],
+                   insert_param_.row_record_array(i).vector_data().data(),
+                   table_info.dimension_ * sizeof(float));
         }
 
         rc.ElapseFromBegin("prepare vectors data");
@@ -487,12 +489,13 @@ InsertTask::OnExecute() {
         //step 4: insert vectors
         auto vec_count = (uint64_t) insert_param_.row_record_array_size();
         std::vector<int64_t> vec_ids(insert_param_.row_id_array_size(), 0);
-        for (auto i = 0; i < insert_param_.row_id_array_size(); i++) {
-            vec_ids[i] = insert_param_.row_id_array(i);
+        if(!insert_param_.row_id_array().empty()) {
+            const int64_t* src_data = insert_param_.row_id_array().data();
+            int64_t* target_data = vec_ids.data();
+            memcpy(target_data, src_data, (size_t)(sizeof(int64_t)*insert_param_.row_id_array_size()));
         }
 
-        stat = DBWrapper::DB()->InsertVectors(insert_param_.table_name(), vec_count, vec_f.data(),
-                                              vec_ids);
+        stat = DBWrapper::DB()->InsertVectors(insert_param_.table_name(), vec_count, vec_f.data(), vec_ids);
         rc.ElapseFromBegin("add vectors to engine");
         if (!stat.ok()) {
             return SetError(SERVER_CACHE_ERROR, "Cache error: " + stat.ToString());

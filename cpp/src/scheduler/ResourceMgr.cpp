@@ -17,6 +17,17 @@ ResourceMgr::ResourceMgr()
 
 }
 
+uint64_t
+ResourceMgr::GetNumOfComputeResource() {
+    uint64_t count = 0;
+    for (auto &res : resources_) {
+        if (res->HasExecutor()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 ResourceWPtr
 ResourceMgr::Add(ResourcePtr &&resource) {
     ResourceWPtr ret(resource);

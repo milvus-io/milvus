@@ -236,7 +236,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     std::vector<std::pair<int64_t, RowRecord>> search_record_array;
     {//insert vectors
-        std::vector<int64_t> record_ids;
         for (int i = 0; i < ADD_VECTOR_LOOP; i++) {//add vectors
             std::vector<RowRecord> record_array;
             int64_t begin_index = i * BATCH_ROW_COUNT;
@@ -248,6 +247,12 @@ ClientTest::Test(const std::string& address, const std::string& port) {
                 record_ids[i * BATCH_ROW_COUNT + j] = i * BATCH_ROW_COUNT + j;
             }
 #endif
+
+            std::vector<int64_t> record_ids;
+            //generate user defined ids
+            for(int k = 0; k < BATCH_ROW_COUNT; k++) {
+                record_ids.push_back(i*BATCH_ROW_COUNT+k);
+            }
 
             auto start = std::chrono::high_resolution_clock::now();
 
@@ -263,9 +268,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
                 search_record_array.push_back(
                         std::make_pair(record_ids[SEARCH_TARGET], record_array[SEARCH_TARGET]));
             }
-            int64_t row_count;
-            conn->CountTable(TABLE_NAME, row_count);
-            std::cout << "\t" << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
         }
     }
 
