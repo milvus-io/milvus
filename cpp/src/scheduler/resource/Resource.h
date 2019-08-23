@@ -82,6 +82,11 @@ public:
         subscriber_ = std::move(subscriber);
     }
 
+    inline std::string
+    Name() const {
+        return name_;
+    }
+
     inline ResourceType
     Type() const {
         return type_;
@@ -112,6 +117,7 @@ public:
 protected:
     Resource(std::string name,
              ResourceType type,
+             uint64_t device_id,
              bool enable_loader,
              bool enable_executor);
 
@@ -162,6 +168,9 @@ private:
      */
     void
     executor_function();
+
+protected:
+    uint64_t device_id_;
 
 private:
     std::string name_;
