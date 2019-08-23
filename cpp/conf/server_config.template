@@ -37,5 +37,40 @@ cache_config:
 
 engine_config:
   use_blas_threshold: 20
-  metric_type: L2                   # compare vectors by euclidean distance(L2) or inner product(IP), optional: L2 or IP
-  omp_thread_num: 0                 # how many cpu cores be used by engine, 0 means use all cpu cores used
+  metric_type: L2               # compare vectors by euclidean distance(L2) or inner product(IP), optional: L2 or IP
+  omp_thread_num: 0             # how many compute threads be used by engine, 0 means use all cpu core to compute
+
+resource_config:
+  resources:
+    ssda:
+      type: DISK
+      memory: 2048
+      device_id: 0
+      enable_loader: true
+      enable_executor: false
+
+    cpu:
+      type: CPU
+      memory: 64
+      device_id: 0
+      enable_loader: true
+      enable_executor: false
+
+    gtx1060:
+      type: GPU
+      memory: 6
+      device_id: 0
+      enable_loader: true
+      enable_executor: true
+
+    gtx1660:
+      type: GPU
+      memory: 6
+      device_id: 1
+      enable_loader: true
+      enable_executor: true
+
+  connections:
+    - ssda===cpu
+    - cpu===gtx1060
+    - cpu===gtx1660
