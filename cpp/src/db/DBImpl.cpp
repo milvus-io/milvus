@@ -396,7 +396,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         ENGINE_LOG_DEBUG << "Merging file " << file_schema.file_id_;
         index_size = index->Size();
 
-        if (index_size >= options_.index_trigger_size) break;
+        if (index_size >= file_schema.index_file_size_) break;
     }
 
     //step 3: serialize to disk
@@ -546,6 +546,11 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
         //step 2: drop old index files
         DropIndex(table_id);
 
+        if(index.engine_type_ == (int)EngineType::FAISS_IDMAP) {
+            ENGINE_LOG_DEBUG << "index type = IDMAP, no need to build index";
+            return Status::OK();
+        }
+
         //step 3: update index info
 
         status = meta_ptr_->UpdateTableIndexParam(table_id, index);
@@ -607,7 +612,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
         try {
             server::CollectBuildIndexMetrics metrics;
-            index = to_index->BuildIndex(table_file.location_);
+            index = to_index->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
         } catch (std::exception& ex) {
             //typical error: out of gpu memory
             std::string msg = "BuildIndex encounter exception" + std::string(ex.what());
