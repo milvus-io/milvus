@@ -33,8 +33,6 @@ public:
     int64_t CacheUsage() const;
     int64_t CacheCapacity() const;
     void SetCapacity(int64_t capacity);
-    std::vector<uint64_t > GpuIds() const;
-    void SetGpuIds(std::vector<uint64_t> gpu_ids);
 
 protected:
     CacheMgr();
