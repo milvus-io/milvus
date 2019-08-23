@@ -46,6 +46,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-405 - Add delete task support
 - MS-407 - Reconstruct MetricsCollector
 - MS-408 - Add device_id in resource construct function
+- MS-409 - Using new scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

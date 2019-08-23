@@ -18,7 +18,7 @@ public:
 
     virtual std::shared_ptr<IScheduleTask> Execute() override;
 
-private:
+public:
     DeleteContextPtr context_;
 };
 
