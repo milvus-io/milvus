@@ -185,6 +185,9 @@ XSearchTask::Execute() {
     }
 
     rc.ElapseFromBegin("totally cost");
+
+    // release index in resource
+    index_engine_ = nullptr;
 }
 
 TaskPtr
