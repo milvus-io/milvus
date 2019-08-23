@@ -157,7 +157,6 @@ if (UNIX)
     endif (APPLE)
 endif (UNIX)
 
-
 # ----------------------------------------------------------------------
 # thirdparty directory
 set(THIRDPARTY_DIR "${MILVUS_SOURCE_DIR}/thirdparty")
@@ -167,7 +166,7 @@ set(THIRDPARTY_DIR "${MILVUS_SOURCE_DIR}/thirdparty")
 if(NOT DEFINED USE_JFROG_CACHE)
     set(USE_JFROG_CACHE "OFF")
 endif()
-if(USE_JFROG_CACHE STREQUAL "ON")    
+if(USE_JFROG_CACHE STREQUAL "ON")
     set(JFROG_ARTFACTORY_CACHE_URL "http://192.168.1.201:80/artifactory/generic-local/milvus/thirdparty/cache/${CMAKE_OS_NAME}/${MILVUS_BUILD_ARCH}/${BUILD_TYPE}")
     set(JFROG_USER_NAME "test")
     set(JFROG_PASSWORD "Fantast1c")
@@ -308,9 +307,11 @@ set(EASYLOGGINGPP_MD5 "b78cd319db4be9b639927657b8aa7732")
 if(DEFINED ENV{MILVUS_FAISS_URL})
     set(FAISS_SOURCE_URL "$ENV{MILVUS_FAISS_URL}")
 else()
-    set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
+    set(FAISS_SOURCE_URL "http://192.168.1.105:6060/jinhai/faiss/-/archive/${FAISS_VERSION}/faiss-${FAISS_VERSION}.tar.gz")
+    # set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
 endif()
-set(FAISS_MD5 "0bc12737b23def156f6a1eb782050135")
+
+set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
 
 if(DEFINED ENV{MILVUS_KNOWHERE_URL})
     set(KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}")
@@ -461,6 +462,7 @@ else()
             "http://git.zilliz.tech/kun.yu/grpc/-/archive/master/grpc-master.tar.gz")
 endif()
 set(GRPC_MD5 "7ec59ad54c85a12dcbbfede09bf413a9")
+
 
 # ----------------------------------------------------------------------
 # ARROW
@@ -686,7 +688,7 @@ macro(build_bzip2)
     set(BZIP2_STATIC_LIB
             "${BZIP2_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}bz2${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-    if(USE_JFROG_CACHE STREQUAL "ON") 
+    if(USE_JFROG_CACHE STREQUAL "ON")
         set(BZIP2_CACHE_PACKAGE_NAME "bzip2_${BZIP2_MD5}.tar.gz")
         set(BZIP2_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${BZIP2_CACHE_PACKAGE_NAME}")
         set(BZIP2_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${BZIP2_CACHE_PACKAGE_NAME}")
@@ -1184,7 +1186,7 @@ macro(build_faiss)
                 INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
                 INTERFACE_LINK_LIBRARIES "openblas;lapack" )
     endif()
-            
+
     add_dependencies(faiss faiss_ep)
 
     if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
@@ -1321,7 +1323,7 @@ if (MILVUS_BUILD_TESTS)
 
     if(NOT GTEST_VENDORED)
     endif()
-    
+
     get_target_property(GTEST_INCLUDE_DIR gtest INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM "${GTEST_PREFIX}/lib")
     include_directories(SYSTEM ${GTEST_INCLUDE_DIR})
@@ -1828,7 +1830,7 @@ endmacro()
 if(MILVUS_WITH_SNAPPY)
 
     resolve_dependency(Snappy)
-    
+
     get_target_property(SNAPPY_INCLUDE_DIRS snappy INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${SNAPPY_PREFIX}/lib/)
     include_directories(SYSTEM ${SNAPPY_INCLUDE_DIRS})
@@ -2131,7 +2133,7 @@ endmacro()
 
 if(MILVUS_WITH_YAMLCPP)
     resolve_dependency(yaml-cpp)
-    
+
     get_target_property(YAMLCPP_INCLUDE_DIR yaml-cpp INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${YAMLCPP_PREFIX}/lib/)
     include_directories(SYSTEM ${YAMLCPP_INCLUDE_DIR})
@@ -2203,7 +2205,7 @@ endmacro()
 
 if(MILVUS_WITH_ZLIB)
     resolve_dependency(ZLIB)
-    
+
     get_target_property(ZLIB_INCLUDE_DIR zlib INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM ${ZLIB_INCLUDE_DIR})
 endif()
@@ -2301,7 +2303,7 @@ endmacro()
 
 if(MILVUS_WITH_ZSTD)
     resolve_dependency(ZSTD)
-    
+
     get_target_property(ZSTD_INCLUDE_DIR zstd INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM ${ZSTD_PREFIX}/lib)
     include_directories(SYSTEM ${ZSTD_INCLUDE_DIR})
@@ -2406,7 +2408,7 @@ endmacro()
 
 if(MILVUS_WITH_AWS)
     resolve_dependency(AWS)
-    
+
     link_directories(SYSTEM ${AWS_PREFIX}/lib)
 
     get_target_property(AWS_CPP_SDK_S3_INCLUDE_DIR aws-cpp-sdk-s3 INTERFACE_INCLUDE_DIRECTORIES)

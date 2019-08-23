@@ -4,7 +4,6 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "EngineFactory.h"
-//#include "FaissExecutionEngine.h"
 #include "ExecutionEngineImpl.h"
 #include "db/Log.h"
 
@@ -12,61 +11,25 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-#if 0
 ExecutionEnginePtr
 EngineFactory::Build(uint16_t dimension,
                      const std::string &location,
-                     EngineType type) {
+                     EngineType index_type,
+                     MetricType metric_type,
+                     int32_t nlist) {
 
-    ExecutionEnginePtr execution_engine_ptr;
-
-    switch (type) {
-        case EngineType::FAISS_IDMAP: {
-            execution_engine_ptr =
-                ExecutionEnginePtr(new FaissExecutionEngine(dimension, location, BUILD_INDEX_TYPE_IDMAP, "IDMap,Flat"));
-            break;
-        }
-
-        case EngineType::FAISS_IVFFLAT_GPU: {
-            execution_engine_ptr =
-                ExecutionEnginePtr(new FaissExecutionEngine(dimension, location, BUILD_INDEX_TYPE_IVF, "IDMap,Flat"));
-            break;
-        }
-
-        case EngineType::FAISS_IVFSQ8: {
-            execution_engine_ptr =
-                    ExecutionEnginePtr(new FaissExecutionEngine(dimension, location, BUILD_INDEX_TYPE_IVFSQ8, "IDMap,Flat"));
-            break;
-        }
-
-        default: {
-            ENGINE_LOG_ERROR << "Unsupported engine type";
-            return nullptr;
-        }
-    }
-
-    execution_engine_ptr->Init();
-    return execution_engine_ptr;
-}
-#else
-ExecutionEnginePtr
-EngineFactory::Build(uint16_t dimension,
-                     const std::string &location,
-                     EngineType type) {
-
-    if(type == EngineType::INVALID) {
+    if(index_type == EngineType::INVALID) {
         ENGINE_LOG_ERROR << "Unsupported engine type";
         return nullptr;
     }
 
-    ENGINE_LOG_DEBUG << "EngineFactory EngineTypee: " << int(type);
+    ENGINE_LOG_DEBUG << "EngineFactory EngineTypee: " << (int)index_type;
     ExecutionEnginePtr execution_engine_ptr =
-            std::make_shared<ExecutionEngineImpl>(dimension, location, type);
+            std::make_shared<ExecutionEngineImpl>(dimension, location, index_type, metric_type, nlist);
 
     execution_engine_ptr->Init();
     return execution_engine_ptr;
 }
-#endif
 
 }
 }

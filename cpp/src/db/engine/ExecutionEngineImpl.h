@@ -22,11 +22,15 @@ public:
 
     ExecutionEngineImpl(uint16_t dimension,
                         const std::string &location,
-                        EngineType type);
+                        EngineType index_type,
+                        MetricType metric_type,
+                        int32_t nlist);
 
     ExecutionEngineImpl(VecIndexPtr index,
                         const std::string &location,
-                        EngineType type);
+                        EngineType index_type,
+                        MetricType metric_type,
+                        int32_t nlist);
 
     Status AddWithIds(long n, const float *xdata, const long *xids) override;
 
@@ -59,7 +63,13 @@ public:
 
     Status Cache() override;
 
+    Status GpuCache(uint64_t gpu_id) override;
+
     Status Init() override;
+
+    EngineType IndexEngineType() const override { return index_type_; }
+
+    MetricType IndexMetricType() const override { return metric_type_; }
 
 private:
     VecIndexPtr CreatetVecIndex(EngineType type);
@@ -68,14 +78,14 @@ private:
 
 protected:
     VecIndexPtr index_ = nullptr;
-    EngineType build_type;
-    EngineType current_type;
+    EngineType index_type_;
+    MetricType metric_type_;
 
-    int64_t dim;
+    int64_t dim_;
     std::string location_;
 
-    size_t nlist_ = 0;
-    int64_t gpu_num = 0;
+    int32_t nlist_ = 0;
+    int64_t gpu_num_ = 0;
 };
 
 

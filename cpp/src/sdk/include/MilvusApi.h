@@ -76,9 +76,10 @@ struct TopKQueryResult {
  */
 struct IndexParam {
     std::string table_name;
-    int32_t index_type;
-    int64_t nlist;
+    IndexType index_type;
+    int32_t nlist;
     int32_t index_file_size;
+    int32_t metric_type;
 };
 
 /**
@@ -354,8 +355,8 @@ class Connection {
      *
      * @return index informations and indicate if this operation is successful.
      */
-    virtual IndexParam
-    DescribeIndex(const std::string &table_name) const = 0;
+    virtual Status
+    DescribeIndex(const std::string &table_name, IndexParam &index_param) const = 0;
 
     /**
      * @brief drop index

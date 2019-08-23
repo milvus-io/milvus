@@ -43,6 +43,12 @@ class MySQLMetaImpl : public Meta {
 
     Status HasNonIndexFiles(const std::string &table_id, bool &has) override;
 
+    Status UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) override;
+
+    Status DescribeTableIndex(const std::string &table_id, TableIndex& index) override;
+
+    Status DropTableIndex(const std::string &table_id) override;
+
     Status UpdateTableFile(TableFileSchema &file_schema) override;
 
     Status UpdateTableFilesToIndex(const std::string &table_id) override;
