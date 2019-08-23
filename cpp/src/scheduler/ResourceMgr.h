@@ -36,6 +36,12 @@ public:
     }
 
     /*
+     * Return account of resource which enable executor;
+     */
+    uint64_t
+    GetNumOfComputeResource();
+
+    /*
      * Add resource into Resource Management;
      * Generate functions on events;
      * Functions only modify bool variable, like event trigger;
