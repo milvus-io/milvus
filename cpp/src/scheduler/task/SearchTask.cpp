@@ -102,7 +102,9 @@ CollectDurationMetrics(int index_type, double total_time) {
 XSearchTask::XSearchTask(TableFileSchemaPtr file) : file_(file) {
     index_engine_ = EngineFactory::Build(file_->dimension_,
                                          file_->location_,
-                                         (EngineType) file_->engine_type_);
+                                         (EngineType) file_->engine_type_,
+                                         (MetricType)file_->metric_type_,
+                                         file_->nlist_);
 }
 
 void

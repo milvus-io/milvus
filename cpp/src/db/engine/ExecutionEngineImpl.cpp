@@ -203,6 +203,13 @@ Status ExecutionEngineImpl::CopyToCpu() {
     return Status::OK();
 }
 
+ExecutionEnginePtr ExecutionEngineImpl::Clone() {
+    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
+    ret->Init();
+    ret->index_ = index_->Clone();
+    return ret;
+}
+
 Status ExecutionEngineImpl::Merge(const std::string &location) {
     if (location == location_) {
         return Status::Error("Cannot Merge Self");
