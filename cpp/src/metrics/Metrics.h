@@ -157,13 +157,13 @@ private:
     size_t size_;
 };
 
-class CollectorAddMetrics {
+class CollectAddMetrics {
 public:
-    CollectorAddMetrics(size_t n, uint16_t dimension) : n_(n), dimension_(dimension) {
+    CollectAddMetrics(size_t n, uint16_t dimension) : n_(n), dimension_(dimension) {
         start_time_ = METRICS_NOW_TIME;
     }
 
-    ~CollectorAddMetrics() {
+    ~CollectAddMetrics() {
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
         server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_),
@@ -177,13 +177,13 @@ private:
     uint16_t dimension_;
 };
 
-class CollectorDurationMetrics {
+class CollectDurationMetrics {
 public:
-    CollectorDurationMetrics() {
+    CollectDurationMetrics(int index_type) : index_type_(index_type) {
         start_time_ = METRICS_NOW_TIME;
     }
 
-    ~CollectorDurationMetrics() {
+    ~CollectDurationMetrics() {
         auto end_time = METRICS_NOW_TIME;
         auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
         switch (index_type_) {

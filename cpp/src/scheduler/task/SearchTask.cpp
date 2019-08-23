@@ -141,7 +141,7 @@ XSearchTask::Execute() {
 
     server::TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
 
-    server::CollectorDurationMetrics metrics(index_type_);
+    server::CollectDurationMetrics metrics(index_type_);
 
     std::vector<long> output_ids;
     std::vector<float> output_distence;
