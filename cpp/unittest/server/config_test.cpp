@@ -135,12 +135,6 @@ TEST(ConfigTest, SERVER_CONFIG_TEST) {
     err = config.ValidateConfig();
     ASSERT_NE(err, server::SERVER_SUCCESS);
 
-    size_t index_building_threshold = (gpu_mem + 1*MB)/MB;
-    db_config.SetValue(server::CONFIG_DB_INDEX_TRIGGER_SIZE,
-            std::to_string(index_building_threshold));
-    err = config.ValidateConfig();
-    ASSERT_NE(err, server::SERVER_SUCCESS);
-
     insert_buffer_size = total_mem/GB + 2;
     db_config.SetValue(server::CONFIG_DB_INSERT_BUFFER_SIZE, std::to_string(insert_buffer_size));
     err = config.ValidateConfig();
