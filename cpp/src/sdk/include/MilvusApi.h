@@ -35,9 +35,8 @@ struct ConnectParam {
  */
 struct TableSchema {
     std::string table_name;                                ///< Table name
-    IndexType index_type = IndexType::invalid;             ///< Index type
     int64_t dimension = 0;                                 ///< Vector dimension, must be a positive value
-    bool store_raw_vector = false;                          ///< Is vector raw data stored in the table
+    int64_t index_file_size = 0;                           ///< Index file size, must be a positive value
 };
 
 /**
@@ -78,7 +77,6 @@ struct IndexParam {
     std::string table_name;
     IndexType index_type;
     int32_t nlist;
-    int32_t index_file_size;
     int32_t metric_type;
 };
 

@@ -76,7 +76,7 @@ ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
 }
 
 ServerError
-ValidationUtil::ValidateTableIndexFileSize(int32_t index_file_size) {
+ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
     if(index_file_size <= 0 || index_file_size > index_file_size_limit) {
         return SERVER_INVALID_INDEX_FILE_SIZE;
     }
