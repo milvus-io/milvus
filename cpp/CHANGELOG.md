@@ -5,6 +5,8 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.4.0 (2019-07-28)
 
 ## Bug
+- MS-411 - Fix metric unittest linking error
+- MS-412 - Fix gpu cache logical error
 
 ## Improvement
 - MS-327 - Clean code for milvus
@@ -48,6 +50,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-408 - Add device_id in resource construct function
 - MS-409 - Using new scheduler
 - MS-413 - Remove thrift dependency
+- MS-410 - Add resource config comment
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
