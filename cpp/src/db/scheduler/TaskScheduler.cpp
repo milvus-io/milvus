@@ -4,12 +4,15 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
+#include "server/ServerConfig.h"
 #include "TaskScheduler.h"
 #include "TaskDispatchQueue.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "db/engine/EngineFactory.h"
 #include "scheduler/task/TaskConvert.h"
+#include "scheduler/SchedInst.h"
+#include "scheduler/ResourceFactory.h"
 
 namespace zilliz {
 namespace milvus {
@@ -86,14 +89,22 @@ TaskScheduler::TaskDispatchWorker() {
             return true;
         }
 
+#ifdef NEW_SCHEDULER
         // TODO: Put task into Disk-TaskTable
-//        auto task = TaskConvert(task_ptr);
-//        DiskResourcePtr->task_table().Put(task)
+        auto task = TaskConvert(task_ptr);
+        auto disk_list = ResMgrInst::GetInstance()->GetDiskResources();
+        if (!disk_list.empty()) {
+	    if (auto disk = disk_list[0].lock()) {
+                disk->task_table().Put(task);
+            }
+        }
+#else
         //execute task
         ScheduleTaskPtr next_task = task_ptr->Execute();
         if(next_task != nullptr) {
             task_queue_.Put(next_task);
         }
+#endif
     }
 
     return true;

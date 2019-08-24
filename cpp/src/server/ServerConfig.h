@@ -24,7 +24,6 @@ static const char* CONFIG_DB = "db_config";
 static const char* CONFIG_DB_URL = "db_backend_url";
 static const char* CONFIG_DB_PATH = "db_path";
 static const char* CONFIG_DB_SLAVE_PATH = "db_slave_path";
-static const char* CONFIG_DB_INDEX_TRIGGER_SIZE = "index_building_threshold";
 static const char* CONFIG_DB_ARCHIVE_DISK = "archive_disk_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS = "archive_days_threshold";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
@@ -49,6 +48,16 @@ static const char* CONFIG_METRIC_PROMETHEUS_PORT = "port";
 static const std::string CONFIG_ENGINE = "engine_config";
 static const std::string CONFIG_DCBT = "use_blas_threshold";
 static const std::string CONFIG_OMP_THREAD_NUM = "omp_thread_num";
+
+static const char* CONFIG_RESOURCE = "resource_config";
+static const char* CONFIG_RESOURCES = "resources";
+static const char* CONFIG_RESOURCE_TYPE = "type";
+static const char* CONFIG_RESOURCE_MEMORY = "memory";
+static const char* CONFIG_RESOURCE_DEVICE_ID = "device_id";
+static const char* CONFIG_RESOURCE_ENABLE_LOADER = "enable_loader";
+static const char* CONFIG_RESOURCE_ENABLE_EXECUTOR = "enable_executor";
+static const char* CONFIG_RESOURCE_CONNECTIONS = "connections";
+
 
 class ServerConfig {
  public:

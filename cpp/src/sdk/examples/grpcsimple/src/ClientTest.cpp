@@ -22,6 +22,7 @@ namespace {
 
     const std::string TABLE_NAME = GetTableName();
     constexpr int64_t TABLE_DIMENSION = 512;
+    constexpr int64_t TABLE_INDEX_FILE_SIZE = 768;
     constexpr int64_t BATCH_ROW_COUNT = 100000;
     constexpr int64_t NQ = 10;
     constexpr int64_t TOP_K = 10;
@@ -94,6 +95,7 @@ namespace {
         TableSchema tb_schema;
         tb_schema.table_name = TABLE_NAME;
         tb_schema.dimension = TABLE_DIMENSION;
+        tb_schema.index_file_size = TABLE_INDEX_FILE_SIZE;
 
         return tb_schema;
     }
@@ -286,7 +288,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         index.table_name = TABLE_NAME;
         index.index_type = IndexType::gpu_ivfflat;
         index.nlist = 1000;
-        index.index_file_size = 1024;
         index.metric_type = 1;
         Status stat = conn->CreateIndex(index);
         std::cout << "CreateIndex function call status: " << stat.ToString() << std::endl;

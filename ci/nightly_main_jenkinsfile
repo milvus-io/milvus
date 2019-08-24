@@ -106,7 +106,7 @@ spec:
                             steps {
                                 gitlabCommitStatus(name: 'Publish Docker') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkinsfile/publish_docker.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/nightly_publish_docker.groovy"
                                     }
                                 }
                             }
@@ -208,17 +208,17 @@ spec:
                                 }
                                 success {
                                     script {
-                                        echo "Milvus Single Node CI/CD success !"
+                                        echo "Milvus Deploy to Dev Single Node CI/CD success !"
                                     }
                                 }
                                 aborted {
                                     script {
-                                        echo "Milvus Single Node CI/CD aborted !"
+                                        echo "Milvus Deploy to Dev Single Node CI/CD aborted !"
                                     }
                                 }
                                 failure {
                                     script {
-                                        echo "Milvus Single Node CI/CD failure !"
+                                        echo "Milvus Deploy to Dev Single Node CI/CD failure !"
                                     }
                                 }
                             }
@@ -300,17 +300,114 @@ spec:
                                 }
                                 success {
                                     script {
-                                        echo "Milvus Cluster CI/CD success !"
+                                        echo "Milvus Deploy to Dev Cluster CI/CD success !"
                                     }
                                 }
                                 aborted {
                                     script {
-                                        echo "Milvus Cluster CI/CD aborted !"
+                                        echo "Milvus Deploy to Dev Cluster CI/CD aborted !"
                                     }
                                 }
                                 failure {
                                     script {
-                                        echo "Milvus Cluster CI/CD failure !"
+                                        echo "Milvus Deploy to Dev Cluster CI/CD failure !"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                stage("Deploy to Staging") {
+                    parallel {
+                        stage("Single Node") {
+                            agent {
+                                kubernetes {
+                                    label 'dev-test'
+                                    defaultContainer 'jnlp'
+                                    yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus
+    componet: test
+spec:
+  containers:
+  - name: milvus-testframework
+    image: registry.zilliz.com/milvus/milvus-test:v0.2
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: kubeconf
+      mountPath: /root/.kube/
+      readOnly: true
+  volumes:
+  - name: kubeconf
+    secret:
+      secretName: aks-gpu-cluster-config
+"""
+                                }
+                            }
+
+                            stages {
+                                stage("Deploy to Staging") {
+                                    steps {
+                                        gitlabCommitStatus(name: 'Deloy to Staging') {
+                                            container('milvus-testframework') {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkinsfile/deploy2staging.groovy"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                stage("Staging Test") {
+                                    steps {
+                                        gitlabCommitStatus(name: 'Staging Test') {
+                                            container('milvus-testframework') {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkinsfile/staging_test.groovy"
+                                                    load "${env.WORKSPACE}/ci/jenkinsfile/upload_staging_test_out.groovy"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                stage ("Cleanup Staging") {
+                                    steps {
+                                        gitlabCommitStatus(name: 'Cleanup Staging') {
+                                            container('milvus-testframework') {
+                                                script {
+                                                    load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_staging.groovy"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            post {
+                                always {
+                                    container('milvus-testframework') {
+                                        script {
+                                            load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_staging.groovy"
+                                        }
+                                    }
+                                }
+                                success {
+                                    script {
+                                        echo "Milvus Deploy to Staging Single Node CI/CD success !"
+                                    }
+                                }
+                                aborted {
+                                    script {
+                                        echo "Milvus Deploy to Staging Single Node CI/CD aborted !"
+                                    }
+                                }
+                                failure {
+                                    script {
+                                        echo "Milvus Deploy to Staging Single Node CI/CD failure !"
                                     }
                                 }
                             }

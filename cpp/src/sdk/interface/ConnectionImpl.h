@@ -6,11 +6,7 @@
 #pragma once
 
 #include "MilvusApi.h"
-#ifdef MILVUS_ENABLE_THRIFT
-#include "src/sdk/thrift/ClientProxy.h"
-#else
 #include "src/sdk/grpc/ClientProxy.h"
-#endif
 
 namespace milvus {
 
