@@ -55,6 +55,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-410 - Add resource config comment
 - MS-414 - Add TaskType in Scheduler::Task
 - MS-415 - Add command tasktable to dump all tasktables
+- MS-418 - Update server_config.template file, set CPU compute only default
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
