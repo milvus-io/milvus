@@ -90,8 +90,6 @@ define_option(MILVUS_WITH_SQLITE_ORM "Build with SQLite ORM library" ON)
 
 define_option(MILVUS_WITH_MYSQLPP "Build with MySQL++" ON)
 
-define_option(MILVUS_WITH_THRIFT "Build with Apache Thrift library" OFF)
-
 define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)
 
 define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
