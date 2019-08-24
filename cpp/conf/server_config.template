@@ -41,6 +41,17 @@ engine_config:
   omp_thread_num: 0             # how many compute threads be used by engine, 0 means use all cpu core to compute
 
 resource_config:
+  # resource list, length: 0~N
+  # please set a DISK resource and a CPU resource least, or system will not return query result.
+  #
+  # example:
+  # resource_name:               # resource name, just using in connections below
+  #   type: DISK                 # resource type, optional: DISK/CPU/GPU
+  #   memory: 256                # memory size, unit: GB
+  #   device_id: 0
+  #   enable_loader: true        # if is enable loader, optional: true, false
+  #   enable_executor: false     # if is enable executor, optional: true, false
+
   resources:
     ssda:
       type: DISK
@@ -54,23 +65,26 @@ resource_config:
       memory: 64
       device_id: 0
       enable_loader: true
-      enable_executor: false
+      enable_executor: true
 
     gtx1060:
       type: GPU
       memory: 6
       device_id: 0
-      enable_loader: true
-      enable_executor: true
+      enable_loader: false
+      enable_executor: false
 
     gtx1660:
       type: GPU
       memory: 6
       device_id: 1
-      enable_loader: true
-      enable_executor: true
+      enable_loader: false
+      enable_executor: false
 
+  # connection list, length: 0~N
+  # format: -${resource_name}===${resource_name}
   connections:
     - ssda===cpu
     - cpu===gtx1060
     - cpu===gtx1660
+
