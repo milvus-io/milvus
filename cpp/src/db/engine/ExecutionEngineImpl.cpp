@@ -139,9 +139,11 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
 }
 
 Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
-    index_ = zilliz::milvus::cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
-    bool already_in_cache = (index_ != nullptr);
-    if (!index_) {
+    auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
+    bool already_in_cache = (index != nullptr);
+    if (already_in_cache) {
+        index_ = index;
+    } else {
         try {
             index_ = index_->CopyToGpu(device_id);
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
@@ -161,9 +163,11 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 Status ExecutionEngineImpl::CopyToCpu() {
-    index_ = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
-    bool already_in_cache = (index_ != nullptr);
-    if (!index_) {
+    auto index = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    bool already_in_cache = (index != nullptr);
+    if (already_in_cache) {
+        index_ = index;
+    } else {
         try {
             index_ = index_->CopyToCpu();
             ENGINE_LOG_DEBUG << "GPU to CPU";
@@ -175,7 +179,7 @@ Status ExecutionEngineImpl::CopyToCpu() {
         }
     }
 
-    if(!already_in_cache) {
+    if (!already_in_cache) {
         Cache();
     }
     return Status::OK();
@@ -276,7 +280,7 @@ Status ExecutionEngineImpl::Init() {
     using namespace zilliz::milvus::server;
     ServerConfig &config = ServerConfig::GetInstance();
     ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-        gpu_num_ = server_config.GetInt32Value("gpu_index", 0);
+    gpu_num_ = server_config.GetInt32Value("gpu_index", 0);
 
     return Status::OK();
 }
