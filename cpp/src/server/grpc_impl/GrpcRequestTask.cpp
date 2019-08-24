@@ -616,23 +616,20 @@ SearchTask::OnExecute() {
         auto record_array_size = search_param_.query_record_array_size();
         std::vector<float> vec_f(record_array_size * table_info.dimension_, 0);
         for (size_t i = 0; i < record_array_size; i++) {
-            for (size_t j = 0; j < table_info.dimension_; j++) {
-                if (search_param_.query_record_array(i).vector_data().empty()) {
-                    return SetError(SERVER_INVALID_ROWRECORD_ARRAY,
-                                    "Query record float array is empty");
-                }
-                uint64_t query_vec_dim = search_param_.query_record_array(
-                        i).vector_data().size();
-                if (query_vec_dim != table_info.dimension_) {
-                    ServerError error_code = SERVER_INVALID_VECTOR_DIMENSION;
-                    std::string error_msg =
-                            "Invalid rowrecord dimension: " + std::to_string(query_vec_dim)
-                            + " vs. table dimension:" + std::to_string(table_info.dimension_);
-                    return SetError(error_code, error_msg);
-                }
-                vec_f[i * table_info.dimension_ + j] = search_param_.query_record_array(
-                        i).vector_data(j);
+            if (search_param_.query_record_array(i).vector_data().empty()) {
+                return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Query record float array is empty");
             }
+            uint64_t query_vec_dim = search_param_.query_record_array(i).vector_data().size();
+            if (query_vec_dim != table_info.dimension_) {
+                ServerError error_code = SERVER_INVALID_VECTOR_DIMENSION;
+                std::string error_msg = "Invalid rowrecord dimension: " + std::to_string(query_vec_dim)
+                                        + " vs. table dimension:" + std::to_string(table_info.dimension_);
+                return SetError(error_code, error_msg);
+            }
+
+            memcpy(&vec_f[i * table_info.dimension_],
+                   search_param_.query_record_array(i).vector_data().data(),
+                   table_info.dimension_ * sizeof(float));
         }
         rc.ElapseFromBegin("prepare vector data");
 
