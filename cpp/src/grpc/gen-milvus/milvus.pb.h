@@ -396,6 +396,7 @@ class TableSchema :
   enum : int {
     kTableNameFieldNumber = 1,
     kDimensionFieldNumber = 2,
+    kIndexFileSizeFieldNumber = 3,
   };
   // .milvus.grpc.TableName table_name = 1;
   bool has_table_name() const;
@@ -410,6 +411,11 @@ class TableSchema :
   ::PROTOBUF_NAMESPACE_ID::int64 dimension() const;
   void set_dimension(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // int64 index_file_size = 3;
+  void clear_index_file_size();
+  ::PROTOBUF_NAMESPACE_ID::int64 index_file_size() const;
+  void set_index_file_size(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.grpc.TableSchema)
  private:
   class _Internal;
@@ -417,6 +423,7 @@ class TableSchema :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::milvus::grpc::TableName* table_name_;
   ::PROTOBUF_NAMESPACE_ID::int64 dimension_;
+  ::PROTOBUF_NAMESPACE_ID::int64 index_file_size_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -2318,8 +2325,7 @@ class Index :
   enum : int {
     kIndexTypeFieldNumber = 1,
     kNlistFieldNumber = 2,
-    kIndexFileSizeFieldNumber = 3,
-    kMetricTypeFieldNumber = 4,
+    kMetricTypeFieldNumber = 3,
   };
   // int32 index_type = 1;
   void clear_index_type();
@@ -2331,12 +2337,7 @@ class Index :
   ::PROTOBUF_NAMESPACE_ID::int32 nlist() const;
   void set_nlist(::PROTOBUF_NAMESPACE_ID::int32 value);
 
-  // int32 index_file_size = 3;
-  void clear_index_file_size();
-  ::PROTOBUF_NAMESPACE_ID::int32 index_file_size() const;
-  void set_index_file_size(::PROTOBUF_NAMESPACE_ID::int32 value);
-
-  // int32 metric_type = 4;
+  // int32 metric_type = 3;
   void clear_metric_type();
   ::PROTOBUF_NAMESPACE_ID::int32 metric_type() const;
   void set_metric_type(::PROTOBUF_NAMESPACE_ID::int32 value);
@@ -2348,7 +2349,6 @@ class Index :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::int32 index_type_;
   ::PROTOBUF_NAMESPACE_ID::int32 nlist_;
-  ::PROTOBUF_NAMESPACE_ID::int32 index_file_size_;
   ::PROTOBUF_NAMESPACE_ID::int32 metric_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -2818,6 +2818,20 @@ inline void TableSchema::set_dimension(::PROTOBUF_NAMESPACE_ID::int64 value) {
   
   dimension_ = value;
   // @@protoc_insertion_point(field_set:milvus.grpc.TableSchema.dimension)
+}
+
+// int64 index_file_size = 3;
+inline void TableSchema::clear_index_file_size() {
+  index_file_size_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 TableSchema::index_file_size() const {
+  // @@protoc_insertion_point(field_get:milvus.grpc.TableSchema.index_file_size)
+  return index_file_size_;
+}
+inline void TableSchema::set_index_file_size(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  index_file_size_ = value;
+  // @@protoc_insertion_point(field_set:milvus.grpc.TableSchema.index_file_size)
 }
 
 // -------------------------------------------------------------------
@@ -3841,21 +3855,7 @@ inline void Index::set_nlist(::PROTOBUF_NAMESPACE_ID::int32 value) {
   // @@protoc_insertion_point(field_set:milvus.grpc.Index.nlist)
 }
 
-// int32 index_file_size = 3;
-inline void Index::clear_index_file_size() {
-  index_file_size_ = 0;
-}
-inline ::PROTOBUF_NAMESPACE_ID::int32 Index::index_file_size() const {
-  // @@protoc_insertion_point(field_get:milvus.grpc.Index.index_file_size)
-  return index_file_size_;
-}
-inline void Index::set_index_file_size(::PROTOBUF_NAMESPACE_ID::int32 value) {
-  
-  index_file_size_ = value;
-  // @@protoc_insertion_point(field_set:milvus.grpc.Index.index_file_size)
-}
-
-// int32 metric_type = 4;
+// int32 metric_type = 3;
 inline void Index::clear_metric_type() {
   metric_type_ = 0;
 }
