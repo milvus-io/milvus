@@ -23,6 +23,7 @@
 #include <cstring>
 #include <cache/CpuCacheMgr.h>
 #include <boost/filesystem.hpp>
+#include "scheduler/SchedInst.h"
 #include <src/cache/GpuCacheMgr.h>
 
 namespace zilliz {
@@ -54,7 +55,9 @@ DBImpl::DBImpl(const Options& options)
 }
 
 Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
-    return meta_ptr_->CreateTable(table_schema);
+    meta::TableSchema temp_schema = table_schema;
+    temp_schema.index_file_size_ *= ONE_MB;
+    return meta_ptr_->CreateTable(temp_schema);
 }
 
 Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& dates) {
@@ -67,12 +70,14 @@ Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& date
 
         //scheduler will determine when to delete table files
         TaskScheduler& scheduler = TaskScheduler::GetInstance();
-        DeleteContextPtr context = std::make_shared<DeleteContext>(table_id, meta_ptr_);
+        DeleteContextPtr context = std::make_shared<DeleteContext>(table_id,
+                                                               meta_ptr_,
+                                                               ResMgrInst::GetInstance()->GetNumOfComputeResource());
         scheduler.Schedule(context);
+        context->WaitAndDelete();
     } else {
         meta_ptr_->DropPartitionsByDates(table_id, dates);
     }
-
 
     return Status::OK();
 }
@@ -397,7 +402,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         ENGINE_LOG_DEBUG << "Merging file " << file_schema.file_id_;
         index_size = index->Size();
 
-        if (index_size >= options_.index_trigger_size) break;
+        if (index_size >= file_schema.index_file_size_) break;
     }
 
     //step 3: serialize to disk
@@ -547,6 +552,11 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
         //step 2: drop old index files
         DropIndex(table_id);
 
+        if(index.engine_type_ == (int)EngineType::FAISS_IDMAP) {
+            ENGINE_LOG_DEBUG << "index type = IDMAP, no need to build index";
+            return Status::OK();
+        }
+
         //step 3: update index info
 
         status = meta_ptr_->UpdateTableIndexParam(table_id, index);
@@ -608,7 +618,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
         try {
             server::CollectBuildIndexMetrics metrics;
-            index = to_index->BuildIndex(table_file.location_);
+            index = to_index->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
         } catch (std::exception& ex) {
             //typical error: out of gpu memory
             std::string msg = "BuildIndex encounter exception" + std::string(ex.what());

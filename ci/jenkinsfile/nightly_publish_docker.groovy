@@ -12,6 +12,9 @@ container('publish-docker') {
                             docker.withRegistry('https://registry.zilliz.com', "${params.DOCKER_PUBLISH_USER}") {
                                 customImage.push()
                             }
+                            docker.withRegistry('https://zilliz.azurecr.cn', "${params.AZURE_DOCKER_PUBLISH_USER}") {
+                                customImage.push()
+                            }
                             if (currentBuild.resultIsBetterOrEqualTo('SUCCESS')) {
                                 updateGitlabCommitStatus name: 'Publish Engine Docker', state: 'success'
                                 echo "Docker Pull Command: docker pull registry.zilliz.com/${PROJECT_NAME}/engine:${DOCKER_VERSION}"

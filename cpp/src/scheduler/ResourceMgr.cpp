@@ -96,6 +96,13 @@ ResourceMgr::Stop() {
 }
 
 void
+ResourceMgr::Clear() {
+    std::lock_guard<std::mutex> lck(resources_mutex_);
+    disk_resources_.clear();
+    resources_.clear();
+}
+
+void
 ResourceMgr::PostEvent(const EventPtr &event) {
     std::lock_guard<std::mutex> lock(event_mutex_);
     queue_.emplace(event);

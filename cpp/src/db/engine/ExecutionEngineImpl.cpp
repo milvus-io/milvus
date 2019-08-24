@@ -139,9 +139,11 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
 }
 
 Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
-    index_ = zilliz::milvus::cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
-    bool already_in_cache = (index_ != nullptr);
-    if (!index_) {
+    auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
+    bool already_in_cache = (index != nullptr);
+    if (already_in_cache) {
+        index_ = index;
+    } else {
         try {
             index_ = index_->CopyToGpu(device_id);
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
@@ -161,9 +163,11 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 Status ExecutionEngineImpl::CopyToCpu() {
-    index_ = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
-    bool already_in_cache = (index_ != nullptr);
-    if (!index_) {
+    auto index = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    bool already_in_cache = (index != nullptr);
+    if (already_in_cache) {
+        index_ = index;
+    } else {
         try {
             index_ = index_->CopyToCpu();
             ENGINE_LOG_DEBUG << "GPU to CPU";
@@ -175,10 +179,17 @@ Status ExecutionEngineImpl::CopyToCpu() {
         }
     }
 
-    if(!already_in_cache) {
+    if (!already_in_cache) {
         Cache();
     }
     return Status::OK();
+}
+
+ExecutionEnginePtr ExecutionEngineImpl::Clone() {
+    auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
+    ret->Init();
+    ret->index_ = index_->Clone();
+    return ret;
 }
 
 Status ExecutionEngineImpl::Merge(const std::string &location) {
@@ -214,11 +225,11 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
 }
 
 ExecutionEnginePtr
-ExecutionEngineImpl::BuildIndex(const std::string &location) {
+ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_type) {
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
-    auto to_index = CreatetVecIndex(index_type_);
+    auto to_index = CreatetVecIndex(engine_type);
     if (!to_index) {
         throw Exception("Create Empty VecIndex");
     }
@@ -236,7 +247,7 @@ ExecutionEngineImpl::BuildIndex(const std::string &location) {
                                  build_cfg);
     if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
 
-    return std::make_shared<ExecutionEngineImpl>(to_index, location, index_type_, metric_type_, nlist_);
+    return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
 
 Status ExecutionEngineImpl::Search(long n,
@@ -269,7 +280,7 @@ Status ExecutionEngineImpl::Init() {
     using namespace zilliz::milvus::server;
     ServerConfig &config = ServerConfig::GetInstance();
     ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-        gpu_num_ = server_config.GetInt32Value("gpu_index", 0);
+    gpu_num_ = server_config.GetInt32Value("gpu_index", 0);
 
     return Status::OK();
 }
