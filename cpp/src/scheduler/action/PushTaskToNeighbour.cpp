@@ -5,6 +5,7 @@
  ******************************************************************************/
 
 #include <list>
+#include <random>
 #include "Action.h"
 
 
@@ -39,6 +40,22 @@ push_task_round_robin(TaskTable &self_task_table, std::list<ResourcePtr> &neighb
 }
 
 void
+push_task_randomly(TaskTable &self_task_table, std::vector<ResourcePtr> &neighbours) {
+    std::random_device rd;
+    std::mt19937 mt(rd());
+    std::uniform_int_distribution<uint64_t> dist(0, neighbours.size() - 1);
+    CacheMgr cache;
+
+    auto indexes = PickToMove(self_task_table, cache, self_task_table.Size());
+    for (auto index : indexes) {
+        if (self_task_table.Move(index)) {
+            auto task = self_task_table.Get(index)->task;
+            neighbours[dist(mt)]->task_table().Put(task);
+        }
+    }
+}
+
+void
 Action::PushTaskToNeighbour(const ResourceWPtr &res) {
     auto self = res.lock();
     if (not self) return;
@@ -60,18 +77,21 @@ Action::PushTaskToNeighbourHasExecutor(const ResourceWPtr &res) {
     auto self = res.lock();
     if (not self) return;
 
-    std::list<ResourcePtr> neighbours;
+    std::list<ResourcePtr> l_neighbours;
+    std::vector<ResourcePtr> v_neighbours;
     for (auto &neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
         if (not node) continue;
 
         auto resource = std::static_pointer_cast<Resource>(node);
         if (resource->HasExecutor()) {
-            neighbours.emplace_back(resource);
+            l_neighbours.push_back(resource);
+            v_neighbours.push_back(resource);
         }
     }
 
-    push_task_round_robin(self->task_table(), neighbours);
+//    push_task_round_robin(self->task_table(), l_neighbours);
+    push_task_randomly(self->task_table(), v_neighbours);
 }
 
 
