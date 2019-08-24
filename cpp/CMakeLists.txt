@@ -34,6 +34,8 @@ else()
 endif()
 message(STATUS "Build type = ${BUILD_TYPE}")
 
+#add_definitions(-DNEW_SCHEDULER)
+
 project(milvus VERSION "${MILVUS_VERSION}")
 project(milvus_engine LANGUAGES CUDA CXX)
 
@@ -70,10 +72,6 @@ set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INL
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
 message("CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}")
 message("CUDA_NVCC_FLAGS=${CUDA_NVCC_FLAGS}")
-
-set(MILVUS_WITH_THRIFT "OFF")
-set(GPU_VERSION "ON")
-add_definitions("-DGPU_VERSION")
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED on)

@@ -84,8 +84,6 @@ macro(build_dependency DEPENDENCY_NAME)
         build_sqlite()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite_ORM")
         build_sqlite_orm()
-    elseif("${DEPENDENCY_NAME}" STREQUAL "Thrift")
-        build_thrift()
     elseif("${DEPENDENCY_NAME}" STREQUAL "yaml-cpp")
         build_yamlcpp()
     elseif("${DEPENDENCY_NAME}" STREQUAL "ZLIB")
@@ -402,14 +400,6 @@ else()
             "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
 endif()
 set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
-
-if(DEFINED ENV{MILVUS_THRIFT_URL})
-    set(THRIFT_SOURCE_URL "$ENV{MILVUS_THRIFT_URL}")
-else()
-    set(THRIFT_SOURCE_URL
-            "https://github.com/apache/thrift/archive/${THRIFT_VERSION}.tar.gz")
-endif()
-set(THRIFT_MD5 "ff9af01fec424b5a279fa8a3c9e95c0c")
 
 if(DEFINED ENV{MILVUS_YAMLCPP_URL})
     set(YAMLCPP_SOURCE_URL "$ENV{MILVUS_YAMLCPP_URL}")
@@ -1944,127 +1934,6 @@ if(MILVUS_WITH_SQLITE_ORM)
 endif()
 
 # ----------------------------------------------------------------------
-# Thrift
-
-macro(build_thrift)
-    message(STATUS "Building Apache Thrift-${THRIFT_VERSION} from source")
-    set(THRIFT_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix/src/thrift_ep")
-    set(THRIFT_INCLUDE_DIR "${THRIFT_PREFIX}/include")
-    set(THRIFT_COMPILER "${THRIFT_PREFIX}/bin/thrift")
-    set(THRIFT_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
-            "-DCMAKE_INSTALL_PREFIX=${THRIFT_PREFIX}"
-            "-DCMAKE_INSTALL_RPATH=${THRIFT_PREFIX}/lib"
-	    -DBOOST_ROOT=${BOOST_PREFIX}
-            -DWITH_CPP=ON
-            -DWITH_STATIC_LIB=ON
-	    -DBUILD_SHARED_LIBS=OFF
-	    -DBUILD_TESTING=OFF
-	    -DBUILD_EXAMPLES=OFF
-            -DBUILD_TUTORIALS=OFF
-            -DWITH_QT4=OFF
-            -DWITH_QT5=OFF
-            -DWITH_C_GLIB=OFF
-            -DWITH_JAVA=OFF
-            -DWITH_PYTHON=OFF
-            -DWITH_HASKELL=OFF
-            -DWITH_LIBEVENT=OFF
-            -DCMAKE_BUILD_TYPE=Release)
-
-    # Thrift also uses boost. Forward important boost settings if there were ones passed.
-    if(DEFINED BOOST_ROOT)
-        set(THRIFT_CMAKE_ARGS ${THRIFT_CMAKE_ARGS} "-DBOOST_ROOT=${BOOST_ROOT}")
-    endif()
-    if(DEFINED Boost_NAMESPACE)
-        set(THRIFT_CMAKE_ARGS ${THRIFT_CMAKE_ARGS} "-DBoost_NAMESPACE=${Boost_NAMESPACE}")
-    endif()
-
-    set(THRIFT_STATIC_LIB_NAME "${CMAKE_STATIC_LIBRARY_PREFIX}thrift")
-
-    set(THRIFT_STATIC_LIB
-            "${THRIFT_PREFIX}/lib/${THRIFT_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-    if(ZLIB_SHARED_LIB)
-        set(THRIFT_CMAKE_ARGS "-DZLIB_LIBRARY=${ZLIB_SHARED_LIB}" ${THRIFT_CMAKE_ARGS})
-    else()
-        set(THRIFT_CMAKE_ARGS "-DZLIB_LIBRARY=${ZLIB_STATIC_LIB}" ${THRIFT_CMAKE_ARGS})
-    endif()
-    set(THRIFT_DEPENDENCIES ${THRIFT_DEPENDENCIES} ${ZLIB_LIBRARY})
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        string(MD5 THRIFT_COMBINE_MD5 "${THRIFT_MD5}${ZLIB_MD5}")
-        set(THRIFT_CACHE_PACKAGE_NAME "thrift_${THRIFT_COMBINE_MD5}.tar.gz")
-        set(THRIFT_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${THRIFT_CACHE_PACKAGE_NAME}")
-        set(THRIFT_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${THRIFT_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${THRIFT_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${THRIFT_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(thrift_ep
-                    URL
-                    ${THRIFT_SOURCE_URL}
-                    BUILD_BYPRODUCTS
-                    "${THRIFT_STATIC_LIB}"
-                    "${THRIFT_COMPILER}"
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    CMAKE_ARGS
-                    ${THRIFT_CMAKE_ARGS}
-                    INSTALL_COMMAND
-                    ${MAKE} install
-                    DEPENDS
-                    ${THRIFT_DEPENDENCIES}
-                    ${EP_LOG_OPTIONS})
-
-            ExternalProject_Create_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${THRIFT_CACHE_URL})
-        else()
-            file(DOWNLOAD ${THRIFT_CACHE_URL} ${THRIFT_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${THRIFT_CACHE_URL} TO ${THRIFT_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(thrift_ep ${THRIFT_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(thrift_ep
-                URL
-                ${THRIFT_SOURCE_URL}
-                BUILD_BYPRODUCTS
-                "${THRIFT_STATIC_LIB}"
-                "${THRIFT_COMPILER}"
-                BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
-                CMAKE_ARGS
-                ${THRIFT_CMAKE_ARGS}
-                INSTALL_COMMAND
-                ${MAKE} install
-                DEPENDS
-                ${THRIFT_DEPENDENCIES}
-                ${EP_LOG_OPTIONS})
-    endif()
-
-    # The include directory must exist before it is referenced by a target.
-    file(MAKE_DIRECTORY "${THRIFT_INCLUDE_DIR}")
-    add_library(thrift STATIC IMPORTED)
-    set_target_properties(thrift
-            PROPERTIES IMPORTED_LOCATION "${THRIFT_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${THRIFT_INCLUDE_DIR}")
-    add_dependencies(thrift thrift_ep)
-endmacro()
-
-if(MILVUS_WITH_THRIFT)
-    resolve_dependency(Thrift)
-
-    link_directories(SYSTEM ${THRIFT_PREFIX}/lib/)
-    link_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix/src/thrift_ep-build/lib)
-    include_directories(SYSTEM ${THRIFT_INCLUDE_DIR})
-    include_directories(SYSTEM ${THRIFT_PREFIX}/lib/cpp/src)
-    include_directories(SYSTEM ${CMAKE_CURRENT_BINARY_DIR}/thrift_ep-prefix/src/thrift_ep-build)
-endif()
-
-# ----------------------------------------------------------------------
 # yaml-cpp
 
 macro(build_yamlcpp)
@@ -2683,15 +2552,12 @@ macro(build_grpc)
     add_dependencies(grpc_protoc grpc_ep)
 endmacro()
 
-if(NOT MILVUS_WITH_THRIFT STREQUAL "ON")
-    resolve_dependency(GRPC)
+resolve_dependency(GRPC)
 
-    get_target_property(GRPC_INCLUDE_DIR grpc INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${GRPC_INCLUDE_DIR})
-    link_directories(SYSTEM ${GRPC_PREFIX}/lib)
+get_target_property(GRPC_INCLUDE_DIR grpc INTERFACE_INCLUDE_DIRECTORIES)
+include_directories(SYSTEM ${GRPC_INCLUDE_DIR})
+link_directories(SYSTEM ${GRPC_PREFIX}/lib)
 
-    set(GRPC_THIRD_PARTY_DIR ${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/third_party)
-    include_directories(SYSTEM ${GRPC_THIRD_PARTY_DIR}/protobuf/src)
-    link_directories(SYSTEM ${GRPC_PROTOBUF_LIB_DIR})
-
-endif()
+set(GRPC_THIRD_PARTY_DIR ${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/third_party)
+include_directories(SYSTEM ${GRPC_THIRD_PARTY_DIR}/protobuf/src)
+link_directories(SYSTEM ${GRPC_PROTOBUF_LIB_DIR})
