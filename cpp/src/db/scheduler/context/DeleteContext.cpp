@@ -20,9 +20,11 @@ DeleteContext::DeleteContext(const std::string &table_id, meta::Meta::Ptr &meta_
 }
 
 void DeleteContext::WaitAndDelete() {
+#ifdef NEW_SCHEDULER
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [&] { return done_resource == num_resource_; });
     meta_ptr_->DeleteTableFiles(table_id_);
+#endif
 }
 
 void DeleteContext::ResourceDone() {
