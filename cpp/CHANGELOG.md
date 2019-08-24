@@ -50,6 +50,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-408 - Add device_id in resource construct function
 - MS-409 - Using new scheduler
 - MS-410 - Add resource config comment
+- MS-414 - Add TaskType in Scheduler::Task
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
