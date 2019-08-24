@@ -32,7 +32,7 @@ message Range {
  * @brief Record inserted
  */
 message RowRecord {
-    repeated float vector_data = 1;             //binary in thrift
+    repeated float vector_data = 1;             //binary vector data
 }
 
 /**
