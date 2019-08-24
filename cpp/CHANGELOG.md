@@ -51,6 +51,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-409 - Using new scheduler
 - MS-413 - Remove thrift dependency
 - MS-410 - Add resource config comment
+- MS-419 - Move index_file_size from IndexParam to TableSchema
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

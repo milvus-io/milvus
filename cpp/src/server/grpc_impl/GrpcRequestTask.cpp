@@ -133,10 +133,16 @@ CreateTableTask::OnExecute() {
             return SetError(res, "Invalid table dimension: " + std::to_string(schema_.dimension()));
         }
 
+        res = ValidationUtil::ValidateTableIndexFileSize(schema_.index_file_size());
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid index file size: " + std::to_string(schema_.index_file_size()));
+        }
+
         //step 2: construct table schema
         engine::meta::TableSchema table_info;
-        table_info.dimension_ = (uint16_t) schema_.dimension();
         table_info.table_id_ = schema_.table_name().table_name();
+        table_info.dimension_ = (uint16_t) schema_.dimension();
+        table_info.index_file_size_ = schema_.index_file_size();
 
         //step 3: create table
         engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
@@ -245,16 +251,10 @@ CreateIndexTask::OnExecute() {
             return SetError(res, "Invalid index metric type: " + std::to_string(index_param_.mutable_index()->metric_type()));
         }
 
-        res = ValidationUtil::ValidateTableIndexFileSize(index_param_.mutable_index()->index_file_size());
-        if(res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid index file size: " + std::to_string(index_param_.mutable_index()->index_file_size()));
-        }
-
         //step 2: check table existence
         engine::TableIndex index;
         index.engine_type_ = index_param_.mutable_index()->index_type();
         index.nlist_ = index_param_.mutable_index()->nlist();
-        index.index_file_size_ = index_param_.mutable_index()->index_file_size();
         index.metric_type_ = index_param_.mutable_index()->metric_type();
         stat = DBWrapper::DB()->CreateIndex(table_name_, index);
         if (!stat.ok()) {
@@ -900,7 +900,6 @@ DescribeIndexTask::OnExecute() {
         index_param_.mutable_table_name()->set_table_name(table_name_);
         index_param_.mutable_index()->set_index_type(index.engine_type_);
         index_param_.mutable_index()->set_nlist(index.nlist_);
-        index_param_.mutable_index()->set_index_file_size(index.index_file_size_);
         index_param_.mutable_index()->set_metric_type(index.metric_type_);
 
         rc.ElapseFromBegin("totally cost");
