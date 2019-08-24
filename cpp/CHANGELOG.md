@@ -49,6 +49,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-407 - Reconstruct MetricsCollector
 - MS-408 - Add device_id in resource construct function
 - MS-409 - Using new scheduler
+- MS-413 - Remove thrift dependency
 - MS-410 - Add resource config comment
 
 ## New Feature
