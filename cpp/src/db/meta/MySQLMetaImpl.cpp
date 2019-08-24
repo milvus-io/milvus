@@ -138,9 +138,9 @@ Status MySQLMetaImpl::Initialize() {
                                 "dimension SMALLINT NOT NULL, " <<
                                 "created_on BIGINT NOT NULL, " <<
                                 "flag BIGINT DEFAULT 0 NOT NULL, " <<
+                                "index_file_size INT DEFAULT 1024 NOT NULL, " <<
                                 "engine_type INT DEFAULT 1 NOT NULL, " <<
                                 "nlist INT DEFAULT 16384 NOT NULL, " <<
-                                "index_file_size INT DEFAULT 1024 NOT NULL, " <<
                                 "metric_type INT DEFAULT 1 NOT NULL);";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
@@ -407,7 +407,6 @@ Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const T
                                            "created_on = " << created_on << ", " <<
                                            "engine_type_ = " << index.engine_type_ << ", " <<
                                            "nlist = " << index.nlist_ << ", " <<
-                                           "index_file_size = " << index.index_file_size_*ONE_MB << ", " <<
                                            "metric_type = " << index.metric_type_ << " " <<
                                            "WHERE id = " << quote << table_id << ";";
 
@@ -504,7 +503,6 @@ Status MySQLMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex
 
                 index.engine_type_ = resRow["engine_type"];
                 index.nlist_ = resRow["nlist"];
-                index.index_file_size_ = resRow["index_file_size"]/ONE_MB;
                 index.metric_type_ = resRow["metric_type"];
             } else {
                 return Status::NotFound("Table " + table_id + " not found");
@@ -694,11 +692,11 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
 
             table_schema.dimension_ = resRow["dimension"];
 
+            table_schema.index_file_size_ = resRow["index_file_size"];
+
             table_schema.engine_type_ = resRow["engine_type"];
 
             table_schema.nlist_ = resRow["nlist"];
-
-            table_schema.index_file_size_ = resRow["index_file_size"];
 
             table_schema.metric_type_ = resRow["metric_type"];
         } else {
@@ -790,11 +788,11 @@ Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
 
             table_schema.dimension_ = resRow["dimension"];
 
+            table_schema.index_file_size_ = resRow["index_file_size"];
+
             table_schema.engine_type_ = resRow["engine_type"];
 
             table_schema.nlist_ = resRow["nlist"];
-
-            table_schema.index_file_size_ = resRow["index_file_size"];
 
             table_schema.metric_type_ = resRow["metric_type"];
 
@@ -833,6 +831,7 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         file_schema.row_count_ = 0;
         file_schema.created_on_ = utils::GetMicroSecTimeStamp();
         file_schema.updated_time_ = file_schema.created_on_;
+        file_schema.index_file_size_ = table_schema.index_file_size_;
         file_schema.engine_type_ = table_schema.engine_type_;
         file_schema.nlist_ = table_schema.nlist_;
         file_schema.metric_type_ = table_schema.metric_type_;
@@ -949,9 +948,10 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
                 groups[table_file.table_id_] = table_schema;
 
             }
-            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
-            table_file.nlist_ = groups[table_file.table_id_].nlist_;
             table_file.dimension_ = groups[table_file.table_id_].dimension_;
+            table_file.index_file_size_ = groups[table_file.table_id_].index_file_size_;
+            table_file.nlist_ = groups[table_file.table_id_].nlist_;
+            table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
 
             utils::GetTableFilePath(options_, table_file);
 
@@ -1041,11 +1041,13 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
             resRow["table_id"].to_string(table_id_str);
             table_file.table_id_ = table_id_str;
 
+            table_file.index_file_size_ = table_schema.index_file_size_;
+
             table_file.engine_type_ = resRow["engine_type"];
 
-            table_file.metric_type_ = table_schema.metric_type_;
-
             table_file.nlist_ = table_schema.nlist_;
+
+            table_file.metric_type_ = table_schema.metric_type_;
 
             std::string file_id;
             resRow["file_id"].to_string(file_id);
@@ -1153,11 +1155,13 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
             resRow["table_id"].to_string(table_id_str);
             table_file.table_id_ = table_id_str;
 
+            table_file.index_file_size_ = table_schema.index_file_size_;
+
             table_file.engine_type_ = resRow["engine_type"];
 
-            table_file.metric_type_ = table_schema.metric_type_;
-
             table_file.nlist_ = table_schema.nlist_;
+
+            table_file.metric_type_ = table_schema.metric_type_;
 
             std::string file_id;
             resRow["file_id"].to_string(file_id);
@@ -1253,11 +1257,13 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
 
             table_file.date_ = resRow["date"];
 
+            table_file.index_file_size_ = table_schema.index_file_size_;
+
             table_file.engine_type_ = resRow["engine_type"];
 
-            table_file.metric_type_ = table_schema.metric_type_;
-
             table_file.nlist_ = table_schema.nlist_;
+
+            table_file.metric_type_ = table_schema.metric_type_;
 
             table_file.created_on_ = resRow["created_on"];
 
@@ -1336,11 +1342,13 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
 
             file_schema.table_id_ = table_id;
 
+            file_schema.index_file_size_ = table_schema.index_file_size_;
+
             file_schema.engine_type_ = resRow["engine_type"];
 
-            file_schema.metric_type_ = table_schema.metric_type_;
-
             file_schema.nlist_ = table_schema.nlist_;
+
+            file_schema.metric_type_ = table_schema.metric_type_;
 
             std::string file_id;
             resRow["file_id"].to_string(file_id);

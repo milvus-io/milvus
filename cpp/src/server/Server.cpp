@@ -5,13 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <thread>
 #include "Server.h"
-//#include "ServerConfig.h"
-#ifdef MILVUS_ENABLE_THRIFT
-#include "server/thrift_impl/MilvusServer.h"
-#else
 #include "server/grpc_impl/GrpcMilvusServer.h"
-#endif
-
 #include "utils/Log.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
@@ -24,6 +18,7 @@
 //#include <numaif.h>
 #include <unistd.h>
 #include <string.h>
+#include <src/scheduler/SchedInst.h>
 
 #include "metrics/Metrics.h"
 
@@ -163,6 +158,7 @@ Server::Start() {
             signal(SIGTERM, SignalUtil::HandleSignal);
             server::Metrics::GetInstance().Init();
             server::SystemInfo::GetInstance().Init();
+            engine::SchedServInit();
             std::cout << "Milvus server start successfully." << std::endl;
             StartService();
 
@@ -225,20 +221,12 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
-#ifdef MILVUS_ENABLE_THRIFT
-    MilvusServer::StartService();
-#else
     grpc::GrpcMilvusServer::StartService();
-#endif
 }
 
 void
 Server::StopService() {
-#ifdef MILVUS_ENABLE_THRIFT
-    MilvusServer::StopService();
-#else
     grpc::GrpcMilvusServer::StopService();
-#endif
 }
 
 }

@@ -19,7 +19,7 @@ namespace meta {
 
 constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
 constexpr int32_t DEFAULT_NLIST = 16384;
-constexpr int32_t DEFAULT_INDEX_FILE_SIZE = 1024*ONE_MB;
+constexpr int32_t DEFAULT_INDEX_FILE_SIZE = ONE_GB;
 constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
 
 constexpr int64_t FLAG_MASK_USERID = 1;
@@ -40,9 +40,9 @@ struct TableSchema {
     uint16_t dimension_ = 0;
     int64_t created_on_ = 0;
     int64_t flag_ = 0;
+    int32_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     int32_t nlist_ = DEFAULT_NLIST;
-    int32_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;
 }; // TableSchema
 
@@ -69,6 +69,7 @@ struct TableFileSchema {
     std::string location_;
     int64_t updated_time_ = 0;
     int64_t created_on_ = 0;
+    int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE; //not persist to meta
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     int32_t nlist_ = DEFAULT_NLIST; //not persist to meta
     int32_t metric_type_ = DEFAULT_METRIC_TYPE; //not persist to meta
