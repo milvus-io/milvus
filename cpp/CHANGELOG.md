@@ -80,6 +80,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-330 - Stability test failed caused by server core dumped
 - MS-347 - Build index hangs again
 - MS-382 - fix MySQLMetaImpl::CleanUpFilesWithTTL unknown column bug
+- MS-411 - Fix metric unittest linking error
 
 ## Improvement
 - MS-156 - Add unittest for merge result functions
