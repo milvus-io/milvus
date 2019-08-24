@@ -18,6 +18,7 @@ message TableName {
 message TableSchema {
     TableName table_name = 1;
     int64 dimension = 2;
+    int64 index_file_size = 3;
 }
 
 /**
@@ -126,8 +127,7 @@ message Command {
 message Index {
     int32 index_type = 1;
     int32 nlist = 2;
-    int32 index_file_size = 3;
-    int32 metric_type = 4;
+    int32 metric_type = 3;
 }
 
 /**
