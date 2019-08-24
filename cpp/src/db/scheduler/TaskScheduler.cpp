@@ -89,7 +89,7 @@ TaskScheduler::TaskDispatchWorker() {
             return true;
         }
 
-#if 1
+#ifdef NEW_SCHEDULER
         // TODO: Put task into Disk-TaskTable
         auto task = TaskConvert(task_ptr);
         auto disk_list = ResMgrInst::GetInstance()->GetDiskResources();
