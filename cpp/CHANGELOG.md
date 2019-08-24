@@ -52,6 +52,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-413 - Remove thrift dependency
 - MS-410 - Add resource config comment
 - MS-414 - Add TaskType in Scheduler::Task
+- MS-415 - Add command tasktable to dump all tasktables
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
