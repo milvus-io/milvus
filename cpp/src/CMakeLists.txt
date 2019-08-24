@@ -8,7 +8,6 @@ aux_source_directory(cache cache_files)
 aux_source_directory(config config_files)
 aux_source_directory(server server_files)
 aux_source_directory(server/grpc_impl grpcserver_files)
-aux_source_directory(server/thrift_impl thriftserver_files)
 aux_source_directory(utils utils_files)
 aux_source_directory(db db_main_files)
 aux_source_directory(db/engine db_engine_files)
@@ -48,17 +47,6 @@ set(license_generator_files
         license/LicenseLibrary.cpp
         )
 
-if (MILVUS_WITH_THRIFT STREQUAL "ON")
-set(thrift_service_files
-        thrift/gen-cpp/MilvusService.cpp
-        thrift/gen-cpp/milvus_constants.cpp
-        thrift/gen-cpp/milvus_types.cpp
-        metrics/SystemInfo.cpp
-        metrics/SystemInfo.h
-        server/thrift_impl/ThreadPoolServer.cpp
-        server/thrift_impl/ThreadPoolServer.h
-        )
-else()
 set(grpc_service_files
         metrics/SystemInfo.cpp
         metrics/SystemInfo.h
@@ -67,7 +55,6 @@ set(grpc_service_files
         grpc/gen-status/status.grpc.pb.cc
         grpc/gen-status/status.pb.cc
         )
-endif()
 
 set(db_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -87,25 +74,16 @@ set(s3_client_files
 
 include_directories(/usr/include)
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
-include_directories(thrift/gen-cpp)
 include_directories(/usr/include/mysql)
 include_directories(grpc/gen-status)
 include_directories(grpc/gen-milvus)
 
-if (MILVUS_WITH_THRIFT STREQUAL "ON")
-    message("Build thrift server")
-    add_definitions("-DMILVUS_ENABLE_THRIFT")
-    set(client_thrift_lib
-            thrift)
-else()
-    message("Build grpc server")
-    set(client_grpc_lib
-            grpcpp_channelz
-            grpc++
-            grpc
-            grpc_protobuf
-            grpc_protoc)
-endif()
+set(client_grpc_lib
+        grpcpp_channelz
+        grpc++
+        grpc
+        grpc_protobuf
+        grpc_protoc)
 
 set(third_party_libs
         knowhere
@@ -117,7 +95,6 @@ set(third_party_libs
         lapack
         easyloggingpp
         sqlite
-        ${client_thrift_lib}
         ${client_grpc_lib}
         yaml-cpp
         prometheus-cpp-push
@@ -138,9 +115,6 @@ set(third_party_libs
         cudart
         )
 
-if (MEGASEARCH_WITH_ARROW STREQUAL "ON")
-    set(third_party_libs ${third_party_libs} arrow)
-endif()
 if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
     set(third_party_libs ${third_party_libs}
             ${MKL_LIBS})
@@ -156,23 +130,14 @@ if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
             libunwind)
 endif()
 
-if (GPU_VERSION STREQUAL "ON")
-    link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
-    set(engine_libs
-            pthread
-            libgomp.a
-            libgfortran.a
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-            )
-else()
-    set(engine_libs
-            pthread
-            libgomp.a
-            libgfortran.a
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-            )
-endif ()
 
+link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+set(engine_libs
+        pthread
+        libgomp.a
+        libgfortran.a
+        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+        )
 
 if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
     set(engine_libs
@@ -215,34 +180,17 @@ set(knowhere_libs
         tbb
         )
 
-if (MILVUS_WITH_THRIFT STREQUAL "ON")
-    add_executable(milvus_server
-            ${config_files}
-            ${server_files}
-            ${thriftserver_files}
-            ${utils_files}
-            ${thrift_service_files}
-            ${metrics_files}
-            ${scheduler_srcs}
-            )
-else()
-    add_executable(milvus_server
-            ${config_files}
-            ${server_files}
-            ${grpcserver_files}
-            ${utils_files}
-            ${grpc_service_files}
-            ${metrics_files}
-            ${scheduler_srcs}
-            )
-endif()
+add_executable(milvus_server
+        ${config_files}
+        ${server_files}
+        ${grpcserver_files}
+        ${utils_files}
+        ${grpc_service_files}
+        ${metrics_files}
+        ${scheduler_srcs}
+        )
 
-if(MILVUS_WITH_THRIFT STREQUAL "ON")
-    target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_party_libs})
-else()
-    target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_party_libs})
-endif()
-
+target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_party_libs})
 
 install(TARGETS milvus_server DESTINATION bin)
 
