@@ -55,7 +55,9 @@ DBImpl::DBImpl(const Options& options)
 }
 
 Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
-    return meta_ptr_->CreateTable(table_schema);
+    meta::TableSchema temp_schema = table_schema;
+    temp_schema.index_file_size_ *= ONE_MB;
+    return meta_ptr_->CreateTable(temp_schema);
 }
 
 Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& dates) {
