@@ -106,7 +106,7 @@ spec:
                             steps {
                                 gitlabCommitStatus(name: 'Publish Docker') {
                                     script {
-                                        load "${env.WORKSPACE}/ci/jenkinsfile/publish_docker.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/nightly_publish_docker.groovy"
                                     }
                                 }
                             }
