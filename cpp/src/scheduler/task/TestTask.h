@@ -14,7 +14,7 @@ namespace engine {
 
 class TestTask : public Task {
 public:
-    TestTask() = default;
+    TestTask();
 
 public:
     void

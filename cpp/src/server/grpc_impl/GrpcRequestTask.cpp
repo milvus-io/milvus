@@ -13,6 +13,7 @@
 #include "version.h"
 #include "GrpcMilvusServer.h"
 #include "db/Utils.h"
+#include "scheduler/SchedInst.h"
 
 #include "src/server/Server.h"
 
@@ -753,7 +754,10 @@ ServerError
 CmdTask::OnExecute() {
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
-    } else {
+    } else if (cmd_ == "tasktable") {
+        result_ = engine::ResMgrInst::GetInstance()->DumpTaskTables();
+    }
+    else {
         result_ = "OK";
     }
 
