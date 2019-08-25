@@ -22,7 +22,7 @@ TEST(MetricbaseTest, METRICBASE_TEST){
     instance.IndexFileSizeHistogramObserve(1.0);
     instance.BuildIndexDurationSecondsHistogramObserve(1.0);
     instance.CpuCacheUsageGaugeSet(1.0);
-    instance.GpuCacheUsageGaugeSet(1.0);
+    instance.GpuCacheUsageGaugeSet();
     instance.MetaAccessTotalIncrement();
     instance.MetaAccessDurationSecondsHistogramObserve(1.0);
     instance.FaissDiskLoadDurationSecondsHistogramObserve(1.0);
