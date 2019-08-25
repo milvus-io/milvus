@@ -21,13 +21,20 @@ enum class LoadType {
     GPU2CPU,
 };
 
+enum class TaskType {
+    SearchTask,
+    DeleteTask,
+    TestTask,
+};
+
 class Task;
 
 using TaskPtr = std::shared_ptr<Task>;
 
 class Task {
 public:
-    Task() = default;
+    explicit
+    Task(TaskType type) : type_(type) {}
 
     virtual void
     Load(LoadType type, uint8_t device_id) = 0;
@@ -39,9 +46,13 @@ public:
     virtual TaskPtr
     Clone() = 0;
 
+    inline TaskType
+    Type() const { return type_; }
+
 public:
     std::vector<SearchContextPtr> search_contexts_;
     ScheduleTaskPtr task_;
+    TaskType type_;
 };
 
 
