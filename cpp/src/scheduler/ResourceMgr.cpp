@@ -60,7 +60,7 @@ ResourceMgr::Connect(const std::string &name1, const std::string &name2, Connect
 
 void
 ResourceMgr::Connect(ResourceWPtr &res1, ResourceWPtr &res2, Connection &connection) {
-    if (auto observe_a = res1.loc   k()) {
+    if (auto observe_a = res1.lock()) {
         if (auto observe_b = res2.lock()) {
             observe_a->AddNeighbour(std::static_pointer_cast<Node>(observe_b), connection);
             observe_b->AddNeighbour(std::static_pointer_cast<Node>(observe_a), connection);
