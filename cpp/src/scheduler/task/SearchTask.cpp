@@ -81,11 +81,12 @@ CollectFileMetrics(int file_type, size_t file_size) {
     }
 }
 
-XSearchTask::XSearchTask(TableFileSchemaPtr file) : file_(file) {
+XSearchTask::XSearchTask(TableFileSchemaPtr file)
+    : Task(TaskType::SearchTask), file_(file) {
     index_engine_ = EngineFactory::Build(file_->dimension_,
                                          file_->location_,
                                          (EngineType) file_->engine_type_,
-                                         (MetricType)file_->metric_type_,
+                                         (MetricType) file_->metric_type_,
                                          file_->nlist_);
 }
 

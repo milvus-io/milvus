@@ -273,6 +273,8 @@ Status ExecutionEngineImpl::Cache() {
 
 Status ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
     zilliz::milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, index_);
+
+    return Status::OK();
 }
 
 // TODO(linxj): remove.
