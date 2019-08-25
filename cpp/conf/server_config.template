@@ -64,21 +64,21 @@ resource_config:
       memory: 64
       device_id: 0
       enable_loader: true
-      enable_executor: false
+      enable_executor: true
 
     gtx1060:
       type: GPU
       memory: 6
       device_id: 0
-      enable_loader: true
-      enable_executor: true
+      enable_loader: false
+      enable_executor: false
 
     gtx1660:
       type: GPU
       memory: 6
       device_id: 1
-      enable_loader: true
-      enable_executor: true
+      enable_loader: false
+      enable_executor: false
 
   # connection list, length: 0~N
   # format: -${resource_name}===${resource_name}

@@ -7,6 +7,8 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Bug
 - MS-411 - Fix metric unittest linking error
 - MS-412 - Fix gpu cache logical error
+- MS-416 - ExecutionEngineImpl::GpuCache has not return value cause crash
+- MS-417 - YAML sequence load disable cause scheduler startup failed
 
 ## Improvement
 - MS-327 - Clean code for milvus
@@ -51,6 +53,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-409 - Using new scheduler
 - MS-413 - Remove thrift dependency
 - MS-410 - Add resource config comment
+- MS-414 - Add TaskType in Scheduler::Task
+- MS-415 - Add command tasktable to dump all tasktables
+- MS-418 - Update server_config.template file, set CPU compute only default
 - MS-419 - Move index_file_size from IndexParam to TableSchema
 
 ## New Feature

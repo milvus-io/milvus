@@ -11,6 +11,8 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+TestTask::TestTask() : Task(TaskType::TestTask) {}
+
 void
 TestTask::Load(LoadType type, uint8_t device_id) {
     load_count_++;
