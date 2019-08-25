@@ -73,19 +73,19 @@ YamlConfigMgr::SetChildConfig(const YAML::Node& node,
     return false;
 }
 
-//bool
-//YamlConfigMgr::SetSequence(const YAML::Node &node,
-//                           const std::string &child_name,
-//                           ConfigNode &config) {
-//    if(node[child_name].IsDefined ()) {
-//        size_t cnt = node[child_name].size();
-//        for(size_t i = 0; i < cnt; i++){
-//            config.AddSequenceItem(child_name, node[child_name][i].as<std::string>());
-//        }
-//        return true;
-//    }
-//    return false;
-//}
+bool
+YamlConfigMgr::SetSequence(const YAML::Node &node,
+                           const std::string &child_name,
+                           ConfigNode &config) {
+    if(node[child_name].IsDefined ()) {
+        size_t cnt = node[child_name].size();
+        for(size_t i = 0; i < cnt; i++){
+            config.AddSequenceItem(child_name, node[child_name][i].as<std::string>());
+        }
+        return true;
+    }
+    return false;
+}
 
 void
 YamlConfigMgr::LoadConfigNode(const YAML::Node& node, ConfigNode& config) {
@@ -98,8 +98,8 @@ YamlConfigMgr::LoadConfigNode(const YAML::Node& node, ConfigNode& config) {
             SetConfigValue(node, key, config);
         } else if(node[key].IsMap()){
             SetChildConfig(node, key, config);
-//        } else if(node[key].IsSequence()){
-//            SetSequence(node, key, config);
+        } else if(node[key].IsSequence()){
+            SetSequence(node, key, config);
         }
     }
 }
