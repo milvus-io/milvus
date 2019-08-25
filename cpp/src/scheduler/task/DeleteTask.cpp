@@ -12,7 +12,7 @@ namespace milvus {
 namespace engine {
 
 XDeleteTask::XDeleteTask(DeleteContextPtr &delete_context)
-    : delete_context_ptr_(delete_context) {}
+    : Task(TaskType::DeleteTask), delete_context_ptr_(delete_context) {}
 
 void
 XDeleteTask::Load(LoadType type, uint8_t device_id) {
