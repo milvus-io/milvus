@@ -184,7 +184,6 @@ ClientProxy::Insert(const std::string &table_name,
 
         for (auto &record : record_array) {
             ::milvus::grpc::RowRecord *grpc_record = insert_param.add_row_record_array();
-//            memcpy(grpc_record->vector_data().data(), record.data.data(), record.data.size() * sizeof(float));
             for (size_t i = 0; i < record.data.size(); i++) {
                 grpc_record->add_vector_data(record.data[i]);
             }
