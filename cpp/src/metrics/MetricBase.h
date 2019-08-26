@@ -32,7 +32,7 @@ class MetricsBase{
     virtual void BuildIndexDurationSecondsHistogramObserve(double value) {};
 
     virtual void CpuCacheUsageGaugeSet(double value) {};
-    virtual void GpuCacheUsageGaugeSet(double value) {};
+    virtual void GpuCacheUsageGaugeSet() {};
 
     virtual void MetaAccessTotalIncrement(double value = 1) {};
     virtual void MetaAccessDurationSecondsHistogramObserve(double value) {};

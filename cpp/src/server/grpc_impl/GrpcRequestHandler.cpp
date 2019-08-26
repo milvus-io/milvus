@@ -18,7 +18,7 @@ GrpcRequestHandler::CreateTable(::grpc::ServerContext *context,
                                 const ::milvus::grpc::TableSchema *request,
                                 ::milvus::grpc::Status *response) {
 
-    BaseTaskPtr task_ptr = CreateTableTask::Create(*request);
+    BaseTaskPtr task_ptr = CreateTableTask::Create(request);
     GrpcRequestScheduler::ExecTask(task_ptr, response);
     return ::grpc::Status::OK;
 }
@@ -52,7 +52,7 @@ GrpcRequestHandler::CreateIndex(::grpc::ServerContext *context,
                                const ::milvus::grpc::IndexParam *request,
                                ::milvus::grpc::Status *response) {
 
-    BaseTaskPtr task_ptr = CreateIndexTask::Create(*request);
+    BaseTaskPtr task_ptr = CreateIndexTask::Create(request);
     GrpcRequestScheduler::ExecTask(task_ptr, response);
     return ::grpc::Status::OK;
 }
@@ -62,7 +62,7 @@ GrpcRequestHandler::Insert(::grpc::ServerContext *context,
                                  const ::milvus::grpc::InsertParam *request,
                                  ::milvus::grpc::VectorIds *response) {
 
-    BaseTaskPtr task_ptr = InsertTask::Create(*request, *response);
+    BaseTaskPtr task_ptr = InsertTask::Create(request, response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     response->mutable_status()->set_reason(grpc_status.reason());
@@ -76,7 +76,7 @@ GrpcRequestHandler::Search(::grpc::ServerContext *context,
                                  ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) {
 
     std::vector<std::string> file_id_array;
-    BaseTaskPtr task_ptr = SearchTask::Create(*request, file_id_array, *writer);
+    BaseTaskPtr task_ptr = SearchTask::Create(request, file_id_array, writer);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     if (grpc_status.error_code() != SERVER_SUCCESS) {
@@ -93,7 +93,11 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext *context,
                                         ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) {
 
     std::vector<std::string> file_id_array;
-    BaseTaskPtr task_ptr = SearchTask::Create(request->search_param(), file_id_array, *writer);
+    for(int i = 0; i < request->file_id_array_size(); i++) {
+        file_id_array.push_back(request->file_id_array(i));
+    }
+    ::milvus::grpc::SearchInFilesParam *request_mutable = const_cast<::milvus::grpc::SearchInFilesParam *>(request);
+    BaseTaskPtr task_ptr = SearchTask::Create(request_mutable->mutable_search_param(), file_id_array, writer);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     if (grpc_status.error_code() != SERVER_SUCCESS) {
@@ -109,7 +113,7 @@ GrpcRequestHandler::DescribeTable(::grpc::ServerContext *context,
                                   const ::milvus::grpc::TableName *request,
                                   ::milvus::grpc::TableSchema *response) {
 
-    BaseTaskPtr task_ptr = DescribeTableTask::Create(request->table_name(), *response);
+    BaseTaskPtr task_ptr = DescribeTableTask::Create(request->table_name(), response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     response->mutable_table_name()->mutable_status()->set_error_code(grpc_status.error_code());
@@ -137,7 +141,7 @@ GrpcRequestHandler::ShowTables(::grpc::ServerContext *context,
                                const ::milvus::grpc::Command *request,
                                ::grpc::ServerWriter<::milvus::grpc::TableName> *writer) {
 
-    BaseTaskPtr task_ptr = ShowTablesTask::Create(*writer);
+    BaseTaskPtr task_ptr = ShowTablesTask::Create(writer);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     if (grpc_status.error_code() != SERVER_SUCCESS) {
@@ -167,7 +171,7 @@ GrpcRequestHandler::Cmd(::grpc::ServerContext *context,
 GrpcRequestHandler::DeleteByRange(::grpc::ServerContext *context,
               const ::milvus::grpc::DeleteByRangeParam *request,
               ::milvus::grpc::Status *response) {
-    BaseTaskPtr task_ptr = DeleteByRangeTask::Create(*request);
+    BaseTaskPtr task_ptr = DeleteByRangeTask::Create(request);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     response->set_error_code(grpc_status.error_code());
@@ -191,7 +195,7 @@ GrpcRequestHandler::PreloadTable(::grpc::ServerContext *context,
 GrpcRequestHandler::DescribeIndex(::grpc::ServerContext *context,
               const ::milvus::grpc::TableName *request,
               ::milvus::grpc::IndexParam *response) {
-    BaseTaskPtr task_ptr = DescribeIndexTask::Create(request->table_name(), *response);
+    BaseTaskPtr task_ptr = DescribeIndexTask::Create(request->table_name(), response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     response->mutable_table_name()->mutable_status()->set_reason(grpc_status.reason());
