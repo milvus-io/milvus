@@ -86,8 +86,7 @@ public:
      * @param status, status to be moved.
      *
      */
-    inline
-    Status(Status &&s) noexcept : state_(s.state_) {};
+    Status(Status &&s) noexcept ;
 
     /**
      * @brief Status
@@ -173,7 +172,7 @@ public:
     static Status
     OK(Args &&... args) {
         return Status(StatusCode::OK, MessageBuilder(std::forward<Args>(args)...));
-}
+    }
 
 /**
  * @brief Invalid
