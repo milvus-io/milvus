@@ -92,6 +92,10 @@ Status ExecutionEngineImpl::AddWithIds(long n, const float *xdata, const long *x
 }
 
 size_t ExecutionEngineImpl::Count() const {
+    if(index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl::index is null";
+        return 0;
+    }
     return index_->Count();
 }
 
@@ -100,6 +104,10 @@ size_t ExecutionEngineImpl::Size() const {
 }
 
 size_t ExecutionEngineImpl::Dimension() const {
+    if(index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl::index is null";
+        return dim_;
+    }
     return index_->Dimension();
 }
 
