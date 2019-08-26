@@ -14,23 +14,11 @@ namespace engine {
 
 class Action {
 public:
-    /*
-     * Push task to neighbour;
-     */
     static void
-    PushTaskToNeighbour(const ResourceWPtr &self);
+    PushTaskToNeighbourRandomly(const TaskPtr &task, const ResourcePtr &self);
 
-    /*
-     * Push task to neighbour that has executor;
-     */
     static void
-    PushTaskToNeighbourHasExecutor(const ResourceWPtr &self);
-
-    /*
-     * Pull task From neighbour;
-     */
-    static void
-    PullTaskFromNeighbour(const ResourceWPtr &self);
+    PushTaskToAllNeighbour(const TaskPtr &task, const ResourcePtr &self);
 };
 
 
