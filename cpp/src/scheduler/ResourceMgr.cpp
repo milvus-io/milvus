@@ -54,7 +54,7 @@ ResourceMgr::Connect(const std::string &name1, const std::string &name2, Connect
     auto res2 = get_resource_by_name(name2);
     if (res1 && res2) {
         res1->AddNeighbour(std::static_pointer_cast<Node>(res2), connection);
-        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
+//        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
     }
 }
 
