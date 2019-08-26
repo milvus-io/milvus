@@ -12,6 +12,9 @@
 using namespace zilliz::milvus;
 
 TEST(PrometheusTest, PROMETHEUS_TEST){
+    server::ConfigNode &configNode = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_METRIC);
+    configNode.SetValue(server::CONFIG_METRIC_IS_STARTUP, "on");
+
     server::PrometheusMetrics instance = server::PrometheusMetrics::GetInstance();
     instance.Init();
     instance.SetStartup(true);
@@ -51,11 +54,20 @@ TEST(PrometheusTest, PROMETHEUS_TEST){
     instance.GPUMemoryUsageGaugeSet();
     instance.AddVectorsPerSecondGaugeSet(1,1,1);
     instance.QueryIndexTypePerSecondSet("IVF", 1.0);
+    instance.QueryIndexTypePerSecondSet("IDMap", 1.0);
     instance.ConnectionGaugeIncrement();
     instance.ConnectionGaugeDecrement();
     instance.KeepingAliveCounterIncrement();
     instance.OctetsSet();
+
     instance.CPUCoreUsagePercentSet();
     instance.GPUTemperature();
     instance.CPUTemperature();
+
+    configNode.SetValue(server::CONFIG_METRIC_IS_STARTUP, "off");
+    instance.Init();
+    instance.CPUCoreUsagePercentSet();
+    instance.GPUTemperature();
+    instance.CPUTemperature();
+
 }
