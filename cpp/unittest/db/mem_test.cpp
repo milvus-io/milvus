@@ -16,20 +16,29 @@
 #include <iostream>
 #include <cmath>
 #include <random>
+#include <chrono>
 
 using namespace zilliz::milvus;
 
 namespace {
 
-static const char* TABLE_NAME = "test_group";
+static std::string TABLE_NAME = "test_group";
 static constexpr int64_t TABLE_DIM = 256;
 static constexpr int64_t VECTOR_COUNT = 250000;
 static constexpr int64_t INSERT_LOOP = 10000;
 
+std::string GenTableName() {
+    auto now = std::chrono::system_clock::now();
+    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
+            now.time_since_epoch()).count();
+    TABLE_NAME = std::to_string(micros);
+    return TABLE_NAME;
+}
+
 engine::meta::TableSchema BuildTableSchema() {
     engine::meta::TableSchema table_info;
     table_info.dimension_ = TABLE_DIM;
-    table_info.table_id_ = TABLE_NAME;
+    table_info.table_id_ = GenTableName();
     table_info.engine_type_ = (int) engine::EngineType::FAISS_IDMAP;
     return table_info;
 }
@@ -261,7 +270,6 @@ TEST_F(NewMemManagerTest, SERIAL_INSERT_SEARCH_TEST) {
     }
 
     delete db_;
-    boost::filesystem::remove_all(options.meta.path);
 
 }
 
@@ -297,7 +305,6 @@ TEST_F(NewMemManagerTest, INSERT_TEST) {
     LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
 
     delete db_;
-    boost::filesystem::remove_all(options.meta.path);
 
 }
 
@@ -378,7 +385,6 @@ TEST_F(NewMemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
     search.join();
 
     delete db_;
-    boost::filesystem::remove_all(options.meta.path);
 };
 
 TEST_F(DBTest, VECTOR_IDS_TEST)
@@ -487,5 +493,4 @@ TEST_F(NewMemManagerTest, MEMMANAGER_TEST) {
     LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
 
     delete db_;
-    boost::filesystem::remove_all(options.meta.path);
 }
