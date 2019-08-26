@@ -3,22 +3,25 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
+#pragma once
 
-#include "Action.h"
+#include "TaskLabel.h"
+
+#include <memory>
 
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-void
-Action::PullTaskFromNeighbour(const ResourceWPtr &self) {
-    // TODO: implement
-}
 
+class BroadcastLabel : public TaskLabel {
+public:
+    BroadcastLabel() : TaskLabel(TaskLabelType::BROADCAST) {}
+};
+
+using BroadcastLabelPtr = std::shared_ptr<BroadcastLabel>;
 
 }
 }
 }
-
-

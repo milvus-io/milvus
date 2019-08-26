@@ -5,10 +5,12 @@
  ******************************************************************************/
 #pragma once
 
+#include "db/scheduler/context/SearchContext.h"
+#include "db/scheduler/task/IScheduleTask.h"
+#include "scheduler/tasklabel/TaskLabel.h"
+
 #include <string>
 #include <memory>
-#include <src/db/scheduler/context/SearchContext.h>
-#include "src/db/scheduler/task/IScheduleTask.h"
 
 
 namespace zilliz {
@@ -36,6 +38,21 @@ public:
     explicit
     Task(TaskType type) : type_(type) {}
 
+    /*
+     * Just Getter;
+     */
+    inline TaskType
+    Type() const { return type_; }
+
+    /*
+     * Getter and Setter;
+     */
+    inline TaskLabelPtr &
+    label() {
+        return label_;
+    }
+
+public:
     virtual void
     Load(LoadType type, uint8_t device_id) = 0;
 
@@ -46,13 +63,11 @@ public:
     virtual TaskPtr
     Clone() = 0;
 
-    inline TaskType
-    Type() const { return type_; }
-
 public:
     std::vector<SearchContextPtr> search_contexts_;
     ScheduleTaskPtr task_;
     TaskType type_;
+    TaskLabelPtr label_ = nullptr;
 };
 
 

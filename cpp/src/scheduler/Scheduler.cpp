@@ -104,18 +104,29 @@ Scheduler::OnStartUp(const EventPtr &event) {
 
 void
 Scheduler::OnFinishTask(const EventPtr &event) {
-    if (auto resource = event->resource_.lock()) {
-    }
 }
 
 void
 Scheduler::OnCopyCompleted(const EventPtr &event) {
+    auto load_completed_event = std::static_pointer_cast<CopyCompletedEvent>(event);
     if (auto resource = event->resource_.lock()) {
         resource->WakeupExecutor();
-        if (resource->Type() == ResourceType::DISK) {
-            Action::PushTaskToNeighbour(event->resource_);
-        } else {
-            Action::PushTaskToNeighbourHasExecutor(event->resource_);
+
+        auto task_table_type = load_completed_event->task_table_item_->task->label()->Type();
+        switch (task_table_type) {
+            case TaskLabelType::DEFAULT: {
+                if (not resource->HasExecutor() && load_completed_event->task_table_item_->Move()) {
+                    Action::PushTaskToNeighbourRandomly(load_completed_event->task_table_item_->task, resource);
+                }
+                break;
+            }
+            case TaskLabelType::BROADCAST: {
+                Action::PushTaskToAllNeighbour(load_completed_event->task_table_item_->task, resource);
+                break;
+            }
+            default: {
+                break;
+            }
         }
     }
 }
