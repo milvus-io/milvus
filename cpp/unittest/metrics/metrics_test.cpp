@@ -25,6 +25,11 @@ using namespace zilliz::milvus;
 
 
 TEST_F(MetricTest, Metric_Tes) {
+    server::ConfigNode &configNode = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_METRIC);
+    configNode.SetValue(server::CONFIG_METRIC_COLLECTOR, "zabbix");
+    server::Metrics::GetInstance();
+    configNode.SetValue(server::CONFIG_METRIC_COLLECTOR, "prometheus");
+    server::Metrics::GetInstance();
 
     server::SystemInfo::GetInstance().Init();
 //    server::Metrics::GetInstance().Init();
