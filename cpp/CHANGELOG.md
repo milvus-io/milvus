@@ -58,6 +58,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-418 - Update server_config.template file, set CPU compute only default
 - MS-419 - Move index_file_size from IndexParam to TableSchema
 - MS-421 - Add TaskLabel in scheduler
+- MS-422 - Support DeleteTask in Multi-GpuResource case
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
