@@ -29,6 +29,7 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+// TODO(wxyu): Storage, Route, Executor
 enum class ResourceType {
     DISK = 0,
     CPU = 1,
