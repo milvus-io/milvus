@@ -167,15 +167,26 @@ void PrometheusMetrics::CPUTemperature() {
     }
 }
 
-void PrometheusMetrics::GpuCacheUsageGaugeSet(double value) {
+void PrometheusMetrics::GpuCacheUsageGaugeSet() {
     if(!startup_) return;
-    int64_t num_processors = server::SystemInfo::GetInstance().num_processor();
+    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+    std::string gpu_ids_str = config.GetValue(server::CONFIG_GPU_IDS, "0,1");
 
-    for (auto i = 0; i < num_processors; ++i) {
-//        int gpu_cache_usage = cache::GpuCacheMgr::GetInstance(i)->CacheUsage();
-//        int gpu_cache_total = cache::GpuCacheMgr::GetInstance(i)->CacheCapacity();
-//        prometheus::Gauge &gpu_cache = gpu_cache_usage_.Add({{"GPU_Cache", std::to_string(i)}});
-//        gpu_cache.Set(gpu_cache_usage * 100 / gpu_cache_total);
+    std::vector<uint64_t > gpu_ids;
+
+    std::stringstream ss(gpu_ids_str);
+    for (int i; ss >> i;) {
+        gpu_ids.push_back(i);
+        if (ss.peek() == ',') {
+            ss.ignore();
+        }
+    }
+
+    for(auto i = 0; i < gpu_ids.size(); ++i) {
+        uint64_t cache_usage = cache::GpuCacheMgr::GetInstance(gpu_ids[i])->CacheUsage();
+        uint64_t cache_capacity = cache::GpuCacheMgr::GetInstance(gpu_ids[i])->CacheCapacity();
+        prometheus::Gauge &gpu_cache = gpu_cache_usage_.Add({{"GPU_Cache", std::to_string(i)}});
+        gpu_cache.Set(cache_usage * 100 / cache_capacity);
     }
 }
 

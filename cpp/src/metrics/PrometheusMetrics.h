@@ -55,7 +55,7 @@ class PrometheusMetrics: public MetricsBase {
     void IndexFileSizeHistogramObserve(double value) override { if(startup_) index_files_size_histogram_.Observe(value);};
     void BuildIndexDurationSecondsHistogramObserve(double value) override { if(startup_) build_index_duration_seconds_histogram_.Observe(value);};
     void CpuCacheUsageGaugeSet(double value) override { if(startup_) cpu_cache_usage_gauge_.Set(value);};
-    void GpuCacheUsageGaugeSet(double value) override; 
+    void GpuCacheUsageGaugeSet() override;
 
     void MetaAccessTotalIncrement(double value = 1) override { if(startup_) meta_access_total_.Increment(value);};
     void MetaAccessDurationSecondsHistogramObserve(double value) override { if(startup_) meta_access_duration_seconds_histogram_.Observe(value);};
@@ -343,7 +343,7 @@ class PrometheusMetrics: public MetricsBase {
         .Help("current cache usage by bytes")
         .Register(*registry_);
     prometheus::Gauge &cpu_cache_usage_gauge_ = cpu_cache_usage_.Add({});
-    
+
     //record GPU cache usage and %
     prometheus::Family<prometheus::Gauge> &gpu_cache_usage_ = prometheus::BuildGauge()
             .Name("gpu_cache_usage_bytes")
