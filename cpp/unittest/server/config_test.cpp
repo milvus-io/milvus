@@ -43,6 +43,10 @@ TEST(ConfigTest, CONFIG_TEST) {
     server::ConfigNode& db_config = root_config.GetChild("db_config");
     server::ConfigNode& metric_config = root_config.GetChild("metric_config");
     server::ConfigNode& cache_config = root_config.GetChild("cache_config");
+    server::ConfigNode invalid_config = root_config.GetChild("invalid_config");
+    auto valus = invalid_config.GetSequence("not_exist");
+    float ff = invalid_config.GetFloatValue("not_exist", 3.0);
+    ASSERT_EQ(ff, 3.0);
 
     std::string address = server_config.GetValue("address");
     ASSERT_TRUE(!address.empty());
