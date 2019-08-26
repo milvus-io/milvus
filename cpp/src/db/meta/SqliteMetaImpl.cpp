@@ -413,7 +413,6 @@ Status SqliteMetaImpl::DescribeTableIndex(const std::string &table_id, TableInde
 
         auto groups = ConnectorPtr->select(columns(&TableSchema::engine_type_,
                                                    &TableSchema::nlist_,
-                                                   &TableSchema::index_file_size_,
                                                    &TableSchema::metric_type_),
                                            where(c(&TableSchema::table_id_) == table_id
                                                  and c(&TableSchema::state_) != (int)TableSchema::TO_DELETE));
