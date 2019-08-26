@@ -104,8 +104,6 @@ Scheduler::OnStartUp(const EventPtr &event) {
 
 void
 Scheduler::OnFinishTask(const EventPtr &event) {
-    if (auto resource = event->resource_.lock()) {
-    }
 }
 
 void
