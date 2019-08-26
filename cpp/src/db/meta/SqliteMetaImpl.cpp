@@ -421,7 +421,7 @@ Status SqliteMetaImpl::DescribeTableIndex(const std::string &table_id, TableInde
         if (groups.size() == 1) {
             index.engine_type_ = std::get<0>(groups[0]);
             index.nlist_ = std::get<1>(groups[0]);
-            index.metric_type_ = std::get<2>(groups[0]);
+            index.metric_type_ = std::get<3>(groups[0]);
         } else {
             return Status::NotFound("Table " + table_id + " not found");
         }
