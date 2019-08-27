@@ -43,9 +43,10 @@ class TaskTableBaseTest : public ::testing::Test {
 protected:
     void
     SetUp() override {
+        TableFileSchemaPtr dummy = nullptr;
         invalid_task_ = nullptr;
-        task1_ = std::make_shared<TestTask>();
-        task2_ = std::make_shared<TestTask>();
+        task1_ = std::make_shared<TestTask>(dummy);
+        task2_ = std::make_shared<TestTask>(dummy);
     }
 
     TaskPtr invalid_task_;
@@ -83,8 +84,9 @@ class TaskTableAdvanceTest : public ::testing::Test {
 protected:
     void
     SetUp() override {
+        TableFileSchemaPtr dummy = nullptr;
         for (uint64_t i = 0; i < 8; ++i) {
-            auto task = std::make_shared<TestTask>();
+            auto task = std::make_shared<TestTask>(dummy);
             table1_.Put(task);
         }
 

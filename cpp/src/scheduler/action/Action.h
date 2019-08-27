@@ -19,6 +19,9 @@ public:
 
     static void
     PushTaskToAllNeighbour(const TaskPtr &task, const ResourcePtr &self);
+
+    static void
+    PushTaskToResource(const TaskPtr &task, const ResourcePtr &dest);
 };
 
 

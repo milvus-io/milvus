@@ -93,6 +93,11 @@ public:
         return type_;
     }
 
+    inline uint64_t
+    DeviceId() {
+        return device_id_;
+    }
+
     // TODO: better name?
     inline bool
     HasLoader() {
@@ -172,9 +177,8 @@ private:
 
 protected:
     uint64_t device_id_;
-
-private:
     std::string name_;
+private:
     ResourceType type_;
 
     TaskTable task_table_;
