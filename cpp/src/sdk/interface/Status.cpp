@@ -28,6 +28,10 @@ void Status::MoveFrom(Status &s) {
 Status::Status(const Status &s)
         : state_((s.state_ == nullptr) ? nullptr : new State(*s.state_)) {}
 
+Status::Status(Status &&s) noexcept {
+    MoveFrom(s);
+}
+
 Status &Status::operator=(const Status &s) {
     if (state_ != s.state_) {
         CopyFrom(s);
