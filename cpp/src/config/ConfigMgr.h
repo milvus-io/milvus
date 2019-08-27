@@ -20,15 +20,15 @@ namespace server {
 //         DDD: 23.5
 //
 // usage
-//   const IConfigMgr* mgr = IConfigMgr::GetInstance();
+//   const ConfigMgr* mgr = ConfigMgr::GetInstance();
 //   const ConfigNode& node = mgr->GetRootNode();
 //   std::string val = node.GetValue("AAA"); // return '1'
 //   const ConfigNode& child = node.GetChild("BBB");
 //   val = child.GetValue("CCC"); //return 'hello'
 
-class IConfigMgr {
+class ConfigMgr {
  public:
-    static IConfigMgr* GetInstance();
+    static ConfigMgr* GetInstance();
 
     virtual ServerError LoadConfigFile(const std::string &filename) = 0;
     virtual void Print() const = 0;//will be deleted

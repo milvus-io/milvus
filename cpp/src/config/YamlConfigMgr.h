@@ -5,7 +5,7 @@
  ******************************************************************************/
 #pragma once
 
-#include "IConfigMgr.h"
+#include "ConfigMgr.h"
 #include "ConfigNode.h"
 #include "utils/Error.h"
 
@@ -15,7 +15,7 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-class YamlConfigMgr : public IConfigMgr {
+class YamlConfigMgr : public ConfigMgr {
  public:
     virtual ServerError LoadConfigFile(const std::string &filename);
     virtual void Print() const;
