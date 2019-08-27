@@ -5,16 +5,16 @@
  ******************************************************************************/
 #pragma once
 
-#include "Task.h"
+#include "SearchTask.h"
 
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-class TestTask : public Task {
+class TestTask : public XSearchTask {
 public:
-    TestTask();
+    TestTask(TableFileSchemaPtr& file);
 
 public:
     void

@@ -22,9 +22,9 @@ class ResourceTest : public testing::Test {
 protected:
     void
     SetUp() override {
-        disk_resource_ = ResourceFactory::Create("disk");
-        cpu_resource_ = ResourceFactory::Create("cpu");
-        gpu_resource_ = ResourceFactory::Create("gpu");
+        disk_resource_ = ResourceFactory::Create("ssd", "DISK", 0);
+        cpu_resource_ = ResourceFactory::Create("cpu", "CPU", 0);
+        gpu_resource_ = ResourceFactory::Create("gpu", "GPU", 0);
         resources_.push_back(disk_resource_);
         resources_.push_back(cpu_resource_);
         resources_.push_back(gpu_resource_);
@@ -85,8 +85,9 @@ protected:
 TEST_F(ResourceTest, cpu_resource_test) {
     const uint64_t NUM = 100;
     std::vector<std::shared_ptr<TestTask>> tasks;
+    TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto task = std::make_shared<TestTask>();
+        auto task = std::make_shared<TestTask>(dummy);
         tasks.push_back(task);
         cpu_resource_->task_table().Put(task);
     }
@@ -113,8 +114,9 @@ TEST_F(ResourceTest, cpu_resource_test) {
 TEST_F(ResourceTest, gpu_resource_test) {
     const uint64_t NUM = 100;
     std::vector<std::shared_ptr<TestTask>> tasks;
+    TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto task = std::make_shared<TestTask>();
+        auto task = std::make_shared<TestTask>(dummy);
         tasks.push_back(task);
         gpu_resource_->task_table().Put(task);
     }

@@ -20,7 +20,7 @@ public:
 
     inline std::string
     Dump() const override {
-        return "<GpuResource>";
+        return "<GpuResource, name=" + name_ + ">";
     }
 
     friend std::ostream &operator<<(std::ostream &out, const GpuResource &resource);

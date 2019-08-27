@@ -73,6 +73,8 @@ public:
     virtual EngineType IndexEngineType() const = 0;
 
     virtual MetricType IndexMetricType() const = 0;
+
+    virtual std::string GetLocation() const = 0;
 };
 
 using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
