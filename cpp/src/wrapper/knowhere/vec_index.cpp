@@ -19,6 +19,8 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+static constexpr float TYPICAL_COUNT = 1000000.0;
+
 struct FileIOWriter {
     std::fstream fs;
     std::string name;
@@ -192,7 +194,13 @@ server::KnowhereError write_index(VecIndexPtr index, const std::string &location
 // TODO(linxj): redo here.
 void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Config &cfg) {
     auto nlist = cfg.get_with_default("nlist", 0);
-    if (int(size/1000000.0) * nlist == 0) { cfg["nlist"] = int(size / 1000000.0 * 16384); }
+    if (size <= TYPICAL_COUNT/16384 + 1) {
+        //handle less row count, avoid nlist set to 0
+        cfg["nlist"] = 1;
+    } else if (int(size/TYPICAL_COUNT) * nlist == 0) {
+        //calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
+        cfg["nlist"] = int(size / TYPICAL_COUNT * 16384);
+    }
 
     if (!cfg.contains("gpu_id")) { cfg["gpu_id"] = int(0); }
     if (!cfg.contains("metric_type")) { cfg["metric_type"] = "L2"; }
