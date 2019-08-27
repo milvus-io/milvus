@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <gtest/gtest-death-test.h>
 
-#include "config/IConfigMgr.h"
+#include "config/ConfigMgr.h"
 #include "server/ServerConfig.h"
 #include "utils/CommonUtil.h"
 #include "utils/ValidationUtil.h"
@@ -25,7 +25,7 @@ static constexpr uint64_t GB = MB*1024;
 }
 
 TEST(ConfigTest, CONFIG_TEST) {
-    server::IConfigMgr* config_mgr = server::IConfigMgr::GetInstance();
+    server::ConfigMgr* config_mgr = server::ConfigMgr::GetInstance();
 
     server::ServerError err = config_mgr->LoadConfigFile("");
     ASSERT_EQ(err, server::SERVER_UNEXPECTED_ERROR);
