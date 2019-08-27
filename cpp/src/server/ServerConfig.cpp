@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <iostream>
 
-#include "config/IConfigMgr.h"
+#include "config/ConfigMgr.h"
 #include "utils/CommonUtil.h"
 #include "utils/ValidationUtil.h"
 
@@ -43,7 +43,7 @@ ServerConfig::LoadConfigFile(const std::string& config_filename) {
     }
 
     try {
-        IConfigMgr* mgr = const_cast<IConfigMgr*>(IConfigMgr::GetInstance());
+        ConfigMgr* mgr = const_cast<ConfigMgr*>(ConfigMgr::GetInstance());
         ServerError err = mgr->LoadConfigFile(filename);
         if(err != 0) {
             std::cout << "Server failed to load config file" << std::endl;
@@ -106,7 +106,7 @@ ServerError ServerConfig::ValidateConfig() const {
 
 void
 ServerConfig::PrintAll() const {
-    if(const IConfigMgr* mgr = IConfigMgr::GetInstance()) {
+    if(const ConfigMgr* mgr = ConfigMgr::GetInstance()) {
         std::string str = mgr->DumpString();
 //        SERVER_LOG_INFO << "\n" << str;
         std::cout << "\n" << str << std::endl;
@@ -115,14 +115,14 @@ ServerConfig::PrintAll() const {
 
 ConfigNode
 ServerConfig::GetConfig(const std::string& name) const {
-    const IConfigMgr* mgr = IConfigMgr::GetInstance();
+    const ConfigMgr* mgr = ConfigMgr::GetInstance();
     const ConfigNode& root_node = mgr->GetRootNode();
     return root_node.GetChild(name);
 }
 
 ConfigNode&
 ServerConfig::GetConfig(const std::string& name) {
-    IConfigMgr* mgr = IConfigMgr::GetInstance();
+    ConfigMgr* mgr = ConfigMgr::GetInstance();
     ConfigNode& root_node = mgr->GetRootNode();
     return root_node.GetChild(name);
 }
