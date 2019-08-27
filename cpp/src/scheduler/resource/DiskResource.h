@@ -20,7 +20,7 @@ public:
 
     inline std::string
     Dump() const override {
-        return "<DiskResource>";
+        return "<DiskResource, name=" + name_ + ">";
     }
 
     friend std::ostream &operator<<(std::ostream &out, const DiskResource &resource);
