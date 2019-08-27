@@ -3,14 +3,14 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "IConfigMgr.h"
+#include "ConfigMgr.h"
 #include "YamlConfigMgr.h"
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 
-IConfigMgr * IConfigMgr::GetInstance() {
+ConfigMgr * ConfigMgr::GetInstance() {
     static YamlConfigMgr mgr;
     return &mgr;
 }
