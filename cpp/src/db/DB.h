@@ -46,7 +46,6 @@ public:
 
     virtual Status Size(uint64_t& result) = 0;
 
-    virtual Status BuildIndex(const std::string& table_id) = 0;
     virtual Status CreateIndex(const std::string& table_id, const TableIndex& index) = 0;
     virtual Status DescribeIndex(const std::string& table_id, TableIndex& index) = 0;
     virtual Status DropIndex(const std::string& table_id) = 0;

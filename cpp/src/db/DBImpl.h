@@ -82,8 +82,6 @@ class DBImpl : public DB {
 
     Status Size(uint64_t &result) override;
 
-    Status BuildIndex(const std::string& table_id) override;
-
     Status CreateIndex(const std::string& table_id, const TableIndex& index) override;
 
     Status DescribeIndex(const std::string& table_id, TableIndex& index) override;
