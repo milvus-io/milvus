@@ -424,7 +424,14 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
     }
 
     //step 4: update table files state
-    table_file.file_type_ = meta::TableFileSchema::RAW;
+    //if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
+    //else set file type to RAW, no need to build index
+    if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+        table_file.file_type_ = (index->PhysicalSize() >= table_file.index_file_size_) ?
+                                meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
+    } else {
+        table_file.file_type_ = meta::TableFileSchema::RAW;
+    }
     table_file.file_size_ = index->PhysicalSize();
     table_file.row_count_ = index->Count();
     updated.push_back(table_file);
@@ -516,22 +523,6 @@ void DBImpl::StartBuildIndexTask(bool force) {
     }
 }
 
-Status DBImpl::BuildIndex(const std::string& table_id) {
-    bool has = false;
-    meta_ptr_->HasNonIndexFiles(table_id, has);
-    int times = 1;
-
-    while (has) {
-        ENGINE_LOG_DEBUG << "Non index files detected in " << table_id << "! Will build index " << times;
-        meta_ptr_->UpdateTableFilesToIndex(table_id);
-        /* StartBuildIndexTask(true); */
-        std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10*1000, times*100)));
-        meta_ptr_->HasNonIndexFiles(table_id, has);
-        times++;
-    }
-    return Status::OK();
-}
-
 Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     {
         std::unique_lock<std::mutex> lock(build_index_mutex_);
@@ -558,7 +549,6 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
         }
 
         //step 3: update index info
-
         status = meta_ptr_->UpdateTableIndexParam(table_id, index);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Failed to update table index info";
