@@ -10,6 +10,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-416 - ExecutionEngineImpl::GpuCache has not return value cause crash
 - MS-417 - YAML sequence load disable cause scheduler startup failed
 - MS-413 - Create index failed and server exited
+- MS-427 - Describe index error after drop index
 
 ## Improvement
 - MS-327 - Clean code for milvus

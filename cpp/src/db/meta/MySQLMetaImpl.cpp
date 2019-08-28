@@ -536,6 +536,7 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
 
             Query dropTableIndexQuery = connectionPtr->query();
 
+            //soft delete index files
             dropTableIndexQuery << "UPDATE TableFiles " <<
                                 "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << "," <<
                                 "updated_time = " << utils::GetMicroSecTimeStamp() << " " <<
@@ -550,11 +551,27 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
                                                   dropTableIndexQuery.error());
             }
 
+            //set all backup file to raw
             dropTableIndexQuery << "UPDATE TableFiles " <<
                                 "SET file_type = " << std::to_string(TableFileSchema::RAW) << "," <<
                                 "updated_time = " << utils::GetMicroSecTimeStamp() << " " <<
                                 "WHERE table_id = " << quote << table_id << " AND " <<
                                 "file_type = " << std::to_string(TableFileSchema::BACKUP) << ";";
+
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();
+
+            if (!dropTableIndexQuery.exec()) {
+                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROP TABLE INDEX";
+                return Status::DBTransactionError("QUERY ERROR WHEN DROP TABLE INDEX",
+                                                  dropTableIndexQuery.error());
+            }
+
+            //set table index type to raw
+            dropTableIndexQuery << "UPDATE Tables " <<
+                                "SET engine_type = " << std::to_string(DEFAULT_ENGINE_TYPE) << "," <<
+                                "nlist = " << std::to_string(DEFAULT_NLIST) << " " <<
+                                "metric_type = " << std::to_string(DEFAULT_METRIC_TYPE) << " " <<
+                                "WHERE table_id = " << quote << table_id << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();
 
