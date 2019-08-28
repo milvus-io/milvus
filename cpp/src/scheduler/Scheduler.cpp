@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
+#include <src/cache/GpuCacheMgr.h>
 #include "Scheduler.h"
 #include "Cost.h"
 #include "action/Action.h"
@@ -116,7 +117,18 @@ Scheduler::OnCopyCompleted(const EventPtr &event) {
         switch (task_table_type) {
             case TaskLabelType::DEFAULT: {
                 if (not resource->HasExecutor() && load_completed_event->task_table_item_->Move()) {
-                    Action::PushTaskToNeighbourRandomly(load_completed_event->task_table_item_->task, resource);
+                    auto task = load_completed_event->task_table_item_->task;
+                    auto search_task = std::static_pointer_cast<XSearchTask>(task);
+                    auto location = search_task->index_engine_->GetLocation();
+
+                    for (auto i = 0; i < res_mgr_.lock()->GetNumGpuResource(); ++i) {
+                        auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
+                        if (index != nullptr) {
+                            auto dest_resource = res_mgr_.lock()->GetResource(ResourceType::GPU, i);
+                            Action::PushTaskToResource(load_completed_event->task_table_item_->task, dest_resource);
+                        }
+                    }
+
                 }
                 break;
             }

@@ -21,7 +21,7 @@ public:
 
     inline std::string
     Dump() const override {
-        return "<CpuResource>";
+        return "<CpuResource, name=" + name_ + ">";
     }
 
     friend std::ostream &operator<<(std::ostream &out, const CpuResource &resource);

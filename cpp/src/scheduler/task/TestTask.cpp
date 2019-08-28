@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 
+#include <src/cache/GpuCacheMgr.h>
 #include "TestTask.h"
 
 
@@ -11,7 +12,8 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-TestTask::TestTask() : Task(TaskType::TestTask) {}
+
+TestTask::TestTask(TableFileSchemaPtr& file) : XSearchTask(file) {}
 
 void
 TestTask::Load(LoadType type, uint8_t device_id) {
@@ -27,7 +29,8 @@ TestTask::Execute() {
 
 TaskPtr
 TestTask::Clone() {
-    auto ret = std::make_shared<TestTask>();
+    TableFileSchemaPtr dummy = nullptr;
+    auto ret = std::make_shared<TestTask>(dummy);
     ret->load_count_ = load_count_;
     ret->exec_count_ = exec_count_;
     return ret;
