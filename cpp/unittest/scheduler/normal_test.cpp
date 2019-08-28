@@ -14,7 +14,7 @@ TEST(normal_test, test1) {
 //    auto res_mgr = std::make_shared<ResourceMgr>();
     auto res_mgr = ResMgrInst::GetInstance();
     auto disk = res_mgr->Add(ResourceFactory::Create("disk", "ssd", true, false));
-    auto cpu = res_mgr->Add(ResourceFactory::Create("cpu"));
+    auto cpu = res_mgr->Add(ResourceFactory::Create("cpu", "CPU", 0));
     auto gpu1 = res_mgr->Add(ResourceFactory::Create("gpu", "gpu0", false, false));
     auto gpu2 = res_mgr->Add(ResourceFactory::Create("gpu", "gpu2", false, false));
 
@@ -32,9 +32,11 @@ TEST(normal_test, test1) {
 
     const uint64_t NUM_TASK = 1000;
     std::vector<std::shared_ptr<TestTask>> tasks;
+    TableFileSchemaPtr dummy = nullptr;
+
     for (uint64_t i = 0; i < NUM_TASK; ++i) {
         if (auto observe = disk.lock()) {
-            auto task = std::make_shared<TestTask>();
+            auto task = std::make_shared<TestTask>(dummy);
             tasks.push_back(task);
             observe->task_table().Put(task);
         }

@@ -28,6 +28,27 @@ ResourceMgr::GetNumOfComputeResource() {
     return count;
 }
 
+uint64_t
+ResourceMgr::GetNumGpuResource() const {
+    uint64_t num = 0;
+    for (auto &res : resources_) {
+        if (res->Type() == ResourceType::GPU) {
+            num++;
+        }
+    }
+    return num;
+}
+
+ResourcePtr
+ResourceMgr::GetResource(ResourceType type, uint64_t device_id) {
+    for (auto &resource : resources_) {
+        if (resource->Type() == type && resource->DeviceId() == device_id) {
+            return resource;
+        }
+    }
+    return nullptr;
+}
+
 ResourceWPtr
 ResourceMgr::Add(ResourcePtr &&resource) {
     ResourceWPtr ret(resource);

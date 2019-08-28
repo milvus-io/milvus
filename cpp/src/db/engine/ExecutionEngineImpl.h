@@ -73,6 +73,8 @@ public:
 
     MetricType IndexMetricType() const override { return metric_type_; }
 
+    std::string GetLocation() const override { return location_; }
+
 private:
     VecIndexPtr CreatetVecIndex(EngineType type);
 

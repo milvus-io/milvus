@@ -46,6 +46,10 @@ Action::PushTaskToAllNeighbour(const TaskPtr &task, const ResourcePtr &self) {
     }
 }
 
+void
+Action::PushTaskToResource(const TaskPtr& task, const ResourcePtr& dest) {
+    dest->task_table().Put(task);
+}
 
 }
 }
