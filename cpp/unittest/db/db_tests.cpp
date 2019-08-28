@@ -34,7 +34,6 @@ namespace {
         engine::meta::TableSchema table_info;
         table_info.dimension_ = TABLE_DIM;
         table_info.table_id_ = TABLE_NAME;
-        table_info.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
         return table_info;
     }
 
@@ -263,7 +262,9 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_STATS(stat);
     }
 
-    db_->BuildIndex(TABLE_NAME); // wait until build index finish
+    engine::TableIndex index;
+    index.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
+    db_->CreateIndex(TABLE_NAME, index); // wait until build index finish
 
     {
         engine::QueryResults results;
@@ -273,7 +274,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 
     {//search by specify index file
         engine::meta::DatesT dates;
-        std::vector<std::string> file_ids = {"4", "5", "6"};
+        std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
         engine::QueryResults results;
         stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
         ASSERT_STATS(stat);
@@ -305,7 +306,12 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
         db_->InsertVectors(TABLE_NAME, nb, xb.data(), target_ids);
         ASSERT_EQ(target_ids.size(), nb);
     }
-    db_->BuildIndex(TABLE_NAME);
+
+    sleep(2);
+
+    engine::TableIndex index;
+    index.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
+    db_->CreateIndex(TABLE_NAME, index); // wait until build index finish
 
     int64_t prev_cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     stat = db_->PreloadTable(TABLE_NAME);
