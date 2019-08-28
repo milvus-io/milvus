@@ -35,6 +35,12 @@ public:
         return disk_resources_;
     }
 
+    uint64_t
+    GetNumGpuResource() const;
+
+    ResourcePtr
+    GetResource(ResourceType type, uint64_t device_id);
+
     /*
      * Return account of resource which enable executor;
      */

@@ -10,8 +10,9 @@ class CostTest : public ::testing::Test {
 protected:
     void
     SetUp() override {
+        TableFileSchemaPtr dummy = nullptr;
         for (uint64_t i = 0; i < 8; ++i) {
-            auto task = std::make_shared<TestTask>();
+            auto task = std::make_shared<TestTask>(dummy);
             table_.Put(task);
         }
         table_.Get(0)->state = TaskTableItemState::INVALID;
