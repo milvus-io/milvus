@@ -1,0 +1,6 @@
+customer_name,has_coupon,phone_number,zip_code,sales_tax_rate,total_amount
+"John Roe",true,0272561313,01001,0.05,431.65
+"Jane Doe",false,416-272-2561,55416,0.15,480.70
+"Joe Bloggs",false,"4162722561","55416",0.15,300.70
+"John Smith",FALSE,NULL,22313-1450,0.15,300.70
+

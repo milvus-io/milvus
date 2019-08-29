@@ -1,0 +1,17 @@
+    {
+        // Members
+        "members" : [
+            {
+                "first_name":"Jane",
+                "last_name":"Roe",
+                "events_attended":10,
+                "accept_waiver_of_liability" : true
+            },
+            {
+                 "first_name":"John",
+                 "last_name":"Doe",
+                 "events_attended":2,
+                 "accept_waiver_of_liability" : true
+             }
+        ]
+    }
