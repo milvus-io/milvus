@@ -23,11 +23,11 @@ namespace {
     const std::string TABLE_NAME = GetTableName();
     constexpr int64_t TABLE_DIMENSION = 512;
     constexpr int64_t TABLE_INDEX_FILE_SIZE = 768;
-    constexpr int64_t BATCH_ROW_COUNT = 100000;
-    constexpr int64_t NQ = 10;
+    constexpr int64_t BATCH_ROW_COUNT = 1000000;
+    constexpr int64_t NQ = 100;
     constexpr int64_t TOP_K = 10;
     constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-    constexpr int64_t ADD_VECTOR_LOOP = 10;
+    constexpr int64_t ADD_VECTOR_LOOP = 1;
     constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
@@ -172,15 +172,20 @@ namespace {
             record_array.push_back(pair.second);
         }
 
-        std::vector<TopKQueryResult> topk_query_result_array;
-        {
-            TimeRecorder rc(phase_name);
-            Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, 10, topk_query_result_array);
-            std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
+        auto start = std::chrono::high_resolution_clock::now();
+        for (auto i = 0; i < 5; ++i) {
+            std::vector<TopKQueryResult> topk_query_result_array;
+            {
+                TimeRecorder rc(phase_name);
+                Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, 32, topk_query_result_array);
+                std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
+            }
         }
+        auto finish = std::chrono::high_resolution_clock::now();
+        std::cout << "SEARCHVECTOR COST: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
 
-        PrintSearchResult(search_record_array, topk_query_result_array);
-        CheckResult(search_record_array, topk_query_result_array);
+//        PrintSearchResult(search_record_array, topk_query_result_array);
+//        CheckResult(search_record_array, topk_query_result_array);
     }
 }
 
@@ -287,7 +292,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         IndexParam index;
         index.table_name = TABLE_NAME;
         index.index_type = IndexType::gpu_ivfflat;
-        index.nlist = 1000;
+        index.nlist = 16384;
         index.metric_type = 1;
         Status stat = conn->CreateIndex(index);
         std::cout << "CreateIndex function call status: " << stat.ToString() << std::endl;
@@ -304,6 +309,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//search vectors after build index finish
         DoSearch(conn, search_record_array, "Search after build index finish");
+//        std::cout << conn->DumpTaskTables() << std::endl;
     }
 
     {//delete index

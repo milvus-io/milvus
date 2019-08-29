@@ -68,6 +68,9 @@ public:
     virtual std::string
     ServerStatus() const override;
 
+    virtual std::string
+    DumpTaskTables() const override;
+
     virtual Status
     DeleteByRange(Range &range,
                   const std::string &table_name) override;

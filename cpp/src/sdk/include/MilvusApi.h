@@ -318,6 +318,9 @@ class Connection {
     virtual std::string
     ServerStatus() const = 0;
 
+    virtual std::string
+    DumpTaskTables() const = 0;
+
     /**
      * @brief delete tables by range
      *
