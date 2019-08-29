@@ -117,8 +117,9 @@ class DBImpl : public DB {
     void StartBuildIndexTask(bool force=false);
     void BackgroundBuildIndex();
 
-    Status
-    BuildIndex(const meta::TableFileSchema &);
+    Status BuildIndex(const meta::TableFileSchema &);
+
+    Status MemSerialize();
 
  private:
     const Options options_;
@@ -129,6 +130,7 @@ class DBImpl : public DB {
 
     MetaPtr meta_ptr_;
     MemManagerAbstractPtr mem_mgr_;
+    std::mutex mem_serialize_mutex_;
 
     server::ThreadPool compact_thread_pool_;
     std::list<std::future<void>> compact_thread_results_;
