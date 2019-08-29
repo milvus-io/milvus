@@ -40,7 +40,7 @@ struct TableSchema {
     uint16_t dimension_ = 0;
     int64_t created_on_ = 0;
     int64_t flag_ = 0;
-    int32_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;
+    int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     int32_t nlist_ = DEFAULT_NLIST;
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;
