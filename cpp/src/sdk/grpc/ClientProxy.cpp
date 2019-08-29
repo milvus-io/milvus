@@ -329,6 +329,21 @@ ClientProxy::ServerStatus() const {
     }
 }
 
+std::string
+ClientProxy::DumpTaskTables() const {
+    if (channel_ == nullptr) {
+        return "not connected to server";
+    }
+
+    try {
+        std::string dummy;
+        Status status = client_ptr_->Cmd(dummy, "tasktable");
+        return dummy;
+    } catch (std::exception &ex) {
+        return "connection lost";
+    }
+}
+
 Status
 ClientProxy::DeleteByRange(milvus::Range &range, const std::string &table_name) {
     try {
