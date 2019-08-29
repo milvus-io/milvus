@@ -543,16 +543,16 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
         //step 2: drop old index files
         DropIndex(table_id);
 
-        if(index.engine_type_ == (int)EngineType::FAISS_IDMAP) {
-            ENGINE_LOG_DEBUG << "index type = IDMAP, no need to build index";
-            return Status::OK();
-        }
-
         //step 3: update index info
         status = meta_ptr_->UpdateTableIndexParam(table_id, index);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Failed to update table index info";
             return status;
+        }
+
+        if(index.engine_type_ == (int)EngineType::FAISS_IDMAP) {
+            ENGINE_LOG_DEBUG << "index type = IDMAP, no need to build index";
+            return Status::OK();
         }
     }
 
