@@ -24,7 +24,7 @@ using namespace zilliz::milvus;
 namespace {
 
     static const char* TABLE_NAME = "test_group";
-    static constexpr int64_t TABLE_DIM = 512;
+    static constexpr int64_t TABLE_DIM = 256;
     static constexpr int64_t VECTOR_COUNT = 250000;
     static constexpr int64_t INSERT_LOOP = 10000;
     static constexpr int64_t SECONDS_EACH_HOUR = 3600;
