@@ -114,6 +114,11 @@ ConnectionImpl::ServerStatus() const {
     return client_proxy_->ServerStatus();
 }
 
+std::string
+ConnectionImpl::DumpTaskTables() const {
+    return client_proxy_->DumpTaskTables();
+}
+
 Status
 ConnectionImpl::DeleteByRange(Range &range,
               const std::string &table_name) {
