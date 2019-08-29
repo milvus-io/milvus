@@ -1,0 +1,16 @@
+[
+   {
+      "color" : "black/green",
+      "price" : 97.5,
+      "options" : [
+         {
+            "color" : "black/grey",
+            "price" : 125.99
+         }
+      ]
+   },
+   {
+      "color" : "black/green",
+      "price" : 97.5
+   }
+]
