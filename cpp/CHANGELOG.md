@@ -11,6 +11,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-417 - YAML sequence load disable cause scheduler startup failed
 - MS-413 - Create index failed and server exited
 - MS-427 - Describe index error after drop index
+- MS-432 - Search vectors params nprobe need to check max number
 
 ## Improvement
 - MS-327 - Clean code for milvus
