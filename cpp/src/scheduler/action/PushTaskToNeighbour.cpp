@@ -21,6 +21,8 @@ get_neighbours(const ResourcePtr &self) {
         if (not node) continue;
 
         auto resource = std::static_pointer_cast<Resource>(node);
+//        if (not resource->HasExecutor()) continue;
+
         neighbours.emplace_back(resource);
     }
     return neighbours;
@@ -31,11 +33,16 @@ void
 Action::PushTaskToNeighbourRandomly(const TaskPtr &task,
                                     const ResourcePtr &self) {
     auto neighbours = get_neighbours(self);
-    std::random_device rd;
-    std::mt19937 mt(rd());
-    std::uniform_int_distribution<uint64_t> dist(0, neighbours.size() - 1);
+    if (not neighbours.empty()) {
+        std::random_device rd;
+        std::mt19937 mt(rd());
+        std::uniform_int_distribution<uint64_t> dist(0, neighbours.size() - 1);
 
-    neighbours[dist(mt)]->task_table().Put(task);
+        neighbours[dist(mt)]->task_table().Put(task);
+    } else {
+        //TODO: process
+    }
+
 }
 
 void
