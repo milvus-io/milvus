@@ -1,0 +1,79 @@
+include_directories(${CMAKE_SOURCE_DIR}/thirdparty)
+include_directories(${CMAKE_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
+include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/thirdparty/jsoncons-0.126.0/include)
+include_directories(/usr/local/cuda/include)
+link_directories(/usr/local/cuda/lib64)
+link_directories(${CMAKE_SOURCE_DIR}/thirdparty/tbb)
+
+set(unittest_libs
+        gtest gmock gtest_main gmock_main)
+
+set(depend_libs
+        faiss openblas lapack
+        arrow jemalloc_pic
+        tbb
+        )
+
+set(basic_libs
+        cudart cublas
+        gomp gfortran pthread
+        )
+
+
+#<IVF-TEST>
+#<<<<<<<<<<
+set(ivf_srcs
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/ivf.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/gpu_ivf.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/cloner.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/idmap.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/adapter/structure.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/common/exception.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/common/timer.cpp
+        utils.cpp
+        )
+add_executable(test_ivf test_ivf.cpp ${ivf_srcs})
+target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
+#<<<<<<<<<<
+
+#<IDMAP-TEST>
+#<<<<<<<<<<
+set(idmap_srcs
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/idmap.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/ivf.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/cloner.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/gpu_ivf.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/adapter/structure.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/common/exception.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/common/timer.cpp
+        utils.cpp
+        )
+add_executable(test_idmap test_idmap.cpp ${idmap_srcs})
+target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
+#<<<<<<<<<<
+
+
+#<KDT-TEST>
+#<<<<<<<<<<
+set(kdt_srcs
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/preprocessor/normalize.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/kdt_parameters.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/cpu_kdt_rng.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/adapter/structure.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/adapter/sptag.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/common/exception.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/adapter/arrow.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/common/timer.cpp
+        utils.cpp
+        )
+add_executable(test_kdt test_kdt.cpp ${kdt_srcs})
+target_link_libraries(test_kdt
+        SPTAGLibStatic
+        ${depend_libs} ${unittest_libs} ${basic_libs})
+#<<<<<<<<<<
+
+
+add_subdirectory(faiss_ori)
+add_subdirectory(test_nsg)
+
