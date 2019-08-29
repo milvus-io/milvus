@@ -260,17 +260,17 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     meta::DatesT dates = {table_file.date_};
-    status = impl_->FilesToSearch(table_id, dates, dated_files);
+    std::vector<size_t> ids;
+    status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
             to_index_files_cnt+raw_files_cnt+index_files_cnt);
 
-    status = impl_->FilesToSearch(table_id, meta::DatesT(), dated_files);
+    status = impl_->FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);
 
-    std::vector<size_t> ids;
     status = impl_->FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),

@@ -279,28 +279,26 @@ Status SqliteMetaImpl::DescribeTable(TableSchema &table_schema) {
     return Status::OK();
 }
 
-Status SqliteMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) {
-    has = false;
+Status SqliteMetaImpl::FilesByType(const std::string& table_id,
+        const std::vector<int>& file_types,
+        std::vector<std::string>& file_ids) {
+    if(file_types.empty()) {
+        return Status::Error("file types array is empty");
+    }
+
     try {
-        std::vector<int> file_types = {
-                (int) TableFileSchema::RAW,
-                (int) TableFileSchema::NEW,
-                (int) TableFileSchema::NEW_MERGE,
-                (int) TableFileSchema::NEW_INDEX,
-                (int) TableFileSchema::TO_INDEX,
-        };
-        auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
+        file_ids.clear();
+        auto selected = ConnectorPtr->select(columns(&TableFileSchema::file_id_,
                                                      &TableFileSchema::file_type_),
                                              where(in(&TableFileSchema::file_type_, file_types)
                                                    and c(&TableFileSchema::table_id_) == table_id
                                              ));
 
         if (selected.size() >= 1) {
-            has = true;
-
-            int raw_count = 0, new_count = 0, new_merge_count = 0, new_index_count = 0, to_index_count = 0;
-            std::vector<std::string> file_ids;
+            int raw_count = 0, new_count = 0, new_merge_count = 0, new_index_count = 0;
+            int to_index_count = 0, index_count = 0, backup_count = 0;
             for (auto &file : selected) {
+                file_ids.push_back(std::get<0>(file));
                 switch (std::get<1>(file)) {
                     case (int) TableFileSchema::RAW:
                         raw_count++;
@@ -317,14 +315,21 @@ Status SqliteMetaImpl::HasNonIndexFiles(const std::string& table_id, bool& has) 
                     case (int) TableFileSchema::TO_INDEX:
                         to_index_count++;
                         break;
+                    case (int) TableFileSchema::INDEX:
+                        index_count++;
+                        break;
+                    case (int) TableFileSchema::BACKUP:
+                        backup_count++;
+                        break;
                     default:
                         break;
                 }
             }
 
             ENGINE_LOG_DEBUG << "Table " << table_id << " currently has raw files:" << raw_count
-                << " new files:" << new_count << " new_merge files:" << new_merge_count
-                << " new_index files:" << new_index_count << " to_index files:" << to_index_count;
+                             << " new files:" << new_count << " new_merge files:" << new_merge_count
+                             << " new_index files:" << new_index_count << " to_index files:" << to_index_count
+                             << " index files:" << index_count << " backup files:" << backup_count;
         }
 
     } catch (std::exception &e) {
@@ -628,111 +633,6 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
 
     } catch (std::exception &e) {
         return HandleException("Encounter exception when iterate raw files", e);
-    }
-
-    return Status::OK();
-}
-
-Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
-                                 const DatesT &partition,
-                                 DatePartionedTableFilesSchema &files) {
-    files.clear();
-
-    try {
-        server::MetricCollector metric;
-
-        if (partition.empty()) {
-            std::vector<int> file_type = {(int) TableFileSchema::RAW, (int) TableFileSchema::TO_INDEX, (int) TableFileSchema::INDEX};
-            auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
-                                                         &TableFileSchema::table_id_,
-                                                         &TableFileSchema::file_id_,
-                                                         &TableFileSchema::file_type_,
-                                                         &TableFileSchema::file_size_,
-                                                         &TableFileSchema::row_count_,
-                                                         &TableFileSchema::date_,
-                                                         &TableFileSchema::engine_type_),
-                                                 where(c(&TableFileSchema::table_id_) == table_id and
-                                                       in(&TableFileSchema::file_type_, file_type)));
-
-            TableSchema table_schema;
-            table_schema.table_id_ = table_id;
-            auto status = DescribeTable(table_schema);
-            if (!status.ok()) {
-                return status;
-            }
-
-            TableFileSchema table_file;
-
-            for (auto &file : selected) {
-                table_file.id_ = std::get<0>(file);
-                table_file.table_id_ = std::get<1>(file);
-                table_file.file_id_ = std::get<2>(file);
-                table_file.file_type_ = std::get<3>(file);
-                table_file.file_size_ = std::get<4>(file);
-                table_file.row_count_ = std::get<5>(file);
-                table_file.date_ = std::get<6>(file);
-                table_file.engine_type_ = std::get<7>(file);
-                table_file.dimension_ = table_schema.dimension_;
-                table_file.index_file_size_ = table_schema.index_file_size_;
-                table_file.nlist_ = table_schema.nlist_;
-                table_file.metric_type_ = table_schema.metric_type_;
-
-                utils::GetTableFilePath(options_, table_file);
-                auto dateItr = files.find(table_file.date_);
-                if (dateItr == files.end()) {
-                    files[table_file.date_] = TableFilesSchema();
-                }
-                files[table_file.date_].push_back(table_file);
-            }
-        }
-        else {
-            std::vector<int> file_type = {(int) TableFileSchema::RAW, (int) TableFileSchema::TO_INDEX, (int) TableFileSchema::INDEX};
-            auto selected = ConnectorPtr->select(columns(&TableFileSchema::id_,
-                                                         &TableFileSchema::table_id_,
-                                                         &TableFileSchema::file_id_,
-                                                         &TableFileSchema::file_type_,
-                                                         &TableFileSchema::file_size_,
-                                                         &TableFileSchema::row_count_,
-                                                         &TableFileSchema::date_,
-                                                         &TableFileSchema::engine_type_),
-                                                 where(c(&TableFileSchema::table_id_) == table_id and
-                                                       in(&TableFileSchema::date_, partition) and
-                                                       in(&TableFileSchema::file_type_, file_type)));
-
-            TableSchema table_schema;
-            table_schema.table_id_ = table_id;
-            auto status = DescribeTable(table_schema);
-            if (!status.ok()) {
-                return status;
-            }
-
-            TableFileSchema table_file;
-
-            for (auto &file : selected) {
-                table_file.id_ = std::get<0>(file);
-                table_file.table_id_ = std::get<1>(file);
-                table_file.file_id_ = std::get<2>(file);
-                table_file.file_type_ = std::get<3>(file);
-                table_file.file_size_ = std::get<4>(file);
-                table_file.row_count_ = std::get<5>(file);
-                table_file.date_ = std::get<6>(file);
-                table_file.engine_type_ = std::get<7>(file);
-                table_file.dimension_ = table_schema.dimension_;
-                table_file.index_file_size_ = table_schema.index_file_size_;
-                table_file.nlist_ = table_schema.nlist_;
-                table_file.metric_type_ = table_schema.metric_type_;
-
-                utils::GetTableFilePath(options_, table_file);
-                auto dateItr = files.find(table_file.date_);
-                if (dateItr == files.end()) {
-                    files[table_file.date_] = TableFilesSchema();
-                }
-                files[table_file.date_].push_back(table_file);
-            }
-
-        }
-    } catch (std::exception &e) {
-        return HandleException("Encounter exception when iterate index files", e);
     }
 
     return Status::OK();

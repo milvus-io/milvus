@@ -70,10 +70,10 @@ class Meta {
     UpdateTableFiles(TableFilesSchema &files) = 0;
 
     virtual Status
-    FilesToSearch(const std::string &table_id, const DatesT &partition, DatePartionedTableFilesSchema &files) = 0;
-
-    virtual Status
-    FilesToSearch(const std::string &table_id, const std::vector<size_t> &ids, const DatesT &partition, DatePartionedTableFilesSchema &files) = 0;
+    FilesToSearch(const std::string &table_id,
+                  const std::vector<size_t> &ids,
+                  const DatesT &partition,
+                  DatePartionedTableFilesSchema &files) = 0;
 
     virtual Status
     FilesToMerge(const std::string &table_id, DatePartionedTableFilesSchema &files) = 0;
@@ -88,7 +88,9 @@ class Meta {
     FilesToIndex(TableFilesSchema &) = 0;
 
     virtual Status
-    HasNonIndexFiles(const std::string &table_id, bool &has) = 0;
+    FilesByType(const std::string &table_id,
+                const std::vector<int> &file_types,
+                std::vector<std::string>& file_ids) = 0;
 
     virtual Status
     DescribeTableIndex(const std::string &table_id, TableIndex& index) = 0;
