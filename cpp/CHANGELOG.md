@@ -12,6 +12,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-413 - Create index failed and server exited
 - MS-427 - Describe index error after drop index
 - MS-432 - Search vectors params nprobe need to check max number
+- MS-431 - Search vectors params nprobe: 0/-1, expected result: raise exception
+- MS-331 - Crate Table : when table exists, error code is META_FAILED(code=15) rather than ILLEGAL TABLE NAME(code=9))
 
 ## Improvement
 - MS-327 - Clean code for milvus
