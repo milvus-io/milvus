@@ -153,7 +153,10 @@ CreateTableTask::OnExecute() {
         engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
         if (!stat.ok()) {
             //table could exist
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            if(stat.IsAlreadyExist()) {
+                return SetError(SERVER_INVALID_TABLE_NAME, stat.ToString());
+            }
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
     } catch (std::exception &ex) {
@@ -193,7 +196,7 @@ DescribeTableTask::OnExecute() {
         table_info.table_id_ = table_name_;
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
         schema_->mutable_table_name()->set_table_name(table_info.table_id_);
@@ -238,7 +241,7 @@ CreateIndexTask::OnExecute() {
         bool has_table = false;
         engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table);
         if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
         if (!has_table) {
@@ -268,7 +271,7 @@ CreateIndexTask::OnExecute() {
         index.metric_type_ = grpc_index.metric_type();
         stat = DBWrapper::DB()->CreateIndex(table_name_, index);
         if (!stat.ok()) {
-            return SetError(SERVER_BUILD_INDEX_ERROR, "Engine failed: " + stat.ToString());
+            return SetError(SERVER_BUILD_INDEX_ERROR, stat.ToString());
         }
 
         rc.ElapseFromBegin("totally cost");
@@ -306,7 +309,7 @@ HasTableTask::OnExecute() {
         //step 2: check table existence
         engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table_);
         if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
         rc.ElapseFromBegin("totally cost");
@@ -348,7 +351,7 @@ DropTableTask::OnExecute() {
             if (stat.IsNotFound()) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
             } else {
-                return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+                return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
             }
         }
 
@@ -358,7 +361,7 @@ DropTableTask::OnExecute() {
         std::vector<DB_DATE> dates;
         stat = DBWrapper::DB()->DeleteTable(table_name_, dates);
         if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
         rc.ElapseFromBegin("total cost");
@@ -386,7 +389,7 @@ ShowTablesTask::OnExecute() {
     std::vector<engine::meta::TableSchema> schema_array;
     engine::Status stat = DBWrapper::DB()->AllTables(schema_array);
     if (!stat.ok()) {
-        return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+        return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
     }
 
     for (auto &schema : schema_array) {
@@ -448,7 +451,7 @@ InsertTask::OnExecute() {
                 return SetError(SERVER_TABLE_NOT_EXIST,
                                 "Table " + insert_param_->table_name() + " not exists");
             } else {
-                return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+                return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
             }
         }
 
@@ -588,7 +591,7 @@ SearchTask::OnExecute() {
             if (stat.IsNotFound()) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
             } else {
-                return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+                return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
             }
         }
 
@@ -667,7 +670,7 @@ SearchTask::OnExecute() {
 
         rc.ElapseFromBegin("search vectors from engine");
         if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
         if (results.empty()) {
@@ -742,7 +745,7 @@ CountTableTask::OnExecute() {
         uint64_t row_count = 0;
         engine::Status stat = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
         if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
         row_count_ = (int64_t) row_count;
@@ -818,7 +821,7 @@ DeleteByRangeTask::OnExecute() {
             if (stat.IsNotFound()) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name + " not exists");
             } else {
-                return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+                return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
             }
         }
 
@@ -844,7 +847,7 @@ DeleteByRangeTask::OnExecute() {
 #endif
         engine::Status status = DBWrapper::DB()->DeleteTable(table_name, dates);
         if (!status.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
     } catch (std::exception &ex) {
@@ -880,7 +883,7 @@ PreloadTableTask::OnExecute() {
         //step 2: check table existence
         engine::Status stat = DBWrapper::DB()->PreloadTable(table_name_);
         if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
         rc.ElapseFromBegin("totally cost");
@@ -921,7 +924,7 @@ DescribeIndexTask::OnExecute() {
         engine::TableIndex index;
         engine::Status stat = DBWrapper::DB()->DescribeIndex(table_name_, index);
         if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
         index_param_->mutable_table_name()->set_table_name(table_name_);
@@ -963,7 +966,7 @@ DropIndexTask::OnExecute() {
         //step 2: check table existence
         engine::Status stat = DBWrapper::DB()->DropIndex(table_name_);
         if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, "Engine failed: " + stat.ToString());
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
         rc.ElapseFromBegin("totally cost");
