@@ -217,6 +217,21 @@ TEST(UtilTest, VALIDATE_INDEX_TEST) {
     ASSERT_EQ(server::ValidationUtil::ValidateTableIndexMetricType(2), server::SERVER_SUCCESS);
 }
 
+TEST(ValidationUtilTest, ValidateTopkTest) {
+    engine::meta::TableSchema schema;
+    ASSERT_EQ(server::ValidationUtil::ValidateSearchTopk(10, schema), server::SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateSearchTopk(65536, schema), server::SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateSearchTopk(0, schema), server::SERVER_SUCCESS);
+}
+
+TEST(ValidationUtilTest, ValidateNprobeTest) {
+    engine::meta::TableSchema schema;
+    schema.nlist_ = 100;
+    ASSERT_EQ(server::ValidationUtil::ValidateSearchNprobe(10, schema), server::SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateSearchNprobe(0, schema), server::SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateSearchNprobe(101, schema), server::SERVER_SUCCESS);
+}
+
 TEST(ValidationUtilTest, ValidateGpuTest) {
     ASSERT_EQ(server::ValidationUtil::ValidateGpuIndex(0), server::SERVER_SUCCESS);
     ASSERT_NE(server::ValidationUtil::ValidateGpuIndex(100), server::SERVER_SUCCESS);
