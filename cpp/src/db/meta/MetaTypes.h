@@ -19,8 +19,8 @@ namespace meta {
 
 constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
 constexpr int32_t DEFAULT_NLIST = 16384;
-constexpr int32_t DEFAULT_INDEX_FILE_SIZE = ONE_GB;
 constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
+constexpr int32_t DEFAULT_INDEX_FILE_SIZE = ONE_GB;
 
 constexpr int64_t FLAG_MASK_USERID = 1;
 

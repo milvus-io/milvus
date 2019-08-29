@@ -461,6 +461,17 @@ Status SqliteMetaImpl::DropTableIndex(const std::string &table_id) {
                         c(&TableFileSchema::file_type_) == (int) TableFileSchema::BACKUP
                 ));
 
+        //set table index type to raw
+        ConnectorPtr->update_all(
+                set(
+                        c(&TableSchema::engine_type_) = DEFAULT_ENGINE_TYPE,
+                        c(&TableSchema::nlist_) = DEFAULT_NLIST,
+                        c(&TableSchema::metric_type_) = DEFAULT_METRIC_TYPE
+                ),
+                where(
+                        c(&TableSchema::table_id_) == table_id
+                ));
+
     } catch (std::exception &e) {
         return HandleException("Encounter exception when delete table index files", e);
     }
@@ -798,10 +809,14 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
             }
             files[table_file.date_].push_back(table_file);
         }
-
+        if(files.empty()) {
+            std::cout << "ERROR" << std::endl;
+        }
     } catch (std::exception &e) {
         return HandleException("Encounter exception when iterate index files", e);
     }
+
+
 
     return Status::OK();
 }
