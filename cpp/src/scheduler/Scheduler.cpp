@@ -120,15 +120,20 @@ Scheduler::OnCopyCompleted(const EventPtr &event) {
                     auto task = load_completed_event->task_table_item_->task;
                     auto search_task = std::static_pointer_cast<XSearchTask>(task);
                     auto location = search_task->index_engine_->GetLocation();
+                    bool moved = false;
 
                     for (auto i = 0; i < res_mgr_.lock()->GetNumGpuResource(); ++i) {
                         auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
                         if (index != nullptr) {
+                            moved = true;
                             auto dest_resource = res_mgr_.lock()->GetResource(ResourceType::GPU, i);
                             Action::PushTaskToResource(load_completed_event->task_table_item_->task, dest_resource);
+                            break;
                         }
                     }
-
+                    if (not moved) {
+                        Action::PushTaskToNeighbourRandomly(task, resource);
+                    }
                 }
                 break;
             }

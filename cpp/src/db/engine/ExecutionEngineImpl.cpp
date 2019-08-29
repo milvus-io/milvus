@@ -124,6 +124,8 @@ Status ExecutionEngineImpl::Serialize() {
 }
 
 Status ExecutionEngineImpl::Load(bool to_cache) {
+    std::cout << "load\n";
+
     index_ = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool already_in_cache = (index_ != nullptr);
     if (!index_) {
@@ -147,6 +149,7 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
 }
 
 Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
+    std::cout << "copytogpu\n";
     auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
