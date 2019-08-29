@@ -281,10 +281,10 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {//search vectors without index
         Sleep(2);
 
-//        int64_t row_count = 0;
-//        Status stat = conn->CountTable(TABLE_NAME, row_count);
-//        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
-//        DoSearch(conn, search_record_array, "Search without index");
+        int64_t row_count = 0;
+        Status stat = conn->CountTable(TABLE_NAME, row_count);
+        std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
+        DoSearch(conn, search_record_array, "Search without index");
     }
 
     {//wait unit build index finish
