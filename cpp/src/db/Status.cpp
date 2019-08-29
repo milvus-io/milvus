@@ -48,6 +48,21 @@ std::string Status::ToString() const {
         case kNotFound:
             type = "NotFound: ";
             break;
+        case kError:
+            type = "Error: ";
+            break;
+        case kInvalidDBPath:
+            type = "InvalidDBPath: ";
+            break;
+        case kGroupError:
+            type = "GroupError: ";
+            break;
+        case kDBTransactionError:
+            type = "DBTransactionError: ";
+            break;
+        case kAlreadyExist:
+            type = "AlreadyExist: ";
+            break;
         default:
             snprintf(tmp, sizeof(tmp), "Unkown code(%d): ",
                     static_cast<int>(code()));

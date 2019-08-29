@@ -93,6 +93,24 @@ ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
 }
 
 ServerError
+ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema) {
+    if (top_k <= 0 || top_k > 1024) {
+        return SERVER_INVALID_TOPK;
+    }
+
+    return SERVER_SUCCESS;
+}
+
+ServerError
+ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema) {
+    if (nprobe <= 0 || nprobe > table_schema.nlist_) {
+        return SERVER_INVALID_NPROBE;
+    }
+
+    return SERVER_SUCCESS;
+}
+
+ServerError
 ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
