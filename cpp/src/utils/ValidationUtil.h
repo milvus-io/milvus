@@ -1,5 +1,6 @@
 #pragma once
 
+#include "db/meta/MetaTypes.h"
 #include "Error.h"
 
 namespace zilliz {
@@ -25,6 +26,12 @@ public:
 
     static ServerError
     ValidateTableIndexMetricType(int32_t metric_type);
+
+    static ServerError
+    ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema);
+
+    static ServerError
+    ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema);
 
     static ServerError
     ValidateGpuIndex(uint32_t gpu_index);
