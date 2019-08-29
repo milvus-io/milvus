@@ -10,7 +10,7 @@ DB_PATH="/opt/milvus"
 PROFILING="OFF"
 BUILD_FAISS_WITH_MKL="OFF"
 USE_JFROG_CACHE="OFF"
-KNOWHERE_BUILD_DIR="`pwd`/thirdparty/knowhere/cmake_build"
+KNOWHERE_BUILD_DIR="`pwd`/src/core/cmake_build"
 
 while getopts "p:d:t:k:uhlrcgmj" arg
 do
