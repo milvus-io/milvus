@@ -326,10 +326,16 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
     }
 }
 
-Status MySQLMetaImpl::HasNonIndexFiles(const std::string &table_id, bool &has) {
-    has = false;
+Status MySQLMetaImpl::FilesByType(const std::string &table_id,
+                                  const std::vector<int> &file_types,
+                                  std::vector<std::string> &file_ids) {
+    if(file_types.empty()) {
+        return Status::Error("file types array is empty");
+    }
 
     try {
+        file_ids.clear();
+
         StoreQueryResult res;
         {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
@@ -338,34 +344,75 @@ Status MySQLMetaImpl::HasNonIndexFiles(const std::string &table_id, bool &has) {
                 return Status::Error("Failed to connect to database server");
             }
 
+            std::string types;
+            for(auto type : file_types) {
+                if(!types.empty()) {
+                    types += ",";
+                }
+                types += std::to_string(type);
+            }
+
             Query hasNonIndexFilesQuery = connectionPtr->query();
             //since table_id is a unique column we just need to check whether it exists or not
-            hasNonIndexFilesQuery << "SELECT EXISTS " <<
-                                  "(SELECT 1 FROM TableFiles " <<
+            hasNonIndexFilesQuery << "SELECT file_id, file_type FROM TableFiles " <<
                                   "WHERE table_id = " << quote << table_id << " AND " <<
-                                  "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
-                                  "file_type = " << std::to_string(TableFileSchema::NEW) << " OR " <<
-                                  "file_type = " << std::to_string(TableFileSchema::NEW_MERGE) << " OR " <<
-                                  "file_type = " << std::to_string(TableFileSchema::NEW_INDEX) << " OR " <<
-                                  "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ")) " <<
-                                  "AS " << quote << "check" << ";";
+                                  "file_type in (" << types << ");";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::HasNonIndexFiles: " << hasNonIndexFilesQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesByType: " << hasNonIndexFilesQuery.str();
 
             res = hasNonIndexFilesQuery.store();
         } //Scoped Connection
 
-        int check = res[0]["check"];
-        has = (check == 1);
+        if (res.num_rows() > 0) {
+            int raw_count = 0, new_count = 0, new_merge_count = 0, new_index_count = 0;
+            int to_index_count = 0, index_count = 0, backup_count = 0;
+            for (auto &resRow : res) {
+                std::string file_id;
+                resRow["file_id"].to_string(file_id);
+                file_ids.push_back(file_id);
+
+                int32_t file_type = resRow["file_type"];
+                switch (file_type) {
+                    case (int) TableFileSchema::RAW:
+                        raw_count++;
+                        break;
+                    case (int) TableFileSchema::NEW:
+                        new_count++;
+                        break;
+                    case (int) TableFileSchema::NEW_MERGE:
+                        new_merge_count++;
+                        break;
+                    case (int) TableFileSchema::NEW_INDEX:
+                        new_index_count++;
+                        break;
+                    case (int) TableFileSchema::TO_INDEX:
+                        to_index_count++;
+                        break;
+                    case (int) TableFileSchema::INDEX:
+                        index_count++;
+                        break;
+                    case (int) TableFileSchema::BACKUP:
+                        backup_count++;
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            ENGINE_LOG_DEBUG << "Table " << table_id << " currently has raw files:" << raw_count
+                             << " new files:" << new_count << " new_merge files:" << new_merge_count
+                             << " new_index files:" << new_index_count << " to_index files:" << to_index_count
+                             << " index files:" << index_count << " backup files:" << backup_count;
+        }
 
     } catch (const BadQuery &er) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN CHECKING IF NON INDEX FILES EXISTS" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN CHECKING IF NON INDEX FILES EXISTS", er.what());
+        ENGINE_LOG_ERROR << "QUERY ERROR WHEN GET FILE BY TYPE" << ": " << er.what();
+        return Status::DBTransactionError("QUERY ERROR WHEN GET FILE BY TYPE", er.what());
     } catch (const Exception &er) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CHECKING IF NON INDEX FILES EXISTS" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN CHECKING IF NON INDEX FILES EXISTS", er.what());
+        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN GET FILE BY TYPE" << ": " << er.what();
+        return Status::DBTransactionError("GENERAL ERROR WHEN GET FILE BY TYPE", er.what());
     }
 
     return Status::OK();
@@ -982,121 +1029,6 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
         // Catch-all for any other MySQL++ exceptions
         ENGINE_LOG_ERROR << "GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX" << ": " << er.what();
         return Status::DBTransactionError("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", er.what());
-    }
-
-    return Status::OK();
-}
-
-Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
-                                    const DatesT &partition,
-                                    DatePartionedTableFilesSchema &files) {
-    files.clear();
-
-    try {
-        server::MetricCollector metric;
-        StoreQueryResult res;
-        {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
-
-            if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
-            }
-
-            if (partition.empty()) {
-
-                Query filesToSearchQuery = connectionPtr->query();
-                filesToSearchQuery << "SELECT id, table_id, engine_type, file_id, file_type, file_size, row_count, date " <<
-                                   "FROM TableFiles " <<
-                                   "WHERE table_id = " << quote << table_id << " AND " <<
-                                   "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
-                                   "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " OR " <<
-                                   "file_type = " << std::to_string(TableFileSchema::INDEX) << ");";
-
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
-
-                res = filesToSearchQuery.store();
-
-            } else {
-
-                Query filesToSearchQuery = connectionPtr->query();
-
-                std::stringstream partitionListSS;
-                for (auto &date : partition) {
-                    partitionListSS << std::to_string(date) << ", ";
-                }
-                std::string partitionListStr = partitionListSS.str();
-                partitionListStr = partitionListStr.substr(0, partitionListStr.size() - 2); //remove the last ", "
-
-                filesToSearchQuery << "SELECT id, table_id, engine_type, file_id, file_type, file_size, row_count, date " <<
-                                   "FROM TableFiles " <<
-                                   "WHERE table_id = " << quote << table_id << " AND " <<
-                                   "date IN (" << partitionListStr << ") AND " <<
-                                   "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
-                                   "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " OR " <<
-                                   "file_type = " << std::to_string(TableFileSchema::INDEX) << ");";
-
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToSearch: " << filesToSearchQuery.str();
-
-                res = filesToSearchQuery.store();
-
-            }
-        } //Scoped Connection
-
-        TableSchema table_schema;
-        table_schema.table_id_ = table_id;
-        auto status = DescribeTable(table_schema);
-        if (!status.ok()) {
-            return status;
-        }
-
-        TableFileSchema table_file;
-        for (auto &resRow : res) {
-
-            table_file.id_ = resRow["id"]; //implicit conversion
-
-            std::string table_id_str;
-            resRow["table_id"].to_string(table_id_str);
-            table_file.table_id_ = table_id_str;
-
-            table_file.index_file_size_ = table_schema.index_file_size_;
-
-            table_file.engine_type_ = resRow["engine_type"];
-
-            table_file.nlist_ = table_schema.nlist_;
-
-            table_file.metric_type_ = table_schema.metric_type_;
-
-            std::string file_id;
-            resRow["file_id"].to_string(file_id);
-            table_file.file_id_ = file_id;
-
-            table_file.file_type_ = resRow["file_type"];
-
-            table_file.file_size_ = resRow["file_size"];
-
-            table_file.row_count_ = resRow["row_count"];
-
-            table_file.date_ = resRow["date"];
-
-            table_file.dimension_ = table_schema.dimension_;
-
-            utils::GetTableFilePath(options_, table_file);
-
-            auto dateItr = files.find(table_file.date_);
-            if (dateItr == files.end()) {
-                files[table_file.date_] = TableFilesSchema();
-            }
-
-            files[table_file.date_].push_back(table_file);
-        }
-    } catch (const BadQuery &er) {
-        // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN FINDING TABLE FILES TO SEARCH" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN FINDING TABLE FILES TO SEARCH", er.what());
-    } catch (const Exception &er) {
-        // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", er.what());
     }
 
     return Status::OK();

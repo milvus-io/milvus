@@ -307,8 +307,6 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
         ASSERT_EQ(target_ids.size(), nb);
     }
 
-    sleep(2);
-
     engine::TableIndex index;
     index.engine_type_ = (int)engine::EngineType::FAISS_IDMAP;
     db_->CreateIndex(TABLE_NAME, index); // wait until build index finish

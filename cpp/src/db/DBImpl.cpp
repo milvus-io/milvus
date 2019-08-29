@@ -98,7 +98,8 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
     meta::DatePartionedTableFilesSchema files;
 
     meta::DatesT dates;
-    auto status = meta_ptr_->FilesToSearch(table_id, dates, files);
+    std::vector<size_t> ids;
+    auto status = meta_ptr_->FilesToSearch(table_id, ids, dates, files);
     if (!status.ok()) {
         return status;
     }
@@ -173,7 +174,8 @@ Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint6
 
     //get all table files from table
     meta::DatePartionedTableFilesSchema files;
-    auto status = meta_ptr_->FilesToSearch(table_id, dates, files);
+    std::vector<size_t> ids;
+    auto status = meta_ptr_->FilesToSearch(table_id, ids, dates, files);
     if (!status.ok()) { return status; }
 
     meta::TableFilesSchema file_id_array;
@@ -334,14 +336,8 @@ void DBImpl::StartMetricTask() {
     ENGINE_LOG_TRACE << "Metric task finished";
 }
 
-void DBImpl::StartCompactionTask() {
-    static uint64_t compact_clock_tick = 0;
-    compact_clock_tick++;
-    if(compact_clock_tick%COMPACT_ACTION_INTERVAL != 0) {
-        return;
-    }
-
-    //serialize memory data
+Status DBImpl::MemSerialize() {
+    std::lock_guard<std::mutex> lck(mem_serialize_mutex_);
     std::set<std::string> temp_table_ids;
     mem_mgr_->Serialize(temp_table_ids);
     for(auto& id : temp_table_ids) {
@@ -351,6 +347,19 @@ void DBImpl::StartCompactionTask() {
     if(!temp_table_ids.empty()) {
         SERVER_LOG_DEBUG << "Insert cache serialized";
     }
+
+    return Status::OK();
+}
+
+void DBImpl::StartCompactionTask() {
+    static uint64_t compact_clock_tick = 0;
+    compact_clock_tick++;
+    if(compact_clock_tick%COMPACT_ACTION_INTERVAL != 0) {
+        return;
+    }
+
+    //serialize memory data
+    MemSerialize();
 
     //compactiong has been finished?
     if(!compact_thread_results_.empty()) {
@@ -535,39 +544,49 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
             return status;
         }
 
-        if(utils::IsSameIndex(old_index, index)) {
-            ENGINE_LOG_DEBUG << "Same index setting, no need to create index again";
-            return Status::OK();
-        }
+        //step 2: update index info
+        if(!utils::IsSameIndex(old_index, index)) {
+            DropIndex(table_id);
 
-        //step 2: drop old index files
-        DropIndex(table_id);
-
-        //step 3: update index info
-        status = meta_ptr_->UpdateTableIndexParam(table_id, index);
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to update table index info";
-            return status;
-        }
-
-        if(index.engine_type_ == (int)EngineType::FAISS_IDMAP) {
-            ENGINE_LOG_DEBUG << "index type = IDMAP, no need to build index";
-            return Status::OK();
+            status = meta_ptr_->UpdateTableIndexParam(table_id, index);
+            if (!status.ok()) {
+                ENGINE_LOG_ERROR << "Failed to update table index info";
+                return status;
+            }
         }
     }
 
-    bool has = false;
-    auto status = meta_ptr_->HasNonIndexFiles(table_id, has);
+    //step 3: wait and build index
+    //for IDMAP type, only wait all NEW file converted to RAW file
+    //for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
+    std::vector<int> file_types;
+    if(index.engine_type_ == (int)EngineType::FAISS_IDMAP) {
+        file_types = {
+            (int) meta::TableFileSchema::NEW,
+            (int) meta::TableFileSchema::NEW_MERGE,
+        };
+    } else {
+        file_types = {
+            (int) meta::TableFileSchema::RAW,
+            (int) meta::TableFileSchema::NEW,
+            (int) meta::TableFileSchema::NEW_MERGE,
+            (int) meta::TableFileSchema::NEW_INDEX,
+            (int) meta::TableFileSchema::TO_INDEX,
+        };
+    }
+
+    std::vector<std::string> file_ids;
+    auto status = meta_ptr_->FilesByType(table_id, file_types, file_ids);
     int times = 1;
 
-    while (has) {
+    while (!file_ids.empty()) {
         ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
-        status = meta_ptr_->UpdateTableFilesToIndex(table_id);
-        /* StartBuildIndexTask(true); */
+
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10*1000, times*100)));
-        status = meta_ptr_->HasNonIndexFiles(table_id, has);
+        status = meta_ptr_->FilesByType(table_id, file_types, file_ids);
         times++;
     }
+
     return Status::OK();
 }
 
@@ -576,6 +595,7 @@ Status DBImpl::DescribeIndex(const std::string& table_id, TableIndex& index) {
 }
 
 Status DBImpl::DropIndex(const std::string& table_id) {
+    ENGINE_LOG_DEBUG << "drop index for table: " << table_id;
     return meta_ptr_->DropTableIndex(table_id);
 }
 
