@@ -15,6 +15,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-431 - Search vectors params nprobe: 0/-1, expected result: raise exception
 - MS-331 - Crate Table : when table exists, error code is META_FAILED(code=15) rather than ILLEGAL TABLE NAME(code=9))
 - MS-430 - Search no result if index created with FLAT
+- MS-443 - Create index hang again
 
 ## Improvement
 - MS-327 - Clean code for milvus
