@@ -93,6 +93,7 @@ namespace {
                 return;
             }
 
+            //range: [start_day, end_day)
             for (long i = 0; i < days; i++) {
                 time_t tt_day = tt_start + DAY_SECONDS * i;
                 tm tm_day;
