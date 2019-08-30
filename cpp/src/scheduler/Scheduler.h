@@ -82,7 +82,7 @@ private:
      * Pull task from neighbours;
      */
     void
-    OnCopyCompleted(const EventPtr &event);
+    OnLoadCompleted(const EventPtr &event);
 
     /*
      * Process task table updated events, which happened on task_table->put;
