@@ -47,6 +47,9 @@ public:
     uint64_t
     GetNumOfComputeResource();
 
+    std::vector<ResourcePtr>
+    GetComputeResource();
+
     /*
      * Add resource into Resource Management;
      * Generate functions on events;

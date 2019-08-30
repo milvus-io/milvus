@@ -19,12 +19,12 @@ public:
         : name_(std::move(name)), speed_(speed) {}
 
     const std::string &
-    get_name() const {
+    name() const {
         return name_;
     }
 
-    const double
-    get_speed() const {
+    uint64_t
+    speed() const {
         return speed_;
     }
 
@@ -38,7 +38,7 @@ public:
 
 private:
     std::string name_;
-    double speed_;
+    uint64_t speed_;
 };
 
 

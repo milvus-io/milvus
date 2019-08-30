@@ -44,7 +44,7 @@ enum class RegisterType {
 };
 
 class Resource : public Node, public std::enable_shared_from_this<Resource> {
-public:
+ public:
     /*
      * Start loader and executor if enable;
      */
@@ -69,7 +69,7 @@ public:
     void
     WakeupExecutor();
 
-public:
+ public:
     template<typename T>
     void Register_T(const RegisterType &type) {
         register_table_.emplace(type, [] { return std::make_shared<T>(); });
@@ -110,6 +110,22 @@ public:
         return enable_executor_;
     }
 
+    // TODO: const
+    uint64_t
+    NumOfTaskToExec() {
+        uint64_t count = 0;
+        for (auto &task : task_table_) {
+            if (task->state == TaskTableItemState::LOADED) ++count;
+        }
+        return count;
+    }
+
+    // TODO: need double ?
+    inline uint64_t
+    TaskAvgCost() const {
+        return total_cost_ / total_task_;
+    }
+
     TaskTable &
     task_table();
 
@@ -120,7 +136,7 @@ public:
 
     friend std::ostream &operator<<(std::ostream &out, const Resource &resource);
 
-protected:
+ protected:
     Resource(std::string name,
              ResourceType type,
              uint64_t device_id,
@@ -142,7 +158,7 @@ protected:
     virtual void
     Process(TaskPtr task) = 0;
 
-private:
+ private:
     /*
      * These function should move to cost.h ???
      * COST.H ???
@@ -162,7 +178,7 @@ private:
     TaskTableItemPtr
     pick_task_execute();
 
-private:
+ private:
     /*
      * Only called by load thread;
      */
@@ -175,13 +191,16 @@ private:
     void
     executor_function();
 
-protected:
+ protected:
     uint64_t device_id_;
     std::string name_;
-private:
+ private:
     ResourceType type_;
 
     TaskTable task_table_;
+
+    uint64_t total_cost_ = 0;
+    uint64_t total_task_ = 0;
 
     std::map<RegisterType, std::function<RegisterHandlerPtr()>> register_table_;
     std::function<void(EventPtr)> subscriber_ = nullptr;
