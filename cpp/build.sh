@@ -2,7 +2,6 @@
 
 BUILD_TYPE="Debug"
 BUILD_UNITTEST="OFF"
-LICENSE_CHECK="OFF"
 INSTALL_PREFIX=$(pwd)/milvus
 MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
@@ -12,7 +11,7 @@ BUILD_FAISS_WITH_MKL="OFF"
 USE_JFROG_CACHE="OFF"
 KNOWHERE_BUILD_DIR="`pwd`/src/core/cmake_build"
 
-while getopts "p:d:t:k:uhlrcgmj" arg
+while getopts "p:d:t:k:uhrcgmj" arg
 do
         case $arg in
              t)
@@ -27,9 +26,6 @@ do
                 ;;
              d)
                 DB_PATH=$OPTARG
-                ;;
-             l)
-                LICENSE_CHECK="ON"
                 ;;
              r)
                 if [[ -d cmake_build ]]; then
@@ -60,7 +56,6 @@ parameter:
 -u: building unit test options(default: OFF)
 -p: install prefix(default: $(pwd)/milvus)
 -d: db path(default: /opt/milvus)
--l: build license version(default: OFF)
 -r: remove previous build directory(default: OFF)
 -c: code coverage(default: OFF)
 -g: profiling(default: OFF)
@@ -94,7 +89,6 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
     -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
-    -DCMAKE_LICENSE_CHECK=${LICENSE_CHECK} \
     -DBUILD_COVERAGE=${BUILD_COVERAGE} \
     -DMILVUS_DB_PATH=${DB_PATH} \
     -DMILVUS_ENABLE_PROFILING=${PROFILING} \
