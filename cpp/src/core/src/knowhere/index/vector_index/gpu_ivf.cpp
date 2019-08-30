@@ -123,6 +123,7 @@ void GPUIVF::search_impl(int64_t n,
                          int64_t *labels,
                          const Config &cfg) {
     if (auto device_index = std::static_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
+        // todo: allocate search memory
         auto nprobe = cfg.get_with_default("nprobe", size_t(1));
 
         std::lock_guard<std::mutex> lk(mutex_);
