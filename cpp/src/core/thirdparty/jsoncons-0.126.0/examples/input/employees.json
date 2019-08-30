@@ -1,0 +1,30 @@
+[
+    {
+        "dept":"sales",
+        "employee-name":"Smith, Matthew",
+        "employee-no":"00000001",
+        "note":"",
+        "salary":"150,000.00"
+    },
+    {
+        "dept":"sales",
+        "employee-name":"Brown, Sarah",
+        "employee-no":"00000002",
+        "note":"",
+        "salary":"89,000.00"
+    },
+    {
+        "dept":"finance",
+        "employee-name":"Oberc, Scott",
+        "employee-no":"00000003",
+        "salary":"110,000.00"
+    },
+    {
+        "dept":"sales",
+        "employee-name":"Scott, Colette",
+        "employee-no":"00000004",
+        "note":"\"Exemplary\" employee\nDependable, trustworthy",
+        "comment":"Team player",
+        "salary":"75,000.00"
+    }
+]

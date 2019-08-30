@@ -197,9 +197,12 @@ TEST_F(DISABLED_MySQLTest, ARCHIVE_TEST_DAYS) {
         i++;
     }
 
-    bool has;
-    status = impl.HasNonIndexFiles(table_id, has);
-    ASSERT_TRUE(status.ok());
+    std::vector<int> file_types = {
+        (int) meta::TableFileSchema::NEW,
+    };
+    std::vector<std::string> file_ids;
+    status = impl.FilesByType(table_id, file_types, file_ids);
+    ASSERT_FALSE(file_ids.empty());
 
     status = impl.UpdateTableFilesToIndex(table_id);
     ASSERT_TRUE(status.ok());
@@ -332,17 +335,17 @@ TEST_F(DISABLED_MySQLTest, TABLE_FILES_TEST) {
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     meta::DatesT dates = {table_file.date_};
-    status = impl.FilesToSearch(table_id, dates, dated_files);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(dated_files[table_file.date_].size(),
-              to_index_files_cnt+raw_files_cnt+index_files_cnt);
-
-    status = impl.FilesToSearch(table_id, meta::DatesT(), dated_files);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(dated_files[table_file.date_].size(),
-              to_index_files_cnt+raw_files_cnt+index_files_cnt);
-
     std::vector<size_t> ids;
+    status = impl.FilesToSearch(table_id, ids, dates, dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[table_file.date_].size(),
+              to_index_files_cnt+raw_files_cnt+index_files_cnt);
+
+    status = impl.FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
+    ASSERT_TRUE(status.ok());
+    ASSERT_EQ(dated_files[table_file.date_].size(),
+              to_index_files_cnt+raw_files_cnt+index_files_cnt);
+
     status = impl.FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
