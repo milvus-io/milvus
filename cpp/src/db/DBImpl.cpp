@@ -581,6 +581,9 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
 
     while (!file_ids.empty()) {
         ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
+        if(index.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+            status = meta_ptr_->UpdateTableFilesToIndex(table_id);
+        }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min(10*1000, times*100)));
         status = meta_ptr_->FilesByType(table_id, file_types, file_ids);
