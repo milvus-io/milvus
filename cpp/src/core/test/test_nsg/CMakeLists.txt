@@ -27,6 +27,8 @@ aux_source_directory(${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/nsg nsg
 set(interface_src
         ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/ivf.cpp
         ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/gpu_ivf.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/cloner.cpp
+        ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/idmap.cpp
         ${CMAKE_SOURCE_DIR}/src/knowhere/index/vector_index/nsg_index.cpp
         ${CMAKE_SOURCE_DIR}/src/knowhere/adapter/structure.cpp
         ${CMAKE_SOURCE_DIR}/src/knowhere/common/exception.cpp
