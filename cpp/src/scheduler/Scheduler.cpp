@@ -77,8 +77,8 @@ Scheduler::Process(const EventPtr &event) {
             OnStartUp(event);
             break;
         }
-        case EventType::COPY_COMPLETED: {
-            OnCopyCompleted(event);
+        case EventType::LOAD_COMPLETED: {
+            OnLoadCompleted(event);
             break;
         }
         case EventType::FINISH_TASK: {
@@ -109,8 +109,8 @@ Scheduler::OnFinishTask(const EventPtr &event) {
 }
 
 void
-Scheduler::OnCopyCompleted(const EventPtr &event) {
-    auto load_completed_event = std::static_pointer_cast<CopyCompletedEvent>(event);
+Scheduler::OnLoadCompleted(const EventPtr &event) {
+    auto load_completed_event = std::static_pointer_cast<LoadCompletedEvent>(event);
     if (auto resource = event->resource_.lock()) {
         resource->WakeupExecutor();
 

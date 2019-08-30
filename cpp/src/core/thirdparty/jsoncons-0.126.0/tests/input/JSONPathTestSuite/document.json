@@ -1,0 +1,65 @@
+{ 
+  "store": {
+    "book": [ 
+      { "category": "reference",
+        "author": "Nigel Rees",
+        "title": "Sayings of the Century",
+        "price": 8.95
+      },
+      { "category": "fiction",
+        "author": "Evelyn Waugh",
+        "title": "Sword of Honour",
+        "price": 12.99
+      },
+      { "category": "fiction",
+        "author": "Herman Melville",
+        "title": "Moby Dick",
+        "isbn": "0-553-21311-3",
+        "price": 8.99
+      },
+      { "category": "fiction",
+        "author": "J. R. R. Tolkien",
+        "title": "The Lord of the Rings",
+        "isbn": "0-395-19395-8",
+        "price": 22.99
+      }
+    ],
+    "bicycle": [{
+      "color": "black/green",
+      "price": 97.50,
+      "options" : [{
+          "color": "black/grey",
+          "price": 125.99
+       }]
+    }]
+  },
+  "boutique": {
+    "book": [ 
+      { "category": "fiction",
+        "author": "Victor Hugo",
+        "title": "Les Miserables",
+        "price": 6.02
+      },
+      { "category": "cooking",
+        "author": "Paula Haney",
+        "title": "The Hoosier Mama Book of Pie",
+        "price": 13.77
+      },
+      { "category": "fiction",
+        "author": "David Lindsay",
+        "title": "A Voyage to Arcturus",
+        "price": 6.99
+      },
+      { "category": "travel",
+        "author": "Gillian Price",
+        "title": "Trekking in the Dolomites",
+        "isbn": "978 1 85284 563 6",
+        "price": 18.55
+      }
+    ],
+    "bicycle": [{
+      "color": "black/green",
+      "price": 97.50
+    }]
+  }  
+}  

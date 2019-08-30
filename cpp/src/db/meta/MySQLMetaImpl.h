@@ -46,7 +46,9 @@ class MySQLMetaImpl : public Meta {
                          const std::vector<size_t> &ids,
                          TableFilesSchema &table_files) override;
 
-    Status HasNonIndexFiles(const std::string &table_id, bool &has) override;
+    Status FilesByType(const std::string &table_id,
+                       const std::vector<int> &file_types,
+                       std::vector<std::string> &file_ids) override;
 
     Status UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) override;
 
@@ -61,10 +63,6 @@ class MySQLMetaImpl : public Meta {
     Status UpdateTableFilesToIndex(const std::string &table_id) override;
 
     Status UpdateTableFiles(TableFilesSchema &files) override;
-
-    Status FilesToSearch(const std::string &table_id,
-                         const DatesT &partition,
-                         DatePartionedTableFilesSchema &files) override;
 
     Status FilesToSearch(const std::string &table_id,
                          const std::vector<size_t> &ids,

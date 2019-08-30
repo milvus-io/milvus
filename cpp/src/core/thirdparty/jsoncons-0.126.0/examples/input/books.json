@@ -1,0 +1,30 @@
+[
+    {
+        "title" : "Kafka on the Shore",
+        "author" : "Haruki Murakami",
+        "price" : 25.17,
+        "reviews" :
+        [
+            {"rating" : "*****"},
+            {"rating" : "*****"}
+        ]
+    },
+    {
+        "title" : "Women: A Novel",
+        "author" : "Charles Bukowski",
+        "price" : 12.00,
+        "reviews" :
+        [
+            {"rating" : "*****"},
+            {"rating" : "*"}
+        ]
+    },
+    {
+        "title" : "Cutter's Way",
+        "author" : "Ivan Passer",
+        "reviews" :
+        [
+            {"rating" : "****"}
+        ]
+    }
+]
