@@ -28,6 +28,11 @@ ResourceMgr::GetNumOfComputeResource() {
     return count;
 }
 
+std::vector<ResourcePtr>
+ResourceMgr::GetComputeResource() {
+    // TODO
+}
+
 uint64_t
 ResourceMgr::GetNumGpuResource() const {
     uint64_t num = 0;

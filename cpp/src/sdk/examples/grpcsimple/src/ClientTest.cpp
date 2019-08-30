@@ -24,8 +24,8 @@ namespace {
     constexpr int64_t TABLE_DIMENSION = 512;
     constexpr int64_t TABLE_INDEX_FILE_SIZE = 768;
     constexpr int64_t BATCH_ROW_COUNT = 1000000;
-    constexpr int64_t NQ = 100;
-    constexpr int64_t TOP_K = 10;
+    constexpr int64_t NQ = 10;
+    constexpr int64_t TOP_K = 1000;
     constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
     constexpr int64_t ADD_VECTOR_LOOP = 1;
     constexpr int64_t SECONDS_EACH_HOUR = 3600;
@@ -177,14 +177,17 @@ namespace {
             std::vector<TopKQueryResult> topk_query_result_array;
             {
                 TimeRecorder rc(phase_name);
-                Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, 32, topk_query_result_array);
+                Status stat = conn->Search("zilliz_face", record_array, query_range_array, TOP_K, 10, topk_query_result_array);
                 std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
+            }
+            if (i == 0) {
+                PrintSearchResult(search_record_array, topk_query_result_array);
             }
         }
         auto finish = std::chrono::high_resolution_clock::now();
         std::cout << "SEARCHVECTOR COST: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
 
-//        PrintSearchResult(search_record_array, topk_query_result_array);
+
 //        CheckResult(search_record_array, topk_query_result_array);
     }
 }
@@ -284,7 +287,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         int64_t row_count = 0;
         Status stat = conn->CountTable(TABLE_NAME, row_count);
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
-        DoSearch(conn, search_record_array, "Search without index");
+//        DoSearch(conn, search_record_array, "Search without index");
     }
 
     {//wait unit build index finish
@@ -308,7 +311,19 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//search vectors after build index finish
-        DoSearch(conn, search_record_array, "Search after build index finish");
+        std::vector<std::pair<int64_t, RowRecord>> search_array;
+        std::vector<RowRecord> row_record_array;
+        row_record_array.resize(NQ);
+        for (int64_t i = 0; i < NQ; ++i) {
+            row_record_array[i].data.resize(TABLE_DIMENSION);
+            for (auto j = 0; j < TABLE_DIMENSION; ++j) {
+                row_record_array[i].data[j] = 1;
+            }
+            search_array.push_back(std::make_pair(i, row_record_array[i]));
+        }
+
+        DoSearch(conn, search_array, "Search after build index finish");
+
 //        std::cout << conn->DumpTaskTables() << std::endl;
     }
 

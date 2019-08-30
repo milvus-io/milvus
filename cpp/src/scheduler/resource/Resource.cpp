@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include <iostream>
+#include "../Utils.h"
 #include "Resource.h"
 
 
@@ -139,7 +140,13 @@ void Resource::executor_function() {
             if (task_item == nullptr) {
                 break;
             }
+
+            auto start = get_now_timestamp();
             Process(task_item->task);
+            auto finish = get_now_timestamp();
+            ++total_task_;
+            total_cost_ += finish - start;
+
             task_item->Executed();
             if (subscriber_) {
                 auto event = std::make_shared<FinishTaskEvent>(shared_from_this(), task_item);

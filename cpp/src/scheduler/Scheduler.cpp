@@ -8,6 +8,7 @@
 #include "Scheduler.h"
 #include "Cost.h"
 #include "action/Action.h"
+#include "Algorithm.h"
 
 
 namespace zilliz {
@@ -135,6 +136,39 @@ Scheduler::OnCopyCompleted(const EventPtr &event) {
                         Action::PushTaskToNeighbourRandomly(task, resource);
                     }
                 }
+                break;
+            }
+            case TaskLabelType::SPECIAL_RESOURCE: {
+                auto self = event->resource_.lock();
+                // if this resource is disk, assign it to smallest cost resource
+                if (self->Type() == ResourceType::DISK) {
+                    // step 1:
+                    // calculate shortest path per resource, from disk to compute resource
+                    // calculate by transport_cost
+                    auto compute_resources = res_mgr_.lock()->GetComputeResource();
+                    std::vector<std::vector<std::string>> paths;
+                    for (auto res : compute_resources) {
+                        std::vector<std::string> path = ShortestPath(self, res);
+                        paths.emplace_back(path);
+                    }
+
+                    // step 2:
+                    // select min cost, cost(resource) = avg_cost * task_to_do + transport_cost
+                    std::vector<uint64_t> costs;
+                    for (auto res : compute_resources) {
+                        uint64_t cost = res->TaskAvgCost() * res->NumOfTaskToExec() + transport_cost;
+                        costs.emplace_back(cost);
+                    }
+
+                    path, cost
+
+                    // step 3:
+                    // set path in task
+                }
+
+                // do or move
+                auto load_event = std::static_pointer_cast<CopyCompletedEvent>(event);
+                auto path = (load_event->task_table_item_->task->Path);
                 break;
             }
             case TaskLabelType::BROADCAST: {

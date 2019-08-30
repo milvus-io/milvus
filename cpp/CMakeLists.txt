@@ -34,7 +34,7 @@ else()
 endif()
 message(STATUS "Build type = ${BUILD_TYPE}")
 
-#add_definitions(-DNEW_SCHEDULER)
+add_definitions(-DNEW_SCHEDULER)
 
 project(milvus VERSION "${MILVUS_VERSION}")
 project(milvus_engine LANGUAGES CUDA CXX)

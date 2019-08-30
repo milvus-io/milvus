@@ -45,6 +45,14 @@ public:
     Type() const { return type_; }
 
     /*
+     * Transport path;
+     */
+    inline std::vector<std::string>&
+    path() {
+        return path_;
+    }
+
+    /*
      * Getter and Setter;
      */
     inline TaskLabelPtr &
@@ -64,6 +72,7 @@ public:
     Clone() = 0;
 
 public:
+    std::vector<std::string> path_;
     std::vector<SearchContextPtr> search_contexts_;
     ScheduleTaskPtr task_;
     TaskType type_;
