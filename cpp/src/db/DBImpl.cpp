@@ -162,7 +162,7 @@ Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint6
                       const float *vectors, QueryResults &results) {
     server::CollectQueryMetrics metrics(nq);
 
-    meta::DatesT dates = {meta::Meta::GetDate()};
+    meta::DatesT dates = {utils::GetDate()};
     Status result = Query(table_id, k, nq, nprobe, vectors, dates, results);
 
     return result;
