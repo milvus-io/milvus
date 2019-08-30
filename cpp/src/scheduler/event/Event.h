@@ -13,7 +13,7 @@ namespace engine {
 
 enum class EventType {
     START_UP,
-    COPY_COMPLETED,
+    LOAD_COMPLETED,
     FINISH_TASK,
     TASK_TABLE_UPDATED
 };
