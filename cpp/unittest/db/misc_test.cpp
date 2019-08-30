@@ -105,7 +105,7 @@ TEST(DBMiscTest, META_TEST) {
     time_t tt;
     time( &tt );
     int delta = 10;
-    engine::meta::DateT dt = impl.GetDate(tt, delta);
+    engine::meta::DateT dt = engine::utils::GetDate(tt, delta);
     ASSERT_GT(dt, 0);
 }
 
