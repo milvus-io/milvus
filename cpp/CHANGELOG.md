@@ -68,6 +68,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-428 - Add PushTaskByDataLocality in scheduler
 - MS-440 - Add DumpTaskTables in sdk
 - MS-442 - Merge Knowhere
+- MS-445 - Rename CopyCompleted to LoadCompleted
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

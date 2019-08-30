@@ -113,10 +113,9 @@ void Resource::loader_function() {
                 break;
             }
             LoadFile(task_item->task);
-            // TODO: wrapper loaded
             task_item->Loaded();
             if (subscriber_) {
-                auto event = std::make_shared<CopyCompletedEvent>(shared_from_this(), task_item);
+                auto event = std::make_shared<LoadCompletedEvent>(shared_from_this(), task_item);
                 subscriber_(std::static_pointer_cast<Event>(event));
             }
         }

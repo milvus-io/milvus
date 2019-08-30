@@ -6,7 +6,7 @@
 
 #include "Event.h"
 #include "StartUpEvent.h"
-#include "CopyCompletedEvent.h"
+#include "LoadCompletedEvent.h"
 #include "FinishTaskEvent.h"
 #include "TaskTableUpdatedEvent.h"
 
@@ -25,7 +25,7 @@ std::ostream &operator<<(std::ostream &out, const StartUpEvent &event) {
     return out;
 }
 
-std::ostream &operator<<(std::ostream &out, const CopyCompletedEvent &event) {
+std::ostream &operator<<(std::ostream &out, const LoadCompletedEvent &event) {
     out << event.Dump();
     return out;
 }
