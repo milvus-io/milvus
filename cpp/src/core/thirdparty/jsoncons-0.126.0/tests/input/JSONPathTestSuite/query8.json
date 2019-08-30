@@ -1,0 +1,16 @@
+[
+   {
+      "category" : "fiction",
+      "author" : "J. R. R. Tolkien",
+      "title" : "The Lord of the Rings",
+      "isbn" : "0-395-19395-8",
+      "price" : 22.99
+   },
+   {
+      "category" : "travel",
+      "author" : "Gillian Price",
+      "title" : "Trekking in the Dolomites",
+      "isbn" : "978 1 85284 563 6",
+      "price" : 18.55
+   }
+]

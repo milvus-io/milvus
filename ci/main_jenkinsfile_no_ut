@@ -224,97 +224,97 @@ spec:
                             }
                         }
 
-                        stage("Cluster") {
-                            agent {
-                                kubernetes {
-                                    label 'dev-test'
-                                    defaultContainer 'jnlp'
-                                    yaml """
-apiVersion: v1
-kind: Pod
-metadata:
-  labels:
-    app: milvus
-    componet: test
-spec:
-  containers:
-  - name: milvus-testframework
-    image: registry.zilliz.com/milvus/milvus-test:v0.2
-    command:
-    - cat
-    tty: true
-    volumeMounts:
-    - name: kubeconf
-      mountPath: /root/.kube/
-      readOnly: true
-  volumes:
-  - name: kubeconf
-    secret:
-      secretName: test-cluster-config
-"""
-                                }
-                            }
-                            stages {
-                                stage("Deploy to Dev") {
-                                    steps {
-                                        gitlabCommitStatus(name: 'Deloy to Dev') {
-                                            container('milvus-testframework') {
-                                                script {
-                                                    load "${env.WORKSPACE}/ci/jenkinsfile/cluster_deploy2dev.groovy"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                stage("Dev Test") {
-                                    steps {
-                                        gitlabCommitStatus(name: 'Deloy Test') {
-                                            container('milvus-testframework') {
-                                                script {
-                                                    load "${env.WORKSPACE}/ci/jenkinsfile/cluster_dev_test.groovy"
-                                                    load "${env.WORKSPACE}/ci/jenkinsfile/upload_dev_cluster_test_out.groovy"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                stage ("Cleanup Dev") {
-                                    steps {
-                                        gitlabCommitStatus(name: 'Cleanup Dev') {
-                                            container('milvus-testframework') {
-                                                script {
-                                                    load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            post {
-                                always {
-                                    container('milvus-testframework') {
-                                        script {
-                                            load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
-                                        }
-                                    }
-                                }
-                                success {
-                                    script {
-                                        echo "Milvus Cluster CI/CD success !"
-                                    }
-                                }
-                                aborted {
-                                    script {
-                                        echo "Milvus Cluster CI/CD aborted !"
-                                    }
-                                }
-                                failure {
-                                    script {
-                                        echo "Milvus Cluster CI/CD failure !"
-                                    }
-                                }
-                            }
-                        }
+//                         stage("Cluster") {
+//                             agent {
+//                                 kubernetes {
+//                                     label 'dev-test'
+//                                     defaultContainer 'jnlp'
+//                                     yaml """
+// apiVersion: v1
+// kind: Pod
+// metadata:
+//   labels:
+//     app: milvus
+//     componet: test
+// spec:
+//   containers:
+//   - name: milvus-testframework
+//     image: registry.zilliz.com/milvus/milvus-test:v0.2
+//     command:
+//     - cat
+//     tty: true
+//     volumeMounts:
+//     - name: kubeconf
+//       mountPath: /root/.kube/
+//       readOnly: true
+//   volumes:
+//   - name: kubeconf
+//     secret:
+//       secretName: test-cluster-config
+// """
+//                                 }
+//                             }
+//                             stages {
+//                                 stage("Deploy to Dev") {
+//                                     steps {
+//                                         gitlabCommitStatus(name: 'Deloy to Dev') {
+//                                             container('milvus-testframework') {
+//                                                 script {
+//                                                     load "${env.WORKSPACE}/ci/jenkinsfile/cluster_deploy2dev.groovy"
+//                                                 }
+//                                             }
+//                                         }
+//                                     }
+//                                 }
+//                                 stage("Dev Test") {
+//                                     steps {
+//                                         gitlabCommitStatus(name: 'Deloy Test') {
+//                                             container('milvus-testframework') {
+//                                                 script {
+//                                                     load "${env.WORKSPACE}/ci/jenkinsfile/cluster_dev_test.groovy"
+//                                                     load "${env.WORKSPACE}/ci/jenkinsfile/upload_dev_cluster_test_out.groovy"
+//                                                 }
+//                                             }
+//                                         }
+//                                     }
+//                                 }
+//                                 stage ("Cleanup Dev") {
+//                                     steps {
+//                                         gitlabCommitStatus(name: 'Cleanup Dev') {
+//                                             container('milvus-testframework') {
+//                                                 script {
+//                                                     load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
+//                                                 }
+//                                             }
+//                                         }
+//                                     }
+//                                 }
+//                             }
+//                             post {
+//                                 always {
+//                                     container('milvus-testframework') {
+//                                         script {
+//                                             load "${env.WORKSPACE}/ci/jenkinsfile/cluster_cleanup_dev.groovy"
+//                                         }
+//                                     }
+//                                 }
+//                                 success {
+//                                     script {
+//                                         echo "Milvus Cluster CI/CD success !"
+//                                     }
+//                                 }
+//                                 aborted {
+//                                     script {
+//                                         echo "Milvus Cluster CI/CD aborted !"
+//                                     }
+//                                 }
+//                                 failure {
+//                                     script {
+//                                         echo "Milvus Cluster CI/CD failure !"
+//                                     }
+//                                 }
+//                             }
+//                         }
                     }
                 }
             }
