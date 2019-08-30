@@ -93,7 +93,7 @@ Status ExecutionEngineImpl::AddWithIds(long n, const float *xdata, const long *x
 
 size_t ExecutionEngineImpl::Count() const {
     if(index_ == nullptr) {
-        ENGINE_LOG_ERROR << "ExecutionEngineImpl::index is null";
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return count 0";
         return 0;
     }
     return index_->Count();
@@ -105,7 +105,7 @@ size_t ExecutionEngineImpl::Size() const {
 
 size_t ExecutionEngineImpl::Dimension() const {
     if(index_ == nullptr) {
-        ENGINE_LOG_ERROR << "ExecutionEngineImpl::index is null";
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return dimension " << dim_;
         return dim_;
     }
     return index_->Dimension();
@@ -126,12 +126,16 @@ Status ExecutionEngineImpl::Serialize() {
 Status ExecutionEngineImpl::Load(bool to_cache) {
     index_ = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool already_in_cache = (index_ != nullptr);
-    if (!index_) {
+    if (!already_in_cache) {
         try {
             double physical_size = PhysicalSize();
             server::CollectExecutionEngineMetrics metrics(physical_size);
             index_ = read_index(location_);
-            ENGINE_LOG_DEBUG << "Disk io from: " << location_;
+            if(index_ == nullptr) {
+                ENGINE_LOG_ERROR << "Failed to load index from " << location_;
+            } else {
+                ENGINE_LOG_DEBUG << "Disk io from: " << location_;
+            }
         } catch (knowhere::KnowhereException &e) {
             ENGINE_LOG_ERROR << e.what();
             return Status::Error(e.what());
@@ -152,6 +156,11 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
     if (already_in_cache) {
         index_ = index;
     } else {
+        if(index_ == nullptr) {
+            ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to gpu";
+            return Status::Error("index is null");
+        }
+
         try {
             index_ = index_->CopyToGpu(device_id);
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
@@ -176,6 +185,11 @@ Status ExecutionEngineImpl::CopyToCpu() {
     if (already_in_cache) {
         index_ = index;
     } else {
+        if(index_ == nullptr) {
+            ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to cpu";
+            return Status::Error("index is null");
+        }
+
         try {
             index_ = index_->CopyToCpu();
             ENGINE_LOG_DEBUG << "GPU to CPU";
@@ -194,6 +208,11 @@ Status ExecutionEngineImpl::CopyToCpu() {
 }
 
 ExecutionEnginePtr ExecutionEngineImpl::Clone() {
+    if(index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
+        return nullptr;
+    }
+
     auto ret = std::make_shared<ExecutionEngineImpl>(dim_, location_, index_type_, metric_type_, nlist_);
     ret->Init();
     ret->index_ = index_->Clone();
@@ -220,6 +239,11 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
         }
     }
 
+    if(index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to merge";
+        return Status::Error("index is null");
+    }
+
     if (auto file_index = std::dynamic_pointer_cast<BFIndex>(to_merge)) {
         auto ec = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
         if (ec != server::KNOWHERE_SUCCESS) {
@@ -237,6 +261,11 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
+    if(from_index == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: from_index is null, failed to build index";
+        return nullptr;
+    }
+
     auto to_index = CreatetVecIndex(engine_type);
     if (!to_index) {
         throw Exception("Create Empty VecIndex");
@@ -264,6 +293,11 @@ Status ExecutionEngineImpl::Search(long n,
                                    long nprobe,
                                    float *distances,
                                    long *labels) const {
+    if(index_ == nullptr) {
+        ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
+        return Status::Error("index is null");
+    }
+
     ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
     auto ec = index_->Search(n, data, distances, labels, Config::object{{"k", k}, {"nprobe", nprobe}});
     if (ec != server::KNOWHERE_SUCCESS) {
