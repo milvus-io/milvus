@@ -10,6 +10,7 @@
 #include "db/Types.h"
 
 #include <string>
+#include <ctime>
 
 namespace zilliz {
 namespace milvus {
@@ -28,6 +29,10 @@ Status DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& 
 bool IsSameIndex(const TableIndex& index1, const TableIndex& index2);
 
 bool UserDefinedId(int64_t flag);
+
+meta::DateT GetDate(const std::time_t &t, int day_delta = 0);
+meta::DateT GetDate();
+meta::DateT GetDateWithDelta(int day_delta);
 
 } // namespace utils
 } // namespace engine

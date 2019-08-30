@@ -68,6 +68,15 @@ using ConnectorT = decltype(StoragePrototype(""));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
 using ConditionT = decltype(c(&TableFileSchema::id_) == 1UL);
 
+SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions &options_)
+    : options_(options_) {
+    Initialize();
+}
+
+SqliteMetaImpl::~SqliteMetaImpl() {
+    CleanUp();
+}
+
 Status SqliteMetaImpl::NextTableId(std::string &table_id) {
     std::stringstream ss;
     SimpleIDGenerator g;
@@ -82,11 +91,6 @@ Status SqliteMetaImpl::NextFileId(std::string &file_id) {
     ss << g.GetNextIDNumber();
     file_id = ss.str();
     return Status::OK();
-}
-
-SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions &options_)
-    : options_(options_) {
-    Initialize();
 }
 
 Status SqliteMetaImpl::Initialize() {
@@ -111,7 +115,7 @@ Status SqliteMetaImpl::Initialize() {
 
 // PXU TODO: Temp solution. Will fix later
 Status SqliteMetaImpl::DropPartitionsByDates(const std::string &table_id,
-                                         const DatesT &dates) {
+                                             const DatesT &dates) {
     if (dates.size() == 0) {
         return Status::OK();
     }
@@ -124,20 +128,13 @@ Status SqliteMetaImpl::DropPartitionsByDates(const std::string &table_id,
     }
 
     try {
-        auto yesterday = GetDateWithDelta(-1);
-
-        for (auto &date : dates) {
-            if (date >= yesterday) {
-                return Status::Error("Could not delete partitions with 2 days");
-            }
-        }
-
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
         ConnectorPtr->update_all(
             set(
-                c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_DELETE
+                c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_DELETE,
+                c(&TableFileSchema::updated_time_) = utils::GetMicroSecTimeStamp()
             ),
             where(
                 c(&TableFileSchema::table_id_) == table_id and
@@ -543,7 +540,7 @@ Status SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
 
 Status SqliteMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
     if (file_schema.date_ == EmptyDate) {
-        file_schema.date_ = Meta::GetDate();
+        file_schema.date_ = utils::GetDate();
     }
     TableSchema table_schema;
     table_schema.table_id_ = file_schema.table_id_;
@@ -1212,10 +1209,6 @@ Status SqliteMetaImpl::DropAll() {
         boost::filesystem::remove_all(options_.path);
     }
     return Status::OK();
-}
-
-SqliteMetaImpl::~SqliteMetaImpl() {
-    CleanUp();
 }
 
 } // namespace meta
