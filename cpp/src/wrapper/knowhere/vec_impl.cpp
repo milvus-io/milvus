@@ -241,8 +241,9 @@ server::KnowhereError IVFMixIndex::BuildAll(const long &nb,
         index_->Add(dataset, cfg);
 
         if (auto device_index = std::dynamic_pointer_cast<GPUIVF>(index_)) {
-            auto host_index = device_index->Copy_index_gpu_to_cpu();
+            auto host_index = device_index->CopyGpuToCpu(Config());
             index_ = host_index;
+            type = TransferToCpuIndexType(type);
         } else {
             WRAPPER_LOG_ERROR << "Build IVFMIXIndex Failed";
         }
