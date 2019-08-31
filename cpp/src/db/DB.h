@@ -22,6 +22,9 @@ class DB {
 public:
     static void Open(const Options& options, DB** dbptr);
 
+    virtual Status Start() = 0;
+    virtual Status Stop() = 0;
+
     virtual Status CreateTable(meta::TableSchema& table_schema_) = 0;
     virtual Status DeleteTable(const std::string& table_id, const meta::DatesT& dates) = 0;
     virtual Status DescribeTable(meta::TableSchema& table_schema_) = 0;
