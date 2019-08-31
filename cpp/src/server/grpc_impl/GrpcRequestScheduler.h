@@ -25,30 +25,24 @@ protected:
     virtual ~GrpcBaseTask();
 
 public:
-    ServerError
-    Execute();
+    ServerError Execute();
 
-    ServerError
-    WaitToFinish();
+    void Done();
 
-    std::string
-    TaskGroup() const { return task_group_; }
+    ServerError WaitToFinish();
 
-    ServerError
-    ErrorCode() const { return error_code_; }
+    std::string TaskGroup() const { return task_group_; }
 
-    std::string
-    ErrorMsg() const { return error_msg_; }
+    ServerError ErrorCode() const { return error_code_; }
 
-    bool
-    IsAsync() const { return async_; }
+    std::string ErrorMsg() const { return error_msg_; }
+
+    bool IsAsync() const { return async_; }
 
 protected:
-    virtual ServerError
-    OnExecute() = 0;
+    virtual ServerError OnExecute() = 0;
 
-    ServerError
-    SetError(ServerError error_code, const std::string &msg);
+    ServerError SetError(ServerError error_code, const std::string &msg);
 
 protected:
     mutable std::mutex finish_mtx_;
@@ -77,19 +71,18 @@ public:
 
     void Stop();
 
-    ServerError
-    ExecuteTask(const BaseTaskPtr &task_ptr);
+    ServerError ExecuteTask(const BaseTaskPtr &task_ptr);
 
-    static void
-    ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Status *grpc_status);
+    static void ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Status *grpc_status);
 
 protected:
     GrpcRequestScheduler();
 
     virtual ~GrpcRequestScheduler();
 
-    ServerError
-    PutTaskToQueue(const BaseTaskPtr &task_ptr);
+    void TakeTaskToExecute(TaskQueuePtr task_queue);
+
+    ServerError PutTaskToQueue(const BaseTaskPtr &task_ptr);
 
 private:
     mutable std::mutex queue_mtx_;
