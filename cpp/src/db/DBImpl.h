@@ -36,6 +36,9 @@ class DBImpl : public DB {
 
     explicit DBImpl(const Options &options);
 
+    Status Start() override;
+    Status Stop() override;
+
     Status CreateTable(meta::TableSchema &table_schema) override;
 
     Status DeleteTable(const std::string &table_id, const meta::DatesT &dates) override;
@@ -91,18 +94,15 @@ class DBImpl : public DB {
     ~DBImpl() override;
 
  private:
-    Status
-    QueryAsync(const std::string &table_id,
-               const meta::TableFilesSchema &files,
-               uint64_t k,
-               uint64_t nq,
-               uint64_t nprobe,
-               const float *vectors,
-               const meta::DatesT &dates,
-               QueryResults &results);
+    Status QueryAsync(const std::string &table_id,
+                      const meta::TableFilesSchema &files,
+                      uint64_t k,
+                      uint64_t nq,
+                      uint64_t nprobe,
+                      const float *vectors,
+                      const meta::DatesT &dates,
+                      QueryResults &results);
 
-
-    void StartTimerTasks();
     void BackgroundTimerTask();
 
     void StartMetricTask();

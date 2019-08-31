@@ -152,10 +152,6 @@ bool IsSameIndex(const TableIndex& index1, const TableIndex& index2) {
         && index1.metric_type_ == index2.metric_type_;
 }
 
-bool UserDefinedId(int64_t flag) {
-    return flag & meta::FLAG_MASK_USERID;
-}
-
 meta::DateT GetDate(const std::time_t& t, int day_delta) {
     struct tm ltm;
     localtime_r(&t, &ltm);

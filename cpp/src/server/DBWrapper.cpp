@@ -17,6 +17,10 @@ namespace milvus {
 namespace server {
 
 DBWrapper::DBWrapper() {
+
+}
+
+ServerError DBWrapper::StartService() {
     //db config
     zilliz::milvus::engine::Options opt;
     ConfigNode& db_config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
@@ -91,7 +95,9 @@ DBWrapper::DBWrapper() {
     //create db instance
     std::string msg = opt.meta.path;
     try {
-        zilliz::milvus::engine::DB::Open(opt, &db_);
+        engine::DB* db = nullptr;
+        zilliz::milvus::engine::DB::Open(opt, &db);
+        db_.reset(db);
     } catch(std::exception& ex) {
         msg = ex.what();
     }
@@ -100,10 +106,18 @@ DBWrapper::DBWrapper() {
         std::cout << "ERROR! Failed to open database: " << msg << std::endl;
         kill(0, SIGUSR1);
     }
+
+    db_->Start();
+
+    return SERVER_SUCCESS;
 }
 
-DBWrapper::~DBWrapper() {
-    delete db_;
+ServerError DBWrapper::StopService() {
+    if(db_) {
+        db_->Stop();
+    }
+
+    return SERVER_SUCCESS;
 }
 
 }
