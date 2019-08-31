@@ -88,7 +88,7 @@ pushd `pwd`/src/core
 popd
 
 cd cmake_build
-git
+
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
 if [[ ${MAKE_CLEAN} == "ON" ]]; then
