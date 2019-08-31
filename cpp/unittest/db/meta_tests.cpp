@@ -74,21 +74,21 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
     ASSERT_EQ(table_file.file_type_, new_file_type);
 
     meta::DatesT dates;
-    dates.push_back(meta::Meta::GetDate());
+    dates.push_back(utils::GetDate());
     status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
-    ASSERT_FALSE(status.ok());
+    ASSERT_TRUE(status.ok());
 
     dates.clear();
     for (auto i=2; i < 10; ++i) {
-        dates.push_back(meta::Meta::GetDateWithDelta(-1*i));
+        dates.push_back(utils::GetDateWithDelta(-1*i));
     }
     status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
 
-    table_file.date_ = meta::Meta::GetDateWithDelta(-2);
+    table_file.date_ = utils::GetDateWithDelta(-2);
     status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(table_file.date_, meta::Meta::GetDateWithDelta(-2));
+    ASSERT_EQ(table_file.date_, utils::GetDateWithDelta(-2));
     ASSERT_FALSE(table_file.file_type_ == meta::TableFileSchema::TO_DELETE);
 
     dates.clear();
