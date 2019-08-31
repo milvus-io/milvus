@@ -17,6 +17,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-430 - Search no result if index created with FLAT
 - MS-443 - Create index hang again
 - MS-436 - Delete vectors failed if index created with index_type: IVF_FLAT/IVF_SQ8
+- MS-450 - server hang after run stop_server.sh
 
 ## Improvement
 - MS-327 - Clean code for milvus
