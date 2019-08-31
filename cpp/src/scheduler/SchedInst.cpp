@@ -7,6 +7,7 @@
 #include "SchedInst.h"
 #include "server/ServerConfig.h"
 #include "ResourceFactory.h"
+#include "knowhere/index/vector_index/gpu_ivf.h"
 
 namespace zilliz {
 namespace milvus {
@@ -36,7 +37,11 @@ StartSchedulerService() {
                                                                device_id,
                                                                enable_loader,
                                                                enable_executor));
+
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id);
     }
+
+    knowhere::FaissGpuResourceMgr::GetInstance().InitResource();
 
     auto default_connection = Connection("default_connection", 500.0);
     auto connections = config.GetSequence(server::CONFIG_RESOURCE_CONNECTIONS);
