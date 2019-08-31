@@ -41,6 +41,18 @@ Status HandleException(const std::string &desc, std::exception &e) {
 
 }
 
+MySQLMetaImpl::MySQLMetaImpl(const DBMetaOptions &options_, const int &mode)
+    : options_(options_),
+      mode_(mode) {
+    Initialize();
+}
+
+MySQLMetaImpl::~MySQLMetaImpl() {
+    if (mode_ != Options::MODE::READ_ONLY) {
+        CleanUp();
+    }
+}
+
 Status MySQLMetaImpl::NextTableId(std::string &table_id) {
     std::stringstream ss;
     SimpleIDGenerator g;
@@ -55,12 +67,6 @@ Status MySQLMetaImpl::NextFileId(std::string &file_id) {
     ss << g.GetNextIDNumber();
     file_id = ss.str();
     return Status::OK();
-}
-
-MySQLMetaImpl::MySQLMetaImpl(const DBMetaOptions &options_, const int &mode)
-    : options_(options_),
-      mode_(mode) {
-    Initialize();
 }
 
 Status MySQLMetaImpl::Initialize() {
@@ -202,15 +208,6 @@ Status MySQLMetaImpl::DropPartitionsByDates(const std::string &table_id,
     }
 
     try {
-
-        auto yesterday = GetDateWithDelta(-1);
-
-        for (auto &date : dates) {
-            if (date >= yesterday) {
-                return Status::Error("Could not delete partitions within 2 days");
-            }
-        }
-
         std::stringstream dateListSS;
         for (auto &date : dates) {
             dateListSS << std::to_string(date) << ", ";
@@ -229,7 +226,8 @@ Status MySQLMetaImpl::DropPartitionsByDates(const std::string &table_id,
             Query dropPartitionsByDatesQuery = connectionPtr->query();
 
             dropPartitionsByDatesQuery << "UPDATE TableFiles " <<
-                                       "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << " " <<
+                                       "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << "," <<
+                                       "updated_time = " << utils::GetMicroSecTimeStamp() << " " <<
                                        "WHERE table_id = " << quote << table_id << " AND " <<
                                        "date in (" << dateListStr << ");";
 
@@ -877,7 +875,7 @@ Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
 
 Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
     if (file_schema.date_ == EmptyDate) {
-        file_schema.date_ = Meta::GetDate();
+        file_schema.date_ = utils::GetDate();
     }
     TableSchema table_schema;
     table_schema.table_id_ = file_schema.table_id_;
@@ -2029,12 +2027,6 @@ Status MySQLMetaImpl::DropAll() {
     }
 
     return Status::OK();
-}
-
-MySQLMetaImpl::~MySQLMetaImpl() {
-    if (mode_ != Options::MODE::READ_ONLY) {
-        CleanUp();
-    }
 }
 
 } // namespace meta

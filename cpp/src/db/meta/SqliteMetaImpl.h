@@ -20,6 +20,7 @@ auto StoragePrototype(const std::string &path);
 class SqliteMetaImpl : public Meta {
  public:
     explicit SqliteMetaImpl(const DBMetaOptions &options_);
+    ~SqliteMetaImpl();
 
     Status CreateTable(TableSchema &table_schema) override;
 
@@ -79,8 +80,6 @@ class SqliteMetaImpl : public Meta {
     Status DropAll() override;
 
     Status Count(const std::string &table_id, uint64_t &result) override;
-
-    ~SqliteMetaImpl() override;
 
  private:
     Status NextFileId(std::string &file_id);

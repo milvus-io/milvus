@@ -293,18 +293,15 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     ASSERT_STATS(stat);
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
-    engine::IDNumbers vector_ids;
-    engine::IDNumbers target_ids;
-
-    int64_t nb = 100000;
+    int64_t nb = VECTOR_COUNT;
     std::vector<float> xb;
     BuildVectors(nb, xb);
 
     int loop = 5;
-
     for (auto i=0; i<loop; ++i) {
-        db_->InsertVectors(TABLE_NAME, nb, xb.data(), target_ids);
-        ASSERT_EQ(target_ids.size(), nb);
+        engine::IDNumbers vector_ids;
+        db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        ASSERT_EQ(vector_ids.size(), nb);
     }
 
     engine::TableIndex index;
@@ -342,9 +339,6 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     ASSERT_STATS(stat);
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
-    engine::IDNumbers vector_ids;
-    engine::IDNumbers target_ids;
-
     uint64_t size;
     db_->Size(size);
 
@@ -354,6 +348,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     int loop = INSERT_LOOP;
     for (auto i=0; i<loop; ++i) {
+        engine::IDNumbers vector_ids;
         db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
         std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
@@ -378,20 +373,17 @@ TEST_F(DBTest2, DELETE_TEST) {
     db_->HasTable(TABLE_NAME, has_table);
     ASSERT_TRUE(has_table);
 
-    engine::IDNumbers vector_ids;
-
     uint64_t size;
     db_->Size(size);
 
-    int64_t nb = INSERT_LOOP;
+    int64_t nb = VECTOR_COUNT;
     std::vector<float> xb;
     BuildVectors(nb, xb);
 
-    int loop = 20;
-    for (auto i=0; i<loop; ++i) {
-        db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
-    }
+    engine::IDNumbers vector_ids;
+    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    engine::TableIndex index;
+    stat = db_->CreateIndex(TABLE_NAME, index);
 
     std::vector<engine::meta::DateT> dates;
     stat = db_->DeleteTable(TABLE_NAME, dates);
@@ -420,25 +412,31 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     db_->HasTable(TABLE_NAME, has_table);
     ASSERT_TRUE(has_table);
 
-    engine::IDNumbers vector_ids;
-
     uint64_t size;
     db_->Size(size);
+    ASSERT_EQ(size, 0UL);
 
-    int64_t nb = INSERT_LOOP;
+    int64_t nb = VECTOR_COUNT;
     std::vector<float> xb;
     BuildVectors(nb, xb);
 
-    int loop = 20;
-    for (auto i=0; i<loop; ++i) {
-        db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
-    }
+    engine::IDNumbers vector_ids;
+    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    engine::TableIndex index;
+    stat = db_->CreateIndex(TABLE_NAME, index);
+
+    db_->Size(size);
+    ASSERT_NE(size, 0UL);
 
     std::vector<engine::meta::DateT> dates;
-    std::string start_value = CurrentTmDate(-3);
-    std::string end_value = CurrentTmDate(-2);
+    std::string start_value = CurrentTmDate();
+    std::string end_value = CurrentTmDate(1);
     ConvertTimeRangeToDBDates(start_value, end_value, dates);
 
-    db_->DeleteTable(TABLE_NAME, dates);
+    stat = db_->DeleteTable(TABLE_NAME, dates);
+    ASSERT_STATS(stat);
+
+    uint64_t row_count = 0;
+    db_->GetTableRowCount(TABLE_NAME, row_count);
+    ASSERT_EQ(row_count, 0UL);
 }
