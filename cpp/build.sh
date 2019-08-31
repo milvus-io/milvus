@@ -10,12 +10,14 @@ PROFILING="OFF"
 BUILD_FAISS_WITH_MKL="OFF"
 USE_JFROG_CACHE="OFF"
 KNOWHERE_BUILD_DIR="`pwd`/src/core/cmake_build"
+KNOWHERE_OPTIONS="-t ${BUILD_TYPE}"
 
 while getopts "p:d:t:k:uhrcgmj" arg
 do
         case $arg in
              t)
                 BUILD_TYPE=$OPTARG # BUILD_TYPE
+                KNOWHERE_OPTIONS="-t ${BUILD_TYPE}"
                 ;;
              u)
                 echo "Build and run unittest cases" ;
@@ -47,6 +49,7 @@ do
                 ;;
              j)
                 USE_JFROG_CACHE="ON"
+                KNOWHERE_OPTIONS="${KNOWHERE_OPTIONS} -j"
                 ;;
              h) # help
                 echo "
@@ -79,6 +82,10 @@ if [[ ! -d cmake_build ]]; then
 	mkdir cmake_build
 	MAKE_CLEAN="ON"
 fi
+
+pushd `pwd`/src/core
+./build.sh ${KNOWHERE_OPTIONS}
+popd
 
 cd cmake_build
 git
