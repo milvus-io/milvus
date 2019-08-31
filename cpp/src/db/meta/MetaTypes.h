@@ -22,7 +22,8 @@ constexpr int32_t DEFAULT_NLIST = 16384;
 constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
 constexpr int32_t DEFAULT_INDEX_FILE_SIZE = ONE_GB;
 
-constexpr int64_t FLAG_MASK_USERID = 1;
+constexpr int64_t FLAG_MASK_NO_USERID = 0x1;
+constexpr int64_t FLAG_MASK_HAS_USERID = 0x1<<1;
 
 typedef int DateT;
 const DateT EmptyDate = -1;
