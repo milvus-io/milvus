@@ -53,7 +53,10 @@ private:
 };
 
 void
-SchedServInit();
+StartSchedulerService();
+
+void
+StopSchedulerService();
 
 }
 }

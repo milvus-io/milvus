@@ -19,7 +19,7 @@ SchedulerPtr SchedInst::instance = nullptr;
 std::mutex SchedInst::mutex_;
 
 void
-SchedServInit() {
+StartSchedulerService() {
     server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
     auto resources = config.GetChild(server::CONFIG_RESOURCES).GetChildren();
     for (auto &resource : resources) {
@@ -52,6 +52,11 @@ SchedServInit() {
     SchedInst::GetInstance()->Start();
 }
 
+void
+StopSchedulerService() {
+    ResMgrInst::GetInstance()->Stop();
+    SchedInst::GetInstance()->Stop();
+}
 }
 }
 }
