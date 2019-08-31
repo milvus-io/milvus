@@ -309,7 +309,8 @@ else()
     # set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
 endif()
 
-#set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
+# set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
+set(FAISS_MD5 "31167ecbd1903fec600dc4ac00b9be9e")
 
 if(DEFINED ENV{MILVUS_KNOWHERE_URL})
     set(KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}")
