@@ -70,15 +70,8 @@ resource_config:
       type: GPU
       memory: 6
       device_id: 0
-      enable_loader: false
-      enable_executor: false
-
-    gtx1660:
-      type: GPU
-      memory: 6
-      device_id: 1
-      enable_loader: false
-      enable_executor: false
+      enable_loader: true
+      enable_executor: true
 
 #    gtx1660:
 #      type: GPU

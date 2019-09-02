@@ -58,13 +58,13 @@ Status DBImpl::Start() {
         return Status::OK();
     }
 
+    shutting_down_.store(false, std::memory_order_release);
+
     //for distribute version, some nodes are read only
     if (options_.mode != Options::MODE::READ_ONLY) {
         ENGINE_LOG_TRACE << "StartTimerTasks";
         bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
     }
-
-    shutting_down_.store(false, std::memory_order_release);
 
     return Status::OK();
 }
