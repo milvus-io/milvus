@@ -6,7 +6,6 @@
 
 #include <src/cache/GpuCacheMgr.h>
 #include "Scheduler.h"
-#include "Cost.h"
 #include "action/Action.h"
 
 
