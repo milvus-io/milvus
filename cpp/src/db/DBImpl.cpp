@@ -163,7 +163,7 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
                     //step 1: load index
                     engine->Load(true);
                 } catch (std::exception &ex) {
-                    std::string msg = "load to cache exception" + std::string(ex.what());
+                    std::string msg = "Pre-load table encounter exception: " + std::string(ex.what());
                     ENGINE_LOG_ERROR << msg;
                     return Status::Error(msg);
                 }
@@ -198,8 +198,6 @@ Status DBImpl::InsertVectors(const std::string& table_id_,
 
 Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
                       const float *vectors, QueryResults &results) {
-    server::CollectQueryMetrics metrics(nq);
-
     meta::DatesT dates = {utils::GetDate()};
     Status result = Query(table_id, k, nq, nprobe, vectors, dates, results);
 
@@ -208,7 +206,7 @@ Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint6
 
 Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
-    ENGINE_LOG_DEBUG << "Query by vectors " << table_id;
+    ENGINE_LOG_DEBUG << "Query by dates for table: " << table_id;
 
     //get all table files from table
     meta::DatePartionedTableFilesSchema files;
@@ -232,7 +230,7 @@ Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint6
 Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>& file_ids,
         uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
         const meta::DatesT& dates, QueryResults& results) {
-    ENGINE_LOG_DEBUG << "Query by file ids";
+    ENGINE_LOG_DEBUG << "Query by file ids for table: " << table_id;
 
     //get specified files
     std::vector<size_t> ids;
@@ -274,7 +272,7 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
     server::TimeRecorder rc("");
 
     //step 1: get files to search
-    ENGINE_LOG_DEBUG << "Engine query begin, index file count:" << files.size() << " date range count:" << dates.size();
+    ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size() << " date range count: " << dates.size();
     SearchContextPtr context = std::make_shared<SearchContext>(k, nq, nprobe, vectors);
     for (auto &file : files) {
         TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
@@ -300,11 +298,11 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
         double search_percent = search_cost/total_cost;
         double reduce_percent = reduce_cost/total_cost;
 
-        ENGINE_LOG_DEBUG << "Engine load index totally cost:" << load_info << " percent: " << load_percent*100 << "%";
-        ENGINE_LOG_DEBUG << "Engine search index totally cost:" << search_info << " percent: " << search_percent*100 << "%";
-        ENGINE_LOG_DEBUG << "Engine reduce topk totally cost:" << reduce_info << " percent: " << reduce_percent*100 << "%";
+        ENGINE_LOG_DEBUG << "Engine load index totally cost: " << load_info << " percent: " << load_percent*100 << "%";
+        ENGINE_LOG_DEBUG << "Engine search index totally cost: " << search_info << " percent: " << search_percent*100 << "%";
+        ENGINE_LOG_DEBUG << "Engine reduce topk totally cost: " << reduce_info << " percent: " << reduce_percent*100 << "%";
     } else {
-        ENGINE_LOG_DEBUG << "Engine load cost:" << load_info
+        ENGINE_LOG_DEBUG << "Engine load cost: " << load_info
             << " search cost: " << search_info
             << " reduce cost: " << reduce_info;
     }
@@ -413,7 +411,7 @@ void DBImpl::StartCompactionTask() {
 
 Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         const meta::TableFilesSchema& files) {
-    ENGINE_LOG_DEBUG << "Merge files for table " << table_id;
+    ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
 
     //step 1: create table file
     meta::TableFileSchema table_file;
@@ -453,7 +451,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         index->Serialize();
     } catch (std::exception& ex) {
         //typical error: out of disk space or permition denied
-        std::string msg = "Serialize merged index encounter exception" + std::string(ex.what());
+        std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
         ENGINE_LOG_ERROR << msg;
 
         table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
@@ -508,7 +506,7 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
         MergeFiles(table_id, kv.first, kv.second);
 
         if (shutting_down_.load(std::memory_order_acquire)){
-            ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action for table " << table_id;
+            ENGINE_LOG_DEBUG << "Server will shutdown, skip merge action for table: " << table_id;
             break;
         }
     }
@@ -574,7 +572,7 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
         TableIndex old_index;
         auto status = DescribeIndex(table_id, old_index);
         if(!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to get table index info";
+            ENGINE_LOG_ERROR << "Failed to get table index info for table: " << table_id;
             return status;
         }
 
@@ -584,7 +582,7 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
 
             status = meta_ptr_->UpdateTableIndexParam(table_id, index);
             if (!status.ok()) {
-                ENGINE_LOG_ERROR << "Failed to update table index info";
+                ENGINE_LOG_ERROR << "Failed to update table index info for table: " << table_id;
                 return status;
             }
         }
@@ -632,7 +630,7 @@ Status DBImpl::DescribeIndex(const std::string& table_id, TableIndex& index) {
 }
 
 Status DBImpl::DropIndex(const std::string& table_id) {
-    ENGINE_LOG_DEBUG << "drop index for table: " << table_id;
+    ENGINE_LOG_DEBUG << "Drop index for table: " << table_id;
     return meta_ptr_->DropTableIndex(table_id);
 }
 
@@ -656,7 +654,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         table_file.file_type_ = meta::TableFileSchema::NEW_INDEX; //for multi-db-path, distribute index file averagely to each path
         Status status = meta_ptr_->CreateTableFile(table_file);
         if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to create table: " << status.ToString();
+            ENGINE_LOG_ERROR << "Failed to create table file: " << status.ToString();
             return status;
         }
 
@@ -668,7 +666,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
             index = to_index->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
         } catch (std::exception& ex) {
             //typical error: out of gpu memory
-            std::string msg = "BuildIndex encounter exception" + std::string(ex.what());
+            std::string msg = "BuildIndex encounter exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
 
             table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
@@ -693,7 +691,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
             index->Serialize();
         } catch (std::exception& ex) {
             //typical error: out of disk space or permition denied
-            std::string msg = "Serialize index encounter exception" + std::string(ex.what());
+            std::string msg = "Serialize index encounter exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
 
             table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
@@ -736,7 +734,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         }
 
     } catch (std::exception& ex) {
-        std::string msg = "Build index encounter exception" + std::string(ex.what());
+        std::string msg = "Build index encounter exception: " + std::string(ex.what());
         ENGINE_LOG_ERROR << msg;
         return Status::Error(msg);
     }
@@ -745,7 +743,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 }
 
 void DBImpl::BackgroundBuildIndex() {
-    ENGINE_LOG_TRACE << " Background build index thread start";
+    ENGINE_LOG_TRACE << "Background build index thread start";
 
     std::unique_lock<std::mutex> lock(build_index_mutex_);
     meta::TableFilesSchema to_index_files;
@@ -764,7 +762,7 @@ void DBImpl::BackgroundBuildIndex() {
         }
     }
 
-    ENGINE_LOG_TRACE << " Background build index thread exit";
+    ENGINE_LOG_TRACE << "Background build index thread exit";
 }
 
 Status DBImpl::DropAll() {

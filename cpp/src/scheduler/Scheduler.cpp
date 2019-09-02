@@ -7,7 +7,6 @@
 #include <src/cache/GpuCacheMgr.h>
 #include "event/LoadCompletedEvent.h"
 #include "Scheduler.h"
-#include "Cost.h"
 #include "action/Action.h"
 #include "Algorithm.h"
 
