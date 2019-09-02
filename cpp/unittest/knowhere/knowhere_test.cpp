@@ -8,23 +8,29 @@
 #include <easylogging++.h>
 
 #include <wrapper/knowhere/vec_index.h>
+#include "knowhere/index/vector_index/gpu_ivf.h"
 
 #include "utils.h"
 
 INITIALIZE_EASYLOGGINGPP
 
 using namespace zilliz::milvus::engine;
-using namespace zilliz::knowhere;
+//using namespace zilliz::knowhere;
 
 using ::testing::TestWithParam;
 using ::testing::Values;
 using ::testing::Combine;
 
+constexpr int64_t DIM = 512;
+constexpr int64_t NB = 1000000;
 
 class KnowhereWrapperTest
     : public TestWithParam<::std::tuple<IndexType, std::string, int, int, int, int, Config, Config>> {
  protected:
     void SetUp() override {
+        zilliz::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(0);
+        zilliz::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(1);
+
         std::string generator_type;
         std::tie(index_type, generator_type, dim, nb, nq, k, train_cfg, search_cfg) = GetParam();
 
@@ -66,8 +72,8 @@ class KnowhereWrapperTest
     Config train_cfg;
     Config search_cfg;
 
-    int dim = 64;
-    int nb = 10000;
+    int dim = DIM;
+    int nb = NB;
     int nq = 10;
     int k = 10;
     std::vector<float> xb;
@@ -94,27 +100,27 @@ INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
                             //                Config::object{{"nlist", 100}, {"dim", 64}},
                             //                Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 40}}
                             //),
-                            std::make_tuple(IndexType::FAISS_IVFFLAT_MIX, "Default",
-                                            64, 100000, 10, 10,
-                                            Config::object{{"nlist", 1000}, {"dim", 64}, {"metric_type", "L2"}},
-                                            Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 5}}
-                            ),
-                            std::make_tuple(IndexType::FAISS_IDMAP, "Default",
-                                            64, 100000, 10, 10,
-                                            Config::object{{"dim", 64}, {"metric_type", "L2"}},
-                                            Config::object{{"dim", 64}, {"k", 10}}
-                            ),
+//                            std::make_tuple(IndexType::FAISS_IVFFLAT_MIX, "Default",
+//                                            64, 100000, 10, 10,
+//                                            Config::object{{"nlist", 1000}, {"dim", 64}, {"metric_type", "L2"}},
+//                                            Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 5}}
+//                            ),
+//                            std::make_tuple(IndexType::FAISS_IDMAP, "Default",
+//                                            64, 100000, 10, 10,
+//                                            Config::object{{"dim", 64}, {"metric_type", "L2"}},
+//                                            Config::object{{"dim", 64}, {"k", 10}}
+//                            ),
                             std::make_tuple(IndexType::FAISS_IVFSQ8_MIX, "Default",
-                                            64, 100000, 10, 10,
-                                            Config::object{{"dim", 64}, {"nlist", 1000}, {"nbits", 8}, {"metric_type", "L2"}},
-                                            Config::object{{"dim", 64}, {"k", 10}, {"nprobe", 5}}
-                            ),
-                            std::make_tuple(IndexType::NSG_MIX, "Default",
-                                            128, 250000, 10, 10,
-                                            Config::object{{"dim", 128}, {"nlist", 8192}, {"nprobe", 16}, {"metric_type", "L2"},
-                                                           {"knng", 200}, {"search_length", 40}, {"out_degree", 60}, {"candidate_pool_size", 200}},
-                                            Config::object{{"k", 10}, {"search_length", 20}}
+                                            DIM, NB, 10, 10,
+                                            Config::object{{"dim", DIM}, {"nlist", 1000}, {"nbits", 8}, {"metric_type", "L2"}},
+                                            Config::object{{"dim", DIM}, {"k", 10}, {"nprobe", 5}}
                             )
+//                            std::make_tuple(IndexType::NSG_MIX, "Default",
+//                                            128, 250000, 10, 10,
+//                                            Config::object{{"dim", 128}, {"nlist", 8192}, {"nprobe", 16}, {"metric_type", "L2"},
+//                                                           {"knng", 200}, {"search_length", 40}, {"out_degree", 60}, {"candidate_pool_size", 200}},
+//                                            Config::object{{"k", 10}, {"search_length", 20}}
+//                            )
                             //std::make_tuple(IndexType::SPTAG_KDT_RNT_CPU, "Default",
                             //                64, 10000, 10, 10,
                             //                Config::object{{"TPTNumber", 1}, {"dim", 64}},
@@ -132,6 +138,31 @@ TEST_P(KnowhereWrapperTest, base_test) {
 
     index_->BuildAll(nb, xb.data(), ids.data(), train_cfg);
     index_->Search(nq, xq.data(), res_dis.data(), res_ids.data(), search_cfg);
+    AssertResult(res_ids, res_dis);
+}
+
+TEST_P(KnowhereWrapperTest, to_gpu_test) {
+    EXPECT_EQ(index_->GetType(), index_type);
+
+    auto elems = nq * k;
+    std::vector<int64_t> res_ids(elems);
+    std::vector<float> res_dis(elems);
+
+    index_->BuildAll(nb, xb.data(), ids.data(), train_cfg);
+    index_->Search(nq, xq.data(), res_dis.data(), res_ids.data(), search_cfg);
+    AssertResult(res_ids, res_dis);
+    {
+        index_->CopyToGpu(1);
+    }
+
+    std::string file_location = "/tmp/whatever";
+    write_index(index_, file_location);
+    auto new_index = read_index(file_location);
+
+    auto dev_idx = new_index->CopyToGpu(1);
+    for (int i = 0; i < 10000; ++i) {
+        dev_idx->Search(nq, xq.data(), res_dis.data(), res_ids.data(), search_cfg);
+    }
     AssertResult(res_ids, res_dis);
 }
 

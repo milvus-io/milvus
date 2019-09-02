@@ -16,6 +16,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-331 - Crate Table : when table exists, error code is META_FAILED(code=15) rather than ILLEGAL TABLE NAME(code=9))
 - MS-430 - Search no result if index created with FLAT
 - MS-443 - Create index hang again
+- MS-436 - Delete vectors failed if index created with index_type: IVF_FLAT/IVF_SQ8
+- MS-450 - server hang after run stop_server.sh
+- MS-449 - Add vectors twice success, once with ids, the other no ids
 
 ## Improvement
 - MS-327 - Clean code for milvus
@@ -70,6 +73,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-440 - Add DumpTaskTables in sdk
 - MS-442 - Merge Knowhere
 - MS-445 - Rename CopyCompleted to LoadCompleted
+- MS-451 - Update server_config.template file, set GPU compute default
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

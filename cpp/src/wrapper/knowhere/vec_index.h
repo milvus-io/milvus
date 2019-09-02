@@ -32,6 +32,7 @@ enum class IndexType {
     FAISS_IVFPQ_GPU,
     SPTAG_KDT_RNT_CPU,
     FAISS_IVFSQ8_MIX,
+    FAISS_IVFSQ8,
     NSG_MIX,
 };
 
@@ -87,6 +88,8 @@ extern VecIndexPtr GetVecIndexFactory(const IndexType &type);
 extern VecIndexPtr LoadVecIndex(const IndexType &index_type, const zilliz::knowhere::BinarySet &index_binary);
 
 extern void AutoGenParams(const IndexType& type, const long& size, Config& cfg);
+
+extern IndexType TransferToCpuIndexType(const IndexType& type);
 
 }
 }

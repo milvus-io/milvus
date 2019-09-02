@@ -37,21 +37,22 @@ public:
     }
 
     ~CollectInsertMetrics() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
-        double avg_time = total_time / n_;
-        for (int i = 0; i < n_; ++i) {
-            Metrics::GetInstance().AddVectorsDurationHistogramOberve(avg_time);
-        }
+        if(n_ > 0) {
+            auto end_time = METRICS_NOW_TIME;
+            auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+            double avg_time = total_time / n_;
+            for (int i = 0; i < n_; ++i) {
+                Metrics::GetInstance().AddVectorsDurationHistogramOberve(avg_time);
+            }
 
-        //    server::Metrics::GetInstance().add_vector_duration_seconds_quantiles().Observe((average_time));
-        if (status_.ok()) {
-            server::Metrics::GetInstance().AddVectorsSuccessTotalIncrement(n_);
-            server::Metrics::GetInstance().AddVectorsSuccessGaugeSet(n_);
-        }
-        else {
-            server::Metrics::GetInstance().AddVectorsFailTotalIncrement(n_);
-            server::Metrics::GetInstance().AddVectorsFailGaugeSet(n_);
+            //    server::Metrics::GetInstance().add_vector_duration_seconds_quantiles().Observe((average_time));
+            if (status_.ok()) {
+                server::Metrics::GetInstance().AddVectorsSuccessTotalIncrement(n_);
+                server::Metrics::GetInstance().AddVectorsSuccessGaugeSet(n_);
+            } else {
+                server::Metrics::GetInstance().AddVectorsFailTotalIncrement(n_);
+                server::Metrics::GetInstance().AddVectorsFailGaugeSet(n_);
+            }
         }
     }
 
@@ -69,14 +70,16 @@ public:
     }
 
     ~CollectQueryMetrics() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
-        for (int i = 0; i < nq_; ++i) {
-            server::Metrics::GetInstance().QueryResponseSummaryObserve(total_time);
+        if(nq_ > 0) {
+            auto end_time = METRICS_NOW_TIME;
+            auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+            for (int i = 0; i < nq_; ++i) {
+                server::Metrics::GetInstance().QueryResponseSummaryObserve(total_time);
+            }
+            auto average_time = total_time / nq_;
+            server::Metrics::GetInstance().QueryVectorResponseSummaryObserve(average_time, nq_);
+            server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double(nq_) / total_time);
         }
-        auto average_time = total_time / nq_;
-        server::Metrics::GetInstance().QueryVectorResponseSummaryObserve(average_time, nq_);
-        server::Metrics::GetInstance().QueryVectorResponsePerSecondGaugeSet(double (nq_) / total_time);
     }
 
 private:

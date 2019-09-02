@@ -152,8 +152,33 @@ bool IsSameIndex(const TableIndex& index1, const TableIndex& index2) {
         && index1.metric_type_ == index2.metric_type_;
 }
 
-bool UserDefinedId(int64_t flag) {
-    return flag & meta::FLAG_MASK_USERID;
+meta::DateT GetDate(const std::time_t& t, int day_delta) {
+    struct tm ltm;
+    localtime_r(&t, &ltm);
+    if (day_delta > 0) {
+        do {
+            ++ltm.tm_mday;
+            --day_delta;
+        } while(day_delta > 0);
+        mktime(&ltm);
+    } else if (day_delta < 0) {
+        do {
+            --ltm.tm_mday;
+            ++day_delta;
+        } while(day_delta < 0);
+        mktime(&ltm);
+    } else {
+        ltm.tm_mday;
+    }
+    return ltm.tm_year*10000 + ltm.tm_mon*100 + ltm.tm_mday;
+}
+
+meta::DateT GetDateWithDelta(int day_delta) {
+    return GetDate(std::time(nullptr), day_delta);
+}
+
+meta::DateT GetDate() {
+    return GetDate(std::time(nullptr), 0);
 }
 
 } // namespace utils
