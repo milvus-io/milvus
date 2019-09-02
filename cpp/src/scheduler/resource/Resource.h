@@ -19,7 +19,6 @@
 #include "../event/TaskTableUpdatedEvent.h"
 #include "../TaskTable.h"
 #include "../task/Task.h"
-#include "../Cost.h"
 #include "Connection.h"
 #include "Node.h"
 #include "RegisterHandler.h"

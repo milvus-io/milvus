@@ -81,7 +81,7 @@ void Resource::WakeupExecutor() {
 }
 
 TaskTableItemPtr Resource::pick_task_load() {
-    auto indexes = PickToLoad(task_table_, 10);
+    auto indexes = task_table_.PickToLoad(10);
     for (auto index : indexes) {
         // try to set one task loading, then return
         if (task_table_.Load(index))
@@ -92,7 +92,7 @@ TaskTableItemPtr Resource::pick_task_load() {
 }
 
 TaskTableItemPtr Resource::pick_task_execute() {
-    auto indexes = PickToExecute(task_table_, 3);
+    auto indexes = task_table_.PickToExecute(3);
     for (auto index : indexes) {
         // try to set one task executing, then return
         if (task_table_.Execute(index))
