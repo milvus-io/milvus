@@ -144,7 +144,7 @@ Status MySQLMetaImpl::Initialize() {
                                 "dimension SMALLINT NOT NULL, " <<
                                 "created_on BIGINT NOT NULL, " <<
                                 "flag BIGINT DEFAULT 0 NOT NULL, " <<
-                                "index_file_size INT DEFAULT 1024 NOT NULL, " <<
+                                "index_file_size BIGINT DEFAULT 1024 NOT NULL, " <<
                                 "engine_type INT DEFAULT 1 NOT NULL, " <<
                                 "nlist INT DEFAULT 16384 NOT NULL, " <<
                                 "metric_type INT DEFAULT 1 NOT NULL);";
@@ -291,11 +291,16 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
             std::string state = std::to_string(table_schema.state_);
             std::string dimension = std::to_string(table_schema.dimension_);
             std::string created_on = std::to_string(table_schema.created_on_);
+            std::string flag = std::to_string(table_schema.flag_);
+            std::string index_file_size = std::to_string(table_schema.index_file_size_);
             std::string engine_type = std::to_string(table_schema.engine_type_);
+            std::string nlist = std::to_string(table_schema.nlist_);
+            std::string metric_type = std::to_string(table_schema.metric_type_);
 
             createTableQuery << "INSERT INTO Tables VALUES" <<
                              "(" << id << ", " << quote << table_id << ", " << state << ", " << dimension << ", " <<
-                             created_on << ", " << engine_type << ");";
+                             created_on << ", " << flag << ", " << index_file_size << ", " << engine_type << ", " <<
+                             nlist << ", " << metric_type << ");";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
 
@@ -904,6 +909,7 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         std::string engine_type = std::to_string(file_schema.engine_type_);
         std::string file_id = file_schema.file_id_;
         std::string file_type = std::to_string(file_schema.file_type_);
+        std::string file_size = std::to_string(file_schema.file_size_);
         std::string row_count = std::to_string(file_schema.row_count_);
         std::string updated_time = std::to_string(file_schema.updated_time_);
         std::string created_on = std::to_string(file_schema.created_on_);
@@ -920,8 +926,8 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
 
             createTableFileQuery << "INSERT INTO TableFiles VALUES" <<
                                  "(" << id << ", " << quote << table_id << ", " << engine_type << ", " <<
-                                 quote << file_id << ", " << file_type << ", " << row_count << ", " <<
-                                 updated_time << ", " << created_on << ", " << date << ");";
+                                 quote << file_id << ", " << file_type << ", " << file_size << ", " <<
+                                 row_count << ", " << updated_time << ", " << created_on << ", " << date << ");";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTableFile: " << createTableFileQuery.str();
 
@@ -1170,7 +1176,7 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
             }
 
             Query filesToMergeQuery = connectionPtr->query();
-            filesToMergeQuery << "SELECT id, table_id, file_id, file_type, file_size, row_count, date, engine_type, create_on " <<
+            filesToMergeQuery << "SELECT id, table_id, file_id, file_type, file_size, row_count, date, engine_type, created_on " <<
                               "FROM TableFiles " <<
                               "WHERE table_id = " << quote << table_id << " AND " <<
                               "file_type = " << std::to_string(TableFileSchema::RAW) << " " <<

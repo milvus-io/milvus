@@ -645,14 +645,18 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
     try {
         //step 1: load index
-        to_index->Load(options_.insert_cache_immediately_);
+        Status status = to_index->Load(options_.insert_cache_immediately_);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Failed to load index file: " << status.ToString();
+            return status;
+        }
 
         //step 2: create table file
         meta::TableFileSchema table_file;
         table_file.table_id_ = file.table_id_;
         table_file.date_ = file.date_;
         table_file.file_type_ = meta::TableFileSchema::NEW_INDEX; //for multi-db-path, distribute index file averagely to each path
-        Status status = meta_ptr_->CreateTableFile(table_file);
+        status = meta_ptr_->CreateTableFile(table_file);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Failed to create table file: " << status.ToString();
             return status;
@@ -664,6 +668,14 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
         try {
             server::CollectBuildIndexMetrics metrics;
             index = to_index->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
+            if (index == nullptr) {
+                table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
+                status = meta_ptr_->UpdateTableFile(table_file);
+                ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
+
+                return status;
+            }
+
         } catch (std::exception& ex) {
             //typical error: out of gpu memory
             std::string msg = "BuildIndex encounter exception: " + std::string(ex.what());
