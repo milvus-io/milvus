@@ -153,6 +153,26 @@ TEST_F(SchedulerTest, OnCopyCompleted) {
 
     sleep(3);
     ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
+
+}
+
+TEST_F(SchedulerTest, PushTaskToNeighbourRandomlyTest) {
+    const uint64_t NUM = 10;
+    std::vector<std::shared_ptr<TestTask>> tasks;
+    TableFileSchemaPtr dummy1 = std::make_shared<meta::TableFileSchema>();
+    dummy1->location_ = "location";
+
+    tasks.clear();
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        auto task = std::make_shared<TestTask>(dummy1);
+        task->label() = std::make_shared<DefaultLabel>();
+        tasks.push_back(task);
+        cpu_resource_.lock()->task_table().Put(task);
+    }
+
+    sleep(3);
+//    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
 }
 
 class SchedulerTest2 : public testing::Test {
