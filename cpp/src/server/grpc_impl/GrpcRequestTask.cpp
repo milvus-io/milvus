@@ -93,6 +93,7 @@ namespace {
                 return;
             }
 
+            //range: [start_day, end_day)
             for (long i = 0; i < days; i++) {
                 time_t tt_day = tt_start + DAY_SECONDS * i;
                 tm tm_day;
@@ -456,21 +457,17 @@ InsertTask::OnExecute() {
             }
         }
 
+        //step 3: check table flag
         //all user provide id, or all internal id
-        uint64_t row_count = 0;
-        DBWrapper::DB()->GetTableRowCount(table_info.table_id_, row_count);
-        bool empty_table = (row_count == 0);
         bool user_provide_ids = !insert_param_->row_id_array().empty();
-        if(!empty_table) {
-            //user already provided id before, all insert action require user id
-            if(engine::utils::UserDefinedId(table_info.flag_) && !user_provide_ids) {
-                return SetError(SERVER_INVALID_ARGUMENT, "Table vector ids are user defined, please provide id for this batch");
-            }
+        //user already provided id before, all insert action require user id
+        if((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) && !user_provide_ids) {
+            return SetError(SERVER_INVALID_ARGUMENT, "Table vector ids are user defined, please provide id for this batch");
+        }
 
-            //user didn't provided id before, no need to provide user id
-            if(!engine::utils::UserDefinedId(table_info.flag_) && user_provide_ids) {
-                return SetError(SERVER_INVALID_ARGUMENT, "Table vector ids are auto generated, no need to provide id for this batch");
-            }
+        //user didn't provided id before, no need to provide user id
+        if((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) && user_provide_ids) {
+            return SetError(SERVER_INVALID_ARGUMENT, "Table vector ids are auto generated, no need to provide id for this batch");
         }
 
         rc.RecordSection("check validation");
@@ -481,7 +478,7 @@ InsertTask::OnExecute() {
         ProfilerStart(fname.c_str());
 #endif
 
-        //step 3: prepare float data
+        //step 4: prepare float data
         std::vector<float> vec_f(insert_param_->row_record_array_size() * table_info.dimension_, 0);
 
         // TODO: change to one dimension array in protobuf or use multiple-thread to copy the data
@@ -504,7 +501,7 @@ InsertTask::OnExecute() {
 
         rc.ElapseFromBegin("prepare vectors data");
 
-        //step 4: insert vectors
+        //step 5: insert vectors
         auto vec_count = (uint64_t) insert_param_->row_record_array_size();
         std::vector<int64_t> vec_ids(insert_param_->row_id_array_size(), 0);
         if(!insert_param_->row_id_array().empty()) {
@@ -529,11 +526,10 @@ InsertTask::OnExecute() {
             return SetError(SERVER_ILLEGAL_VECTOR_ID, msg);
         }
 
-        //step 5: update table flag
-        if(empty_table && user_provide_ids) {
-            stat = DBWrapper::DB()->UpdateTableFlag(insert_param_->table_name(),
-                                                    table_info.flag_ | engine::meta::FLAG_MASK_USERID);
-        }
+        //step 6: update table flag
+        user_provide_ids ? table_info.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
+                : table_info.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
+        stat = DBWrapper::DB()->UpdateTableFlag(insert_param_->table_name(), table_info.flag_);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();

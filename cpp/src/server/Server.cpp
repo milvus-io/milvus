@@ -21,6 +21,7 @@
 #include <src/scheduler/SchedInst.h>
 
 #include "metrics/Metrics.h"
+#include "DBWrapper.h"
 
 namespace zilliz {
 namespace milvus {
@@ -158,7 +159,7 @@ Server::Start() {
             signal(SIGTERM, SignalUtil::HandleSignal);
             server::Metrics::GetInstance().Init();
             server::SystemInfo::GetInstance().Init();
-            engine::SchedServInit();
+
             std::cout << "Milvus server start successfully." << std::endl;
             StartService();
 
@@ -221,12 +222,16 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
+    engine::StartSchedulerService();
+    DBWrapper::GetInstance().StartService();
     grpc::GrpcMilvusServer::StartService();
 }
 
 void
 Server::StopService() {
     grpc::GrpcMilvusServer::StopService();
+    DBWrapper::GetInstance().StopService();
+    engine::StopSchedulerService();
 }
 
 }

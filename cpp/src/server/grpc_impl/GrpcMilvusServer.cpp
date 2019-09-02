@@ -49,8 +49,6 @@ GrpcMilvusServer::StartService() {
 
     faiss::distance_compute_blas_threshold = engine_config.GetInt32Value(CONFIG_DCBT, 20);
 
-    DBWrapper::DB();//initialize db
-
     std::string server_address(address + ":" + std::to_string(port));
 
     ::grpc::ServerBuilder builder;

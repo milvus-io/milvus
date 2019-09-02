@@ -24,6 +24,7 @@ using namespace mysqlpp;
 class MySQLMetaImpl : public Meta {
  public:
     MySQLMetaImpl(const DBMetaOptions &options_, const int &mode);
+    ~MySQLMetaImpl();
 
     Status CreateTable(TableSchema &table_schema) override;
 
@@ -85,8 +86,6 @@ class MySQLMetaImpl : public Meta {
     Status DropAll() override;
 
     Status Count(const std::string &table_id, uint64_t &result) override;
-
-    virtual ~MySQLMetaImpl();
 
  private:
     Status NextFileId(std::string &file_id);

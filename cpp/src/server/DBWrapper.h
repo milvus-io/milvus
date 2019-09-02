@@ -5,7 +5,10 @@
  ******************************************************************************/
 #pragma once
 
+#include "utils/Error.h"
 #include "db/DB.h"
+
+#include <memory>
 
 namespace zilliz {
 namespace milvus {
@@ -14,18 +17,27 @@ namespace server {
 class DBWrapper {
 private:
     DBWrapper();
-    ~DBWrapper();
+    ~DBWrapper() = default;
 
 public:
-    static zilliz::milvus::engine::DB* DB() {
-        static DBWrapper db_wrapper;
-        return db_wrapper.db();
+    static DBWrapper& GetInstance() {
+        static DBWrapper wrapper;
+        return wrapper;
     }
 
-    zilliz::milvus::engine::DB* db() { return db_; }
+    static std::shared_ptr<engine::DB> DB() {
+        return GetInstance().EngineDB();
+    }
+
+    ServerError StartService();
+    ServerError StopService();
+
+    std::shared_ptr<engine::DB> EngineDB() {
+        return db_;
+    }
 
 private:
-    zilliz::milvus::engine::DB* db_ = nullptr;
+    std::shared_ptr<engine::DB> db_;
 };
 
 }

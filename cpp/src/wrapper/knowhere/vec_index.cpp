@@ -106,6 +106,10 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type) {
             index = std::make_shared<zilliz::knowhere::GPUIVFSQ>(0);
             return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFSQ8_MIX);
         }
+        case IndexType::FAISS_IVFSQ8: {
+            index = std::make_shared<zilliz::knowhere::IVFSQ>();
+            break;
+        }
         case IndexType::NSG_MIX: { // TODO(linxj): bug.
             index = std::make_shared<zilliz::knowhere::NSG>(0);
             break;
@@ -194,10 +198,10 @@ server::KnowhereError write_index(VecIndexPtr index, const std::string &location
 // TODO(linxj): redo here.
 void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Config &cfg) {
     auto nlist = cfg.get_with_default("nlist", 0);
-    if (size <= TYPICAL_COUNT/16384 + 1) {
+    if (size <= TYPICAL_COUNT / 16384 + 1) {
         //handle less row count, avoid nlist set to 0
         cfg["nlist"] = 1;
-    } else if (int(size/TYPICAL_COUNT) * nlist == 0) {
+    } else if (int(size / TYPICAL_COUNT) * nlist == 0) {
         //calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
         cfg["nlist"] = int(size / TYPICAL_COUNT * 16384);
     }
@@ -221,6 +225,20 @@ void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Co
             if (!cfg.contains("candidate_pool_size")) { cfg["candidate_pool_size"] = 200 + 100 * scale_factor; }
             WRAPPER_LOG_DEBUG << pretty_print(cfg);
             break;
+        }
+    }
+}
+
+IndexType TransferToCpuIndexType(const IndexType &type) {
+    switch (type) {
+        case IndexType::FAISS_IVFFLAT_MIX: {
+            return IndexType::FAISS_IVFFLAT_CPU;
+        }
+        case IndexType::FAISS_IVFSQ8_MIX: {
+            return IndexType::FAISS_IVFSQ8;
+        }
+        default: {
+            return IndexType::INVALID;
         }
     }
 }
