@@ -30,7 +30,7 @@ protected:
         resources_.push_back(gpu_resource_);
 
         auto subscriber = [&](EventPtr event) {
-            if (event->Type() == EventType::COPY_COMPLETED) {
+            if (event->Type() == EventType::LOAD_COMPLETED) {
                 std::lock_guard<std::mutex> lock(load_mutex_);
                 ++load_count_;
                 cv_.notify_one();

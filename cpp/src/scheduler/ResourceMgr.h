@@ -41,11 +41,20 @@ public:
     ResourcePtr
     GetResource(ResourceType type, uint64_t device_id);
 
+    ResourcePtr
+    GetResourceByName(std::string name);
+
+    std::vector<ResourcePtr>
+    GetAllResouces();
+
     /*
      * Return account of resource which enable executor;
      */
     uint64_t
     GetNumOfComputeResource();
+
+    std::vector<ResourcePtr>
+    GetComputeResource();
 
     /*
      * Add resource into Resource Management;
