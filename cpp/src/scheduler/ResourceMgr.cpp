@@ -28,6 +28,17 @@ ResourceMgr::GetNumOfComputeResource() {
     return count;
 }
 
+std::vector<ResourcePtr>
+ResourceMgr::GetComputeResource() {
+    std::vector<ResourcePtr > result;
+    for (auto &resource : resources_) {
+        if (resource->HasExecutor()) {
+            result.emplace_back(resource);
+        }
+    }
+    return result;
+}
+
 uint64_t
 ResourceMgr::GetNumGpuResource() const {
     uint64_t num = 0;
@@ -47,6 +58,21 @@ ResourceMgr::GetResource(ResourceType type, uint64_t device_id) {
         }
     }
     return nullptr;
+}
+
+ResourcePtr
+ResourceMgr::GetResourceByName(std::string name) {
+    for (auto &resource : resources_) {
+        if (resource->Name() == name) {
+            return resource;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<ResourcePtr>
+ResourceMgr::GetAllResouces() {
+    return resources_;
 }
 
 ResourceWPtr
