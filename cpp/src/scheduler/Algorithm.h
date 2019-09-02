@@ -5,6 +5,7 @@
  ******************************************************************************/
 
 #include "resource/Resource.h"
+#include "ResourceMgr.h"
 
 #include <vector>
 #include <string>
@@ -13,8 +14,11 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-std::vector<std::string>
-ShortestPath(const ResourcePtr &src, const ResourcePtr& dest);
+uint64_t
+ShortestPath(const ResourcePtr &src,
+             const ResourcePtr &dest,
+             const ResourceMgrPtr &res_mgr,
+             std::vector<std::string>& path);
 
 }
 }
