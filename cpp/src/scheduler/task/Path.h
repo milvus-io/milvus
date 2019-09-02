@@ -29,19 +29,23 @@ class Path {
         return path_;
     }
 
-    std::string &
+    std::string
     Next() {
-        --index_;
-        return path_[index_];
+        if (index_ > 0 && !path_.empty()) {
+            --index_;
+            return path_[index_];
+        } else {
+            return nullptr;
+        }
+
     }
 
-    std::string &
+    std::string
     Last() {
         if (!path_.empty()) {
             return path_[0];
         } else {
-            std::string str;
-            return str;
+            return nullptr;
         }
     }
 

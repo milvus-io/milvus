@@ -126,6 +126,11 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
         return total_cost_ / total_task_;
     }
 
+    inline uint64_t
+    TotalTasks() const {
+        return total_task_;
+    }
+
     TaskTable &
     task_table();
 

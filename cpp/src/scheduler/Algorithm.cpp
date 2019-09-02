@@ -21,19 +21,18 @@ ShortestPath(const ResourcePtr &src,
     std::vector<std::vector<std::string>> paths;
 
     uint64_t num_of_resources = res_mgr->GetAllResouces().size();
-    uint64_t src_id, dest_id;
     std::unordered_map<uint64_t, std::string> id_name_map;
     std::unordered_map<std::string, uint64_t> name_id_map;
-    for (auto i = 0; i < num_of_resources; ++i) {
+    for (uint64_t i = 0; i < num_of_resources; ++i) {
         id_name_map.insert(std::make_pair(i, res_mgr->GetAllResouces().at(i)->Name()));
         name_id_map.insert(std::make_pair(res_mgr->GetAllResouces().at(i)->Name(), i));
     }
 
     std::vector<std::vector<uint64_t> > dis_matrix;
     dis_matrix.resize(num_of_resources);
-    for (auto i = 0; i < num_of_resources; ++i) {
+    for (uint64_t i = 0; i < num_of_resources; ++i) {
         dis_matrix[i].resize(num_of_resources);
-        for (auto j = 0; j < num_of_resources; ++j) {
+        for (uint64_t j = 0; j < num_of_resources; ++j) {
             dis_matrix[i][j] = MAXINT;
         }
         dis_matrix[i][i] = 0;
@@ -62,8 +61,8 @@ ShortestPath(const ResourcePtr &src,
 
     for (uint64_t i = 0; i < num_of_resources; ++i) {
         uint64_t minn = MAXINT;
-        uint64_t temp;
-        for (auto j = 0; j < num_of_resources; ++j) {
+        uint64_t temp = 0;
+        for (uint64_t j = 0; j < num_of_resources; ++j) {
             if (!vis[j] && dis[j] < minn) {
                 minn = dis[j];
                 temp = j;
@@ -91,7 +90,6 @@ ShortestPath(const ResourcePtr &src,
         path.push_back(id_name_map.at(parent_idx));
         parent_idx = parent[parent_idx];
     }
-//    result.push_back(id_name_map.at(parent_idx));
     return dis[name_id_map.at(dest->Name())];
 }
 
