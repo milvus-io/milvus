@@ -11,7 +11,7 @@ namespace milvus {
 namespace engine {
 
 uint64_t
-get_now_timestamp();
+get_current_timestamp();
 
 }
 }

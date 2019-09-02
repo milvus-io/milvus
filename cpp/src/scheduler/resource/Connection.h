@@ -28,6 +28,11 @@ public:
         return speed_;
     }
 
+    uint64_t
+    transport_cost() {
+        return 1024 / speed_;
+    }
+
 public:
     std::string
     Dump() const {
