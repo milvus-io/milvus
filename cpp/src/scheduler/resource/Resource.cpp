@@ -140,9 +140,9 @@ void Resource::executor_function() {
                 break;
             }
 
-            auto start = get_now_timestamp();
+            auto start = get_current_timestamp();
             Process(task_item->task);
-            auto finish = get_now_timestamp();
+            auto finish = get_current_timestamp();
             ++total_task_;
             total_cost_ += finish - start;
 

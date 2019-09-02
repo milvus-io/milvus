@@ -22,24 +22,24 @@ namespace engine {
 class SpecResLabel : public TaskLabel {
 public:
     SpecResLabel(const ResourceWPtr &resource)
-        : TaskLabel(TaskLabelType::SPECIAL_RESOURCE), resource_(resource) {}
+        : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource) {}
 
     inline ResourceWPtr &
-    resource() const {
+    resource() {
         return resource_;
     }
 
     inline std::string &
-    resource_name() const {
+    resource_name() {
         return resource_name_;
     }
 
 private:
     ResourceWPtr resource_;
     std::string resource_name_;
-}
+};
 
-using SpecResLabelPtr = std::make_shared<SpecResLabel>;
+using SpecResLabelPtr = std::shared_ptr<SpecResLabel>();
 
 }
 }

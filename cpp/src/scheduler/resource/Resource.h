@@ -199,8 +199,8 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
 
     TaskTable task_table_;
 
-    uint64_t total_cost_ = 0;
-    uint64_t total_task_ = 0;
+    uint64_t total_cost_ = 10;
+    uint64_t total_task_ = 10;
 
     std::map<RegisterType, std::function<RegisterHandlerPtr()>> register_table_;
     std::function<void(EventPtr)> subscriber_ = nullptr;

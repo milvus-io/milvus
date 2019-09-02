@@ -41,6 +41,12 @@ public:
     ResourcePtr
     GetResource(ResourceType type, uint64_t device_id);
 
+    ResourcePtr
+    GetResourceByName(std::string name);
+
+    std::vector<ResourcePtr>
+    GetAllResouces();
+
     /*
      * Return account of resource which enable executor;
      */
