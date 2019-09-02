@@ -112,7 +112,7 @@ zilliz::milvus::engine::DBMetaOptions DISABLED_MySQLTest::getDBMetaOptions() {
 
     if(options.backend_uri.empty()) {
 //        throw std::exception();
-        options.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
+        options.backend_uri = "mysql://root:Fantast1c@192.168.1.134:3306/";
     }
 
     return options;
