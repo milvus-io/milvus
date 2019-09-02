@@ -28,17 +28,48 @@ get_neighbours(const ResourcePtr &self) {
     return neighbours;
 }
 
+std::vector<std::pair<ResourcePtr, Connection>>
+get_neighbours_with_connetion(const ResourcePtr &self) {
+    std::vector<std::pair<ResourcePtr, Connection>> neighbours;
+    for (auto &neighbour_node : self->GetNeighbours()) {
+        auto node = neighbour_node.neighbour_node.lock();
+        if (not node) continue;
+
+        auto resource = std::static_pointer_cast<Resource>(node);
+//        if (not resource->HasExecutor()) continue;
+        Connection conn = neighbour_node.connection;
+        neighbours.emplace_back(std::make_pair(resource, conn));
+    }
+    return neighbours;
+}
+
 
 void
 Action::PushTaskToNeighbourRandomly(const TaskPtr &task,
                                     const ResourcePtr &self) {
-    auto neighbours = get_neighbours(self);
+    auto neighbours = get_neighbours_with_connetion(self);
     if (not neighbours.empty()) {
+        std::vector<uint64_t > speeds;
+        uint64_t total_speed = 0;
+        for (auto &neighbour : neighbours) {
+            uint64_t speed = neighbour.second.speed();
+            speeds.emplace_back(speed);
+            total_speed += speed;
+        }
+
         std::random_device rd;
         std::mt19937 mt(rd());
-        std::uniform_int_distribution<uint64_t> dist(0, neighbours.size() - 1);
+        std::uniform_int_distribution<int> dist(0, total_speed);
+        uint64_t index = 0;
+        int64_t rd_speed = dist(mt);
+        for (uint64_t i = 0; i < speeds.size(); ++i) {
+            rd_speed -= speeds[i];
+            if (rd_speed <= 0) {
+                neighbours[i].first->task_table().Put(task);
+                return;
+            }
+        }
 
-        neighbours[dist(mt)]->task_table().Put(task);
     } else {
         //TODO: process
     }

@@ -8,6 +8,7 @@
 #include "db/scheduler/context/SearchContext.h"
 #include "db/scheduler/task/IScheduleTask.h"
 #include "scheduler/tasklabel/TaskLabel.h"
+#include "Path.h"
 
 #include <string>
 #include <memory>
@@ -45,6 +46,14 @@ public:
     Type() const { return type_; }
 
     /*
+     * Transport path;
+     */
+    inline Path&
+    path() {
+        return task_path_;
+    }
+
+    /*
      * Getter and Setter;
      */
     inline TaskLabelPtr &
@@ -64,6 +73,7 @@ public:
     Clone() = 0;
 
 public:
+    Path task_path_;
     std::vector<SearchContextPtr> search_contexts_;
     ScheduleTaskPtr task_;
     TaskType type_;
