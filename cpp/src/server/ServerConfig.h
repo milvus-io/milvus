@@ -45,9 +45,9 @@ static const char* CONFIG_METRIC_COLLECTOR = "collector";
 static const char* CONFIG_PROMETHEUS = "prometheus_config";
 static const char* CONFIG_METRIC_PROMETHEUS_PORT = "port";
 
-static const std::string CONFIG_ENGINE = "engine_config";
-static const std::string CONFIG_DCBT = "use_blas_threshold";
-static const std::string CONFIG_OMP_THREAD_NUM = "omp_thread_num";
+static const char* CONFIG_ENGINE = "engine_config";
+static const char* CONFIG_DCBT = "use_blas_threshold";
+static const char* CONFIG_OMP_THREAD_NUM = "omp_thread_num";
 
 static const char* CONFIG_RESOURCE = "resource_config";
 static const char* CONFIG_RESOURCES = "resources";
