@@ -170,16 +170,12 @@ void PrometheusMetrics::CPUTemperature() {
 void PrometheusMetrics::GpuCacheUsageGaugeSet() {
     if(!startup_) return;
     server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-    std::string gpu_ids_str = config.GetValue(server::CONFIG_GPU_IDS, "0,1");
+    auto conf_gpu_ids = config.GetSequence(server::CONFIG_GPU_IDS);
 
     std::vector<uint64_t > gpu_ids;
 
-    std::stringstream ss(gpu_ids_str);
-    for (int i; ss >> i;) {
-        gpu_ids.push_back(i);
-        if (ss.peek() == ',') {
-            ss.ignore();
-        }
+    for (auto gpu_id : conf_gpu_ids) {
+        gpu_ids.push_back(std::atoi(gpu_id.c_str()));
     }
 
     for(auto i = 0; i < gpu_ids.size(); ++i) {
