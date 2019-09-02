@@ -1,0 +1,13 @@
+# source
+src/
+include/
+
+# third party
+thirdparty/
+
+# cmake
+cmake/
+CMakeLists.txt
+
+# script
+build.sh

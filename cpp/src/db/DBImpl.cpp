@@ -41,17 +41,55 @@ constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
 
 DBImpl::DBImpl(const Options& options)
     : options_(options),
-      shutting_down_(false),
+      shutting_down_(true),
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
     meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
-    if (options.mode != Options::MODE::READ_ONLY) {
-        ENGINE_LOG_TRACE << "StartTimerTasks";
-        StartTimerTasks();
+    Start();
+}
+
+DBImpl::~DBImpl() {
+    Stop();
+}
+
+Status DBImpl::Start() {
+    if (!shutting_down_.load(std::memory_order_acquire)){
+        return Status::OK();
     }
 
+    //for distribute version, some nodes are read only
+    if (options_.mode != Options::MODE::READ_ONLY) {
+        ENGINE_LOG_TRACE << "StartTimerTasks";
+        bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
+    }
 
+    shutting_down_.store(false, std::memory_order_release);
+
+    return Status::OK();
+}
+
+Status DBImpl::Stop() {
+    if (shutting_down_.load(std::memory_order_acquire)){
+        return Status::OK();
+    }
+
+    shutting_down_.store(true, std::memory_order_release);
+    bg_timer_thread_.join();
+
+    //wait compaction/buildindex finish
+    for(auto& result : compact_thread_results_) {
+        result.wait();
+    }
+
+    for(auto& result : index_thread_results_) {
+        result.wait();
+    }
+
+    //makesure all memory data serialized
+    MemSerialize();
+
+    return Status::OK();
 }
 
 Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
@@ -162,7 +200,7 @@ Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint6
                       const float *vectors, QueryResults &results) {
     server::CollectQueryMetrics metrics(nq);
 
-    meta::DatesT dates = {meta::Meta::GetDate()};
+    meta::DatesT dates = {utils::GetDate()};
     Status result = Query(table_id, k, nq, nprobe, vectors, dates, results);
 
     return result;
@@ -276,10 +314,6 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
     rc.ElapseFromBegin("Engine query totally cost");
 
     return Status::OK();
-}
-
-void DBImpl::StartTimerTasks() {
-    bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
 }
 
 void DBImpl::BackgroundTimerTask() {
@@ -739,13 +773,6 @@ Status DBImpl::DropAll() {
 
 Status DBImpl::Size(uint64_t& result) {
     return  meta_ptr_->Size(result);
-}
-
-DBImpl::~DBImpl() {
-    shutting_down_.store(true, std::memory_order_release);
-    bg_timer_thread_.join();
-    std::set<std::string> ids;
-    mem_mgr_->Serialize(ids);
 }
 
 } // namespace engine
