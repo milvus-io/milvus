@@ -20,6 +20,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-450 - server hang after run stop_server.sh
 - MS-449 - Add vectors twice success, once with ids, the other no ids
 - MS-461 - Mysql meta unittest failed
+- MS-462 - Run milvus server twices, should display error
 
 ## Improvement
 - MS-327 - Clean code for milvus
