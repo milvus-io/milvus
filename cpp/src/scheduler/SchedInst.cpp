@@ -43,14 +43,21 @@ StartSchedulerService() {
 
     knowhere::FaissGpuResourceMgr::GetInstance().InitResource();
 
-    auto default_connection = Connection("default_connection", 500.0);
-    auto connections = config.GetSequence(server::CONFIG_RESOURCE_CONNECTIONS);
+//    auto default_connection = Connection("default_connection", 500.0);
+    auto connections = config.GetChild(server::CONFIG_RESOURCE_CONNECTIONS).GetChildren();
     for (auto &conn : connections) {
-        std::string delimiter = "===";
-        std::string left = conn.substr(0, conn.find(delimiter));
-        std::string right = conn.substr(conn.find(delimiter) + 3, conn.length());
+        auto &connect_name = conn.first;
+        auto &connect_conf = conn.second;
+        auto connect_speed = connect_conf.GetInt64Value(server::CONFIG_SPEED_CONNECTIONS);
+        auto connect_endpoint = connect_conf.GetValue(server::CONFIG_ENDPOINT_CONNECTIONS);
 
-        ResMgrInst::GetInstance()->Connect(left, right, default_connection);
+        std::string delimiter = "===";
+        std::string left = connect_endpoint.substr(0, connect_endpoint.find(delimiter));
+        std::string right = connect_endpoint.substr(connect_endpoint.find(delimiter) + 3,
+            connect_endpoint.length());
+
+        auto connection = Connection(connect_name, connect_speed);
+        ResMgrInst::GetInstance()->Connect(left, right, connection);
     }
 
     ResMgrInst::GetInstance()->Start();
