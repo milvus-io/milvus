@@ -132,7 +132,9 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
             server::CollectExecutionEngineMetrics metrics(physical_size);
             index_ = read_index(location_);
             if(index_ == nullptr) {
-                ENGINE_LOG_ERROR << "Failed to load index from " << location_;
+                std::string msg = "Failed to load index from " + location_;
+                ENGINE_LOG_ERROR << msg;
+                return Status::Error(msg);
             } else {
                 ENGINE_LOG_DEBUG << "Disk io from: " << location_;
             }

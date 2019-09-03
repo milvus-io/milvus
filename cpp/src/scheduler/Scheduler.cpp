@@ -5,9 +5,10 @@
  ******************************************************************************/
 
 #include <src/cache/GpuCacheMgr.h>
+#include "event/LoadCompletedEvent.h"
 #include "Scheduler.h"
-#include "Cost.h"
 #include "action/Action.h"
+#include "Algorithm.h"
 
 
 namespace zilliz {
@@ -134,6 +135,54 @@ Scheduler::OnLoadCompleted(const EventPtr &event) {
                     if (not moved) {
                         Action::PushTaskToNeighbourRandomly(task, resource);
                     }
+                }
+                break;
+            }
+            case TaskLabelType::SPECIFIED_RESOURCE: {
+                auto self = event->resource_.lock();
+                auto task = load_completed_event->task_table_item_->task;
+
+                // if this resource is disk, assign it to smallest cost resource
+                if (self->Type() == ResourceType::DISK) {
+                    // step 1: calculate shortest path per resource, from disk to compute resource
+                    auto compute_resources = res_mgr_.lock()->GetComputeResource();
+                    std::vector<std::vector<std::string>> paths;
+                    std::vector<uint64_t > transport_costs;
+                    for (auto &res : compute_resources) {
+                        std::vector<std::string> path;
+                        uint64_t transport_cost = ShortestPath(self, res, res_mgr_.lock(), path);
+                        transport_costs.push_back(transport_cost);
+                        paths.emplace_back(path);
+                    }
+
+                    // step 2: select min cost, cost(resource) = avg_cost * task_to_do + transport_cost
+                    uint64_t min_cost = std::numeric_limits<uint64_t>::max();
+                    uint64_t min_cost_idx = 0;
+                    for (uint64_t i = 0; i < compute_resources.size(); ++i) {
+                        if (compute_resources[i]->TotalTasks() == 0) {
+                            min_cost_idx = i;
+                            break;
+                        }
+                        uint64_t cost = compute_resources[i]->TaskAvgCost() * compute_resources[i]->NumOfTaskToExec()
+                            + transport_costs[i];
+                        if (min_cost > cost) {
+                            min_cost = cost;
+                            min_cost_idx = i;
+                        }
+                    }
+
+                    // step 3: set path in task
+                    Path task_path(paths[min_cost_idx], paths[min_cost_idx].size() - 1);
+                    task->path() = task_path;
+                }
+
+                if(self->Name() == task->path().Last()) {
+                    self->WakeupLoader();
+                } else {
+                    auto next_res_name = task->path().Next();
+                    auto next_res = res_mgr_.lock()->GetResourceByName(next_res_name);
+                    load_completed_event->task_table_item_->Move();
+                    next_res->task_table().Put(task);
                 }
                 break;
             }

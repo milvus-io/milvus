@@ -4,6 +4,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include <iostream>
+#include "../Utils.h"
 #include "Resource.h"
 
 
@@ -80,7 +81,7 @@ void Resource::WakeupExecutor() {
 }
 
 TaskTableItemPtr Resource::pick_task_load() {
-    auto indexes = PickToLoad(task_table_, 10);
+    auto indexes = task_table_.PickToLoad(10);
     for (auto index : indexes) {
         // try to set one task loading, then return
         if (task_table_.Load(index))
@@ -91,7 +92,7 @@ TaskTableItemPtr Resource::pick_task_load() {
 }
 
 TaskTableItemPtr Resource::pick_task_execute() {
-    auto indexes = PickToExecute(task_table_, 3);
+    auto indexes = task_table_.PickToExecute(3);
     for (auto index : indexes) {
         // try to set one task executing, then return
         if (task_table_.Execute(index))
@@ -138,7 +139,13 @@ void Resource::executor_function() {
             if (task_item == nullptr) {
                 break;
             }
+
+            auto start = get_current_timestamp();
             Process(task_item->task);
+            auto finish = get_current_timestamp();
+            ++total_task_;
+            total_cost_ += finish - start;
+
             task_item->Executed();
             if (subscriber_) {
                 auto event = std::make_shared<FinishTaskEvent>(shared_from_this(), task_item);
