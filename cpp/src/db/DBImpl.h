@@ -35,6 +35,7 @@ class DBImpl : public DB {
     using MetaPtr = meta::Meta::Ptr;
 
     explicit DBImpl(const Options &options);
+    ~DBImpl();
 
     Status Start() override;
     Status Stop() override;
@@ -90,8 +91,6 @@ class DBImpl : public DB {
     Status DescribeIndex(const std::string& table_id, TableIndex& index) override;
 
     Status DropIndex(const std::string& table_id) override;
-
-    ~DBImpl() override;
 
  private:
     Status QueryAsync(const std::string &table_id,
