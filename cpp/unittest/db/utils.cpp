@@ -124,7 +124,12 @@ zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
 zilliz::milvus::engine::Options MySQLDBTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
+    options.meta.backend_uri = DBTestEnvironment::getURI();
+
+    if(options.meta.backend_uri.empty()) {
+        options.meta.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
+    }
+
     return options;
 }
 
