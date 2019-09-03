@@ -34,6 +34,17 @@ static std::unique_ptr<::grpc::Server> server;
 
 constexpr long MESSAGE_SIZE = -1;
 
+class NoReusePortOption : public ::grpc::ServerBuilderOption {
+ public:
+    void UpdateArguments(::grpc::ChannelArguments* args) override {
+        args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
+    }
+
+    void UpdatePlugins(std::vector<std::unique_ptr<::grpc::ServerBuilderPlugin>>*
+    plugins) override {}
+};
+
+
 void
 GrpcMilvusServer::StartService() {
     if (server != nullptr) {
@@ -52,6 +63,7 @@ GrpcMilvusServer::StartService() {
     std::string server_address(address + ":" + std::to_string(port));
 
     ::grpc::ServerBuilder builder;
+    builder.SetOption(std::unique_ptr<::grpc::ServerBuilderOption>(new NoReusePortOption));
     builder.SetMaxReceiveMessageSize(MESSAGE_SIZE); //default 4 * 1024 * 1024
     builder.SetMaxSendMessageSize(MESSAGE_SIZE);
 

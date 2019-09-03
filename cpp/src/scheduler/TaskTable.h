@@ -55,6 +55,9 @@ struct TaskTableItem {
     uint8_t priority; // just a number, meaningless;
 
     bool
+    IsFinish();
+
+    bool
     Load();
 
     bool
@@ -142,6 +145,13 @@ public:
     std::deque<TaskTableItemPtr>::iterator end() { return table_.end(); }
 
 public:
+    std::vector<uint64_t>
+    PickToLoad(uint64_t limit);
+
+    std::vector<uint64_t>
+    PickToExecute(uint64_t limit);
+
+public:
 
     /******** Action ********/
 
@@ -182,7 +192,7 @@ public:
      * Called by executor;
      */
     inline bool
-    Executed(uint64_t index){
+    Executed(uint64_t index) {
         return table_[index]->Executed();
     }
 
@@ -193,7 +203,7 @@ public:
      */
 
     inline bool
-    Move(uint64_t index){
+    Move(uint64_t index) {
         return table_[index]->Move();
     }
 
@@ -203,7 +213,7 @@ public:
      * Called by scheduler;
      */
     inline bool
-    Moved(uint64_t index){
+    Moved(uint64_t index) {
         return table_[index]->Moved();
     }
 
@@ -220,6 +230,9 @@ private:
     mutable std::mutex id_mutex_;
     std::deque<TaskTableItemPtr> table_;
     std::function<void(void)> subscriber_ = nullptr;
+
+    // cache last finish avoid Pick task from begin always
+    uint64_t last_finish_ = 0;
 };
 
 

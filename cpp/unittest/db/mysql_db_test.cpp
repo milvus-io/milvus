@@ -46,11 +46,7 @@ namespace {
 }
 
 
-TEST_F(DISABLED_MySQLDBTest, DB_TEST) {
-
-    auto options = GetOptions();
-    auto db_ = engine::DBFactory::Build(options);
-
+TEST_F(MySQLDBTest, DB_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -115,6 +111,8 @@ TEST_F(DISABLED_MySQLDBTest, DB_TEST) {
             ASSERT_TRUE(count >= prev_count);
             std::this_thread::sleep_for(std::chrono::seconds(3));
         }
+
+        std::cout << "Search AAA done" << std::endl;
     });
 
     int loop = INSERT_LOOP;
@@ -131,18 +129,9 @@ TEST_F(DISABLED_MySQLDBTest, DB_TEST) {
     }
 
     search.join();
-
-    delete db_;
-
-    auto dummyDB = engine::DBFactory::Build(options);
-    dummyDB->DropAll();
-    delete dummyDB;
 };
 
-TEST_F(DISABLED_MySQLDBTest, SEARCH_TEST) {
-    auto options = GetOptions();
-    auto db_ = engine::DBFactory::Build(options);
-
+TEST_F(MySQLDBTest, SEARCH_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -192,22 +181,9 @@ TEST_F(DISABLED_MySQLDBTest, SEARCH_TEST) {
     engine::QueryResults results;
     stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
     ASSERT_STATS(stat);
-
-    delete db_;
-
-    auto dummyDB = engine::DBFactory::Build(options);
-    dummyDB->DropAll();
-    delete dummyDB;
-
-    // TODO(linxj): add groundTruth assert
 };
 
-TEST_F(DISABLED_MySQLDBTest, ARHIVE_DISK_CHECK) {
-
-    auto options = GetOptions();
-    options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
-    auto db_ = engine::DBFactory::Build(options);
-
+TEST_F(MySQLDBTest, ARHIVE_DISK_CHECK) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -250,20 +226,9 @@ TEST_F(DISABLED_MySQLDBTest, ARHIVE_DISK_CHECK) {
     db_->Size(size);
     LOG(DEBUG) << "size=" << size;
     ASSERT_LE(size, 1 * engine::meta::G);
-
-    delete db_;
-
-    auto dummyDB = engine::DBFactory::Build(options);
-    dummyDB->DropAll();
-    delete dummyDB;
 };
 
-TEST_F(DISABLED_MySQLDBTest, DELETE_TEST) {
-
-    auto options = GetOptions();
-    options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
-    auto db_ = engine::DBFactory::Build(options);
-
+TEST_F(MySQLDBTest, DELETE_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 //    std::cout << stat.ToString() << std::endl;
@@ -301,10 +266,4 @@ TEST_F(DISABLED_MySQLDBTest, DELETE_TEST) {
 
     db_->HasTable(TABLE_NAME, has_table);
     ASSERT_FALSE(has_table);
-
-    delete db_;
-
-    auto dummyDB = engine::DBFactory::Build(options);
-    dummyDB->DropAll();
-    delete dummyDB;
 };

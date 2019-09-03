@@ -63,7 +63,7 @@ set(grpc_service_files
         grpc/gen-milvus/milvus.pb.cc
         grpc/gen-status/status.grpc.pb.cc
         grpc/gen-status/status.pb.cc
-        )
+        scheduler/Utils.h)
 
 set(db_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
