@@ -12,6 +12,7 @@
 #include "utils.h"
 #include "db/Factories.h"
 #include "db/Options.h"
+#include "server/ServerConfig.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -59,6 +60,9 @@ engine::Options DBTest::GetOptions() {
 
 void DBTest::SetUp() {
     InitLog();
+
+    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+    config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
 
     auto res_mgr = engine::ResMgrInst::GetInstance();
     res_mgr->Clear();
