@@ -22,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-461 - Mysql meta unittest failed
 - MS-462 - Run milvus server twices, should display error
 - MS-463 - Search timeout
+- MS-467 - mysql db test failed
 
 ## Improvement
 - MS-327 - Clean code for milvus
