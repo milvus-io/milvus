@@ -114,6 +114,7 @@ server::KnowhereError VecIndexImpl::Search(const long &nq, const float *xq, floa
 }
 
 zilliz::knowhere::BinarySet VecIndexImpl::Serialize() {
+    type = ConvertToCpuIndexType(type);
     return index_->Serialize();
 }
 
@@ -136,26 +137,23 @@ IndexType VecIndexImpl::GetType() {
 }
 
 VecIndexPtr VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg) {
-    //if (auto new_type = GetGpuIndexType(type)) {
-    //    auto device_index = index_->CopyToGpu(device_id);
-    //    return std::make_shared<VecIndexImpl>(device_index, new_type);
-    //}
-    //return nullptr;
-
-    // TODO(linxj): update type
+    // TODO(linxj): exception handle
     auto gpu_index = zilliz::knowhere::CopyCpuToGpu(index_, device_id, cfg);
-    auto new_index = std::make_shared<VecIndexImpl>(gpu_index, type);
+    auto new_index = std::make_shared<VecIndexImpl>(gpu_index, ConvertToGpuIndexType(type));
     new_index->dim = dim;
     return new_index;
 }
 
-// TODO(linxj): rename copytocpu => copygputocpu
 VecIndexPtr VecIndexImpl::CopyToCpu(const Config &cfg) {
+    // TODO(linxj): exception handle
     auto cpu_index = zilliz::knowhere::CopyGpuToCpu(index_, cfg);
-    return std::make_shared<VecIndexImpl>(cpu_index, type);
+    auto new_index = std::make_shared<VecIndexImpl>(cpu_index, ConvertToCpuIndexType(type));
+    new_index->dim = dim;
+    return new_index;
 }
 
 VecIndexPtr VecIndexImpl::Clone() {
+    // TODO(linxj): exception handle
     auto clone_index = std::make_shared<VecIndexImpl>(index_->Clone(), type);
     clone_index->dim = dim;
     return clone_index;
@@ -165,10 +163,8 @@ int64_t VecIndexImpl::GetDeviceId() {
     if (auto device_idx = std::dynamic_pointer_cast<GPUIndex>(index_)){
         return device_idx->GetGpuDevice();
     }
-    else {
-        return -1; // -1 == cpu
-    }
-    return 0;
+    // else
+    return -1; // -1 == cpu
 }
 
 float *BFIndex::GetRawVectors() {
@@ -243,9 +239,10 @@ server::KnowhereError IVFMixIndex::BuildAll(const long &nb,
         if (auto device_index = std::dynamic_pointer_cast<GPUIVF>(index_)) {
             auto host_index = device_index->CopyGpuToCpu(Config());
             index_ = host_index;
-            type = TransferToCpuIndexType(type);
+            type = ConvertToCpuIndexType(type);
         } else {
             WRAPPER_LOG_ERROR << "Build IVFMIXIndex Failed";
+            return server::KNOWHERE_ERROR;
         }
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
@@ -261,7 +258,7 @@ server::KnowhereError IVFMixIndex::BuildAll(const long &nb,
 }
 
 server::KnowhereError IVFMixIndex::Load(const zilliz::knowhere::BinarySet &index_binary) {
-    index_ = std::make_shared<IVF>();
+    //index_ = std::make_shared<IVF>();
     index_->Load(index_binary);
     dim = Dimension();
     return server::KNOWHERE_SUCCESS;
