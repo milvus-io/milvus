@@ -72,13 +72,13 @@ add_executable(metrics_test ${count_test_src} ${require_files} )
 
 set(knowhere_libs
         knowhere
-        SPTAGLibStatic
-        arrow
-        jemalloc_pic
-        faiss
-        openblas
-        lapack
-        tbb
+#        SPTAGLibStatic
+#        arrow
+#        jemalloc_pic
+#        faiss
+#        openblas
+#        lapack
+#        tbb
         )
 
 target_link_libraries(metrics_test
@@ -96,12 +96,12 @@ target_link_libraries(metrics_test
         mysqlpp
         ${unittest_libs}
         )
-if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
-    target_link_libraries(metrics_test ${MKL_LIBS} ${MKL_LIBS})
-else()
-    target_link_libraries(metrics_test
-            lapack
-            openblas)
-endif()
+#if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
+#    target_link_libraries(metrics_test ${MKL_LIBS} ${MKL_LIBS})
+#else()
+#    target_link_libraries(metrics_test
+#            lapack
+#            openblas)
+#endif()
 
 install(TARGETS metrics_test DESTINATION bin)
