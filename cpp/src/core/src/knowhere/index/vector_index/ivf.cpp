@@ -350,11 +350,15 @@ void BasicIndex::LoadImpl(const BinarySet &index_binary) {
 }
 
 void BasicIndex::SealImpl() {
+// TODO(linxj): enable
 //#ifdef ZILLIZ_FAISS
     faiss::Index *index = index_.get();
     auto idx = dynamic_cast<faiss::IndexIVF *>(index);
     if (idx != nullptr) {
         idx->to_readonly();
+    }
+    else {
+        KNOHWERE_ERROR_MSG("Seal failed");
     }
 //#endif
 }
