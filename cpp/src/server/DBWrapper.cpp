@@ -6,6 +6,7 @@
 
 #include "DBWrapper.h"
 #include "ServerConfig.h"
+#include "db/Factories.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
@@ -95,8 +96,7 @@ ServerError DBWrapper::StartService() {
     //create db instance
     std::string msg = opt.meta.path;
     try {
-        engine::DB* db = nullptr;
-        zilliz::milvus::engine::DB::Open(opt, &db);
+        engine::DB* db = engine::DBFactory::Build(opt);
         db_.reset(db);
     } catch(std::exception& ex) {
         msg = ex.what();

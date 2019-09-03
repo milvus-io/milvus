@@ -20,7 +20,11 @@ class Env;
 
 class DB {
 public:
-    static void Open(const Options& options, DB** dbptr);
+    DB() = default;
+    DB(const DB&) = delete;
+    DB& operator=(const DB&) = delete;
+
+    virtual ~DB() = default;
 
     virtual Status Start() = 0;
     virtual Status Stop() = 0;
@@ -55,11 +59,6 @@ public:
 
     virtual Status DropAll() = 0;
 
-    DB() = default;
-    DB(const DB&) = delete;
-    DB& operator=(const DB&) = delete;
-
-    virtual ~DB() = 0;
 }; // DB
 
 } // namespace engine
