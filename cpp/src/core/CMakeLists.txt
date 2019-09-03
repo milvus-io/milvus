@@ -5,6 +5,7 @@
 #-------------------------------------------------------------------------------
 
 cmake_minimum_required(VERSION 3.14)
+message(STATUS "---------------core--------------")
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
 set(KNOWHERE_VERSION "0.1.0")
@@ -42,14 +43,14 @@ find_package(CUDA)
 #set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
-    message("building milvus_engine on x86 architecture")
+    message(STATUS "building milvus_engine on x86 architecture")
     set(KNOWHERE_BUILD_ARCH x86_64)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(ppc)")
-    message("building milvus_engine on ppc architecture")
+    message(STATUS "building milvus_engine on ppc architecture")
     set(KNOWHERE_BUILD_ARCH ppc64le)
 else()
-    message("unknown processor type")
-    message("CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
+    message(WARNING "unknown processor type")
+    message(WARNING "CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
     set(KNOWHERE_BUILD_ARCH unknown)
 endif()
 
@@ -60,13 +61,20 @@ else()
 endif()
 message(STATUS "Build type = ${BUILD_TYPE}")
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+set(CORE_SOURCE_DIR ${PROJECT_SOURCE_DIR})
+set(CORE_BINARY_DIR ${PROJECT_BINARY_DIR})
+message(STATUS "Core source dir: ${PROJECT_SOURCE_DIR}")
+message(STATUS "Core binary dir: ${PROJECT_BINARY_DIR}")
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CORE_SOURCE_DIR}/cmake")
+
 include(ExternalProject)
-include(DefineOptions)
-include(BuildUtils)
-include(ThirdPartyPackages)
+include(DefineOptionsCore)
+include(BuildUtilsCore)
+include(ThirdPartyPackagesCore)
 
 add_subdirectory(src)
+
+set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
 
 if(BUILD_UNIT_TEST STREQUAL "ON")
     add_subdirectory(test)

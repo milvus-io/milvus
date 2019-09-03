@@ -8,13 +8,13 @@ set(helper
 
 set(knowhere_libs
         knowhere
-        SPTAGLibStatic
-        arrow
-        jemalloc_pic
-        faiss
-        openblas
-        lapack
-        tbb
+#        SPTAGLibStatic
+#        arrow
+#        jemalloc_pic
+#        faiss
+#        openblas
+#        lapack
+#        tbb
         cudart
         cublas
         )
