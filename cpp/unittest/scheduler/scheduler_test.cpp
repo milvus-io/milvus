@@ -13,6 +13,7 @@
 #include "scheduler/resource/Resource.h"
 #include "utils/Error.h"
 #include "wrapper/knowhere/vec_index.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace zilliz {
 namespace milvus {
@@ -122,9 +123,6 @@ protected:
 
     ResourceMgrPtr res_mgr_;
     std::shared_ptr<Scheduler> scheduler_;
-    uint64_t load_count_ = 0;
-    std::mutex load_mutex_;
-    std::condition_variable cv_;
 };
 
 void
@@ -155,6 +153,94 @@ TEST_F(SchedulerTest, OnCopyCompleted) {
 
     sleep(3);
     ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
+
+}
+
+TEST_F(SchedulerTest, PushTaskToNeighbourRandomlyTest) {
+    const uint64_t NUM = 10;
+    std::vector<std::shared_ptr<TestTask>> tasks;
+    TableFileSchemaPtr dummy1 = std::make_shared<meta::TableFileSchema>();
+    dummy1->location_ = "location";
+
+    tasks.clear();
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        auto task = std::make_shared<TestTask>(dummy1);
+        task->label() = std::make_shared<DefaultLabel>();
+        tasks.push_back(task);
+        cpu_resource_.lock()->task_table().Put(task);
+    }
+
+    sleep(3);
+//    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
+}
+
+class SchedulerTest2 : public testing::Test {
+ protected:
+    void
+    SetUp() override {
+        ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, true, false);
+        ResourcePtr cpu0 = ResourceFactory::Create("cpu0", "CPU", 0, true, false);
+        ResourcePtr cpu1 = ResourceFactory::Create("cpu1", "CPU", 1, true, false);
+        ResourcePtr cpu2 = ResourceFactory::Create("cpu2", "CPU", 2, true, false);
+        ResourcePtr gpu0 = ResourceFactory::Create("gpu0", "GPU", 0, true, true);
+        ResourcePtr gpu1 = ResourceFactory::Create("gpu1", "GPU", 1, true, true);
+
+        res_mgr_ = std::make_shared<ResourceMgr>();
+        disk_ = res_mgr_->Add(std::move(disk));
+        cpu_0_ = res_mgr_->Add(std::move(cpu0));
+        cpu_1_ = res_mgr_->Add(std::move(cpu1));
+        cpu_2_ = res_mgr_->Add(std::move(cpu2));
+        gpu_0_ = res_mgr_->Add(std::move(gpu0));
+        gpu_1_ = res_mgr_->Add(std::move(gpu1));
+        auto IO = Connection("IO", 5.0);
+        auto PCIE1 = Connection("PCIE", 11.0);
+        auto PCIE2 = Connection("PCIE", 20.0);
+        res_mgr_->Connect("disk", "cpu0", IO);
+        res_mgr_->Connect("cpu0", "cpu1", IO);
+        res_mgr_->Connect("cpu1", "cpu2", IO);
+        res_mgr_->Connect("cpu0", "cpu2", IO);
+        res_mgr_->Connect("cpu1", "gpu0", PCIE1);
+        res_mgr_->Connect("cpu2", "gpu1", PCIE2);
+
+        scheduler_ = std::make_shared<Scheduler>(res_mgr_);
+
+        res_mgr_->Start();
+        scheduler_->Start();
+    }
+
+    void
+    TearDown() override {
+        scheduler_->Stop();
+        res_mgr_->Stop();
+    }
+
+    ResourceWPtr disk_;
+    ResourceWPtr cpu_0_;
+    ResourceWPtr cpu_1_;
+    ResourceWPtr cpu_2_;
+    ResourceWPtr gpu_0_;
+    ResourceWPtr gpu_1_;
+    ResourceMgrPtr res_mgr_;
+
+    std::shared_ptr<Scheduler> scheduler_;
+};
+
+
+TEST_F(SchedulerTest2, SpecifiedResourceTest) {
+    const uint64_t NUM = 10;
+    std::vector<std::shared_ptr<TestTask>> tasks;
+    TableFileSchemaPtr dummy = std::make_shared<meta::TableFileSchema>();
+    dummy->location_ = "location";
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        std::shared_ptr<TestTask> task = std::make_shared<TestTask>(dummy);
+        task->label() = std::make_shared<SpecResLabel>(disk_);
+        tasks.push_back(task);
+        disk_.lock()->task_table().Put(task);
+    }
+
+//    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
 }
 
 }

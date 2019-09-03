@@ -141,7 +141,6 @@ TEST_F(DBTest, CONFIG_TEST) {
 
 
 TEST_F(DBTest, DB_TEST) {
-    db_->Open(GetOptions(), &db_);
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 

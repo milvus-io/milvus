@@ -71,8 +71,9 @@ size_t FileIOWriter::operator()(void *ptr, size_t size) {
 }
 
 
-VecIndexPtr GetVecIndexFactory(const IndexType &type) {
+VecIndexPtr GetVecIndexFactory(const IndexType &type, const Config& cfg) {
     std::shared_ptr<zilliz::knowhere::VectorIndex> index;
+    auto gpu_device = cfg.get_with_default("gpu_id", 0);
     switch (type) {
         case IndexType::FAISS_IDMAP: {
             index = std::make_shared<zilliz::knowhere::IDMAP>();
@@ -83,7 +84,8 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type) {
             break;
         }
         case IndexType::FAISS_IVFFLAT_GPU: {
-            index = std::make_shared<zilliz::knowhere::GPUIVF>(0);
+            // TODO(linxj): 规范化参数
+            index = std::make_shared<zilliz::knowhere::GPUIVF>(gpu_device);
             break;
         }
         case IndexType::FAISS_IVFFLAT_MIX: {
@@ -95,7 +97,7 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type) {
             break;
         }
         case IndexType::FAISS_IVFPQ_GPU: {
-            index = std::make_shared<zilliz::knowhere::GPUIVFPQ>(0);
+            index = std::make_shared<zilliz::knowhere::GPUIVFPQ>(gpu_device);
             break;
         }
         case IndexType::SPTAG_KDT_RNT_CPU: {
@@ -103,15 +105,19 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type) {
             break;
         }
         case IndexType::FAISS_IVFSQ8_MIX: {
-            index = std::make_shared<zilliz::knowhere::GPUIVFSQ>(0);
+            index = std::make_shared<zilliz::knowhere::GPUIVFSQ>(gpu_device);
             return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFSQ8_MIX);
         }
-        case IndexType::FAISS_IVFSQ8: {
+        case IndexType::FAISS_IVFSQ8_CPU: {
             index = std::make_shared<zilliz::knowhere::IVFSQ>();
             break;
         }
+        case IndexType::FAISS_IVFSQ8_GPU: {
+            index = std::make_shared<zilliz::knowhere::GPUIVFSQ>(gpu_device);
+            break;
+        }
         case IndexType::NSG_MIX: { // TODO(linxj): bug.
-            index = std::make_shared<zilliz::knowhere::NSG>(0);
+            index = std::make_shared<zilliz::knowhere::NSG>(gpu_device);
             break;
         }
         default: {
@@ -229,19 +235,39 @@ void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Co
     }
 }
 
-IndexType TransferToCpuIndexType(const IndexType &type) {
+IndexType ConvertToCpuIndexType(const IndexType &type) {
+    // TODO(linxj): add IDMAP
     switch (type) {
+        case IndexType::FAISS_IVFFLAT_GPU:
         case IndexType::FAISS_IVFFLAT_MIX: {
             return IndexType::FAISS_IVFFLAT_CPU;
         }
+        case IndexType::FAISS_IVFSQ8_GPU:
         case IndexType::FAISS_IVFSQ8_MIX: {
-            return IndexType::FAISS_IVFSQ8;
+            return IndexType::FAISS_IVFSQ8_CPU;
         }
         default: {
-            return IndexType::INVALID;
+            return type;
         }
     }
 }
+
+IndexType ConvertToGpuIndexType(const IndexType &type) {
+    switch (type) {
+        case IndexType::FAISS_IVFFLAT_MIX:
+        case IndexType::FAISS_IVFFLAT_CPU: {
+            return IndexType::FAISS_IVFFLAT_GPU;
+        }
+        case IndexType::FAISS_IVFSQ8_MIX:
+        case IndexType::FAISS_IVFSQ8_CPU: {
+            return IndexType::FAISS_IVFSQ8_GPU;
+        }
+        default: {
+            return type;
+        }
+    }
+}
+
 
 }
 }

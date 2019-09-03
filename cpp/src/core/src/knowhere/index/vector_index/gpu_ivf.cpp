@@ -31,10 +31,11 @@ IndexModelPtr GPUIVF::Train(const DatasetPtr &dataset, const Config &config) {
 
     GETTENSOR(dataset)
 
-    // TODO(linxj): use device_id
     auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_device);
     ResScope rs(gpu_device, res);
-    faiss::gpu::GpuIndexIVFFlat device_index(res.get(), dim, nlist, metric_type);
+    faiss::gpu::GpuIndexIVFFlatConfig idx_config;
+    idx_config.device = gpu_device;
+    faiss::gpu::GpuIndexIVFFlat device_index(res.get(), dim, nlist, metric_type, idx_config);
     device_index.train(rows, (float *) p_data);
 
     std::shared_ptr<faiss::Index> host_index = nullptr;
