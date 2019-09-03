@@ -12,6 +12,7 @@
 #include "utils.h"
 #include "db/Factories.h"
 #include "db/Options.h"
+#include "server/ServerConfig.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -60,6 +61,9 @@ engine::Options DBTest::GetOptions() {
 void DBTest::SetUp() {
     InitLog();
 
+    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+    config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
+
     auto res_mgr = engine::ResMgrInst::GetInstance();
     res_mgr->Clear();
     res_mgr->Add(engine::ResourceFactory::Create("disk", "DISK", 0, true, false));
@@ -103,7 +107,7 @@ void MetaTest::TearDown() {
     impl_->DropAll();
 }
 
-zilliz::milvus::engine::DBMetaOptions DISABLED_MySQLTest::getDBMetaOptions() {
+zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
 //    std::string path = "/tmp/milvus_test";
 //    engine::DBMetaOptions options = engine::DBMetaOptionsFactory::Build(path);
     zilliz::milvus::engine::DBMetaOptions options;
@@ -111,17 +115,16 @@ zilliz::milvus::engine::DBMetaOptions DISABLED_MySQLTest::getDBMetaOptions() {
     options.backend_uri = DBTestEnvironment::getURI();
 
     if(options.backend_uri.empty()) {
-//        throw std::exception();
         options.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
     }
 
     return options;
 }
 
-zilliz::milvus::engine::Options DISABLED_MySQLDBTest::GetOptions() {
+zilliz::milvus::engine::Options MySQLDBTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = DBTestEnvironment::getURI();
+    options.meta.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
     return options;
 }
 

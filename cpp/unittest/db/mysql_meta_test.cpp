@@ -21,7 +21,7 @@
 
 using namespace zilliz::milvus::engine;
 
-TEST_F(DISABLED_MySQLTest, TABLE_TEST) {
+TEST_F(MySQLTest, TABLE_TEST) {
     DBMetaOptions options;
     try {
         options = getDBMetaOptions();
@@ -53,7 +53,7 @@ TEST_F(DISABLED_MySQLTest, TABLE_TEST) {
 
     table.table_id_ = table_id;
     status = impl.CreateTable(table);
-    ASSERT_TRUE(status.ok());
+    ASSERT_TRUE(status.IsAlreadyExist());
 
     table.table_id_ = "";
     status = impl.CreateTable(table);
@@ -63,7 +63,7 @@ TEST_F(DISABLED_MySQLTest, TABLE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(DISABLED_MySQLTest, TABLE_FILE_TEST) {
+TEST_F(MySQLTest, TABLE_FILE_TEST) {
     DBMetaOptions options;
     try {
         options = getDBMetaOptions();
@@ -92,7 +92,7 @@ TEST_F(DISABLED_MySQLTest, TABLE_FILE_TEST) {
     meta::DatesT dates;
     dates.push_back(utils::GetDate());
     status = impl.DropPartitionsByDates(table_file.table_id_, dates);
-    ASSERT_FALSE(status.ok());
+    ASSERT_TRUE(status.ok());
 
     uint64_t cnt = 0;
     status = impl.Count(table_id, cnt);
@@ -139,7 +139,7 @@ TEST_F(DISABLED_MySQLTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(DISABLED_MySQLTest, ARCHIVE_TEST_DAYS) {
+TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
     DBMetaOptions options;
     try {
@@ -211,7 +211,7 @@ TEST_F(DISABLED_MySQLTest, ARCHIVE_TEST_DAYS) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(DISABLED_MySQLTest, ARCHIVE_TEST_DISK) {
+TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
     DBMetaOptions options;
     try {
         options = getDBMetaOptions();
@@ -269,7 +269,7 @@ TEST_F(DISABLED_MySQLTest, ARCHIVE_TEST_DISK) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(DISABLED_MySQLTest, TABLE_FILES_TEST) {
+TEST_F(MySQLTest, TABLE_FILES_TEST) {
     DBMetaOptions options;
     try {
         options = getDBMetaOptions();
