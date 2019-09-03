@@ -54,6 +54,11 @@ ToString(const TaskTimestamp &timestamp) {
 }
 
 bool
+TaskTableItem::IsFinish() {
+    return state == TaskTableItemState::MOVED || state == TaskTableItemState::EXECUTED;
+}
+
+bool
 TaskTableItem::Load() {
     std::unique_lock<std::mutex> lock(mutex);
     if (state == TaskTableItemState::START) {
@@ -131,6 +136,38 @@ TaskTableItem::Dump() {
     ss << ", timestamp=" << ToString(timestamp);
     ss << ">";
     return ss.str();
+}
+
+std::vector<uint64_t>
+TaskTable::PickToLoad(uint64_t limit) {
+    std::vector<uint64_t> indexes;
+    bool cross = false;
+    for (uint64_t i = last_finish_, count = 0; i < table_.size() && count < limit; ++i) {
+        if (not cross && table_[i]->IsFinish()) {
+            last_finish_ = i;
+        } else if (table_[i]->state == TaskTableItemState::START) {
+            cross = true;
+            indexes.push_back(i);
+            ++count;
+        }
+    }
+    return indexes;
+}
+
+std::vector<uint64_t>
+TaskTable::PickToExecute(uint64_t limit) {
+    std::vector<uint64_t> indexes;
+    bool cross = false;
+    for (uint64_t i = last_finish_, count = 0; i < table_.size() && count < limit; ++i) {
+        if (not cross && table_[i]->IsFinish()) {
+            last_finish_ = i;
+        } else if (table_[i]->state == TaskTableItemState::LOADED) {
+            cross = true;
+            indexes.push_back(i);
+            ++count;
+        }
+    }
+    return indexes;
 }
 
 void
