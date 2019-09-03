@@ -83,9 +83,9 @@ if [[ ! -d cmake_build ]]; then
 	MAKE_CLEAN="ON"
 fi
 
-pushd `pwd`/src/core
-./build.sh ${KNOWHERE_OPTIONS}
-popd
+#pushd `pwd`/src/core
+#./build.sh ${KNOWHERE_OPTIONS}
+#popd
 
 cd cmake_build
 

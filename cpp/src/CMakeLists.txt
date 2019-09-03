@@ -4,6 +4,15 @@
 # Proprietary and confidential.
 #-------------------------------------------------------------------------------
 
+add_subdirectory(core)
+
+set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
+foreach(dir ${CORE_INCLUDE_DIRS})
+    message("dir = ${dir}")
+    include_directories(${dir})
+endforeach()
+#include_directories(${CMAKE_SOURCE_DIR}/src/core/thirdparty/SPTAG/AnnService)
+
 aux_source_directory(cache cache_files)
 aux_source_directory(config config_files)
 aux_source_directory(server server_files)
@@ -87,12 +96,12 @@ set(client_grpc_lib
 
 set(third_party_libs
         knowhere
-        SPTAGLibStatic
-        arrow
-        jemalloc_pic
-        faiss
-        openblas
-        lapack
+#        SPTAGLibStatic
+#        arrow
+#        jemalloc_pic
+#        faiss
+#        openblas
+#        lapack
         easyloggingpp
         sqlite
         ${client_grpc_lib}
@@ -115,14 +124,14 @@ set(third_party_libs
         cudart
         )
 
-if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
-    set(third_party_libs ${third_party_libs}
-            ${MKL_LIBS})
-else()
-    set(third_party_libs ${third_party_libs}
-            lapack
-            openblas)
-endif()
+#if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
+#    set(third_party_libs ${third_party_libs}
+#            ${MKL_LIBS})
+#else()
+#    set(third_party_libs ${third_party_libs}
+#            lapack
+#            openblas)
+#endif()
 
 if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
     set(third_party_libs ${third_party_libs}
@@ -171,13 +180,13 @@ set(server_libs
 
 set(knowhere_libs
         knowhere
-        SPTAGLibStatic
-        arrow
-        jemalloc_pic
-        faiss
-        openblas
-        lapack
-        tbb
+#        SPTAGLibStatic
+#        arrow
+#        jemalloc_pic
+#        faiss
+#        openblas
+#        lapack
+#        tbb
         )
 
 add_executable(milvus_server
@@ -195,8 +204,8 @@ target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_part
 install(TARGETS milvus_server DESTINATION bin)
 
 install(FILES
-        ${KNOWHERE_BUILD_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}
-        ${KNOWHERE_BUILD_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}.2
+        ${CMAKE_SOURCE_DIR}/src/core/thirdparty/tbb/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}
+        ${CMAKE_SOURCE_DIR}/src/core/thirdparty/tbb/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}.2
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4
