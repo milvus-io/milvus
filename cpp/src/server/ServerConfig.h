@@ -58,7 +58,7 @@ static const char* CONFIG_RESOURCE_ENABLE_LOADER = "enable_loader";
 static const char* CONFIG_RESOURCE_ENABLE_EXECUTOR = "enable_executor";
 static const char* CONFIG_RESOURCE_CONNECTIONS = "connections";
 static const char* CONFIG_SPEED_CONNECTIONS = "speed";
-static const char* CONFIG_ENDPOINT_CONNECTIONS = "connections";
+static const char* CONFIG_ENDPOINT_CONNECTIONS = "endpoint";
 
 
 class ServerConfig {
