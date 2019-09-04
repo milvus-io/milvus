@@ -38,4 +38,4 @@ target_link_libraries(s3_test
         curl
         crypto)
 
-install(TARGETS s3_test DESTINATION bin)
+install(TARGETS s3_test DESTINATION unittest)
