@@ -8,6 +8,18 @@
 namespace zilliz {
 namespace knowhere {
 
+struct Resource {
+    Resource(std::shared_ptr<faiss::gpu::StandardGpuResources> &r): faiss_res(r) {
+        static int64_t global_id = 0;
+        id = global_id++;
+    }
+
+    std::shared_ptr<faiss::gpu::StandardGpuResources> faiss_res;
+    int64_t id;
+};
+using ResPtr = std::shared_ptr<Resource>;
+using ResWPtr = std::weak_ptr<Resource>;
+
 class FaissGpuResourceMgr {
  public:
     struct DeviceParams {
@@ -17,14 +29,11 @@ class FaissGpuResourceMgr {
     };
 
  public:
-    using ResPtr = std::shared_ptr<faiss::gpu::StandardGpuResources>;
-    using ResWPtr = std::weak_ptr<faiss::gpu::StandardGpuResources>;
-
     static FaissGpuResourceMgr &
     GetInstance();
 
     void
-    AllocateTempMem(ResPtr &res, const int64_t& device_id, const int64_t& size);
+    AllocateTempMem(ResPtr &resource, const int64_t& device_id, const int64_t& size);
 
     void
     InitDevice(int64_t device_id,
@@ -32,12 +41,23 @@ class FaissGpuResourceMgr {
                int64_t temp_mem_size = 0,
                int64_t res_num = 2);
 
-    void InitResource();
+    void
+    InitResource();
 
-    ResPtr GetRes(const int64_t &device_id, const int64_t& alloc_size = 0);
+    // allocate gpu memory invoke by build or copy_to_gpu
+    ResPtr
+    GetRes(const int64_t &device_id, const int64_t& alloc_size = 0);
 
-    void MoveToInuse(const int64_t &device_id, const ResPtr& res);
-    void MoveToIdle(const int64_t &device_id, const ResPtr& res);
+    // allocate gpu memory before search
+    // this func will return True if the device is idle and exists an idle resource.
+    bool
+    GetRes(const int64_t& device_id, ResPtr &res, const int64_t& alloc_size = 0);
+
+    void
+    MoveToInuse(const int64_t &device_id, const ResPtr& res);
+
+    void
+    MoveToIdle(const int64_t &device_id, const ResPtr& res);
 
  protected:
     bool is_init = false;
@@ -50,23 +70,24 @@ class FaissGpuResourceMgr {
 
 class ResScope {
  public:
-    ResScope(const int64_t device_id,std::shared_ptr<faiss::gpu::StandardGpuResources> &res) : resource(res), device_id(device_id) {
+    ResScope(const int64_t device_id,  ResPtr &res) : resource(res), device_id(device_id) {
         FaissGpuResourceMgr::GetInstance().MoveToInuse(device_id, resource);
     }
 
     ~ResScope() {
-        resource->noTempMemory();
+        //resource->faiss_res->noTempMemory();
         FaissGpuResourceMgr::GetInstance().MoveToIdle(device_id, resource);
     }
 
  private:
-    std::shared_ptr<faiss::gpu::StandardGpuResources> resource;
+    ResPtr resource;
     int64_t device_id;
 };
 
 class GPUIndex {
  public:
-    explicit GPUIndex(const int &device_id) : gpu_id_(device_id) {};
+    explicit GPUIndex(const int &device_id) : gpu_id_(device_id) {}
+    GPUIndex(const int& device_id, ResPtr resource): gpu_id_(device_id), res_(std::move(resource)){}
 
     virtual VectorIndexPtr CopyGpuToCpu(const Config &config) = 0;
     virtual VectorIndexPtr CopyGpuToGpu(const int64_t &device_id, const Config &config) = 0;
@@ -76,13 +97,14 @@ class GPUIndex {
 
  protected:
     int64_t gpu_id_;
+    ResPtr res_ = nullptr;
 };
 
 class GPUIVF : public IVF, public GPUIndex {
  public:
     explicit GPUIVF(const int &device_id) : IVF(), GPUIndex(device_id) {}
-    explicit GPUIVF(std::shared_ptr<faiss::Index> index, const int64_t &device_id)
-        : IVF(std::move(index)), GPUIndex(device_id) {};
+    explicit GPUIVF(std::shared_ptr<faiss::Index> index, const int64_t &device_id, ResPtr &resource)
+        : IVF(std::move(index)), GPUIndex(device_id, resource) {};
     IndexModelPtr Train(const DatasetPtr &dataset, const Config &config) override;
     void set_index_model(IndexModelPtr model) override;
     //DatasetPtr Search(const DatasetPtr &dataset, const Config &config) override;
@@ -107,7 +129,8 @@ class GPUIVF : public IVF, public GPUIndex {
 class GPUIVFSQ : public GPUIVF {
  public:
     explicit GPUIVFSQ(const int &device_id) : GPUIVF(device_id) {}
-    explicit GPUIVFSQ(std::shared_ptr<faiss::Index> index, const int64_t& device_id) : GPUIVF(std::move(index),device_id) {};
+    explicit GPUIVFSQ(std::shared_ptr<faiss::Index> index, const int64_t &device_id, ResPtr &resource)
+        : GPUIVF(std::move(index), device_id, resource) {};
     IndexModelPtr Train(const DatasetPtr &dataset, const Config &config) override;
 
  public:
