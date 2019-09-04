@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "server/ServerConfig.h"
 
 #include "utils/Error.h"
 #include "wrapper/knowhere/vec_index.h"
@@ -146,6 +147,9 @@ TEST(CacheTest, CPU_CACHE_TEST) {
 }
 
 TEST(CacheTest, GPU_CACHE_TEST) {
+    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+    config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
+
     cache::CacheMgr* gpu_mgr = cache::GpuCacheMgr::GetInstance(0);
 
     const int dim = 256;
