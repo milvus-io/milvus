@@ -90,5 +90,5 @@ endif()
 
 target_link_libraries(db_test ${db_libs} ${knowhere_libs} ${unittest_libs})
 
-install(TARGETS db_test DESTINATION bin)
+install(TARGETS db_test DESTINATION unittest)
 

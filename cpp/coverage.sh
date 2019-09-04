@@ -12,7 +12,7 @@ FILE_INFO_OUTPUT_NEW="output_new.info"
 DIR_LCOV_OUTPUT="lcov_out"
 
 DIR_GCNO="cmake_build"
-DIR_UNITTEST="milvus/bin"
+DIR_UNITTEST="milvus/unittest"
  
 MYSQL_USER_NAME=root
 MYSQL_PASSWORD=Fantast1c
@@ -77,6 +77,7 @@ for test in `ls ${DIR_UNITTEST}`; do
     # run unittest
     ./${DIR_UNITTEST}/${test} "${args}"
     if [ $? -ne 0 ]; then
+        echo ${args}
         echo ${DIR_UNITTEST}/${test} "run failed"
     fi
 done
