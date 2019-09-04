@@ -522,7 +522,6 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
         status = BackgroundMergeFiles(table_id);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Merge files for table " << table_id << " failed: " << status.ToString();
-            continue;//let other table get chance to merge
         }
 
         if (shutting_down_.load(std::memory_order_acquire)){
@@ -765,7 +764,6 @@ void DBImpl::BackgroundBuildIndex() {
         status = BuildIndex(file);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
-            return;
         }
 
         if (shutting_down_.load(std::memory_order_acquire)){
