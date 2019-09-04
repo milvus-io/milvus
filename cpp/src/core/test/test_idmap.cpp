@@ -18,9 +18,11 @@
 
 using namespace zilliz::knowhere;
 
+static int device_id = 0;
 class IDMAPTest : public DataGen, public ::testing::Test {
  protected:
     void SetUp() override {
+        FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*300, 2);
         Init_with_default();
         index_ = std::make_shared<IDMAP>();
     }

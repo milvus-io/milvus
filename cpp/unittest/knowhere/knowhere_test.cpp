@@ -29,7 +29,7 @@ class KnowhereWrapperTest
     : public TestWithParam<::std::tuple<IndexType, std::string, int, int, int, int, Config, Config>> {
  protected:
     void SetUp() override {
-        zilliz::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID);
+        zilliz::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, 1024*1024*200, 1024*1024*300, 2);
 
         std::string generator_type;
         std::tie(index_type, generator_type, dim, nb, nq, k, train_cfg, search_cfg) = GetParam();
