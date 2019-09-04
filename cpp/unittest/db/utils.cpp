@@ -82,6 +82,7 @@ void DBTest::SetUp() {
 }
 
 void DBTest::TearDown() {
+    db_->DropAll();
     delete db_;
 
     engine::ResMgrInst::GetInstance()->Stop();
