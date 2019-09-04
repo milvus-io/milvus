@@ -1205,9 +1205,7 @@ Status SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 }
 
 Status SqliteMetaImpl::DropAll() {
-    if (boost::filesystem::is_directory(options_.path)) {
-        boost::filesystem::remove_all(options_.path);
-    }
+
     return Status::OK();
 }
 
