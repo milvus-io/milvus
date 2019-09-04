@@ -83,9 +83,13 @@ resource_config:
 #      enable_executor: true
 
   # connection list, length: 0~N
-  # format: -${resource_name}===${resource_name}
+      # format: -${resource_name}===${resource_name}
   connections:
-    - ssda===cpu
-    - cpu===gpu0
+    io:
+      speed: 500
+      endpoint: ssda===cpu
+    pcie:
+      speed: 11000
+      endpoint: cpu===gpu0
 #    - cpu===gtx1660
 

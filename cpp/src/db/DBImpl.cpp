@@ -183,7 +183,7 @@ Status DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count
 
 Status DBImpl::InsertVectors(const std::string& table_id_,
         uint64_t n, const float* vectors, IDNumbers& vector_ids_) {
-    ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
+//    ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
 
     Status status;
     zilliz::milvus::server::CollectInsertMetrics metrics(n, status);
@@ -191,7 +191,7 @@ Status DBImpl::InsertVectors(const std::string& table_id_,
 //    std::chrono::microseconds time_span = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
 //    double average_time = double(time_span.count()) / n;
 
-    ENGINE_LOG_DEBUG << "Insert vectors to cache finished";
+//    ENGINE_LOG_DEBUG << "Insert vectors to cache finished";
 
     return status;
 }
@@ -778,6 +778,7 @@ void DBImpl::BackgroundBuildIndex() {
 }
 
 Status DBImpl::DropAll() {
+    Stop();
     return meta_ptr_->DropAll();
 }
 
