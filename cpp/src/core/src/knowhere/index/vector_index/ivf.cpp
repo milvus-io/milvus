@@ -357,9 +357,9 @@ void BasicIndex::SealImpl() {
     if (idx != nullptr) {
         idx->to_readonly();
     }
-    else {
-        KNOHWERE_ERROR_MSG("Seal failed");
-    }
+    //else {
+    //    KNOHWERE_ERROR_MSG("Seal failed");
+    //}
 //#endif
 }
 
