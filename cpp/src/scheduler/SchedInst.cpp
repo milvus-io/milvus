@@ -31,19 +31,21 @@ StartSchedulerService() {
         auto device_id = resconf.GetInt64Value(server::CONFIG_RESOURCE_DEVICE_ID);
         auto enable_loader = resconf.GetBoolValue(server::CONFIG_RESOURCE_ENABLE_LOADER);
         auto enable_executor = resconf.GetBoolValue(server::CONFIG_RESOURCE_ENABLE_EXECUTOR);
-        auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY);
-        auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY);
-        auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM);
 
-        ResMgrInst::GetInstance()->Add(ResourceFactory::Create(resname,
+        auto res = ResMgrInst::GetInstance()->Add(ResourceFactory::Create(resname,
                                                                type,
                                                                device_id,
                                                                enable_loader,
                                                                enable_executor));
 
-        pinned_memory = 1024 * 1024 * pinned_memory;
-        temp_memory = 1024 * 1024 * temp_memory;
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, pinned_memory, temp_memory, resource_num);
+        if (res.lock()->Type() == ResourceType::GPU) {
+            auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY);
+            auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY);
+            auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM);
+            pinned_memory = 1024 * 1024 * pinned_memory;
+            temp_memory = 1024 * 1024 * temp_memory;
+            knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, pinned_memory, temp_memory, resource_num);
+        }
     }
 
     knowhere::FaissGpuResourceMgr::GetInstance().InitResource();
