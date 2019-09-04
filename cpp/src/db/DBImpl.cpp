@@ -778,6 +778,7 @@ void DBImpl::BackgroundBuildIndex() {
 }
 
 Status DBImpl::DropAll() {
+    Stop();
     return meta_ptr_->DropAll();
 }
 

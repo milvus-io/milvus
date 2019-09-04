@@ -104,4 +104,4 @@ else()
             openblas)
 endif()
 
-install(TARGETS metrics_test DESTINATION bin)
+install(TARGETS metrics_test DESTINATION unittest)
