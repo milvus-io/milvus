@@ -91,5 +91,5 @@ endif ()
 
 target_link_libraries(scheduler_test ${scheduler_libs} ${knowhere_libs} ${unittest_libs})
 
-install(TARGETS scheduler_test DESTINATION bin)
+install(TARGETS scheduler_test DESTINATION unittest)
 

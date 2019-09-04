@@ -2001,9 +2001,6 @@ Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 }
 
 Status MySQLMetaImpl::DropAll() {
-    if (boost::filesystem::is_directory(options_.path)) {
-        boost::filesystem::remove_all(options_.path);
-    }
     try {
         ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
