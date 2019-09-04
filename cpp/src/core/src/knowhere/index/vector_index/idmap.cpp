@@ -135,11 +135,11 @@ VectorIndexPtr IDMAP::Clone() {
 VectorIndexPtr IDMAP::CopyCpuToGpu(const int64_t &device_id, const Config &config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)){
         ResScope rs(device_id, res);
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res.get(), device_id, index_.get());
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get());
 
         std::shared_ptr<faiss::Index> device_index;
         device_index.reset(gpu_index);
-        return std::make_shared<GPUIDMAP>(device_index, device_id);
+        return std::make_shared<GPUIDMAP>(device_index, device_id, res);
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }
@@ -204,7 +204,7 @@ void GPUIDMAP::LoadImpl(const BinarySet &index_binary) {
 
         if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_) ){
             ResScope rs(gpu_id_, res);
-            auto device_index = faiss::gpu::index_cpu_to_gpu(res.get(), gpu_id_, index);
+            auto device_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id_, index);
             index_.reset(device_index);
         } else {
             KNOWHERE_THROW_MSG("Load error, can't get gpu resource");
