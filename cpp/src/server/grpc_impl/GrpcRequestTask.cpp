@@ -144,11 +144,17 @@ CreateTableTask::OnExecute() {
             return SetError(res, "Invalid index file size: " + std::to_string(schema_->index_file_size()));
         }
 
+        res = ValidationUtil::ValidateTableIndexMetricType(schema_->metric_type());
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid index metric type: " + std::to_string(schema_->metric_type()));
+        }
+
         //step 2: construct table schema
         engine::meta::TableSchema table_info;
         table_info.table_id_ = schema_->table_name().table_name();
         table_info.dimension_ = (uint16_t) schema_->dimension();
         table_info.index_file_size_ = schema_->index_file_size();
+        table_info.metric_type_ = schema_->metric_type();
 
         //step 3: create table
         engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
@@ -261,16 +267,10 @@ CreateIndexTask::OnExecute() {
             return SetError(res, "Invalid index nlist: " + std::to_string(grpc_index.nlist()));
         }
 
-        res = ValidationUtil::ValidateTableIndexMetricType(grpc_index.metric_type());
-        if(res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid index metric type: " + std::to_string(grpc_index.metric_type()));
-        }
-
         //step 2: check table existence
         engine::TableIndex index;
         index.engine_type_ = grpc_index.index_type();
         index.nlist_ = grpc_index.nlist();
-        index.metric_type_ = grpc_index.metric_type();
         stat = DBWrapper::DB()->CreateIndex(table_name_, index);
         if (!stat.ok()) {
             return SetError(SERVER_BUILD_INDEX_ERROR, stat.ToString());
@@ -927,7 +927,6 @@ DescribeIndexTask::OnExecute() {
         index_param_->mutable_table_name()->set_table_name(table_name_);
         index_param_->mutable_index()->set_index_type(index.engine_type_);
         index_param_->mutable_index()->set_nlist(index.nlist_);
-        index_param_->mutable_index()->set_metric_type(index.metric_type_);
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception &ex) {
