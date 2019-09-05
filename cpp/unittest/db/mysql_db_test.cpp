@@ -46,7 +46,7 @@ namespace {
 }
 
 
-TEST_F(MySQLDBTest, DB_TEST) {
+TEST_F(MySqlDBTest, DB_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -131,7 +131,7 @@ TEST_F(MySQLDBTest, DB_TEST) {
     search.join();
 };
 
-TEST_F(MySQLDBTest, SEARCH_TEST) {
+TEST_F(MySqlDBTest, SEARCH_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -183,7 +183,7 @@ TEST_F(MySQLDBTest, SEARCH_TEST) {
     ASSERT_STATS(stat);
 };
 
-TEST_F(MySQLDBTest, ARHIVE_DISK_CHECK) {
+TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -228,7 +228,7 @@ TEST_F(MySQLDBTest, ARHIVE_DISK_CHECK) {
     ASSERT_LE(size, 1 * engine::meta::G);
 };
 
-TEST_F(MySQLDBTest, DELETE_TEST) {
+TEST_F(MySqlDBTest, DELETE_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 //    std::cout << stat.ToString() << std::endl;

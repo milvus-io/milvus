@@ -54,7 +54,7 @@ void BuildVectors(int64_t n, std::vector<float> &vectors) {
 }
 }
 
-TEST_F(NewMemManagerTest, VECTOR_SOURCE_TEST) {
+TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
 
     std::shared_ptr<engine::meta::SqliteMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
 
@@ -102,7 +102,7 @@ TEST_F(NewMemManagerTest, VECTOR_SOURCE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(NewMemManagerTest, MEM_TABLE_FILE_TEST) {
+TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
 
     std::shared_ptr<engine::meta::SqliteMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
     auto options = engine::OptionsFactory::Build();
@@ -148,7 +148,7 @@ TEST_F(NewMemManagerTest, MEM_TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
+TEST_F(MemManagerTest, MEM_TABLE_TEST) {
 
     std::shared_ptr<engine::meta::SqliteMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
     auto options = engine::OptionsFactory::Build();
@@ -212,19 +212,11 @@ TEST_F(NewMemManagerTest, MEM_TABLE_TEST) {
     status = mem_table.Serialize();
     ASSERT_TRUE(status.ok());
 
-
-
     status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(NewMemManagerTest, SERIAL_INSERT_SEARCH_TEST) {
-
-    auto options = engine::OptionsFactory::Build();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = "sqlite://:@:/";
-    auto db_ = engine::DBFactory::Build(options);
-
+TEST_F(MemManagerTest, SERIAL_INSERT_SEARCH_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -268,18 +260,9 @@ TEST_F(NewMemManagerTest, SERIAL_INSERT_SEARCH_TEST) {
         ASSERT_EQ(results[0][0].first, pair.first);
         ASSERT_LT(results[0][0].second, 0.00001);
     }
-
-    delete db_;
-
 }
 
-TEST_F(NewMemManagerTest, INSERT_TEST) {
-
-    auto options = engine::OptionsFactory::Build();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = "sqlite://:@:/";
-    auto db_ = engine::DBFactory::Build(options);
-
+TEST_F(MemManagerTest, INSERT_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -303,18 +286,9 @@ TEST_F(NewMemManagerTest, INSERT_TEST) {
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
     LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
-
-    delete db_;
-
 }
 
-TEST_F(NewMemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
-
-    auto options = engine::OptionsFactory::Build();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = "sqlite://:@:/";
-    auto db_ = engine::DBFactory::Build(options);
-
+TEST_F(MemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -383,12 +357,9 @@ TEST_F(NewMemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
     }
 
     search.join();
-
-    delete db_;
 };
 
-TEST_F(DBTest, VECTOR_IDS_TEST)
-{
+TEST_F(MemManagerTest, VECTOR_IDS_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -457,40 +428,4 @@ TEST_F(DBTest, VECTOR_IDS_TEST)
     for (auto i = 0; i < nb; i++) {
         ASSERT_EQ(vector_ids[i], i + nb);
     }
-}
-
-TEST_F(NewMemManagerTest, MEMMANAGER_TEST) {
-    int setenv_res = setenv("MILVUS_USE_OLD_MEM_MANAGER", "ON", 1);
-    ASSERT_TRUE(setenv_res == 0);
-
-    auto options = engine::OptionsFactory::Build();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = "sqlite://:@:/";
-    auto db_ = engine::DBFactory::Build(options);
-
-    engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
-
-    engine::meta::TableSchema table_info_get;
-    table_info_get.table_id_ = TABLE_NAME;
-    stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
-    ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
-
-    auto start_time = METRICS_NOW_TIME;
-
-    int insert_loop = 20;
-    for (int i = 0; i < insert_loop; ++i) {
-        int64_t nb = 40960;
-        std::vector<float> xb;
-        BuildVectors(nb, xb);
-        engine::IDNumbers vector_ids;
-        engine::Status status = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
-        ASSERT_TRUE(status.ok());
-    }
-    auto end_time = METRICS_NOW_TIME;
-    auto total_time = METRICS_MICROSECONDS(start_time, end_time);
-    LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
-
-    delete db_;
 }

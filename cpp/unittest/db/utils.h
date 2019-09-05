@@ -34,44 +34,29 @@
 
 void ASSERT_STATS(zilliz::milvus::engine::Status &stat);
 
-//class TestEnv : public ::testing::Environment {
-//public:
-//
-//    static std::string getURI() {
-//        if (const char* uri = std::getenv("MILVUS_DBMETA_URI")) {
-//            return uri;
-//        }
-//        else {
-//            return "";
-//        }
-//    }
-//
-//    void SetUp() override {
-//        getURI();
-//    }
-//
-//};
-//
-//::testing::Environment* const test_env =
-//        ::testing::AddGlobalTestEnvironment(new TestEnv);
-
-class DBTest : public ::testing::Test {
- protected:
-    zilliz::milvus::engine::DB *db_;
-
+class BaseTest : public ::testing::Test {
+protected:
     void InitLog();
-    virtual void SetUp() override;
-    virtual void TearDown() override;
     virtual zilliz::milvus::engine::Options GetOptions();
 };
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class DBTest : public BaseTest {
+ protected:
+    zilliz::milvus::engine::DB *db_;
+
+    virtual void SetUp() override;
+    virtual void TearDown() override;
+};
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class DBTest2 : public DBTest {
  protected:
     virtual zilliz::milvus::engine::Options GetOptions() override;
 };
 
-
-class MetaTest : public DBTest {
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class MetaTest : public BaseTest {
  protected:
     std::shared_ptr<zilliz::milvus::engine::meta::SqliteMetaImpl> impl_;
 
@@ -79,19 +64,25 @@ class MetaTest : public DBTest {
     virtual void TearDown() override;
 };
 
-class MySQLTest : public ::testing::Test {
- protected:
-//    std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
-    zilliz::milvus::engine::DBMetaOptions getDBMetaOptions();
-};
-
-class MySQLDBTest : public DBTest {
- protected:
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class MySqlDBTest : public DBTest {
+protected:
     zilliz::milvus::engine::Options GetOptions();
 };
 
-class NewMemManagerTest : public ::testing::Test {
-    void InitLog();
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class MySqlMetaTest : public BaseTest {
+ protected:
+    std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
+
+    virtual void SetUp() override;
+    virtual void TearDown() override;
+    zilliz::milvus::engine::Options GetOptions();
+};
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class MemManagerTest : public DBTest {
     void SetUp() override;
     void TearDown() override;
 };

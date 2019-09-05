@@ -21,81 +21,59 @@
 
 using namespace zilliz::milvus::engine;
 
-TEST_F(MySQLTest, TABLE_TEST) {
-    DBMetaOptions options;
-    try {
-        options = getDBMetaOptions();
-    } catch(std::exception& ex) {
-        ASSERT_TRUE(false);
-        return;
-    }
-
-    int mode = Options::MODE::SINGLE;
-    meta::MySQLMetaImpl impl(options, mode);
-
+TEST_F(MySqlMetaTest, TABLE_TEST) {
     auto table_id = "meta_test_table";
 
     meta::TableSchema table;
     table.table_id_ = table_id;
-    auto status = impl.CreateTable(table);
+    auto status = impl_->CreateTable(table);
     ASSERT_TRUE(status.ok());
 
     auto gid = table.id_;
     table.id_ = -1;
-    status = impl.DescribeTable(table);
+    status = impl_->DescribeTable(table);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table.id_, gid);
     ASSERT_EQ(table.table_id_, table_id);
 
     table.table_id_ = "not_found";
-    status = impl.DescribeTable(table);
+    status = impl_->DescribeTable(table);
     ASSERT_TRUE(!status.ok());
 
     table.table_id_ = table_id;
-    status = impl.CreateTable(table);
+    status = impl_->CreateTable(table);
     ASSERT_TRUE(status.IsAlreadyExist());
 
     table.table_id_ = "";
-    status = impl.CreateTable(table);
+    status = impl_->CreateTable(table);
 //    ASSERT_TRUE(status.ok());
 
-    status = impl.DropAll();
+    status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MySQLTest, TABLE_FILE_TEST) {
-    DBMetaOptions options;
-    try {
-        options = getDBMetaOptions();
-    } catch(std::exception& ex) {
-        ASSERT_TRUE(false);
-        return;
-    }
-
-    int mode = Options::MODE::SINGLE;
-    meta::MySQLMetaImpl impl(options, mode);
-
+TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     auto table_id = "meta_test_table";
 
     meta::TableSchema table;
     table.table_id_ = table_id;
     table.dimension_ = 256;
-    auto status = impl.CreateTable(table);
+    auto status = impl_->CreateTable(table);
 
 
     meta::TableFileSchema table_file;
     table_file.table_id_ = table.table_id_;
-    status = impl.CreateTableFile(table_file);
+    status = impl_->CreateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, meta::TableFileSchema::NEW);
 
     meta::DatesT dates;
     dates.push_back(utils::GetDate());
-    status = impl.DropPartitionsByDates(table_file.table_id_, dates);
+    status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
 
     uint64_t cnt = 0;
-    status = impl.Count(table_id, cnt);
+    status = impl_->Count(table_id, cnt);
 //    ASSERT_TRUE(status.ok());
 //    ASSERT_EQ(cnt, 0UL);
 
@@ -104,7 +82,7 @@ TEST_F(MySQLTest, TABLE_FILE_TEST) {
     auto new_file_type = meta::TableFileSchema::INDEX;
     table_file.file_type_ = new_file_type;
 
-    status = impl.UpdateTableFile(table_file);
+    status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, new_file_type);
 
@@ -112,42 +90,31 @@ TEST_F(MySQLTest, TABLE_FILE_TEST) {
     for (auto i=2; i < 10; ++i) {
         dates.push_back(utils::GetDateWithDelta(-1*i));
     }
-    status = impl.DropPartitionsByDates(table_file.table_id_, dates);
+    status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
 
     table_file.date_ = utils::GetDateWithDelta(-2);
-    status = impl.UpdateTableFile(table_file);
+    status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.date_, utils::GetDateWithDelta(-2));
     ASSERT_FALSE(table_file.file_type_ == meta::TableFileSchema::TO_DELETE);
 
     dates.clear();
     dates.push_back(table_file.date_);
-    status = impl.DropPartitionsByDates(table_file.table_id_, dates);
+    status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
 
     std::vector<size_t> ids = {table_file.id_};
     meta::TableFilesSchema files;
-    status = impl.GetTableFiles(table_file.table_id_, ids, files);
+    status = impl_->GetTableFiles(table_file.table_id_, ids, files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(files.size(), 1UL);
     ASSERT_TRUE(files[0].file_type_ == meta::TableFileSchema::TO_DELETE);
-
-//    status = impl.NextTableId(table_id);
-
-    status = impl.DropAll();
-    ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
+TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
-    DBMetaOptions options;
-    try {
-        options = getDBMetaOptions();
-    } catch(std::exception& ex) {
-        ASSERT_TRUE(false);
-        return;
-    }
+    DBMetaOptions options = GetOptions().meta;
 
     int days_num = rand() % 100;
     std::stringstream ss;
@@ -211,14 +178,8 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DAYS) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
-    DBMetaOptions options;
-    try {
-        options = getDBMetaOptions();
-    } catch(std::exception& ex) {
-        ASSERT_TRUE(false);
-        return;
-    }
+TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
+    DBMetaOptions options = GetOptions().meta;
 
     options.archive_conf = ArchiveConf("delete", "disk:11");
     int mode = Options::MODE::SINGLE;
@@ -269,23 +230,12 @@ TEST_F(MySQLTest, ARCHIVE_TEST_DISK) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MySQLTest, TABLE_FILES_TEST) {
-    DBMetaOptions options;
-    try {
-        options = getDBMetaOptions();
-    } catch(std::exception& ex) {
-        ASSERT_TRUE(false);
-        return;
-    }
-
-    int mode = Options::MODE::SINGLE;
-    auto impl = meta::MySQLMetaImpl(options, mode);
-
+TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     auto table_id = "meta_test_group";
 
     meta::TableSchema table;
     table.table_id_ = table_id;
-    auto status = impl.CreateTable(table);
+    auto status = impl_->CreateTable(table);
 
     int new_files_cnt = 4;
     int raw_files_cnt = 5;
@@ -296,66 +246,66 @@ TEST_F(MySQLTest, TABLE_FILES_TEST) {
     table_file.table_id_ = table.table_id_;
 
     for (auto i=0; i<new_files_cnt; ++i) {
-        status = impl.CreateTableFile(table_file);
+        status = impl_->CreateTableFile(table_file);
         table_file.file_type_ = meta::TableFileSchema::NEW;
-        status = impl.UpdateTableFile(table_file);
+        status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i=0; i<raw_files_cnt; ++i) {
-        status = impl.CreateTableFile(table_file);
+        status = impl_->CreateTableFile(table_file);
         table_file.file_type_ = meta::TableFileSchema::RAW;
-        status = impl.UpdateTableFile(table_file);
+        status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i=0; i<to_index_files_cnt; ++i) {
-        status = impl.CreateTableFile(table_file);
+        status = impl_->CreateTableFile(table_file);
         table_file.file_type_ = meta::TableFileSchema::TO_INDEX;
-        status = impl.UpdateTableFile(table_file);
+        status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i=0; i<index_files_cnt; ++i) {
-        status = impl.CreateTableFile(table_file);
+        status = impl_->CreateTableFile(table_file);
         table_file.file_type_ = meta::TableFileSchema::INDEX;
-        status = impl.UpdateTableFile(table_file);
+        status = impl_->UpdateTableFile(table_file);
     }
 
     meta::TableFilesSchema files;
 
-    status = impl.FilesToIndex(files);
+    status = impl_->FilesToIndex(files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     meta::DatePartionedTableFilesSchema dated_files;
-    status = impl.FilesToMerge(table.table_id_, dated_files);
+    status = impl_->FilesToMerge(table.table_id_, dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(), raw_files_cnt);
 
-    status = impl.FilesToIndex(files);
+    status = impl_->FilesToIndex(files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     meta::DatesT dates = {table_file.date_};
     std::vector<size_t> ids;
-    status = impl.FilesToSearch(table_id, ids, dates, dated_files);
+    status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);
 
-    status = impl.FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
+    status = impl_->FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);
 
-    status = impl.FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
+    status = impl_->FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);
 
     ids.push_back(size_t(9999999999));
-    status = impl.FilesToSearch(table_id, ids, dates, dated_files);
+    status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),0);
 
-    status = impl.DropAll();
+    status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
 }
