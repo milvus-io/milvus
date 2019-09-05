@@ -22,6 +22,11 @@ enum class IndexType {
     mix_nsg,
 };
 
+enum class MetricType {
+    L2 = 1,
+    IP = 2,
+};
+
 /**
  * @brief Connect API parameter
  */
@@ -37,6 +42,7 @@ struct TableSchema {
     std::string table_name;                                ///< Table name
     int64_t dimension = 0;                                 ///< Vector dimension, must be a positive value
     int64_t index_file_size = 0;                           ///< Index file size, must be a positive value
+    MetricType metric_type = MetricType::L2;               ///< Index metric type
 };
 
 /**
@@ -77,7 +83,6 @@ struct IndexParam {
     std::string table_name;
     IndexType index_type;
     int32_t nlist;
-    int32_t metric_type;
 };
 
 /**
