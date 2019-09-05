@@ -39,8 +39,8 @@ using IDMAPPtr = std::shared_ptr<IDMAP>;
 
 class GPUIDMAP : public IDMAP, public GPUIndex {
  public:
-    explicit GPUIDMAP(std::shared_ptr<faiss::Index> index, const int64_t &device_id)
-        : IDMAP(std::move(index)), GPUIndex(device_id) {}
+    explicit GPUIDMAP(std::shared_ptr<faiss::Index> index, const int64_t &device_id, ResPtr& res)
+        : IDMAP(std::move(index)), GPUIndex(device_id, res) {}
 
     VectorIndexPtr CopyGpuToCpu(const Config &config) override;
     float *GetRawVectors() override;
