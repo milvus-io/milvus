@@ -84,6 +84,7 @@ ClientProxy::CreateTable(const TableSchema &param) {
         schema.mutable_table_name()->set_table_name(param.table_name);
         schema.set_dimension(param.dimension);
         schema.set_index_file_size(param.index_file_size);
+        schema.set_metric_type((int32_t)param.metric_type);
 
         return client_ptr_->CreateTable(schema);
     } catch (std::exception &ex) {
@@ -116,11 +117,9 @@ ClientProxy::CreateIndex(const IndexParam &index_param) {
     try {
         //TODO:add index params
         ::milvus::grpc::IndexParam grpc_index_param;
-        grpc_index_param.mutable_table_name()->set_table_name(
-                index_param.table_name);
+        grpc_index_param.mutable_table_name()->set_table_name(index_param.table_name);
         grpc_index_param.mutable_index()->set_index_type((int32_t)index_param.index_type);
         grpc_index_param.mutable_index()->set_nlist(index_param.nlist);
-        grpc_index_param.mutable_index()->set_metric_type(index_param.metric_type);
         return client_ptr_->CreateIndex(grpc_index_param);
 
     } catch (std::exception &ex) {
@@ -273,6 +272,7 @@ ClientProxy::DescribeTable(const std::string &table_name, TableSchema &table_sch
         table_schema.table_name = grpc_schema.table_name().table_name();
         table_schema.dimension = grpc_schema.dimension();
         table_schema.index_file_size = grpc_schema.index_file_size();
+        table_schema.metric_type = (MetricType)grpc_schema.metric_type();
 
         return status;
     } catch (std::exception &ex) {
@@ -378,7 +378,6 @@ ClientProxy::DescribeIndex(const std::string &table_name, IndexParam &index_para
         Status status = client_ptr_->DescribeIndex(grpc_table_name, grpc_index_param);
         index_param.index_type = (IndexType)(grpc_index_param.mutable_index()->index_type());
         index_param.nlist = grpc_index_param.mutable_index()->nlist();
-        index_param.metric_type = grpc_index_param.mutable_index()->metric_type();
 
         return status;
 
