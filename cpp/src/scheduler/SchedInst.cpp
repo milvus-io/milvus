@@ -42,6 +42,22 @@ StartSchedulerService() {
             auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY);
             auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM);
 
+        auto res = ResMgrInst::GetInstance()->Add(ResourceFactory::Create(resname,
+                                                               type,
+                                                               device_id,
+                                                               enable_loader,
+                                                               enable_executor));
+
+        if (res.lock()->Type() == ResourceType::GPU) {
+            auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY, 300);
+            auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY, 300);
+            auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM, 2);
+            pinned_memory = 1024 * 1024 * pinned_memory;
+            temp_memory = 1024 * 1024 * temp_memory;
+            knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, pinned_memory, temp_memory, resource_num);
+        }
+
+
             ResMgrInst::GetInstance()->Add(ResourceFactory::Create(resname,
                                                                    type,
                                                                    device_id,
@@ -55,7 +71,6 @@ StartSchedulerService() {
 
         knowhere::FaissGpuResourceMgr::GetInstance().InitResource();
 
-//    auto default_connection = Connection("default_connection", 500.0);
         auto connections = config.GetChild(server::CONFIG_RESOURCE_CONNECTIONS).GetChildren();
         for (auto &conn : connections) {
             auto &connect_name = conn.first;
