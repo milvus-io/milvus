@@ -72,11 +72,11 @@ GrpcRequestHandler::Insert(::grpc::ServerContext *context,
 
 ::grpc::Status
 GrpcRequestHandler::Search(::grpc::ServerContext *context,
-                                 const ::milvus::grpc::SearchParam *request,
-                                 ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) {
+                           const ::milvus::grpc::SearchParam *request,
+                           ::milvus::grpc::TopKQueryResultList *response) {
 
     std::vector<std::string> file_id_array;
-    BaseTaskPtr task_ptr = SearchTask::Create(request, file_id_array, writer);
+    BaseTaskPtr task_ptr = SearchTask::Create(request, file_id_array, response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     if (grpc_status.error_code() != SERVER_SUCCESS) {
@@ -89,15 +89,15 @@ GrpcRequestHandler::Search(::grpc::ServerContext *context,
 
 ::grpc::Status
 GrpcRequestHandler::SearchInFiles(::grpc::ServerContext *context,
-                                        const ::milvus::grpc::SearchInFilesParam *request,
-                                        ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) {
+                                  const ::milvus::grpc::SearchInFilesParam *request,
+                                  ::milvus::grpc::TopKQueryResultList *response) {
 
     std::vector<std::string> file_id_array;
-    for(int i = 0; i < request->file_id_array_size(); i++) {
+    for (int i = 0; i < request->file_id_array_size(); i++) {
         file_id_array.push_back(request->file_id_array(i));
     }
     ::milvus::grpc::SearchInFilesParam *request_mutable = const_cast<::milvus::grpc::SearchInFilesParam *>(request);
-    BaseTaskPtr task_ptr = SearchTask::Create(request_mutable->mutable_search_param(), file_id_array, writer);
+    BaseTaskPtr task_ptr = SearchTask::Create(request_mutable->mutable_search_param(), file_id_array, response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
     if (grpc_status.error_code() != SERVER_SUCCESS) {

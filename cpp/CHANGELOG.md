@@ -24,6 +24,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-462 - Run milvus server twices, should display error
 - MS-463 - Search timeout
 - MS-467 - mysql db test failed
+- MS-470 - Drop index success, which table not created
 - MS-471 - code coverage run failed
 
 ## Improvement
@@ -83,6 +84,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-455 - Distribute tasks by minimal cost in scheduler
 - MS-460 - Put transport speed as weight when choosing neighbour to execute task
 - MS-459 - Add cache for pick function in tasktable
+- MS-482 - Change search stream transport to unary in grpc
+- MS-487 - Define metric type in CreateTable
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
