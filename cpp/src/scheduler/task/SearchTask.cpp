@@ -163,6 +163,7 @@ XSearchTask::Execute() {
             double span = rc.RecordSection("do search for context:" + context->Identity());
             context->AccumSearchCost(span);
 
+
             //step 3: cluster result
             SearchContext::ResultSet result_set;
             auto spec_k = index_engine_->Count() < context->topk() ? index_engine_->Count() : context->topk();
@@ -176,7 +177,6 @@ XSearchTask::Execute() {
 
             span = rc.RecordSection("reduce topk for context:" + context->Identity());
             context->AccumReduceCost(span);
-
         } catch (std::exception &ex) {
             ENGINE_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
             context->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed

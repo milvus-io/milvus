@@ -50,8 +50,8 @@ public:
                       Status& status);
 
     Status
-    Search(std::vector<grpc::TopKQueryResult>& result_array,
-                      const grpc::SearchParam& search_param);
+    Search(::milvus::grpc::TopKQueryResultList& topk_query_result_list,
+           const grpc::SearchParam &search_param);
 
     Status
     DescribeTable(grpc::TableSchema& grpc_schema,
