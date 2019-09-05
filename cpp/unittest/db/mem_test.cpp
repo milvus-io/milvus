@@ -216,7 +216,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     ASSERT_TRUE(status.ok());
 }
 
-TEST_F(MemManagerTest, SERIAL_INSERT_SEARCH_TEST) {
+TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -262,7 +262,7 @@ TEST_F(MemManagerTest, SERIAL_INSERT_SEARCH_TEST) {
     }
 }
 
-TEST_F(MemManagerTest, INSERT_TEST) {
+TEST_F(MemManagerTest2, INSERT_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -288,7 +288,7 @@ TEST_F(MemManagerTest, INSERT_TEST) {
     LOG(DEBUG) << "total_time spent in INSERT_TEST (ms) : " << total_time;
 }
 
-TEST_F(MemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
+TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
@@ -359,7 +359,7 @@ TEST_F(MemManagerTest, CONCURRENT_INSERT_SEARCH_TEST) {
     search.join();
 };
 
-TEST_F(MemManagerTest, VECTOR_IDS_TEST) {
+TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 

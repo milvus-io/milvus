@@ -96,6 +96,7 @@ TableSchema BuildTableSchema() {
     tb_schema.table_name = TABLE_NAME;
     tb_schema.dimension = TABLE_DIMENSION;
     tb_schema.index_file_size = TABLE_INDEX_FILE_SIZE;
+    tb_schema.metric_type = MetricType::L2;
 
     return tb_schema;
 }
@@ -291,7 +292,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         index.table_name = TABLE_NAME;
         index.index_type = IndexType::gpu_ivfflat;
         index.nlist = 16384;
-        index.metric_type = 1;
         Status stat = conn->CreateIndex(index);
         std::cout << "CreateIndex function call status: " << stat.ToString() << std::endl;
 

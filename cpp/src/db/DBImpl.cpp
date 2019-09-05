@@ -250,7 +250,9 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
         }
 
         //step 2: update index info
-        if(!utils::IsSameIndex(old_index, index)) {
+        TableIndex new_index = index;
+        new_index.metric_type_ = old_index.metric_type_;//dont change metric type, it was defined by CreateTable
+        if(!utils::IsSameIndex(old_index, new_index)) {
             DropIndex(table_id);
 
             status = meta_ptr_->UpdateTableIndexParam(table_id, index);
