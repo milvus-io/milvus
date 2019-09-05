@@ -197,11 +197,11 @@ void IVF::search_impl(int64_t n,
 VectorIndexPtr IVF::CopyCpuToGpu(const int64_t& device_id, const Config &config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)){
         ResScope rs(device_id, res);
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res.get(), device_id, index_.get());
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get());
 
         std::shared_ptr<faiss::Index> device_index;
         device_index.reset(gpu_index);
-        return std::make_shared<GPUIVF>(device_index, device_id);
+        return std::make_shared<GPUIVF>(device_index, device_id, res);
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }
@@ -275,11 +275,11 @@ VectorIndexPtr IVFSQ::CopyCpuToGpu(const int64_t &device_id, const Config &confi
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
 
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res.get(), device_id, index_.get(), &option);
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get(), &option);
 
         std::shared_ptr<faiss::Index> device_index;
         device_index.reset(gpu_index);
-        return std::make_shared<GPUIVFSQ>(device_index, device_id);
+        return std::make_shared<GPUIVFSQ>(device_index, device_id, res);
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }
@@ -350,12 +350,16 @@ void BasicIndex::LoadImpl(const BinarySet &index_binary) {
 }
 
 void BasicIndex::SealImpl() {
+// TODO(linxj): enable
 //#ifdef ZILLIZ_FAISS
     faiss::Index *index = index_.get();
     auto idx = dynamic_cast<faiss::IndexIVF *>(index);
     if (idx != nullptr) {
         idx->to_readonly();
     }
+    //else {
+    //    KNOHWERE_ERROR_MSG("Seal failed");
+    //}
 //#endif
 }
 
