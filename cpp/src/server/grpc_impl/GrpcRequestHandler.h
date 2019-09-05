@@ -136,8 +136,8 @@ public:
      */
     ::grpc::Status
     Search(::grpc::ServerContext *context,
-                 const ::milvus::grpc::SearchParam *request,
-                 ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) override;
+           const ::milvus::grpc::SearchParam *request,
+           ::milvus::grpc::TopKQueryResultList *response) override;
 
     /**
    * @brief Internal use query interface
@@ -161,8 +161,8 @@ public:
    */
     ::grpc::Status
     SearchInFiles(::grpc::ServerContext *context,
-                        const ::milvus::grpc::SearchInFilesParam *request,
-                        ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) override;
+                  const ::milvus::grpc::SearchInFilesParam *request,
+                  ::milvus::grpc::TopKQueryResultList *response) override;
 
     /**
      * @brief Get table schema

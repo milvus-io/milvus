@@ -25,6 +25,7 @@
 #include <grpcpp/security/credentials.h>
 #include <grpcpp/grpcpp.h>
 
+
 namespace zilliz {
 namespace milvus {
 namespace server {
@@ -36,11 +37,11 @@ constexpr long MESSAGE_SIZE = -1;
 
 class NoReusePortOption : public ::grpc::ServerBuilderOption {
  public:
-    void UpdateArguments(::grpc::ChannelArguments* args) override {
+    void UpdateArguments(::grpc::ChannelArguments *args) override {
         args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
     }
 
-    void UpdatePlugins(std::vector<std::unique_ptr<::grpc::ServerBuilderPlugin>>*
+    void UpdatePlugins(std::vector<std::unique_ptr<::grpc::ServerBuilderPlugin>> *
     plugins) override {}
 };
 
@@ -78,6 +79,7 @@ GrpcMilvusServer::StartService() {
 
     server = builder.BuildAndStart();
     server->Wait();
+
 }
 
 void
