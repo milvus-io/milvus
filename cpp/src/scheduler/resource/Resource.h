@@ -21,7 +21,6 @@
 #include "../task/Task.h"
 #include "Connection.h"
 #include "Node.h"
-#include "RegisterHandler.h"
 
 
 namespace zilliz {
@@ -33,13 +32,6 @@ enum class ResourceType {
     DISK = 0,
     CPU = 1,
     GPU = 2
-};
-
-enum class RegisterType {
-    START_UP,
-    ON_FINISH_TASK,
-    ON_COPY_COMPLETED,
-    ON_TASK_TABLE_UPDATED,
 };
 
 class Resource : public Node, public std::enable_shared_from_this<Resource> {
@@ -68,56 +60,51 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
     void
     WakeupExecutor();
 
- public:
-    template<typename T>
-    void Register_T(const RegisterType &type) {
-        register_table_.emplace(type, [] { return std::make_shared<T>(); });
-    }
-
-    RegisterHandlerPtr
-    GetRegisterFunc(const RegisterType &type);
-
     inline void
     RegisterSubscriber(std::function<void(EventPtr)> subscriber) {
         subscriber_ = std::move(subscriber);
     }
 
+    inline virtual std::string
+    Dump() const {
+        return "<Resource>";
+    }
+
+ public:
     inline std::string
-    Name() const {
+    name() const {
         return name_;
     }
 
     inline ResourceType
-    Type() const {
+    type() const {
         return type_;
     }
 
     inline uint64_t
-    DeviceId() {
+    device_id() const {
         return device_id_;
     }
 
-    // TODO: better name?
+    TaskTable &
+    task_table() {
+        return task_table_;
+    }
+
+public:
     inline bool
-    HasLoader() {
+    HasLoader() const {
         return enable_loader_;
     }
 
-    // TODO: better name?
     inline bool
-    HasExecutor() {
+    HasExecutor() const {
         return enable_executor_;
     }
 
     // TODO: const
     uint64_t
-    NumOfTaskToExec() {
-        uint64_t count = 0;
-        for (auto &task : task_table_) {
-            if (task->state == TaskTableItemState::LOADED) ++count;
-        }
-        return count;
-    }
+    NumOfTaskToExec();
 
     // TODO: need double ?
     inline uint64_t
@@ -128,14 +115,6 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
     inline uint64_t
     TotalTasks() const {
         return total_task_;
-    }
-
-    TaskTable &
-    task_table();
-
-    inline virtual std::string
-    Dump() const {
-        return "<Resource>";
     }
 
     friend std::ostream &operator<<(std::ostream &out, const Resource &resource);
@@ -198,6 +177,7 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
  protected:
     uint64_t device_id_;
     std::string name_;
+
  private:
     ResourceType type_;
 
@@ -206,17 +186,16 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
     uint64_t total_cost_ = 0;
     uint64_t total_task_ = 0;
 
-    std::map<RegisterType, std::function<RegisterHandlerPtr()>> register_table_;
     std::function<void(EventPtr)> subscriber_ = nullptr;
 
-    bool running_;
+    bool running_ = false;
     bool enable_loader_ = true;
     bool enable_executor_ = true;
     std::thread loader_thread_;
     std::thread executor_thread_;
 
-    bool load_flag_;
-    bool exec_flag_;
+    bool load_flag_ = false;
+    bool exec_flag_ = false;
     std::mutex load_mutex_;
     std::mutex exec_mutex_;
     std::condition_variable load_cv_;
