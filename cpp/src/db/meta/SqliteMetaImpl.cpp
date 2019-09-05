@@ -74,7 +74,7 @@ SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions &options_)
 }
 
 SqliteMetaImpl::~SqliteMetaImpl() {
-    CleanUp();
+
 }
 
 Status SqliteMetaImpl::NextTableId(std::string &table_id) {
@@ -1205,6 +1205,14 @@ Status SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 }
 
 Status SqliteMetaImpl::DropAll() {
+    ENGINE_LOG_DEBUG << "Drop all sqlite meta";
+
+    try {
+        ConnectorPtr->drop_table("Tables");
+        ConnectorPtr->drop_table("TableFiles");
+    } catch (std::exception &e) {
+        return HandleException("Encounter exception when drop all meta", e);
+    }
 
     return Status::OK();
 }
