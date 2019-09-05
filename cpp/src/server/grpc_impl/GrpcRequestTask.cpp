@@ -547,25 +547,25 @@ InsertTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 SearchTask::SearchTask(const ::milvus::grpc::SearchParam *search_vector_infos,
-                                   const std::vector<std::string> &file_id_array,
-                                   ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer)
-        : GrpcBaseTask(DQL_TASK_GROUP),
-          search_param_(search_vector_infos),
-          file_id_array_(file_id_array),
-          writer_(writer) {
+                       const std::vector<std::string> &file_id_array,
+                       ::milvus::grpc::TopKQueryResultList *response)
+    : GrpcBaseTask(DQL_TASK_GROUP),
+      search_param_(search_vector_infos),
+      file_id_array_(file_id_array),
+      topk_result_list(response) {
 
 }
 
 BaseTaskPtr
 SearchTask::Create(const ::milvus::grpc::SearchParam *search_vector_infos,
                    const std::vector<std::string> &file_id_array,
-                   ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) {
+                   ::milvus::grpc::TopKQueryResultList *response) {
     if(search_vector_infos == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
     return std::shared_ptr<GrpcBaseTask>(new SearchTask(search_vector_infos, file_id_array,
-                                                              writer));
+                                                        response));
 }
 
 ServerError
@@ -683,17 +683,12 @@ SearchTask::OnExecute() {
         rc.ElapseFromBegin("do search");
 
         //step 7: construct result array
-        for (uint64_t i = 0; i < record_count; i++) {
-            auto &result = results[i];
-            const auto &record = search_param_->query_record_array(i);
-            ::milvus::grpc::TopKQueryResult grpc_topk_result;
+        for (auto &result : results) {
+            ::milvus::grpc::TopKQueryResult *topk_query_result = topk_result_list->add_topk_query_result();
             for (auto &pair : result) {
-                ::milvus::grpc::QueryResult *grpc_result = grpc_topk_result.add_query_result_arrays();
+                ::milvus::grpc::QueryResult *grpc_result = topk_query_result->add_query_result_arrays();
                 grpc_result->set_id(pair.first);
                 grpc_result->set_distance(pair.second);
-            }
-            if (!writer_->Write(grpc_topk_result)) {
-                return SetError(SERVER_WRITE_ERROR, "Write topk result failed!");
             }
         }
 

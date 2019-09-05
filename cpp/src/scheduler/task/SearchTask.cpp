@@ -157,11 +157,18 @@ XSearchTask::Execute() {
 
         try {
             //step 2: search
+            auto start = std::chrono::high_resolution_clock::now();
             index_engine_->Search(context->nq(), context->vectors(), inner_k, nprobe, output_distence.data(),
                                   output_ids.data());
+            auto finish = std::chrono::high_resolution_clock::now();
+//            std::cout << "Knowhere COST: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
+//            std::cout << "********************************************************\n";
+
 
             double span = rc.RecordSection("do search for context:" + context->Identity());
             context->AccumSearchCost(span);
+
+            start = std::chrono::high_resolution_clock::now();
 
             //step 3: cluster result
             SearchContext::ResultSet result_set;
@@ -174,8 +181,11 @@ XSearchTask::Execute() {
             //step 4: pick up topk result
             XSearchTask::TopkResult(result_set, inner_k, metric_l2, context->GetResult());
 
-            span = rc.RecordSection("reduce topk for context:" + context->Identity());
             context->AccumReduceCost(span);
+            span = rc.RecordSection("reduce topk for context:" + context->Identity());
+            finish = std::chrono::high_resolution_clock::now();
+//            std::cout << "Reduce COST: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
+//            std::cout << "********************************************************\n";
 
         } catch (std::exception &ex) {
             ENGINE_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
@@ -188,7 +198,6 @@ XSearchTask::Execute() {
     }
 
     rc.ElapseFromBegin("totally cost");
-
     // release index in resource
     index_engine_ = nullptr;
 }
