@@ -37,6 +37,8 @@ void ASSERT_STATS(zilliz::milvus::engine::Status &stat);
 class BaseTest : public ::testing::Test {
 protected:
     void InitLog();
+
+    virtual void SetUp() override;
     virtual zilliz::milvus::engine::Options GetOptions();
 };
 
@@ -82,5 +84,9 @@ class MySqlMetaTest : public BaseTest {
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class MemManagerTest : public DBTest {
+class MemManagerTest : public BaseTest {
+};
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class MemManagerTest2 : public DBTest {
 };
