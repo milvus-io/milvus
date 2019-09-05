@@ -707,7 +707,7 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
             files[table_file.date_].push_back(table_file);
         }
         if(files.empty()) {
-            std::cout << "ERROR" << std::endl;
+            ENGINE_LOG_ERROR << "No file to search for table: " << table_id;
         }
     } catch (std::exception &e) {
         return HandleException("Encounter exception when iterate index files", e);
