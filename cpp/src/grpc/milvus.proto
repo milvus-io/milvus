@@ -84,8 +84,15 @@ message QueryResult {
  * @brief TopK query result
  */
 message TopKQueryResult {
+    repeated QueryResult query_result_arrays = 1;
+}
+
+/**
+ * @brief List of topK query result
+ */
+message TopKQueryResultList {
     Status status = 1;
-    repeated QueryResult query_result_arrays = 2;
+    repeated TopKQueryResult topk_query_result = 2;
 }
 
 /**
@@ -211,7 +218,7 @@ service MilvusService {
      *
      * @return query result array.
      */
-    rpc Search(SearchParam) returns (stream TopKQueryResult) {}
+    rpc Search(SearchParam) returns (TopKQueryResultList) {}
 
     /**
      * @brief Internal use query interface
@@ -225,7 +232,7 @@ service MilvusService {
      *
      * @return query result array.
      */
-    rpc SearchInFiles(SearchInFilesParam) returns (stream TopKQueryResult) {}
+    rpc SearchInFiles(SearchInFilesParam) returns (TopKQueryResultList) {}
 
     /**
      * @brief Get table schema
