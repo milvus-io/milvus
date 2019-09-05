@@ -193,16 +193,6 @@ XSearchTask::Execute() {
     index_engine_ = nullptr;
 }
 
-TaskPtr
-XSearchTask::Clone() {
-    auto ret = std::make_shared<XSearchTask>(file_);
-    ret->index_id_ = index_id_;
-    ret->index_engine_ = index_engine_->Clone();
-    ret->search_contexts_ = search_contexts_;
-    ret->metric_l2 = metric_l2;
-    return ret;
-}
-
 Status XSearchTask::ClusterResult(const std::vector<long> &output_ids,
                                   const std::vector<float> &output_distence,
                                   uint64_t nq,
