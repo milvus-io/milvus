@@ -24,9 +24,6 @@ public:
     void
     Execute() override;
 
-    TaskPtr
-    Clone() override;
-
 public:
     DeleteContextPtr delete_context_ptr_;
 };

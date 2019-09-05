@@ -23,9 +23,6 @@ public:
     void
     Execute() override;
 
-    TaskPtr
-    Clone() override;
-
 public:
     static Status ClusterResult(const std::vector<long> &output_ids,
                                 const std::vector<float> &output_distence,

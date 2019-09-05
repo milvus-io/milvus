@@ -6,6 +6,8 @@
 
 #include "TaskTable.h"
 #include "event/TaskTableUpdatedEvent.h"
+#include "Utils.h"
+
 #include <vector>
 #include <sstream>
 #include <ctime>
@@ -14,14 +16,6 @@
 namespace zilliz {
 namespace milvus {
 namespace engine {
-
-uint64_t
-get_now_timestamp() {
-    std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now();
-    auto duration = now.time_since_epoch();
-    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-    return millis;
-}
 
 std::string
 ToString(TaskTableItemState state) {
@@ -64,7 +58,7 @@ TaskTableItem::Load() {
     if (state == TaskTableItemState::START) {
         state = TaskTableItemState::LOADING;
         lock.unlock();
-        timestamp.load = get_now_timestamp();
+        timestamp.load = get_current_timestamp();
         return true;
     }
     return false;
@@ -75,7 +69,7 @@ TaskTableItem::Loaded() {
     if (state == TaskTableItemState::LOADING) {
         state = TaskTableItemState::LOADED;
         lock.unlock();
-        timestamp.loaded = get_now_timestamp();
+        timestamp.loaded = get_current_timestamp();
         return true;
     }
     return false;
@@ -86,7 +80,7 @@ TaskTableItem::Execute() {
     if (state == TaskTableItemState::LOADED) {
         state = TaskTableItemState::EXECUTING;
         lock.unlock();
-        timestamp.execute = get_now_timestamp();
+        timestamp.execute = get_current_timestamp();
         return true;
     }
     return false;
@@ -97,8 +91,8 @@ TaskTableItem::Executed() {
     if (state == TaskTableItemState::EXECUTING) {
         state = TaskTableItemState::EXECUTED;
         lock.unlock();
-        timestamp.executed = get_now_timestamp();
-        timestamp.finish = get_now_timestamp();
+        timestamp.executed = get_current_timestamp();
+        timestamp.finish = get_current_timestamp();
         return true;
     }
     return false;
@@ -109,7 +103,7 @@ TaskTableItem::Move() {
     if (state == TaskTableItemState::LOADED) {
         state = TaskTableItemState::MOVING;
         lock.unlock();
-        timestamp.move = get_now_timestamp();
+        timestamp.move = get_current_timestamp();
         return true;
     }
     return false;
@@ -120,8 +114,8 @@ TaskTableItem::Moved() {
     if (state == TaskTableItemState::MOVING) {
         state = TaskTableItemState::MOVED;
         lock.unlock();
-        timestamp.moved = get_now_timestamp();
-        timestamp.finish = get_now_timestamp();
+        timestamp.moved = get_current_timestamp();
+        timestamp.finish = get_current_timestamp();
         return true;
     }
     return false;
@@ -177,7 +171,7 @@ TaskTable::Put(TaskPtr task) {
     item->id = id_++;
     item->task = std::move(task);
     item->state = TaskTableItemState::START;
-    item->timestamp.start = get_now_timestamp();
+    item->timestamp.start = get_current_timestamp();
     table_.push_back(item);
     if (subscriber_) {
         subscriber_();
@@ -192,7 +186,7 @@ TaskTable::Put(std::vector<TaskPtr> &tasks) {
         item->id = id_++;
         item->task = std::move(task);
         item->state = TaskTableItemState::START;
-        item->timestamp.start = get_now_timestamp();
+        item->timestamp.start = get_current_timestamp();
         table_.push_back(item);
     }
     if (subscriber_) {

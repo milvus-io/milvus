@@ -23,9 +23,6 @@ public:
     void
     Execute() override;
 
-    TaskPtr
-    Clone() override;
-
     void
     Wait();
 
