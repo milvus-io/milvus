@@ -25,7 +25,7 @@ StartSchedulerService() {
     try {
         server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
 
-        if (config.GetSequences().empty() || config.GetChildren().empty()) throw "resource_config null exception";
+        if (config.GetChildren().empty()) throw "resource_config null exception";
 
         auto resources = config.GetChild(server::CONFIG_RESOURCES).GetChildren();
 
