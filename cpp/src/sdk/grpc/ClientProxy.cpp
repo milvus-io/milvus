@@ -240,16 +240,16 @@ ClientProxy::Search(const std::string &table_name,
         }
 
         //step 3: search vectors
-        std::vector<::milvus::grpc::TopKQueryResult> result_array;
-        Status status = client_ptr_->Search(result_array, search_param);
+        ::milvus::grpc::TopKQueryResultList topk_query_result_list;
+        Status status = client_ptr_->Search(topk_query_result_list, search_param);
 
         //step 4: convert result array
-        for (auto &grpc_topk_result : result_array) {
+        for (uint64_t i = 0; i < topk_query_result_list.topk_query_result_size(); ++i) {
             TopKQueryResult result;
-            for (size_t i = 0; i < grpc_topk_result.query_result_arrays_size(); i++) {
+            for (uint64_t j = 0; j < topk_query_result_list.topk_query_result(i).query_result_arrays_size(); ++j) {
                 QueryResult query_result;
-                query_result.id = grpc_topk_result.query_result_arrays(i).id();
-                query_result.distance = grpc_topk_result.query_result_arrays(i).distance();
+                query_result.id = topk_query_result_list.topk_query_result(i).query_result_arrays(j).id();
+                query_result.distance = topk_query_result_list.topk_query_result(i).query_result_arrays(j).distance();
                 result.query_result_arrays.emplace_back(query_result);
             }
 
