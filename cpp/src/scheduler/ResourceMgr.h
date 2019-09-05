@@ -22,78 +22,63 @@ namespace engine {
 
 class ResourceMgr {
 public:
-    ResourceMgr();
+    ResourceMgr() = default;
 
+public:
     /******** Management Interface ********/
-    inline void
-    RegisterSubscriber(std::function<void(EventPtr)> subscriber) {
-        subscriber_ = std::move(subscriber);
-    }
-
-    std::vector<ResourceWPtr> &
-    GetDiskResources() {
-        return disk_resources_;
-    }
-
-    uint64_t
-    GetNumGpuResource() const;
-
-    ResourcePtr
-    GetResource(ResourceType type, uint64_t device_id);
-
-    ResourcePtr
-    GetResourceByName(std::string name);
-
-    std::vector<ResourcePtr>
-    GetAllResouces();
-
-    /*
-     * Return account of resource which enable executor;
-     */
-    uint64_t
-    GetNumOfComputeResource();
-
-    std::vector<ResourcePtr>
-    GetComputeResource();
-
-    /*
-     * Add resource into Resource Management;
-     * Generate functions on events;
-     * Functions only modify bool variable, like event trigger;
-     */
-    ResourceWPtr
-    Add(ResourcePtr &&resource);
-
-    void
-    Connect(const std::string &res1, const std::string &res2, Connection &connection);
-
-    /*
-     * Create connection between A and B;
-     */
-    void
-    Connect(ResourceWPtr &res1, ResourceWPtr &res2, Connection &connection);
-
-    /*
-     * Synchronous start all resource;
-     * Last, start event process thread;
-     */
     void
     Start();
 
     void
     Stop();
 
+    ResourceWPtr
+    Add(ResourcePtr &&resource);
+
+    void
+    Connect(const std::string &res1, const std::string &res2, Connection &connection);
+
     void
     Clear();
 
-    void
-    PostEvent(const EventPtr &event);
+    inline void
+    RegisterSubscriber(std::function<void(EventPtr)> subscriber) {
+        subscriber_ = std::move(subscriber);
+    }
 
+public:
+    /******** Management Interface ********/
+    inline std::vector<ResourceWPtr> &
+    GetDiskResources() {
+        return disk_resources_;
+    }
+
+    // TODO: why return shared pointer
+    inline std::vector<ResourcePtr>
+    GetAllResources() {
+        return resources_;
+    }
+
+    std::vector<ResourcePtr>
+    GetComputeResource();
+
+    ResourcePtr
+    GetResource(ResourceType type, uint64_t device_id);
+
+    ResourcePtr
+    GetResource(const std::string &name);
+
+    uint64_t
+    GetNumOfComputeResource();
+
+    uint64_t
+    GetNumGpuResource() const;
+
+public:
     // TODO: add stats interface(low)
 
 public:
-    /******** Utlitity Functions ********/
-
+    /******** Utility Functions ********/
     std::string
     Dump();
 
@@ -101,25 +86,25 @@ public:
     DumpTaskTables();
 
 private:
-    ResourcePtr
-    get_resource_by_name(const std::string &name);
+    void
+    post_event(const EventPtr &event);
 
     void
     event_process();
 
 private:
-    std::queue<EventPtr> queue_;
-    std::function<void(EventPtr)> subscriber_ = nullptr;
-
-    bool running_;
+    bool running_ = false;
 
     std::vector<ResourceWPtr> disk_resources_;
     std::vector<ResourcePtr> resources_;
     mutable std::mutex resources_mutex_;
-    std::thread worker_thread_;
 
+    std::queue<EventPtr> queue_;
+    std::function<void(EventPtr)> subscriber_ = nullptr;
     std::mutex event_mutex_;
     std::condition_variable event_cv_;
+
+    std::thread worker_thread_;
 
 };
 
