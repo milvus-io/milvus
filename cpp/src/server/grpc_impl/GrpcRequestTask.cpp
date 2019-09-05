@@ -209,6 +209,7 @@ DescribeTableTask::OnExecute() {
         schema_->mutable_table_name()->set_table_name(table_info.table_id_);
         schema_->set_dimension(table_info.dimension_);
         schema_->set_index_file_size(table_info.index_file_size_);
+        schema_->set_metric_type(table_info.metric_type_);
 
     } catch (std::exception &ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
