@@ -9,6 +9,7 @@
 #include "ResourceFactory.h"
 #include "knowhere/index/vector_index/gpu_ivf.h"
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
@@ -21,14 +22,14 @@ std::mutex SchedInst::mutex_;
 
 void
 StartSchedulerService() {
-    try{
+    try {
         server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
 
-//        if (config.GetSequences().empty() || config.GetChildren().empty()) throw ...;
+        if (config.GetSequences().empty() || config.GetChildren().empty()) throw "resource_config null exception";
 
         auto resources = config.GetChild(server::CONFIG_RESOURCES).GetChildren();
 
-//        if (resources.empty()) throw ...;
+        if (resources.empty()) throw "Children of resource_config null exception";
 
         for (auto &resource : resources) {
             auto &resname = resource.first;
@@ -42,20 +43,23 @@ StartSchedulerService() {
             auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY);
             auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM);
 
-        auto res = ResMgrInst::GetInstance()->Add(ResourceFactory::Create(resname,
-                                                               type,
-                                                               device_id,
-                                                               enable_loader,
-                                                               enable_executor));
+            auto res = ResMgrInst::GetInstance()->Add(ResourceFactory::Create(resname,
+                                                                              type,
+                                                                              device_id,
+                                                                              enable_loader,
+                                                                              enable_executor));
 
-        if (res.lock()->Type() == ResourceType::GPU) {
-            auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY, 300);
-            auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY, 300);
-            auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM, 2);
-            pinned_memory = 1024 * 1024 * pinned_memory;
-            temp_memory = 1024 * 1024 * temp_memory;
-            knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, pinned_memory, temp_memory, resource_num);
-        }
+            if (res.lock()->Type() == ResourceType::GPU) {
+                auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY, 300);
+                auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY, 300);
+                auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM, 2);
+                pinned_memory = 1024 * 1024 * pinned_memory;
+                temp_memory = 1024 * 1024 * temp_memory;
+                knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id,
+                                                                        pinned_memory,
+                                                                        temp_memory,
+                                                                        resource_num);
+            }
 
 
             ResMgrInst::GetInstance()->Add(ResourceFactory::Create(resname,
@@ -66,12 +70,16 @@ StartSchedulerService() {
 
             pinned_memory = 1024 * 1024 * pinned_memory;
             temp_memory = 1024 * 1024 * temp_memory;
-            knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, pinned_memory, temp_memory, resource_num);
+            knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id,
+                                                                    pinned_memory,
+                                                                    temp_memory,
+                                                                    resource_num);
         }
 
         knowhere::FaissGpuResourceMgr::GetInstance().InitResource();
 
         auto connections = config.GetChild(server::CONFIG_RESOURCE_CONNECTIONS).GetChildren();
+        if(connections.empty()) throw "connections config null exception";
         for (auto &conn : connections) {
             auto &connect_name = conn.first;
             auto &connect_conf = conn.second;
@@ -86,11 +94,10 @@ StartSchedulerService() {
             auto connection = Connection(connect_name, connect_speed);
             ResMgrInst::GetInstance()->Connect(left, right, connection);
         }
-    } catch (...) {
-//        log <<< ;
-//        exit(-1);
+    } catch (const char* msg) {
+        SERVER_LOG_ERROR << msg;
+        exit(-1);
     }
-
 
     ResMgrInst::GetInstance()->Start();
     SchedInst::GetInstance()->Start();
