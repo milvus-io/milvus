@@ -39,6 +39,9 @@ DatasetPtr IDMAP::Search(const DatasetPtr &dataset, const Config &config) {
     }
 
     auto k = config["k"].as<size_t>();
+    auto metric_type = config["metric_type"].as_string() == "L2" ?
+                       faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+    index_->metric_type = metric_type;
 
     GETTENSOR(dataset)
 
