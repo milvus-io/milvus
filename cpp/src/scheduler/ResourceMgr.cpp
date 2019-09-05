@@ -12,109 +12,6 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-ResourceMgr::ResourceMgr()
-    : running_(false) {
-
-}
-
-uint64_t
-ResourceMgr::GetNumOfComputeResource() {
-    uint64_t count = 0;
-    for (auto &res : resources_) {
-        if (res->HasExecutor()) {
-            ++count;
-        }
-    }
-    return count;
-}
-
-std::vector<ResourcePtr>
-ResourceMgr::GetComputeResource() {
-    std::vector<ResourcePtr > result;
-    for (auto &resource : resources_) {
-        if (resource->HasExecutor()) {
-            result.emplace_back(resource);
-        }
-    }
-    return result;
-}
-
-uint64_t
-ResourceMgr::GetNumGpuResource() const {
-    uint64_t num = 0;
-    for (auto &res : resources_) {
-        if (res->Type() == ResourceType::GPU) {
-            num++;
-        }
-    }
-    return num;
-}
-
-ResourcePtr
-ResourceMgr::GetResource(ResourceType type, uint64_t device_id) {
-    for (auto &resource : resources_) {
-        if (resource->Type() == type && resource->DeviceId() == device_id) {
-            return resource;
-        }
-    }
-    return nullptr;
-}
-
-ResourcePtr
-ResourceMgr::GetResourceByName(std::string name) {
-    for (auto &resource : resources_) {
-        if (resource->Name() == name) {
-            return resource;
-        }
-    }
-    return nullptr;
-}
-
-std::vector<ResourcePtr>
-ResourceMgr::GetAllResouces() {
-    return resources_;
-}
-
-ResourceWPtr
-ResourceMgr::Add(ResourcePtr &&resource) {
-    ResourceWPtr ret(resource);
-
-    std::lock_guard<std::mutex> lck(resources_mutex_);
-    if (running_) {
-        ENGINE_LOG_ERROR << "ResourceMgr is running, not allow to add resource";
-        return ret;
-    }
-
-    if (resource->Type() == ResourceType::DISK) {
-        disk_resources_.emplace_back(ResourceWPtr(resource));
-    }
-    resources_.emplace_back(resource);
-
-    size_t index = resources_.size() - 1;
-    resource->RegisterSubscriber(std::bind(&ResourceMgr::PostEvent, this, std::placeholders::_1));
-    return ret;
-}
-
-void
-ResourceMgr::Connect(const std::string &name1, const std::string &name2, Connection &connection) {
-    auto res1 = get_resource_by_name(name1);
-    auto res2 = get_resource_by_name(name2);
-    if (res1 && res2) {
-        res1->AddNeighbour(std::static_pointer_cast<Node>(res2), connection);
-//        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
-    }
-}
-
-void
-ResourceMgr::Connect(ResourceWPtr &res1, ResourceWPtr &res2, Connection &connection) {
-    if (auto observe_a = res1.lock()) {
-        if (auto observe_b = res2.lock()) {
-            observe_a->AddNeighbour(std::static_pointer_cast<Node>(observe_b), connection);
-            observe_b->AddNeighbour(std::static_pointer_cast<Node>(observe_a), connection);
-        }
-    }
-}
-
 
 void
 ResourceMgr::Start() {
@@ -142,6 +39,37 @@ ResourceMgr::Stop() {
     }
 }
 
+ResourceWPtr
+ResourceMgr::Add(ResourcePtr &&resource) {
+    ResourceWPtr ret(resource);
+
+    std::lock_guard<std::mutex> lck(resources_mutex_);
+    if (running_) {
+        ENGINE_LOG_ERROR << "ResourceMgr is running, not allow to add resource";
+        return ret;
+    }
+
+    resource->RegisterSubscriber(std::bind(&ResourceMgr::post_event, this, std::placeholders::_1));
+
+    if (resource->type() == ResourceType::DISK) {
+        disk_resources_.emplace_back(ResourceWPtr(resource));
+    }
+    resources_.emplace_back(resource);
+
+    return ret;
+}
+
+void
+ResourceMgr::Connect(const std::string &name1, const std::string &name2, Connection &connection) {
+    auto res1 = GetResource(name1);
+    auto res2 = GetResource(name2);
+    if (res1 && res2) {
+        res1->AddNeighbour(std::static_pointer_cast<Node>(res2), connection);
+        // TODO: enable when task balance supported
+//        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
+    }
+}
+
 void
 ResourceMgr::Clear() {
     std::lock_guard<std::mutex> lck(resources_mutex_);
@@ -149,11 +77,57 @@ ResourceMgr::Clear() {
     resources_.clear();
 }
 
-void
-ResourceMgr::PostEvent(const EventPtr &event) {
-    std::lock_guard<std::mutex> lock(event_mutex_);
-    queue_.emplace(event);
-    event_cv_.notify_one();
+std::vector<ResourcePtr>
+ResourceMgr::GetComputeResource() {
+    std::vector<ResourcePtr> result;
+    for (auto &resource : resources_) {
+        if (resource->HasExecutor()) {
+            result.emplace_back(resource);
+        }
+    }
+    return result;
+}
+
+ResourcePtr
+ResourceMgr::GetResource(ResourceType type, uint64_t device_id) {
+    for (auto &resource : resources_) {
+        if (resource->type() == type && resource->device_id() == device_id) {
+            return resource;
+        }
+    }
+    return nullptr;
+}
+
+ResourcePtr
+ResourceMgr::GetResource(const std::string &name) {
+    for (auto &resource : resources_) {
+        if (resource->name() == name) {
+            return resource;
+        }
+    }
+    return nullptr;
+}
+
+uint64_t
+ResourceMgr::GetNumOfComputeResource() {
+    uint64_t count = 0;
+    for (auto &res : resources_) {
+        if (res->HasExecutor()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+uint64_t
+ResourceMgr::GetNumGpuResource() const {
+    uint64_t num = 0;
+    for (auto &res : resources_) {
+        if (res->type() == ResourceType::GPU) {
+            num++;
+        }
+    }
+    return num;
 }
 
 std::string
@@ -180,14 +154,13 @@ ResourceMgr::DumpTaskTables() {
     return ss.str();
 }
 
-ResourcePtr
-ResourceMgr::get_resource_by_name(const std::string &name) {
-    for (auto &res : resources_) {
-        if (res->Name() == name) {
-            return res;
-        }
+void
+ResourceMgr::post_event(const EventPtr &event) {
+    {
+        std::lock_guard<std::mutex> lock(event_mutex_);
+        queue_.emplace(event);
     }
-    return nullptr;
+    event_cv_.notify_one();
 }
 
 void
@@ -202,8 +175,6 @@ ResourceMgr::event_process() {
         if (event == nullptr) {
             break;
         }
-
-//        ENGINE_LOG_DEBUG << "ResourceMgr process " << *event;
 
         if (subscriber_) {
             subscriber_(event);

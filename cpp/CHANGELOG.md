@@ -85,6 +85,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-460 - Put transport speed as weight when choosing neighbour to execute task
 - MS-459 - Add cache for pick function in tasktable
 - MS-482 - Change search stream transport to unary in grpc
+- MS-488 - Improve code format in scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
