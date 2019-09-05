@@ -83,6 +83,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-455 - Distribute tasks by minimal cost in scheduler
 - MS-460 - Put transport speed as weight when choosing neighbour to execute task
 - MS-459 - Add cache for pick function in tasktable
+- MS-488 - Improve code format in scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
