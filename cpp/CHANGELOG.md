@@ -24,6 +24,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-462 - Run milvus server twices, should display error
 - MS-463 - Search timeout
 - MS-467 - mysql db test failed
+- MS-470 - Drop index success, which table not created
 - MS-471 - code coverage run failed
 
 ## Improvement
