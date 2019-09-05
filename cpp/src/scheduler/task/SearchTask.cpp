@@ -175,8 +175,8 @@ XSearchTask::Execute() {
             //step 4: pick up topk result
             XSearchTask::TopkResult(result_set, inner_k, metric_l2, context->GetResult());
 
-            context->AccumReduceCost(span);
             span = rc.RecordSection("reduce topk for context:" + context->Identity());
+            context->AccumReduceCost(span);
         } catch (std::exception &ex) {
             ENGINE_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
             context->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
@@ -188,6 +188,7 @@ XSearchTask::Execute() {
     }
 
     rc.ElapseFromBegin("totally cost");
+
     // release index in resource
     index_engine_ = nullptr;
 }
