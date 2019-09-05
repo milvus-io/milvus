@@ -24,12 +24,6 @@ XDeleteTask::Execute() {
     delete_context_ptr_->ResourceDone();
 }
 
-TaskPtr
-XDeleteTask::Clone() {
-    auto task = std::make_shared<XDeleteTask>(delete_context_ptr_);
-    return task;
-}
-
 }
 }
 }

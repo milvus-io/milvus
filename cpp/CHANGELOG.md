@@ -86,6 +86,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-459 - Add cache for pick function in tasktable
 - MS-482 - Change search stream transport to unary in grpc
 - MS-487 - Define metric type in CreateTable
+- MS-488 - Improve code format in scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
