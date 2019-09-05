@@ -9,7 +9,6 @@
 #include "ResourceFactory.h"
 #include "knowhere/index/vector_index/gpu_ivf.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace engine {
@@ -60,20 +59,6 @@ StartSchedulerService() {
                                                                         temp_memory,
                                                                         resource_num);
             }
-
-
-            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(resname,
-                                                                   type,
-                                                                   device_id,
-                                                                   enable_loader,
-                                                                   enable_executor));
-
-            pinned_memory = 1024 * 1024 * pinned_memory;
-            temp_memory = 1024 * 1024 * temp_memory;
-            knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id,
-                                                                    pinned_memory,
-                                                                    temp_memory,
-                                                                    resource_num);
         }
 
         knowhere::FaissGpuResourceMgr::GetInstance().InitResource();
