@@ -39,12 +39,9 @@ StartSchedulerService() {
                                                                enable_executor));
 
         if (res.lock()->Type() == ResourceType::GPU) {
-            auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY);
-            auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY);
-            auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM);
-            if (pinned_memory == 0) pinned_memory = 300;
-            if (temp_memory == 0) temp_memory = 300;
-            if (resource_num == 0) resource_num = 2;
+            auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY, 300);
+            auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY, 300);
+            auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM, 2);
             pinned_memory = 1024 * 1024 * pinned_memory;
             temp_memory = 1024 * 1024 * temp_memory;
             knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, pinned_memory, temp_memory, resource_num);
