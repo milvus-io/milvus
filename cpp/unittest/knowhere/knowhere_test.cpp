@@ -40,6 +40,9 @@ class KnowhereWrapperTest
 
         index_ = GetVecIndexFactory(index_type);
     }
+    void TearDown() override {
+        zilliz::knowhere::FaissGpuResourceMgr::GetInstance().Free();
+    }
 
     void AssertResult(const std::vector<long> &ids, const std::vector<float> &dis) {
         EXPECT_EQ(ids.size(), nq * k);
