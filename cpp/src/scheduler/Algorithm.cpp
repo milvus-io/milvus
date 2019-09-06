@@ -20,12 +20,12 @@ ShortestPath(const ResourcePtr &src,
 
     std::vector<std::vector<std::string>> paths;
 
-    uint64_t num_of_resources = res_mgr->GetAllResouces().size();
+    uint64_t num_of_resources = res_mgr->GetAllResources().size();
     std::unordered_map<uint64_t, std::string> id_name_map;
     std::unordered_map<std::string, uint64_t> name_id_map;
     for (uint64_t i = 0; i < num_of_resources; ++i) {
-        id_name_map.insert(std::make_pair(i, res_mgr->GetAllResouces().at(i)->Name()));
-        name_id_map.insert(std::make_pair(res_mgr->GetAllResouces().at(i)->Name(), i));
+        id_name_map.insert(std::make_pair(i, res_mgr->GetAllResources().at(i)->name()));
+        name_id_map.insert(std::make_pair(res_mgr->GetAllResources().at(i)->name(), i));
     }
 
     std::vector<std::vector<uint64_t> > dis_matrix;
@@ -40,23 +40,23 @@ ShortestPath(const ResourcePtr &src,
 
     std::vector<bool> vis(num_of_resources, false);
     std::vector<uint64_t> dis(num_of_resources, MAXINT);
-    for (auto &res : res_mgr->GetAllResouces()) {
+    for (auto &res : res_mgr->GetAllResources()) {
 
         auto cur_node = std::static_pointer_cast<Node>(res);
         auto cur_neighbours = cur_node->GetNeighbours();
 
         for (auto &neighbour : cur_neighbours) {
             auto neighbour_res = std::static_pointer_cast<Resource>(neighbour.neighbour_node.lock());
-            dis_matrix[name_id_map.at(res->Name())][name_id_map.at(neighbour_res->Name())] =
+            dis_matrix[name_id_map.at(res->name())][name_id_map.at(neighbour_res->name())] =
                 neighbour.connection.transport_cost();
         }
     }
 
     for (uint64_t i = 0; i < num_of_resources; ++i) {
-        dis[i] = dis_matrix[name_id_map.at(src->Name())][i];
+        dis[i] = dis_matrix[name_id_map.at(src->name())][i];
     }
 
-    vis[name_id_map.at(src->Name())] = true;
+    vis[name_id_map.at(src->name())] = true;
     std::vector<int64_t> parent(num_of_resources, -1);
 
     for (uint64_t i = 0; i < num_of_resources; ++i) {
@@ -71,7 +71,7 @@ ShortestPath(const ResourcePtr &src,
         vis[temp] = true;
 
         if (i == 0) {
-            parent[temp] = name_id_map.at(src->Name());
+            parent[temp] = name_id_map.at(src->name());
         }
 
         for (uint64_t j = 0; j < num_of_resources; ++j) {
@@ -82,15 +82,15 @@ ShortestPath(const ResourcePtr &src,
         }
     }
 
-    int64_t parent_idx = parent[name_id_map.at(dest->Name())];
+    int64_t parent_idx = parent[name_id_map.at(dest->name())];
     if (parent_idx != -1) {
-        path.push_back(dest->Name());
+        path.push_back(dest->name());
     }
     while (parent_idx != -1) {
         path.push_back(id_name_map.at(parent_idx));
         parent_idx = parent[parent_idx];
     }
-    return dis[name_id_map.at(dest->Name())];
+    return dis[name_id_map.at(dest->name())];
 }
 
 }

@@ -25,6 +25,7 @@ public:
     }
 
 protected:
+    explicit
     TaskLabel(TaskLabelType type) : type_(type) {}
 
 private:

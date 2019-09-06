@@ -143,7 +143,7 @@ Scheduler::OnLoadCompleted(const EventPtr &event) {
                 auto task = load_completed_event->task_table_item_->task;
 
                 // if this resource is disk, assign it to smallest cost resource
-                if (self->Type() == ResourceType::DISK) {
+                if (self->type() == ResourceType::DISK) {
                     // step 1: calculate shortest path per resource, from disk to compute resource
                     auto compute_resources = res_mgr_.lock()->GetComputeResource();
                     std::vector<std::vector<std::string>> paths;
@@ -176,11 +176,11 @@ Scheduler::OnLoadCompleted(const EventPtr &event) {
                     task->path() = task_path;
                 }
 
-                if(self->Name() == task->path().Last()) {
+                if(self->name() == task->path().Last()) {
                     self->WakeupLoader();
                 } else {
                     auto next_res_name = task->path().Next();
-                    auto next_res = res_mgr_.lock()->GetResourceByName(next_res_name);
+                    auto next_res = res_mgr_.lock()->GetResource(next_res_name);
                     load_completed_event->task_table_item_->Move();
                     next_res->task_table().Put(task);
                 }
