@@ -7,13 +7,11 @@
 #include <gtest/gtest.h>
 
 #include <iostream>
-#include <sstream>
 #include <thread>
 
 #include <faiss/AutoTune.h>
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
-#include <faiss/gpu/GpuClonerOptions.h>
 
 #include "knowhere/index/vector_index/gpu_ivf.h"
 #include "knowhere/index/vector_index/ivf.h"
@@ -57,6 +55,9 @@ class IVFTest
         Generate(128, 1000000/5, 10);
         index_ = IndexFactory(index_type);
         FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*300, 2);
+    }
+    void TearDown() override {
+        FaissGpuResourceMgr::GetInstance().Free();
     }
 
  protected:
@@ -369,6 +370,7 @@ class GPURESTEST
     void TearDown() override {
         delete ids;
         delete dis;
+        FaissGpuResourceMgr::GetInstance().Free();
     }
 
  protected:
