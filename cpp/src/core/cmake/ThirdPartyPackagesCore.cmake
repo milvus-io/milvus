@@ -6,7 +6,6 @@
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
 #
-#   http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
@@ -18,7 +17,6 @@
 set(KNOWHERE_THIRDPARTY_DEPENDENCIES
 
         ARROW
-#        BOOST
         FAISS
         GTest
         LAPACK
@@ -53,11 +51,8 @@ endmacro()
 macro(resolve_dependency DEPENDENCY_NAME)
     if (${DEPENDENCY_NAME}_SOURCE STREQUAL "AUTO")
         #message(STATUS "Finding ${DEPENDENCY_NAME} package")
-#        find_package(${DEPENDENCY_NAME} QUIET)
-#        if (NOT ${DEPENDENCY_NAME}_FOUND)
             #message(STATUS "${DEPENDENCY_NAME} package not found")
         build_dependency(${DEPENDENCY_NAME})
-#        endif ()
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "BUNDLED")
         build_dependency(${DEPENDENCY_NAME})
     elseif (${DEPENDENCY_NAME}_SOURCE STREQUAL "SYSTEM")
@@ -202,14 +197,6 @@ endif()
 
 set(MAKE_BUILD_ARGS "-j8")
 
-## Using make -j in sub-make is fragile
-## see discussion https://github.com/apache/KNOWHERE/pull/2779
-#if(${CMAKE_GENERATOR} MATCHES "Makefiles")
-#    set(MAKE_BUILD_ARGS "")
-#else()
-#    # limit the maximum number of jobs for ninja
-#    set(MAKE_BUILD_ARGS "-j4")
-#endif()
 
 # ----------------------------------------------------------------------
 # Find pthreads
@@ -243,21 +230,10 @@ foreach(_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     set(${_LIB_NAME} "${_LIB_VERSION}")
 endforeach()
 
-#if(DEFINED ENV{KNOWHERE_BOOST_URL})
-#    set(BOOST_SOURCE_URL "$ENV{KNOWHERE_BOOST_URL}")
-#else()
-#    string(REPLACE "." "_" BOOST_VERSION_UNDERSCORES ${BOOST_VERSION})
-#    set(BOOST_SOURCE_URL
-#            "https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz"
-#    )
-#endif()
-
 if(DEFINED ENV{KNOWHERE_FAISS_URL})
     set(FAISS_SOURCE_URL "$ENV{KNOWHERE_FAISS_URL}")
 else()
     set(FAISS_SOURCE_URL "http://192.168.1.105:6060/jinhai/faiss/-/archive/${FAISS_VERSION}/faiss-${FAISS_VERSION}.tar.gz")
-#    set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
-#    set(FAISS_SOURCE_URL "${CMAKE_SOURCE_DIR}/thirdparty/faiss-1.5.3")
     message(STATUS "FAISS URL = ${FAISS_SOURCE_URL}")
 endif()
 # set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
@@ -301,25 +277,14 @@ set(ARROW_PREFIX "${CORE_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep/cpp")
 
 macro(build_arrow)
     message(STATUS "Building Apache ARROW-${ARROW_VERSION} from source")
-#    set(ARROW_PREFIX "${CORE_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep/cpp")
     set(ARROW_STATIC_LIB_NAME arrow)
-#    set(PARQUET_STATIC_LIB_NAME parquet)
-    #    set(ARROW_CUDA_STATIC_LIB_NAME arrow_cuda)
-    set(ARROW_STATIC_LIB
+        set(ARROW_STATIC_LIB
             "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
             )
-#    set(PARQUET_STATIC_LIB
-#            "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${PARQUET_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
-#            )
-    #    set(ARROW_CUDA_STATIC_LIB
-    #            "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_CUDA_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
-    #            )
-    set(ARROW_INCLUDE_DIR "${ARROW_PREFIX}/include")
+                set(ARROW_INCLUDE_DIR "${ARROW_PREFIX}/include")
 
     set(ARROW_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
-            #            "-DARROW_THRIFT_URL=${THRIFT_SOURCE_URL}"
-            #"env ARROW_THRIFT_URL=${THRIFT_SOURCE_URL}"
             -DARROW_BUILD_STATIC=ON
             -DARROW_BUILD_SHARED=OFF
             -DARROW_PARQUET=OFF
@@ -329,8 +294,7 @@ macro(build_arrow)
             -DCMAKE_BUILD_TYPE=Release
             -DARROW_DEPENDENCY_SOURCE=BUNDLED) #Build all arrow dependencies from source instead of calling find_package first
 
-    #    set($ENV{ARROW_THRIFT_URL} ${THRIFT_SOURCE_URL})
-
+    
     if(USE_JFROG_CACHE STREQUAL "ON")
         execute_process(COMMAND sh -c "git ls-remote --heads --tags ${ARROW_SOURCE_URL} ${ARROW_VERSION} | cut -f 1" OUTPUT_VARIABLE ARROW_LAST_COMMIT_ID)
         if(${ARROW_LAST_COMMIT_ID} MATCHES "^[^#][a-z0-9]+")
@@ -403,8 +367,7 @@ macro(build_arrow)
     set_target_properties(arrow
             PROPERTIES IMPORTED_LOCATION "${ARROW_STATIC_LIB}"
             INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INCLUDE_DIR}")
-    #            INTERFACE_LINK_LIBRARIES thrift)
-    add_dependencies(arrow arrow_ep)
+        add_dependencies(arrow arrow_ep)
 
     set(JEMALLOC_PREFIX "${CORE_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep-build/jemalloc_ep-prefix/src/jemalloc_ep")
 
@@ -422,185 +385,6 @@ if(KNOWHERE_WITH_ARROW AND NOT TARGET arrow_ep)
     link_directories(SYSTEM ${ARROW_PREFIX}/lib/)
     include_directories(SYSTEM ${ARROW_INCLUDE_DIR})
 endif()
-
-# ----------------------------------------------------------------------
-# Add Boost dependencies (code adapted from Apache Kudu (incubating))
-
-#set(Boost_USE_MULTITHREADED ON)
-#if(MSVC AND KNOWHERE_USE_STATIC_CRT)
-#    set(Boost_USE_STATIC_RUNTIME ON)
-#endif()
-#set(Boost_ADDITIONAL_VERSIONS
-#        "1.70.0"
-#        "1.70"
-#        "1.69.0"
-#        "1.69"
-#        "1.68.0"
-#        "1.68"
-#        "1.67.0"
-#        "1.67"
-#        "1.66.0"
-#        "1.66"
-#        "1.65.0"
-#        "1.65"
-#        "1.64.0"
-#        "1.64"
-#        "1.63.0"
-#        "1.63"
-#        "1.62.0"
-#        "1.61"
-#        "1.61.0"
-#        "1.62"
-#        "1.60.0"
-#        "1.60")
-#
-## TODO
-#if(KNOWHERE_BOOST_VENDORED)
-##    system thread serialization wserialization regex
-#    set(BOOST_PREFIX "${CORE_BINARY_DIR}/boost_ep-prefix/src/boost_ep")
-#    set(BOOST_LIB_DIR "${BOOST_PREFIX}/stage/lib")
-#    set(BOOST_BUILD_LINK "static")
-#    set(BOOST_STATIC_SYSTEM_LIBRARY
-#            "${BOOST_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}boost_system${CMAKE_STATIC_LIBRARY_SUFFIX}"
-#    )
-#    set(BOOST_STATIC_FILESYSTEM_LIBRARY
-#            "${BOOST_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}boost_filesystem${CMAKE_STATIC_LIBRARY_SUFFIX}"
-#    )
-#    set(BOOST_STATIC_SERIALIZATION_LIBRARY
-#            "${BOOST_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}boost_serialization${CMAKE_STATIC_LIBRARY_SUFFIX}"
-#    )
-#    set(BOOST_STATIC_WSERIALIZATION_LIBRARY
-#            "${BOOST_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}boost_wserialization${CMAKE_STATIC_LIBRARY_SUFFIX}"
-#            )
-#    set(BOOST_STATIC_REGEX_LIBRARY
-#            "${BOOST_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}boost_regex${CMAKE_STATIC_LIBRARY_SUFFIX}"
-#            )
-#    set(BOOST_STATIC_THREAD_LIBRARY
-#            "${BOOST_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}boost_thread${CMAKE_STATIC_LIBRARY_SUFFIX}"
-#            )
-#    set(BOOST_SYSTEM_LIBRARY boost_system_static)
-#    set(BOOST_FILESYSTEM_LIBRARY boost_filesystem_static)
-#    set(BOOST_SERIALIZATION_LIBRARY boost_serialization_static)
-#    set(BOOST_WSERIALIZATION_LIBRARY boost_wserialization_static)
-#    set(BOOST_REGEX_LIBRARY boost_regex_static)
-#    set(BOOST_THREAD_LIBRARY boost_thread_static)
-#
-#    if(KNOWHERE_BOOST_HEADER_ONLY)
-#        set(BOOST_BUILD_PRODUCTS)
-#        set(BOOST_CONFIGURE_COMMAND "")
-#        set(BOOST_BUILD_COMMAND "")
-#    else()
-#        set(BOOST_BUILD_PRODUCTS ${BOOST_STATIC_SYSTEM_LIBRARY}
-#                ${BOOST_STATIC_FILESYSTEM_LIBRARY} ${BOOST_STATIC_SERIALIZATION_LIBRARY}
-#                ${BOOST_STATIC_WSERIALIZATION_LIBRARY} ${BOOST_STATIC_REGEX_LIBRARY}
-#                ${BOOST_STATIC_THREAD_LIBRARY})
-#        set(BOOST_CONFIGURE_COMMAND "./bootstrap.sh" "--prefix=${BOOST_PREFIX}"
-#                "--with-libraries=filesystem,serialization,wserialization,system,thread,regex")
-#        if("${CMAKE_BUILD_TYPE}" STREQUAL "DEBUG")
-#            set(BOOST_BUILD_VARIANT "debug")
-#        else()
-#            set(BOOST_BUILD_VARIANT "release")
-#        endif()
-#        set(BOOST_BUILD_COMMAND
-#                "./b2"
-#                "link=${BOOST_BUILD_LINK}"
-#                "variant=${BOOST_BUILD_VARIANT}"
-#                "cxxflags=-fPIC")
-#
-#        add_thirdparty_lib(boost_system STATIC_LIB "${BOOST_STATIC_SYSTEM_LIBRARY}")
-#
-#        add_thirdparty_lib(boost_filesystem STATIC_LIB "${BOOST_STATIC_FILESYSTEM_LIBRARY}")
-#
-#        add_thirdparty_lib(boost_serialization STATIC_LIB "${BOOST_STATIC_SERIALIZATION_LIBRARY}")
-#
-#        add_thirdparty_lib(boost_wserialization STATIC_LIB "${BOOST_STATIC_WSERIALIZATION_LIBRARY}")
-#
-#        add_thirdparty_lib(boost_regex STATIC_LIB "${BOOST_STATIC_REGEX_LIBRARY}")
-#
-#        add_thirdparty_lib(boost_thread STATIC_LIB "${BOOST_STATIC_THREAD_LIBRARY}")
-#
-#        set(KNOWHERE_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY} ${BOOST_SERIALIZATION_LIBRARY}
-#                ${BOOST_WSERIALIZATION_LIBRARY} ${BOOST_REGEX_LIBRARY} ${BOOST_THREAD_LIBRARY})
-#    endif()
-#    externalproject_add(boost_ep
-#            URL
-#            ${BOOST_SOURCE_URL}
-#            BUILD_BYPRODUCTS
-#            ${BOOST_BUILD_PRODUCTS}
-#            BUILD_IN_SOURCE
-#            1
-#            CONFIGURE_COMMAND
-#            ${BOOST_CONFIGURE_COMMAND}
-#            BUILD_COMMAND
-#            ${BOOST_BUILD_COMMAND}
-#            INSTALL_COMMAND
-#            ""
-#            ${EP_LOG_OPTIONS})
-#    set(Boost_INCLUDE_DIR "${BOOST_PREFIX}")
-#    set(Boost_INCLUDE_DIRS "${BOOST_INCLUDE_DIR}")
-#    add_dependencies(boost_system_static boost_ep)
-#    add_dependencies(boost_filesystem_static boost_ep)
-#    add_dependencies(boost_serialization_static boost_ep)
-#    add_dependencies(boost_wserialization_static boost_ep)
-#    add_dependencies(boost_regex_static boost_ep)
-#    add_dependencies(boost_thread_static boost_ep)
-#
-##else()
-##    if(MSVC)
-##        # disable autolinking in boost
-##        add_definitions(-DBOOST_ALL_NO_LIB)
-##    endif()
-#
-##    if(DEFINED ENV{BOOST_ROOT} OR DEFINED BOOST_ROOT)
-##        # In older versions of CMake (such as 3.2), the system paths for Boost will
-##        # In older versions of CMake (such as 3.2), the system paths for Boost will
-##        # be looked in first even if we set $BOOST_ROOT or pass -DBOOST_ROOT
-##        set(Boost_NO_SYSTEM_PATHS ON)
-##    endif()
-#
-##    if(KNOWHERE_BOOST_USE_SHARED)
-##        # Find shared Boost libraries.
-##        set(Boost_USE_STATIC_LIBS OFF)
-##        set(BUILD_SHARED_LIBS_KEEP ${BUILD_SHARED_LIBS})
-##        set(BUILD_SHARED_LIBS ON)
-##
-##        if(MSVC)
-##            # force all boost libraries to dynamic link
-##            add_definitions(-DBOOST_ALL_DYN_LINK)
-##        endif()
-##
-##        if(KNOWHERE_BOOST_HEADER_ONLY)
-##            find_package(Boost REQUIRED)
-##        else()
-##            find_package(Boost COMPONENTS serialization system filesystem REQUIRED)
-##            set(BOOST_SYSTEM_LIBRARY Boost::system)
-##            set(BOOST_FILESYSTEM_LIBRARY Boost::filesystem)
-##            set(BOOST_SERIALIZATION_LIBRARY Boost::serialization)
-##            set(KNOWHERE_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY})
-##        endif()
-##        set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_KEEP})
-##        unset(BUILD_SHARED_LIBS_KEEP)
-##    else()
-##        # Find static boost headers and libs
-##        # TODO Differentiate here between release and debug builds
-##        set(Boost_USE_STATIC_LIBS ON)
-##        if(KNOWHERE_BOOST_HEADER_ONLY)
-##            find_package(Boost REQUIRED)
-##        else()
-##            find_package(Boost COMPONENTS serialization system filesystem REQUIRED)
-##            set(BOOST_SYSTEM_LIBRARY Boost::system)
-##            set(BOOST_FILESYSTEM_LIBRARY Boost::filesystem)
-##            set(BOOST_SERIALIZATION_LIBRARY Boost::serialization)
-##            set(KNOWHERE_BOOST_LIBS ${BOOST_SYSTEM_LIBRARY} ${BOOST_FILESYSTEM_LIBRARY})
-##        endif()
-##    endif()
-#endif()
-#
-##message(STATUS "Boost include dir: " ${Boost_INCLUDE_DIR})
-##message(STATUS "Boost libraries: " ${Boost_LIBRARIES})
-#
-#include_directories(SYSTEM ${Boost_INCLUDE_DIR})
-#link_directories(SYSTEM ${BOOST_LIB_DIR})
 
 # ----------------------------------------------------------------------
 # OpenBLAS
@@ -679,14 +463,6 @@ macro(build_openblas)
     add_dependencies(openblas openblas_ep)
 endmacro()
 
-#if(KNOWHERE_WITH_OPENBLAS)
-#    resolve_dependency(OpenBLAS)
-#
-#    get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
-#    include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
-#    link_directories(SYSTEM ${OPENBLAS_PREFIX}/lib)
-#endif()
-
 # ----------------------------------------------------------------------
 # LAPACK
 
@@ -756,14 +532,6 @@ macro(build_lapack)
 
     add_dependencies(lapack lapack_ep)
 endmacro()
-
-#if(KNOWHERE_WITH_LAPACK)
-#    resolve_dependency(LAPACK)
-#
-#    get_target_property(LAPACK_INCLUDE_DIR lapack INTERFACE_INCLUDE_DIRECTORIES)
-#    include_directories(SYSTEM "${LAPACK_INCLUDE_DIR}")
-#    link_directories(SYSTEM ${LAPACK_PREFIX}/lib)
-#endif()
 
 # ----------------------------------------------------------------------
 # Google gtest
@@ -873,7 +641,6 @@ macro(build_gtest)
 endmacro()
 
 if (KNOWHERE_BUILD_TESTS AND NOT TARGET googletest_ep)
-    #message(STATUS "Resolving gtest dependency")
     resolve_dependency(GTest)
 
     if(NOT GTEST_VENDORED)
@@ -895,12 +662,7 @@ macro(build_faiss)
     set(FAISS_STATIC_LIB
             "${FAISS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}faiss${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-    #    add_custom_target(faiss_dependencies)
-    #    add_dependencies(faiss_dependencies openblas_ep)
-    #    add_dependencies(faiss_dependencies openblas)
-    #    get_target_property(FAISS_OPENBLAS_LIB_DIR openblas IMPORTED_LOCATION)
-    #    get_filename_component(FAISS_OPENBLAS_LIB "${FAISS_OPENBLAS_LIB_DIR}" DIRECTORY)
-
+                    
     set(FAISS_CONFIGURE_ARGS
             "--prefix=${FAISS_PREFIX}"
             "CFLAGS=${EP_C_FLAGS}"
@@ -908,13 +670,7 @@ macro(build_faiss)
             "LDFLAGS=-L${OPENBLAS_PREFIX}/lib -L${LAPACK_PREFIX}/lib -lopenblas -llapack"
             --without-python)
 
-    #    if(OPENBLAS_STATIC_LIB)
-    #        set(OPENBLAS_LIBRARY ${OPENBLAS_STATIC_LIB})
-    #    else()
-    #        set(OPENBLAS_LIBRARY ${OPENBLAS_SHARED_LIB})
-    #    endif()
-    #    set(FAISS_DEPENDENCIES ${FAISS_DEPENDENCIES} ${OPENBLAS_LIBRARY})
-
+                        
     if(${KNOWHERE_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
@@ -925,9 +681,7 @@ macro(build_faiss)
     endif()
 
     if(USE_JFROG_CACHE STREQUAL "ON")
-#        Check_Last_Modify("${CMAKE_SOURCE_DIR}/thirdparty/faiss_cache_check_lists.txt" "${CMAKE_SOURCE_DIR}" FAISS_LAST_MODIFIED_COMMIT_ID)
         string(MD5 FAISS_COMBINE_MD5 "${FAISS_MD5}${LAPACK_MD5}${OPENBLAS_MD5}")
-        # string(MD5 FAISS_COMBINE_MD5 "${FAISS_LAST_MODIFIED_COMMIT_ID}${LAPACK_MD5}${OPENBLAS_MD5}")
         set(FAISS_CACHE_PACKAGE_NAME "faiss_${FAISS_COMBINE_MD5}.tar.gz")
         set(FAISS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${FAISS_CACHE_PACKAGE_NAME}")
         set(FAISS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${FAISS_CACHE_PACKAGE_NAME}")
@@ -991,10 +745,6 @@ macro(build_faiss)
             INTERFACE_LINK_LIBRARIES "openblas;lapack" )
 
     add_dependencies(faiss faiss_ep)
-    #add_dependencies(faiss openblas_ep)
-    #add_dependencies(faiss lapack_ep)
-    #target_link_libraries(faiss ${OPENBLAS_PREFIX}/lib)
-    #target_link_libraries(faiss ${LAPACK_PREFIX}/lib)
 
 endmacro()
 
@@ -1013,8 +763,5 @@ if(KNOWHERE_WITH_FAISS AND NOT TARGET faiss_ep)
     resolve_dependency(FAISS)
     get_target_property(FAISS_INCLUDE_DIR faiss INTERFACE_INCLUDE_DIRECTORIES)
     include_directories(SYSTEM "${FAISS_INCLUDE_DIR}")
-#    include_directories(SYSTEM "${CORE_BINARY_DIR}/faiss_ep-prefix/src/")
-#    link_directories(SYSTEM ${FAISS_PREFIX}/)
     link_directories(SYSTEM ${FAISS_PREFIX}/lib/)
-#    link_directories(SYSTEM ${FAISS_PREFIX}/gpu/)
 endif()
