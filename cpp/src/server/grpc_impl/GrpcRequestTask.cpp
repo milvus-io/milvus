@@ -955,15 +955,8 @@ DropIndexTask::OnExecute() {
             return SetError(res, "Invalid table name: " + table_name_);
         }
 
-        //step 2:check index existence
-        engine::TableIndex index;
-        engine::Status stat = DBWrapper::DB()->DescribeIndex(table_name_, index);
-        if (index.engine_type_ == 1) {
-            return SetError(SERVER_UNEXPECTED_ERROR, "index not existed");
-        }
-
-        //step 3: check table existence
-        stat = DBWrapper::DB()->DropIndex(table_name_);
+        //step 2: check table existence
+        auto stat = DBWrapper::DB()->DropIndex(table_name_);
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
