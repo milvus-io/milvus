@@ -27,14 +27,14 @@ static constexpr uint64_t GB = MB*1024;
 TEST(ConfigTest, CONFIG_TEST) {
     server::ConfigMgr* config_mgr = server::ConfigMgr::GetInstance();
 
-    server::ServerError err = config_mgr->LoadConfigFile("");
-    ASSERT_EQ(err, server::SERVER_UNEXPECTED_ERROR);
+    ErrorCode err = config_mgr->LoadConfigFile("");
+    ASSERT_EQ(err, SERVER_UNEXPECTED_ERROR);
 
     err = config_mgr->LoadConfigFile(LOG_FILE_PATH);
-    ASSERT_EQ(err, server::SERVER_UNEXPECTED_ERROR);
+    ASSERT_EQ(err, SERVER_UNEXPECTED_ERROR);
 
     err = config_mgr->LoadConfigFile(CONFIG_FILE_PATH);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ASSERT_EQ(err, SERVER_SUCCESS);
 
     config_mgr->Print();
 
@@ -95,11 +95,11 @@ TEST(ConfigTest, CONFIG_TEST) {
 
 TEST(ConfigTest, SERVER_CONFIG_TEST) {
     server::ServerConfig& config = server::ServerConfig::GetInstance();
-    server::ServerError err = config.LoadConfigFile(CONFIG_FILE_PATH);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ErrorCode err = config.LoadConfigFile(CONFIG_FILE_PATH);
+    ASSERT_EQ(err, SERVER_SUCCESS);
 
     err = server::ServerConfig::GetInstance().ValidateConfig();
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ASSERT_EQ(err, SERVER_SUCCESS);
 
     server::ConfigNode node1 = config.GetConfig("server_config");
     server::ConfigNode& node2 = config.GetConfig("cache_config");
@@ -125,26 +125,26 @@ TEST(ConfigTest, SERVER_CONFIG_TEST) {
     server::ConfigNode& cache_config = config.GetConfig(server::CONFIG_CACHE);
     cache_config.SetValue(server::CACHE_FREE_PERCENT, "2.0");
     err = config.ValidateConfig();
-    ASSERT_NE(err, server::SERVER_SUCCESS);
+    ASSERT_NE(err, SERVER_SUCCESS);
 
     size_t cache_cap = 16;
     size_t insert_buffer_size = (total_mem - cache_cap*GB + 1*GB)/GB;
     db_config.SetValue(server::CONFIG_DB_INSERT_BUFFER_SIZE, std::to_string(insert_buffer_size));
     cache_config.SetValue(server::CONFIG_CPU_CACHE_CAPACITY, std::to_string(cache_cap));
     err = config.ValidateConfig();
-    ASSERT_NE(err, server::SERVER_SUCCESS);
+    ASSERT_NE(err, SERVER_SUCCESS);
 
     cache_cap = total_mem/GB + 2;
     cache_config.SetValue(server::CONFIG_CPU_CACHE_CAPACITY, std::to_string(cache_cap));
     err = config.ValidateConfig();
-    ASSERT_NE(err, server::SERVER_SUCCESS);
+    ASSERT_NE(err, SERVER_SUCCESS);
 
     insert_buffer_size = total_mem/GB + 2;
     db_config.SetValue(server::CONFIG_DB_INSERT_BUFFER_SIZE, std::to_string(insert_buffer_size));
     err = config.ValidateConfig();
-    ASSERT_NE(err, server::SERVER_SUCCESS);
+    ASSERT_NE(err, SERVER_SUCCESS);
 
     server_config.SetValue(server::CONFIG_GPU_INDEX, "9999");
     err = config.ValidateConfig();
-    ASSERT_NE(err, server::SERVER_SUCCESS);
+    ASSERT_NE(err, SERVER_SUCCESS);
 }

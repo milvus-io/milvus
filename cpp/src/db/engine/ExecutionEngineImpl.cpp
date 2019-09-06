@@ -41,7 +41,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
     build_cfg["metric_type"] = (metric_type_ == MetricType::IP) ? "IP" : "L2";
     AutoGenParams(index_->GetType(), 0, build_cfg);
     auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(build_cfg);
-    if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
+    if (ec != KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index,
@@ -85,7 +85,7 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 
 Status ExecutionEngineImpl::AddWithIds(long n, const float *xdata, const long *xids) {
     auto ec = index_->Add(n, xdata, xids);
-    if (ec != server::KNOWHERE_SUCCESS) {
+    if (ec != KNOWHERE_SUCCESS) {
         return Status::Error("Add error");
     }
     return Status::OK();
@@ -117,7 +117,7 @@ size_t ExecutionEngineImpl::PhysicalSize() const {
 
 Status ExecutionEngineImpl::Serialize() {
     auto ec = write_index(index_, location_);
-    if (ec != server::KNOWHERE_SUCCESS) {
+    if (ec != KNOWHERE_SUCCESS) {
         return Status::Error("Serialize: write to disk error");
     }
     return Status::OK();
@@ -248,7 +248,7 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
 
     if (auto file_index = std::dynamic_pointer_cast<BFIndex>(to_merge)) {
         auto ec = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
-        if (ec != server::KNOWHERE_SUCCESS) {
+        if (ec != KNOWHERE_SUCCESS) {
             ENGINE_LOG_ERROR << "Merge: Add Error";
             return Status::Error("Merge: Add Error");
         }
@@ -284,7 +284,7 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
                                  from_index->GetRawVectors(),
                                  from_index->GetRawIds(),
                                  build_cfg);
-    if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
+    if (ec != KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
 
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
@@ -303,7 +303,7 @@ Status ExecutionEngineImpl::Search(long n,
     ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
     auto cfg = Config::object{{"k", k}, {"nprobe", nprobe}};
     auto ec = index_->Search(n, data, distances, labels, cfg);
-    if (ec != server::KNOWHERE_SUCCESS) {
+    if (ec != KNOWHERE_SUCCESS) {
         ENGINE_LOG_ERROR << "Search error";
         return Status::Error("Search: Search Error");
     }
