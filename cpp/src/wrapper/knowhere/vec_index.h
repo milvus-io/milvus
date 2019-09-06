@@ -44,23 +44,23 @@ using VecIndexPtr = std::shared_ptr<VecIndex>;
 
 class VecIndex {
  public:
-    virtual server::KnowhereError BuildAll(const long &nb,
-                                           const float *xb,
-                                           const long *ids,
-                                           const Config &cfg,
-                                           const long &nt = 0,
-                                           const float *xt = nullptr) = 0;
+    virtual ErrorCode BuildAll(const long &nb,
+                               const float *xb,
+                               const long *ids,
+                               const Config &cfg,
+                               const long &nt = 0,
+                               const float *xt = nullptr) = 0;
 
-    virtual server::KnowhereError Add(const long &nb,
-                                      const float *xb,
-                                      const long *ids,
-                                      const Config &cfg = Config()) = 0;
+    virtual ErrorCode Add(const long &nb,
+                          const float *xb,
+                          const long *ids,
+                          const Config &cfg = Config()) = 0;
 
-    virtual server::KnowhereError Search(const long &nq,
-                                         const float *xq,
-                                         float *dist,
-                                         long *ids,
-                                         const Config &cfg = Config()) = 0;
+    virtual ErrorCode Search(const long &nq,
+                             const float *xq,
+                             float *dist,
+                             long *ids,
+                             const Config &cfg = Config()) = 0;
 
     virtual VecIndexPtr CopyToGpu(const int64_t& device_id,
                                   const Config &cfg = Config()) = 0;
@@ -79,10 +79,10 @@ class VecIndex {
 
     virtual zilliz::knowhere::BinarySet Serialize() = 0;
 
-    virtual server::KnowhereError Load(const zilliz::knowhere::BinarySet &index_binary) = 0;
+    virtual ErrorCode Load(const zilliz::knowhere::BinarySet &index_binary) = 0;
 };
 
-extern server::KnowhereError write_index(VecIndexPtr index, const std::string &location);
+extern ErrorCode write_index(VecIndexPtr index, const std::string &location);
 
 extern VecIndexPtr read_index(const std::string &location);
 

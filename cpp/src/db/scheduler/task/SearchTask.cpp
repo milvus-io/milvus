@@ -134,7 +134,7 @@ Status SearchTask::ClusterResult(const std::vector<long> &output_ids,
         std::string msg = "Invalid id array size: " + std::to_string(output_ids.size()) +
                 " distance array size: " + std::to_string(output_distence.size());
         ENGINE_LOG_ERROR << msg;
-        return Status::Error(msg);
+        return Status(DB_ERROR, msg);
     }
 
     result_set.clear();
@@ -249,7 +249,7 @@ Status SearchTask::TopkResult(SearchContext::ResultSet &result_src,
     if (result_src.size() != result_target.size()) {
         std::string msg = "Invalid result set size";
         ENGINE_LOG_ERROR << msg;
-        return Status::Error(msg);
+        return Status(DB_ERROR, msg);
     }
 
     std::function<void(size_t, size_t)> ReduceWorker = [&](size_t from_index, size_t to_index) {

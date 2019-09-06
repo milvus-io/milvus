@@ -25,24 +25,24 @@ protected:
     virtual ~GrpcBaseTask();
 
 public:
-    ServerError Execute();
+    ErrorCode Execute();
 
     void Done();
 
-    ServerError WaitToFinish();
+    ErrorCode WaitToFinish();
 
     std::string TaskGroup() const { return task_group_; }
 
-    ServerError ErrorCode() const { return error_code_; }
+    ErrorCode ErrorID() const { return error_code_; }
 
     std::string ErrorMsg() const { return error_msg_; }
 
     bool IsAsync() const { return async_; }
 
 protected:
-    virtual ServerError OnExecute() = 0;
+    virtual ErrorCode OnExecute() = 0;
 
-    ServerError SetError(ServerError error_code, const std::string &msg);
+    ErrorCode SetError(ErrorCode error_code, const std::string &msg);
 
 protected:
     mutable std::mutex finish_mtx_;
@@ -51,7 +51,7 @@ protected:
     std::string task_group_;
     bool async_;
     bool done_;
-    ServerError error_code_;
+    ErrorCode error_code_;
     std::string error_msg_;
 };
 
@@ -71,7 +71,7 @@ public:
 
     void Stop();
 
-    ServerError ExecuteTask(const BaseTaskPtr &task_ptr);
+    ErrorCode ExecuteTask(const BaseTaskPtr &task_ptr);
 
     static void ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Status *grpc_status);
 
@@ -82,7 +82,7 @@ protected:
 
     void TakeTaskToExecute(TaskQueuePtr task_queue);
 
-    ServerError PutTaskToQueue(const BaseTaskPtr &task_ptr);
+    ErrorCode PutTaskToQueue(const BaseTaskPtr &task_ptr);
 
 private:
     mutable std::mutex queue_mtx_;
