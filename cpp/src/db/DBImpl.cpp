@@ -104,7 +104,7 @@ Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
     }
 
     meta::TableSchema temp_schema = table_schema;
-    temp_schema.index_file_size_ *= ONE_MB;
+    temp_schema.index_file_size_ *= ONE_MB; //store as MB
     return meta_ptr_->CreateTable(temp_schema);
 }
 
@@ -139,7 +139,9 @@ Status DBImpl::DescribeTable(meta::TableSchema& table_schema) {
         return Status::Error("Milsvus server is shutdown!");
     }
 
-    return meta_ptr_->DescribeTable(table_schema);
+    auto stat = meta_ptr_->DescribeTable(table_schema);
+    table_schema.index_file_size_ /= ONE_MB; //return as MB
+    return stat;
 }
 
 Status DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
