@@ -14,7 +14,7 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-ServerError
+    ErrorCode
 PrometheusMetrics::Init() {
     try {
         ConfigNode &configNode = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);

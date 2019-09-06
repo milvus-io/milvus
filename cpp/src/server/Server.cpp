@@ -209,10 +209,10 @@ Server::Stop() {
 }
 
 
-ServerError
+ErrorCode
 Server::LoadConfig() {
     ServerConfig::GetInstance().LoadConfigFile(config_filename_);
-    ServerError err = ServerConfig::GetInstance().ValidateConfig();
+    ErrorCode err = ServerConfig::GetInstance().ValidateConfig();
     if(err != SERVER_SUCCESS){
         exit(0);
     }
