@@ -9,7 +9,7 @@ namespace zilliz {
 namespace knowhere {
 
 struct Resource {
-    Resource(std::shared_ptr<faiss::gpu::StandardGpuResources> &r): faiss_res(r) {
+    explicit Resource(std::shared_ptr<faiss::gpu::StandardGpuResources> &r): faiss_res(r) {
         static int64_t global_id = 0;
         id = global_id++;
     }
@@ -31,6 +31,11 @@ class FaissGpuResourceMgr {
  public:
     static FaissGpuResourceMgr &
     GetInstance();
+
+    // Free gpu resource, avoid cudaGetDevice error when deallocate.
+    // this func should be invoke before main return
+    void
+    Free();
 
     void
     AllocateTempMem(ResPtr &resource, const int64_t& device_id, const int64_t& size);
