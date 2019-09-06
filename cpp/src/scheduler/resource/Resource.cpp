@@ -12,7 +12,8 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-std::ostream &operator<<(std::ostream &out, const Resource &resource) {
+std::ostream &
+operator<<(std::ostream &out, const Resource &resource) {
     out << resource.Dump();
     return out;
 }
@@ -25,11 +26,9 @@ Resource::Resource(std::string name,
     : name_(std::move(name)),
       type_(type),
       device_id_(device_id),
-      running_(false),
       enable_loader_(enable_loader),
-      enable_executor_(enable_executor),
-      load_flag_(false),
-      exec_flag_(false) {
+      enable_executor_(enable_executor) {
+    // register subscriber in tasktable
     task_table_.RegisterSubscriber([&] {
         if (subscriber_) {
             auto event = std::make_shared<TaskTableUpdatedEvent>(shared_from_this());
@@ -38,7 +37,8 @@ Resource::Resource(std::string name,
     });
 }
 
-void Resource::Start() {
+void
+Resource::Start() {
     running_ = true;
     if (enable_loader_) {
         loader_thread_ = std::thread(&Resource::loader_function, this);
@@ -48,7 +48,8 @@ void Resource::Start() {
     }
 }
 
-void Resource::Stop() {
+void
+Resource::Stop() {
     running_ = false;
     if (enable_loader_) {
         WakeupLoader();
@@ -60,11 +61,8 @@ void Resource::Stop() {
     }
 }
 
-TaskTable &Resource::task_table() {
-    return task_table_;
-}
-
-void Resource::WakeupLoader() {
+void
+Resource::WakeupLoader() {
     {
         std::lock_guard<std::mutex> lock(load_mutex_);
         load_flag_ = true;
@@ -72,12 +70,22 @@ void Resource::WakeupLoader() {
     load_cv_.notify_one();
 }
 
-void Resource::WakeupExecutor() {
+void
+Resource::WakeupExecutor() {
     {
         std::lock_guard<std::mutex> lock(exec_mutex_);
         exec_flag_ = true;
     }
     exec_cv_.notify_one();
+}
+
+uint64_t
+Resource::NumOfTaskToExec() {
+    uint64_t count = 0;
+    for (auto &task : task_table_) {
+        if (task->state == TaskTableItemState::LOADED) ++count;
+    }
+    return count;
 }
 
 TaskTableItemPtr Resource::pick_task_load() {
@@ -154,11 +162,6 @@ void Resource::executor_function() {
         }
 
     }
-}
-
-RegisterHandlerPtr Resource::GetRegisterFunc(const RegisterType &type) {
-    // construct object each time.
-    return register_table_[type]();
 }
 
 }

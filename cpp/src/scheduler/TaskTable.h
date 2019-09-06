@@ -40,19 +40,16 @@ struct TaskTimestamp {
 };
 
 struct TaskTableItem {
-    TaskTableItem() : id(0), state(TaskTableItemState::INVALID), mutex(), priority(0) {}
+    TaskTableItem() : id(0), state(TaskTableItemState::INVALID), mutex() {}
 
     TaskTableItem(const TaskTableItem &src)
-        : id(src.id), state(src.state), mutex(), priority(src.priority) {}
+        : id(src.id), state(src.state), mutex() {}
 
     uint64_t id; // auto increment from 0;
-    // TODO: add tag into task
     TaskPtr task; // the task;
     TaskTableItemState state; // the state;
     std::mutex mutex;
     TaskTimestamp timestamp;
-
-    uint8_t priority; // just a number, meaningless;
 
     bool
     IsFinish();
@@ -113,7 +110,7 @@ public:
     Get(uint64_t index);
 
     /*
-     * TODO
+     * TODO(wxyu): BIG GC
      * Remove sequence task which is DONE or MOVED from front;
      * Called by ?
      */
@@ -135,6 +132,7 @@ public:
     Size() {
         return table_.size();
     }
+
 public:
     TaskTableItemPtr &
     operator[](uint64_t index) {
@@ -225,7 +223,6 @@ public:
     Dump();
 
 private:
-    // TODO: map better ?
     std::uint64_t id_ = 0;
     mutable std::mutex id_mutex_;
     std::deque<TaskTableItemPtr> table_;

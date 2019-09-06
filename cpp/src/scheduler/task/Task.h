@@ -68,14 +68,9 @@ public:
     virtual void
     Execute() = 0;
 
-    // TODO: dont use this method to support task move
-    virtual TaskPtr
-    Clone() = 0;
-
 public:
     Path task_path_;
     std::vector<SearchContextPtr> search_contexts_;
-    ScheduleTaskPtr task_;
     TaskType type_;
     TaskLabelPtr label_ = nullptr;
 };

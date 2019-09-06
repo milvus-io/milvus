@@ -150,12 +150,12 @@ public:
     static BaseTaskPtr
     Create(const ::milvus::grpc::SearchParam *search_param,
            const std::vector<std::string> &file_id_array,
-           ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer);
+           ::milvus::grpc::TopKQueryResultList *response);
 
 protected:
     SearchTask(const ::milvus::grpc::SearchParam *search_param,
-                     const std::vector<std::string> &file_id_array,
-                     ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer);
+               const std::vector<std::string> &file_id_array,
+               ::milvus::grpc::TopKQueryResultList *response);
 
     ServerError
     OnExecute() override;
@@ -163,7 +163,7 @@ protected:
 private:
     const ::milvus::grpc::SearchParam *search_param_;
     std::vector<std::string> file_id_array_;
-    ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer_;
+    ::milvus::grpc::TopKQueryResultList *topk_result_list;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

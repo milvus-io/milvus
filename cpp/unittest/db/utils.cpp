@@ -42,8 +42,8 @@ void ASSERT_STATS(engine::Status& stat) {
     }
 }
 
-
-void DBTest::InitLog() {
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void BaseTest::InitLog() {
     el::Configurations defaultConf;
     defaultConf.setToDefault();
     defaultConf.set(el::Level::Debug,
@@ -51,15 +51,20 @@ void DBTest::InitLog() {
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
-engine::Options DBTest::GetOptions() {
+void BaseTest::SetUp() {
+    InitLog();
+}
+
+engine::Options BaseTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = "sqlite://:@:/";
     return options;
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void DBTest::SetUp() {
-    InitLog();
+    BaseTest::SetUp();
 
     server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
     config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
@@ -82,6 +87,8 @@ void DBTest::SetUp() {
 }
 
 void DBTest::TearDown() {
+    db_->Stop();
+    db_->DropAll();
     delete db_;
 
     engine::ResMgrInst::GetInstance()->Stop();
@@ -90,6 +97,7 @@ void DBTest::TearDown() {
     boost::filesystem::remove_all("/tmp/milvus_test");
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 engine::Options DBTest2::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
@@ -98,8 +106,10 @@ engine::Options DBTest2::GetOptions() {
     return options;
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void MetaTest::SetUp() {
-    InitLog();
+    BaseTest::SetUp();
+
     impl_ = engine::DBMetaImplFactory::Build();
 }
 
@@ -107,54 +117,45 @@ void MetaTest::TearDown() {
     impl_->DropAll();
 }
 
-zilliz::milvus::engine::DBMetaOptions MySQLTest::getDBMetaOptions() {
-//    std::string path = "/tmp/milvus_test";
-//    engine::DBMetaOptions options = engine::DBMetaOptionsFactory::Build(path);
-    zilliz::milvus::engine::DBMetaOptions options;
-    options.path = "/tmp/milvus_test";
-    options.backend_uri = DBTestEnvironment::getURI();
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+engine::Options MySqlDBTest::GetOptions() {
+    auto options = engine::OptionsFactory::Build();
+    options.meta.path = "/tmp/milvus_test";
+    options.meta.backend_uri = DBTestEnvironment::getURI();
 
-    if(options.backend_uri.empty()) {
-        options.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
+    if(options.meta.backend_uri.empty()) {
+        options.meta.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
     }
 
     return options;
 }
 
-zilliz::milvus::engine::Options MySQLDBTest::GetOptions() {
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void MySqlMetaTest::SetUp() {
+    BaseTest::SetUp();
+
+    engine::DBMetaOptions options = GetOptions().meta;
+    int mode = engine::Options::MODE::SINGLE;
+    impl_ = std::make_shared<engine::meta::MySQLMetaImpl>(options, mode);
+}
+
+void MySqlMetaTest::TearDown() {
+    impl_->DropAll();
+}
+
+zilliz::milvus::engine::Options MySqlMetaTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
+    options.meta.backend_uri = DBTestEnvironment::getURI();
+
+    if(options.meta.backend_uri.empty()) {
+        options.meta.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
+    }
+
     return options;
 }
 
-void NewMemManagerTest::InitLog() {
-    el::Configurations defaultConf;
-    defaultConf.setToDefault();
-    defaultConf.set(el::Level::Debug,
-                    el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
-    el::Loggers::reconfigureLogger("default", defaultConf);
-}
-
-void NewMemManagerTest::SetUp() {
-    InitLog();
-
-    auto res_mgr = engine::ResMgrInst::GetInstance();
-    res_mgr->Clear();
-    res_mgr->Add(engine::ResourceFactory::Create("disk", "DISK", 0, true, false));
-    res_mgr->Add(engine::ResourceFactory::Create("cpu", "CPU", 0, true, true));
-
-    auto default_conn = engine::Connection("IO", 500.0);
-    res_mgr->Connect("disk", "cpu", default_conn);
-    res_mgr->Start();
-    engine::SchedInst::GetInstance()->Start();
-}
-
-void NewMemManagerTest::TearDown() {
-    engine::ResMgrInst::GetInstance()->Stop();
-    engine::SchedInst::GetInstance()->Stop();
-}
-
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     if (argc > 1) {

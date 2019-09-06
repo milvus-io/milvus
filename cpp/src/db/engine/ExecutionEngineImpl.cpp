@@ -301,7 +301,8 @@ Status ExecutionEngineImpl::Search(long n,
     }
 
     ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
-    auto ec = index_->Search(n, data, distances, labels, Config::object{{"k", k}, {"nprobe", nprobe}});
+    auto cfg = Config::object{{"k", k}, {"nprobe", nprobe}};
+    auto ec = index_->Search(n, data, distances, labels, cfg);
     if (ec != server::KNOWHERE_SUCCESS) {
         ENGINE_LOG_ERROR << "Search error";
         return Status::Error("Search: Search Error");
