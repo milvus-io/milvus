@@ -38,6 +38,10 @@ set(unittest_libs
         cudart
         )
 
+foreach(dir ${CORE_INCLUDE_DIRS})
+    include_directories(${dir})
+endforeach()
+
 add_subdirectory(server)
 add_subdirectory(db)
 add_subdirectory(knowhere)

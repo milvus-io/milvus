@@ -72,8 +72,11 @@ ErrorCode VecIndexImpl::Search(const long &nq, const float *xq, float *dist, lon
         auto k = cfg["k"].as<int>();
         auto dataset = GenDataset(nq, dim, xq);
 
-        Config search_cfg;
-        auto res = index_->Search(dataset, cfg);
+        Config search_cfg = cfg;
+
+        ParameterValidation(type, search_cfg);
+
+        auto res = index_->Search(dataset, search_cfg);
         auto ids_array = res->array()[0];
         auto dis_array = res->array()[1];
 
