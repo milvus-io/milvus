@@ -12,7 +12,7 @@ constexpr size_t table_name_size_limit = 255;
 constexpr int64_t table_dimension_limit = 16384;
 constexpr int32_t index_file_size_limit = 4096; //index trigger size max = 4096 MB
 
-ServerError
+ErrorCode
 ValidationUtil::ValidateTableName(const std::string &table_name) {
 
     // Table name shouldn't be empty.
@@ -46,7 +46,7 @@ ValidationUtil::ValidateTableName(const std::string &table_name) {
     return SERVER_SUCCESS;
 }
 
-ServerError
+ErrorCode
 ValidationUtil::ValidateTableDimension(int64_t dimension) {
     if (dimension <= 0 || dimension > table_dimension_limit) {
         SERVER_LOG_ERROR << "Table dimension excceed the limitation: " << table_dimension_limit;
@@ -56,7 +56,7 @@ ValidationUtil::ValidateTableDimension(int64_t dimension) {
     }
 }
 
-ServerError
+ErrorCode
 ValidationUtil::ValidateTableIndexType(int32_t index_type) {
     int engine_type = (int)engine::EngineType(index_type);
     if(engine_type <= 0 || engine_type > (int)engine::EngineType::MAX_VALUE) {
@@ -66,7 +66,7 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
     return SERVER_SUCCESS;
 }
 
-ServerError
+ErrorCode
 ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
     if(nlist <= 0) {
         return SERVER_INVALID_INDEX_NLIST;
@@ -75,7 +75,7 @@ ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
     return SERVER_SUCCESS;
 }
 
-ServerError
+ErrorCode
 ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
     if(index_file_size <= 0 || index_file_size > index_file_size_limit) {
         return SERVER_INVALID_INDEX_FILE_SIZE;
@@ -84,7 +84,7 @@ ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
     return SERVER_SUCCESS;
 }
 
-ServerError
+ErrorCode
 ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
     if(metric_type != (int32_t)engine::MetricType::L2 && metric_type != (int32_t)engine::MetricType::IP) {
         return SERVER_INVALID_INDEX_METRIC_TYPE;
@@ -92,7 +92,7 @@ ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
     return SERVER_SUCCESS;
 }
 
-ServerError
+ErrorCode
 ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema) {
     if (top_k <= 0) {
         return SERVER_INVALID_TOPK;
@@ -101,7 +101,7 @@ ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchem
     return SERVER_SUCCESS;
 }
 
-ServerError
+ErrorCode
 ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema) {
     if (nprobe <= 0 || nprobe > table_schema.nlist_) {
         return SERVER_INVALID_NPROBE;
@@ -110,7 +110,7 @@ ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSc
     return SERVER_SUCCESS;
 }
 
-ServerError
+ErrorCode
 ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
@@ -126,7 +126,7 @@ ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
     return SERVER_SUCCESS;
 }
 
-ServerError
+ErrorCode
 ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t& memory) {
     cudaDeviceProp deviceProp;
     auto cuda_err = cudaGetDeviceProperties(&deviceProp, gpu_index);

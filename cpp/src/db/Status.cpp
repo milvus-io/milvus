@@ -12,56 +12,61 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-const char* Status::CopyState(const char* state) {
-    uint32_t size;
-    std::memcpy(&size, state, sizeof(size));
-    char* result = new char[size+5];
-    memcpy(result, state, size+5);
-    return result;
+constexpr int CODE_WIDTH = sizeof(ErrorCode);
+
+Status::Status(ErrorCode code, const std::string& msg) {
+    //4 bytes store code
+    //4 bytes store message length
+    //the left bytes store message string
+    const uint32_t length = (uint32_t)msg.size();
+    char* result = new char[length + sizeof(length) + CODE_WIDTH];
+    std::memcpy(result, &code, CODE_WIDTH);
+    std::memcpy(result + CODE_WIDTH, &length, sizeof(length));
+    memcpy(result + sizeof(length) + CODE_WIDTH, msg.data(), length);
+
+    state_ = result;
 }
 
-Status::Status(Code code, const std::string& msg, const std::string& msg2) {
-    assert(code != kOK);
-    const uint32_t len1 = msg.size();
-    const uint32_t len2 = msg2.size();
-    const uint32_t size = len1 + (len2 ? (2+len2) : 0);
-    char* result = new char[size+5];
-    std::memcpy(result, &size, sizeof(size));
-    result[4] = static_cast<char>(code);
-    memcpy(result+5, msg.data(), len1);
-    if (len2) {
-        result[5 + len1] = ':';
-        result[6 + len1] = ' ';
-        memcpy(result + 7 + len1, msg2.data(), len2);
-    }
-    state_ = result;
+Status::Status()
+    : state_(nullptr) {
+
+}
+
+Status::~Status() {
+    delete[] state_;
+}
+
+const char* Status::CopyState(const char* state) {
+    uint32_t length = 0;
+    std::memcpy(&length, state + CODE_WIDTH, sizeof(length));
+    int buff_len = length + sizeof(length) + CODE_WIDTH;
+    char* result = new char[buff_len];
+    memcpy(result, state, buff_len);
+    return result;
 }
 
 std::string Status::ToString() const {
     if (state_ == nullptr) return "OK";
-    char tmp[30];
+    char tmp[32];
     const char* type;
     switch (code()) {
-        case kOK:
+        case DB_SUCCESS:
             type = "OK";
             break;
-        case kNotFound:
-            type = "NotFound: ";
-            break;
-        case kError:
+        case DB_ERROR:
             type = "Error: ";
             break;
-        case kInvalidDBPath:
-            type = "InvalidDBPath: ";
-            break;
-        case kGroupError:
-            type = "GroupError: ";
-            break;
-        case kDBTransactionError:
+        case DB_META_TRANSACTION_FAILED:
             type = "DBTransactionError: ";
             break;
-        case kAlreadyExist:
+        case DB_NOT_FOUND:
+            type = "NotFound: ";
+            break;
+        case DB_ALREADY_EXIST:
             type = "AlreadyExist: ";
+            break;
+        case DB_INVALID_PATH:
+            type = "InvalidPath: ";
             break;
         default:
             snprintf(tmp, sizeof(tmp), "Unkown code(%d): ",
@@ -71,9 +76,9 @@ std::string Status::ToString() const {
     }
 
     std::string result(type);
-    uint32_t length;
-    memcpy(&length, state_, sizeof(length));
-    result.append(state_ + 5, length);
+    uint32_t length = 0;
+    memcpy(&length, state_ + CODE_WIDTH, sizeof(length));
+    result.append(state_ + sizeof(length) + CODE_WIDTH, length);
     return result;
 }
 
