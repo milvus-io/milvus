@@ -94,6 +94,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-338 - NewAPI: refine code to support CreateIndex
 - MS-339 - NewAPI: refine code to support DropIndex
 - MS-340 - NewAPI: implement DescribeIndex
+- MS-495 - cmake: integrated knowhere
 
 ## Task
 - MS-297 - disable mysql unit test

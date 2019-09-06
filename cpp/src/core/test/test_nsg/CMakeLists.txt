@@ -2,7 +2,6 @@
 include_directories(/usr/local/include/gperftools)
 link_directories(/usr/local/lib)
 
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free")
 add_definitions(-std=c++11 -O3 -lboost -march=native -Wall -DINFO)
 
 find_package(OpenMP)
@@ -15,14 +14,8 @@ endif ()
 message(${OpenMP_CXX_FLAGS})
 
 include_directories(${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/nsg)
-#include_directories(/home/zilliz/opt/app/pyenv/versions/3.6.8/include/python3.6m)
-#include_directories(/home/zilliz/opt/app/pyenv/versions/3.6.8/envs/megasearch_testframework_dev/lib/python3.6/site-packages/numpy/core/include)
 
 aux_source_directory(${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/nsg nsg_src)
-
-#add_library(nsg_raw SHARED ${nsg_src})
-#target_link_libraries(nsg_raw
-#        gomp)
 
 set(interface_src
         ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/ivf.cpp
@@ -43,10 +36,6 @@ if(NOT TARGET test_nsg)
             ${nsg_src}
             )
 endif()
-#target_link_libraries(test_nsg
-#        #         libprofiler.so
-##        -ltcmalloc
-##        gomp
-#        )
+
 target_link_libraries(test_nsg ${depend_libs} ${unittest_libs} ${basic_libs})
 ##############################

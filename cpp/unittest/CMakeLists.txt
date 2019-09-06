@@ -6,8 +6,6 @@
 link_directories(
         "${CMAKE_BINARY_DIR}/lib"
 )
-#include_directories(${CMAKE_SOURCE_DIR}/src/core/include)
-#include_directories(${CMAKE_SOURCE_DIR}/src/core/thirdparty/SPTAG/AnnService)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
@@ -40,16 +38,13 @@ set(unittest_libs
         cudart
         )
 
-#message(STATUS "unittest core dir: ${CMAKE_CURRENT_BINARY_DIR}/core")
-#add_subdirectory(${CMAKE_SOURCE_DIR}/src/core ${CMAKE_CURRENT_BINARY_DIR}/core)
 foreach(dir ${CORE_INCLUDE_DIRS})
-    message("dir = ${dir}")
     include_directories(${dir})
 endforeach()
 
 add_subdirectory(server)
 add_subdirectory(db)
-#add_subdirectory(knowhere)
+add_subdirectory(knowhere)
 add_subdirectory(metrics)
-#add_subdirectory(scheduler)
-#add_subdirectory(storage)
+add_subdirectory(scheduler)
+add_subdirectory(storage)

@@ -24,7 +24,6 @@ set(basic_libs
 
 
 #<IVF-TEST>
-#<<<<<<<<<<
 set(ivf_srcs
         ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/ivf.cpp
         ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/gpu_ivf.cpp
@@ -39,10 +38,8 @@ if(NOT TARGET test_ivf)
     add_executable(test_ivf test_ivf.cpp ${ivf_srcs})
 endif()
 target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
-#<<<<<<<<<<
 
 #<IDMAP-TEST>
-#<<<<<<<<<<
 set(idmap_srcs
         ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/idmap.cpp
         ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/ivf.cpp
@@ -57,11 +54,8 @@ if(NOT TARGET test_idmap)
     add_executable(test_idmap test_idmap.cpp ${idmap_srcs})
 endif()
 target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
-#<<<<<<<<<<
-
 
 #<KDT-TEST>
-#<<<<<<<<<<
 set(kdt_srcs
         ${CORE_SOURCE_DIR}/src/knowhere/index/preprocessor/normalize.cpp
         ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/kdt_parameters.cpp
@@ -79,8 +73,6 @@ endif()
 target_link_libraries(test_kdt
         SPTAGLibStatic
         ${depend_libs} ${unittest_libs} ${basic_libs})
-#<<<<<<<<<<
-
 
 add_subdirectory(faiss_ori)
 add_subdirectory(test_nsg)

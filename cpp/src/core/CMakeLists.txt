@@ -39,8 +39,6 @@ endif()
 MESSAGE(STATUS "CMAKE_CXX_FLAGS" ${CMAKE_CXX_FLAGS})
 
 find_package(CUDA)
-#set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES --expt-extended-lambda")
-#set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
     message(STATUS "building milvus_engine on x86 architecture")

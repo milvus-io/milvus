@@ -24,8 +24,6 @@ file(GLOB SRC_FILES
         ${SPTAG_SOURCE_DIR}/AnnService/src/Core/KDT/*.cpp
         ${SPTAG_SOURCE_DIR}/AnnService/src/Helper/*.cpp)
 
-#add_library(SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
-#target_link_libraries(SPTAGLib ${TBB_LIBRARIES})
 if(NOT TARGET SPTAGLibStatic)
     add_library(SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
 endif()
@@ -53,7 +51,6 @@ set(index_srcs
         )
 
 set(depend_libs
-#        libtcmalloc.a
         SPTAGLibStatic
         ${TBB_LIBRARIES}
         faiss
@@ -75,24 +72,11 @@ if(NOT TARGET knowhere)
             ${index_srcs}
     )
 endif()
-#target_compile_options(knowhere PUBLIC "-fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free")
 
 target_link_libraries(
         knowhere
         ${depend_libs}
 )
-
-#add_library(
-#        knowhereS SHARED
-#        ${external_srcs}
-#        ${index_srcs}
-#)
-#
-#target_link_libraries(
-#        knowhereS
-##        ${TBB_LIBRARIES}
-#        ${depend_libs}
-#)
 
 INSTALL(TARGETS
         knowhere
@@ -102,7 +86,6 @@ INSTALL(TARGETS
 
 INSTALL(FILES
         ${ARROW_STATIC_LIB}
-#        ${PARQUET_STATIC_LIB}
         ${ARROW_PREFIX}/lib/libjemalloc_pic.a
         ${FAISS_STATIC_LIB}
         ${LAPACK_STATIC_LIB}
@@ -117,11 +100,9 @@ INSTALL(FILES ${OPENBLAS_REAL_STATIC_LIB}
         )
 
 INSTALL(FILES ${CORE_SOURCE_DIR}/thirdparty/tbb/libtbb.so.2
-#        RENAME "libtbb.so.2"
         DESTINATION lib
         )
 INSTALL(FILES ${CORE_SOURCE_DIR}/thirdparty/tbb/libtbb.so
-#        RENAME "libtbb.so"
         DESTINATION lib
         )
 
@@ -138,17 +119,12 @@ set(CORE_INCLUDE_DIRS
         )
 
 set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
-#include_directories(SYSTEM ${CORE_SOURCE_DIR}/include)
-#include_directories(SYSTEM ${CORE_SOURCE_DIR}/thirdparty/jsoncons-0.126.0/include)
-#include_directories(SYSTEM ${CORE_SOURCE_DIR}/thirdparty/tbb/include)
-#include_directories(SYSTEM ${SPTAG_SOURCE_DIR}/AnnService/inc)
 
 INSTALL(DIRECTORY
         ${CORE_SOURCE_DIR}/include/knowhere
         ${CORE_SOURCE_DIR}/thirdparty/jsoncons-0.126.0/include/jsoncons
         ${CORE_SOURCE_DIR}/thirdparty/jsoncons-0.126.0/include/jsoncons_ext
         ${ARROW_INCLUDE_DIR}/arrow
-#        ${ARROW_INCLUDE_DIR}/parquet
         ${FAISS_PREFIX}/include/faiss
         ${OPENBLAS_INCLUDE_DIR}/
         ${CORE_SOURCE_DIR}/thirdparty/tbb/include/tbb
