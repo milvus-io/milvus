@@ -282,7 +282,7 @@ void FaissGpuResourceMgr::InitResource() {
     for(auto& device : devices_params_) {
         auto& resource_vec = idle_[device.first];
 
-        for (int i = 0; i < device.second.resource_num; ++i) {
+        for (int64_t i = 0; i < device.second.resource_num; ++i) {
             auto res = std::make_shared<faiss::gpu::StandardGpuResources>();
 
             // TODO(linxj): enable set pinned memory
@@ -349,6 +349,18 @@ void FaissGpuResourceMgr::MoveToIdle(const int64_t &device_id, const ResPtr &res
     std::lock_guard<std::mutex> lk(mutex_);
     auto it = idle_[device_id].begin();
     idle_[device_id].insert(it, res);
+}
+
+void FaissGpuResourceMgr::Free() {
+    for (auto &item : in_use_) {
+        auto& res_vec = item.second;
+        res_vec.clear();
+    }
+    for (auto &item : idle_) {
+        auto& res_vec = item.second;
+        res_vec.clear();
+    }
+    is_init = false;
 }
 
 void GPUIndex::SetGpuDevice(const int &gpu_id) {
