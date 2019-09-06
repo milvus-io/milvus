@@ -35,8 +35,6 @@ link_directories("/usr/local/cuda/lib64")
 
 include_directories(/usr/include/mysql)
 
-#add_definitions(-DBOOST_ERROR_CODE_HEADER_ONLY)
-
 set(db_test_src
     ${config_files}
     ${cache_srcs}
@@ -69,24 +67,9 @@ set(db_libs
 
 set(knowhere_libs
         knowhere
-        SPTAGLibStatic
-        arrow
-        jemalloc_pic
-        faiss
-        openblas
-        lapack
-        tbb
         cudart
         cublas
         )
-
-if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
-    set(db_libs ${db_libs} ${MKL_LIBS} ${MKL_LIBS})
-else()
-    set(db_libs ${db_libs}
-            lapack
-            openblas)
-endif()
 
 target_link_libraries(db_test ${db_libs} ${knowhere_libs} ${unittest_libs})
 
