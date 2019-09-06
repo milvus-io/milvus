@@ -14,6 +14,8 @@
 #include "knowhere/common/config.h"
 #include "knowhere/common/binary_set.h"
 
+#include "cuda.h"
+
 
 namespace zilliz {
 namespace milvus {
@@ -89,6 +91,8 @@ extern VecIndexPtr GetVecIndexFactory(const IndexType &type, const Config& cfg =
 extern VecIndexPtr LoadVecIndex(const IndexType &index_type, const zilliz::knowhere::BinarySet &index_binary);
 
 extern void AutoGenParams(const IndexType& type, const long& size, Config& cfg);
+
+extern void ParameterValidation(const IndexType& type, Config& cfg);
 
 extern IndexType ConvertToCpuIndexType(const IndexType& type);
 extern IndexType ConvertToGpuIndexType(const IndexType& type);
