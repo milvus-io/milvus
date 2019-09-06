@@ -71,7 +71,7 @@ size_t FileIOWriter::operator()(void *ptr, size_t size) {
 }
 
 
-VecIndexPtr GetVecIndexFactory(const IndexType &type, const Config& cfg) {
+VecIndexPtr GetVecIndexFactory(const IndexType &type, const Config &cfg) {
     std::shared_ptr<zilliz::knowhere::VectorIndex> index;
     auto gpu_device = cfg.get_with_default("gpu_id", 0);
     switch (type) {
@@ -232,6 +232,31 @@ void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Co
             WRAPPER_LOG_DEBUG << pretty_print(cfg);
             break;
         }
+    }
+}
+
+#if CUDA_VERSION > 9000
+#define GPU_MAX_NRPOBE 2048
+#else
+#define GPU_MAX_NRPOBE 1024
+#endif
+
+void AutoTurnParams(const IndexType &type, Config &cfg) {
+    switch (type) {
+        case IndexType::FAISS_IVFSQ8_GPU:
+        case IndexType::FAISS_IVFFLAT_GPU:
+        case IndexType::FAISS_IVFPQ_GPU: {
+            if (cfg.get_with_default("nprobe", 0) != 0) {
+                auto nprobe = cfg["nprobe"].as<int>();
+                if (nprobe > GPU_MAX_NRPOBE) {
+                    WRAPPER_LOG_ERROR << "When search with GPU, nprobe shoud be no more than " << GPU_MAX_NRPOBE << ", but you passed " << nprobe
+                                      << ". Search with " << GPU_MAX_NRPOBE << " instead";
+                    cfg.insert_or_assign("nprobe", GPU_MAX_NRPOBE);
+                }
+            }
+            break;
+        }
+        default:break;
     }
 }
 
