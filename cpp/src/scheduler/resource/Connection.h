@@ -15,6 +15,7 @@ namespace engine {
 
 class Connection {
 public:
+    // TODO: update construct function, speed: double->uint64_t
     Connection(std::string name, double speed)
         : name_(std::move(name)), speed_(speed) {}
 

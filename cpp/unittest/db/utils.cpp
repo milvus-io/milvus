@@ -51,6 +51,10 @@ void BaseTest::InitLog() {
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
+void BaseTest::SetUp() {
+    InitLog();
+}
+
 engine::Options BaseTest::GetOptions() {
     auto options = engine::OptionsFactory::Build();
     options.meta.path = "/tmp/milvus_test";
@@ -60,7 +64,7 @@ engine::Options BaseTest::GetOptions() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void DBTest::SetUp() {
-    InitLog();
+    BaseTest::SetUp();
 
     server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
     config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
@@ -104,7 +108,8 @@ engine::Options DBTest2::GetOptions() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void MetaTest::SetUp() {
-    InitLog();
+    BaseTest::SetUp();
+
     impl_ = engine::DBMetaImplFactory::Build();
 }
 
@@ -127,7 +132,7 @@ engine::Options MySqlDBTest::GetOptions() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void MySqlMetaTest::SetUp() {
-    InitLog();
+    BaseTest::SetUp();
 
     engine::DBMetaOptions options = GetOptions().meta;
     int mode = engine::Options::MODE::SINGLE;
