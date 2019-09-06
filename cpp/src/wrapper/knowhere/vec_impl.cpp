@@ -74,7 +74,7 @@ server::KnowhereError VecIndexImpl::Search(const long &nq, const float *xq, floa
 
         Config search_cfg = cfg;
 
-        AutoTurnParams(type, search_cfg);
+        ParameterValidation(type, search_cfg);
 
         auto res = index_->Search(dataset, search_cfg);
         auto ids_array = res->array()[0];
