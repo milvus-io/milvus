@@ -26,6 +26,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-467 - mysql db test failed
 - MS-470 - Drop index success, which table not created
 - MS-471 - code coverage run failed
+- MS-453 - GPU search error when nprobe set more than 1024
 
 ## Improvement
 - MS-327 - Clean code for milvus
