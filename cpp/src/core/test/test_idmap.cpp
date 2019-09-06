@@ -26,6 +26,11 @@ class IDMAPTest : public DataGen, public ::testing::Test {
         Init_with_default();
         index_ = std::make_shared<IDMAP>();
     }
+
+    void TearDown() override {
+        FaissGpuResourceMgr::GetInstance().Free();
+    }
+
  protected:
     IDMAPPtr index_ = nullptr;
 };
