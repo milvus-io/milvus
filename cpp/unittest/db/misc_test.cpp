@@ -41,24 +41,29 @@ TEST(DBMiscTest, STATUS_TEST) {
     std::string str = status.ToString();
     ASSERT_FALSE(str.empty());
 
-    status = engine::Status::Error("wrong", "mistake");
-    ASSERT_TRUE(status.IsError());
+    status = engine::Status(DB_ERROR, "mistake");
+    ASSERT_EQ(status.code(), DB_ERROR);
     str = status.ToString();
     ASSERT_FALSE(str.empty());
 
-    status = engine::Status::NotFound("wrong", "mistake");
-    ASSERT_TRUE(status.IsNotFound());
+    status = engine::Status(DB_NOT_FOUND, "mistake");
+    ASSERT_EQ(status.code(), DB_NOT_FOUND);
     str = status.ToString();
     ASSERT_FALSE(str.empty());
 
-    status = engine::Status::DBTransactionError("wrong", "mistake");
-    ASSERT_TRUE(status.IsDBTransactionError());
+    status = engine::Status(DB_ALREADY_EXIST, "mistake");
+    ASSERT_EQ(status.code(), DB_ALREADY_EXIST);
+    str = status.ToString();
+    ASSERT_FALSE(str.empty());
+
+    status = engine::Status(DB_META_TRANSACTION_FAILED, "mistake");
+    ASSERT_EQ(status.code(), DB_META_TRANSACTION_FAILED);
     str = status.ToString();
     ASSERT_FALSE(str.empty());
 
     engine::Status status_copy = engine::Status::OK();
     CopyStatus(status_copy, status);
-    ASSERT_TRUE(status.IsDBTransactionError());
+    ASSERT_EQ(status.code(), DB_META_TRANSACTION_FAILED);
 }
 
 TEST(DBMiscTest, OPTIONS_TEST) {

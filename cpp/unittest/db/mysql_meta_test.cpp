@@ -19,6 +19,7 @@
 
 #include <iostream>
 
+using namespace zilliz::milvus;
 using namespace zilliz::milvus::engine;
 
 TEST_F(MySqlMetaTest, TABLE_TEST) {
@@ -42,7 +43,7 @@ TEST_F(MySqlMetaTest, TABLE_TEST) {
 
     table.table_id_ = table_id;
     status = impl_->CreateTable(table);
-    ASSERT_TRUE(status.IsAlreadyExist());
+    ASSERT_EQ(status.code(), DB_ALREADY_EXIST);
 
     table.table_id_ = "";
     status = impl_->CreateTable(table);

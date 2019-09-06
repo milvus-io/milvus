@@ -174,7 +174,7 @@ VecIndexPtr read_index(const std::string &location) {
     return LoadVecIndex(current_type, load_data_list);
 }
 
-server::KnowhereError write_index(VecIndexPtr index, const std::string &location) {
+ErrorCode write_index(VecIndexPtr index, const std::string &location) {
     try {
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
@@ -194,12 +194,12 @@ server::KnowhereError write_index(VecIndexPtr index, const std::string &location
         }
     } catch (knowhere::KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_UNEXPECTED_ERROR;
+        return KNOWHERE_UNEXPECTED_ERROR;
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_ERROR;
+        return KNOWHERE_ERROR;
     }
-    return server::KNOWHERE_SUCCESS;
+    return KNOWHERE_SUCCESS;
 }
 
 

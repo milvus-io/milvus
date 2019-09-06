@@ -38,7 +38,7 @@ Status MemTable::Add(VectorSource::Ptr &source, IDNumbers &vector_ids) {
         if (!status.ok()) {
             std::string err_msg = "MemTable::Add failed: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;
-            return Status::Error(err_msg);
+            return Status(DB_ERROR, err_msg);
         }
     }
     return Status::OK();
@@ -58,7 +58,7 @@ Status MemTable::Serialize() {
         if (!status.ok()) {
             std::string err_msg = "MemTable::Serialize failed: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;
-            return Status::Error(err_msg);
+            return Status(DB_ERROR, err_msg);
         }
         std::lock_guard<std::mutex> lock(mutex_);
         mem_table_file = mem_table_file_list_.erase(mem_table_file);

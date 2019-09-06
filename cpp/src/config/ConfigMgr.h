@@ -30,7 +30,7 @@ class ConfigMgr {
  public:
     static ConfigMgr* GetInstance();
 
-    virtual ServerError LoadConfigFile(const std::string &filename) = 0;
+    virtual ErrorCode LoadConfigFile(const std::string &filename) = 0;
     virtual void Print() const = 0;//will be deleted
     virtual std::string DumpString() const = 0;
 
