@@ -21,11 +21,11 @@ ToServerErrorCode(const ErrorCode error_code) {
     return SERVER_ERROR_CODE_BASE + error_code;
 }
 
-constexpr ErrorCode ENGINE_SUCCESS = 0;
-constexpr ErrorCode ENGINE_ERROR_CODE_BASE = 0x40000;
+constexpr ErrorCode DB_SUCCESS = 0;
+constexpr ErrorCode DB_ERROR_CODE_BASE = 0x40000;
 constexpr ErrorCode
-ToEngineErrorCode(const ErrorCode error_code) {
-    return ENGINE_ERROR_CODE_BASE + error_code;
+ToDbErrorCode(const ErrorCode error_code) {
+    return DB_ERROR_CODE_BASE + error_code;
 }
 
 constexpr ErrorCode KNOWHERE_SUCCESS = 0;
@@ -67,9 +67,12 @@ constexpr ErrorCode SERVER_INVALID_INDEX_NLIST = ToServerErrorCode(114);
 constexpr ErrorCode SERVER_INVALID_INDEX_METRIC_TYPE = ToServerErrorCode(115);
 constexpr ErrorCode SERVER_INVALID_INDEX_FILE_SIZE = ToServerErrorCode(116);
 
-//engine error code
-constexpr ErrorCode DB_META_TRANSACTION_FAILED = ToEngineErrorCode(1);
-constexpr ErrorCode DB_TABLE_NOT_FOUND = ToEngineErrorCode(2);
+//db error code
+constexpr ErrorCode DB_META_TRANSACTION_FAILED = ToDbErrorCode(1);
+constexpr ErrorCode DB_ERROR = ToDbErrorCode(2);
+constexpr ErrorCode DB_NOT_FOUND = ToDbErrorCode(3);
+constexpr ErrorCode DB_ALREADY_EXIST = ToDbErrorCode(4);
+constexpr ErrorCode DB_INVALID_PATH = ToDbErrorCode(5);
 
 //knowhere error code
 constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);

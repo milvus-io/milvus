@@ -160,7 +160,7 @@ CreateTableTask::OnExecute() {
         engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
         if (!stat.ok()) {
             //table could exist
-            if(stat.IsAlreadyExist()) {
+            if(stat.code() == DB_ALREADY_EXIST) {
                 return SetError(SERVER_INVALID_TABLE_NAME, stat.ToString());
             }
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
@@ -351,7 +351,7 @@ DropTableTask::OnExecute() {
         table_info.table_id_ = table_name_;
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
-            if (stat.IsNotFound()) {
+            if (stat.code() == DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
             } else {
                 return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
@@ -450,7 +450,7 @@ InsertTask::OnExecute() {
         table_info.table_id_ = insert_param_->table_name();
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
-            if (stat.IsNotFound()) {
+            if (stat.code() == DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST,
                                 "Table " + insert_param_->table_name() + " not exists");
             } else {
@@ -586,7 +586,7 @@ SearchTask::OnExecute() {
         table_info.table_id_ = table_name_;
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
-            if (stat.IsNotFound()) {
+            if (stat.code() == DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
             } else {
                 return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
@@ -811,7 +811,7 @@ DeleteByRangeTask::OnExecute() {
         table_info.table_id_ = table_name;
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
-            if (stat.IsNotFound()) {
+            if (stat.code(), DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name + " not exists");
             } else {
                 return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());

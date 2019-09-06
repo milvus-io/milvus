@@ -49,7 +49,7 @@ Status MemTableFile::Add(const VectorSource::Ptr &source, IDNumbers& vector_ids)
         std::string err_msg = "MemTableFile::Add: table_file_schema dimension = " +
             std::to_string(table_file_schema_.dimension_) + ", table_id = " + table_file_schema_.table_id_;
         ENGINE_LOG_ERROR << err_msg;
-        return Status::Error(err_msg);
+        return Status(DB_ERROR, err_msg);
     }
 
     size_t single_vector_mem_size = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;

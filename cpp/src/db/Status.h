@@ -5,8 +5,9 @@
  ******************************************************************************/
 #pragma once
 
-#include <string>
+#include "utils/Error.h"
 
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -14,9 +15,9 @@ namespace engine {
 
 class Status {
  public:
-    Status() noexcept : state_(nullptr) {}
-
-    ~Status() { delete[] state_; }
+    Status(ErrorCode code, const std::string &msg);
+    Status();
+    ~Status();
 
     Status(const Status &rhs);
 
@@ -31,64 +32,17 @@ class Status {
     static Status
     OK() { return Status(); }
 
-    static Status
-    NotFound(const std::string &msg, const std::string &msg2 = "") {
-        return Status(kNotFound, msg, msg2);
-    }
-    static Status
-    Error(const std::string &msg, const std::string &msg2 = "") {
-        return Status(kError, msg, msg2);
-    }
-
-    static Status
-    InvalidDBPath(const std::string &msg, const std::string &msg2 = "") {
-        return Status(kInvalidDBPath, msg, msg2);
-    }
-    static Status
-    GroupError(const std::string &msg, const std::string &msg2 = "") {
-        return Status(kGroupError, msg, msg2);
-    }
-    static Status
-    DBTransactionError(const std::string &msg, const std::string &msg2 = "") {
-        return Status(kDBTransactionError, msg, msg2);
-    }
-
-    static Status
-    AlreadyExist(const std::string &msg, const std::string &msg2 = "") {
-        return Status(kAlreadyExist, msg, msg2);
-    }
-
-    bool ok() const { return state_ == nullptr; }
-
-    bool IsNotFound() const { return code() == kNotFound; }
-    bool IsError() const { return code() == kError; }
-
-    bool IsInvalidDBPath() const { return code() == kInvalidDBPath; }
-    bool IsGroupError() const { return code() == kGroupError; }
-    bool IsDBTransactionError() const { return code() == kDBTransactionError; }
-    bool IsAlreadyExist() const { return code() == kAlreadyExist; }
+    bool ok() const { return state_ == nullptr || code() == DB_SUCCESS; }
 
     std::string ToString() const;
+
+    ErrorCode code() const {
+        return (state_ == nullptr) ? DB_SUCCESS : *(ErrorCode*)(state_);
+    }
 
  private:
     const char *state_ = nullptr;
 
-    enum Code {
-        kOK = 0,
-        kNotFound,
-        kError,
-
-        kInvalidDBPath,
-        kGroupError,
-        kDBTransactionError,
-
-        kAlreadyExist,
-    };
-
-    Code code() const {
-        return (state_ == nullptr) ? kOK : static_cast<Code>(state_[4]);
-    }
-    Status(Code code, const std::string &msg, const std::string &msg2);
     static const char *CopyState(const char *s);
 
 }; // Status
