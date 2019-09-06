@@ -74,6 +74,9 @@ resource_config:
       device_id: 0
       enable_loader: true
       enable_executor: true
+      gpu_resource_num: 2
+      pinned_memory: 300
+      temp_memory: 300
 
 #    gtx1660:
 #      type: GPU

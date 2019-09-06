@@ -144,11 +144,17 @@ CreateTableTask::OnExecute() {
             return SetError(res, "Invalid index file size: " + std::to_string(schema_->index_file_size()));
         }
 
+        res = ValidationUtil::ValidateTableIndexMetricType(schema_->metric_type());
+        if(res != SERVER_SUCCESS) {
+            return SetError(res, "Invalid index metric type: " + std::to_string(schema_->metric_type()));
+        }
+
         //step 2: construct table schema
         engine::meta::TableSchema table_info;
         table_info.table_id_ = schema_->table_name().table_name();
         table_info.dimension_ = (uint16_t) schema_->dimension();
         table_info.index_file_size_ = schema_->index_file_size();
+        table_info.metric_type_ = schema_->metric_type();
 
         //step 3: create table
         engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
@@ -203,6 +209,7 @@ DescribeTableTask::OnExecute() {
         schema_->mutable_table_name()->set_table_name(table_info.table_id_);
         schema_->set_dimension(table_info.dimension_);
         schema_->set_index_file_size(table_info.index_file_size_);
+        schema_->set_metric_type(table_info.metric_type_);
 
     } catch (std::exception &ex) {
         return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
@@ -261,16 +268,10 @@ CreateIndexTask::OnExecute() {
             return SetError(res, "Invalid index nlist: " + std::to_string(grpc_index.nlist()));
         }
 
-        res = ValidationUtil::ValidateTableIndexMetricType(grpc_index.metric_type());
-        if(res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid index metric type: " + std::to_string(grpc_index.metric_type()));
-        }
-
         //step 2: check table existence
         engine::TableIndex index;
         index.engine_type_ = grpc_index.index_type();
         index.nlist_ = grpc_index.nlist();
-        index.metric_type_ = grpc_index.metric_type();
         stat = DBWrapper::DB()->CreateIndex(table_name_, index);
         if (!stat.ok()) {
             return SetError(SERVER_BUILD_INDEX_ERROR, stat.ToString());
@@ -547,25 +548,25 @@ InsertTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 SearchTask::SearchTask(const ::milvus::grpc::SearchParam *search_vector_infos,
-                                   const std::vector<std::string> &file_id_array,
-                                   ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer)
-        : GrpcBaseTask(DQL_TASK_GROUP),
-          search_param_(search_vector_infos),
-          file_id_array_(file_id_array),
-          writer_(writer) {
+                       const std::vector<std::string> &file_id_array,
+                       ::milvus::grpc::TopKQueryResultList *response)
+    : GrpcBaseTask(DQL_TASK_GROUP),
+      search_param_(search_vector_infos),
+      file_id_array_(file_id_array),
+      topk_result_list(response) {
 
 }
 
 BaseTaskPtr
 SearchTask::Create(const ::milvus::grpc::SearchParam *search_vector_infos,
                    const std::vector<std::string> &file_id_array,
-                   ::grpc::ServerWriter<::milvus::grpc::TopKQueryResult> *writer) {
+                   ::milvus::grpc::TopKQueryResultList *response) {
     if(search_vector_infos == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
     return std::shared_ptr<GrpcBaseTask>(new SearchTask(search_vector_infos, file_id_array,
-                                                              writer));
+                                                        response));
 }
 
 ServerError
@@ -683,17 +684,12 @@ SearchTask::OnExecute() {
         rc.ElapseFromBegin("do search");
 
         //step 7: construct result array
-        for (uint64_t i = 0; i < record_count; i++) {
-            auto &result = results[i];
-            const auto &record = search_param_->query_record_array(i);
-            ::milvus::grpc::TopKQueryResult grpc_topk_result;
+        for (auto &result : results) {
+            ::milvus::grpc::TopKQueryResult *topk_query_result = topk_result_list->add_topk_query_result();
             for (auto &pair : result) {
-                ::milvus::grpc::QueryResult *grpc_result = grpc_topk_result.add_query_result_arrays();
+                ::milvus::grpc::QueryResult *grpc_result = topk_query_result->add_query_result_arrays();
                 grpc_result->set_id(pair.first);
                 grpc_result->set_distance(pair.second);
-            }
-            if (!writer_->Write(grpc_topk_result)) {
-                return SetError(SERVER_WRITE_ERROR, "Write topk result failed!");
             }
         }
 
@@ -927,7 +923,6 @@ DescribeIndexTask::OnExecute() {
         index_param_->mutable_table_name()->set_table_name(table_name_);
         index_param_->mutable_index()->set_index_type(index.engine_type_);
         index_param_->mutable_index()->set_nlist(index.nlist_);
-        index_param_->mutable_index()->set_metric_type(index.metric_type_);
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception &ex) {
@@ -961,7 +956,7 @@ DropIndexTask::OnExecute() {
         }
 
         //step 2: check table existence
-        engine::Status stat = DBWrapper::DB()->DropIndex(table_name_);
+        auto stat = DBWrapper::DB()->DropIndex(table_name_);
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }

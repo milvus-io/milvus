@@ -65,7 +65,7 @@ target_link_libraries(server_test
         ${unittest_libs}
         )
 
-install(TARGETS server_test DESTINATION bin)
+install(TARGETS server_test DESTINATION unittest)
 
 configure_file(appendix/server_config.yaml
         "${CMAKE_CURRENT_BINARY_DIR}/milvus/conf/server_config.yaml"

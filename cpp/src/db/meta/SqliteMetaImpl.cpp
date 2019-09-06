@@ -74,7 +74,7 @@ SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions &options_)
 }
 
 SqliteMetaImpl::~SqliteMetaImpl() {
-    CleanUp();
+
 }
 
 Status SqliteMetaImpl::NextTableId(std::string &table_id) {
@@ -707,7 +707,7 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
             files[table_file.date_].push_back(table_file);
         }
         if(files.empty()) {
-            std::cout << "ERROR" << std::endl;
+            ENGINE_LOG_ERROR << "No file to search for table: " << table_id;
         }
     } catch (std::exception &e) {
         return HandleException("Encounter exception when iterate index files", e);
@@ -1205,9 +1205,15 @@ Status SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 }
 
 Status SqliteMetaImpl::DropAll() {
-    if (boost::filesystem::is_directory(options_.path)) {
-        boost::filesystem::remove_all(options_.path);
+    ENGINE_LOG_DEBUG << "Drop all sqlite meta";
+
+    try {
+        ConnectorPtr->drop_table("Tables");
+        ConnectorPtr->drop_table("TableFiles");
+    } catch (std::exception &e) {
+        return HandleException("Encounter exception when drop all meta", e);
     }
+
     return Status::OK();
 }
 
