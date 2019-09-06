@@ -21,7 +21,7 @@ DBWrapper::DBWrapper() {
 
 }
 
-ServerError DBWrapper::StartService() {
+ErrorCode DBWrapper::StartService() {
     //db config
     zilliz::milvus::engine::Options opt;
     ConfigNode& db_config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
@@ -79,7 +79,7 @@ ServerError DBWrapper::StartService() {
     opt.meta.archive_conf.SetCriterias(criterial);
 
     //create db root folder
-    ServerError err = CommonUtil::CreateDirectory(opt.meta.path);
+    ErrorCode err = CommonUtil::CreateDirectory(opt.meta.path);
     if(err != SERVER_SUCCESS) {
         std::cout << "ERROR! Failed to create database root path: " << opt.meta.path << std::endl;
         kill(0, SIGUSR1);
@@ -112,7 +112,7 @@ ServerError DBWrapper::StartService() {
     return SERVER_SUCCESS;
 }
 
-ServerError DBWrapper::StopService() {
+ErrorCode DBWrapper::StopService() {
     if(db_) {
         db_->Stop();
     }

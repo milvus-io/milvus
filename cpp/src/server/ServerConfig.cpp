@@ -28,7 +28,7 @@ ServerConfig::GetInstance() {
     return config;
 }
 
-ServerError
+ErrorCode
 ServerConfig::LoadConfigFile(const std::string& config_filename) {
     std::string filename = config_filename;
     if(filename.empty()){
@@ -44,7 +44,7 @@ ServerConfig::LoadConfigFile(const std::string& config_filename) {
 
     try {
         ConfigMgr* mgr = const_cast<ConfigMgr*>(ConfigMgr::GetInstance());
-        ServerError err = mgr->LoadConfigFile(filename);
+        ErrorCode err = mgr->LoadConfigFile(filename);
         if(err != 0) {
             std::cout << "Server failed to load config file" << std::endl;
             exit(1);//directly exit program if the config file is illegal
@@ -58,7 +58,7 @@ ServerConfig::LoadConfigFile(const std::string& config_filename) {
     return SERVER_SUCCESS;
 }
 
-ServerError ServerConfig::ValidateConfig() const {
+ErrorCode ServerConfig::ValidateConfig() const {
     //server config validation
     ConfigNode server_config = GetConfig(CONFIG_SERVER);
     uint32_t gpu_index = (uint32_t)server_config.GetInt32Value(CONFIG_GPU_INDEX, 0);

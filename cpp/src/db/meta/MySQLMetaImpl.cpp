@@ -34,9 +34,15 @@ using namespace mysqlpp;
 
 namespace {
 
-Status HandleException(const std::string &desc, std::exception &e) {
-    ENGINE_LOG_ERROR << desc << ": " << e.what();
-    return Status::DBTransactionError(desc, e.what());
+Status HandleException(const std::string &desc, const char* what = nullptr) {
+    if(what == nullptr) {
+        ENGINE_LOG_ERROR << desc;
+        return Status(DB_META_TRANSACTION_FAILED, desc);
+    } else {
+        std::string msg = desc + ":" + what;
+        ENGINE_LOG_ERROR << msg;
+        return Status(DB_META_TRANSACTION_FAILED, msg);
+    }
 }
 
 }
@@ -71,8 +77,9 @@ Status MySQLMetaImpl::Initialize() {
     if (!boost::filesystem::is_directory(options_.path)) {
         auto ret = boost::filesystem::create_directory(options_.path);
         if (!ret) {
-            ENGINE_LOG_ERROR << "Failed to create db directory " << options_.path;
-            return Status::DBTransactionError("Failed to create db directory", options_.path);
+            std::string msg = "Failed to create db directory " + options_.path;
+            ENGINE_LOG_ERROR << msg;
+            return Status(DB_META_TRANSACTION_FAILED, msg);
         }
     }
 
@@ -97,7 +104,7 @@ Status MySQLMetaImpl::Initialize() {
         std::string dialect = pieces_match[1].str();
         std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
         if (dialect.find("mysql") == std::string::npos) {
-            return Status::Error("URI's dialect is not MySQL");
+            return Status(DB_ERROR, "URI's dialect is not MySQL");
         }
         std::string username = pieces_match[2].str();
         std::string password = pieces_match[3].str();
@@ -125,13 +132,13 @@ Status MySQLMetaImpl::Initialize() {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
                 if (connectionPtr == nullptr) {
-                    return Status::Error("Failed to connect to database server");
+                    return Status(DB_ERROR, "Failed to connect to database server");
                 }
 
 
                 if (!connectionPtr->thread_aware()) {
                     ENGINE_LOG_ERROR << "MySQL++ wasn't built with thread awareness! Can't run without it.";
-                    return Status::Error("MySQL++ wasn't built with thread awareness! Can't run without it.");
+                    return Status(DB_ERROR, "MySQL++ wasn't built with thread awareness! Can't run without it.");
                 }
                 Query InitializeQuery = connectionPtr->query();
 
@@ -150,7 +157,7 @@ Status MySQLMetaImpl::Initialize() {
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
                 if (!InitializeQuery.exec()) {
-                    return Status::DBTransactionError("Initialization Error", InitializeQuery.error());
+                    return HandleException("Initialization Error", InitializeQuery.error());
                 }
 
                 InitializeQuery << "CREATE TABLE IF NOT EXISTS TableFiles (" <<
@@ -168,24 +175,22 @@ Status MySQLMetaImpl::Initialize() {
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::Initialize: " << InitializeQuery.str();
 
                 if (!InitializeQuery.exec()) {
-                    return Status::DBTransactionError("Initialization Error", InitializeQuery.error());
+                    return HandleException("Initialization Error", InitializeQuery.error());
                 }
             } //Scoped Connection
 
-        } catch (const BadQuery &er) {
+        } catch (const BadQuery &e) {
             // Handle any query errors
-            ENGINE_LOG_ERROR << "QUERY ERROR DURING INITIALIZATION" << ": " << er.what();
-            return Status::DBTransactionError("QUERY ERROR DURING INITIALIZATION", er.what());
-        } catch (const Exception &er) {
+            return HandleException("GENERAL ERROR DURING INITIALIZATION", e.what());
+        } catch (const Exception &e) {
             // Catch-all for any other MySQL++ exceptions
-            ENGINE_LOG_ERROR << "GENERAL ERROR DURING INITIALIZATION" << ": " << er.what();
-            return Status::DBTransactionError("GENERAL ERROR DURING INITIALIZATION", er.what());
+            return HandleException("GENERAL ERROR DURING INITIALIZATION", e.what());
         } catch (std::exception &e) {
-            return HandleException("Encounter exception during initialization", e);
+            return HandleException("GENERAL ERROR DURING INITIALIZATION", e.what());
         }
     } else {
         ENGINE_LOG_ERROR << "Wrong URI format. URI = " << uri;
-        return Status::Error("Wrong URI format");
+        return Status(DB_ERROR, "Wrong URI format");
     }
 
     return Status::OK();
@@ -217,7 +222,7 @@ Status MySQLMetaImpl::DropPartitionsByDates(const std::string &table_id,
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
 
@@ -232,19 +237,17 @@ Status MySQLMetaImpl::DropPartitionsByDates(const std::string &table_id,
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropPartitionsByDates: " << dropPartitionsByDatesQuery.str();
 
             if (!dropPartitionsByDatesQuery.exec()) {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROPPING PARTITIONS BY DATES";
-                return Status::DBTransactionError("QUERY ERROR WHEN DROPPING PARTITIONS BY DATES",
-                                                  dropPartitionsByDatesQuery.error());
+                return HandleException("QUERY ERROR WHEN DROPPING PARTITIONS BY DATES", dropPartitionsByDatesQuery.error());
             }
         } //Scoped Connection
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROPPING PARTITIONS BY DATES" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN DROPPING PARTITIONS BY DATES", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES", er.what());
+        return HandleException("GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES", e.what());
     }
     return Status::OK();
 }
@@ -256,7 +259,7 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query createTableQuery = connectionPtr->query();
@@ -274,9 +277,9 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
                 if (res.num_rows() == 1) {
                     int state = res[0]["state"];
                     if (TableSchema::TO_DELETE == state) {
-                        return Status::Error("Table already exists and it is in delete state, please wait a second");
+                        return Status(DB_ERROR, "Table already exists and it is in delete state, please wait a second");
                     } else {
-                        return Status::AlreadyExist("Table already exists");
+                        return Status(DB_ALREADY_EXIST, "Table already exists");
                     }
                 }
             }
@@ -307,23 +310,20 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
 
                 //Consume all results to avoid "Commands out of sync" error
             } else {
-                ENGINE_LOG_ERROR << "Add Table Error";
-                return Status::DBTransactionError("Add Table Error", createTableQuery.error());
+                return HandleException("Add Table Error", createTableQuery.error());
             }
         } //Scoped Connection
 
         return utils::CreateTablePath(options_, table_schema.table_id_);
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN ADDING TABLE" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN ADDING TABLE", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN CREATING TABLE", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN ADDING TABLE" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN ADDING TABLE", er.what());
+        return HandleException("GENERAL ERROR WHEN CREATING TABLE", e.what());
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when create table", e);
+        return HandleException("GENERAL ERROR WHEN CREATING TABLE", e.what());
     }
 }
 
@@ -331,7 +331,7 @@ Status MySQLMetaImpl::FilesByType(const std::string &table_id,
                                   const std::vector<int> &file_types,
                                   std::vector<std::string> &file_ids) {
     if(file_types.empty()) {
-        return Status::Error("file types array is empty");
+        return Status(DB_ERROR, "file types array is empty");
     }
 
     try {
@@ -342,7 +342,7 @@ Status MySQLMetaImpl::FilesByType(const std::string &table_id,
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             std::string types;
@@ -406,14 +406,14 @@ Status MySQLMetaImpl::FilesByType(const std::string &table_id,
                              << " index files:" << index_count << " backup files:" << backup_count;
         }
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN GET FILE BY TYPE" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN GET FILE BY TYPE", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN GET FILE BY TYPE", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN GET FILE BY TYPE" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN GET FILE BY TYPE", er.what());
+        return HandleException("GENERAL ERROR WHEN GET FILE BY TYPE", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN GET FILE BY TYPE", e.what());
     }
 
     return Status::OK();
@@ -427,7 +427,7 @@ Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const T
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query updateTableIndexParamQuery = connectionPtr->query();
@@ -462,24 +462,22 @@ Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const T
 
 
                 if (!updateTableIndexParamQuery.exec()) {
-                    ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE INDEX PARAM";
-                    return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE INDEX PARAM",
-                                                      updateTableIndexParamQuery.error());
+                    return HandleException("QUERY ERROR WHEN UPDATING TABLE INDEX PARAM", updateTableIndexParamQuery.error());
                 }
             } else {
-                return Status::NotFound("Table " + table_id + " not found");
+                return Status(DB_NOT_FOUND, "Table " + table_id + " not found");
             }
 
         } //Scoped Connection
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE INDEX PARAM" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE INDEX PARAM", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", er.what());
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", e.what());
     }
 
     return Status::OK();
@@ -493,7 +491,7 @@ Status MySQLMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag)
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query updateTableFlagQuery = connectionPtr->query();
@@ -503,23 +501,20 @@ Status MySQLMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag)
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFlag: " << updateTableFlagQuery.str();
 
-
             if (!updateTableFlagQuery.exec()) {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FLAG";
-                return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FLAG",
-                                                  updateTableFlagQuery.error());
+                return HandleException("QUERY ERROR WHEN UPDATING TABLE FLAG", updateTableFlagQuery.error());
             }
 
         } //Scoped Connection
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FLAG" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FLAG", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN UPDATING TABLE FLAG" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN UPDATING TABLE FLAG", er.what());
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
     }
 
     return Status::OK();
@@ -533,7 +528,7 @@ Status MySQLMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query describeTableIndexQuery = connectionPtr->query();
@@ -553,19 +548,19 @@ Status MySQLMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex
                 index.nlist_ = resRow["nlist"];
                 index.metric_type_ = resRow["metric_type"];
             } else {
-                return Status::NotFound("Table " + table_id + " not found");
+                return Status(DB_NOT_FOUND, "Table " + table_id + " not found");
             }
 
         } //Scoped Connection
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN DESCRIBE TABLE INDEX" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN DESCRIBE TABLE INDEX", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN DESCRIBE TABLE INDEX", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DESCRIBE TABLE INDEX" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN DESCRIBE TABLE INDEX", er.what());
+        return HandleException("GENERAL ERROR WHEN DESCRIBE TABLE INDEX", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
     }
 
     return Status::OK();
@@ -579,7 +574,7 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query dropTableIndexQuery = connectionPtr->query();
@@ -594,9 +589,7 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();
 
             if (!dropTableIndexQuery.exec()) {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROP TABLE INDEX";
-                return Status::DBTransactionError("QUERY ERROR WHEN DROP TABLE INDEX",
-                                                  dropTableIndexQuery.error());
+                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropTableIndexQuery.error());
             }
 
             //set all backup file to raw
@@ -609,9 +602,7 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();
 
             if (!dropTableIndexQuery.exec()) {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROP TABLE INDEX";
-                return Status::DBTransactionError("QUERY ERROR WHEN DROP TABLE INDEX",
-                                                  dropTableIndexQuery.error());
+                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropTableIndexQuery.error());
             }
 
             //set table index type to raw
@@ -624,21 +615,19 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropTableIndex: " << dropTableIndexQuery.str();
 
             if (!dropTableIndexQuery.exec()) {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROP TABLE INDEX";
-                return Status::DBTransactionError("QUERY ERROR WHEN DROP TABLE INDEX",
-                                                  dropTableIndexQuery.error());
+                return HandleException("QUERY ERROR WHEN DROPPING TABLE INDEX", dropTableIndexQuery.error());
             }
 
         } //Scoped Connection
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROP TABLE INDEX" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN DROP TABLE INDEX", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN DROPPING TABLE INDEX", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DROP TABLE INDEX" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN DROP TABLE INDEX", er.what());
+        return HandleException("GENERAL ERROR WHEN DROPPING TABLE INDEX", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN DROPPING TABLE INDEX", e.what());
     }
 
     return Status::OK();
@@ -651,7 +640,7 @@ Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             //soft delete table
@@ -664,8 +653,7 @@ Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DeleteTable: " << deleteTableQuery.str();
 
             if (!deleteTableQuery.exec()) {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE";
-                return Status::DBTransactionError("QUERY ERROR WHEN DELETING TABLE", deleteTableQuery.error());
+                return HandleException("QUERY ERROR WHEN DELETING TABLE", deleteTableQuery.error());
             }
 
         } //Scoped Connection
@@ -674,14 +662,14 @@ Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
             DeleteTableFiles(table_id);
         }
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DELETING TABLE" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN DELETING TABLE", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN DELETING TABLE", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DELETING TABLE" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN DELETING TABLE", er.what());
+        return HandleException("GENERAL ERROR WHEN DELETING TABLE", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN DELETING TABLE", e.what());
     }
 
     return Status::OK();
@@ -694,7 +682,7 @@ Status MySQLMetaImpl::DeleteTableFiles(const std::string &table_id) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             //soft delete table files
@@ -709,18 +697,17 @@ Status MySQLMetaImpl::DeleteTableFiles(const std::string &table_id) {
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::DeleteTableFiles: " << deleteTableFilesQuery.str();
 
             if (!deleteTableFilesQuery.exec()) {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE FILES";
-                return Status::DBTransactionError("QUERY ERROR WHEN DELETING TABLE", deleteTableFilesQuery.error());
+                return HandleException("QUERY ERROR WHEN DELETING TABLE FILES", deleteTableFilesQuery.error());
             }
         } //Scoped Connection
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN DELETING TABLE FILES" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN DELETING TABLE FILES", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN DELETING TABLE FILES", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DELETING TABLE FILES" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN DELETING TABLE FILES", er.what());
+        return HandleException("GENERAL ERROR WHEN DELETING TABLE FILES", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN DELETING TABLE FILES", e.what());
     }
 
     return Status::OK();
@@ -734,7 +721,7 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query describeTableQuery = connectionPtr->query();
@@ -765,17 +752,17 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
 
             table_schema.metric_type_ = resRow["metric_type"];
         } else {
-            return Status::NotFound("Table " + table_schema.table_id_ + " not found");
+            return Status(DB_NOT_FOUND, "Table " + table_schema.table_id_ + " not found");
         }
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN DESCRIBING TABLE" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN DESCRIBING TABLE", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN DESCRIBING TABLE", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DESCRIBING TABLE" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN DESCRIBING TABLE", er.what());
+        return HandleException("GENERAL ERROR WHEN DESCRIBING TABLE", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN DESCRIBING TABLE", e.what());
     }
 
     return Status::OK();
@@ -789,7 +776,7 @@ Status MySQLMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query hasTableQuery = connectionPtr->query();
@@ -808,14 +795,14 @@ Status MySQLMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
         int check = res[0]["check"];
         has_or_not = (check == 1);
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN CHECKING IF TABLE EXISTS" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN CHECKING IF TABLE EXISTS", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN CHECKING IF TABLE EXISTS", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CHECKING IF TABLE EXISTS" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN CHECKING IF TABLE EXISTS", er.what());
+        return HandleException("GENERAL ERROR WHEN CHECKING IF TABLE EXISTS", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN CHECKING IF TABLE EXISTS", e.what());
     }
 
     return Status::OK();
@@ -829,7 +816,7 @@ Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query allTablesQuery = connectionPtr->query();
@@ -863,14 +850,14 @@ Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
 
             table_schema_array.emplace_back(table_schema);
         }
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN DESCRIBING ALL TABLES" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN DESCRIBING ALL TABLES", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN DESCRIBING ALL TABLES", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DESCRIBING ALL TABLES" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN DESCRIBING ALL TABLES", er.what());
+        return HandleException("GENERAL ERROR WHEN DESCRIBING ALL TABLES", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN DESCRIBING ALL TABLES", e.what());
     }
 
     return Status::OK();
@@ -917,7 +904,7 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query createTableFileQuery = connectionPtr->query();
@@ -934,23 +921,20 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
 
                 //Consume all results to avoid "Commands out of sync" error
             } else {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN ADDING TABLE FILE";
-                return Status::DBTransactionError("Add file Error", createTableFileQuery.error());
+                return HandleException("QUERY ERROR WHEN CREATING TABLE FILE", createTableFileQuery.error());
             }
         } // Scoped Connection
 
         return utils::CreateTableFilePath(options_, file_schema);
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN ADDING TABLE FILE" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN ADDING TABLE FILE", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN CREATING TABLE FILE", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN ADDING TABLE FILE" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN ADDING TABLE FILE", er.what());
-    } catch (std::exception &ex) {
-        return HandleException("Encounter exception when create table file", ex);
+        return HandleException("GENERAL ERROR WHEN CREATING TABLE FILE", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN CREATING TABLE FILE", e.what());
     }
 }
 
@@ -964,7 +948,7 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query filesToIndexQuery = connectionPtr->query();
@@ -1023,14 +1007,14 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
 
             files.push_back(table_file);
         }
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN FINDING TABLE FILES TO INDEX" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN FINDING TABLE FILES TO INDEX", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", er.what());
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", e.what());
     }
 
     return Status::OK();
@@ -1049,7 +1033,7 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query filesToSearchQuery = connectionPtr->query();
@@ -1137,14 +1121,14 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
 
             files[table_file.date_].push_back(table_file);
         }
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN FINDING TABLE FILES TO SEARCH" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN FINDING TABLE FILES TO SEARCH", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", er.what());
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", e.what());
     }
 
     return Status::OK();
@@ -1170,7 +1154,7 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query filesToMergeQuery = connectionPtr->query();
@@ -1230,14 +1214,14 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
             files[table_file.date_].push_back(table_file);
         }
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN FINDING TABLE FILES TO MERGE" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN FINDING TABLE FILES TO MERGE", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE", er.what());
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE", e.what());
     }
 
     return Status::OK();
@@ -1263,9 +1247,8 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
-
 
             Query getTableFileQuery = connectionPtr->query();
             getTableFileQuery << "SELECT id, engine_type, file_id, file_type, file_size, row_count, date, created_on " <<
@@ -1321,14 +1304,14 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
 
             table_files.emplace_back(file_schema);
         }
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN RETRIEVING TABLE FILES" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN RETRIEVING TABLE FILES", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN RETRIEVING TABLE FILES" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN RETRIEVING TABLE FILES", er.what());
+        return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES", e.what());
     }
 
     return Status::OK();
@@ -1352,7 +1335,7 @@ Status MySQLMetaImpl::Archive() {
                 ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
                 if (connectionPtr == nullptr) {
-                    return Status::Error("Failed to connect to database server");
+                    return Status(DB_ERROR, "Failed to connect to database server");
                 }
 
                 Query archiveQuery = connectionPtr->query();
@@ -1364,17 +1347,17 @@ Status MySQLMetaImpl::Archive() {
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::Archive: " << archiveQuery.str();
 
                 if (!archiveQuery.exec()) {
-                    return Status::DBTransactionError("QUERY ERROR DURING ARCHIVE", archiveQuery.error());
+                    return HandleException("QUERY ERROR DURING ARCHIVE", archiveQuery.error());
                 }
 
-            } catch (const BadQuery &er) {
+            } catch (const BadQuery &e) {
                 // Handle any query errors
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DURING ARCHIVE" << ": " << er.what();
-                return Status::DBTransactionError("QUERY ERROR WHEN DURING ARCHIVE", er.what());
-            } catch (const Exception &er) {
+                return HandleException("GENERAL ERROR WHEN DURING ARCHIVE", e.what());
+            } catch (const Exception &e) {
                 // Catch-all for any other MySQL++ exceptions
-                ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DURING ARCHIVE" << ": " << er.what();
-                return Status::DBTransactionError("GENERAL ERROR WHEN DURING ARCHIVE", er.what());
+                return HandleException("GENERAL ERROR WHEN DURING ARCHIVE", e.what());
+            } catch (std::exception &e) {
+                return HandleException("GENERAL ERROR WHEN DURING ARCHIVE", e.what());
             }
         }
         if (criteria == "disk") {
@@ -1398,9 +1381,8 @@ Status MySQLMetaImpl::Size(uint64_t &result) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
-
 
             Query getSizeQuery = connectionPtr->query();
             getSizeQuery << "SELECT IFNULL(SUM(file_size),0) AS sum " <<
@@ -1418,14 +1400,14 @@ Status MySQLMetaImpl::Size(uint64_t &result) {
             result = res[0]["sum"];
         }
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN RETRIEVING SIZE" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN RETRIEVING SIZE", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN RETRIEVING SIZE", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN RETRIEVING SIZE" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN RETRIEVING SIZE", er.what());
+        return HandleException("GENERAL ERROR WHEN RETRIEVING SIZE", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN RETRIEVING SIZE", e.what());
     }
 
     return Status::OK();
@@ -1445,7 +1427,7 @@ Status MySQLMetaImpl::DiscardFiles(long long to_discard_size) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query discardFilesQuery = connectionPtr->query();
@@ -1488,21 +1470,20 @@ Status MySQLMetaImpl::DiscardFiles(long long to_discard_size) {
 
             status = discardFilesQuery.exec();
             if (!status) {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN DISCARDING FILES";
-                return Status::DBTransactionError("QUERY ERROR WHEN DISCARDING FILES", discardFilesQuery.error());
+                return HandleException("QUERY ERROR WHEN DISCARDING FILES", discardFilesQuery.error());
             }
         } //Scoped Connection
 
         return DiscardFiles(to_discard_size);
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN DISCARDING FILES" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN DISCARDING FILES", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN DISCARDING FILES", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DISCARDING FILES" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN DISCARDING FILES", er.what());
+        return HandleException("GENERAL ERROR WHEN DISCARDING FILES", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN DISCARDING FILES", e.what());
     }
 }
 
@@ -1516,7 +1497,7 @@ Status MySQLMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query updateTableFileQuery = connectionPtr->query();
@@ -1564,26 +1545,24 @@ Status MySQLMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
 
-
             if (!updateTableFileQuery.exec()) {
                 ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILE";
-                return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILE",
-                                                  updateTableFileQuery.error());
+                return HandleException("QUERY ERROR WHEN UPDATING TABLE FILE", updateTableFileQuery.error());
             }
         } //Scoped Connection
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
         ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILE" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILE", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILE", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
         ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN UPDATING TABLE FILE" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN UPDATING TABLE FILE", er.what());
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILE", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILE", e.what());
     }
+
     return Status::OK();
 }
 
@@ -1592,7 +1571,7 @@ Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string &table_id) {
         ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
         if (connectionPtr == nullptr) {
-            return Status::Error("Failed to connect to database server");
+            return Status(DB_ERROR, "Failed to connect to database server");
         }
 
         Query updateTableFilesToIndexQuery = connectionPtr->query();
@@ -1605,19 +1584,17 @@ Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string &table_id) {
         ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFilesToIndex: " << updateTableFilesToIndexQuery.str();
 
         if (!updateTableFilesToIndexQuery.exec()) {
-            ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILE";
-            return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILE",
-                                              updateTableFilesToIndexQuery.error());
+            return HandleException("QUERY ERROR WHEN UPDATING TABLE FILE TO INDEX", updateTableFilesToIndexQuery.error());
         }
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILES TO INDEX" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILES TO INDEX", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX", er.what());
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX", e.what());
     }
 
     return Status::OK();
@@ -1630,7 +1607,7 @@ Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query updateTableFilesQuery = connectionPtr->query();
@@ -1689,21 +1666,19 @@ Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFiles: " << updateTableFilesQuery.str();
 
                 if (!updateTableFilesQuery.exec()) {
-                    ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILES";
-                    return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILES",
-                                                      updateTableFilesQuery.error());
+                    return HandleException("QUERY ERROR WHEN UPDATING TABLE FILES", updateTableFilesQuery.error());
                 }
             }
         } //Scoped Connection
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN UPDATING TABLE FILES" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN UPDATING TABLE FILES", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN UPDATING TABLE FILES" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN UPDATING TABLE FILES", er.what());
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES", e.what());
     }
 
     return Status::OK();
@@ -1721,7 +1696,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query cleanUpFilesWithTTLQuery = connectionPtr->query();
@@ -1775,21 +1750,19 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
                 if (!cleanUpFilesWithTTLQuery.exec()) {
-                    ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
-                    return Status::DBTransactionError("CleanUpFilesWithTTL Error",
-                                                      cleanUpFilesWithTTLQuery.error());
+                    return HandleException("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", cleanUpFilesWithTTLQuery.error());
                 }
             }
         } //Scoped Connection
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
+        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", e.what());
     }
 
     //remove to_delete tables
@@ -1800,7 +1773,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             Query cleanUpFilesWithTTLQuery = connectionPtr->query();
@@ -1832,21 +1805,19 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
                 if (!cleanUpFilesWithTTLQuery.exec()) {
-                    ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL";
-                    return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL",
-                                                      cleanUpFilesWithTTLQuery.error());
+                    return HandleException("QUERY ERROR WHEN CLEANING UP TABLES WITH TTL", cleanUpFilesWithTTLQuery.error());
                 }
             }
         } //Scoped Connection
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
+        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
     }
 
     //remove deleted table folder
@@ -1858,7 +1829,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
             for(auto& table_id : table_ids) {
@@ -1876,14 +1847,14 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 }
             }
         }
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES WITH TTL" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", er.what());
+        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
     }
 
     return Status::OK();
@@ -1894,7 +1865,7 @@ Status MySQLMetaImpl::CleanUp() {
         ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
         if (connectionPtr == nullptr) {
-            return Status::Error("Failed to connect to database server");
+            return Status(DB_ERROR, "Failed to connect to database server");
         }
 
         Query cleanUpQuery = connectionPtr->query();
@@ -1917,19 +1888,18 @@ Status MySQLMetaImpl::CleanUp() {
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
 
             if (!cleanUpQuery.exec()) {
-                ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES";
-                return Status::DBTransactionError("Clean up Error", cleanUpQuery.error());
+                return HandleException("QUERY ERROR WHEN CLEANING UP FILES", cleanUpQuery.error());
             }
         }
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN CLEANING UP FILES" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN CLEANING UP FILES", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN CLEANING UP FILES" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN CLEANING UP FILES", er.what());
+        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES", e.what());
     }
 
     return Status::OK();
@@ -1952,7 +1922,7 @@ Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
             ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
             if (connectionPtr == nullptr) {
-                return Status::Error("Failed to connect to database server");
+                return Status(DB_ERROR, "Failed to connect to database server");
             }
 
 
@@ -1980,19 +1950,19 @@ Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
             errorMsg << "MySQLMetaImpl::Count: " << "table dimension = " << std::to_string(table_schema.dimension_)
                      << ", table_id = " << table_id;
             ENGINE_LOG_ERROR << errorMsg.str();
-            return Status::Error(errorMsg.str());
+            return Status(DB_ERROR, errorMsg.str());
         }
         result /= table_schema.dimension_;
         result /= sizeof(float);
 
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN RETRIEVING COUNT" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN RETRIEVING COUNT", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN RETRIEVING COUNT", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN RETRIEVING COUNT" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN RETRIEVING COUNT", er.what());
+        return HandleException("GENERAL ERROR WHEN RETRIEVING COUNT", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN RETRIEVING COUNT", e.what());
     }
 
     return Status::OK();
@@ -2004,7 +1974,7 @@ Status MySQLMetaImpl::DropAll() {
         ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
         if (connectionPtr == nullptr) {
-            return Status::Error("Failed to connect to database server");
+            return Status(DB_ERROR, "Failed to connect to database server");
         }
 
         Query dropTableQuery = connectionPtr->query();
@@ -2015,20 +1985,17 @@ Status MySQLMetaImpl::DropAll() {
         if (dropTableQuery.exec()) {
             return Status::OK();
         } else {
-            ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROPPING TABLE";
-            return Status::DBTransactionError("DROP TABLE ERROR", dropTableQuery.error());
+            return HandleException("QUERY ERROR WHEN DROPPING ALL", dropTableQuery.error());
         }
-    } catch (const BadQuery &er) {
+    } catch (const BadQuery &e) {
         // Handle any query errors
-        ENGINE_LOG_ERROR << "QUERY ERROR WHEN DROPPING TABLE" << ": " << er.what();
-        return Status::DBTransactionError("QUERY ERROR WHEN DROPPING TABLE", er.what());
-    } catch (const Exception &er) {
+        return HandleException("GENERAL ERROR WHEN DROPPING ALL", e.what());
+    } catch (const Exception &e) {
         // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_ERROR << "GENERAL ERROR WHEN DROPPING TABLE" << ": " << er.what();
-        return Status::DBTransactionError("GENERAL ERROR WHEN DROPPING TABLE", er.what());
+        return HandleException("GENERAL ERROR WHEN DROPPING ALL", e.what());
+    } catch (std::exception &e) {
+        return HandleException("GENERAL ERROR WHEN DROPPING ALL", e.what());
     }
-
-    return Status::OK();
 }
 
 } // namespace meta
