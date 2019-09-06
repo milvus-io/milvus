@@ -92,6 +92,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-487 - Define metric type in CreateTable
 - MS-488 - Improve code format in scheduler
 - MS-495 - cmake: integrated knowhere
+- MS-496 - Change the top_k limitation from 1024 to 2048
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

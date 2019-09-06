@@ -94,7 +94,7 @@ ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
 
 ServerError
 ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema) {
-    if (top_k <= 0 || top_k > 1024) {
+    if (top_k <= 0) {
         return SERVER_INVALID_TOPK;
     }
 
