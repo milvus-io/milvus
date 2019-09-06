@@ -21,7 +21,7 @@ namespace engine {
 
 using namespace zilliz::knowhere;
 
-server::KnowhereError VecIndexImpl::BuildAll(const long &nb,
+ErrorCode VecIndexImpl::BuildAll(const long &nb,
                                              const float *xb,
                                              const long *ids,
                                              const Config &cfg,
@@ -38,36 +38,36 @@ server::KnowhereError VecIndexImpl::BuildAll(const long &nb,
         index_->Add(dataset, cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_UNEXPECTED_ERROR;
+        return KNOWHERE_UNEXPECTED_ERROR;
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_INVALID_ARGUMENT;
+        return KNOWHERE_INVALID_ARGUMENT;
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_ERROR;
+        return KNOWHERE_ERROR;
     }
-    return server::KNOWHERE_SUCCESS;
+    return KNOWHERE_SUCCESS;
 }
 
-server::KnowhereError VecIndexImpl::Add(const long &nb, const float *xb, const long *ids, const Config &cfg) {
+ErrorCode VecIndexImpl::Add(const long &nb, const float *xb, const long *ids, const Config &cfg) {
     try {
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         index_->Add(dataset, cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_UNEXPECTED_ERROR;
+        return KNOWHERE_UNEXPECTED_ERROR;
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_INVALID_ARGUMENT;
+        return KNOWHERE_INVALID_ARGUMENT;
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_ERROR;
+        return KNOWHERE_ERROR;
     }
-    return server::KNOWHERE_SUCCESS;
+    return KNOWHERE_SUCCESS;
 }
 
-server::KnowhereError VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) {
+ErrorCode VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) {
     try {
         auto k = cfg["k"].as<int>();
         auto dataset = GenDataset(nq, dim, xq);
@@ -102,15 +102,15 @@ server::KnowhereError VecIndexImpl::Search(const long &nq, const float *xq, floa
         memcpy(dist, p_dist, sizeof(float) * nq * k);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_UNEXPECTED_ERROR;
+        return KNOWHERE_UNEXPECTED_ERROR;
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_INVALID_ARGUMENT;
+        return KNOWHERE_INVALID_ARGUMENT;
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_ERROR;
+        return KNOWHERE_ERROR;
     }
-    return server::KNOWHERE_SUCCESS;
+    return KNOWHERE_SUCCESS;
 }
 
 zilliz::knowhere::BinarySet VecIndexImpl::Serialize() {
@@ -118,10 +118,10 @@ zilliz::knowhere::BinarySet VecIndexImpl::Serialize() {
     return index_->Serialize();
 }
 
-server::KnowhereError VecIndexImpl::Load(const zilliz::knowhere::BinarySet &index_binary) {
+ErrorCode VecIndexImpl::Load(const zilliz::knowhere::BinarySet &index_binary) {
     index_->Load(index_binary);
     dim = Dimension();
-    return server::KNOWHERE_SUCCESS;
+    return KNOWHERE_SUCCESS;
 }
 
 int64_t VecIndexImpl::Dimension() {
@@ -177,24 +177,24 @@ int64_t *BFIndex::GetRawIds() {
     return std::static_pointer_cast<IDMAP>(index_)->GetRawIds();
 }
 
-server::KnowhereError BFIndex::Build(const Config &cfg) {
+ErrorCode BFIndex::Build(const Config &cfg) {
     try {
         dim = cfg["dim"].as<int>();
         std::static_pointer_cast<IDMAP>(index_)->Train(cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_UNEXPECTED_ERROR;
+        return KNOWHERE_UNEXPECTED_ERROR;
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_INVALID_ARGUMENT;
+        return KNOWHERE_INVALID_ARGUMENT;
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_ERROR;
+        return KNOWHERE_ERROR;
     }
-    return server::KNOWHERE_SUCCESS;
+    return KNOWHERE_SUCCESS;
 }
 
-server::KnowhereError BFIndex::BuildAll(const long &nb,
+ErrorCode BFIndex::BuildAll(const long &nb,
                                         const float *xb,
                                         const long *ids,
                                         const Config &cfg,
@@ -208,19 +208,19 @@ server::KnowhereError BFIndex::BuildAll(const long &nb,
         index_->Add(dataset, cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_UNEXPECTED_ERROR;
+        return KNOWHERE_UNEXPECTED_ERROR;
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_INVALID_ARGUMENT;
+        return KNOWHERE_INVALID_ARGUMENT;
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_ERROR;
+        return KNOWHERE_ERROR;
     }
-    return server::KNOWHERE_SUCCESS;
+    return KNOWHERE_SUCCESS;
 }
 
 // TODO(linxj): add lock here.
-server::KnowhereError IVFMixIndex::BuildAll(const long &nb,
+ErrorCode IVFMixIndex::BuildAll(const long &nb,
                                             const float *xb,
                                             const long *ids,
                                             const Config &cfg,
@@ -242,26 +242,26 @@ server::KnowhereError IVFMixIndex::BuildAll(const long &nb,
             type = ConvertToCpuIndexType(type);
         } else {
             WRAPPER_LOG_ERROR << "Build IVFMIXIndex Failed";
-            return server::KNOWHERE_ERROR;
+            return KNOWHERE_ERROR;
         }
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_UNEXPECTED_ERROR;
+        return KNOWHERE_UNEXPECTED_ERROR;
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_INVALID_ARGUMENT;
+        return KNOWHERE_INVALID_ARGUMENT;
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return server::KNOWHERE_ERROR;
+        return KNOWHERE_ERROR;
     }
-    return server::KNOWHERE_SUCCESS;
+    return KNOWHERE_SUCCESS;
 }
 
-server::KnowhereError IVFMixIndex::Load(const zilliz::knowhere::BinarySet &index_binary) {
+ErrorCode IVFMixIndex::Load(const zilliz::knowhere::BinarySet &index_binary) {
     //index_ = std::make_shared<IVF>();
     index_->Load(index_binary);
     dim = Dimension();
-    return server::KNOWHERE_SUCCESS;
+    return KNOWHERE_SUCCESS;
 }
 
 }

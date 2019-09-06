@@ -654,8 +654,12 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
 
         auto match_tableid = c(&TableFileSchema::table_id_) == table_id;
 
-        std::vector<int> file_type = {(int) TableFileSchema::RAW, (int) TableFileSchema::TO_INDEX, (int) TableFileSchema::INDEX};
-        auto match_type = in(&TableFileSchema::file_type_, file_type);
+        std::vector<int> file_types = {
+                (int) TableFileSchema::RAW,
+                (int) TableFileSchema::TO_INDEX,
+                (int) TableFileSchema::INDEX
+        };
+        auto match_type = in(&TableFileSchema::file_type_, file_types);
 
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
@@ -1152,8 +1156,12 @@ Status SqliteMetaImpl::CleanUp() {
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        std::vector<int> file_type = {(int) TableFileSchema::NEW, (int) TableFileSchema::NEW_INDEX, (int) TableFileSchema::NEW_MERGE};
-        auto files = ConnectorPtr->select(columns(&TableFileSchema::id_), where(in(&TableFileSchema::file_type_, file_type)));
+        std::vector<int> file_types = {
+                (int) TableFileSchema::NEW,
+                (int) TableFileSchema::NEW_INDEX,
+                (int) TableFileSchema::NEW_MERGE
+        };
+        auto files = ConnectorPtr->select(columns(&TableFileSchema::id_), where(in(&TableFileSchema::file_type_, file_types)));
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
             for (auto &file : files) {
@@ -1180,9 +1188,13 @@ Status SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
     try {
         server::MetricCollector metric;
 
-        std::vector<int> file_type = {(int) TableFileSchema::RAW, (int) TableFileSchema::TO_INDEX, (int) TableFileSchema::INDEX};
+        std::vector<int> file_types = {
+                (int) TableFileSchema::RAW,
+                (int) TableFileSchema::TO_INDEX,
+                (int) TableFileSchema::INDEX
+        };
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::row_count_),
-                                             where(in(&TableFileSchema::file_type_, file_type)
+                                             where(in(&TableFileSchema::file_type_, file_types)
                                                    and c(&TableFileSchema::table_id_) == table_id));
 
         TableSchema table_schema;

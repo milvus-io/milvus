@@ -24,9 +24,9 @@ void StringHelpFunctions::TrimStringQuote(std::string &string, const std::string
     }
 }
 
-ServerError StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
-                                                        const std::string &delimeter,
-                                                        std::vector<std::string> &result) {
+ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
+                                                      const std::string &delimeter,
+                                                      std::vector<std::string> &result) {
     if(str.empty()) {
         return SERVER_SUCCESS;
     }
@@ -46,10 +46,10 @@ ServerError StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
     return SERVER_SUCCESS;
 }
 
-ServerError StringHelpFunctions::SplitStringByQuote(const std::string &str,
-                                                    const std::string &delimeter,
-                                                    const std::string &quote,
-                                                    std::vector<std::string> &result) {
+    ErrorCode StringHelpFunctions::SplitStringByQuote(const std::string &str,
+                                                      const std::string &delimeter,
+                                                      const std::string &quote,
+                                                      std::vector<std::string> &result) {
     if (quote.empty()) {
         return SplitStringByDelimeter(str, delimeter, result);
     }
