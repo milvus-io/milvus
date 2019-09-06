@@ -49,7 +49,7 @@ StartSchedulerService() {
                                                                               enable_loader,
                                                                               enable_executor));
 
-            if (res.lock()->Type() == ResourceType::GPU) {
+            if (res.lock()->type() == ResourceType::GPU) {
                 auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY, 300);
                 auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY, 300);
                 auto resource_num = resconf.GetInt64Value(server::CONFIG_RESOURCE_NUM, 2);

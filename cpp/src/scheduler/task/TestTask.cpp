@@ -27,15 +27,6 @@ TestTask::Execute() {
     done_ = true;
 }
 
-TaskPtr
-TestTask::Clone() {
-    TableFileSchemaPtr dummy = nullptr;
-    auto ret = std::make_shared<TestTask>(dummy);
-    ret->load_count_ = load_count_;
-    ret->exec_count_ = exec_count_;
-    return ret;
-}
-
 void
 TestTask::Wait() {
     std::unique_lock<std::mutex> lock(mutex_);
