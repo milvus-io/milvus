@@ -21,7 +21,6 @@ TaskConvert(const ScheduleTaskPtr &schedule_task) {
             auto task = std::make_shared<XSearchTask>(load_task->file_);
             task->label() = std::make_shared<DefaultLabel>();
             task->search_contexts_ = load_task->search_contexts_;
-            task->task_ = schedule_task;
             return task;
         }
         case ScheduleTaskType::kDelete: {

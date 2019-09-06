@@ -35,9 +35,11 @@ class DBImpl : public DB {
     using MetaPtr = meta::Meta::Ptr;
 
     explicit DBImpl(const Options &options);
+    ~DBImpl();
 
     Status Start() override;
     Status Stop() override;
+    Status DropAll() override;
 
     Status CreateTable(meta::TableSchema &table_schema) override;
 
@@ -56,6 +58,12 @@ class DBImpl : public DB {
     Status GetTableRowCount(const std::string &table_id, uint64_t &row_count) override;
 
     Status InsertVectors(const std::string &table_id, uint64_t n, const float *vectors, IDNumbers &vector_ids) override;
+
+    Status CreateIndex(const std::string& table_id, const TableIndex& index) override;
+
+    Status DescribeIndex(const std::string& table_id, TableIndex& index) override;
+
+    Status DropIndex(const std::string& table_id) override;
 
     Status Query(const std::string &table_id,
             uint64_t k,
@@ -81,17 +89,7 @@ class DBImpl : public DB {
           const meta::DatesT &dates,
           QueryResults &results) override;
 
-    Status DropAll() override;
-
     Status Size(uint64_t &result) override;
-
-    Status CreateIndex(const std::string& table_id, const TableIndex& index) override;
-
-    Status DescribeIndex(const std::string& table_id, TableIndex& index) override;
-
-    Status DropIndex(const std::string& table_id) override;
-
-    ~DBImpl() override;
 
  private:
     Status QueryAsync(const std::string &table_id,

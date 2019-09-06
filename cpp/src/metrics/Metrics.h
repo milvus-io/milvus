@@ -29,17 +29,34 @@ class Metrics {
  private:
     static MetricsBase &CreateMetricsCollector();
 };
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CollectMetricsBase {
+protected:
+    CollectMetricsBase() {
+        start_time_ = METRICS_NOW_TIME;
+    }
 
-class CollectInsertMetrics {
+    virtual ~CollectMetricsBase() = default;
+
+    double TimeFromBegine() {
+        auto end_time = METRICS_NOW_TIME;
+        return METRICS_MICROSECONDS(start_time_, end_time);
+    }
+
+protected:
+    using TIME_POINT = std::chrono::system_clock::time_point;
+    TIME_POINT start_time_;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CollectInsertMetrics : CollectMetricsBase {
 public:
     CollectInsertMetrics(size_t n, engine::Status& status) : n_(n), status_(status) {
-        start_time_ = METRICS_NOW_TIME;
     }
 
     ~CollectInsertMetrics() {
         if(n_ > 0) {
-            auto end_time = METRICS_NOW_TIME;
-            auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+            auto total_time = TimeFromBegine();
             double avg_time = total_time / n_;
             for (int i = 0; i < n_; ++i) {
                 Metrics::GetInstance().AddVectorsDurationHistogramOberve(avg_time);
@@ -57,22 +74,19 @@ public:
     }
 
 private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
     size_t n_;
     engine::Status& status_;
 };
 
-class CollectQueryMetrics {
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CollectQueryMetrics : CollectMetricsBase {
 public:
     CollectQueryMetrics(size_t nq) : nq_(nq) {
-        start_time_ = METRICS_NOW_TIME;
     }
 
     ~CollectQueryMetrics() {
         if(nq_ > 0) {
-            auto end_time = METRICS_NOW_TIME;
-            auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+            auto total_time = TimeFromBegine();
             for (int i = 0; i < nq_; ++i) {
                 server::Metrics::GetInstance().QueryResponseSummaryObserve(total_time);
             }
@@ -83,112 +97,90 @@ public:
     }
 
 private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
     size_t nq_;
 };
 
-class CollectMergeFilesMetrics {
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CollectMergeFilesMetrics : CollectMetricsBase {
 public:
     CollectMergeFilesMetrics() {
-        start_time_ = METRICS_NOW_TIME;
     }
 
     ~CollectMergeFilesMetrics() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+        auto total_time = TimeFromBegine();
         server::Metrics::GetInstance().MemTableMergeDurationSecondsHistogramObserve(total_time);
     }
-
-private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
 };
 
-class CollectBuildIndexMetrics {
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CollectBuildIndexMetrics : CollectMetricsBase {
 public:
     CollectBuildIndexMetrics() {
-        start_time_ = METRICS_NOW_TIME;
     }
 
     ~CollectBuildIndexMetrics() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+        auto total_time = TimeFromBegine();
         server::Metrics::GetInstance().BuildIndexDurationSecondsHistogramObserve(total_time);
     }
-private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
 };
 
-class CollectExecutionEngineMetrics {
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CollectExecutionEngineMetrics : CollectMetricsBase {
 public:
     CollectExecutionEngineMetrics(double physical_size) : physical_size_(physical_size) {
-        start_time_ = METRICS_NOW_TIME;
     }
 
     ~CollectExecutionEngineMetrics() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+        auto total_time = TimeFromBegine();
 
         server::Metrics::GetInstance().FaissDiskLoadDurationSecondsHistogramObserve(total_time);
-
         server::Metrics::GetInstance().FaissDiskLoadSizeBytesHistogramObserve(physical_size_);
         server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(physical_size_ / double(total_time));
     }
 
 private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
     double physical_size_;
 };
 
-class CollectSerializeMetrics {
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CollectSerializeMetrics : CollectMetricsBase {
 public:
     CollectSerializeMetrics(size_t size) : size_(size) {
-        start_time_ = METRICS_NOW_TIME;
     }
 
     ~CollectSerializeMetrics() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+        auto total_time = TimeFromBegine();
         server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double) size_ / total_time);
     }
 private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
     size_t size_;
 };
 
-class CollectAddMetrics {
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CollectAddMetrics : CollectMetricsBase {
 public:
     CollectAddMetrics(size_t n, uint16_t dimension) : n_(n), dimension_(dimension) {
-        start_time_ = METRICS_NOW_TIME;
     }
 
     ~CollectAddMetrics() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+        auto total_time = TimeFromBegine();
         server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_),
                                                                    static_cast<int>(dimension_),
                                                                    total_time);
     }
 private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
     size_t n_;
     uint16_t dimension_;
 };
 
-class CollectDurationMetrics {
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CollectDurationMetrics : CollectMetricsBase {
 public:
     CollectDurationMetrics(int index_type) : index_type_(index_type) {
-        start_time_ = METRICS_NOW_TIME;
     }
 
     ~CollectDurationMetrics() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+        auto total_time = TimeFromBegine();
         switch (index_type_) {
             case engine::meta::TableFileSchema::RAW: {
                 server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
@@ -205,20 +197,17 @@ public:
         }
     }
 private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
     int index_type_;
 };
 
-class CollectSearchTaskMetrics {
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class CollectSearchTaskMetrics : CollectMetricsBase {
 public:
     CollectSearchTaskMetrics(int index_type) : index_type_(index_type) {
-        start_time_ = METRICS_NOW_TIME;
     }
 
     ~CollectSearchTaskMetrics() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+        auto total_time = TimeFromBegine();
         switch(index_type_) {
             case engine::meta::TableFileSchema::RAW: {
                 server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
@@ -236,27 +225,20 @@ public:
     }
 
 private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
     int index_type_;
 };
 
-class MetricCollector {
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class MetricCollector : CollectMetricsBase {
 public:
     MetricCollector() {
         server::Metrics::GetInstance().MetaAccessTotalIncrement();
-        start_time_ = METRICS_NOW_TIME;
     }
 
     ~MetricCollector() {
-        auto end_time = METRICS_NOW_TIME;
-        auto total_time = METRICS_MICROSECONDS(start_time_, end_time);
+        auto total_time = TimeFromBegine();
         server::Metrics::GetInstance().MetaAccessDurationSecondsHistogramObserve(total_time);
     }
-
-private:
-    using TIME_POINT = std::chrono::system_clock::time_point;
-    TIME_POINT start_time_;
 };
 
 

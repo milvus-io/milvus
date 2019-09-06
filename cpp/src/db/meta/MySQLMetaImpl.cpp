@@ -48,9 +48,7 @@ MySQLMetaImpl::MySQLMetaImpl(const DBMetaOptions &options_, const int &mode)
 }
 
 MySQLMetaImpl::~MySQLMetaImpl() {
-    if (mode_ != Options::MODE::READ_ONLY) {
-        CleanUp();
-    }
+
 }
 
 Status MySQLMetaImpl::NextTableId(std::string &table_id) {
@@ -2001,10 +1999,8 @@ Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 }
 
 Status MySQLMetaImpl::DropAll() {
-    if (boost::filesystem::is_directory(options_.path)) {
-        boost::filesystem::remove_all(options_.path);
-    }
     try {
+        ENGINE_LOG_DEBUG << "Drop all mysql meta";
         ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
 
         if (connectionPtr == nullptr) {

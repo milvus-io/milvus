@@ -17,11 +17,16 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-430 - Search no result if index created with FLAT
 - MS-443 - Create index hang again
 - MS-436 - Delete vectors failed if index created with index_type: IVF_FLAT/IVF_SQ8
-- MS-450 - server hang after run stop_server.sh
 - MS-449 - Add vectors twice success, once with ids, the other no ids
+- MS-450 - server hang after run stop_server.sh
+- MS-458 - Keep building index for one file when no gpu resource
 - MS-461 - Mysql meta unittest failed
 - MS-462 - Run milvus server twices, should display error
 - MS-463 - Search timeout
+- MS-467 - mysql db test failed
+- MS-470 - Drop index success, which table not created
+- MS-471 - code coverage run failed
+- MS-492 - Drop index failed if index have been created with index_type: FLAT
 
 ## Improvement
 - MS-327 - Clean code for milvus
@@ -80,6 +85,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-455 - Distribute tasks by minimal cost in scheduler
 - MS-460 - Put transport speed as weight when choosing neighbour to execute task
 - MS-459 - Add cache for pick function in tasktable
+- MS-482 - Change search stream transport to unary in grpc
+- MS-487 - Define metric type in CreateTable
+- MS-488 - Improve code format in scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

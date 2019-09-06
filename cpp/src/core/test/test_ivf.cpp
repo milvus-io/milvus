@@ -8,6 +8,12 @@
 
 #include <iostream>
 #include <sstream>
+#include <thread>
+
+#include <faiss/AutoTune.h>
+#include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/gpu/GpuIndexIVFFlat.h>
+#include <faiss/gpu/GpuClonerOptions.h>
 
 #include "knowhere/index/vector_index/gpu_ivf.h"
 #include "knowhere/index/vector_index/ivf.h"
@@ -25,7 +31,7 @@ using ::testing::TestWithParam;
 using ::testing::Values;
 using ::testing::Combine;
 
-static int device_id = 1;
+static int device_id = 0;
 IVFIndexPtr IndexFactory(const std::string &type) {
     if (type == "IVF") {
         return std::make_shared<IVF>();
@@ -50,7 +56,7 @@ class IVFTest
         //Init_with_default();
         Generate(128, 1000000/5, 10);
         index_ = IndexFactory(index_type);
-        FaissGpuResourceMgr::GetInstance().InitDevice(device_id);
+        FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*300, 2);
     }
 
  protected:
@@ -342,5 +348,214 @@ TEST_P(IVFTest, seal_test) {
     auto with_seal = tc.RecordSection("With seal");
     ASSERT_GE(without_seal, with_seal);
 }
+
+
+class GPURESTEST
+    : public DataGen, public ::testing::Test {
+ protected:
+    void SetUp() override {
+        //std::tie(index_type, preprocess_cfg, train_cfg, add_cfg, search_cfg) = GetParam();
+        //Init_with_default();
+        Generate(128, 1000000, 1000);
+        k = 100;
+        //index_ = IndexFactory(index_type);
+        FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*300, 2);
+
+        elems = nq * k;
+        ids = (int64_t *) malloc(sizeof(int64_t) * elems);
+        dis = (float *) malloc(sizeof(float) * elems);
+    }
+
+    void TearDown() override {
+        delete ids;
+        delete dis;
+    }
+
+ protected:
+    std::string index_type;
+    Config preprocess_cfg;
+    Config train_cfg;
+    Config add_cfg;
+    Config search_cfg;
+    IVFIndexPtr index_ = nullptr;
+
+    int64_t *ids = nullptr;
+    float *dis = nullptr;
+    int64_t elems = 0;
+};
+
+const int search_count = 100;
+const int load_count = 30;
+
+TEST_F(GPURESTEST, gpu_ivf_resource_test) {
+    assert(!xb.empty());
+
+
+    {
+        index_type = "GPUIVF";
+        index_ = IndexFactory(index_type);
+        auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+        index_->set_preprocessor(preprocessor);
+        train_cfg = Config::object{{"nlist", 1638}, {"gpu_id", device_id}, {"metric_type", "L2"}};
+        auto model = index_->Train(base_dataset, train_cfg);
+        index_->set_index_model(model);
+        index_->Add(base_dataset, add_cfg);
+        EXPECT_EQ(index_->Count(), nb);
+        EXPECT_EQ(index_->Dimension(), dim);
+
+        search_cfg  = Config::object{{"k", k}};
+        TimeRecorder tc("knowere GPUIVF");
+        for (int i = 0; i < search_count; ++i) {
+            index_->Search(query_dataset, search_cfg);
+            if (i > search_count - 6 || i < 5)
+                tc.RecordSection("search once");
+        }
+        tc.RecordSection("search all");
+    }
+
+    {
+        // IVF-Search
+        faiss::gpu::StandardGpuResources res;
+        faiss::gpu::GpuIndexIVFFlatConfig idx_config;
+        idx_config.device = device_id;
+        faiss::gpu::GpuIndexIVFFlat device_index(&res, dim, 1638, faiss::METRIC_L2, idx_config);
+        device_index.train(nb, xb.data());
+        device_index.add(nb, xb.data());
+
+        TimeRecorder tc("ori IVF");
+        for (int i = 0; i < search_count; ++i) {
+            device_index.search(nq, xq.data(), k, dis, ids);
+            if (i > search_count - 6 || i < 5)
+                tc.RecordSection("search once");
+        }
+        tc.RecordSection("search all");
+    }
+
+}
+
+TEST_F(GPURESTEST, gpuivfsq) {
+    {
+        // knowhere gpu ivfsq
+        index_type = "GPUIVFSQ";
+        index_ = IndexFactory(index_type);
+        auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+        index_->set_preprocessor(preprocessor);
+        train_cfg = Config::object{{"gpu_id", device_id}, {"nlist", 1638}, {"nbits", 8}, {"metric_type", "L2"}};
+        auto model = index_->Train(base_dataset, train_cfg);
+        index_->set_index_model(model);
+        index_->Add(base_dataset, add_cfg);
+        search_cfg  = Config::object{{"k", k}};
+        auto result = index_->Search(query_dataset, search_cfg);
+        AssertAnns(result, nq, k);
+
+        auto cpu_idx = CopyGpuToCpu(index_, Config());
+        cpu_idx->Seal();
+
+        TimeRecorder tc("knowhere GPUSQ8");
+        auto search_idx = CopyCpuToGpu(cpu_idx, device_id, Config());
+        tc.RecordSection("Copy to gpu");
+        for (int i = 0; i < search_count; ++i) {
+            search_idx->Search(query_dataset, search_cfg);
+            if (i > search_count - 6 || i < 5)
+                tc.RecordSection("search once");
+        }
+        tc.RecordSection("search all");
+    }
+
+    {
+        // Ori gpuivfsq Test
+        const char *index_description = "IVF1638,SQ8";
+        faiss::Index *ori_index = faiss::index_factory(dim, index_description, faiss::METRIC_L2);
+
+        faiss::gpu::StandardGpuResources res;
+        auto device_index = faiss::gpu::index_cpu_to_gpu(&res, device_id, ori_index);
+        device_index->train(nb, xb.data());
+        device_index->add(nb, xb.data());
+
+        auto cpu_index = faiss::gpu::index_gpu_to_cpu(device_index);
+        auto idx = dynamic_cast<faiss::IndexIVF *>(cpu_index);
+        if (idx != nullptr) {
+            idx->to_readonly();
+        }
+        delete device_index;
+        delete ori_index;
+
+        faiss::gpu::GpuClonerOptions option;
+        option.allInGpu = true;
+
+        TimeRecorder tc("ori GPUSQ8");
+        faiss::Index *search_idx = faiss::gpu::index_cpu_to_gpu(&res, device_id, cpu_index, &option);
+        tc.RecordSection("Copy to gpu");
+        for (int i = 0; i < search_count; ++i) {
+            search_idx->search(nq, xq.data(), k, dis, ids);
+            if (i > search_count - 6 || i < 5)
+                tc.RecordSection("search once");
+        }
+        tc.RecordSection("search all");
+        delete cpu_index;
+        delete search_idx;
+    }
+
+}
+
+TEST_F(GPURESTEST, copyandsearch) {
+    printf("==================\n");
+
+    // search and copy at the same time
+    index_type = "GPUIVFSQ";
+    //index_type = "GPUIVF";
+    index_ = IndexFactory(index_type);
+    auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+    index_->set_preprocessor(preprocessor);
+    train_cfg = Config::object{{"gpu_id", device_id}, {"nlist", 1638}, {"nbits", 8}, {"metric_type", "L2"}};
+    auto model = index_->Train(base_dataset, train_cfg);
+    index_->set_index_model(model);
+    index_->Add(base_dataset, add_cfg);
+    search_cfg = Config::object{{"k", k}};
+    auto result = index_->Search(query_dataset, search_cfg);
+    AssertAnns(result, nq, k);
+
+    auto cpu_idx = CopyGpuToCpu(index_, Config());
+    cpu_idx->Seal();
+
+    auto search_idx = CopyCpuToGpu(cpu_idx, device_id, Config());
+
+    auto search_func = [&] {
+        //TimeRecorder tc("search&load");
+        for (int i = 0; i < search_count; ++i) {
+            search_idx->Search(query_dataset, search_cfg);
+            //if (i > search_count - 6 || i == 0)
+            //    tc.RecordSection("search once");
+        }
+        //tc.ElapseFromBegin("search finish");
+    };
+    auto load_func = [&] {
+        //TimeRecorder tc("search&load");
+        for (int i = 0; i < load_count; ++i) {
+            CopyCpuToGpu(cpu_idx, device_id, Config());
+            //if (i > load_count -5 || i < 5)
+                //tc.RecordSection("Copy to gpu");
+        }
+        //tc.ElapseFromBegin("load finish");
+    };
+
+    TimeRecorder tc("basic");
+    CopyCpuToGpu(cpu_idx, device_id, Config());
+    tc.RecordSection("Copy to gpu once");
+    search_idx->Search(query_dataset, search_cfg);
+    tc.RecordSection("search once");
+    search_func();
+    tc.RecordSection("only search total");
+    load_func();
+    tc.RecordSection("only copy total");
+
+    std::thread search_thread(search_func);
+    std::thread load_thread(load_func);
+    search_thread.join();
+    load_thread.join();
+    tc.RecordSection("Copy&search total");
+}
+
+
 
 // TODO(linxj): Add exception test
