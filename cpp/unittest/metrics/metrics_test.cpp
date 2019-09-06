@@ -127,7 +127,7 @@ TEST_F(MetricTest, Metric_Tes) {
 TEST_F(MetricTest, Collector_Metrics_Test){
     engine::Status status = engine::Status::OK();
     server::CollectInsertMetrics insert_metrics0(0, status);
-    status = engine::Status::Error("error");
+    status = engine::Status(DB_ERROR, "error");
     server::CollectInsertMetrics insert_metrics1(0, status);
 
     server::CollectQueryMetrics query_metrics(10);

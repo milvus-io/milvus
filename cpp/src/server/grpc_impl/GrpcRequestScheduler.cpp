@@ -16,8 +16,8 @@ namespace grpc {
 using namespace ::milvus;
 
 namespace {
-    const std::map<ServerError, ::milvus::grpc::ErrorCode> &ErrorMap() {
-        static const std::map<ServerError, ::milvus::grpc::ErrorCode> code_map = {
+    const std::map<ErrorCode, ::milvus::grpc::ErrorCode> &ErrorMap() {
+        static const std::map<ErrorCode, ::milvus::grpc::ErrorCode> code_map = {
                 {SERVER_UNEXPECTED_ERROR,         ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
                 {SERVER_UNSUPPORTED_ERROR,        ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
                 {SERVER_NULL_POINTER,             ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
@@ -66,7 +66,7 @@ GrpcBaseTask::~GrpcBaseTask() {
     WaitToFinish();
 }
 
-ServerError GrpcBaseTask::Execute() {
+ErrorCode GrpcBaseTask::Execute() {
     error_code_ = OnExecute();
     Done();
     return error_code_;
@@ -77,7 +77,7 @@ void GrpcBaseTask::Done() {
     finish_cond_.notify_all();
 }
 
-ServerError GrpcBaseTask::SetError(ServerError error_code, const std::string &error_msg) {
+ErrorCode GrpcBaseTask::SetError(ErrorCode error_code, const std::string &error_msg) {
     error_code_ = error_code;
     error_msg_ = error_msg;
 
@@ -85,7 +85,7 @@ ServerError GrpcBaseTask::SetError(ServerError error_code, const std::string &er
     return error_code_;
 }
 
-ServerError GrpcBaseTask::WaitToFinish() {
+ErrorCode GrpcBaseTask::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     finish_cond_.wait(lock, [this] { return done_; });
 
@@ -112,7 +112,7 @@ void GrpcRequestScheduler::ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Statu
 
     if (!task_ptr->IsAsync()) {
         task_ptr->WaitToFinish();
-        ServerError err = task_ptr->ErrorCode();
+        ErrorCode err = task_ptr->ErrorID();
         if (err != SERVER_SUCCESS) {
             grpc_status->set_reason(task_ptr->ErrorMsg());
             grpc_status->set_error_code(ErrorMap().at(err));
@@ -153,12 +153,12 @@ void GrpcRequestScheduler::Stop() {
     SERVER_LOG_INFO << "Scheduler stopped";
 }
 
-ServerError GrpcRequestScheduler::ExecuteTask(const BaseTaskPtr &task_ptr) {
+ErrorCode GrpcRequestScheduler::ExecuteTask(const BaseTaskPtr &task_ptr) {
     if (task_ptr == nullptr) {
         return SERVER_NULL_POINTER;
     }
 
-    ServerError err = PutTaskToQueue(task_ptr);
+    ErrorCode err = PutTaskToQueue(task_ptr);
     if (err != SERVER_SUCCESS) {
         SERVER_LOG_ERROR << "Put task to queue failed with code: " << err;
         return err;
@@ -185,7 +185,7 @@ void GrpcRequestScheduler::TakeTaskToExecute(TaskQueuePtr task_queue) {
         }
 
         try {
-            ServerError err = task->Execute();
+            ErrorCode err = task->Execute();
             if (err != SERVER_SUCCESS) {
                 SERVER_LOG_ERROR << "Task failed with code: " << err;
             }
@@ -195,7 +195,7 @@ void GrpcRequestScheduler::TakeTaskToExecute(TaskQueuePtr task_queue) {
     }
 }
 
-ServerError GrpcRequestScheduler::PutTaskToQueue(const BaseTaskPtr &task_ptr) {
+ErrorCode GrpcRequestScheduler::PutTaskToQueue(const BaseTaskPtr &task_ptr) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
 
     std::string group_name = task_ptr->TaskGroup();

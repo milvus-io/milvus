@@ -41,7 +41,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
     build_cfg["metric_type"] = (metric_type_ == MetricType::IP) ? "IP" : "L2";
     AutoGenParams(index_->GetType(), 0, build_cfg);
     auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(build_cfg);
-    if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
+    if (ec != KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index,
@@ -85,8 +85,8 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 
 Status ExecutionEngineImpl::AddWithIds(long n, const float *xdata, const long *xids) {
     auto ec = index_->Add(n, xdata, xids);
-    if (ec != server::KNOWHERE_SUCCESS) {
-        return Status::Error("Add error");
+    if (ec != KNOWHERE_SUCCESS) {
+        return Status(DB_ERROR, "Add error");
     }
     return Status::OK();
 }
@@ -117,8 +117,8 @@ size_t ExecutionEngineImpl::PhysicalSize() const {
 
 Status ExecutionEngineImpl::Serialize() {
     auto ec = write_index(index_, location_);
-    if (ec != server::KNOWHERE_SUCCESS) {
-        return Status::Error("Serialize: write to disk error");
+    if (ec != KNOWHERE_SUCCESS) {
+        return Status(DB_ERROR, "Serialize: write to disk error");
     }
     return Status::OK();
 }
@@ -134,15 +134,15 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
             if(index_ == nullptr) {
                 std::string msg = "Failed to load index from " + location_;
                 ENGINE_LOG_ERROR << msg;
-                return Status::Error(msg);
+                return Status(DB_ERROR, msg);
             } else {
                 ENGINE_LOG_DEBUG << "Disk io from: " << location_;
             }
         } catch (knowhere::KnowhereException &e) {
             ENGINE_LOG_ERROR << e.what();
-            return Status::Error(e.what());
+            return Status(DB_ERROR, e.what());
         } catch (std::exception &e) {
-            return Status::Error(e.what());
+            return Status(DB_ERROR, e.what());
         }
     }
 
@@ -160,7 +160,7 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
     } else {
         if(index_ == nullptr) {
             ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to gpu";
-            return Status::Error("index is null");
+            return Status(DB_ERROR, "index is null");
         }
 
         try {
@@ -168,9 +168,9 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
         } catch (knowhere::KnowhereException &e) {
             ENGINE_LOG_ERROR << e.what();
-            return Status::Error(e.what());
+            return Status(DB_ERROR, e.what());
         } catch (std::exception &e) {
-            return Status::Error(e.what());
+            return Status(DB_ERROR, e.what());
         }
     }
 
@@ -189,7 +189,7 @@ Status ExecutionEngineImpl::CopyToCpu() {
     } else {
         if(index_ == nullptr) {
             ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to cpu";
-            return Status::Error("index is null");
+            return Status(DB_ERROR, "index is null");
         }
 
         try {
@@ -197,9 +197,9 @@ Status ExecutionEngineImpl::CopyToCpu() {
             ENGINE_LOG_DEBUG << "GPU to CPU";
         } catch (knowhere::KnowhereException &e) {
             ENGINE_LOG_ERROR << e.what();
-            return Status::Error(e.what());
+            return Status(DB_ERROR, e.what());
         } catch (std::exception &e) {
-            return Status::Error(e.what());
+            return Status(DB_ERROR, e.what());
         }
     }
 
@@ -223,7 +223,7 @@ ExecutionEnginePtr ExecutionEngineImpl::Clone() {
 
 Status ExecutionEngineImpl::Merge(const std::string &location) {
     if (location == location_) {
-        return Status::Error("Cannot Merge Self");
+        return Status(DB_ERROR, "Cannot Merge Self");
     }
     ENGINE_LOG_DEBUG << "Merge index file: " << location << " to: " << location_;
 
@@ -235,26 +235,26 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
             to_merge = read_index(location);
         } catch (knowhere::KnowhereException &e) {
             ENGINE_LOG_ERROR << e.what();
-            return Status::Error(e.what());
+            return Status(DB_ERROR, e.what());
         } catch (std::exception &e) {
-            return Status::Error(e.what());
+            return Status(DB_ERROR, e.what());
         }
     }
 
     if(index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to merge";
-        return Status::Error("index is null");
+        return Status(DB_ERROR, "index is null");
     }
 
     if (auto file_index = std::dynamic_pointer_cast<BFIndex>(to_merge)) {
         auto ec = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
-        if (ec != server::KNOWHERE_SUCCESS) {
+        if (ec != KNOWHERE_SUCCESS) {
             ENGINE_LOG_ERROR << "Merge: Add Error";
-            return Status::Error("Merge: Add Error");
+            return Status(DB_ERROR, "Merge: Add Error");
         }
         return Status::OK();
     } else {
-        return Status::Error("file index type is not idmap");
+        return Status(DB_ERROR, "file index type is not idmap");
     }
 }
 
@@ -284,7 +284,7 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
                                  from_index->GetRawVectors(),
                                  from_index->GetRawIds(),
                                  build_cfg);
-    if (ec != server::KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
+    if (ec != KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
 
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
@@ -297,15 +297,15 @@ Status ExecutionEngineImpl::Search(long n,
                                    long *labels) const {
     if(index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
-        return Status::Error("index is null");
+        return Status(DB_ERROR, "index is null");
     }
 
     ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
     auto cfg = Config::object{{"k", k}, {"nprobe", nprobe}};
     auto ec = index_->Search(n, data, distances, labels, cfg);
-    if (ec != server::KNOWHERE_SUCCESS) {
+    if (ec != KNOWHERE_SUCCESS) {
         ENGINE_LOG_ERROR << "Search error";
-        return Status::Error("Search: Search Error");
+        return Status(DB_ERROR, "Search: Search Error");
     }
     return Status::OK();
 }

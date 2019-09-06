@@ -61,7 +61,7 @@ bool CommonUtil::IsDirectoryExist(const std::string &path) {
     return true;
 }
 
-ServerError CommonUtil::CreateDirectory(const std::string &path) {
+ErrorCode CommonUtil::CreateDirectory(const std::string &path) {
     if(path.empty()) {
         return SERVER_SUCCESS;
     }
@@ -74,7 +74,7 @@ ServerError CommonUtil::CreateDirectory(const std::string &path) {
 
     fs::path fs_path(path);
     fs::path parent_path = fs_path.parent_path();
-    ServerError err = CreateDirectory(parent_path.string());
+    ErrorCode err = CreateDirectory(parent_path.string());
     if(err != SERVER_SUCCESS){
         return err;
     }
@@ -122,7 +122,7 @@ namespace {
     }
 }
 
-ServerError CommonUtil::DeleteDirectory(const std::string &path) {
+ErrorCode CommonUtil::DeleteDirectory(const std::string &path) {
     if(path.empty()) {
         return SERVER_SUCCESS;
     }

@@ -12,7 +12,7 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-ServerError YamlConfigMgr::LoadConfigFile(const std::string &filename) {
+ErrorCode YamlConfigMgr::LoadConfigFile(const std::string &filename) {
     struct stat directoryStat;
     int statOK = stat(filename.c_str(), &directoryStat);
     if (statOK != 0) {
