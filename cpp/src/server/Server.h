@@ -29,7 +29,7 @@ class Server {
     void Daemonize();
 
     static void HandleSignal(int signal);
-    ServerError LoadConfig();
+    ErrorCode LoadConfig();
 
     void StartService();
     void StopService();
