@@ -96,6 +96,8 @@ define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
 
 define_option(MILVUS_WITH_KNOWHERE "Build with Knowhere" OFF)
 
+define_option(MILVUS_ENABLE_PROFILING "Build with profiling" ON)
+
 if(CMAKE_VERSION VERSION_LESS 3.7)
     set(MILVUS_WITH_ZSTD_DEFAULT OFF)
 else()
