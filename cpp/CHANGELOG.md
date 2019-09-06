@@ -26,6 +26,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-467 - mysql db test failed
 - MS-470 - Drop index success, which table not created
 - MS-471 - code coverage run failed
+- MS-492 - Drop index failed if index have been created with index_type: FLAT
 
 ## Improvement
 - MS-327 - Clean code for milvus
