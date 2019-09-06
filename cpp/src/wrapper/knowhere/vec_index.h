@@ -92,7 +92,7 @@ extern VecIndexPtr LoadVecIndex(const IndexType &index_type, const zilliz::knowh
 
 extern void AutoGenParams(const IndexType& type, const long& size, Config& cfg);
 
-extern void AutoTurnParams(const IndexType& type, Config& cfg);
+extern void ParameterValidation(const IndexType& type, Config& cfg);
 
 extern IndexType ConvertToCpuIndexType(const IndexType& type);
 extern IndexType ConvertToGpuIndexType(const IndexType& type);
