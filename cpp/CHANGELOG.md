@@ -91,6 +91,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-482 - Change search stream transport to unary in grpc
 - MS-487 - Define metric type in CreateTable
 - MS-488 - Improve code format in scheduler
+- MS-495 - cmake: integrated knowhere
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
