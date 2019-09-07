@@ -8,9 +8,9 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-constexpr size_t table_name_size_limit = 255;
-constexpr int64_t table_dimension_limit = 16384;
-constexpr int32_t index_file_size_limit = 4096; //index trigger size max = 4096 MB
+constexpr size_t TABLE_NAME_SIZE_LIMIT = 255;
+constexpr int64_t TABLE_DIMENSION_LIMIT = 16384;
+constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096; //index trigger size max = 4096 MB
 
 ErrorCode
 ValidationUtil::ValidateTableName(const std::string &table_name) {
@@ -22,7 +22,7 @@ ValidationUtil::ValidateTableName(const std::string &table_name) {
     }
 
     // Table name size shouldn't exceed 16384.
-    if (table_name.size() > table_name_size_limit) {
+    if (table_name.size() > TABLE_NAME_SIZE_LIMIT) {
         SERVER_LOG_ERROR << "Table name size exceed the limitation";
         return SERVER_INVALID_TABLE_NAME;
     }
@@ -48,8 +48,8 @@ ValidationUtil::ValidateTableName(const std::string &table_name) {
 
 ErrorCode
 ValidationUtil::ValidateTableDimension(int64_t dimension) {
-    if (dimension <= 0 || dimension > table_dimension_limit) {
-        SERVER_LOG_ERROR << "Table dimension excceed the limitation: " << table_dimension_limit;
+    if (dimension <= 0 || dimension > TABLE_DIMENSION_LIMIT) {
+        SERVER_LOG_ERROR << "Table dimension excceed the limitation: " << TABLE_DIMENSION_LIMIT;
         return SERVER_INVALID_VECTOR_DIMENSION;
     } else {
         return SERVER_SUCCESS;
@@ -77,7 +77,7 @@ ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
 
 ErrorCode
 ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
-    if(index_file_size <= 0 || index_file_size > index_file_size_limit) {
+    if(index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
         return SERVER_INVALID_INDEX_FILE_SIZE;
     }
 
