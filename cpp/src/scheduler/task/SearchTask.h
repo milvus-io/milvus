@@ -12,6 +12,7 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
+// TODO: rewrite
 class XSearchTask : public Task {
 public:
     explicit

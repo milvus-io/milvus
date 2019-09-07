@@ -13,7 +13,7 @@ namespace milvus {
 namespace engine {
 
 
-TestTask::TestTask(TableFileSchemaPtr& file) : XSearchTask(file) {}
+TestTask::TestTask(TableFileSchemaPtr &file) : XSearchTask(file) {}
 
 void
 TestTask::Load(LoadType type, uint8_t device_id) {
@@ -22,9 +22,12 @@ TestTask::Load(LoadType type, uint8_t device_id) {
 
 void
 TestTask::Execute() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    exec_count_++;
-    done_ = true;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        exec_count_++;
+        done_ = true;
+    }
+    cv_.notify_one();
 }
 
 void
