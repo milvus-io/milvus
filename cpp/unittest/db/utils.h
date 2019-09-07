@@ -32,8 +32,6 @@
 #define STOP_TIMER(name)
 #endif
 
-void ASSERT_STATS(zilliz::milvus::engine::Status &stat);
-
 class BaseTest : public ::testing::Test {
 protected:
     void InitLog();
