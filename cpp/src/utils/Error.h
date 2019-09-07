@@ -11,82 +11,95 @@
 
 namespace zilliz {
 namespace milvus {
-namespace server {
 
-using ServerError = int32_t;
+using ErrorCode = int32_t;
 
-constexpr ServerError SERVER_SUCCESS = 0;
-
-constexpr ServerError SERVER_ERROR_CODE_BASE = 0x30000;
-
-constexpr ServerError
-ToGlobalServerErrorCode(const ServerError error_code) {
+constexpr ErrorCode SERVER_SUCCESS = 0;
+constexpr ErrorCode SERVER_ERROR_CODE_BASE = 0x30000;
+constexpr ErrorCode
+ToServerErrorCode(const ErrorCode error_code) {
     return SERVER_ERROR_CODE_BASE + error_code;
 }
 
-constexpr ServerError SERVER_UNEXPECTED_ERROR = ToGlobalServerErrorCode(1);
-constexpr ServerError SERVER_UNSUPPORTED_ERROR = ToGlobalServerErrorCode(2);
-constexpr ServerError SERVER_NULL_POINTER = ToGlobalServerErrorCode(3);
-constexpr ServerError SERVER_INVALID_ARGUMENT = ToGlobalServerErrorCode(4);
-constexpr ServerError SERVER_FILE_NOT_FOUND = ToGlobalServerErrorCode(5);
-constexpr ServerError SERVER_NOT_IMPLEMENT = ToGlobalServerErrorCode(6);
-constexpr ServerError SERVER_BLOCKING_QUEUE_EMPTY = ToGlobalServerErrorCode(7);
-constexpr ServerError SERVER_CANNOT_CREATE_FOLDER = ToGlobalServerErrorCode(8);
-constexpr ServerError SERVER_CANNOT_CREATE_FILE = ToGlobalServerErrorCode(9);
-constexpr ServerError SERVER_CANNOT_DELETE_FOLDER = ToGlobalServerErrorCode(10);
-constexpr ServerError SERVER_CANNOT_DELETE_FILE = ToGlobalServerErrorCode(11);
-constexpr ServerError SERVER_BUILD_INDEX_ERROR = ToGlobalServerErrorCode(12);
+constexpr ErrorCode DB_SUCCESS = 0;
+constexpr ErrorCode DB_ERROR_CODE_BASE = 0x40000;
+constexpr ErrorCode
+ToDbErrorCode(const ErrorCode error_code) {
+    return DB_ERROR_CODE_BASE + error_code;
+}
 
-constexpr ServerError SERVER_TABLE_NOT_EXIST = ToGlobalServerErrorCode(100);
-constexpr ServerError SERVER_INVALID_TABLE_NAME = ToGlobalServerErrorCode(101);
-constexpr ServerError SERVER_INVALID_TABLE_DIMENSION = ToGlobalServerErrorCode(102);
-constexpr ServerError SERVER_INVALID_TIME_RANGE = ToGlobalServerErrorCode(103);
-constexpr ServerError SERVER_INVALID_VECTOR_DIMENSION = ToGlobalServerErrorCode(104);
-constexpr ServerError SERVER_INVALID_INDEX_TYPE = ToGlobalServerErrorCode(105);
-constexpr ServerError SERVER_INVALID_ROWRECORD = ToGlobalServerErrorCode(106);
-constexpr ServerError SERVER_INVALID_ROWRECORD_ARRAY = ToGlobalServerErrorCode(107);
-constexpr ServerError SERVER_INVALID_TOPK = ToGlobalServerErrorCode(108);
-constexpr ServerError SERVER_ILLEGAL_VECTOR_ID = ToGlobalServerErrorCode(109);
-constexpr ServerError SERVER_ILLEGAL_SEARCH_RESULT = ToGlobalServerErrorCode(110);
-constexpr ServerError SERVER_CACHE_ERROR = ToGlobalServerErrorCode(111);
-constexpr ServerError SERVER_WRITE_ERROR = ToGlobalServerErrorCode(112);
-constexpr ServerError SERVER_INVALID_NPROBE = ToGlobalServerErrorCode(113);
-constexpr ServerError SERVER_INVALID_INDEX_NLIST = ToGlobalServerErrorCode(114);
-constexpr ServerError SERVER_INVALID_INDEX_METRIC_TYPE = ToGlobalServerErrorCode(115);
-constexpr ServerError SERVER_INVALID_INDEX_FILE_SIZE = ToGlobalServerErrorCode(116);
+constexpr ErrorCode KNOWHERE_SUCCESS = 0;
+constexpr ErrorCode KNOWHERE_ERROR_CODE_BASE = 0x50000;
+constexpr ErrorCode
+ToKnowhereErrorCode(const ErrorCode error_code) {
+    return KNOWHERE_ERROR_CODE_BASE + error_code;
+}
 
+//server error code
+constexpr ErrorCode SERVER_UNEXPECTED_ERROR = ToServerErrorCode(1);
+constexpr ErrorCode SERVER_UNSUPPORTED_ERROR = ToServerErrorCode(2);
+constexpr ErrorCode SERVER_NULL_POINTER = ToServerErrorCode(3);
+constexpr ErrorCode SERVER_INVALID_ARGUMENT = ToServerErrorCode(4);
+constexpr ErrorCode SERVER_FILE_NOT_FOUND = ToServerErrorCode(5);
+constexpr ErrorCode SERVER_NOT_IMPLEMENT = ToServerErrorCode(6);
+constexpr ErrorCode SERVER_BLOCKING_QUEUE_EMPTY = ToServerErrorCode(7);
+constexpr ErrorCode SERVER_CANNOT_CREATE_FOLDER = ToServerErrorCode(8);
+constexpr ErrorCode SERVER_CANNOT_CREATE_FILE = ToServerErrorCode(9);
+constexpr ErrorCode SERVER_CANNOT_DELETE_FOLDER = ToServerErrorCode(10);
+constexpr ErrorCode SERVER_CANNOT_DELETE_FILE = ToServerErrorCode(11);
+constexpr ErrorCode SERVER_BUILD_INDEX_ERROR = ToServerErrorCode(12);
 
-constexpr ServerError SERVER_LICENSE_FILE_NOT_EXIST = ToGlobalServerErrorCode(500);
-constexpr ServerError SERVER_LICENSE_VALIDATION_FAIL = ToGlobalServerErrorCode(501);
+constexpr ErrorCode SERVER_TABLE_NOT_EXIST = ToServerErrorCode(100);
+constexpr ErrorCode SERVER_INVALID_TABLE_NAME = ToServerErrorCode(101);
+constexpr ErrorCode SERVER_INVALID_TABLE_DIMENSION = ToServerErrorCode(102);
+constexpr ErrorCode SERVER_INVALID_TIME_RANGE = ToServerErrorCode(103);
+constexpr ErrorCode SERVER_INVALID_VECTOR_DIMENSION = ToServerErrorCode(104);
+constexpr ErrorCode SERVER_INVALID_INDEX_TYPE = ToServerErrorCode(105);
+constexpr ErrorCode SERVER_INVALID_ROWRECORD = ToServerErrorCode(106);
+constexpr ErrorCode SERVER_INVALID_ROWRECORD_ARRAY = ToServerErrorCode(107);
+constexpr ErrorCode SERVER_INVALID_TOPK = ToServerErrorCode(108);
+constexpr ErrorCode SERVER_ILLEGAL_VECTOR_ID = ToServerErrorCode(109);
+constexpr ErrorCode SERVER_ILLEGAL_SEARCH_RESULT = ToServerErrorCode(110);
+constexpr ErrorCode SERVER_CACHE_ERROR = ToServerErrorCode(111);
+constexpr ErrorCode SERVER_WRITE_ERROR = ToServerErrorCode(112);
+constexpr ErrorCode SERVER_INVALID_NPROBE = ToServerErrorCode(113);
+constexpr ErrorCode SERVER_INVALID_INDEX_NLIST = ToServerErrorCode(114);
+constexpr ErrorCode SERVER_INVALID_INDEX_METRIC_TYPE = ToServerErrorCode(115);
+constexpr ErrorCode SERVER_INVALID_INDEX_FILE_SIZE = ToServerErrorCode(116);
 
-constexpr ServerError DB_META_TRANSACTION_FAILED = ToGlobalServerErrorCode(1000);
+//db error code
+constexpr ErrorCode DB_META_TRANSACTION_FAILED = ToDbErrorCode(1);
+constexpr ErrorCode DB_ERROR = ToDbErrorCode(2);
+constexpr ErrorCode DB_NOT_FOUND = ToDbErrorCode(3);
+constexpr ErrorCode DB_ALREADY_EXIST = ToDbErrorCode(4);
+constexpr ErrorCode DB_INVALID_PATH = ToDbErrorCode(5);
 
-using KnowhereError = int32_t;
-constexpr KnowhereError KNOWHERE_SUCCESS = 0;
-constexpr KnowhereError KNOWHERE_ERROR = ToGlobalServerErrorCode(1);
-constexpr KnowhereError KNOWHERE_INVALID_ARGUMENT = ToGlobalServerErrorCode(2);
-constexpr KnowhereError KNOWHERE_UNEXPECTED_ERROR = ToGlobalServerErrorCode(3);
+//knowhere error code
+constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);
+constexpr ErrorCode KNOWHERE_INVALID_ARGUMENT = ToKnowhereErrorCode(2);
+constexpr ErrorCode KNOWHERE_UNEXPECTED_ERROR = ToKnowhereErrorCode(3);
 
-class ServerException : public std::exception {
-public:
-    ServerException(ServerError error_code,
-              const std::string &message = std::string())
+namespace server {
+    class ServerException : public std::exception {
+    public:
+        ServerException(ErrorCode error_code,
+                        const std::string &message = std::string())
             : error_code_(error_code), message_(message) {}
 
-public:
-    ServerError error_code() const {
-        return error_code_;
-    }
+    public:
+        ErrorCode error_code() const {
+            return error_code_;
+        }
 
-    virtual const char *what() const noexcept {
-        return message_.c_str();
-    }
+        virtual const char *what() const noexcept {
+            return message_.c_str();
+        }
 
-private:
-    ServerError error_code_;
-    std::string message_;
-};
+    private:
+        ErrorCode error_code_;
+        std::string message_;
+    };
+}
 
-}  // namespace server
 }  // namespace milvus
 }  // namespace zilliz

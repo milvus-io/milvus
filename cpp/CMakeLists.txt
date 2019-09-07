@@ -31,6 +31,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(BUILD_TYPE "release")
 else()
     set(BUILD_TYPE "debug")
+    SET(CMAKE_VERBOSE_MAKEFILE on)
 endif()
 message(STATUS "Build type = ${BUILD_TYPE}")
 
@@ -70,21 +71,21 @@ set(MILVUS_BINARY_DIR ${PROJECT_BINARY_DIR})
 find_package(CUDA)
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES -arch sm_60 --expt-extended-lambda")
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
-message("CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}")
-message("CUDA_NVCC_FLAGS=${CUDA_NVCC_FLAGS}")
+message(STATUS "CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}")
+message(STATUS "CUDA_NVCC_FLAGS=${CUDA_NVCC_FLAGS}")
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
-    message("building milvus_engine on x86 architecture")
+    message(STATUS "building milvus_engine on x86 architecture")
     set(MILVUS_BUILD_ARCH x86_64)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(ppc)")
-    message("building milvus_engine on ppc architecture")
+    message(STATUS "building milvus_engine on ppc architecture")
     set(MILVUS_BUILD_ARCH ppc64le)
 else()
-    message("unknown processor type")
-    message("CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
+    message(WARNING "unknown processor type")
+    message(WARNING "CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
     set(MILVUS_BUILD_ARCH unknown)
 endif()
 
@@ -93,6 +94,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
 endif()
+
+set(ALLOW_DUPLICATE_CUSTOM_TARGETS TRUE)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -104,14 +107,6 @@ include(ThirdPartyPackages)
 include_directories(${MILVUS_SOURCE_DIR})
 link_directories(${MILVUS_BINARY_DIR})
 
-if (NOT DEFINED KNOWHERE_BUILD_DIR)
-    message(FATAL_ERROR "You must set  environment variable KNOWHERE_BUILD_DIR")
-endif()
-message(STATUS "Build with ${KNOWHERE_BUILD_DIR}")
-include_directories(${KNOWHERE_BUILD_DIR}/include)
-include_directories(${KNOWHERE_BUILD_DIR}/include/SPTAG/AnnService)
-link_directories(${KNOWHERE_BUILD_DIR}/lib)
-
 ## Following should be check
 
 set(MILVUS_ENGINE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
@@ -119,7 +114,7 @@ set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
 
 add_compile_definitions(PROFILER=${PROFILER})
 
-message("MILVUS_ENABLE_PROFILING = ${MILVUS_ENABLE_PROFILING}")
+message(STATUS "MILVUS_ENABLE_PROFILING = ${MILVUS_ENABLE_PROFILING}")
 if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
     ADD_DEFINITIONS(-DMILVUS_ENABLE_PROFILING)
 endif()

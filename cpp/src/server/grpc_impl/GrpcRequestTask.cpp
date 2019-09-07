@@ -67,7 +67,7 @@ namespace {
     void
     ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range> &range_array,
                               std::vector<DB_DATE> &dates,
-                              ServerError &error_code,
+                              ErrorCode &error_code,
                               std::string &error_msg) {
         dates.clear();
         for (auto &range : range_array) {
@@ -123,13 +123,13 @@ CreateTableTask::Create(const ::milvus::grpc::TableSchema *schema) {
     return std::shared_ptr<GrpcBaseTask>(new CreateTableTask(schema));
 }
 
-ServerError
+ErrorCode
 CreateTableTask::OnExecute() {
     TimeRecorder rc("CreateTableTask");
 
     try {
         //step 1: check arguments
-        ServerError res = ValidationUtil::ValidateTableName(schema_->table_name().table_name());
+        ErrorCode res = ValidationUtil::ValidateTableName(schema_->table_name().table_name());
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + schema_->table_name().table_name());
         }
@@ -160,7 +160,7 @@ CreateTableTask::OnExecute() {
         engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
         if (!stat.ok()) {
             //table could exist
-            if(stat.IsAlreadyExist()) {
+            if(stat.code() == DB_ALREADY_EXIST) {
                 return SetError(SERVER_INVALID_TABLE_NAME, stat.ToString());
             }
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
@@ -187,13 +187,13 @@ DescribeTableTask::Create(const std::string &table_name, ::milvus::grpc::TableSc
     return std::shared_ptr<GrpcBaseTask>(new DescribeTableTask(table_name, schema));
 }
 
-ServerError
+ErrorCode
 DescribeTableTask::OnExecute() {
     TimeRecorder rc("DescribeTableTask");
 
     try {
         //step 1: check arguments
-        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -235,14 +235,14 @@ CreateIndexTask::Create(const ::milvus::grpc::IndexParam *index_param) {
     return std::shared_ptr<GrpcBaseTask>(new CreateIndexTask(index_param));
 }
 
-ServerError
+ErrorCode
 CreateIndexTask::OnExecute() {
     try {
         TimeRecorder rc("CreateIndexTask");
 
         //step 1: check arguments
         std::string table_name_ = index_param_->table_name().table_name();
-        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -298,13 +298,13 @@ HasTableTask::Create(const std::string &table_name, bool &has_table) {
     return std::shared_ptr<GrpcBaseTask>(new HasTableTask(table_name, has_table));
 }
 
-ServerError
+ErrorCode
 HasTableTask::OnExecute() {
     try {
         TimeRecorder rc("HasTableTask");
 
         //step 1: check arguments
-        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -335,13 +335,13 @@ DropTableTask::Create(const std::string &table_name) {
     return std::shared_ptr<GrpcBaseTask>(new DropTableTask(table_name));
 }
 
-ServerError
+ErrorCode
 DropTableTask::OnExecute() {
     try {
         TimeRecorder rc("DropTableTask");
 
         //step 1: check arguments
-        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -351,7 +351,7 @@ DropTableTask::OnExecute() {
         table_info.table_id_ = table_name_;
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
-            if (stat.IsNotFound()) {
+            if (stat.code() == DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
             } else {
                 return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
@@ -387,7 +387,7 @@ ShowTablesTask::Create(::grpc::ServerWriter<::milvus::grpc::TableName> *writer) 
     return std::shared_ptr<GrpcBaseTask>(new ShowTablesTask(writer));
 }
 
-ServerError
+ErrorCode
 ShowTablesTask::OnExecute() {
     std::vector<engine::meta::TableSchema> schema_array;
     engine::Status stat = DBWrapper::DB()->AllTables(schema_array);
@@ -424,13 +424,13 @@ InsertTask::Create(const ::milvus::grpc::InsertParam *insert_param,
     return std::shared_ptr<GrpcBaseTask>(new InsertTask(insert_param, record_ids));
 }
 
-ServerError
+ErrorCode
 InsertTask::OnExecute() {
     try {
         TimeRecorder rc("InsertVectorTask");
 
         //step 1: check arguments
-        ServerError res = ValidationUtil::ValidateTableName(insert_param_->table_name());
+        ErrorCode res = ValidationUtil::ValidateTableName(insert_param_->table_name());
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + insert_param_->table_name());
         }
@@ -450,7 +450,7 @@ InsertTask::OnExecute() {
         table_info.table_id_ = insert_param_->table_name();
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
-            if (stat.IsNotFound()) {
+            if (stat.code() == DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST,
                                 "Table " + insert_param_->table_name() + " not exists");
             } else {
@@ -489,7 +489,7 @@ InsertTask::OnExecute() {
             }
             uint64_t vec_dim = insert_param_->row_record_array(i).vector_data().size();
             if (vec_dim != table_info.dimension_) {
-                ServerError error_code = SERVER_INVALID_VECTOR_DIMENSION;
+                ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
                 std::string error_msg = "Invalid rowrecord dimension: " + std::to_string(vec_dim)
                                         + " vs. table dimension:" +
                                         std::to_string(table_info.dimension_);
@@ -569,14 +569,14 @@ SearchTask::Create(const ::milvus::grpc::SearchParam *search_vector_infos,
                                                         response));
 }
 
-ServerError
+ErrorCode
 SearchTask::OnExecute() {
     try {
         TimeRecorder rc("SearchTask");
 
         //step 1: check table name
         std::string table_name_ = search_param_->table_name();
-        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -586,7 +586,7 @@ SearchTask::OnExecute() {
         table_info.table_id_ = table_name_;
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
-            if (stat.IsNotFound()) {
+            if (stat.code() == DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
             } else {
                 return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
@@ -612,7 +612,7 @@ SearchTask::OnExecute() {
 
         //step 4: check date range, and convert to db dates
         std::vector<DB_DATE> dates;
-        ServerError error_code = SERVER_SUCCESS;
+        ErrorCode error_code = SERVER_SUCCESS;
         std::string error_msg;
 
         std::vector<::milvus::grpc::Range> range_array;
@@ -642,7 +642,7 @@ SearchTask::OnExecute() {
             }
             uint64_t query_vec_dim = search_param_->query_record_array(i).vector_data().size();
             if (query_vec_dim != table_info.dimension_) {
-                ServerError error_code = SERVER_INVALID_VECTOR_DIMENSION;
+                ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
                 std::string error_msg = "Invalid rowrecord dimension: " + std::to_string(query_vec_dim)
                                         + " vs. table dimension:" + std::to_string(table_info.dimension_);
                 return SetError(error_code, error_msg);
@@ -722,13 +722,13 @@ CountTableTask::Create(const std::string &table_name, int64_t &row_count) {
     return std::shared_ptr<GrpcBaseTask>(new CountTableTask(table_name, row_count));
 }
 
-ServerError
+ErrorCode
 CountTableTask::OnExecute() {
     try {
         TimeRecorder rc("GetTableRowCountTask");
 
         //step 1: check arguments
-        ServerError res = SERVER_SUCCESS;
+        ErrorCode res = SERVER_SUCCESS;
         res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
@@ -765,7 +765,7 @@ CmdTask::Create(const std::string &cmd, std::string &result) {
     return std::shared_ptr<GrpcBaseTask>(new CmdTask(cmd, result));
 }
 
-ServerError
+ErrorCode
 CmdTask::OnExecute() {
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
@@ -794,14 +794,14 @@ DeleteByRangeTask::Create(const ::milvus::grpc::DeleteByRangeParam *delete_by_ra
     return std::shared_ptr<GrpcBaseTask>(new DeleteByRangeTask(delete_by_range_param));
 }
 
-ServerError
+ErrorCode
 DeleteByRangeTask::OnExecute() {
     try {
         TimeRecorder rc("DeleteByRangeTask");
 
         //step 1: check arguments
         std::string table_name = delete_by_range_param_->table_name();
-        ServerError res = ValidationUtil::ValidateTableName(table_name);
+        ErrorCode res = ValidationUtil::ValidateTableName(table_name);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name);
         }
@@ -811,7 +811,7 @@ DeleteByRangeTask::OnExecute() {
         table_info.table_id_ = table_name;
         engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
-            if (stat.IsNotFound()) {
+            if (stat.code(), DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name + " not exists");
             } else {
                 return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
@@ -822,7 +822,7 @@ DeleteByRangeTask::OnExecute() {
 
         //step 3: check date range, and convert to db dates
         std::vector<DB_DATE> dates;
-        ServerError error_code = SERVER_SUCCESS;
+        ErrorCode error_code = SERVER_SUCCESS;
         std::string error_msg;
 
         std::vector<::milvus::grpc::Range> range_array;
@@ -862,13 +862,13 @@ PreloadTableTask::Create(const std::string &table_name){
     return std::shared_ptr<GrpcBaseTask>(new PreloadTableTask(table_name));
 }
 
-ServerError
+ErrorCode
 PreloadTableTask::OnExecute() {
     try {
         TimeRecorder rc("PreloadTableTask");
 
         //step 1: check arguments
-        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -902,13 +902,13 @@ DescribeIndexTask::Create(const std::string &table_name,
     return std::shared_ptr<GrpcBaseTask>(new DescribeIndexTask(table_name, index_param));
 }
 
-ServerError
+ErrorCode
 DescribeIndexTask::OnExecute() {
     try {
         TimeRecorder rc("DescribeIndexTask");
 
         //step 1: check arguments
-        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
@@ -944,26 +944,19 @@ DropIndexTask::Create(const std::string &table_name){
     return std::shared_ptr<GrpcBaseTask>(new DropIndexTask(table_name));
 }
 
-ServerError
+ErrorCode
 DropIndexTask::OnExecute() {
     try {
         TimeRecorder rc("DropIndexTask");
 
         //step 1: check arguments
-        ServerError res = ValidationUtil::ValidateTableName(table_name_);
+        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid table name: " + table_name_);
         }
 
-        //step 2:check index existence
-        engine::TableIndex index;
-        engine::Status stat = DBWrapper::DB()->DescribeIndex(table_name_, index);
-        if (index.engine_type_ == 1) {
-            return SetError(SERVER_UNEXPECTED_ERROR, "index not existed");
-        }
-
-        //step 3: check table existence
-        stat = DBWrapper::DB()->DropIndex(table_name_);
+        //step 2: check table existence
+        auto stat = DBWrapper::DB()->DropIndex(table_name_);
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
