@@ -59,7 +59,7 @@ ResourceMgr::Add(ResourcePtr &&resource) {
     return ret;
 }
 
-void
+bool
 ResourceMgr::Connect(const std::string &name1, const std::string &name2, Connection &connection) {
     auto res1 = GetResource(name1);
     auto res2 = GetResource(name2);
@@ -67,7 +67,9 @@ ResourceMgr::Connect(const std::string &name1, const std::string &name2, Connect
         res1->AddNeighbour(std::static_pointer_cast<Node>(res2), connection);
         // TODO: enable when task balance supported
 //        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
+        return true;
     }
+    return false;
 }
 
 void
@@ -78,7 +80,7 @@ ResourceMgr::Clear() {
 }
 
 std::vector<ResourcePtr>
-ResourceMgr::GetComputeResource() {
+ResourceMgr::GetComputeResources() {
     std::vector<ResourcePtr> result;
     for (auto &resource : resources_) {
         if (resource->HasExecutor()) {
@@ -109,7 +111,12 @@ ResourceMgr::GetResource(const std::string &name) {
 }
 
 uint64_t
-ResourceMgr::GetNumOfComputeResource() {
+ResourceMgr::GetNumOfResource() const {
+    return resources_.size();
+}
+
+uint64_t
+ResourceMgr::GetNumOfComputeResource() const {
     uint64_t count = 0;
     for (auto &res : resources_) {
         if (res->HasExecutor()) {
