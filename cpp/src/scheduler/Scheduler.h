@@ -21,6 +21,7 @@ namespace milvus {
 namespace engine {
 
 
+// TODO: refactor, not friendly to unittest, logical in framework code
 class Scheduler {
 public:
     explicit
