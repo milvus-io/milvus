@@ -243,28 +243,8 @@ void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Co
 #define GPU_MAX_NRPOBE 1024
 #endif
 
-#define GPU_MAX_TOP_K GPU_MAX_NRPOBE
-// TODO(yzb): may be changed latter
-#define CPU_MAX_TOP_K GPU_MAX_TOP_K
-#define DEFAULT_MAX_TOP_K GPU_MAX_TOP_K
-
 void ParameterValidation(const IndexType &type, Config &cfg) {
     switch (type) {
-        case IndexType::FAISS_IVFFLAT_CPU:
-        case IndexType::FAISS_IVFPQ_CPU:
-        case IndexType::FAISS_IVFSQ8_CPU: {
-            //search on CPU
-            if (cfg.get_with_default("k", 0) != 0) {
-                auto k = cfg["k"].as<int>();
-                if (k > CPU_MAX_TOP_K) {
-                    WRAPPER_LOG_WARNING << "When search with CPU, top_k shoud be no more than " << CPU_MAX_TOP_K
-                                        << ", but you passed " << k
-                                        << ". Search with " << CPU_MAX_TOP_K << " instead";
-                    cfg.insert_or_assign("k", CPU_MAX_TOP_K);
-                }
-            }
-            break;
-        }
         case IndexType::FAISS_IVFSQ8_GPU:
         case IndexType::FAISS_IVFFLAT_GPU:
         case IndexType::FAISS_IVFPQ_GPU: {
@@ -276,32 +256,6 @@ void ParameterValidation(const IndexType &type, Config &cfg) {
                                         << ", but you passed " << nprobe
                                         << ". Search with " << GPU_MAX_NRPOBE << " instead";
                     cfg.insert_or_assign("nprobe", GPU_MAX_NRPOBE);
-                }
-            }
-            if (cfg.get_with_default("k", 0) != 0) {
-                auto k = cfg["k"].as<int>();
-                if (k > GPU_MAX_TOP_K) {
-                    WRAPPER_LOG_WARNING << "When search with GPU, top_k shoud be no more than " << GPU_MAX_TOP_K
-                                        << ", but you passed " << k
-                                        << ". Search with " << GPU_MAX_TOP_K << " instead";
-                    cfg.insert_or_assign("k", GPU_MAX_TOP_K);
-                }
-            }
-            break;
-        }
-        case IndexType::FAISS_IDMAP:
-        case IndexType::FAISS_IVFFLAT_MIX:
-        case IndexType::SPTAG_KDT_RNT_CPU:
-        case IndexType::FAISS_IVFSQ8_MIX:
-        case IndexType::NSG_MIX: {
-            // TODO(yzb): need to figure out where it search
-            if (cfg.get_with_default("k", 0) != 0) {
-                auto k = cfg["k"].as<int>();
-                if (k > DEFAULT_MAX_TOP_K) {
-                    WRAPPER_LOG_WARNING << "top_k shoud be no more than " << DEFAULT_MAX_TOP_K << ", but you passed "
-                                        << k
-                                        << ". Search with " << DEFAULT_MAX_TOP_K << " instead";
-                    cfg.insert_or_assign("k", DEFAULT_MAX_TOP_K);
                 }
             }
             break;
