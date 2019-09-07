@@ -8,6 +8,7 @@
 #include "scheduler/resource/DiskResource.h"
 #include "scheduler/resource/CpuResource.h"
 #include "scheduler/resource/GpuResource.h"
+#include "scheduler/resource/TestResource.h"
 #include "scheduler/task/Task.h"
 #include "scheduler/task/TestTask.h"
 #include "scheduler/ResourceFactory.h"
@@ -18,7 +19,71 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-class ResourceTest : public testing::Test {
+/************ ResourceBaseTest ************/
+class ResourceBaseTest : public testing::Test {
+protected:
+    void
+    SetUp() override {
+        only_loader_  = std::make_shared<DiskResource>(name1, id1, true, false);
+        only_executor_  = std::make_shared<CpuResource>(name2, id2, false, true);
+        both_enable_  = std::make_shared<GpuResource>(name3, id3, true, true);
+        both_disable_  = std::make_shared<TestResource>(name4, id4, false, false);
+    }
+
+    const std::string name1 = "only_loader_";
+    const std::string name2 = "only_executor_";
+    const std::string name3 = "both_enable_";
+    const std::string name4 = "both_disable_";
+
+    const uint64_t id1 = 1;
+    const uint64_t id2 = 2;
+    const uint64_t id3 = 3;
+    const uint64_t id4 = 4;
+
+    ResourcePtr only_loader_ = nullptr;
+    ResourcePtr only_executor_ = nullptr;
+    ResourcePtr both_enable_ = nullptr;
+    ResourcePtr both_disable_ = nullptr;
+};
+
+TEST_F(ResourceBaseTest, name) {
+    ASSERT_EQ(only_loader_->name(), name1);
+    ASSERT_EQ(only_executor_->name(), name2);
+    ASSERT_EQ(both_enable_->name(), name3);
+    ASSERT_EQ(both_disable_->name(), name4);
+}
+
+TEST_F(ResourceBaseTest, type) {
+    ASSERT_EQ(only_loader_->type(), ResourceType::DISK);
+    ASSERT_EQ(only_executor_->type(), ResourceType::CPU);
+    ASSERT_EQ(both_enable_->type(), ResourceType::GPU);
+    ASSERT_EQ(both_disable_->type(), ResourceType::TEST);
+}
+
+TEST_F(ResourceBaseTest, device_id) {
+    ASSERT_EQ(only_loader_->device_id(), id1);
+    ASSERT_EQ(only_executor_->device_id(), id2);
+    ASSERT_EQ(both_enable_->device_id(), id3);
+    ASSERT_EQ(both_disable_->device_id(), id4);
+}
+
+TEST_F(ResourceBaseTest, has_loader) {
+    ASSERT_TRUE(only_loader_->HasLoader());
+    ASSERT_FALSE(only_executor_->HasLoader());
+    ASSERT_TRUE(both_enable_->HasLoader());
+    ASSERT_FALSE(both_disable_->HasLoader());
+}
+
+TEST_F(ResourceBaseTest, has_executor) {
+    ASSERT_FALSE(only_loader_->HasExecutor());
+    ASSERT_TRUE(only_executor_->HasExecutor());
+    ASSERT_TRUE(both_enable_->HasExecutor());
+    ASSERT_FALSE(both_disable_->HasExecutor());
+}
+
+/************ ResourceAdvanceTest ************/
+
+class ResourceAdvanceTest : public testing::Test {
 protected:
     void
     SetUp() override {
@@ -31,14 +96,18 @@ protected:
 
         auto subscriber = [&](EventPtr event) {
             if (event->Type() == EventType::LOAD_COMPLETED) {
-                std::lock_guard<std::mutex> lock(load_mutex_);
-                ++load_count_;
+                {
+                    std::lock_guard<std::mutex> lock(load_mutex_);
+                    ++load_count_;
+                }
                 cv_.notify_one();
             }
 
             if (event->Type() == EventType::FINISH_TASK) {
-                std::lock_guard<std::mutex> lock(load_mutex_);
-                ++exec_count_;
+                {
+                    std::lock_guard<std::mutex> lock(load_mutex_);
+                    ++exec_count_;
+                }
                 cv_.notify_one();
             }
         };
@@ -82,7 +151,32 @@ protected:
     std::condition_variable cv_;
 };
 
-TEST_F(ResourceTest, cpu_resource_test) {
+TEST_F(ResourceAdvanceTest, disk_resource_test) {
+    const uint64_t NUM = 100;
+    std::vector<std::shared_ptr<TestTask>> tasks;
+    TableFileSchemaPtr dummy = nullptr;
+    for (uint64_t i = 0; i < NUM; ++i) {
+        auto task = std::make_shared<TestTask>(dummy);
+        tasks.push_back(task);
+        disk_resource_->task_table().Put(task);
+    }
+
+    disk_resource_->WakeupLoader();
+    WaitLoader(NUM);
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        ASSERT_EQ(tasks[i]->load_count_, 0);
+    }
+
+    disk_resource_->WakeupExecutor();
+    WaitExecutor(NUM);
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        ASSERT_EQ(tasks[i]->exec_count_, 0);
+    }
+}
+
+TEST_F(ResourceAdvanceTest, cpu_resource_test) {
     const uint64_t NUM = 100;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
@@ -94,8 +188,6 @@ TEST_F(ResourceTest, cpu_resource_test) {
 
     cpu_resource_->WakeupLoader();
     WaitLoader(NUM);
-//    std::cout << "after WakeupLoader" << std::endl;
-//    std::cout << cpu_resource_->task_table().Dump();
 
     for (uint64_t i = 0; i < NUM; ++i) {
         ASSERT_EQ(tasks[i]->load_count_, 1);
@@ -103,15 +195,13 @@ TEST_F(ResourceTest, cpu_resource_test) {
 
     cpu_resource_->WakeupExecutor();
     WaitExecutor(NUM);
-//    std::cout << "after WakeupExecutor" << std::endl;
-//    std::cout << cpu_resource_->task_table().Dump();
 
     for (uint64_t i = 0; i < NUM; ++i) {
         ASSERT_EQ(tasks[i]->exec_count_, 1);
     }
 }
 
-TEST_F(ResourceTest, gpu_resource_test) {
+TEST_F(ResourceAdvanceTest, gpu_resource_test) {
     const uint64_t NUM = 100;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
@@ -123,8 +213,6 @@ TEST_F(ResourceTest, gpu_resource_test) {
 
     gpu_resource_->WakeupLoader();
     WaitLoader(NUM);
-//    std::cout << "after WakeupLoader" << std::endl;
-//    std::cout << cpu_resource_->task_table().Dump();
 
     for (uint64_t i = 0; i < NUM; ++i) {
         ASSERT_EQ(tasks[i]->load_count_, 1);
@@ -132,8 +220,6 @@ TEST_F(ResourceTest, gpu_resource_test) {
 
     gpu_resource_->WakeupExecutor();
     WaitExecutor(NUM);
-//    std::cout << "after WakeupExecutor" << std::endl;
-//    std::cout << cpu_resource_->task_table().Dump();
 
     for (uint64_t i = 0; i < NUM; ++i) {
         ASSERT_EQ(tasks[i]->exec_count_, 1);
