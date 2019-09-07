@@ -39,3 +39,5 @@ endif()
 
 target_link_libraries(test_nsg ${depend_libs} ${unittest_libs} ${basic_libs})
 ##############################
+
+install(TARGETS test_nsg DESTINATION unittest)
