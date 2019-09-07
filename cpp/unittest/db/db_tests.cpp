@@ -147,7 +147,7 @@ TEST_F(DBTest, DB_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     engine::IDNumbers vector_ids;
@@ -181,7 +181,7 @@ TEST_F(DBTest, DB_TEST) {
             ss << "Search " << j << " With Size " << count/engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
-            ASSERT_STATS(stat);
+            ASSERT_TRUE(stat.ok());
             for (auto k=0; k<qb; ++k) {
                 ASSERT_EQ(results[k][0].first, target_ids[k]);
                 ss.str("");
@@ -212,7 +212,7 @@ TEST_F(DBTest, DB_TEST) {
 
     uint64_t count;
     stat = db_->GetTableRowCount(TABLE_NAME, count);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_TRUE(count > 0);
 };
 
@@ -223,7 +223,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     // prepare raw data
@@ -258,7 +258,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     for (int j = 0; j < nb / batch_size; ++j) {
         stat = db_->InsertVectors(TABLE_NAME, batch_size, xb.data()+batch_size*j*TABLE_DIM, ids);
         if (j == 200){ sleep(1);}
-        ASSERT_STATS(stat);
+        ASSERT_TRUE(stat.ok());
     }
 
     engine::TableIndex index;
@@ -268,7 +268,7 @@ TEST_F(DBTest, SEARCH_TEST) {
     {
         engine::QueryResults results;
         stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
-        ASSERT_STATS(stat);
+        ASSERT_TRUE(stat.ok());
     }
 
     {//search by specify index file
@@ -276,7 +276,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
         engine::QueryResults results;
         stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
-        ASSERT_STATS(stat);
+        ASSERT_TRUE(stat.ok());
     }
 
     // TODO(linxj): add groundTruth assert
@@ -289,7 +289,7 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     int64_t nb = VECTOR_COUNT;
@@ -309,7 +309,7 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
 
     int64_t prev_cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     stat = db_->PreloadTable(TABLE_NAME);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     int64_t cur_cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     ASSERT_TRUE(prev_cache_usage < cur_cache_usage);
 
@@ -322,7 +322,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     std::vector<engine::meta::TableSchema> table_schema_array;
     stat = db_->AllTables(table_schema_array);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     bool bfound = false;
     for(auto& schema : table_schema_array) {
         if(schema.table_id_ == TABLE_NAME) {
@@ -335,7 +335,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     uint64_t size;
@@ -366,7 +366,7 @@ TEST_F(DBTest2, DELETE_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
 
     bool has_table = false;
     db_->HasTable(TABLE_NAME, has_table);
@@ -405,7 +405,7 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
 
     bool has_table = false;
     db_->HasTable(TABLE_NAME, has_table);
@@ -433,7 +433,7 @@ TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     ConvertTimeRangeToDBDates(start_value, end_value, dates);
 
     stat = db_->DeleteTable(TABLE_NAME, dates);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
 
     uint64_t row_count = 0;
     db_->GetTableRowCount(TABLE_NAME, row_count);
