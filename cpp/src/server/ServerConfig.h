@@ -68,8 +68,8 @@ class ServerConfig {
  public:
     static ServerConfig &GetInstance();
 
-    ServerError LoadConfigFile(const std::string& config_filename);
-    ServerError ValidateConfig() const;
+    ErrorCode LoadConfigFile(const std::string& config_filename);
+    ErrorCode ValidateConfig() const;
     void PrintAll() const;
 
     ConfigNode GetConfig(const std::string& name) const;

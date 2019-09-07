@@ -39,8 +39,7 @@ class PrometheusMetrics: public MetricsBase {
         return instance;
     }
 
-    ServerError
-    Init();
+    ErrorCode Init();
 
  private:
     std::shared_ptr<prometheus::Exposer> exposer_ptr_;

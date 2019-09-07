@@ -22,8 +22,8 @@ class CommonUtil {
     static bool IsFileExist(const std::string &path);
     static uint64_t GetFileSize(const std::string &path);
     static bool IsDirectoryExist(const std::string &path);
-    static ServerError CreateDirectory(const std::string &path);
-    static ServerError DeleteDirectory(const std::string &path);
+    static ErrorCode CreateDirectory(const std::string &path);
+    static ErrorCode DeleteDirectory(const std::string &path);
 
     static std::string GetExePath();
 
