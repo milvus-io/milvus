@@ -97,6 +97,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-504 - Update node_test in scheduler
 - MS-505 - Install core unit test and add to coverage
 - MS-508 - Update normal_test in scheduler
+- MS-511 - Update resource_test in scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
