@@ -22,9 +22,9 @@ std::string GetTableName();
 
 const std::string TABLE_NAME = GetTableName();
 constexpr int64_t TABLE_DIMENSION = 512;
-constexpr int64_t TABLE_INDEX_FILE_SIZE = 768;
-constexpr int64_t BATCH_ROW_COUNT = 100000;
-constexpr int64_t NQ = 100;
+constexpr int64_t TABLE_INDEX_FILE_SIZE = 1024;
+constexpr int64_t BATCH_ROW_COUNT = 1000000;
+constexpr int64_t NQ = 10000;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
 constexpr int64_t ADD_VECTOR_LOOP = 1;
@@ -306,7 +306,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//search vectors after build index finish
-        DoSearch(conn, search_record_array, "Search after build index finish");
+        for (uint64_t i = 0; i < 5; ++i) {
+            DoSearch(conn, search_record_array, "Search after build index finish");
+        }
 //        std::cout << conn->DumpTaskTables() << std::endl;
     }
 
@@ -338,7 +340,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "Server status before disconnect: " << status << std::endl;
     }
     Connection::Destroy(conn);
-//    conn->Disconnect();
     {//server status
         std::string status = conn->ServerStatus();
         std::cout << "Server status after disconnect: " << status << std::endl;

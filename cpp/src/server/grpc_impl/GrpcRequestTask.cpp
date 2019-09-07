@@ -14,7 +14,7 @@
 #include "GrpcMilvusServer.h"
 #include "db/Utils.h"
 #include "scheduler/SchedInst.h"
-#include <gperftools/profiler.h>
+//#include <gperftools/profiler.h>
 
 #include "src/server/Server.h"
 
