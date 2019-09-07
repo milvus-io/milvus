@@ -14,8 +14,6 @@
 #include "knowhere/common/config.h"
 #include "knowhere/common/binary_set.h"
 
-#include "cuda.h"
-
 
 namespace zilliz {
 namespace milvus {
@@ -62,7 +60,7 @@ class VecIndex {
                              long *ids,
                              const Config &cfg = Config()) = 0;
 
-    virtual VecIndexPtr CopyToGpu(const int64_t& device_id,
+    virtual VecIndexPtr CopyToGpu(const int64_t &device_id,
                                   const Config &cfg = Config()) = 0;
 
     virtual VecIndexPtr CopyToCpu(const Config &cfg = Config()) = 0;
@@ -86,16 +84,16 @@ extern ErrorCode write_index(VecIndexPtr index, const std::string &location);
 
 extern VecIndexPtr read_index(const std::string &location);
 
-extern VecIndexPtr GetVecIndexFactory(const IndexType &type, const Config& cfg = Config());
+extern VecIndexPtr GetVecIndexFactory(const IndexType &type, const Config &cfg = Config());
 
 extern VecIndexPtr LoadVecIndex(const IndexType &index_type, const zilliz::knowhere::BinarySet &index_binary);
 
-extern void AutoGenParams(const IndexType& type, const long& size, Config& cfg);
+extern void AutoGenParams(const IndexType &type, const long &size, Config &cfg);
 
-extern void ParameterValidation(const IndexType& type, Config& cfg);
+extern void ParameterValidation(const IndexType &type, Config &cfg);
 
-extern IndexType ConvertToCpuIndexType(const IndexType& type);
-extern IndexType ConvertToGpuIndexType(const IndexType& type);
+extern IndexType ConvertToCpuIndexType(const IndexType &type);
+extern IndexType ConvertToGpuIndexType(const IndexType &type);
 
 }
 }
