@@ -99,7 +99,17 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 
     try {
         if (type == LoadType::DISK2CPU) {
-            index_engine_->Load();
+            auto stat = index_engine_->Load();
+            if(!stat.ok()) {
+                //typical error: file not available
+                ENGINE_LOG_ERROR << "Failed to load index file: file not available";
+
+                for(auto& context : search_contexts_) {
+                    context->IndexSearchDone(file_->id_);//mark as done avoid dead lock, even failed
+                }
+
+                return;
+            }
         } else if (type == LoadType::CPU2GPU) {
             index_engine_->CopyToGpu(device_id);
         } else if (type == LoadType::GPU2CPU) {

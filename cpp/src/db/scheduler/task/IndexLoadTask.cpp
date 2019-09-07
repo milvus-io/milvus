@@ -50,7 +50,17 @@ std::shared_ptr<IScheduleTask> IndexLoadTask::Execute() {
                                                         file_->nlist_);
 
     try {
-        index_ptr->Load();
+        auto stat = index_ptr->Load();
+        if(!stat.ok()) {
+            //typical error: file not available
+            ENGINE_LOG_ERROR << "Failed to load index file: file not available";
+
+            for(auto& context : search_contexts_) {
+                context->IndexSearchDone(file_->id_);//mark as done avoid dead lock, even failed
+            }
+
+            return nullptr;
+        }
     } catch (std::exception& ex) {
         //typical error: out of disk space or permition denied
         std::string msg = "Failed to load index file: " + std::string(ex.what());
