@@ -93,6 +93,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-488 - Improve code format in scheduler
 - MS-495 - cmake: integrated knowhere
 - MS-496 - Change the top_k limitation from 1024 to 2048
+- MS-505 - Install core unit test
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
