@@ -9,14 +9,6 @@
 #include "utils.h"
 
 
-DataGenPtr GetGenerateFactory(const std::string &gen_type) {
-    std::shared_ptr<DataGenBase> generator;
-    if (gen_type == "default") {
-        generator = std::make_shared<DataGenBase>();
-    }
-    return generator;
-}
-
 void DataGenBase::GenData(const int &dim, const int &nb, const int &nq,
                           float *xb, float *xq, long *ids,
                           const int &k, long *gt_ids, float *gt_dis) {
