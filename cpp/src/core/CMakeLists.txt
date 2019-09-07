@@ -72,6 +72,10 @@ include(ThirdPartyPackagesCore)
 
 add_subdirectory(src)
 
+if (BUILD_COVERAGE STREQUAL "ON")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+endif()
+
 set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
 
 if(BUILD_UNIT_TEST STREQUAL "ON")
