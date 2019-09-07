@@ -17,8 +17,6 @@ class DataGenBase;
 
 using DataGenPtr = std::shared_ptr<DataGenBase>;
 
-extern DataGenPtr GetGenerateFactory(const std::string &gen_type);
-
 
 class DataGenBase {
  public:

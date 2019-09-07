@@ -35,13 +35,6 @@ public:
 
 };
 
-void ASSERT_STATS(engine::Status& stat) {
-    ASSERT_TRUE(stat.ok());
-    if(!stat.ok()) {
-        std::cout << stat.ToString() << std::endl;
-    }
-}
-
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void BaseTest::InitLog() {
     el::Configurations defaultConf;
@@ -94,7 +87,8 @@ void DBTest::TearDown() {
     engine::ResMgrInst::GetInstance()->Stop();
     engine::SchedInst::GetInstance()->Stop();
 
-    boost::filesystem::remove_all("/tmp/milvus_test");
+    auto options = GetOptions();
+    boost::filesystem::remove_all(options.meta.path);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -110,11 +104,15 @@ engine::Options DBTest2::GetOptions() {
 void MetaTest::SetUp() {
     BaseTest::SetUp();
 
-    impl_ = engine::DBMetaImplFactory::Build();
+    auto options = GetOptions();
+    impl_ = std::make_shared<engine::meta::SqliteMetaImpl>(options.meta);
 }
 
 void MetaTest::TearDown() {
     impl_->DropAll();
+
+    auto options = GetOptions();
+    boost::filesystem::remove_all(options.meta.path);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -134,13 +132,15 @@ engine::Options MySqlDBTest::GetOptions() {
 void MySqlMetaTest::SetUp() {
     BaseTest::SetUp();
 
-    engine::DBMetaOptions options = GetOptions().meta;
-    int mode = engine::Options::MODE::SINGLE;
-    impl_ = std::make_shared<engine::meta::MySQLMetaImpl>(options, mode);
+    auto options = GetOptions();
+    impl_ = std::make_shared<engine::meta::MySQLMetaImpl>(options.meta, options.mode);
 }
 
 void MySqlMetaTest::TearDown() {
     impl_->DropAll();
+
+    auto options = GetOptions();
+    boost::filesystem::remove_all(options.meta.path);
 }
 
 zilliz::milvus::engine::Options MySqlMetaTest::GetOptions() {

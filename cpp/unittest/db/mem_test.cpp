@@ -3,12 +3,12 @@
 #include "db/insert/VectorSource.h"
 #include "db/insert/MemTableFile.h"
 #include "db/insert/MemTable.h"
-#include "utils.h"
 #include "db/Factories.h"
 #include "db/Constants.h"
 #include "db/engine/EngineFactory.h"
-#include "metrics/Metrics.h"
 #include "db/meta/MetaConsts.h"
+#include "metrics/Metrics.h"
+#include "utils.h"
 
 #include <boost/filesystem.hpp>
 #include <thread>
@@ -223,7 +223,7 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     std::map<int64_t, std::vector<float>> search_vectors;
@@ -269,7 +269,7 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     auto start_time = METRICS_NOW_TIME;
@@ -295,7 +295,7 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     engine::IDNumbers vector_ids;
@@ -329,7 +329,7 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
             ss << "Search " << j << " With Size " << count / engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
-            ASSERT_STATS(stat);
+            ASSERT_TRUE(stat.ok());
             for (auto k = 0; k < qb; ++k) {
                 ASSERT_EQ(results[k][0].first, target_ids[k]);
                 ss.str("");
@@ -366,7 +366,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     engine::IDNumbers vector_ids;
@@ -383,7 +383,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
 
     stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
     ASSERT_EQ(vector_ids[0], 0);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
 
     nb = 25000;
     xb.clear();
@@ -395,7 +395,7 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     }
     stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
     ASSERT_EQ(vector_ids[0], nb);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
 
     nb = 262144; //512M
     xb.clear();
@@ -407,14 +407,14 @@ TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     }
     stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
     ASSERT_EQ(vector_ids[0], nb/2);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
 
     nb = 65536; //128M
     xb.clear();
     BuildVectors(nb, xb);
     vector_ids.clear();
     stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
 
     nb = 100;
     xb.clear();
