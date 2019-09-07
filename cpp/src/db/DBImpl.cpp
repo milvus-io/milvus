@@ -100,17 +100,17 @@ Status DBImpl::DropAll() {
 
 Status DBImpl::CreateTable(meta::TableSchema& table_schema) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     meta::TableSchema temp_schema = table_schema;
-    temp_schema.index_file_size_ *= ONE_MB;
+    temp_schema.index_file_size_ *= ONE_MB; //store as MB
     return meta_ptr_->CreateTable(temp_schema);
 }
 
 Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& dates) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     //dates partly delete files of the table but currently we don't support
@@ -136,15 +136,17 @@ Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& date
 
 Status DBImpl::DescribeTable(meta::TableSchema& table_schema) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
-    return meta_ptr_->DescribeTable(table_schema);
+    auto stat = meta_ptr_->DescribeTable(table_schema);
+    table_schema.index_file_size_ /= ONE_MB; //return as MB
+    return stat;
 }
 
 Status DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     return meta_ptr_->HasTable(table_id, has_or_not);
@@ -152,7 +154,7 @@ Status DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
 
 Status DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     return meta_ptr_->AllTables(table_schema_array);
@@ -160,7 +162,7 @@ Status DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
 
 Status DBImpl::PreloadTable(const std::string &table_id) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     meta::DatePartionedTableFilesSchema files;
@@ -182,7 +184,7 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
             ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_, (MetricType)file.metric_type_, file.nlist_);
             if(engine == nullptr) {
                 ENGINE_LOG_ERROR << "Invalid engine type";
-                return Status::Error("Invalid engine type");
+                return Status(DB_ERROR, "Invalid engine type");
             }
 
             size += engine->PhysicalSize();
@@ -195,7 +197,7 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
                 } catch (std::exception &ex) {
                     std::string msg = "Pre-load table encounter exception: " + std::string(ex.what());
                     ENGINE_LOG_ERROR << msg;
-                    return Status::Error(msg);
+                    return Status(DB_ERROR, msg);
                 }
             }
         }
@@ -205,7 +207,7 @@ Status DBImpl::PreloadTable(const std::string &table_id) {
 
 Status DBImpl::UpdateTableFlag(const std::string &table_id, int64_t flag) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     return meta_ptr_->UpdateTableFlag(table_id, flag);
@@ -213,7 +215,7 @@ Status DBImpl::UpdateTableFlag(const std::string &table_id, int64_t flag) {
 
 Status DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     return meta_ptr_->Count(table_id, row_count);
@@ -223,7 +225,7 @@ Status DBImpl::InsertVectors(const std::string& table_id_,
         uint64_t n, const float* vectors, IDNumbers& vector_ids_) {
 //    ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     Status status;
@@ -312,7 +314,7 @@ Status DBImpl::DropIndex(const std::string& table_id) {
 Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
                       const float *vectors, QueryResults &results) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     meta::DatesT dates = {utils::GetDate()};
@@ -324,7 +326,7 @@ Status DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint6
 Status DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe,
         const float* vectors, const meta::DatesT& dates, QueryResults& results) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     ENGINE_LOG_DEBUG << "Query by dates for table: " << table_id;
@@ -352,7 +354,7 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
         uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
         const meta::DatesT& dates, QueryResults& results) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     ENGINE_LOG_DEBUG << "Query by file ids for table: " << table_id;
@@ -380,7 +382,7 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
     }
 
     if(file_id_array.empty()) {
-        return Status::Error("Invalid file id");
+        return Status(DB_ERROR, "Invalid file id");
     }
 
     cache::CpuCacheMgr::GetInstance()->PrintInfo(); //print cache info before query
@@ -391,7 +393,7 @@ Status DBImpl::Query(const std::string& table_id, const std::vector<std::string>
 
 Status DBImpl::Size(uint64_t& result) {
     if (shutting_down_.load(std::memory_order_acquire)){
-        return Status::Error("Milsvus server is shutdown!");
+        return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     return  meta_ptr_->Size(result);
@@ -598,7 +600,7 @@ Status DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date,
         std::cout << "ERROR: failed to persist merged index file: " << table_file.location_
                   << ", possible out of disk space" << std::endl;
 
-        return Status::Error(msg);
+        return Status(DB_ERROR, msg);
     }
 
     //step 4: update table files state
@@ -706,7 +708,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
                     (MetricType)file.metric_type_, file.nlist_);
     if(to_index == nullptr) {
         ENGINE_LOG_ERROR << "Invalid engine type";
-        return Status::Error("Invalid engine type");
+        return Status(DB_ERROR, "Invalid engine type");
     }
 
     try {
@@ -753,7 +755,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
 
             std::cout << "ERROR: failed to build index, index file is too large or gpu memory is not enough" << std::endl;
 
-            return Status::Error(msg);
+            return Status(DB_ERROR, msg);
         }
 
         //step 4: if table has been deleted, dont save index file
@@ -779,7 +781,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
             std::cout << "ERROR: failed to persist index file: " << table_file.location_
                 << ", possible out of disk space" << std::endl;
 
-            return Status::Error(msg);
+            return Status(DB_ERROR, msg);
         }
 
         //step 6: update meta
@@ -814,7 +816,7 @@ Status DBImpl::BuildIndex(const meta::TableFileSchema& file) {
     } catch (std::exception& ex) {
         std::string msg = "Build index encounter exception: " + std::string(ex.what());
         ENGINE_LOG_ERROR << msg;
-        return Status::Error(msg);
+        return Status(DB_ERROR, msg);
     }
 
     return Status::OK();
