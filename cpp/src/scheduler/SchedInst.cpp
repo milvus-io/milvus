@@ -80,13 +80,15 @@ StartSchedulerService() {
             auto connection = Connection(connect_name, connect_speed);
             ResMgrInst::GetInstance()->Connect(left, right, connection);
         }
+        ResMgrInst::GetInstance()->Start();
+        SchedInst::GetInstance()->Start();
     } catch (const char* msg) {
         SERVER_LOG_ERROR << msg;
+        std::cerr << msg << std::endl;
+        std::cerr << "Milvus server shut down!" << std::endl;
         exit(-1);
     }
 
-    ResMgrInst::GetInstance()->Start();
-    SchedInst::GetInstance()->Start();
 }
 
 void
