@@ -14,6 +14,8 @@
 #include "vec_impl.h"
 #include "wrapper_log.h"
 
+#include <cuda.h>
+
 
 namespace zilliz {
 namespace milvus {
@@ -246,11 +248,13 @@ void ParameterValidation(const IndexType &type, Config &cfg) {
         case IndexType::FAISS_IVFSQ8_GPU:
         case IndexType::FAISS_IVFFLAT_GPU:
         case IndexType::FAISS_IVFPQ_GPU: {
+            //search on GPU
             if (cfg.get_with_default("nprobe", 0) != 0) {
                 auto nprobe = cfg["nprobe"].as<int>();
                 if (nprobe > GPU_MAX_NRPOBE) {
-                    WRAPPER_LOG_WARNING << "When search with GPU, nprobe shoud be no more than " << GPU_MAX_NRPOBE << ", but you passed " << nprobe
-                                      << ". Search with " << GPU_MAX_NRPOBE << " instead";
+                    WRAPPER_LOG_WARNING << "When search with GPU, nprobe shoud be no more than " << GPU_MAX_NRPOBE
+                                        << ", but you passed " << nprobe
+                                        << ". Search with " << GPU_MAX_NRPOBE << " instead";
                     cfg.insert_or_assign("nprobe", GPU_MAX_NRPOBE);
                 }
             }

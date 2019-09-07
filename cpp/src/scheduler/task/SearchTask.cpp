@@ -106,6 +106,8 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
             index_engine_->CopyToCpu();
         } else {
             // TODO: exception
+            std::string msg = "Wrong load type";
+            ENGINE_LOG_ERROR << msg;
         }
     } catch (std::exception &ex) {
         //typical error: out of disk space or permition denied
@@ -150,17 +152,17 @@ XSearchTask::Execute() {
     server::CollectDurationMetrics metrics(index_type_);
 
     std::vector<long> output_ids;
-    std::vector<float> output_distence;
+    std::vector<float> output_distance;
     for (auto &context : search_contexts_) {
         //step 1: allocate memory
         auto inner_k = context->topk();
         auto nprobe = context->nprobe();
         output_ids.resize(inner_k * context->nq());
-        output_distence.resize(inner_k * context->nq());
+        output_distance.resize(inner_k * context->nq());
 
         try {
             //step 2: search
-            index_engine_->Search(context->nq(), context->vectors(), inner_k, nprobe, output_distence.data(),
+            index_engine_->Search(context->nq(), context->vectors(), inner_k, nprobe, output_distance.data(),
                                   output_ids.data());
 
             double span = rc.RecordSection("do search for context:" + context->Identity());
@@ -170,12 +172,12 @@ XSearchTask::Execute() {
             //step 3: cluster result
             SearchContext::ResultSet result_set;
             auto spec_k = index_engine_->Count() < context->topk() ? index_engine_->Count() : context->topk();
-            XSearchTask::ClusterResult(output_ids, output_distence, context->nq(), spec_k, result_set);
+            XSearchTask::ClusterResult(output_ids, output_distance, context->nq(), spec_k, result_set);
 
             span = rc.RecordSection("cluster result for context:" + context->Identity());
             context->AccumReduceCost(span);
 
-            //step 4: pick up topk result
+            // step 4: pick up topk result
             XSearchTask::TopkResult(result_set, inner_k, metric_l2, context->GetResult());
 
             span = rc.RecordSection("reduce topk for context:" + context->Identity());
@@ -197,13 +199,13 @@ XSearchTask::Execute() {
 }
 
 Status XSearchTask::ClusterResult(const std::vector<long> &output_ids,
-                                  const std::vector<float> &output_distence,
+                                  const std::vector<float> &output_distance,
                                   uint64_t nq,
                                   uint64_t topk,
                                   SearchContext::ResultSet &result_set) {
-    if (output_ids.size() < nq * topk || output_distence.size() < nq * topk) {
+    if (output_ids.size() < nq * topk || output_distance.size() < nq * topk) {
         std::string msg = "Invalid id array size: " + std::to_string(output_ids.size()) +
-            " distance array size: " + std::to_string(output_distence.size());
+            " distance array size: " + std::to_string(output_distance.size());
         ENGINE_LOG_ERROR << msg;
         return Status(DB_ERROR, msg);
     }
@@ -220,7 +222,7 @@ Status XSearchTask::ClusterResult(const std::vector<long> &output_ids,
                 if (output_ids[index] < 0) {
                     continue;
                 }
-                id_distance.push_back(std::make_pair(output_ids[index], output_distence[index]));
+                id_distance.push_back(std::make_pair(output_ids[index], output_distance[index]));
             }
             result_set[i] = id_distance;
         }
