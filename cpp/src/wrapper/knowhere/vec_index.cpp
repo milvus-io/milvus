@@ -139,7 +139,11 @@ VecIndexPtr read_index(const std::string &location) {
     knowhere::BinarySet load_data_list;
     FileIOReader reader(location);
     reader.fs.seekg(0, reader.fs.end);
-    size_t length = reader.fs.tellg();
+    int64_t length = reader.fs.tellg();
+    if(length <= 0) {
+        return nullptr;
+    }
+
     reader.fs.seekg(0);
 
     size_t rp = 0;
