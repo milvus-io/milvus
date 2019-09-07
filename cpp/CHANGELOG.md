@@ -88,6 +88,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-487 - Define metric type in CreateTable
 - MS-488 - Improve code format in scheduler
 - MS-502 - Update tasktable_test in scheduler
+- MS-504 - Update node_test in scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
