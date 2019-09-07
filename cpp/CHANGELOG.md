@@ -92,7 +92,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-487 - Define metric type in CreateTable
 - MS-488 - Improve code format in scheduler
 - MS-495 - cmake: integrated knowhere
-- MS-505 - Install core unit test
+- MS-505 - Install core unit test and add to coverage
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
