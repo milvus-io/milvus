@@ -94,6 +94,7 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "/usr/*" \
     "*/boost/*" \
     "*/cmake_build/*_ep-prefix/*" \
+    "src/core/cmake_build*" \
     "src/core/thirdparty*" \
 
 # gen html report
