@@ -22,6 +22,7 @@ enum class LoadType {
     DISK2CPU,
     CPU2GPU,
     GPU2CPU,
+    TEST,
 };
 
 enum class TaskType {
