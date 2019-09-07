@@ -11,7 +11,7 @@
 using namespace zilliz::milvus::engine;
 
 
-TEST(normal_test, inst_test) {
+TEST(normal_test, DISABLED_inst_test) {
     // ResourceMgr only compose resources, provide unified event
     auto res_mgr = ResMgrInst::GetInstance();
 
