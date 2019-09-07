@@ -35,7 +35,7 @@ public:
     ResourceWPtr
     Add(ResourcePtr &&resource);
 
-    void
+    bool
     Connect(const std::string &res1, const std::string &res2, Connection &connection);
 
     void
@@ -60,7 +60,7 @@ public:
     }
 
     std::vector<ResourcePtr>
-    GetComputeResource();
+    GetComputeResources();
 
     ResourcePtr
     GetResource(ResourceType type, uint64_t device_id);
@@ -69,7 +69,10 @@ public:
     GetResource(const std::string &name);
 
     uint64_t
-    GetNumOfComputeResource();
+    GetNumOfResource() const;
+
+    uint64_t
+    GetNumOfComputeResource() const;
 
     uint64_t
     GetNumGpuResource() const;

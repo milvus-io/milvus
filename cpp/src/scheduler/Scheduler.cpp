@@ -151,7 +151,7 @@ Scheduler::OnLoadCompleted(const EventPtr &event) {
                 // if this resource is disk, assign it to smallest cost resource
                 if (self->type() == ResourceType::DISK) {
                     // step 1: calculate shortest path per resource, from disk to compute resource
-                    auto compute_resources = res_mgr_.lock()->GetComputeResource();
+                    auto compute_resources = res_mgr_.lock()->GetComputeResources();
                     std::vector<std::vector<std::string>> paths;
                     std::vector<uint64_t> transport_costs;
                     for (auto &res : compute_resources) {
