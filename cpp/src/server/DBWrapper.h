@@ -29,8 +29,8 @@ public:
         return GetInstance().EngineDB();
     }
 
-    ServerError StartService();
-    ServerError StopService();
+    ErrorCode StartService();
+    ErrorCode StopService();
 
     std::shared_ptr<engine::DB> EngineDB() {
         return db_;

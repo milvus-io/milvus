@@ -24,3 +24,5 @@ if(NOT TARGET test_gpu)
     add_executable(test_gpu gpuresource_test.cpp)
 endif()
 target_link_libraries(test_gpu ${depend_libs} ${unittest_libs} ${basic_libs})
+
+install(TARGETS test_gpu DESTINATION unittest)

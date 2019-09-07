@@ -19,7 +19,7 @@ class VecIndexImpl : public VecIndex {
  public:
     explicit VecIndexImpl(std::shared_ptr<zilliz::knowhere::VectorIndex> index, const IndexType &type)
         : index_(std::move(index)), type(type) {};
-    server::KnowhereError BuildAll(const long &nb,
+    ErrorCode BuildAll(const long &nb,
                                    const float *xb,
                                    const long *ids,
                                    const Config &cfg,
@@ -30,12 +30,12 @@ class VecIndexImpl : public VecIndex {
     IndexType GetType() override;
     int64_t Dimension() override;
     int64_t Count() override;
-    server::KnowhereError Add(const long &nb, const float *xb, const long *ids, const Config &cfg) override;
+    ErrorCode Add(const long &nb, const float *xb, const long *ids, const Config &cfg) override;
     zilliz::knowhere::BinarySet Serialize() override;
-    server::KnowhereError Load(const zilliz::knowhere::BinarySet &index_binary) override;
+    ErrorCode Load(const zilliz::knowhere::BinarySet &index_binary) override;
     VecIndexPtr Clone() override;
     int64_t GetDeviceId() override;
-    server::KnowhereError Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) override;
+    ErrorCode Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) override;
 
  protected:
     int64_t dim = 0;
@@ -48,22 +48,22 @@ class IVFMixIndex : public VecIndexImpl {
     explicit IVFMixIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index, const IndexType &type)
         : VecIndexImpl(std::move(index), type) {};
 
-    server::KnowhereError BuildAll(const long &nb,
+    ErrorCode BuildAll(const long &nb,
                                    const float *xb,
                                    const long *ids,
                                    const Config &cfg,
                                    const long &nt,
                                    const float *xt) override;
-    server::KnowhereError Load(const zilliz::knowhere::BinarySet &index_binary) override;
+    ErrorCode Load(const zilliz::knowhere::BinarySet &index_binary) override;
 };
 
 class BFIndex : public VecIndexImpl {
  public:
     explicit BFIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : VecIndexImpl(std::move(index),
                                                                                           IndexType::FAISS_IDMAP) {};
-    server::KnowhereError Build(const Config& cfg);
+    ErrorCode Build(const Config& cfg);
     float *GetRawVectors();
-    server::KnowhereError BuildAll(const long &nb,
+    ErrorCode BuildAll(const long &nb,
                                    const float *xb,
                                    const long *ids,
                                    const Config &cfg,
