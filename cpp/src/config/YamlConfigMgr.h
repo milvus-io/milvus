@@ -17,7 +17,7 @@ namespace server {
 
 class YamlConfigMgr : public ConfigMgr {
  public:
-    virtual ServerError LoadConfigFile(const std::string &filename);
+    virtual ErrorCode LoadConfigFile(const std::string &filename);
     virtual void Print() const;
     virtual std::string DumpString() const;
 

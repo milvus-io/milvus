@@ -21,7 +21,7 @@ class MetricsBase{
         return instance;
     }
 
-    virtual ServerError Init() {};
+    virtual ErrorCode Init() {};
 
     virtual void AddVectorsSuccessTotalIncrement(double value = 1) {};
     virtual void AddVectorsFailTotalIncrement(double value = 1) {};

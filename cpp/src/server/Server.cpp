@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <src/scheduler/SchedInst.h>
+#include "knowhere/index/vector_index/gpu_ivf.h"
 
 #include "metrics/Metrics.h"
 #include "DBWrapper.h"
@@ -209,10 +210,10 @@ Server::Stop() {
 }
 
 
-ServerError
+ErrorCode
 Server::LoadConfig() {
     ServerConfig::GetInstance().LoadConfigFile(config_filename_);
-    ServerError err = ServerConfig::GetInstance().ValidateConfig();
+    ErrorCode err = ServerConfig::GetInstance().ValidateConfig();
     if(err != SERVER_SUCCESS){
         exit(0);
     }
@@ -232,6 +233,7 @@ Server::StopService() {
     grpc::GrpcMilvusServer::StopService();
     DBWrapper::GetInstance().StopService();
     engine::StopSchedulerService();
+    knowhere::FaissGpuResourceMgr::GetInstance().Free(); // free gpu resource.
 }
 
 }

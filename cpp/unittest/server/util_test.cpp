@@ -25,8 +25,8 @@ static const char* LOG_FILE_PATH = "./milvus/conf/log_config.conf";
 
 TEST(UtilTest, EXCEPTION_TEST) {
     std::string err_msg = "failed";
-    server::ServerException ex(server::SERVER_UNEXPECTED_ERROR, err_msg);
-    ASSERT_EQ(ex.error_code(), server::SERVER_UNEXPECTED_ERROR);
+    server::ServerException ex(SERVER_UNEXPECTED_ERROR, err_msg);
+    ASSERT_EQ(ex.error_code(), SERVER_UNEXPECTED_ERROR);
     std::string msg = ex.what();
     ASSERT_EQ(msg, err_msg);
 }
@@ -44,19 +44,19 @@ TEST(UtilTest, COMMON_TEST) {
     std::string path1 = "/tmp/milvus_test/";
     std::string path2 = path1 + "common_test_12345/";
     std::string path3 = path2 + "abcdef";
-    server::ServerError err = server::CommonUtil::CreateDirectory(path3);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ErrorCode err = server::CommonUtil::CreateDirectory(path3);
+    ASSERT_EQ(err, SERVER_SUCCESS);
     //test again
     err = server::CommonUtil::CreateDirectory(path3);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ASSERT_EQ(err, SERVER_SUCCESS);
 
     ASSERT_TRUE(server::CommonUtil::IsDirectoryExist(path3));
 
     err = server::CommonUtil::DeleteDirectory(path1);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ASSERT_EQ(err, SERVER_SUCCESS);
     //test again
     err = server::CommonUtil::DeleteDirectory(path1);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ASSERT_EQ(err, SERVER_SUCCESS);
 
     ASSERT_FALSE(server::CommonUtil::IsDirectoryExist(path1));
     ASSERT_FALSE(server::CommonUtil::IsFileExist(path1));
@@ -94,24 +94,24 @@ TEST(UtilTest, STRINGFUNCTIONS_TEST) {
 
     str = "a,b,c";
     std::vector<std::string> result;
-    server::ServerError err = server::StringHelpFunctions::SplitStringByDelimeter(str , ",", result);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ErrorCode err = server::StringHelpFunctions::SplitStringByDelimeter(str , ",", result);
+    ASSERT_EQ(err, SERVER_SUCCESS);
     ASSERT_EQ(result.size(), 3UL);
 
     result.clear();
     err = server::StringHelpFunctions::SplitStringByQuote(str , ",", "\"", result);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ASSERT_EQ(err, SERVER_SUCCESS);
     ASSERT_EQ(result.size(), 3UL);
 
     result.clear();
     err = server::StringHelpFunctions::SplitStringByQuote(str , ",", "", result);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ASSERT_EQ(err, SERVER_SUCCESS);
     ASSERT_EQ(result.size(), 3UL);
 
     str = "55,\"aa,gg,yy\",b";
     result.clear();
     err = server::StringHelpFunctions::SplitStringByQuote(str , ",", "\"", result);
-    ASSERT_EQ(err, server::SERVER_SUCCESS);
+    ASSERT_EQ(err, SERVER_SUCCESS);
     ASSERT_EQ(result.size(), 3UL);
 
 
@@ -159,86 +159,86 @@ TEST(UtilTest, LOG_TEST) {
 
 TEST(UtilTest, VALIDATE_TABLENAME_TEST) {
     std::string table_name = "Normal123_";
-    server:: ServerError res = server::ValidationUtil::ValidateTableName(table_name);
-    ASSERT_EQ(res, server::SERVER_SUCCESS);
+    ErrorCode res = server::ValidationUtil::ValidateTableName(table_name);
+    ASSERT_EQ(res, SERVER_SUCCESS);
 
     table_name = "12sds";
     res = server::ValidationUtil::ValidateTableName(table_name);
-    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(res, SERVER_INVALID_TABLE_NAME);
 
     table_name = "";
     res = server::ValidationUtil::ValidateTableName(table_name);
-    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(res, SERVER_INVALID_TABLE_NAME);
 
     table_name = "_asdasd";
     res = server::ValidationUtil::ValidateTableName(table_name);
-    ASSERT_EQ(res, server::SERVER_SUCCESS);
+    ASSERT_EQ(res, SERVER_SUCCESS);
 
     table_name = "!@#!@";
     res = server::ValidationUtil::ValidateTableName(table_name);
-    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(res, SERVER_INVALID_TABLE_NAME);
 
     table_name = "_!@#!@";
     res = server::ValidationUtil::ValidateTableName(table_name);
-    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(res, SERVER_INVALID_TABLE_NAME);
 
     table_name = "中文";
     res = server::ValidationUtil::ValidateTableName(table_name);
-    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(res, SERVER_INVALID_TABLE_NAME);
 
     table_name = std::string(10000, 'a');
     res = server::ValidationUtil::ValidateTableName(table_name);
-    ASSERT_EQ(res, server::SERVER_INVALID_TABLE_NAME);
+    ASSERT_EQ(res, SERVER_INVALID_TABLE_NAME);
 }
 
 TEST(UtilTest, VALIDATE_DIMENSIONTEST) {
-    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(-1), server::SERVER_INVALID_VECTOR_DIMENSION);
-    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(0), server::SERVER_INVALID_VECTOR_DIMENSION);
-    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(16385), server::SERVER_INVALID_VECTOR_DIMENSION);
-    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(16384), server::SERVER_SUCCESS);
-    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(1), server::SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(-1), SERVER_INVALID_VECTOR_DIMENSION);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(0), SERVER_INVALID_VECTOR_DIMENSION);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(16385), SERVER_INVALID_VECTOR_DIMENSION);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(16384), SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(1), SERVER_SUCCESS);
 }
 
 TEST(UtilTest, VALIDATE_INDEX_TEST) {
-    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType((int)engine::EngineType::INVALID), server::SERVER_INVALID_INDEX_TYPE);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType((int)engine::EngineType::INVALID), SERVER_INVALID_INDEX_TYPE);
     for(int i = 1; i <= (int)engine::EngineType::MAX_VALUE; i++) {
-        ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType(i), server::SERVER_SUCCESS);
+        ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType(i), SERVER_SUCCESS);
     }
-    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType((int)engine::EngineType::MAX_VALUE + 1), server::SERVER_INVALID_INDEX_TYPE);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType((int)engine::EngineType::MAX_VALUE + 1), SERVER_INVALID_INDEX_TYPE);
 
-    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexNlist(0), server::SERVER_INVALID_INDEX_NLIST);
-    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexNlist(100), server::SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexNlist(0), SERVER_INVALID_INDEX_NLIST);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexNlist(100), SERVER_SUCCESS);
 
-    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexFileSize(0), server::SERVER_INVALID_INDEX_FILE_SIZE);
-    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexFileSize(100), server::SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexFileSize(0), SERVER_INVALID_INDEX_FILE_SIZE);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexFileSize(100), SERVER_SUCCESS);
 
-    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexMetricType(0), server::SERVER_INVALID_INDEX_METRIC_TYPE);
-    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexMetricType(1), server::SERVER_SUCCESS);
-    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexMetricType(2), server::SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexMetricType(0), SERVER_INVALID_INDEX_METRIC_TYPE);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexMetricType(1), SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateTableIndexMetricType(2), SERVER_SUCCESS);
 }
 
 TEST(ValidationUtilTest, ValidateTopkTest) {
     engine::meta::TableSchema schema;
-    ASSERT_EQ(server::ValidationUtil::ValidateSearchTopk(10, schema), server::SERVER_SUCCESS);
-    ASSERT_NE(server::ValidationUtil::ValidateSearchTopk(65536, schema), server::SERVER_SUCCESS);
-    ASSERT_NE(server::ValidationUtil::ValidateSearchTopk(0, schema), server::SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateSearchTopk(10, schema), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateSearchTopk(65536, schema), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateSearchTopk(0, schema), SERVER_SUCCESS);
 }
 
 TEST(ValidationUtilTest, ValidateNprobeTest) {
     engine::meta::TableSchema schema;
     schema.nlist_ = 100;
-    ASSERT_EQ(server::ValidationUtil::ValidateSearchNprobe(10, schema), server::SERVER_SUCCESS);
-    ASSERT_NE(server::ValidationUtil::ValidateSearchNprobe(0, schema), server::SERVER_SUCCESS);
-    ASSERT_NE(server::ValidationUtil::ValidateSearchNprobe(101, schema), server::SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateSearchNprobe(10, schema), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateSearchNprobe(0, schema), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateSearchNprobe(101, schema), SERVER_SUCCESS);
 }
 
 TEST(ValidationUtilTest, ValidateGpuTest) {
-    ASSERT_EQ(server::ValidationUtil::ValidateGpuIndex(0), server::SERVER_SUCCESS);
-    ASSERT_NE(server::ValidationUtil::ValidateGpuIndex(100), server::SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateGpuIndex(0), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateGpuIndex(100), SERVER_SUCCESS);
 
     size_t memory = 0;
-    ASSERT_EQ(server::ValidationUtil::GetGpuMemory(0, memory), server::SERVER_SUCCESS);
-    ASSERT_NE(server::ValidationUtil::GetGpuMemory(100, memory), server::SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::GetGpuMemory(0, memory), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::GetGpuMemory(100, memory), SERVER_SUCCESS);
 }
 
 TEST(UtilTest, TIMERECORDER_TEST) {
