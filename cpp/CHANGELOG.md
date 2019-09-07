@@ -89,6 +89,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-488 - Improve code format in scheduler
 - MS-502 - Update tasktable_test in scheduler
 - MS-504 - Update node_test in scheduler
+- MS-508 - Update normal_test in scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

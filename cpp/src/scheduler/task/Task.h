@@ -34,6 +34,7 @@ class Task;
 
 using TaskPtr = std::shared_ptr<Task>;
 
+// TODO: re-design
 class Task {
 public:
     explicit
