@@ -74,6 +74,10 @@ target_link_libraries(test_kdt
         SPTAGLibStatic
         ${depend_libs} ${unittest_libs} ${basic_libs})
 
+install(TARGETS test_ivf DESTINATION unittest)
+install(TARGETS test_idmap DESTINATION unittest)
+install(TARGETS test_kdt DESTINATION unittest)
+
 add_subdirectory(faiss_ori)
 add_subdirectory(test_nsg)
 
