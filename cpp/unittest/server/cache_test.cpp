@@ -30,12 +30,12 @@ public:
 
 class MockVecIndex : public engine::VecIndex {
 public:
-    virtual server::KnowhereError BuildAll(const long &nb,
-                          const float *xb,
-                          const long *ids,
-                          const engine::Config &cfg,
-                          const long &nt = 0,
-                          const float *xt = nullptr) {
+    virtual ErrorCode BuildAll(const long &nb,
+                               const float *xb,
+                               const long *ids,
+                               const engine::Config &cfg,
+                               const long &nt = 0,
+                               const float *xt = nullptr) {
 
     }
 
@@ -51,18 +51,18 @@ public:
         return engine::IndexType::INVALID;
     }
 
-    virtual server::KnowhereError Add(const long &nb,
-                     const float *xb,
-                     const long *ids,
-                     const engine::Config &cfg = engine::Config()) {
+    virtual ErrorCode Add(const long &nb,
+                          const float *xb,
+                          const long *ids,
+                          const engine::Config &cfg = engine::Config()) {
 
     }
 
-    virtual server::KnowhereError Search(const long &nq,
-                        const float *xq,
-                        float *dist,
-                        long *ids,
-                        const engine::Config &cfg = engine::Config()) {
+    virtual ErrorCode Search(const long &nq,
+                             const float *xq,
+                             float *dist,
+                             long *ids,
+                             const engine::Config &cfg = engine::Config()) {
 
     }
 
@@ -87,7 +87,7 @@ public:
         return binset;
     }
 
-    virtual server::KnowhereError Load(const zilliz::knowhere::BinarySet &index_binary) {
+    virtual ErrorCode Load(const zilliz::knowhere::BinarySet &index_binary) {
 
     }
 

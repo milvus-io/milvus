@@ -9,34 +9,34 @@ namespace server {
 
 class ValidationUtil {
 public:
-    static ServerError
+    static ErrorCode
     ValidateTableName(const std::string &table_name);
 
-    static ServerError
+    static ErrorCode
     ValidateTableDimension(int64_t dimension);
 
-    static ServerError
+    static ErrorCode
     ValidateTableIndexType(int32_t index_type);
 
-    static ServerError
+    static ErrorCode
     ValidateTableIndexNlist(int32_t nlist);
 
-    static ServerError
+    static ErrorCode
     ValidateTableIndexFileSize(int64_t index_file_size);
 
-    static ServerError
+    static ErrorCode
     ValidateTableIndexMetricType(int32_t metric_type);
 
-    static ServerError
+    static ErrorCode
     ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema);
 
-    static ServerError
+    static ErrorCode
     ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema);
 
-    static ServerError
+    static ErrorCode
     ValidateGpuIndex(uint32_t gpu_index);
 
-    static ServerError
+    static ErrorCode
     GetGpuMemory(uint32_t gpu_index, size_t &memory);
 };
 

@@ -53,7 +53,7 @@ TaskDispatchQueue::Front() {
     if (queue_.empty()) {
         std::string error_msg = "blocking queue empty";
         SERVER_LOG_ERROR << error_msg;
-        throw server::ServerException(server::SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
+        throw server::ServerException(SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
     ScheduleTaskPtr front(queue_.front());
     return front;
@@ -67,7 +67,7 @@ TaskDispatchQueue::Back() {
     if (queue_.empty()) {
         std::string error_msg = "blocking queue empty";
         SERVER_LOG_ERROR << error_msg;
-        throw server::ServerException(server::SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
+        throw server::ServerException(SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
 
     ScheduleTaskPtr back(queue_.back());

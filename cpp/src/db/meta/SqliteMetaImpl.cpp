@@ -29,9 +29,15 @@ using namespace sqlite_orm;
 
 namespace {
 
-Status HandleException(const std::string& desc, std::exception &e) {
-    ENGINE_LOG_ERROR << desc << ": " << e.what();
-    return Status::DBTransactionError(desc, e.what());
+Status HandleException(const std::string &desc, const char* what = nullptr) {
+    if(what == nullptr) {
+        ENGINE_LOG_ERROR << desc;
+        return Status(DB_META_TRANSACTION_FAILED, desc);
+    } else {
+        std::string msg = desc + ":" + what;
+        ENGINE_LOG_ERROR << msg;
+        return Status(DB_META_TRANSACTION_FAILED, msg);
+    }
 }
 
 }
@@ -97,8 +103,9 @@ Status SqliteMetaImpl::Initialize() {
     if (!boost::filesystem::is_directory(options_.path)) {
         auto ret = boost::filesystem::create_directory(options_.path);
         if (!ret) {
-            ENGINE_LOG_ERROR << "Failed to create db directory " << options_.path;
-            return Status::InvalidDBPath("Failed to create db directory", options_.path);
+            std::string msg = "Failed to create db directory " + options_.path;
+            ENGINE_LOG_ERROR << msg;
+            return Status(DB_INVALID_PATH, msg);
         }
     }
 
@@ -141,7 +148,7 @@ Status SqliteMetaImpl::DropPartitionsByDates(const std::string &table_id,
                     in(&TableFileSchema::date_, dates)
             ));
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when drop partition", e);
+        return HandleException("Encounter exception when drop partition", e.what());
     }
 
     return Status::OK();
@@ -162,10 +169,10 @@ Status SqliteMetaImpl::CreateTable(TableSchema &table_schema) {
                                                where(c(&TableSchema::table_id_) == table_schema.table_id_));
             if (table.size() == 1) {
                 if(TableSchema::TO_DELETE == std::get<0>(table[0])) {
-                    return Status::Error("Table already exists and it is in delete state, please wait a second");
+                    return Status(DB_ERROR, "Table already exists and it is in delete state, please wait a second");
                 } else {
                     // Change from no error to already exist.
-                    return Status::AlreadyExist("Table already exists");
+                    return Status(DB_ALREADY_EXIST, "Table already exists");
                 }
             }
         }
@@ -176,15 +183,14 @@ Status SqliteMetaImpl::CreateTable(TableSchema &table_schema) {
         try {
             auto id = ConnectorPtr->insert(table_schema);
             table_schema.id_ = id;
-        } catch (...) {
-            ENGINE_LOG_ERROR << "sqlite transaction failed";
-            return Status::DBTransactionError("Add Table Error");
+        } catch (std::exception &e) {
+            return HandleException("Encounter exception when create table", e.what());
         }
 
         return utils::CreateTablePath(options_, table_schema.table_id_);
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when create table", e);
+        return HandleException("Encounter exception when create table", e.what());
     }
 
     return Status::OK();
@@ -208,7 +214,7 @@ Status SqliteMetaImpl::DeleteTable(const std::string& table_id) {
                 ));
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when delete table", e);
+        return HandleException("Encounter exception when delete table", e.what());
     }
 
     return Status::OK();
@@ -233,7 +239,7 @@ Status SqliteMetaImpl::DeleteTableFiles(const std::string& table_id) {
                 ));
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when delete table files", e);
+        return HandleException("Encounter exception when delete table files", e.what());
     }
 
     return Status::OK();
@@ -266,11 +272,11 @@ Status SqliteMetaImpl::DescribeTable(TableSchema &table_schema) {
             table_schema.nlist_ = std::get<7>(groups[0]);
             table_schema.metric_type_ = std::get<8>(groups[0]);
         } else {
-            return Status::NotFound("Table " + table_schema.table_id_ + " not found");
+            return Status(DB_NOT_FOUND, "Table " + table_schema.table_id_ + " not found");
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when describe table", e);
+        return HandleException("Encounter exception when describe table", e.what());
     }
 
     return Status::OK();
@@ -280,7 +286,7 @@ Status SqliteMetaImpl::FilesByType(const std::string& table_id,
         const std::vector<int>& file_types,
         std::vector<std::string>& file_ids) {
     if(file_types.empty()) {
-        return Status::Error("file types array is empty");
+        return Status(DB_ERROR, "file types array is empty");
     }
 
     try {
@@ -330,7 +336,7 @@ Status SqliteMetaImpl::FilesByType(const std::string& table_id,
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when check non index files", e);
+        return HandleException("Encounter exception when check non index files", e.what());
     }
     return Status::OK();
 }
@@ -366,7 +372,7 @@ Status SqliteMetaImpl::UpdateTableIndexParam(const std::string &table_id, const 
 
             ConnectorPtr->update(table_schema);
         } else {
-            return Status::NotFound("Table " + table_id + " not found");
+            return Status(DB_NOT_FOUND, "Table " + table_id + " not found");
         }
 
         //set all backup file to raw
@@ -382,7 +388,7 @@ Status SqliteMetaImpl::UpdateTableIndexParam(const std::string &table_id, const 
 
     } catch (std::exception &e) {
         std::string msg = "Encounter exception when update table index: table_id = " + table_id;
-        return HandleException(msg, e);
+        return HandleException(msg, e.what());
     }
 
     return Status::OK();
@@ -403,7 +409,7 @@ Status SqliteMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag
 
     } catch (std::exception &e) {
         std::string msg = "Encounter exception when update table flag: table_id = " + table_id;
-        return HandleException(msg, e);
+        return HandleException(msg, e.what());
     }
 
     return Status::OK();
@@ -424,11 +430,11 @@ Status SqliteMetaImpl::DescribeTableIndex(const std::string &table_id, TableInde
             index.nlist_ = std::get<1>(groups[0]);
             index.metric_type_ = std::get<2>(groups[0]);
         } else {
-            return Status::NotFound("Table " + table_id + " not found");
+            return Status(DB_NOT_FOUND, "Table " + table_id + " not found");
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when describe index", e);
+        return HandleException("Encounter exception when describe index", e.what());
     }
 
     return Status::OK();
@@ -475,7 +481,7 @@ Status SqliteMetaImpl::DropTableIndex(const std::string &table_id) {
                 ));
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when delete table index files", e);
+        return HandleException("Encounter exception when delete table index files", e.what());
     }
 
     return Status::OK();
@@ -496,7 +502,7 @@ Status SqliteMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when lookup table", e);
+        return HandleException("Encounter exception when lookup table", e.what());
     }
 
     return Status::OK();
@@ -532,7 +538,7 @@ Status SqliteMetaImpl::AllTables(std::vector<TableSchema>& table_schema_array) {
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when lookup all tables", e);
+        return HandleException("Encounter exception when lookup all tables", e.what());
     }
 
     return Status::OK();
@@ -571,8 +577,8 @@ Status SqliteMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
 
         return utils::CreateTableFilePath(options_, file_schema);
 
-    } catch (std::exception& ex) {
-        return HandleException("Encounter exception when create table file", ex);
+    } catch (std::exception& e) {
+        return HandleException("Encounter exception when create table file", e.what());
     }
 
     return Status::OK();
@@ -629,7 +635,7 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when iterate raw files", e);
+        return HandleException("Encounter exception when iterate raw files", e.what());
     }
 
     return Status::OK();
@@ -654,8 +660,12 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
 
         auto match_tableid = c(&TableFileSchema::table_id_) == table_id;
 
-        std::vector<int> file_type = {(int) TableFileSchema::RAW, (int) TableFileSchema::TO_INDEX, (int) TableFileSchema::INDEX};
-        auto match_type = in(&TableFileSchema::file_type_, file_type);
+        std::vector<int> file_types = {
+                (int) TableFileSchema::RAW,
+                (int) TableFileSchema::TO_INDEX,
+                (int) TableFileSchema::INDEX
+        };
+        auto match_type = in(&TableFileSchema::file_type_, file_types);
 
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
@@ -710,7 +720,7 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
             ENGINE_LOG_ERROR << "No file to search for table: " << table_id;
         }
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when iterate index files", e);
+        return HandleException("Encounter exception when iterate index files", e.what());
     }
 
 
@@ -773,7 +783,7 @@ Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
             files[table_file.date_].push_back(table_file);
         }
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when iterate merge files", e);
+        return HandleException("Encounter exception when iterate merge files", e.what());
     }
 
     return Status::OK();
@@ -824,7 +834,7 @@ Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
             table_files.emplace_back(file_schema);
         }
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when lookup table files", e);
+        return HandleException("Encounter exception when lookup table files", e.what());
     }
 
     return Status::OK();
@@ -856,7 +866,7 @@ Status SqliteMetaImpl::Archive() {
                             c(&TableFileSchema::file_type_) != (int) TableFileSchema::TO_DELETE
                     ));
             } catch (std::exception &e) {
-                return HandleException("Encounter exception when update table files", e);
+                return HandleException("Encounter exception when update table files", e.what());
             }
         }
         if (criteria == engine::ARCHIVE_CONF_DISK) {
@@ -886,7 +896,7 @@ Status SqliteMetaImpl::Size(uint64_t &result) {
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when calculte db size", e);
+        return HandleException("Encounter exception when calculte db size", e.what());
     }
 
     return Status::OK();
@@ -943,12 +953,11 @@ Status SqliteMetaImpl::DiscardFiles(long to_discard_size) {
         });
 
         if (!commited) {
-            ENGINE_LOG_ERROR << "sqlite transaction failed";
-            return Status::DBTransactionError("Update table file error");
+            return HandleException("DiscardFiles error: sqlite transaction failed");
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when discard table file", e);
+        return HandleException("Encounter exception when discard table file", e.what());
     }
 
     return DiscardFiles(to_discard_size);
@@ -976,7 +985,7 @@ Status SqliteMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     } catch (std::exception &e) {
         std::string msg = "Exception update table file: table_id = " + file_schema.table_id_
             + " file_id = " + file_schema.file_id_;
-        return HandleException(msg, e);
+        return HandleException(msg, e.what());
     }
     return Status::OK();
 }
@@ -997,7 +1006,7 @@ Status SqliteMetaImpl::UpdateTableFilesToIndex(const std::string& table_id) {
                 c(&TableFileSchema::file_type_) == (int) TableFileSchema::RAW
             ));
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when update table files to to_index", e);
+        return HandleException("Encounter exception when update table files to to_index", e.what());
     }
 
     return Status::OK();
@@ -1038,12 +1047,11 @@ Status SqliteMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
         });
 
         if (!commited) {
-            ENGINE_LOG_ERROR << "sqlite transaction failed";
-            return Status::DBTransactionError("Update table files error");
+            return HandleException("UpdateTableFiles error: sqlite transaction failed");
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when update table files", e);
+        return HandleException("Encounter exception when update table files", e.what());
     }
     return Status::OK();
 }
@@ -1088,12 +1096,11 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         });
 
         if (!commited) {
-            ENGINE_LOG_ERROR << "sqlite transaction failed";
-            return Status::DBTransactionError("Clean files error");
+            return HandleException("CleanUpFilesWithTTL error: sqlite transaction failed");
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when clean table files", e);
+        return HandleException("Encounter exception when clean table files", e.what());
     }
 
     //remove to_delete tables
@@ -1117,12 +1124,11 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         });
 
         if (!commited) {
-            ENGINE_LOG_ERROR << "sqlite transaction failed";
-            return Status::DBTransactionError("Clean files error");
+            return HandleException("CleanUpFilesWithTTL error: sqlite transaction failed");
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when clean table files", e);
+        return HandleException("Encounter exception when clean table files", e.what());
     }
 
     //remove deleted table folder
@@ -1139,7 +1145,7 @@ Status SqliteMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when delete table folder", e);
+        return HandleException("Encounter exception when delete table folder", e.what());
     }
 
     return Status::OK();
@@ -1152,8 +1158,12 @@ Status SqliteMetaImpl::CleanUp() {
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        std::vector<int> file_type = {(int) TableFileSchema::NEW, (int) TableFileSchema::NEW_INDEX, (int) TableFileSchema::NEW_MERGE};
-        auto files = ConnectorPtr->select(columns(&TableFileSchema::id_), where(in(&TableFileSchema::file_type_, file_type)));
+        std::vector<int> file_types = {
+                (int) TableFileSchema::NEW,
+                (int) TableFileSchema::NEW_INDEX,
+                (int) TableFileSchema::NEW_MERGE
+        };
+        auto files = ConnectorPtr->select(columns(&TableFileSchema::id_), where(in(&TableFileSchema::file_type_, file_types)));
 
         auto commited = ConnectorPtr->transaction([&]() mutable {
             for (auto &file : files) {
@@ -1164,12 +1174,11 @@ Status SqliteMetaImpl::CleanUp() {
         });
 
         if (!commited) {
-            ENGINE_LOG_ERROR << "sqlite transaction failed";
-            return Status::DBTransactionError("Clean files error");
+            return HandleException("CleanUp error: sqlite transaction failed");
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when clean table file", e);
+        return HandleException("Encounter exception when clean table file", e.what());
     }
 
     return Status::OK();
@@ -1180,9 +1189,13 @@ Status SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
     try {
         server::MetricCollector metric;
 
-        std::vector<int> file_type = {(int) TableFileSchema::RAW, (int) TableFileSchema::TO_INDEX, (int) TableFileSchema::INDEX};
+        std::vector<int> file_types = {
+                (int) TableFileSchema::RAW,
+                (int) TableFileSchema::TO_INDEX,
+                (int) TableFileSchema::INDEX
+        };
         auto selected = ConnectorPtr->select(columns(&TableFileSchema::row_count_),
-                                             where(in(&TableFileSchema::file_type_, file_type)
+                                             where(in(&TableFileSchema::file_type_, file_types)
                                                    and c(&TableFileSchema::table_id_) == table_id));
 
         TableSchema table_schema;
@@ -1199,7 +1212,7 @@ Status SqliteMetaImpl::Count(const std::string &table_id, uint64_t &result) {
         }
 
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when calculate table file size", e);
+        return HandleException("Encounter exception when calculate table file size", e.what());
     }
     return Status::OK();
 }
@@ -1211,7 +1224,7 @@ Status SqliteMetaImpl::DropAll() {
         ConnectorPtr->drop_table("Tables");
         ConnectorPtr->drop_table("TableFiles");
     } catch (std::exception &e) {
-        return HandleException("Encounter exception when drop all meta", e);
+        return HandleException("Encounter exception when drop all meta", e.what());
     }
 
     return Status::OK();
