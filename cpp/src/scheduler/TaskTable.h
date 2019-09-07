@@ -40,10 +40,10 @@ struct TaskTimestamp {
 };
 
 struct TaskTableItem {
-    TaskTableItem() : id(0), state(TaskTableItemState::INVALID), mutex() {}
+    TaskTableItem() : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex() {}
 
-    TaskTableItem(const TaskTableItem &src)
-        : id(src.id), state(src.state), mutex() {}
+    TaskTableItem(const TaskTableItem &src) = delete;
+    TaskTableItem(TaskTableItem &&) = delete;
 
     uint64_t id; // auto increment from 0;
     TaskPtr task; // the task;
@@ -114,8 +114,8 @@ public:
      * Remove sequence task which is DONE or MOVED from front;
      * Called by ?
      */
-    void
-    Clear();
+//    void
+//    Clear();
 
     /*
      * Return true if task table empty, otherwise false;
@@ -229,7 +229,9 @@ private:
     std::function<void(void)> subscriber_ = nullptr;
 
     // cache last finish avoid Pick task from begin always
-    uint64_t last_finish_ = 0;
+    // pick from (last_finish_ + 1)
+    // init with -1, pick from (last_finish_ + 1) = 0
+    uint64_t last_finish_ = -1;
 };
 
 

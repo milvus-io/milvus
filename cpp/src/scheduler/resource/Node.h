@@ -37,12 +37,6 @@ public:
     void
     AddNeighbour(const NeighbourNodePtr &neighbour_node, Connection &connection);
 
-    void
-    DelNeighbour(const NeighbourNodePtr &neighbour_ptr);
-
-    bool
-    IsNeighbour(const NeighbourNodePtr& neighbour_ptr);
-
     std::vector<Neighbour>
     GetNeighbours();
 
