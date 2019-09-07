@@ -103,6 +103,7 @@ ErrorCode VecIndexImpl::Search(const long &nq, const float *xq, float *dist, lon
         // TODO(linxj): avoid copy here.
         memcpy(ids, p_ids, sizeof(int64_t) * nq * k);
         memcpy(dist, p_dist, sizeof(float) * nq * k);
+
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return KNOWHERE_UNEXPECTED_ERROR;

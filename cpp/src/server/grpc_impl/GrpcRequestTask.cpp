@@ -652,7 +652,7 @@ SearchTask::OnExecute() {
                    search_param_->query_record_array(i).vector_data().data(),
                    table_info.dimension_ * sizeof(float));
         }
-        rc.ElapseFromBegin("prepare vector data");
+        rc.RecordSection("prepare vector data");
 
         //step 6: search vectors
         engine::QueryResults results;
@@ -666,7 +666,7 @@ SearchTask::OnExecute() {
                                           record_count, nprobe, vec_f.data(), dates, results);
         }
 
-        rc.ElapseFromBegin("search vectors from engine");
+        rc.RecordSection("search vectors from engine");
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
@@ -680,8 +680,6 @@ SearchTask::OnExecute() {
                               + std::to_string(results.size()) + " results";
             return SetError(SERVER_ILLEGAL_SEARCH_RESULT, msg);
         }
-
-        rc.ElapseFromBegin("do search");
 
         //step 7: construct result array
         for (auto &result : results) {
@@ -698,7 +696,7 @@ SearchTask::OnExecute() {
 #endif
 
         //step 8: print time cost percent
-        double span_result = rc.RecordSection("construct result");
+        rc.RecordSection("construct result and send");
         rc.ElapseFromBegin("totally cost");
 
 
