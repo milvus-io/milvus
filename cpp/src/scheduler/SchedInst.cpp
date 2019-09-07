@@ -81,7 +81,9 @@ StartSchedulerService() {
         }
     } catch (const char* msg) {
         SERVER_LOG_ERROR << msg;
+        // TODO: throw exception instead
         exit(-1);
+//        throw std::exception();
     }
 
     ResMgrInst::GetInstance()->Start();
