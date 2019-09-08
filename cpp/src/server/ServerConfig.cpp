@@ -128,6 +128,7 @@ ErrorCode ServerConfig::ValidateConfig() const {
     }
 
     if(!resource_valid_flag) {
+        std::cerr << "Building index GPU can't be found in resource config." << std::endl;
         return SERVER_INVALID_ARGUMENT;
     }
 
