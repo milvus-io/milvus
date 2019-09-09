@@ -51,7 +51,7 @@ class MySQLMetaImpl : public Meta {
                        const std::vector<int> &file_types,
                        std::vector<std::string> &file_ids) override;
 
-    Status UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) override;
+    Status UpdateTableIndex(const std::string &table_id, const TableIndex& index) override;
 
     Status UpdateTableFlag(const std::string &table_id, int64_t flag);
 
