@@ -4,6 +4,11 @@
 
 #include <cuda_runtime.h>
 
+#include <arpa/inet.h>
+
+#include <regex>
+#include <algorithm>
+
 namespace zilliz {
 namespace milvus {
 namespace server {
@@ -137,6 +142,110 @@ ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t& memory) {
 
     memory = deviceProp.totalGlobalMem;
     return SERVER_SUCCESS;
+}
+
+ErrorCode
+ValidationUtil::ValidateIpAddress(const std::string &ip_address)  {
+
+    struct in_addr address;
+
+    int result = inet_pton(AF_INET, ip_address.c_str(), &address);
+
+    switch(result) {
+        case 1:
+            return SERVER_SUCCESS;
+        case 0:
+            SERVER_LOG_ERROR << "Invalid IP address: " << ip_address;
+            return SERVER_INVALID_ARGUMENT;
+        default:
+            SERVER_LOG_ERROR << "inet_pton conversion error";
+            return SERVER_UNEXPECTED_ERROR;
+    }
+}
+
+ErrorCode
+ValidationUtil::ValidateStringIsNumber(const std::string &string) {
+    if (!string.empty() && std::all_of(string.begin(), string.end(), ::isdigit)) {
+        return SERVER_SUCCESS;
+    }
+    else {
+        return SERVER_INVALID_ARGUMENT;
+    }
+}
+
+ErrorCode
+ValidationUtil::ValidateStringIsBool(std::string &str) {
+    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+    if (str == "true" || str == "on" || str == "yes" || str == "1" ||
+        str == "false" || str == "off" || str == "no" || str == "0" ||
+        str.empty()) {
+        return SERVER_SUCCESS;
+    }
+    else {
+        return SERVER_INVALID_ARGUMENT;
+    }
+}
+
+ErrorCode
+ValidationUtil::ValidateStringIsDouble(const std::string &str, double &val) {
+    char* end = nullptr;
+    val = std::strtod(str.c_str(), &end);
+    if (end != str.c_str() && *end == '\0' && val != HUGE_VAL) {
+        return SERVER_SUCCESS;
+    }
+    else {
+        return SERVER_INVALID_ARGUMENT;
+    }
+}
+
+ErrorCode
+ValidationUtil::ValidateDbURI(const std::string &uri) {
+    std::string dialectRegex = "(.*)";
+    std::string usernameRegex = "(.*)";
+    std::string passwordRegex = "(.*)";
+    std::string hostRegex = "(.*)";
+    std::string portRegex = "(.*)";
+    std::string dbNameRegex = "(.*)";
+    std::string uriRegexStr = dialectRegex + "\\:\\/\\/" +
+        usernameRegex + "\\:" +
+        passwordRegex + "\\@" +
+        hostRegex + "\\:" +
+        portRegex + "\\/" +
+        dbNameRegex;
+    std::regex uriRegex(uriRegexStr);
+    std::smatch pieces_match;
+
+    bool okay = true;
+
+    if (std::regex_match(uri, pieces_match, uriRegex)) {
+        std::string dialect = pieces_match[1].str();
+        std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
+        if (dialect.find("mysql") == std::string::npos && dialect.find("sqlite") == std::string::npos) {
+            SERVER_LOG_ERROR << "Invalid dialect in URI: dialect = " << dialect;
+            okay = false;
+        }
+
+        std::string host = pieces_match[4].str();
+        if (!host.empty() && host != "localhost") {
+            if (ValidateIpAddress(host) != SERVER_SUCCESS) {
+                SERVER_LOG_ERROR << "Invalid host ip address in uri = " << host;
+                okay = false;
+            }
+        }
+
+        std::string port = pieces_match[5].str();
+        if (!port.empty()) {
+            if (ValidateStringIsNumber(port) != SERVER_SUCCESS) {
+                SERVER_LOG_ERROR << "Invalid port in uri = " << port;
+                okay = false;
+            }
+        }
+    } else {
+        SERVER_LOG_ERROR << "Wrong URI format: URI = " << uri;
+        okay = false;
+    }
+
+    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
 }
 
 }
