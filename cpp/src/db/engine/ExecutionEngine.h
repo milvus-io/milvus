@@ -31,8 +31,6 @@ enum class MetricType {
 class ExecutionEngine {
 public:
 
-    virtual Status AddWithIdArray(const std::vector<float>& vectors, const std::vector<long>& vector_ids);
-
     virtual Status AddWithIds(long n, const float *xdata, const long *xids) = 0;
 
     virtual size_t Count() const = 0;
