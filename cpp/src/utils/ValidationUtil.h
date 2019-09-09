@@ -40,7 +40,19 @@ public:
     GetGpuMemory(uint32_t gpu_index, size_t &memory);
 
     static ErrorCode
-    ValidateConfig();
+    ValidateIpAddress(const std::string &ip_address);
+
+    static ErrorCode
+    ValidateStringIsNumber(const std::string &str);
+
+    static ErrorCode
+    ValidateStringIsBool(std::string &str);
+
+    static ErrorCode
+    ValidateStringIsDouble(const std::string &str, double &val);
+
+    static ErrorCode
+    ValidateDbURI(const std::string &uri);
 };
 
 }
