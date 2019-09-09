@@ -36,7 +36,7 @@ public:
                                const engine::Config &cfg,
                                const long &nt = 0,
                                const float *xt = nullptr) {
-
+        return 0;
     }
 
     engine::VecIndexPtr Clone() override {
@@ -55,7 +55,7 @@ public:
                           const float *xb,
                           const long *ids,
                           const engine::Config &cfg = engine::Config()) {
-
+        return 0;
     }
 
     virtual ErrorCode Search(const long &nq,
@@ -63,15 +63,16 @@ public:
                              float *dist,
                              long *ids,
                              const engine::Config &cfg = engine::Config()) {
-
+        return 0;
     }
 
-    engine::VecIndexPtr CopyToGpu(const int64_t &device_id, const engine::Config &cfg) override {
-
+    engine::VecIndexPtr CopyToGpu(const int64_t &device_id,
+                                  const engine::Config &cfg) override {
+        return nullptr;
     }
 
     engine::VecIndexPtr CopyToCpu(const engine::Config &cfg) override {
-
+        return nullptr;
     }
 
     virtual int64_t Dimension() {
@@ -88,7 +89,7 @@ public:
     }
 
     virtual ErrorCode Load(const zilliz::knowhere::BinarySet &index_binary) {
-
+        return 0;
     }
 
 public:
@@ -96,6 +97,24 @@ public:
     int64_t ntotal_ = 0;
 };
 
+}
+
+TEST(CacheTest, DUMMY_TEST) {
+    engine::Config cfg;
+    MockVecIndex mock_index;
+    mock_index.Dimension();
+    mock_index.Count();
+    mock_index.Add(1, nullptr, nullptr);
+    mock_index.BuildAll(1, nullptr, nullptr, cfg);
+    mock_index.Search(1, nullptr, nullptr, nullptr, cfg);
+    mock_index.Clone();
+    mock_index.CopyToCpu(cfg);
+    mock_index.CopyToGpu(1, cfg);
+    mock_index.GetDeviceId();
+    mock_index.GetType();
+    zilliz::knowhere::BinarySet index_binary;
+    mock_index.Load(index_binary);
+    mock_index.Serialize();
 }
 
 TEST(CacheTest, CPU_CACHE_TEST) {

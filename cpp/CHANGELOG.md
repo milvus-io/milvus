@@ -29,6 +29,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-492 - Drop index failed if index have been created with index_type: FLAT
 - MS-493 - Knowhere unittest crash
 - MS-453 - GPU search error when nprobe set more than 1024
+- MS-510 - unittest out of memory and crashed
 - MS-119 - The problem of combining the log files
 
 ## Improvement
@@ -94,7 +95,20 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-488 - Improve code format in scheduler
 - MS-495 - cmake: integrated knowhere
 - MS-496 - Change the top_k limitation from 1024 to 2048
+- MS-502 - Update tasktable_test in scheduler
+- MS-504 - Update node_test in scheduler
 - MS-505 - Install core unit test and add to coverage
+- MS-508 - Update normal_test in scheduler
+- MS-511 - Update resource_test in scheduler
+- MS-517 - Update resource_mgr_test in scheduler
+- MS-518 - Add schedinst_test in scheduler
+- MS-519 - Add event_test in scheduler
+- MS-520 - Update resource_test in scheduler
+- MS-524 - Add some unittest in event_test and resource_test
+- MS-525 - Disable parallel reduce in SearchTask
+- MS-527 - Update scheduler_test and enable it
+- MS-528 - Hide some config used future
+- MS-530 - Add unittest for SearchTask->Load
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

@@ -36,7 +36,8 @@ StartSchedulerService() {
             auto type = resconf.GetValue(server::CONFIG_RESOURCE_TYPE);
 //        auto memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_MEMORY);
             auto device_id = resconf.GetInt64Value(server::CONFIG_RESOURCE_DEVICE_ID);
-            auto enable_loader = resconf.GetBoolValue(server::CONFIG_RESOURCE_ENABLE_LOADER);
+//            auto enable_loader = resconf.GetBoolValue(server::CONFIG_RESOURCE_ENABLE_LOADER);
+            auto enable_loader = true;
             auto enable_executor = resconf.GetBoolValue(server::CONFIG_RESOURCE_ENABLE_EXECUTOR);
             auto pinned_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_PIN_MEMORY);
             auto temp_memory = resconf.GetInt64Value(server::CONFIG_RESOURCE_TEMP_MEMORY);
@@ -81,7 +82,9 @@ StartSchedulerService() {
         }
     } catch (const char* msg) {
         SERVER_LOG_ERROR << msg;
+        // TODO: throw exception instead
         exit(-1);
+//        throw std::exception();
     }
 
     ResMgrInst::GetInstance()->Start();
