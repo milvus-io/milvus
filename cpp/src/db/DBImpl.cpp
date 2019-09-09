@@ -257,7 +257,7 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
         if(!utils::IsSameIndex(old_index, new_index)) {
             DropIndex(table_id);
 
-            status = meta_ptr_->UpdateTableIndexParam(table_id, new_index);
+            status = meta_ptr_->UpdateTableIndex(table_id, new_index);
             if (!status.ok()) {
                 ENGINE_LOG_ERROR << "Failed to update table index info for table: " << table_id;
                 return status;
