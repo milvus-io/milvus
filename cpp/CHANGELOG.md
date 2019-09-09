@@ -29,6 +29,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-492 - Drop index failed if index have been created with index_type: FLAT
 - MS-493 - Knowhere unittest crash
 - MS-453 - GPU search error when nprobe set more than 1024
+- MS-119 - The problem of combining the log files
 
 ## Improvement
 - MS-327 - Clean code for milvus
