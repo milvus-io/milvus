@@ -9,11 +9,70 @@
 #include <easylogging++.h>
 #include <ctype.h>
 
+#include <string>
+#include <libgen.h>
+
+
 namespace zilliz {
 namespace milvus {
 namespace server {
 
-int32_t InitLog(const std::string& log_config_file) {
+namespace {
+static int global_idx = 0;
+static int debug_idx = 0;
+static int warning_idx = 0;
+static int trace_idx = 0;
+static int error_idx = 0;
+static int fatal_idx = 0;
+}
+
+// TODO(yzb) : change the easylogging library to get the log level from parameter rather than filename
+void rolloutHandler(const char *filename, std::size_t size) {
+    char *dirc = strdup(filename);
+    char *basec = strdup(filename);
+    char *dir = dirname(dirc);
+    char *base = basename(basec);
+
+    std::string s(base);
+    std::stringstream ss;
+    std::string
+        list[] = {"\\", " ", "\'", "\"", "*", "\?", "{", "}", ";", "<", ">", "|", "^", "&", "$", "#", "!", "`", "~"};
+    std::string::size_type position;
+    for (auto substr : list) {
+        position = 0;
+        while ((position = s.find_first_of(substr, position)) != std::string::npos) {
+            s.insert(position, "\\");
+            position += 2;
+        }
+    }
+    int ret;
+    std::string m(std::string(dir) + "/" + s);
+    s = m;
+    if ((position = s.find("global")) != std::string::npos) {
+        s.append("." + std::to_string(++global_idx));
+        ret = rename(m.c_str(), s.c_str());
+    } else if ((position = s.find("debug")) != std::string::npos) {
+        s.append("." + std::to_string(++debug_idx));
+        ret = rename(m.c_str(), s.c_str());
+    } else if ((position = s.find("warning")) != std::string::npos) {
+        s.append("." + std::to_string(++warning_idx));
+        ret = rename(m.c_str(), s.c_str());
+    } else if ((position = s.find("trace")) != std::string::npos) {
+        s.append("." + std::to_string(++trace_idx));
+        ret = rename(m.c_str(), s.c_str());
+    } else if ((position = s.find("error")) != std::string::npos) {
+        s.append("." + std::to_string(++error_idx));
+        ret = rename(m.c_str(), s.c_str());
+    } else if ((position = s.find("fatal")) != std::string::npos) {
+        s.append("." + std::to_string(++fatal_idx));
+        ret = rename(m.c_str(), s.c_str());
+    } else {
+        s.append("." + std::to_string(++global_idx));
+        ret = rename(m.c_str(), s.c_str());
+    }
+}
+
+int32_t InitLog(const std::string &log_config_file) {
 #if 0
     ServerConfig &config = ServerConfig::GetInstance();
     ConfigNode log_config = config.GetConfig(CONFIG_LOG);
@@ -50,8 +109,10 @@ int32_t InitLog(const std::string& log_config_file) {
 #else
     el::Configurations conf(log_config_file);
 #endif
-
     el::Loggers::reconfigureAllLoggers(conf);
+
+    el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
+    el::Helpers::installPreRollOutCallback(rolloutHandler);
     return 0;
 }
 
