@@ -10,6 +10,8 @@
 #include "TaskDispatchQueue.h"
 #include "utils/BlockingQueue.h"
 
+#include <thread>
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
