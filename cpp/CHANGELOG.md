@@ -104,6 +104,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-519 - Add event_test in scheduler
 - MS-520 - Update resource_test in scheduler
 - MS-524 - Add some unittest in event_test and resource_test
+- MS-525 - Disable parallel reduce in SearchTask
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
