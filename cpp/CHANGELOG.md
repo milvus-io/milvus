@@ -101,6 +101,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-511 - Update resource_test in scheduler
 - MS-517 - Update resource_mgr_test in scheduler
 - MS-518 - Add schedinst_test in scheduler
+- MS-519 - Add event_test in scheduler
+- MS-520 - Update resource_test in scheduler
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
