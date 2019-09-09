@@ -3,20 +3,21 @@
  * Unauthorized copying of this file, via any medium is strictly prohibited.
  * Proprietary and confidential.
  ******************************************************************************/
-#include "ExecutionEngine.h"
 
-#include <easylogging++.h>
+#include "scheduler/task/SearchTask.h"
+#include <gtest/gtest.h>
+
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-Status ExecutionEngine::AddWithIdArray(const std::vector<float>& vectors, const std::vector<long>& vector_ids) {
-    long n = (long)vector_ids.size();
-    return AddWithIds(n, vectors.data(), vector_ids.data());
+
+TEST(TaskTest, invalid_index) {
+    auto search_task = std::make_shared<XSearchTask>(nullptr);
+    search_task->Load(LoadType::TEST, 10);
 }
 
-
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}
+}
+}

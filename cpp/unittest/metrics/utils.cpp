@@ -34,14 +34,6 @@ public:
 
 };
 
-void ASSERT_STATS(engine::Status& stat) {
-    ASSERT_TRUE(stat.ok());
-    if(!stat.ok()) {
-        std::cout << stat.ToString() << std::endl;
-    }
-}
-
-
 void MetricTest::InitLog() {
     el::Configurations defaultConf;
     defaultConf.setToDefault();

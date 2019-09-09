@@ -20,47 +20,47 @@ namespace engine {
 static constexpr size_t PARALLEL_REDUCE_THRESHOLD = 10000;
 static constexpr size_t PARALLEL_REDUCE_BATCH = 1000;
 
-bool
-NeedParallelReduce(uint64_t nq, uint64_t topk) {
-    server::ServerConfig &config = server::ServerConfig::GetInstance();
-    server::ConfigNode &db_config = config.GetConfig(server::CONFIG_DB);
-    bool need_parallel = db_config.GetBoolValue(server::CONFIG_DB_PARALLEL_REDUCE, false);
-    if (!need_parallel) {
-        return false;
-    }
-
-    return nq * topk >= PARALLEL_REDUCE_THRESHOLD;
-}
-
-void
-ParallelReduce(std::function<void(size_t, size_t)> &reduce_function, size_t max_index) {
-    size_t reduce_batch = PARALLEL_REDUCE_BATCH;
-
-    auto thread_count = std::thread::hardware_concurrency() - 1; //not all core do this work
-    if (thread_count > 0) {
-        reduce_batch = max_index / thread_count + 1;
-    }
-    ENGINE_LOG_DEBUG << "use " << thread_count <<
-                     " thread parallelly do reduce, each thread process " << reduce_batch << " vectors";
-
-    std::vector<std::shared_ptr<std::thread> > thread_array;
-    size_t from_index = 0;
-    while (from_index < max_index) {
-        size_t to_index = from_index + reduce_batch;
-        if (to_index > max_index) {
-            to_index = max_index;
-        }
-
-        auto reduce_thread = std::make_shared<std::thread>(reduce_function, from_index, to_index);
-        thread_array.push_back(reduce_thread);
-
-        from_index = to_index;
-    }
-
-    for (auto &thread_ptr : thread_array) {
-        thread_ptr->join();
-    }
-}
+//bool
+//NeedParallelReduce(uint64_t nq, uint64_t topk) {
+//    server::ServerConfig &config = server::ServerConfig::GetInstance();
+//    server::ConfigNode &db_config = config.GetConfig(server::CONFIG_DB);
+//    bool need_parallel = db_config.GetBoolValue(server::CONFIG_DB_PARALLEL_REDUCE, false);
+//    if (!need_parallel) {
+//        return false;
+//    }
+//
+//    return nq * topk >= PARALLEL_REDUCE_THRESHOLD;
+//}
+//
+//void
+//ParallelReduce(std::function<void(size_t, size_t)> &reduce_function, size_t max_index) {
+//    size_t reduce_batch = PARALLEL_REDUCE_BATCH;
+//
+//    auto thread_count = std::thread::hardware_concurrency() - 1; //not all core do this work
+//    if (thread_count > 0) {
+//        reduce_batch = max_index / thread_count + 1;
+//    }
+//    ENGINE_LOG_DEBUG << "use " << thread_count <<
+//                     " thread parallelly do reduce, each thread process " << reduce_batch << " vectors";
+//
+//    std::vector<std::shared_ptr<std::thread> > thread_array;
+//    size_t from_index = 0;
+//    while (from_index < max_index) {
+//        size_t to_index = from_index + reduce_batch;
+//        if (to_index > max_index) {
+//            to_index = max_index;
+//        }
+//
+//        auto reduce_thread = std::make_shared<std::thread>(reduce_function, from_index, to_index);
+//        thread_array.push_back(reduce_thread);
+//
+//        from_index = to_index;
+//    }
+//
+//    for (auto &thread_ptr : thread_array) {
+//        thread_ptr->join();
+//    }
+//}
 
 void
 CollectFileMetrics(int file_type, size_t file_size) {
@@ -96,23 +96,31 @@ XSearchTask::XSearchTask(TableFileSchemaPtr file)
 void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
     server::TimeRecorder rc("");
+    Status stat = Status::OK();
+    std::string error_msg;
 
     try {
         if (type == LoadType::DISK2CPU) {
-            index_engine_->Load();
+            stat = index_engine_->Load();
         } else if (type == LoadType::CPU2GPU) {
-            index_engine_->CopyToGpu(device_id);
+            stat = index_engine_->CopyToGpu(device_id);
         } else if (type == LoadType::GPU2CPU) {
-            index_engine_->CopyToCpu();
+            stat = index_engine_->CopyToCpu();
         } else {
-            // TODO: exception
-            std::string msg = "Wrong load type";
-            ENGINE_LOG_ERROR << msg;
+            error_msg = "Wrong load type";
+            stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
     } catch (std::exception &ex) {
         //typical error: out of disk space or permition denied
-        std::string msg = "Failed to load index file: " + std::string(ex.what());
-        ENGINE_LOG_ERROR << msg;
+        error_msg = "Failed to load index file: " + std::string(ex.what());
+        stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
+    }
+
+    if (!stat.ok()) {
+        if (error_msg.empty())
+            error_msg = std::string("Failed to load index file: file not available");
+        //typical error: file not available
+        ENGINE_LOG_ERROR << error_msg;
 
         for (auto &context : search_contexts_) {
             context->IndexSearchDone(file_->id_);//mark as done avoid dead lock, even failed
@@ -228,11 +236,11 @@ Status XSearchTask::ClusterResult(const std::vector<long> &output_ids,
         }
     };
 
-    if (NeedParallelReduce(nq, topk)) {
-        ParallelReduce(reduce_worker, nq);
-    } else {
-        reduce_worker(0, nq);
-    }
+//    if (NeedParallelReduce(nq, topk)) {
+//        ParallelReduce(reduce_worker, nq);
+//    } else {
+    reduce_worker(0, nq);
+//    }
 
     return Status::OK();
 }
@@ -333,11 +341,11 @@ Status XSearchTask::TopkResult(SearchContext::ResultSet &result_src,
         }
     };
 
-    if (NeedParallelReduce(result_src.size(), topk)) {
-        ParallelReduce(ReduceWorker, result_src.size());
-    } else {
-        ReduceWorker(0, result_src.size());
-    }
+//    if (NeedParallelReduce(result_src.size(), topk)) {
+//        ParallelReduce(ReduceWorker, result_src.size());
+//    } else {
+    ReduceWorker(0, result_src.size());
+//    }
 
     return Status::OK();
 }

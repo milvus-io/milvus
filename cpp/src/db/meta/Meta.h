@@ -32,7 +32,7 @@ class Meta {
 
     virtual Status AllTables(std::vector<TableSchema> &table_schema_array) = 0;
 
-    virtual Status UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) = 0;
+    virtual Status UpdateTableIndex(const std::string &table_id, const TableIndex& index) = 0;
 
     virtual Status UpdateTableFlag(const std::string &table_id, int64_t flag) = 0;
 

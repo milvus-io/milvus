@@ -52,9 +52,9 @@ class IVFTest
     void SetUp() override {
         std::tie(index_type, preprocess_cfg, train_cfg, add_cfg, search_cfg) = GetParam();
         //Init_with_default();
-        Generate(128, 1000000/5, 10);
+        Generate(128, 1000000/100, 10);
         index_ = IndexFactory(index_type);
-        FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*300, 2);
+        FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*600, 2);
     }
     void TearDown() override {
         FaissGpuResourceMgr::GetInstance().Free();
@@ -77,21 +77,21 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                                             Config::object{{"nlist", 100}, {"metric_type", "L2"}},
                                             Config(),
                                             Config::object{{"k", 10}}),
-                            //std::make_tuple("IVFPQ",
-                            //                Config(),
-                            //                Config::object{{"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
-                            //                Config(),
-                            //                Config::object{{"k", 10}}),
-                            std::make_tuple("GPUIVF",
+                            std::make_tuple("IVFPQ",
                                             Config(),
-                                            Config::object{{"nlist", 1638}, {"gpu_id", device_id}, {"metric_type", "L2"}},
+                                            Config::object{{"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
                                             Config(),
                                             Config::object{{"k", 10}}),
-                            //std::make_tuple("GPUIVFPQ",
-                            //                Config(),
-                            //                Config::object{{"gpu_id", device_id}, {"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
-                            //                Config(),
-                            //                Config::object{{"k", 10}}),
+                            std::make_tuple("GPUIVF",
+                                            Config(),
+                                            Config::object{{"nlist", 100}, {"gpu_id", device_id}, {"metric_type", "L2"}},
+                                            Config(),
+                                            Config::object{{"k", 10}}),
+                            std::make_tuple("GPUIVFPQ",
+                                            Config(),
+                                            Config::object{{"gpu_id", device_id}, {"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
+                                            Config(),
+                                            Config::object{{"k", 10}}),
                             std::make_tuple("IVFSQ",
                                             Config(),
                                             Config::object{{"nlist", 100}, {"nbits", 8}, {"metric_type", "L2"}},
@@ -99,7 +99,7 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                                             Config::object{{"k", 10}}),
                             std::make_tuple("GPUIVFSQ",
                                             Config(),
-                                            Config::object{{"gpu_id", device_id}, {"nlist", 1638}, {"nbits", 8}, {"metric_type", "L2"}},
+                                            Config::object{{"gpu_id", device_id}, {"nlist", 100}, {"nbits", 8}, {"metric_type", "L2"}},
                                             Config(),
                                             Config::object{{"k", 10}})
                         )
@@ -386,8 +386,8 @@ class GPURESTEST
     int64_t elems = 0;
 };
 
-const int search_count = 100;
-const int load_count = 30;
+const int search_count = 10;
+const int load_count = 3;
 
 TEST_F(GPURESTEST, gpu_ivf_resource_test) {
     assert(!xb.empty());

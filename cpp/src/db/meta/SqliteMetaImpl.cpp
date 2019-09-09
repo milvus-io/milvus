@@ -192,8 +192,6 @@ Status SqliteMetaImpl::CreateTable(TableSchema &table_schema) {
     } catch (std::exception &e) {
         return HandleException("Encounter exception when create table", e.what());
     }
-
-    return Status::OK();
 }
 
 Status SqliteMetaImpl::DeleteTable(const std::string& table_id) {
@@ -341,7 +339,7 @@ Status SqliteMetaImpl::FilesByType(const std::string& table_id,
     return Status::OK();
 }
 
-Status SqliteMetaImpl::UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) {
+Status SqliteMetaImpl::UpdateTableIndex(const std::string &table_id, const TableIndex& index) {
     try {
         server::MetricCollector metric;
 
