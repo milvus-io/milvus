@@ -25,7 +25,7 @@ class NSGInterfaceTest : public DataGen, public TestWithParam<::std::tuple<Confi
  protected:
     void SetUp() override {
         //Init_with_default();
-        FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, 1024*1024*200, 1024*1024*300, 2);
+        FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, 1024*1024*200, 1024*1024*600, 2);
         Generate(256, 1000000, 1);
         index_ = std::make_shared<NSG>();
         std::tie(train_cfg, search_cfg) = GetParam();
