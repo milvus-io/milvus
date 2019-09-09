@@ -148,10 +148,6 @@ TEST_F(IDMAPTest, copy_test) {
 
     {
         // cpu to gpu
-        static int64_t device_id = 0;
-        FaissGpuResourceMgr::GetInstance().InitDevice(0);
-        FaissGpuResourceMgr::GetInstance().InitDevice(1);
-
         auto clone_index = CopyCpuToGpu(index_, device_id, Config());
         auto clone_result = clone_index->Search(query_dataset, Config::object{{"k", k}});
         AssertAnns(clone_result, nq, k);
@@ -169,7 +165,7 @@ TEST_F(IDMAPTest, copy_test) {
         assert(std::static_pointer_cast<IDMAP>(host_index)->GetRawIds() != nullptr);
 
         // gpu to gpu
-        auto device_index = CopyCpuToGpu(index_, 1, Config());
+        auto device_index = CopyCpuToGpu(index_, device_id, Config());
         auto device_result = device_index->Search(query_dataset, Config::object{{"k", k}});
         AssertAnns(device_result, nq, k);
         //assert(std::static_pointer_cast<GPUIDMAP>(device_index)->GetRawVectors() != nullptr);
