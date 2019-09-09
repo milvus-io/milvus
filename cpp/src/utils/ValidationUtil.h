@@ -38,6 +38,9 @@ public:
 
     static ErrorCode
     GetGpuMemory(uint32_t gpu_index, size_t &memory);
+
+    static ErrorCode
+    ValidateConfig();
 };
 
 }
