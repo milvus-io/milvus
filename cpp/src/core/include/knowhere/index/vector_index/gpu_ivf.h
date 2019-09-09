@@ -3,6 +3,7 @@
 #include <faiss/gpu/StandardGpuResources.h>
 
 #include "ivf.h"
+#include "src/utils/BlockingQueue.h"
 
 
 namespace zilliz {
@@ -16,12 +17,15 @@ struct Resource {
 
     std::shared_ptr<faiss::gpu::StandardGpuResources> faiss_res;
     int64_t id;
+    std::mutex mutex;
 };
 using ResPtr = std::shared_ptr<Resource>;
 using ResWPtr = std::weak_ptr<Resource>;
 
 class FaissGpuResourceMgr {
  public:
+    using ResBQ = zilliz::milvus::server::BlockingQueue<ResPtr>;
+
     struct DeviceParams {
         int64_t temp_mem_size = 0;
         int64_t pinned_mem_size = 0;
@@ -55,11 +59,8 @@ class FaissGpuResourceMgr {
 
     // allocate gpu memory before search
     // this func will return True if the device is idle and exists an idle resource.
-    bool
-    GetRes(const int64_t& device_id, ResPtr &res, const int64_t& alloc_size = 0);
-
-    void
-    MoveToInuse(const int64_t &device_id, const ResPtr& res);
+    //bool
+    //GetRes(const int64_t& device_id, ResPtr &res, const int64_t& alloc_size = 0);
 
     void
     MoveToIdle(const int64_t &device_id, const ResPtr& res);
@@ -68,32 +69,33 @@ class FaissGpuResourceMgr {
     Dump();
 
  protected:
-    void
-    RemoveResource(const int64_t& device_id, const ResPtr& res, std::map<int64_t, std::vector<ResPtr>>& resource_pool);
-
- protected:
     bool is_init = false;
 
-    std::mutex mutex_;
     std::map<int64_t, DeviceParams> devices_params_;
-    std::map<int64_t, std::vector<ResPtr>> in_use_;
-    std::map<int64_t, std::vector<ResPtr>> idle_;
+    std::map<int64_t, ResBQ> idle_map;
 };
 
 class ResScope {
  public:
-    ResScope(const int64_t device_id,  ResPtr &res) : resource(res), device_id(device_id) {
-        FaissGpuResourceMgr::GetInstance().MoveToInuse(device_id, resource);
+    ResScope(const int64_t device_id,  ResPtr &res) : resource(res), device_id(device_id), move(true) {
+        res->mutex.lock();
+    }
+
+    ResScope(ResPtr &res) : resource(res), device_id(-1), move(false) {
+        res->mutex.lock();
     }
 
     ~ResScope() {
-        //resource->faiss_res->noTempMemory();
-        FaissGpuResourceMgr::GetInstance().MoveToIdle(device_id, resource);
+        if (move) {
+            FaissGpuResourceMgr::GetInstance().MoveToIdle(device_id, resource);
+        }
+        resource->mutex.unlock();
     }
 
  private:
     ResPtr resource;
     int64_t device_id;
+    bool move = true;
 };
 
 class GPUIndex {
