@@ -100,9 +100,11 @@ protected:
         disk_resource_ = ResourceFactory::Create("ssd", "DISK", 0);
         cpu_resource_ = ResourceFactory::Create("cpu", "CPU", 0);
         gpu_resource_ = ResourceFactory::Create("gpu", "GPU", 0);
+        test_resource_ = std::make_shared<TestResource>("test", 0, true, true);
         resources_.push_back(disk_resource_);
         resources_.push_back(cpu_resource_);
         resources_.push_back(gpu_resource_);
+        resources_.push_back(test_resource_);
 
         auto subscriber = [&](EventPtr event) {
             if (event->Type() == EventType::LOAD_COMPLETED) {
@@ -125,10 +127,12 @@ protected:
         disk_resource_->RegisterSubscriber(subscriber);
         cpu_resource_->RegisterSubscriber(subscriber);
         gpu_resource_->RegisterSubscriber(subscriber);
+        test_resource_->RegisterSubscriber(subscriber);
 
         disk_resource_->Start();
         cpu_resource_->Start();
         gpu_resource_->Start();
+        test_resource_->Start();
     }
 
     void
@@ -136,6 +140,7 @@ protected:
         disk_resource_->Stop();
         cpu_resource_->Stop();
         gpu_resource_->Stop();
+        test_resource_->Stop();
     }
 
     void
@@ -153,6 +158,7 @@ protected:
     ResourcePtr disk_resource_;
     ResourcePtr cpu_resource_;
     ResourcePtr gpu_resource_;
+    ResourcePtr test_resource_;
     std::vector<ResourcePtr> resources_;
     uint64_t load_count_ = 0;
     uint64_t exec_count_ = 0;
@@ -236,6 +242,30 @@ TEST_F(ResourceAdvanceTest, gpu_resource_test) {
     }
 }
 
+TEST_F(ResourceAdvanceTest, test_resource_test) {
+    const uint64_t NUM = 100;
+    std::vector<std::shared_ptr<TestTask>> tasks;
+    TableFileSchemaPtr dummy = nullptr;
+    for (uint64_t i = 0; i < NUM; ++i) {
+        auto task = std::make_shared<TestTask>(dummy);
+        tasks.push_back(task);
+        test_resource_->task_table().Put(task);
+    }
+
+    test_resource_->WakeupLoader();
+    WaitLoader(NUM);
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        ASSERT_EQ(tasks[i]->load_count_, 1);
+    }
+
+    test_resource_->WakeupExecutor();
+    WaitExecutor(NUM);
+
+    for (uint64_t i = 0; i < NUM; ++i) {
+        ASSERT_EQ(tasks[i]->exec_count_, 1);
+    }
+}
 
 }
 }
