@@ -419,7 +419,7 @@ Status MySQLMetaImpl::FilesByType(const std::string &table_id,
     return Status::OK();
 }
 
-Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const TableIndex& index) {
+Status MySQLMetaImpl::UpdateTableIndex(const std::string &table_id, const TableIndex& index) {
     try {
         server::MetricCollector metric;
 
@@ -436,7 +436,7 @@ Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const T
                                        "WHERE table_id = " << quote << table_id << " AND " <<
                                        "state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
-            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableIndexParam: " << updateTableIndexParamQuery.str();
+            ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableIndex: " << updateTableIndexParamQuery.str();
 
             StoreQueryResult res = updateTableIndexParamQuery.store();
 
@@ -453,12 +453,12 @@ Status MySQLMetaImpl::UpdateTableIndexParam(const std::string &table_id, const T
                                            "state = " << state << ", " <<
                                            "dimension = " << dimension << ", " <<
                                            "created_on = " << created_on << ", " <<
-                                           "engine_type_ = " << index.engine_type_ << ", " <<
+                                           "engine_type = " << index.engine_type_ << ", " <<
                                            "nlist = " << index.nlist_ << ", " <<
                                            "metric_type = " << index.metric_type_ << " " <<
-                                           "WHERE id = " << quote << table_id << ";";
+                                           "WHERE table_id = " << quote << table_id << ";";
 
-                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableIndexParam: " << updateTableIndexParamQuery.str();
+                ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableIndex: " << updateTableIndexParamQuery.str();
 
 
                 if (!updateTableIndexParamQuery.exec()) {
@@ -497,7 +497,7 @@ Status MySQLMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag)
             Query updateTableFlagQuery = connectionPtr->query();
             updateTableFlagQuery << "UPDATE Tables " <<
                                  "SET flag = " << flag << " " <<
-                                 "WHERE id = " << quote << table_id << ";";
+                                 "WHERE table_id = " << quote << table_id << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFlag: " << updateTableFlagQuery.str();
 
@@ -608,7 +608,7 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
             //set table index type to raw
             dropTableIndexQuery << "UPDATE Tables " <<
                                 "SET engine_type = " << std::to_string(DEFAULT_ENGINE_TYPE) << "," <<
-                                "nlist = " << std::to_string(DEFAULT_NLIST) << " " <<
+                                "nlist = " << std::to_string(DEFAULT_NLIST) << ", " <<
                                 "metric_type = " << std::to_string(DEFAULT_METRIC_TYPE) << " " <<
                                 "WHERE table_id = " << quote << table_id << ";";
 
@@ -725,7 +725,8 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
             }
 
             Query describeTableQuery = connectionPtr->query();
-            describeTableQuery << "SELECT id, state, dimension, engine_type, nlist, index_file_size, metric_type " <<
+            describeTableQuery << "SELECT id, state, dimension, created_on, " <<
+                               "flag, index_file_size, engine_type, nlist, metric_type " <<
                                "FROM Tables " <<
                                "WHERE table_id = " << quote << table_schema.table_id_ << " " <<
                                "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
@@ -743,6 +744,10 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
             table_schema.state_ = resRow["state"];
 
             table_schema.dimension_ = resRow["dimension"];
+
+            table_schema.created_on_ = resRow["created_on"];
+
+            table_schema.flag_ = resRow["flag"];
 
             table_schema.index_file_size_ = resRow["index_file_size"];
 
@@ -1927,7 +1932,7 @@ Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 
 
             Query countQuery = connectionPtr->query();
-            countQuery << "SELECT size " <<
+            countQuery << "SELECT row_count " <<
                        "FROM TableFiles " <<
                        "WHERE table_id = " << quote << table_id << " AND " <<
                        "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
@@ -1941,19 +1946,9 @@ Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 
         result = 0;
         for (auto &resRow : res) {
-            size_t size = resRow["size"];
+            size_t size = resRow["row_count"];
             result += size;
         }
-
-        if (table_schema.dimension_ <= 0) {
-            std::stringstream errorMsg;
-            errorMsg << "MySQLMetaImpl::Count: " << "table dimension = " << std::to_string(table_schema.dimension_)
-                     << ", table_id = " << table_id;
-            ENGINE_LOG_ERROR << errorMsg.str();
-            return Status(DB_ERROR, errorMsg.str());
-        }
-        result /= table_schema.dimension_;
-        result /= sizeof(float);
 
     } catch (const BadQuery &e) {
         // Handle any query errors
