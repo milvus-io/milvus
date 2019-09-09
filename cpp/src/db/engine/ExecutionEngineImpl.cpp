@@ -138,10 +138,8 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
             } else {
                 ENGINE_LOG_DEBUG << "Disk io from: " << location_;
             }
-        } catch (knowhere::KnowhereException &e) {
-            ENGINE_LOG_ERROR << e.what();
-            return Status(DB_ERROR, e.what());
         } catch (std::exception &e) {
+            ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
     }
@@ -166,10 +164,8 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
         try {
             index_ = index_->CopyToGpu(device_id);
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
-        } catch (knowhere::KnowhereException &e) {
-            ENGINE_LOG_ERROR << e.what();
-            return Status(DB_ERROR, e.what());
         } catch (std::exception &e) {
+            ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
     }
@@ -195,10 +191,8 @@ Status ExecutionEngineImpl::CopyToCpu() {
         try {
             index_ = index_->CopyToCpu();
             ENGINE_LOG_DEBUG << "GPU to CPU";
-        } catch (knowhere::KnowhereException &e) {
-            ENGINE_LOG_ERROR << e.what();
-            return Status(DB_ERROR, e.what());
         } catch (std::exception &e) {
+            ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
     }
@@ -233,10 +227,8 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
             double physical_size = server::CommonUtil::GetFileSize(location);
             server::CollectExecutionEngineMetrics metrics(physical_size);
             to_merge = read_index(location);
-        } catch (knowhere::KnowhereException &e) {
-            ENGINE_LOG_ERROR << e.what();
-            return Status(DB_ERROR, e.what());
         } catch (std::exception &e) {
+            ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
     }
