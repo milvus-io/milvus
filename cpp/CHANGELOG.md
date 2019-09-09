@@ -107,6 +107,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-525 - Disable parallel reduce in SearchTask
 - MS-527 - Update scheduler_test and enable it
 - MS-528 - Hide some config used future
+- MS-530 - Add unittest for SearchTask->Load
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
