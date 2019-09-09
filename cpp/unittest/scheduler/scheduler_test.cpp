@@ -6,6 +6,7 @@
 #include "scheduler/Scheduler.h"
 #include <gtest/gtest.h>
 #include <src/scheduler/tasklabel/DefaultLabel.h>
+#include <src/server/ServerConfig.h>
 #include "cache/DataObj.h"
 #include "cache/GpuCacheMgr.h"
 #include "scheduler/task/TestTask.h"
@@ -15,18 +16,19 @@
 #include "wrapper/knowhere/vec_index.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class MockVecIndex : public engine::VecIndex {
 public:
-    virtual server::KnowhereError BuildAll(const long &nb,
-                                           const float *xb,
-                                           const long *ids,
-                                           const engine::Config &cfg,
-                                           const long &nt = 0,
-                                           const float *xt = nullptr) {
+    virtual ErrorCode BuildAll(const long &nb,
+                               const float *xb,
+                               const long *ids,
+                               const engine::Config &cfg,
+                               const long &nt = 0,
+                               const float *xt = nullptr) {
 
     }
 
@@ -42,18 +44,18 @@ public:
         return engine::IndexType::INVALID;
     }
 
-    virtual server::KnowhereError Add(const long &nb,
-                                      const float *xb,
-                                      const long *ids,
-                                      const engine::Config &cfg = engine::Config()) {
+    virtual ErrorCode Add(const long &nb,
+                          const float *xb,
+                          const long *ids,
+                          const engine::Config &cfg = engine::Config()) {
 
     }
 
-    virtual server::KnowhereError Search(const long &nq,
-                                         const float *xq,
-                                         float *dist,
-                                         long *ids,
-                                         const engine::Config &cfg = engine::Config()) {
+    virtual ErrorCode Search(const long &nq,
+                             const float *xq,
+                             float *dist,
+                             long *ids,
+                             const engine::Config &cfg = engine::Config()) {
 
     }
 
@@ -78,7 +80,7 @@ public:
         return binset;
     }
 
-    virtual server::KnowhereError Load(const zilliz::knowhere::BinarySet &index_binary) {
+    virtual ErrorCode Load(const zilliz::knowhere::BinarySet &index_binary) {
 
     }
 
@@ -92,6 +94,10 @@ class SchedulerTest : public testing::Test {
 protected:
     void
     SetUp() override {
+        server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+        config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
+        config.AddSequenceItem(server::CONFIG_GPU_IDS, "1");
+
         ResourcePtr cpu = ResourceFactory::Create("cpu", "CPU", 0, true, false);
         ResourcePtr gpu_0 = ResourceFactory::Create("gpu0", "GPU", 0);
         ResourcePtr gpu_1 = ResourceFactory::Create("gpu1", "GPU", 1);
@@ -127,16 +133,16 @@ protected:
 
 void
 insert_dummy_index_into_gpu_cache(uint64_t device_id) {
-    MockVecIndex* mock_index = new MockVecIndex();
+    MockVecIndex *mock_index = new MockVecIndex();
     mock_index->ntotal_ = 1000;
     engine::VecIndexPtr index(mock_index);
 
     cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index);
 
-    cache::GpuCacheMgr::GetInstance(device_id)->InsertItem("location",obj);
+    cache::GpuCacheMgr::GetInstance(device_id)->InsertItem("location", obj);
 }
 
-TEST_F(SchedulerTest, OnCopyCompleted) {
+TEST_F(SchedulerTest, OnLoadCompleted) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = std::make_shared<meta::TableFileSchema>();
@@ -176,7 +182,7 @@ TEST_F(SchedulerTest, PushTaskToNeighbourRandomlyTest) {
 }
 
 class SchedulerTest2 : public testing::Test {
- protected:
+protected:
     void
     SetUp() override {
         ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, true, false);

@@ -138,8 +138,8 @@ class NsgIndex {
 
     void FindUnconnectedNode(boost::dynamic_bitset<> &flags, int64_t &root);
 
- private:
-    void GetKnnGraphFromFile();
+ //private:
+ //   void GetKnnGraphFromFile();
 };
 
 }

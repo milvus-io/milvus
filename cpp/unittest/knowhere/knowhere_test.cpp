@@ -34,7 +34,6 @@ class KnowhereWrapperTest
         std::string generator_type;
         std::tie(index_type, generator_type, dim, nb, nq, k, train_cfg, search_cfg) = GetParam();
 
-        //auto generator = GetGenerateFactory(generator_type);
         auto generator = std::make_shared<DataGenBase>();
         generator->GenData(dim, nb, nq, xb, xq, ids, k, gt_ids, gt_dis);
 

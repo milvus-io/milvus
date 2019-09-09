@@ -53,7 +53,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     engine::IDNumbers vector_ids;
@@ -90,7 +90,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
             ss << "Search " << j << " With Size " << count/engine::meta::M << " M";
             STOP_TIMER(ss.str());
 
-            ASSERT_STATS(stat);
+            ASSERT_TRUE(stat.ok());
             for (auto k=0; k<qb; ++k) {
 //                std::cout << results[k][0].first << " " << target_ids[k] << std::endl;
 //                ASSERT_EQ(results[k][0].first, target_ids[k]);
@@ -138,7 +138,7 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     // prepare raw data
@@ -173,14 +173,14 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
     for (int j = 0; j < nb / batch_size; ++j) {
         stat = db_->InsertVectors(TABLE_NAME, batch_size, xb.data()+batch_size*j*TABLE_DIM, ids);
         if (j == 200){ sleep(1);}
-        ASSERT_STATS(stat);
+        ASSERT_TRUE(stat.ok());
     }
 
     sleep(2); // wait until build index finish
 
     engine::QueryResults results;
     stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
 };
 
 TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
@@ -189,7 +189,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
 
     std::vector<engine::meta::TableSchema> table_schema_array;
     stat = db_->AllTables(table_schema_array);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     bool bfound = false;
     for(auto& schema : table_schema_array) {
         if(schema.table_id_ == TABLE_NAME) {
@@ -202,7 +202,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
     engine::IDNumbers vector_ids;
@@ -236,7 +236,7 @@ TEST_F(MySqlDBTest, DELETE_TEST) {
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
-    ASSERT_STATS(stat);
+    ASSERT_TRUE(stat.ok());
 
     bool has_table = false;
     db_->HasTable(TABLE_NAME, has_table);
