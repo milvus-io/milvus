@@ -90,8 +90,6 @@ TEST_F(MetricTest, Metric_Tes) {
 //            stat = db_->Query(group_name, k, qb, qxb, results);
             ss << "Search " << j << " With Size " << (float)(count*group_dim*sizeof(float))/(1024*1024) << " M";
 
-
-//            ASSERT_STATS(stat);
             for (auto k=0; k<qb; ++k) {
 //                ASSERT_EQ(results[k][0].first, target_ids[k]);
                 ss.str("");
