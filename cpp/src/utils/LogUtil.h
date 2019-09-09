@@ -12,7 +12,16 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
+static unsigned global_idx = 0;
+static unsigned debug_idx = 0;
+static unsigned warning_idx = 0;
+static unsigned trace_idx = 0;
+static unsigned error_idx = 0;
+static unsigned fatal_idx = 0;
+
 int32_t InitLog(const std::string& log_config_file);
+
+void rolloutHandler(const char* filename, std::size_t size);
 
 inline std::string GetFileName(std::string filename) {
     int pos = filename.find_last_of('/');
