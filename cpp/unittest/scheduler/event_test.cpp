@@ -19,27 +19,24 @@ TEST(EventTest, start_up_event) {
     ResourceWPtr res(ResourcePtr(nullptr));
     auto event = std::make_shared<StartUpEvent>(res);
     ASSERT_FALSE(event->Dump().empty());
-    std::stringstream ss;
-    ss << event;
-    ASSERT_FALSE(ss.str().empty());
+    std::cout << *event;
+    std::cout << *EventPtr(event);
 }
 
 TEST(EventTest, load_completed_event) {
     ResourceWPtr res(ResourcePtr(nullptr));
     auto event = std::make_shared<LoadCompletedEvent>(res, nullptr);
     ASSERT_FALSE(event->Dump().empty());
-    std::stringstream ss;
-    ss << event;
-    ASSERT_FALSE(ss.str().empty());
+    std::cout << *event;
+    std::cout << *EventPtr(event);
 }
 
 TEST(EventTest, finish_task_event) {
     ResourceWPtr res(ResourcePtr(nullptr));
     auto event = std::make_shared<FinishTaskEvent>(res, nullptr);
     ASSERT_FALSE(event->Dump().empty());
-    std::stringstream ss;
-    ss << event;
-    ASSERT_FALSE(ss.str().empty());
+    std::cout << *event;
+    std::cout << *EventPtr(event);
 }
 
 
@@ -47,9 +44,8 @@ TEST(EventTest, tasktable_updated_event) {
     ResourceWPtr res(ResourcePtr(nullptr));
     auto event = std::make_shared<TaskTableUpdatedEvent>(res);
     ASSERT_FALSE(event->Dump().empty());
-    std::stringstream ss;
-    ss << event;
-    ASSERT_FALSE(ss.str().empty());
+    std::cout << *event;
+    std::cout << *EventPtr(event);
 }
 
 }
