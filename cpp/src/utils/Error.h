@@ -78,6 +78,7 @@ constexpr ErrorCode DB_INVALID_PATH = ToDbErrorCode(5);
 constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);
 constexpr ErrorCode KNOWHERE_INVALID_ARGUMENT = ToKnowhereErrorCode(2);
 constexpr ErrorCode KNOWHERE_UNEXPECTED_ERROR = ToKnowhereErrorCode(3);
+constexpr ErrorCode KNOWHERE_NO_SPACE = ToKnowhereErrorCode(4);
 
 namespace server {
     class ServerException : public std::exception {

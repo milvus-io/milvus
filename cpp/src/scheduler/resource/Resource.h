@@ -31,7 +31,8 @@ namespace engine {
 enum class ResourceType {
     DISK = 0,
     CPU = 1,
-    GPU = 2
+    GPU = 2,
+    TEST = 3,
 };
 
 class Resource : public Node, public std::enable_shared_from_this<Resource> {
@@ -126,7 +127,6 @@ public:
              bool enable_loader,
              bool enable_executor);
 
-    // TODO: SearchContextPtr to TaskPtr
     /*
      * Implementation by inherit class;
      * Blocking function;
@@ -142,11 +142,6 @@ public:
     Process(TaskPtr task) = 0;
 
  private:
-    /*
-     * These function should move to cost.h ???
-     * COST.H ???
-     */
-
     /*
      * Pick one task to load;
      * Order by start time;

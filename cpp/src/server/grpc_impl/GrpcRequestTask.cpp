@@ -950,8 +950,18 @@ DropIndexTask::OnExecute() {
             return SetError(res, "Invalid table name: " + table_name_);
         }
 
+        bool has_table = false;
+        auto stat = DBWrapper::DB()->HasTable(table_name_, has_table);
+        if (!stat.ok()) {
+            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+        }
+
+        if (!has_table) {
+            return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+        }
+
         //step 2: check table existence
-        auto stat = DBWrapper::DB()->DropIndex(table_name_);
+        stat = DBWrapper::DB()->DropIndex(table_name_);
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
