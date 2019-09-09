@@ -30,6 +30,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-493 - Knowhere unittest crash
 - MS-453 - GPU search error when nprobe set more than 1024
 - MS-510 - unittest out of memory and crashed
+- MS-119 - The problem of combining the log files
 
 ## Improvement
 - MS-327 - Clean code for milvus
@@ -107,6 +108,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-525 - Disable parallel reduce in SearchTask
 - MS-527 - Update scheduler_test and enable it
 - MS-528 - Hide some config used future
+- MS-530 - Add unittest for SearchTask->Load
+- MS-531 - Disable next version code
+- MS-533 - Update resource_test to cover dump function
 - MS-523 - Config file validation
 
 ## New Feature
