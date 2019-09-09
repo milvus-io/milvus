@@ -69,11 +69,19 @@ class ServerConfig {
     static ServerConfig &GetInstance();
 
     ErrorCode LoadConfigFile(const std::string& config_filename);
-    ErrorCode ValidateConfig() const;
+    ErrorCode ValidateConfig();
     void PrintAll() const;
 
     ConfigNode GetConfig(const std::string& name) const;
     ConfigNode& GetConfig(const std::string& name);
+
+ private:
+    ErrorCode CheckServerConfig();
+    ErrorCode CheckDBConfig();
+    ErrorCode CheckMetricConfig();
+    ErrorCode CheckCacheConfig();
+    ErrorCode CheckEngineConfig();
+    ErrorCode CheckResourceConfig();
 };
 
 }
