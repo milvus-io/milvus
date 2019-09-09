@@ -52,9 +52,9 @@ class IVFTest
     void SetUp() override {
         std::tie(index_type, preprocess_cfg, train_cfg, add_cfg, search_cfg) = GetParam();
         //Init_with_default();
-        Generate(128, 1000000/5, 10);
+        Generate(128, 1000000/10, 10);
         index_ = IndexFactory(index_type);
-        FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*300, 2);
+        FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*600, 2);
     }
     void TearDown() override {
         FaissGpuResourceMgr::GetInstance().Free();
@@ -77,21 +77,21 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                                             Config::object{{"nlist", 100}, {"metric_type", "L2"}},
                                             Config(),
                                             Config::object{{"k", 10}}),
-                            //std::make_tuple("IVFPQ",
-                            //                Config(),
-                            //                Config::object{{"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
-                            //                Config(),
-                            //                Config::object{{"k", 10}}),
+                            std::make_tuple("IVFPQ",
+                                            Config(),
+                                            Config::object{{"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
+                                            Config(),
+                                            Config::object{{"k", 10}}),
                             std::make_tuple("GPUIVF",
                                             Config(),
                                             Config::object{{"nlist", 1638}, {"gpu_id", device_id}, {"metric_type", "L2"}},
                                             Config(),
                                             Config::object{{"k", 10}}),
-                            //std::make_tuple("GPUIVFPQ",
-                            //                Config(),
-                            //                Config::object{{"gpu_id", device_id}, {"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
-                            //                Config(),
-                            //                Config::object{{"k", 10}}),
+                            std::make_tuple("GPUIVFPQ",
+                                            Config(),
+                                            Config::object{{"gpu_id", device_id}, {"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
+                                            Config(),
+                                            Config::object{{"k", 10}}),
                             std::make_tuple("IVFSQ",
                                             Config(),
                                             Config::object{{"nlist", 100}, {"nbits", 8}, {"metric_type", "L2"}},
