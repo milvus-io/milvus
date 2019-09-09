@@ -179,12 +179,6 @@ Status MySQLMetaImpl::Initialize() {
                 }
             } //Scoped Connection
 
-        } catch (const BadQuery &e) {
-            // Handle any query errors
-            return HandleException("GENERAL ERROR DURING INITIALIZATION", e.what());
-        } catch (const Exception &e) {
-            // Catch-all for any other MySQL++ exceptions
-            return HandleException("GENERAL ERROR DURING INITIALIZATION", e.what());
         } catch (std::exception &e) {
             return HandleException("GENERAL ERROR DURING INITIALIZATION", e.what());
         }
@@ -240,12 +234,6 @@ Status MySQLMetaImpl::DropPartitionsByDates(const std::string &table_id,
                 return HandleException("QUERY ERROR WHEN DROPPING PARTITIONS BY DATES", dropPartitionsByDatesQuery.error());
             }
         } //Scoped Connection
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES", e.what());
     }
@@ -316,12 +304,6 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
 
         return utils::CreateTablePath(options_, table_schema.table_id_);
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN CREATING TABLE", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN CREATING TABLE", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN CREATING TABLE", e.what());
     }
@@ -406,12 +388,6 @@ Status MySQLMetaImpl::FilesByType(const std::string &table_id,
                              << " index files:" << index_count << " backup files:" << backup_count;
         }
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN GET FILE BY TYPE", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN GET FILE BY TYPE", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN GET FILE BY TYPE", e.what());
     }
@@ -470,12 +446,6 @@ Status MySQLMetaImpl::UpdateTableIndex(const std::string &table_id, const TableI
 
         } //Scoped Connection
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", e.what());
     }
@@ -507,12 +477,6 @@ Status MySQLMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag)
 
         } //Scoped Connection
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
     }
@@ -553,12 +517,6 @@ Status MySQLMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex
 
         } //Scoped Connection
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN DESCRIBE TABLE INDEX", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN DESCRIBE TABLE INDEX", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
     }
@@ -620,12 +578,6 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
 
         } //Scoped Connection
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN DROPPING TABLE INDEX", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN DROPPING TABLE INDEX", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DROPPING TABLE INDEX", e.what());
     }
@@ -662,12 +614,6 @@ Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
             DeleteTableFiles(table_id);
         }
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN DELETING TABLE", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN DELETING TABLE", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DELETING TABLE", e.what());
     }
@@ -700,12 +646,6 @@ Status MySQLMetaImpl::DeleteTableFiles(const std::string &table_id) {
                 return HandleException("QUERY ERROR WHEN DELETING TABLE FILES", deleteTableFilesQuery.error());
             }
         } //Scoped Connection
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN DELETING TABLE FILES", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN DELETING TABLE FILES", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DELETING TABLE FILES", e.what());
     }
@@ -760,12 +700,6 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
             return Status(DB_NOT_FOUND, "Table " + table_schema.table_id_ + " not found");
         }
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN DESCRIBING TABLE", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN DESCRIBING TABLE", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DESCRIBING TABLE", e.what());
     }
@@ -800,12 +734,6 @@ Status MySQLMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
         int check = res[0]["check"];
         has_or_not = (check == 1);
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN CHECKING IF TABLE EXISTS", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN CHECKING IF TABLE EXISTS", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN CHECKING IF TABLE EXISTS", e.what());
     }
@@ -855,12 +783,6 @@ Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
 
             table_schema_array.emplace_back(table_schema);
         }
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN DESCRIBING ALL TABLES", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN DESCRIBING ALL TABLES", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DESCRIBING ALL TABLES", e.what());
     }
@@ -932,12 +854,6 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
 
         return utils::CreateTableFilePath(options_, file_schema);
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN CREATING TABLE FILE", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN CREATING TABLE FILE", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN CREATING TABLE FILE", e.what());
     }
@@ -1012,12 +928,6 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
 
             files.push_back(table_file);
         }
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", e.what());
     }
@@ -1126,12 +1036,6 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
 
             files[table_file.date_].push_back(table_file);
         }
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", e.what());
     }
@@ -1219,12 +1123,6 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
             files[table_file.date_].push_back(table_file);
         }
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE", e.what());
     }
@@ -1309,12 +1207,6 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
 
             table_files.emplace_back(file_schema);
         }
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES", e.what());
     }
@@ -1355,12 +1247,6 @@ Status MySQLMetaImpl::Archive() {
                     return HandleException("QUERY ERROR DURING ARCHIVE", archiveQuery.error());
                 }
 
-            } catch (const BadQuery &e) {
-                // Handle any query errors
-                return HandleException("GENERAL ERROR WHEN DURING ARCHIVE", e.what());
-            } catch (const Exception &e) {
-                // Catch-all for any other MySQL++ exceptions
-                return HandleException("GENERAL ERROR WHEN DURING ARCHIVE", e.what());
             } catch (std::exception &e) {
                 return HandleException("GENERAL ERROR WHEN DURING ARCHIVE", e.what());
             }
@@ -1405,12 +1291,6 @@ Status MySQLMetaImpl::Size(uint64_t &result) {
             result = res[0]["sum"];
         }
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN RETRIEVING SIZE", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN RETRIEVING SIZE", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN RETRIEVING SIZE", e.what());
     }
@@ -1481,12 +1361,6 @@ Status MySQLMetaImpl::DiscardFiles(long long to_discard_size) {
 
         return DiscardFiles(to_discard_size);
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN DISCARDING FILES", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN DISCARDING FILES", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DISCARDING FILES", e.what());
     }
@@ -1556,14 +1430,6 @@ Status MySQLMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
             }
         } //Scoped Connection
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILE", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        ENGINE_LOG_DEBUG << "table_id= " << file_schema.table_id_ << " file_id=" << file_schema.file_id_;
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILE", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILE", e.what());
     }
@@ -1592,12 +1458,6 @@ Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string &table_id) {
             return HandleException("QUERY ERROR WHEN UPDATING TABLE FILE TO INDEX", updateTableFilesToIndexQuery.error());
         }
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX", e.what());
     }
@@ -1676,12 +1536,6 @@ Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
             }
         } //Scoped Connection
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES", e.what());
     }
@@ -1760,12 +1614,6 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
             }
         } //Scoped Connection
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN CLEANING UP FILES WITH TTL", e.what());
     }
@@ -1815,12 +1663,6 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
             }
         } //Scoped Connection
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
     }
@@ -1852,12 +1694,6 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 }
             }
         }
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN CLEANING UP TABLES WITH TTL", e.what());
     }
@@ -1897,12 +1733,6 @@ Status MySQLMetaImpl::CleanUp() {
             }
         }
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN CLEANING UP FILES", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN CLEANING UP FILES", e.what());
     }
@@ -1950,12 +1780,6 @@ Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
             result += size;
         }
 
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN RETRIEVING COUNT", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN RETRIEVING COUNT", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN RETRIEVING COUNT", e.what());
     }
@@ -1982,12 +1806,6 @@ Status MySQLMetaImpl::DropAll() {
         } else {
             return HandleException("QUERY ERROR WHEN DROPPING ALL", dropTableQuery.error());
         }
-    } catch (const BadQuery &e) {
-        // Handle any query errors
-        return HandleException("GENERAL ERROR WHEN DROPPING ALL", e.what());
-    } catch (const Exception &e) {
-        // Catch-all for any other MySQL++ exceptions
-        return HandleException("GENERAL ERROR WHEN DROPPING ALL", e.what());
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DROPPING ALL", e.what());
     }
