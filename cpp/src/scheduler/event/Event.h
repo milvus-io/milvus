@@ -32,10 +32,8 @@ public:
         return type_;
     }
 
-    inline virtual std::string
-    Dump() const {
-        return "<Event>";
-    }
+    virtual std::string
+    Dump() const = 0;
 
     friend std::ostream &operator<<(std::ostream &out, const Event &event);
 
