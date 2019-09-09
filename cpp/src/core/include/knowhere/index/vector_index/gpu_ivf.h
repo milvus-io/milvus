@@ -64,6 +64,13 @@ class FaissGpuResourceMgr {
     void
     MoveToIdle(const int64_t &device_id, const ResPtr& res);
 
+    void
+    Dump();
+
+ protected:
+    void
+    RemoveResource(const int64_t& device_id, const ResPtr& res, std::map<int64_t, std::vector<ResPtr>>& resource_pool);
+
  protected:
     bool is_init = false;
 
