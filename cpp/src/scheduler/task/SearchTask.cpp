@@ -96,33 +96,31 @@ XSearchTask::XSearchTask(TableFileSchemaPtr file)
 void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
     server::TimeRecorder rc("");
+    Status stat = Status::OK();
+    std::string error_msg;
 
     try {
         if (type == LoadType::DISK2CPU) {
-            auto stat = index_engine_->Load();
-            if(!stat.ok()) {
-                //typical error: file not available
-                ENGINE_LOG_ERROR << "Failed to load index file: file not available";
-
-                for(auto& context : search_contexts_) {
-                    context->IndexSearchDone(file_->id_);//mark as done avoid dead lock, even failed
-                }
-
-                return;
-            }
+            stat = index_engine_->Load();
         } else if (type == LoadType::CPU2GPU) {
-            index_engine_->CopyToGpu(device_id);
+            stat = index_engine_->CopyToGpu(device_id);
         } else if (type == LoadType::GPU2CPU) {
-            index_engine_->CopyToCpu();
+            stat = index_engine_->CopyToCpu();
         } else {
-            // TODO: exception
-            std::string msg = "Wrong load type";
-            ENGINE_LOG_ERROR << msg;
+            error_msg = "Wrong load type";
+            stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
     } catch (std::exception &ex) {
         //typical error: out of disk space or permition denied
-        std::string msg = "Failed to load index file: " + std::string(ex.what());
-        ENGINE_LOG_ERROR << msg;
+        error_msg = "Failed to load index file: " + std::string(ex.what());
+        stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
+    }
+
+    if (!stat.ok()) {
+        if (error_msg.empty())
+            error_msg = std::string("Failed to load index file: file not available");
+        //typical error: file not available
+        ENGINE_LOG_ERROR << error_msg;
 
         for (auto &context : search_contexts_) {
             context->IndexSearchDone(file_->id_);//mark as done avoid dead lock, even failed
@@ -241,7 +239,7 @@ Status XSearchTask::ClusterResult(const std::vector<long> &output_ids,
 //    if (NeedParallelReduce(nq, topk)) {
 //        ParallelReduce(reduce_worker, nq);
 //    } else {
-        reduce_worker(0, nq);
+    reduce_worker(0, nq);
 //    }
 
     return Status::OK();
@@ -346,7 +344,7 @@ Status XSearchTask::TopkResult(SearchContext::ResultSet &result_src,
 //    if (NeedParallelReduce(result_src.size(), topk)) {
 //        ParallelReduce(ReduceWorker, result_src.size());
 //    } else {
-        ReduceWorker(0, result_src.size());
+    ReduceWorker(0, result_src.size());
 //    }
 
     return Status::OK();
