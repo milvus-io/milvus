@@ -722,30 +722,30 @@ void NsgIndex::SetKnnGraph(Graph &g) {
     knng = std::move(g);
 }
 
-void NsgIndex::GetKnnGraphFromFile() {
-    //std::string filename = "/home/zilliz/opt/workspace/wook/efanna_graph/tests/sift.1M.50NN.graph";
-    std::string filename = "/home/zilliz/opt/workspace/wook/efanna_graph/tests/sift.50NN.graph";
-
-    std::ifstream in(filename, std::ios::binary);
-    unsigned k;
-    in.read((char *) &k, sizeof(unsigned));
-    in.seekg(0, std::ios::end);
-    std::ios::pos_type ss = in.tellg();
-    size_t fsize = (size_t) ss;
-    size_t num = (unsigned) (fsize / (k + 1) / 4);
-    in.seekg(0, std::ios::beg);
-
-    knng.resize(num);
-    knng.reserve(num);
-    unsigned kk = (k + 3) / 4 * 4;
-    for (size_t i = 0; i < num; i++) {
-        in.seekg(4, std::ios::cur);
-        knng[i].resize(k);
-        knng[i].reserve(kk);
-        in.read((char *) knng[i].data(), k * sizeof(unsigned));
-    }
-    in.close();
-}
+//void NsgIndex::GetKnnGraphFromFile() {
+//    //std::string filename = "/home/zilliz/opt/workspace/wook/efanna_graph/tests/sift.1M.50NN.graph";
+//    std::string filename = "/home/zilliz/opt/workspace/wook/efanna_graph/tests/sift.50NN.graph";
+//
+//    std::ifstream in(filename, std::ios::binary);
+//    unsigned k;
+//    in.read((char *) &k, sizeof(unsigned));
+//    in.seekg(0, std::ios::end);
+//    std::ios::pos_type ss = in.tellg();
+//    size_t fsize = (size_t) ss;
+//    size_t num = (unsigned) (fsize / (k + 1) / 4);
+//    in.seekg(0, std::ios::beg);
+//
+//    knng.resize(num);
+//    knng.reserve(num);
+//    unsigned kk = (k + 3) / 4 * 4;
+//    for (size_t i = 0; i < num; i++) {
+//        in.seekg(4, std::ios::cur);
+//        knng[i].resize(k);
+//        knng[i].reserve(kk);
+//        in.read((char *) knng[i].data(), k * sizeof(unsigned));
+//    }
+//    in.close();
+//}
 
 }
 }
