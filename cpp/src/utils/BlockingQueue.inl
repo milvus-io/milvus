@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Log.h"
+//#include "Log.h"
 #include "Error.h"
 
 namespace zilliz {
@@ -17,7 +17,7 @@ BlockingQueue<T>::Put(const T &task) {
         std::string error_msg =
                 "blocking queue is full, capacity: " + std::to_string(capacity_) + " queue_size: " +
                 std::to_string(queue_.size());
-        SERVER_LOG_ERROR << error_msg;
+        //SERVER_LOG_ERROR << error_msg;
         throw ServerException(SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
 
@@ -33,7 +33,7 @@ BlockingQueue<T>::Take() {
 
     if (queue_.empty()) {
         std::string error_msg = "blocking queue empty";
-        SERVER_LOG_ERROR << error_msg;
+        //SERVER_LOG_ERROR << error_msg;
         throw ServerException(SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
 
@@ -57,7 +57,7 @@ BlockingQueue<T>::Front() {
     empty_.wait(lock, [this] { return !queue_.empty(); });
     if (queue_.empty()) {
         std::string error_msg = "blocking queue empty";
-        SERVER_LOG_ERROR << error_msg;
+        //SERVER_LOG_ERROR << error_msg;
         throw ServerException(SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
     T front(queue_.front());
@@ -72,7 +72,7 @@ BlockingQueue<T>::Back() {
 
     if (queue_.empty()) {
         std::string error_msg = "blocking queue empty";
-        SERVER_LOG_ERROR << error_msg;
+        //SERVER_LOG_ERROR << error_msg;
         throw ServerException(SERVER_BLOCKING_QUEUE_EMPTY, error_msg);
     }
 
