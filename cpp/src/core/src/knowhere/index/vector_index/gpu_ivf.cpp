@@ -130,19 +130,17 @@ void GPUIVF::search_impl(int64_t n,
                          float *distances,
                          int64_t *labels,
                          const Config &cfg) {
-    // TODO(linxj): allocate mem
-    auto temp_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
-    if (temp_res) {
-        ResScope rs(gpu_id_, temp_res);
-        if (auto device_index = std::static_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
-            auto nprobe = cfg.get_with_default("nprobe", size_t(1));
+    std::lock_guard<std::mutex> lk(mutex_);
 
-            std::lock_guard<std::mutex> lk(mutex_);
-            device_index->setNumProbes(nprobe);
+    if (auto device_index = std::static_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
+        auto nprobe = cfg.get_with_default("nprobe", size_t(1));
+        device_index->setNumProbes(nprobe);
+
+        {
+            // TODO(linxj): allocate mem
+            ResScope rs(res_);
             device_index->search(n, (float *) data, k, distances, labels);
         }
-    } else {
-        KNOWHERE_THROW_MSG("search can't get gpu resource");
     }
 }
 
@@ -283,119 +281,70 @@ void FaissGpuResourceMgr::InitResource() {
     is_init = true;
 
     for(auto& device : devices_params_) {
-        auto& resource_vec = idle_[device.first];
+        auto& device_id = device.first;
+        auto& device_param = device.second;
+        auto& bq = idle_map[device_id];
 
-        for (int64_t i = 0; i < device.second.resource_num; ++i) {
-            auto res = std::make_shared<faiss::gpu::StandardGpuResources>();
+        for (int64_t i = 0; i < device_param.resource_num; ++i) {
+            auto raw_resource = std::make_shared<faiss::gpu::StandardGpuResources>();
 
             // TODO(linxj): enable set pinned memory
-            //res->noTempMemory();
-            auto res_wrapper = std::make_shared<Resource>(res);
-            AllocateTempMem(res_wrapper, device.first, 0);
+            auto res_wrapper = std::make_shared<Resource>(raw_resource);
+            AllocateTempMem(res_wrapper, device_id, 0);
 
-            resource_vec.emplace_back(res_wrapper);
+            bq.Put(res_wrapper);
         }
     }
 }
 
 ResPtr FaissGpuResourceMgr::GetRes(const int64_t &device_id,
                                    const int64_t &alloc_size) {
-    std::lock_guard<std::mutex> lk(mutex_);
+    InitResource();
 
-    if (!is_init) {
-        InitResource();
-        is_init = true;
-    }
-
-    auto search = idle_.find(device_id);
-    if (search != idle_.end()) {
-        auto res = search->second.back();
-        //AllocateTempMem(res, device_id, alloc_size);
-
-        search->second.pop_back();
-        return res;
+    auto finder = idle_map.find(device_id);
+    if (finder != idle_map.end()) {
+        auto& bq = finder->second;
+        auto&& resource = bq.Take();
+        AllocateTempMem(resource, device_id, alloc_size);
+        return resource;
     }
     return nullptr;
 }
 
-bool FaissGpuResourceMgr::GetRes(const int64_t &device_id,
-                                 ResPtr &res,
-                                 const int64_t &alloc_size) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
-    if (!is_init) {
-        InitResource();
-        is_init = true;
-    }
-
-    auto search = idle_.find(device_id);
-    if (search != idle_.end()) {
-        auto &res_vec = search->second;
-        for (auto it = res_vec.cbegin(); it != res_vec.cend(); ++it) {
-            if ((*it)->id == res->id) {
-                //AllocateTempMem(res, device_id, alloc_size);
-                res_vec.erase(it);
-                return true;
-            }
-        }
-    }
-    // else
-    return false;
-}
-
-void FaissGpuResourceMgr::MoveToInuse(const int64_t &device_id, const ResPtr &res) {
-    std::lock_guard<std::mutex> lk(mutex_);
-    RemoveResource(device_id, res, idle_);
-    in_use_[device_id].push_back(res);
-}
+//bool FaissGpuResourceMgr::GetRes(const int64_t &device_id,
+//                                 ResPtr &res,
+//                                 const int64_t &alloc_size) {
+//    InitResource();
+//
+//    std::lock_guard<std::mutex> lk(res->mutex);
+//    AllocateTempMem(res, device_id, alloc_size);
+//    return true;
+//}
 
 void FaissGpuResourceMgr::MoveToIdle(const int64_t &device_id, const ResPtr &res) {
-    std::lock_guard<std::mutex> lk(mutex_);
-    RemoveResource(device_id, res, in_use_);
-    auto it = idle_[device_id].begin();
-    idle_[device_id].insert(it, res);
-}
-
-void
-FaissGpuResourceMgr::RemoveResource(const int64_t &device_id,
-                                    const ResPtr &res,
-                                    std::map<int64_t, std::vector<ResPtr>> &resource_pool) {
-    if (resource_pool.find(device_id) != resource_pool.end()) {
-        std::vector<ResPtr> &res_array = resource_pool[device_id];
-        res_array.erase(std::remove_if(res_array.begin(), res_array.end(),
-                                       [&](ResPtr &ptr) { return ptr->id == res->id; }),
-                                       res_array.end());
+    auto finder = idle_map.find(device_id);
+    if (finder != idle_map.end()) {
+        auto& bq = finder->second;
+        bq.Put(res);
     }
 }
 
 void FaissGpuResourceMgr::Free() {
-    for (auto &item : in_use_) {
-        auto& res_vec = item.second;
-        res_vec.clear();
-    }
-    for (auto &item : idle_) {
-        auto& res_vec = item.second;
-        res_vec.clear();
+    for (auto &item : idle_map) {
+        auto& bq = item.second;
+        while (!bq.Empty()) {
+            bq.Take();
+        }
     }
     is_init = false;
 }
 
 void
 FaissGpuResourceMgr::Dump() {
-    std::cout << "In used resource" << std::endl;
-    for(auto& item: in_use_) {
-        std::cout << "device_id: " << item.first << std::endl;
-        for(auto& elem : item.second) {
-            std::cout << "resource_id: " << elem->id << std::endl;
-        }
-    }
-
-    std::cout << "Idle resource" << std::endl;
-    for(auto& item: idle_) {
-        std::cout << "device_id: " << item.first << std::endl;
-        for(auto& elem : item.second) {
-            std::cout << "resource_id: " << elem->id << std::endl;
-        }
+    for (auto &item : idle_map) {
+        auto& bq = item.second;
+        std::cout << "device_id: " << item.first
+                  << ", resource count:" << bq.Size();
     }
 }
 
