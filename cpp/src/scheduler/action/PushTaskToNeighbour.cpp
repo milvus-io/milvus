@@ -57,8 +57,8 @@ Action::PushTaskToNeighbourRandomly(const TaskPtr &task,
             total_speed += speed;
         }
 
-        std::random_device rd;
-        std::mt19937 mt(rd());
+        unsigned seed1 = std::chrono::system_clock::now().time_since_epoch().count();
+        std::mt19937 mt(seed1);
         std::uniform_int_distribution<int> dist(0, total_speed);
         uint64_t index = 0;
         int64_t rd_speed = dist(mt);
