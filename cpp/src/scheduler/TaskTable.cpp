@@ -136,7 +136,7 @@ std::vector<uint64_t>
 TaskTable::PickToLoad(uint64_t limit) {
     std::vector<uint64_t> indexes;
     bool cross = false;
-    for (uint64_t i = last_finish_, count = 0; i < table_.size() && count < limit; ++i) {
+    for (uint64_t i = last_finish_ + 1, count = 0; i < table_.size() && count < limit; ++i) {
         if (not cross && table_[i]->IsFinish()) {
             last_finish_ = i;
         } else if (table_[i]->state == TaskTableItemState::START) {
@@ -152,7 +152,7 @@ std::vector<uint64_t>
 TaskTable::PickToExecute(uint64_t limit) {
     std::vector<uint64_t> indexes;
     bool cross = false;
-    for (uint64_t i = last_finish_, count = 0; i < table_.size() && count < limit; ++i) {
+    for (uint64_t i = last_finish_ + 1, count = 0; i < table_.size() && count < limit; ++i) {
         if (not cross && table_[i]->IsFinish()) {
             last_finish_ = i;
         } else if (table_[i]->state == TaskTableItemState::LOADED) {
@@ -200,15 +200,15 @@ TaskTable::Get(uint64_t index) {
     return table_[index];
 }
 
-void
-TaskTable::Clear() {
-// find first task is NOT (done or moved), erase from begin to it;
-//        auto iterator = table_.begin();
-//        while (iterator->state == TaskTableItemState::EXECUTED or
-//            iterator->state == TaskTableItemState::MOVED)
-//            iterator++;
-//        table_.erase(table_.begin(), iterator);
-}
+//void
+//TaskTable::Clear() {
+//// find first task is NOT (done or moved), erase from begin to it;
+////        auto iterator = table_.begin();
+////        while (iterator->state == TaskTableItemState::EXECUTED or
+////            iterator->state == TaskTableItemState::MOVED)
+////            iterator++;
+////        table_.erase(table_.begin(), iterator);
+//}
 
 
 std::string

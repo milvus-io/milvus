@@ -108,6 +108,7 @@ void
 Scheduler::OnFinishTask(const EventPtr &event) {
 }
 
+// TODO: refactor the function
 void
 Scheduler::OnLoadCompleted(const EventPtr &event) {
     auto load_completed_event = std::static_pointer_cast<LoadCompletedEvent>(event);
@@ -120,18 +121,23 @@ Scheduler::OnLoadCompleted(const EventPtr &event) {
                 if (not resource->HasExecutor() && load_completed_event->task_table_item_->Move()) {
                     auto task = load_completed_event->task_table_item_->task;
                     auto search_task = std::static_pointer_cast<XSearchTask>(task);
-                    auto location = search_task->index_engine_->GetLocation();
                     bool moved = false;
 
-                    for (auto i = 0; i < res_mgr_.lock()->GetNumGpuResource(); ++i) {
-                        auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
-                        if (index != nullptr) {
-                            moved = true;
-                            auto dest_resource = res_mgr_.lock()->GetResource(ResourceType::GPU, i);
-                            Action::PushTaskToResource(load_completed_event->task_table_item_->task, dest_resource);
-                            break;
+                    // to support test task, REFACTOR
+                    if (auto index_engine = search_task->index_engine_) {
+                        auto location = index_engine->GetLocation();
+
+                        for (auto i = 0; i < res_mgr_.lock()->GetNumGpuResource(); ++i) {
+                            auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
+                            if (index != nullptr) {
+                                moved = true;
+                                auto dest_resource = res_mgr_.lock()->GetResource(ResourceType::GPU, i);
+                                Action::PushTaskToResource(load_completed_event->task_table_item_->task, dest_resource);
+                                break;
+                            }
                         }
                     }
+
                     if (not moved) {
                         Action::PushTaskToNeighbourRandomly(task, resource);
                     }
@@ -145,9 +151,9 @@ Scheduler::OnLoadCompleted(const EventPtr &event) {
                 // if this resource is disk, assign it to smallest cost resource
                 if (self->type() == ResourceType::DISK) {
                     // step 1: calculate shortest path per resource, from disk to compute resource
-                    auto compute_resources = res_mgr_.lock()->GetComputeResource();
+                    auto compute_resources = res_mgr_.lock()->GetComputeResources();
                     std::vector<std::vector<std::string>> paths;
-                    std::vector<uint64_t > transport_costs;
+                    std::vector<uint64_t> transport_costs;
                     for (auto &res : compute_resources) {
                         std::vector<std::string> path;
                         uint64_t transport_cost = ShortestPath(self, res, res_mgr_.lock(), path);
@@ -176,7 +182,7 @@ Scheduler::OnLoadCompleted(const EventPtr &event) {
                     task->path() = task_path;
                 }
 
-                if(self->name() == task->path().Last()) {
+                if (self->name() == task->path().Last()) {
                     self->WakeupLoader();
                 } else {
                     auto next_res_name = task->path().Next();

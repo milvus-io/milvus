@@ -139,7 +139,11 @@ VecIndexPtr read_index(const std::string &location) {
     knowhere::BinarySet load_data_list;
     FileIOReader reader(location);
     reader.fs.seekg(0, reader.fs.end);
-    size_t length = reader.fs.tellg();
+    int64_t length = reader.fs.tellg();
+    if (length <= 0) {
+        return nullptr;
+    }
+
     reader.fs.seekg(0);
 
     size_t rp = 0;
@@ -197,7 +201,13 @@ ErrorCode write_index(VecIndexPtr index, const std::string &location) {
         return KNOWHERE_UNEXPECTED_ERROR;
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_ERROR;
+        std::string estring(e.what());
+        if (estring.find("No space left on device") != estring.npos) {
+            WRAPPER_LOG_ERROR << "No space left on the device";
+            return KNOWHERE_NO_SPACE;
+        } else {
+            return KNOWHERE_ERROR;
+        }
     }
     return KNOWHERE_SUCCESS;
 }
@@ -209,7 +219,7 @@ void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Co
     if (size <= TYPICAL_COUNT / 16384 + 1) {
         //handle less row count, avoid nlist set to 0
         cfg["nlist"] = 1;
-    } else if (int(size / TYPICAL_COUNT) * nlist == 0) {
+    } else if (int(size / TYPICAL_COUNT) *nlist == 0) {
         //calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
         cfg["nlist"] = int(size / TYPICAL_COUNT * 16384);
     }

@@ -22,6 +22,7 @@ enum class LoadType {
     DISK2CPU,
     CPU2GPU,
     GPU2CPU,
+    TEST,
 };
 
 enum class TaskType {
@@ -34,6 +35,7 @@ class Task;
 
 using TaskPtr = std::shared_ptr<Task>;
 
+// TODO: re-design
 class Task {
 public:
     explicit
