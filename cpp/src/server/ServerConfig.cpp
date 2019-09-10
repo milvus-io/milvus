@@ -97,32 +97,30 @@ ServerConfig::CheckServerConfig() {
 
     std::string ip_address = server_config.GetValue(CONFIG_SERVER_ADDRESS, "127.0.0.1");
     if (ValidationUtil::ValidateIpAddress(ip_address) != SERVER_SUCCESS) {
-        std::cerr << "Error: invalid server IP address: " << ip_address << std::endl;
+        std::cerr << "ERROR: invalid server IP address: " << ip_address << std::endl;
         okay = false;
     }
 
     std::string port_str = server_config.GetValue(CONFIG_SERVER_PORT, "19530");
     if (ValidationUtil::ValidateStringIsNumber(port_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: port " << port_str << " is not a number" << std::endl;
+        std::cerr << "ERROR: port " << port_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
+    } else {
         int32_t port = std::stol(port_str);
         if (port < 1025 | port > 65534) {
-            std::cerr << "Error: port " << port_str << " out of range [1025, 65534]" << std::endl;
+            std::cerr << "ERROR: port " << port_str << " out of range [1025, 65534]" << std::endl;
             okay = false;
         }
     }
 
     std::string gpu_index_str = server_config.GetValue(CONFIG_GPU_INDEX, "0");
     if (ValidationUtil::ValidateStringIsNumber(gpu_index_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: gpu_index " << gpu_index_str << " is not a number" << std::endl;
+        std::cerr << "ERROR: gpu_index " << gpu_index_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
+    } else {
         int32_t gpu_index = std::stol(gpu_index_str);
         if (ValidationUtil::ValidateGpuIndex(gpu_index) != SERVER_SUCCESS) {
-            std::cerr << "Error: invalid gpu_index " << gpu_index_str << std::endl;
+            std::cerr << "ERROR: invalid gpu_index " << gpu_index_str << std::endl;
             okay = false;
         }
     }
@@ -130,6 +128,25 @@ ServerConfig::CheckServerConfig() {
     std::string mode = server_config.GetValue(CONFIG_CLUSTER_MODE, "single");
     if (mode != "single" && mode != "cluster" && mode != "read_only") {
         std::cerr << "ERROR: mode " << mode << " is not one of ['single', 'cluster', 'read_only']" << std::endl;
+        okay = false;
+    }
+
+    std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
+    int flag = 0;
+    if(time_zone.length() < 3)
+        flag = 1;
+    else if(time_zone.substr(0, 3) != "UTC")
+        flag = 1;
+    else if(time_zone.length() > 3){
+        try {
+            stoi(time_zone.substr(3, std::string::npos));
+        }
+        catch (std::invalid_argument &) {
+            flag = 1;
+        }
+    }
+    if(flag == 1){
+        std::cerr << "ERROR: time_zone " << time_zone << " is not in a right format" << std::endl;
         okay = false;
     }
 
@@ -163,33 +180,27 @@ ServerConfig::CheckDBConfig() {
         okay = false;
     }
 
-    std::string parallel_reduce_str = db_config.GetValue(CONFIG_DB_PARALLEL_REDUCE, "false");
-    if (ValidationUtil::ValidateStringIsBool(parallel_reduce_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: invalid parallel_reduce config: " << parallel_reduce_str << std::endl;
-        okay = false;
-    }
-
     std::string db_backend_url = db_config.GetValue(CONFIG_DB_URL);
     if (ValidationUtil::ValidateDbURI(db_backend_url) != SERVER_SUCCESS) {
-        std::cerr << "Error: invalid db_backend_url " << db_backend_url << std::endl;
+        std::cerr << "ERROR: invalid db_backend_url: " << db_backend_url << std::endl;
         okay = false;
     }
 
     std::string archive_disk_threshold_str = db_config.GetValue(CONFIG_DB_INSERT_BUFFER_SIZE, "0");
     if (ValidationUtil::ValidateStringIsNumber(archive_disk_threshold_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: archive_disk_threshold " << archive_disk_threshold_str << " is not a number" << std::endl;
+        std::cerr << "ERROR: archive_disk_threshold " << archive_disk_threshold_str << " is not a number" << std::endl;
         okay = false;
     }
 
     std::string archive_days_threshold_str = db_config.GetValue(CONFIG_DB_INSERT_BUFFER_SIZE, "0");
     if (ValidationUtil::ValidateStringIsNumber(archive_days_threshold_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: archive_days_threshold " << archive_days_threshold_str << " is not a number" << std::endl;
+        std::cerr << "ERROR: archive_days_threshold " << archive_days_threshold_str << " is not a number" << std::endl;
         okay = false;
     }
 
     std::string insert_buffer_size_str = db_config.GetValue(CONFIG_DB_INSERT_BUFFER_SIZE, "4");
     if (ValidationUtil::ValidateStringIsNumber(insert_buffer_size_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: insert_buffer_size " << insert_buffer_size_str << " is not a number" << std::endl;
+        std::cerr << "ERROR: insert_buffer_size " << insert_buffer_size_str << " is not a number" << std::endl;
         okay = false;
     }
     else {
@@ -198,7 +209,7 @@ ServerConfig::CheckDBConfig() {
         unsigned long total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (insert_buffer_size >= total_mem) {
-            std::cerr << "Error: insert_buffer_size exceed system memory" << std::endl;
+            std::cerr << "ERROR: insert_buffer_size exceed system memory" << std::endl;
             okay = false;
         }
     }
@@ -222,13 +233,13 @@ ServerConfig::CheckMetricConfig() {
 
     std::string is_startup_str = metric_config.GetValue(CONFIG_METRIC_IS_STARTUP, "off");
     if (ValidationUtil::ValidateStringIsBool(is_startup_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: invalid is_startup config: " << is_startup_str << std::endl;
+        std::cerr << "ERROR: invalid is_startup config: " << is_startup_str << std::endl;
         okay = false;
     }
 
     std::string port_str = metric_config.GetChild(CONFIG_PROMETHEUS).GetValue(CONFIG_METRIC_PROMETHEUS_PORT, "8080");
     if (ValidationUtil::ValidateStringIsNumber(port_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: port specified in prometheus_config " << port_str << " is not a number" << std::endl;
+        std::cerr << "ERROR: port specified in prometheus_config " << port_str << " is not a number" << std::endl;
         okay = false;
     }
 
@@ -253,7 +264,7 @@ ServerConfig::CheckCacheConfig() {
 
     std::string cpu_cache_capacity_str = cache_config.GetValue(CONFIG_CPU_CACHE_CAPACITY, "16");
     if (ValidationUtil::ValidateStringIsNumber(cpu_cache_capacity_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: cpu_cache_capacity " << cpu_cache_capacity_str << " is not a number" << std::endl;
+        std::cerr << "ERROR: cpu_cache_capacity " << cpu_cache_capacity_str << " is not a number" << std::endl;
         okay = false;
     }
     else {
@@ -262,7 +273,7 @@ ServerConfig::CheckCacheConfig() {
         unsigned long total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (cpu_cache_capacity >= total_mem) {
-            std::cerr << "Error: cpu_cache_capacity exceed system memory" << std::endl;
+            std::cerr << "ERROR: cpu_cache_capacity exceed system memory" << std::endl;
             okay = false;
         }
         else if (cpu_cache_capacity > (double) total_mem * 0.9) {
@@ -272,7 +283,7 @@ ServerConfig::CheckCacheConfig() {
         uint64_t insert_buffer_size = (uint64_t) GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
         insert_buffer_size *= GB;
         if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
-            std::cerr << "Error: sum of cpu_cache_capacity and insert_buffer_size exceed system memory" << std::endl;
+            std::cerr << "ERROR: sum of cpu_cache_capacity and insert_buffer_size exceed system memory" << std::endl;
             okay = false;
         }
     }
@@ -280,23 +291,23 @@ ServerConfig::CheckCacheConfig() {
     std::string cpu_cache_free_percent_str = cache_config.GetValue(CACHE_FREE_PERCENT, "0.85");
     double cpu_cache_free_percent;
     if (ValidationUtil::ValidateStringIsDouble(cpu_cache_free_percent_str, cpu_cache_free_percent) != SERVER_SUCCESS) {
-        std::cerr << "Error: cpu_cache_free_percent " << cpu_cache_free_percent_str << " is not a double" << std::endl;
+        std::cerr << "ERROR: cpu_cache_free_percent " << cpu_cache_free_percent_str << " is not a double" << std::endl;
         okay = false;
     }
     else if (cpu_cache_free_percent < std::numeric_limits<double>::epsilon() || cpu_cache_free_percent > 1.0) {
-        std::cerr << "Error: invalid cpu_cache_free_percent " << cpu_cache_free_percent_str << std::endl;
+        std::cerr << "ERROR: invalid cpu_cache_free_percent " << cpu_cache_free_percent_str << std::endl;
         okay = false;
     }
 
     std::string insert_cache_immediately_str = cache_config.GetValue(CONFIG_INSERT_CACHE_IMMEDIATELY, "false");
     if (ValidationUtil::ValidateStringIsBool(insert_cache_immediately_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: invalid insert_cache_immediately config: " << insert_cache_immediately_str << std::endl;
+        std::cerr << "ERROR: invalid insert_cache_immediately config: " << insert_cache_immediately_str << std::endl;
         okay = false;
     }
 
     std::string gpu_cache_capacity_str = cache_config.GetValue(CONFIG_GPU_CACHE_CAPACITY, "5");
     if (ValidationUtil::ValidateStringIsNumber(gpu_cache_capacity_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: gpu_cache_capacity " << gpu_cache_capacity_str << " is not a number" << std::endl;
+        std::cerr << "ERROR: gpu_cache_capacity " << gpu_cache_capacity_str << " is not a number" << std::endl;
         okay = false;
     }
     else {
@@ -305,11 +316,11 @@ ServerConfig::CheckCacheConfig() {
         int gpu_index = GetConfig(CONFIG_SERVER).GetInt32Value(CONFIG_GPU_INDEX, 0);
         size_t gpu_memory;
         if (ValidationUtil::GetGpuMemory(gpu_index, gpu_memory) != SERVER_SUCCESS) {
-            std::cerr << "Error: could not get gpu memory for device " << gpu_index << std::endl;
+            std::cerr << "ERROR: could not get gpu memory for device " << gpu_index << std::endl;
             okay = false;
         }
         else if (gpu_cache_capacity >= gpu_memory) {
-            std::cerr << "Error: gpu_cache_capacity " << gpu_cache_capacity
+            std::cerr << "ERROR: gpu_cache_capacity " << gpu_cache_capacity
                       << " exceed total gpu memory " << gpu_memory << std::endl;
             okay = false;
         }
@@ -321,11 +332,11 @@ ServerConfig::CheckCacheConfig() {
     std::string gpu_cache_free_percent_str = cache_config.GetValue(GPU_CACHE_FREE_PERCENT, "0.85");
     double gpu_cache_free_percent;
     if (ValidationUtil::ValidateStringIsDouble(gpu_cache_free_percent_str, gpu_cache_free_percent) != SERVER_SUCCESS) {
-        std::cerr << "Error: gpu_cache_free_percent " << gpu_cache_free_percent_str << " is not a double" << std::endl;
+        std::cerr << "ERROR: gpu_cache_free_percent " << gpu_cache_free_percent_str << " is not a double" << std::endl;
         okay = false;
     }
     else if (gpu_cache_free_percent < std::numeric_limits<double>::epsilon() || gpu_cache_free_percent > 1.0) {
-        std::cerr << "Error: invalid gpu_cache_free_percent " << gpu_cache_free_percent << std::endl;
+        std::cerr << "ERROR: invalid gpu_cache_free_percent " << gpu_cache_free_percent << std::endl;
         okay = false;
     }
 
@@ -333,11 +344,11 @@ ServerConfig::CheckCacheConfig() {
 
     for (std::string &gpu_id : conf_gpu_ids) {
         if (ValidationUtil::ValidateStringIsNumber(gpu_id) != SERVER_SUCCESS) {
-            std::cerr << "Error: gpu_id " << gpu_id << " is not a number" << std::endl;
+            std::cerr << "ERROR: gpu_id " << gpu_id << " is not a number" << std::endl;
             okay = false;
         }
         else if (ValidationUtil::ValidateGpuIndex(std::stol(gpu_id)) != SERVER_SUCCESS) {
-            std::cerr << "Error: gpu_id " << gpu_id << " is invalid" << std::endl;
+            std::cerr << "ERROR: gpu_id " << gpu_id << " is invalid" << std::endl;
             okay = false;
         }
     }
@@ -357,20 +368,19 @@ ServerConfig::CheckEngineConfig() {
 
     std::string use_blas_threshold_str = engine_config.GetValue(CONFIG_DCBT, "20");
     if (ValidationUtil::ValidateStringIsNumber(use_blas_threshold_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: use_blas_threshold " << use_blas_threshold_str << " is not a number" << std::endl;
+        std::cerr << "ERROR: use_blas_threshold " << use_blas_threshold_str << " is not a number" << std::endl;
         okay = false;
     }
 
     std::string omp_thread_num_str = engine_config.GetValue(CONFIG_OMP_THREAD_NUM, "0");
     if (ValidationUtil::ValidateStringIsNumber(omp_thread_num_str) != SERVER_SUCCESS) {
-        std::cerr << "Error: omp_thread_num " << omp_thread_num_str << " is not a number" << std::endl;
+        std::cerr << "ERROR: omp_thread_num " << omp_thread_num_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
+    } else {
         int32_t omp_thread = std::stol(omp_thread_num_str);
         uint32_t sys_thread_cnt = 8;
         if (omp_thread > CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
-            std::cerr << "Error: omp_thread_num " << omp_thread_num_str << " > system available thread "
+            std::cerr << "ERROR: omp_thread_num " << omp_thread_num_str << " > system available thread "
                       << sys_thread_cnt << std::endl;
             okay = false;
         }
@@ -428,7 +438,7 @@ ServerConfig::CheckResourceConfig() {
     bool okay = true;
     server::ConfigNode resource_config = GetConfig(CONFIG_RESOURCE);
     if (resource_config.GetChildren().empty()) {
-        std::cerr << "Error: no context under resource" << std::endl;
+        std::cerr << "ERROR: no context under resource" << std::endl;
         okay = false;
     }
 
@@ -452,23 +462,21 @@ ServerConfig::CheckResourceConfig() {
         std::string device_id_str = resource_conf.GetValue(CONFIG_RESOURCE_DEVICE_ID, "0");
         int32_t device_id = -1;
         if (ValidationUtil::ValidateStringIsNumber(device_id_str) != SERVER_SUCCESS) {
-            std::cerr << "Error: device_id " << device_id_str << " is not a number" << std::endl;
+            std::cerr << "ERROR: device_id " << device_id_str << " is not a number" << std::endl;
             okay = false;
-        }
-        else {
+        } else {
             device_id = std::stol(device_id_str);
         }
 
         std::string enable_executor_str = resource_conf.GetValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, "off");
         if (ValidationUtil::ValidateStringIsBool(enable_executor_str) != SERVER_SUCCESS) {
-            std::cerr << "Error: invalid enable_executor config: " << enable_executor_str << std::endl;
+            std::cerr << "ERROR: invalid enable_executor config: " << enable_executor_str << std::endl;
             okay = false;
         }
 
         if (type == "DISK") {
             hasDisk = true;
-        }
-        else if (type == "CPU") {
+        } else if (type == "CPU") {
             hasCPU = true;
             if (resource_conf.GetBoolValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, false)) {
                 hasExecutor = true;
@@ -484,32 +492,32 @@ ServerConfig::CheckResourceConfig() {
             }
             std::string gpu_resource_num_str = resource_conf.GetValue(CONFIG_RESOURCE_NUM, "2");
             if (ValidationUtil::ValidateStringIsNumber(gpu_resource_num_str) != SERVER_SUCCESS) {
-                std::cerr << "Error: gpu_resource_num " << gpu_resource_num_str << " is not a number" << std::endl;
+                std::cerr << "ERROR: gpu_resource_num " << gpu_resource_num_str << " is not a number" << std::endl;
                 okay = false;
             }
             bool mem_valid = true;
             std::string pinned_memory_str = resource_conf.GetValue(CONFIG_RESOURCE_PIN_MEMORY, "300");
             if (ValidationUtil::ValidateStringIsNumber(pinned_memory_str) != SERVER_SUCCESS) {
-                std::cerr << "Error: pinned_memory " << pinned_memory_str << " is not a number" << std::endl;
+                std::cerr << "ERROR: pinned_memory " << pinned_memory_str << " is not a number" << std::endl;
                 okay = false;
                 mem_valid = false;
             }
             std::string temp_memory_str = resource_conf.GetValue(CONFIG_RESOURCE_TEMP_MEMORY, "300");
             if (ValidationUtil::ValidateStringIsNumber(temp_memory_str) != SERVER_SUCCESS) {
-                std::cerr << "Error: temp_memory " << temp_memory_str << " is not a number" << std::endl;
+                std::cerr << "ERROR: temp_memory " << temp_memory_str << " is not a number" << std::endl;
                 okay = false;
                 mem_valid = false;
             }
             if (mem_valid) {
                 size_t gpu_memory;
                 if (ValidationUtil::GetGpuMemory(device_id, gpu_memory) != SERVER_SUCCESS) {
-                    std::cerr << "Error: could not get gpu memory for device " << device_id << std::endl;
+                    std::cerr << "ERROR: could not get gpu memory for device " << device_id << std::endl;
                     okay = false;
                 }
                 else {
                     size_t prealoc_mem = std::stol(pinned_memory_str) + std::stol(temp_memory_str);
                     if (prealoc_mem >= gpu_memory) {
-                        std::cerr << "Error: sum of pinned_memory and temp_memory " << prealoc_mem
+                        std::cerr << "ERROR: sum of pinned_memory and temp_memory " << prealoc_mem
                                   << " exceeds total gpu memory " << gpu_memory << " for device " << device_id << std::endl;
                         okay = false;
                     }
@@ -537,7 +545,7 @@ ServerConfig::CheckResourceConfig() {
 
         std::string speed_str = connection_conf.GetValue(CONFIG_SPEED_CONNECTIONS);
         if (ValidationUtil::ValidateStringIsNumber(speed_str) != SERVER_SUCCESS) {
-            std::cerr << "Error: speed " << speed_str << " is not a number" << std::endl;
+            std::cerr << "ERROR: speed " << speed_str << " is not a number" << std::endl;
             okay = false;
         }
 
@@ -545,18 +553,17 @@ ServerConfig::CheckResourceConfig() {
         std::string delimiter = "===";
         auto delimiter_pos = endpoint_str.find(delimiter);
         if (delimiter_pos == std::string::npos) {
-            std::cerr << "Error: invalid endpoint format: " << endpoint_str << std::endl;
+            std::cerr << "ERROR: invalid endpoint format: " << endpoint_str << std::endl;
             okay = false;
-        }
-        else {
+        } else {
             std::string left_resource = endpoint_str.substr(0, delimiter_pos);
             if (resource_list.find(left_resource) == resource_list.end()) {
-                std::cerr << "Error: left resource " << left_resource << " does not exist" << std::endl;
+                std::cerr << "ERROR: left resource " << left_resource << " does not exist" << std::endl;
                 okay = false;
             }
             std::string right_resource = endpoint_str.substr(delimiter_pos + delimiter.length(), endpoint_str.length());
             if (resource_list.find(right_resource) == resource_list.end()) {
-                std::cerr << "Error: right resource " << right_resource << " does not exist" << std::endl;
+                std::cerr << "ERROR: right resource " << right_resource << " does not exist" << std::endl;
                 okay = false;
             }
         }

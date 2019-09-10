@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 
+#include "knowhere/common/exception.h"
 #include "knowhere/index/vector_index/gpu_ivf.h"
 #include "knowhere/index/vector_index/nsg_index.h"
 #include "knowhere/index/vector_index/nsg/nsg_io.h"
@@ -70,6 +71,14 @@ TEST_P(NSGInterfaceTest, basic_test) {
     new_index->Load(binaryset);
     auto new_result = new_index->Search(query_dataset, Config::object{{"k", k}});
     AssertAnns(result, nq, k);
+
+    ASSERT_EQ(index_->Count(), nb);
+    ASSERT_EQ(index_->Dimension(), dim);
+    ASSERT_THROW({index_->Clone();}, zilliz::knowhere::KnowhereException);
+    ASSERT_NO_THROW({
+        index_->Add(base_dataset, Config());
+        index_->Seal();
+    });
 
     {
         //std::cout << "k = 1" << std::endl;

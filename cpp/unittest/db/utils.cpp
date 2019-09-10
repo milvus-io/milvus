@@ -47,6 +47,12 @@ void BaseTest::InitLog() {
 
 void BaseTest::SetUp() {
     InitLog();
+
+    zilliz::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(0, 1024*1024*200, 1024*1024*300, 2);
+}
+
+void BaseTest::TearDown() {
+    zilliz::knowhere::FaissGpuResourceMgr::GetInstance().Free();
 }
 
 engine::Options BaseTest::GetOptions() {
@@ -59,8 +65,6 @@ engine::Options BaseTest::GetOptions() {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void DBTest::SetUp() {
     BaseTest::SetUp();
-
-    zilliz::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(0, 1024*1024*200, 1024*1024*300, 2);
 
     server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
     config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
@@ -87,7 +91,7 @@ void DBTest::TearDown() {
     db_->DropAll();
     delete db_;
 
-    zilliz::knowhere::FaissGpuResourceMgr::GetInstance().Free();
+    BaseTest::TearDown();
 
     engine::ResMgrInst::GetInstance()->Stop();
     engine::SchedInst::GetInstance()->Stop();
@@ -116,6 +120,8 @@ void MetaTest::SetUp() {
 void MetaTest::TearDown() {
     impl_->DropAll();
 
+    BaseTest::TearDown();
+
     auto options = GetOptions();
     boost::filesystem::remove_all(options.meta.path);
 }
@@ -143,6 +149,8 @@ void MySqlMetaTest::SetUp() {
 
 void MySqlMetaTest::TearDown() {
     impl_->DropAll();
+
+    BaseTest::TearDown();
 
     auto options = GetOptions();
     boost::filesystem::remove_all(options.meta.path);
