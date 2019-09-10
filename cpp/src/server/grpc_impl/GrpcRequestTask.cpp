@@ -485,7 +485,7 @@ InsertTask::OnExecute() {
         // TODO: change to one dimension array in protobuf or use multiple-thread to copy the data
         for (size_t i = 0; i < insert_param_->row_record_array_size(); i++) {
             if (insert_param_->row_record_array(i).vector_data().empty()) {
-                return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record float array is empty");
+                return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array data is empty");
             }
             uint64_t vec_dim = insert_param_->row_record_array(i).vector_data().size();
             if (vec_dim != table_info.dimension_) {
@@ -638,12 +638,12 @@ SearchTask::OnExecute() {
         std::vector<float> vec_f(record_array_size * table_info.dimension_, 0);
         for (size_t i = 0; i < record_array_size; i++) {
             if (search_param_->query_record_array(i).vector_data().empty()) {
-                return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Query record float array is empty");
+                return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array data is empty");
             }
             uint64_t query_vec_dim = search_param_->query_record_array(i).vector_data().size();
             if (query_vec_dim != table_info.dimension_) {
                 ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
-                std::string error_msg = "Invalid query record dimension: " + std::to_string(query_vec_dim)
+                std::string error_msg = "Invalid row record dimension: " + std::to_string(query_vec_dim)
                                         + " vs. table dimension:" + std::to_string(table_info.dimension_);
                 return SetError(error_code, error_msg);
             }
