@@ -37,6 +37,7 @@ protected:
     void InitLog();
 
     virtual void SetUp() override;
+    virtual void TearDown() override;
     virtual zilliz::milvus::engine::Options GetOptions();
 };
 
@@ -53,6 +54,10 @@ class DBTest : public BaseTest {
 class DBTest2 : public DBTest {
  protected:
     virtual zilliz::milvus::engine::Options GetOptions() override;
+};
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+class EngineTest : public DBTest {
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
