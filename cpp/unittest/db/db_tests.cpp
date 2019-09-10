@@ -315,6 +315,79 @@ TEST_F(DBTest, PRELOADTABLE_TEST) {
 
 }
 
+TEST_F(DBTest, SHUTDOWN_TEST) {
+    db_->Stop();
+
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DescribeTable(table_info);
+    ASSERT_FALSE(stat.ok());
+
+    bool has_table = false;
+    stat = db_->HasTable(table_info.table_id_, has_table);
+    ASSERT_FALSE(stat.ok());
+
+    engine::IDNumbers ids;
+    stat = db_->InsertVectors(table_info.table_id_, 0, nullptr, ids);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->PreloadTable(table_info.table_id_);
+    ASSERT_FALSE(stat.ok());
+
+    uint64_t row_count = 0;
+    stat = db_->GetTableRowCount(table_info.table_id_, row_count);
+    ASSERT_FALSE(stat.ok());
+
+    engine::TableIndex index;
+    stat = db_->CreateIndex(table_info.table_id_, index);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DescribeIndex(table_info.table_id_, index);
+    ASSERT_FALSE(stat.ok());
+
+    engine::meta::DatesT dates;
+    engine::QueryResults results;
+    stat = db_->Query(table_info.table_id_, 1, 1, 1, nullptr, dates, results);
+    ASSERT_FALSE(stat.ok());
+    std::vector<std::string> file_ids;
+    stat = db_->Query(table_info.table_id_, file_ids, 1, 1, 1, nullptr, dates, results);
+    ASSERT_FALSE(stat.ok());
+
+    stat = db_->DeleteTable(table_info.table_id_, dates);
+    ASSERT_FALSE(stat.ok());
+}
+
+TEST_F(DBTest, INDEX_TEST) {
+    engine::meta::TableSchema table_info = BuildTableSchema();
+    engine::Status stat = db_->CreateTable(table_info);
+
+    int64_t nb = VECTOR_COUNT;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
+
+    engine::IDNumbers vector_ids;
+    db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    ASSERT_EQ(vector_ids.size(), nb);
+
+    engine::TableIndex index;
+    index.engine_type_ = (int)engine::EngineType::FAISS_IVFSQ8;
+    index.metric_type_ = (int)engine::MetricType::IP;
+    stat = db_->CreateIndex(table_info.table_id_, index);
+    ASSERT_TRUE(stat.ok());
+
+    engine::TableIndex index_out;
+    stat = db_->DescribeIndex(table_info.table_id_, index);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(index.engine_type_, index_out.engine_type_);
+    ASSERT_EQ(index.nlist_, index_out.nlist_);
+    ASSERT_EQ(index.metric_type_, index_out.metric_type_);
+
+    stat = db_->DropIndex(table_info.table_id_);
+    ASSERT_TRUE(stat.ok());
+}
+
 TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     engine::meta::TableSchema table_info = BuildTableSchema();
