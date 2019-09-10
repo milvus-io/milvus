@@ -55,9 +55,6 @@ void BuildVectors(int64_t n, std::vector<float> &vectors) {
 }
 
 TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
-
-    std::shared_ptr<engine::meta::SqliteMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
-
     engine::meta::TableSchema table_schema = BuildTableSchema();
     auto status = impl_->CreateTable(table_schema);
     ASSERT_TRUE(status.ok());
@@ -96,16 +93,10 @@ TEST_F(MemManagerTest, VECTOR_SOURCE_TEST) {
 
     vector_ids = source.GetVectorIds();
     ASSERT_EQ(vector_ids.size(), 100);
-
-
-    status = impl_->DropAll();
-    ASSERT_TRUE(status.ok());
 }
 
 TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
-
-    std::shared_ptr<engine::meta::SqliteMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
-    auto options = engine::OptionsFactory::Build();
+    auto options = GetOptions();
 
     engine::meta::TableSchema table_schema = BuildTableSchema();
     auto status = impl_->CreateTable(table_schema);
@@ -143,15 +134,10 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     ASSERT_EQ(vector_ids.size(), n_max - n_100);
 
     ASSERT_TRUE(mem_table_file.IsFull());
-
-    status = impl_->DropAll();
-    ASSERT_TRUE(status.ok());
 }
 
 TEST_F(MemManagerTest, MEM_TABLE_TEST) {
-
-    std::shared_ptr<engine::meta::SqliteMetaImpl> impl_ = engine::DBMetaImplFactory::Build();
-    auto options = engine::OptionsFactory::Build();
+    auto options = GetOptions();
 
     engine::meta::TableSchema table_schema = BuildTableSchema();
     auto status = impl_->CreateTable(table_schema);
@@ -210,9 +196,6 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     ASSERT_EQ(mem_table.GetTableFileCount(), expectedTableFileCount);
 
     status = mem_table.Serialize();
-    ASSERT_TRUE(status.ok());
-
-    status = impl_->DropAll();
     ASSERT_TRUE(status.ok());
 }
 
