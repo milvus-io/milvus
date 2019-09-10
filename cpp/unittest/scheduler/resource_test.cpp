@@ -86,9 +86,7 @@ TEST_F(ResourceBaseTest, dump) {
     ASSERT_FALSE(only_executor_->Dump().empty());
     ASSERT_FALSE(both_enable_->Dump().empty());
     ASSERT_FALSE(both_disable_->Dump().empty());
-    std::stringstream ss;
-    ss << only_loader_ << only_executor_ << both_enable_ << both_disable_;
-    ASSERT_FALSE(ss.str().empty());
+    std::cout << *only_loader_ << *only_executor_ << *both_enable_ << *both_disable_;
 }
 
 /************ ResourceAdvanceTest ************/

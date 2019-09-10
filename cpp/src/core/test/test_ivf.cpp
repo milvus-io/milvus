@@ -386,7 +386,7 @@ class GPURESTEST
     int64_t elems = 0;
 };
 
-const int search_count = 10;
+const int search_count = 18;
 const int load_count = 3;
 
 TEST_F(GPURESTEST, gpu_ivf_resource_test) {

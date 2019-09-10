@@ -29,11 +29,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-492 - Drop index failed if index have been created with index_type: FLAT
 - MS-493 - Knowhere unittest crash
 - MS-453 - GPU search error when nprobe set more than 1024
-<<<<<<< HEAD
 - MS-474 - Create index hang if use branch-0.3.1 server config
-=======
 - MS-510 - unittest out of memory and crashed
->>>>>>> upstream/branch-0.4.0
+- MS-119 - The problem of combining the log files
 
 ## Improvement
 - MS-327 - Clean code for milvus
@@ -114,6 +112,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-528 - Hide some config used future
 - MS-530 - Add unittest for SearchTask->Load
 - MS-531 - Disable next version code
+- MS-533 - Update resource_test to cover dump function
+- MS-523 - Config file validation
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
