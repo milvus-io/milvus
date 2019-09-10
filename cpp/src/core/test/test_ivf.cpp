@@ -394,8 +394,11 @@ TEST_F(GPURESTEST, gpu_ivf_resource_test) {
 
 
     {
-        index_type = "GPUIVF";
-        index_ = IndexFactory(index_type);
+        index_ =  std::make_shared<GPUIVF>(-1);
+        ASSERT_EQ(std::dynamic_pointer_cast<GPUIVF>(index_)->GetGpuDevice(), -1);
+        std::dynamic_pointer_cast<GPUIVF>(index_)->SetGpuDevice(device_id);
+        ASSERT_EQ(std::dynamic_pointer_cast<GPUIVF>(index_)->GetGpuDevice(), device_id);
+
         auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
         index_->set_preprocessor(preprocessor);
         train_cfg = Config::object{{"nlist", 1638}, {"gpu_id", device_id}, {"metric_type", "L2"}};
@@ -412,8 +415,9 @@ TEST_F(GPURESTEST, gpu_ivf_resource_test) {
             if (i > search_count - 6 || i < 5)
                 tc.RecordSection("search once");
         }
-        tc.RecordSection("search all");
+        tc.ElapseFromBegin("search all");
     }
+    FaissGpuResourceMgr::GetInstance().Dump();
 
     {
         // IVF-Search
@@ -430,7 +434,7 @@ TEST_F(GPURESTEST, gpu_ivf_resource_test) {
             if (i > search_count - 6 || i < 5)
                 tc.RecordSection("search once");
         }
-        tc.RecordSection("search all");
+        tc.ElapseFromBegin("search all");
     }
 
 }
@@ -461,7 +465,7 @@ TEST_F(GPURESTEST, gpuivfsq) {
             if (i > search_count - 6 || i < 5)
                 tc.RecordSection("search once");
         }
-        tc.RecordSection("search all");
+        tc.ElapseFromBegin("search all");
     }
 
     {
@@ -493,7 +497,7 @@ TEST_F(GPURESTEST, gpuivfsq) {
             if (i > search_count - 6 || i < 5)
                 tc.RecordSection("search once");
         }
-        tc.RecordSection("search all");
+        tc.ElapseFromBegin("search all");
         delete cpu_index;
         delete search_idx;
     }

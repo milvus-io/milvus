@@ -16,7 +16,7 @@ namespace grpc {
 using namespace ::milvus;
 
 namespace {
-    const std::map<ErrorCode, ::milvus::grpc::ErrorCode> &ErrorMap() {
+    ::milvus::grpc::ErrorCode ErrorMap(ErrorCode code) {
         static const std::map<ErrorCode, ::milvus::grpc::ErrorCode> code_map = {
                 {SERVER_UNEXPECTED_ERROR,         ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
                 {SERVER_UNSUPPORTED_ERROR,        ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR},
@@ -40,8 +40,9 @@ namespace {
                 {SERVER_INVALID_ROWRECORD_ARRAY,  ::milvus::grpc::ErrorCode::ILLEGAL_ROWRECORD},
                 {SERVER_INVALID_TOPK,             ::milvus::grpc::ErrorCode::ILLEGAL_TOPK},
                 {SERVER_INVALID_NPROBE,           ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
-                {SERVER_INVALID_INDEX_NLIST,      ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
-                {SERVER_INVALID_INDEX_METRIC_TYPE,::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
+                {SERVER_INVALID_INDEX_NLIST,      ::milvus::grpc::ErrorCode::ILLEGAL_NLIST},
+                {SERVER_INVALID_INDEX_METRIC_TYPE,::milvus::grpc::ErrorCode::ILLEGAL_METRIC_TYPE},
+                {SERVER_INVALID_INDEX_FILE_SIZE,  ::milvus::grpc::ErrorCode::ILLEGAL_ARGUMENT},
                 {SERVER_ILLEGAL_VECTOR_ID,        ::milvus::grpc::ErrorCode::ILLEGAL_VECTOR_ID},
                 {SERVER_ILLEGAL_SEARCH_RESULT,    ::milvus::grpc::ErrorCode::ILLEGAL_SEARCH_RESULT},
                 {SERVER_CACHE_ERROR,              ::milvus::grpc::ErrorCode::CACHE_FAILED},
@@ -49,7 +50,11 @@ namespace {
                 {SERVER_BUILD_INDEX_ERROR,        ::milvus::grpc::ErrorCode::BUILD_INDEX_ERROR},
         };
 
-        return code_map;
+        if(code_map.find(code) != code_map.end()) {
+            return code_map.at(code);
+        } else {
+            return ::milvus::grpc::ErrorCode::UNEXPECTED_ERROR;
+        }
     }
 }
 
@@ -115,7 +120,7 @@ void GrpcRequestScheduler::ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Statu
         ErrorCode err = task_ptr->ErrorID();
         if (err != SERVER_SUCCESS) {
             grpc_status->set_reason(task_ptr->ErrorMsg());
-            grpc_status->set_error_code(ErrorMap().at(err));
+            grpc_status->set_error_code(ErrorMap(err));
         }
     }
 }
