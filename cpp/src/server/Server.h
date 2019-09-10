@@ -18,7 +18,7 @@ class Server {
    public:
     static Server* Instance();
 
-    void Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename);
+    void Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename, const std::string &log_config_file);
     int Start();
     void Stop();
 
@@ -40,6 +40,7 @@ class Server {
     int pid_fd = -1;
     std::string pid_filename_;
     std::string config_filename_;
+    std::string log_config_file_;
 };  // Server
 
 }   // server

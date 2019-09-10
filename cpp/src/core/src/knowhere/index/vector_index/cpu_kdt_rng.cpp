@@ -9,7 +9,7 @@
 
 #include "knowhere/index/vector_index/cpu_kdt_rng.h"
 #include "knowhere/index/vector_index/definitions.h"
-#include "knowhere/index/preprocessor/normalize.h"
+//#include "knowhere/index/preprocessor/normalize.h"
 #include "knowhere/index/vector_index/kdt_parameters.h"
 #include "knowhere/adapter/sptag.h"
 #include "knowhere/common/exception.h"
@@ -60,20 +60,20 @@ CPUKDTRNG::Load(const BinarySet &binary_set) {
     index_ptr_->LoadIndexFromMemory(index_blobs);
 }
 
-PreprocessorPtr
-CPUKDTRNG::BuildPreprocessor(const DatasetPtr &dataset, const Config &config) {
-    return std::make_shared<NormalizePreprocessor>();
-}
+//PreprocessorPtr
+//CPUKDTRNG::BuildPreprocessor(const DatasetPtr &dataset, const Config &config) {
+//    return std::make_shared<NormalizePreprocessor>();
+//}
 
 IndexModelPtr
 CPUKDTRNG::Train(const DatasetPtr &origin, const Config &train_config) {
     SetParameters(train_config);
     DatasetPtr dataset = origin->Clone();
 
-    if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
-        && preprocessor_) {
-        preprocessor_->Preprocess(dataset);
-    }
+    //if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
+    //    && preprocessor_) {
+    //    preprocessor_->Preprocess(dataset);
+    //}
 
     auto vectorset = ConvertToVectorSet(dataset);
     auto metaset = ConvertToMetadataSet(dataset);
@@ -88,10 +88,10 @@ CPUKDTRNG::Add(const DatasetPtr &origin, const Config &add_config) {
     SetParameters(add_config);
     DatasetPtr dataset = origin->Clone();
 
-    if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
-        && preprocessor_) {
-        preprocessor_->Preprocess(dataset);
-    }
+    //if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
+    //    && preprocessor_) {
+    //    preprocessor_->Preprocess(dataset);
+    //}
 
     auto vectorset = ConvertToVectorSet(dataset);
     auto metaset = ConvertToMetadataSet(dataset);

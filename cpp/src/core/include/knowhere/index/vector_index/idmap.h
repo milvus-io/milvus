@@ -32,6 +32,12 @@ class IDMAP : public VectorIndex, public BasicIndex {
     virtual int64_t *GetRawIds();
 
  protected:
+    virtual void search_impl(int64_t n,
+                             const float *data,
+                             int64_t k,
+                             float *distances,
+                             int64_t *labels,
+                             const Config &cfg);
     std::mutex mutex_;
 };
 
@@ -49,6 +55,12 @@ class GPUIDMAP : public IDMAP, public GPUIndex {
     VectorIndexPtr CopyGpuToGpu(const int64_t &device_id, const Config &config) override;
 
  protected:
+    void search_impl(int64_t n,
+                     const float *data,
+                     int64_t k,
+                     float *distances,
+                     int64_t *labels,
+                     const Config &cfg) override;
     BinarySet SerializeImpl() override;
     void LoadImpl(const BinarySet &index_binary) override;
 };
