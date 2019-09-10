@@ -6,6 +6,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 - MS-119 - The problem of combining the log files
+- MS-121 - The problem that user can't change the time zone
 - MS-411 - Fix metric unittest linking error
 - MS-412 - Fix gpu cache logical error
 - MS-416 - ExecutionEngineImpl::GpuCache has not return value cause crash
@@ -31,8 +32,6 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-493 - Knowhere unittest crash
 - MS-453 - GPU search error when nprobe set more than 1024
 - MS-510 - unittest out of memory and crashed
-- MS-119 - The problem of combining the log files
-- MS-121 - The problem that user can't change the time zone
 - MS-507 - Dataset 10m-512, index type sq8，performance in-normal when set CPU_CACHE to 16 or 64
 
 ## Improvement
