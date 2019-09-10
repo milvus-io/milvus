@@ -814,7 +814,6 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         file_schema.engine_type_ = table_schema.engine_type_;
         file_schema.nlist_ = table_schema.nlist_;
         file_schema.metric_type_ = table_schema.metric_type_;
-        utils::GetTableFilePath(options_, file_schema);
 
         std::string id = "NULL"; //auto-increment
         std::string table_id = file_schema.table_id_;
@@ -924,7 +923,10 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
             table_file.nlist_ = groups[table_file.table_id_].nlist_;
             table_file.metric_type_ = groups[table_file.table_id_].metric_type_;
 
-            utils::GetTableFilePath(options_, table_file);
+            auto status = utils::GetTableFilePath(options_, table_file);
+            if(!status.ok()) {
+                return status;
+            }
 
             files.push_back(table_file);
         }
@@ -1027,7 +1029,10 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
 
             table_file.dimension_ = table_schema.dimension_;
 
-            utils::GetTableFilePath(options_, table_file);
+            auto status = utils::GetTableFilePath(options_, table_file);
+            if(!status.ok()) {
+                return status;
+            }
 
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
@@ -1113,7 +1118,10 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
 
             table_file.dimension_ = table_schema.dimension_;
 
-            utils::GetTableFilePath(options_, table_file);
+            auto status = utils::GetTableFilePath(options_, table_file);
+            if(!status.ok()) {
+                return status;
+            }
 
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
@@ -1203,7 +1211,10 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
 
             file_schema.dimension_ = table_schema.dimension_;
 
-            utils::GetTableFilePath(options_, file_schema);
+            auto status = utils::GetTableFilePath(options_, file_schema);
+            if(!status.ok()) {
+                return status;
+            }
 
             table_files.emplace_back(file_schema);
         }
