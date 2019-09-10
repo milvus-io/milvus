@@ -324,6 +324,12 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     status = impl_->DeleteTableFiles(table_id);
     ASSERT_TRUE(status.ok());
 
+    status = impl_->CreateTableFile(table_file);
+    table_file.file_type_ = meta::TableFileSchema::NEW;
+    status = impl_->UpdateTableFile(table_file);
+    status = impl_->CleanUp();
+    ASSERT_TRUE(status.ok());
+
     status = impl_->DeleteTable(table_id);
     ASSERT_TRUE(status.ok());
 
