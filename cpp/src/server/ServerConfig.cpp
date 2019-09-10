@@ -15,23 +15,24 @@
 #include "utils/CommonUtil.h"
 #include "utils/ValidationUtil.h"
 
+
 namespace zilliz {
 namespace milvus {
 namespace server {
 
-constexpr uint64_t MB = 1024*1024;
-constexpr uint64_t GB = MB*1024;
+constexpr uint64_t MB = 1024 * 1024;
+constexpr uint64_t GB = MB * 1024;
 
-ServerConfig&
+ServerConfig &
 ServerConfig::GetInstance() {
     static ServerConfig config;
     return config;
 }
 
 ErrorCode
-ServerConfig::LoadConfigFile(const std::string& config_filename) {
+ServerConfig::LoadConfigFile(const std::string &config_filename) {
     std::string filename = config_filename;
-    if(filename.empty()){
+    if (filename.empty()) {
         std::cout << "ERROR: a config file is required" << std::endl;
         exit(1);//directly exit program if config file not specified
     }
@@ -43,14 +44,14 @@ ServerConfig::LoadConfigFile(const std::string& config_filename) {
     }
 
     try {
-        ConfigMgr* mgr = const_cast<ConfigMgr*>(ConfigMgr::GetInstance());
+        ConfigMgr *mgr = const_cast<ConfigMgr *>(ConfigMgr::GetInstance());
         ErrorCode err = mgr->LoadConfigFile(filename);
-        if(err != 0) {
+        if (err != 0) {
             std::cout << "Server failed to load config file" << std::endl;
             exit(1);//directly exit program if the config file is illegal
         }
     }
-    catch (YAML::Exception& e) {
+    catch (YAML::Exception &e) {
         std::cout << "Server failed to load config file: " << std::endl;
         return SERVER_UNEXPECTED_ERROR;
     }
@@ -104,8 +105,7 @@ ServerConfig::CheckServerConfig() {
     if (ValidationUtil::ValidateStringIsNumber(port_str) != SERVER_SUCCESS) {
         std::cerr << "Error: port " << port_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
+    } else {
         int32_t port = std::stol(port_str);
         if (port < 1025 | port > 65534) {
             std::cerr << "Error: port " << port_str << " out of range [1025, 65534]" << std::endl;
@@ -117,10 +117,9 @@ ServerConfig::CheckServerConfig() {
     if (ValidationUtil::ValidateStringIsNumber(gpu_index_str) != SERVER_SUCCESS) {
         std::cerr << "Error: gpu_index " << gpu_index_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
+    } else {
         int32_t gpu_index = std::stol(gpu_index_str);
-        if(ValidationUtil::ValidateGpuIndex(gpu_index) != SERVER_SUCCESS) {
+        if (ValidationUtil::ValidateGpuIndex(gpu_index) != SERVER_SUCCESS) {
             std::cerr << "Error: invalid gpu_index " << gpu_index_str << std::endl;
             okay = false;
         }
@@ -129,6 +128,25 @@ ServerConfig::CheckServerConfig() {
     std::string mode = server_config.GetValue(CONFIG_CLUSTER_MODE, "single");
     if (mode != "single" && mode != "cluster" && mode != "read_only") {
         std::cerr << "ERROR: mode " << mode << " is not one of ['single', 'cluster', 'read_only']" << std::endl;
+        okay = false;
+    }
+
+    std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
+    int flag = 0;
+    if(time_zone.length() < 3)
+        flag = 1;
+    else if(time_zone.substr(0, 3) != "UTC")
+        flag = 1;
+    else if(time_zone.length() > 3){
+        try {
+            stoi(time_zone.substr(3, std::string::npos));
+        }
+        catch (std::invalid_argument &) {
+            flag = 1;
+        }
+    }
+    if(flag == 1){
+        std::cerr << "ERROR: time_zone " << time_zone << " is not in a right format" << std::endl;
         okay = false;
     }
 
@@ -190,13 +208,12 @@ ServerConfig::CheckDBConfig() {
     if (ValidationUtil::ValidateStringIsNumber(insert_buffer_size_str) != SERVER_SUCCESS) {
         std::cerr << "Error: insert_buffer_size " << insert_buffer_size_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
-        uint64_t insert_buffer_size = (uint64_t)std::stol(insert_buffer_size_str);
+    } else {
+        uint64_t insert_buffer_size = (uint64_t) std::stol(insert_buffer_size_str);
         insert_buffer_size *= GB;
         unsigned long total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
-        if(insert_buffer_size >= total_mem) {
+        if (insert_buffer_size >= total_mem) {
             std::cerr << "Error: insert_buffer_size exceed system memory" << std::endl;
             okay = false;
         }
@@ -254,21 +271,19 @@ ServerConfig::CheckCacheConfig() {
     if (ValidationUtil::ValidateStringIsNumber(cpu_cache_capacity_str) != SERVER_SUCCESS) {
         std::cerr << "Error: cpu_cache_capacity " << cpu_cache_capacity_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
-        uint64_t cpu_cache_capacity = (uint64_t)std::stol(cpu_cache_capacity_str);
+    } else {
+        uint64_t cpu_cache_capacity = (uint64_t) std::stol(cpu_cache_capacity_str);
         cpu_cache_capacity *= GB;
         unsigned long total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (cpu_cache_capacity >= total_mem) {
             std::cerr << "Error: cpu_cache_capacity exceed system memory" << std::endl;
             okay = false;
-        }
-        else if(cpu_cache_capacity > (double)total_mem*0.9) {
+        } else if (cpu_cache_capacity > (double) total_mem * 0.9) {
             std::cerr << "Warning: cpu_cache_capacity value is too aggressive" << std::endl;
         }
 
-        uint64_t insert_buffer_size = (uint64_t)GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
+        uint64_t insert_buffer_size = (uint64_t) GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
         insert_buffer_size *= GB;
         if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
             std::cerr << "Error: sum of cpu_cache_capacity and insert_buffer_size exceed system memory" << std::endl;
@@ -281,8 +296,7 @@ ServerConfig::CheckCacheConfig() {
     if (ValidationUtil::ValidateStringIsDouble(cpu_cache_free_percent_str, cpu_cache_free_percent) != SERVER_SUCCESS) {
         std::cerr << "Error: cpu_cache_free_percent " << cpu_cache_free_percent_str << " is not a double" << std::endl;
         okay = false;
-    }
-    else if (cpu_cache_free_percent < std::numeric_limits<double>::epsilon() || cpu_cache_free_percent > 1.0) {
+    } else if (cpu_cache_free_percent < std::numeric_limits<double>::epsilon() || cpu_cache_free_percent > 1.0) {
         std::cerr << "Error: invalid cpu_cache_free_percent " << cpu_cache_free_percent_str << std::endl;
         okay = false;
     }
@@ -297,22 +311,19 @@ ServerConfig::CheckCacheConfig() {
     if (ValidationUtil::ValidateStringIsNumber(gpu_cache_capacity_str) != SERVER_SUCCESS) {
         std::cerr << "Error: gpu_cache_capacity " << gpu_cache_capacity_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
-        uint64_t gpu_cache_capacity = (uint64_t)std::stol(gpu_cache_capacity_str);
+    } else {
+        uint64_t gpu_cache_capacity = (uint64_t) std::stol(gpu_cache_capacity_str);
         gpu_cache_capacity *= GB;
         int gpu_index = GetConfig(CONFIG_SERVER).GetInt32Value(CONFIG_GPU_INDEX, 0);
         size_t gpu_memory;
         if (ValidationUtil::GetGpuMemory(gpu_index, gpu_memory) != SERVER_SUCCESS) {
             std::cerr << "Error: could not get gpu memory for device " << gpu_index << std::endl;
             okay = false;
-        }
-        else if (gpu_cache_capacity >= gpu_memory) {
+        } else if (gpu_cache_capacity >= gpu_memory) {
             std::cerr << "Error: gpu_cache_capacity " << gpu_cache_capacity
                       << " exceed total gpu memory " << gpu_memory << std::endl;
             okay = false;
-        }
-        else if(gpu_cache_capacity > (double)gpu_memory*0.9) {
+        } else if (gpu_cache_capacity > (double) gpu_memory * 0.9) {
             std::cerr << "Warning: gpu_cache_capacity value is too aggressive" << std::endl;
         }
     }
@@ -322,8 +333,7 @@ ServerConfig::CheckCacheConfig() {
     if (ValidationUtil::ValidateStringIsDouble(gpu_cache_free_percent_str, gpu_cache_free_percent) != SERVER_SUCCESS) {
         std::cerr << "Error: gpu_cache_free_percent " << gpu_cache_free_percent_str << " is not a double" << std::endl;
         okay = false;
-    }
-    else if (gpu_cache_free_percent < std::numeric_limits<double>::epsilon() || gpu_cache_free_percent > 1.0) {
+    } else if (gpu_cache_free_percent < std::numeric_limits<double>::epsilon() || gpu_cache_free_percent > 1.0) {
         std::cerr << "Error: invalid gpu_cache_free_percent " << gpu_cache_free_percent << std::endl;
         okay = false;
     }
@@ -334,8 +344,7 @@ ServerConfig::CheckCacheConfig() {
         if (ValidationUtil::ValidateStringIsNumber(gpu_id) != SERVER_SUCCESS) {
             std::cerr << "Error: gpu_id " << gpu_id << " is not a number" << std::endl;
             okay = false;
-        }
-        else if (ValidationUtil::ValidateGpuIndex(std::stol(gpu_id)) != SERVER_SUCCESS) {
+        } else if (ValidationUtil::ValidateGpuIndex(std::stol(gpu_id)) != SERVER_SUCCESS) {
             std::cerr << "Error: gpu_id " << gpu_id << " is valid" << std::endl;
             okay = false;
         }
@@ -364,12 +373,12 @@ ServerConfig::CheckEngineConfig() {
     if (ValidationUtil::ValidateStringIsNumber(omp_thread_num_str) != SERVER_SUCCESS) {
         std::cerr << "Error: omp_thread_num " << omp_thread_num_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
+    } else {
         int32_t omp_thread = std::stol(omp_thread_num_str);
         uint32_t sys_thread_cnt = 8;
-        if(omp_thread > CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
-            std::cerr << "Error: omp_thread_num " << omp_thread_num_str << " > system available thread " << sys_thread_cnt << std::endl;
+        if (omp_thread > CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
+            std::cerr << "Error: omp_thread_num " << omp_thread_num_str << " > system available thread "
+                      << sys_thread_cnt << std::endl;
             okay = false;
         }
     }
@@ -446,14 +455,13 @@ ServerConfig::CheckResourceConfig() {
         resource_list.emplace(resource.first);
         auto &resource_conf = resource.second;
         auto type = resource_conf.GetValue(CONFIG_RESOURCE_TYPE);
-        
+
         std::string device_id_str = resource_conf.GetValue(CONFIG_RESOURCE_DEVICE_ID, "0");
         int32_t device_id;
         if (ValidationUtil::ValidateStringIsNumber(device_id_str) != SERVER_SUCCESS) {
             std::cerr << "Error: device_id " << device_id_str << " is not a number" << std::endl;
             okay = false;
-        }
-        else {
+        } else {
             device_id = std::stol(device_id_str);
         }
 
@@ -465,16 +473,14 @@ ServerConfig::CheckResourceConfig() {
 
         if (type == "DISK") {
             hasDisk = true;
-        }
-        else if (type == "CPU") {
+        } else if (type == "CPU") {
             hasCPU = true;
             if (resource_conf.GetBoolValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, false)) {
                 hasExecutor = true;
             }
-        }
-        else if(type == "GPU") {
+        } else if (type == "GPU") {
             int build_index_gpu_index = GetConfig(CONFIG_SERVER).GetInt32Value(CONFIG_GPU_INDEX, 0);
-            if(device_id == build_index_gpu_index) {
+            if (device_id == build_index_gpu_index) {
                 resource_valid_flag = true;
             }
             if (resource_conf.GetBoolValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, false)) {
@@ -498,7 +504,7 @@ ServerConfig::CheckResourceConfig() {
         }
     }
 
-    if(!resource_valid_flag) {
+    if (!resource_valid_flag) {
         std::cerr << "Building index GPU can't be found in resource config." << std::endl;
         okay = false;
     }
@@ -510,7 +516,7 @@ ServerConfig::CheckResourceConfig() {
         std::cerr << "No CPU or GPU resource has executor enabled" << std::endl;
         okay = false;
     }
-    
+
     auto connections = resource_config.GetChild(CONFIG_RESOURCE_CONNECTIONS).GetChildren();
     for (auto &connection : connections) {
         auto &connection_conf = connection.second;
@@ -527,8 +533,7 @@ ServerConfig::CheckResourceConfig() {
         if (delimiter_pos == std::string::npos) {
             std::cerr << "Error: invalid endpoint format: " << endpoint_str << std::endl;
             okay = false;
-        }
-        else {
+        } else {
             std::string left_resource = endpoint_str.substr(0, delimiter_pos);
             if (resource_list.find(left_resource) == resource_list.end()) {
                 std::cerr << "Error: left resource " << left_resource << " does not exist" << std::endl;
@@ -547,7 +552,7 @@ ServerConfig::CheckResourceConfig() {
 
 void
 ServerConfig::PrintAll() const {
-    if(const ConfigMgr* mgr = ConfigMgr::GetInstance()) {
+    if (const ConfigMgr *mgr = ConfigMgr::GetInstance()) {
         std::string str = mgr->DumpString();
 //        SERVER_LOG_INFO << "\n" << str;
         std::cout << "\n" << str << std::endl;
@@ -555,16 +560,16 @@ ServerConfig::PrintAll() const {
 }
 
 ConfigNode
-ServerConfig::GetConfig(const std::string& name) const {
-    const ConfigMgr* mgr = ConfigMgr::GetInstance();
-    const ConfigNode& root_node = mgr->GetRootNode();
+ServerConfig::GetConfig(const std::string &name) const {
+    const ConfigMgr *mgr = ConfigMgr::GetInstance();
+    const ConfigNode &root_node = mgr->GetRootNode();
     return root_node.GetChild(name);
 }
 
-ConfigNode&
-ServerConfig::GetConfig(const std::string& name) {
-    ConfigMgr* mgr = ConfigMgr::GetInstance();
-    ConfigNode& root_node = mgr->GetRootNode();
+ConfigNode &
+ServerConfig::GetConfig(const std::string &name) {
+    ConfigMgr *mgr = ConfigMgr::GetInstance();
+    ConfigNode &root_node = mgr->GetRootNode();
     return root_node.GetChild(name);
 }
 

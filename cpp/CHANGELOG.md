@@ -31,6 +31,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-453 - GPU search error when nprobe set more than 1024
 - MS-510 - unittest out of memory and crashed
 - MS-119 - The problem of combining the log files
+- MS-121 - The problem that user can't change the time zone
 
 ## Improvement
 - MS-327 - Clean code for milvus
