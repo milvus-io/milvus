@@ -113,6 +113,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-531 - Disable next version code
 - MS-533 - Update resource_test to cover dump function
 - MS-523 - Config file validation
+- MS-539 - Remove old task code
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
