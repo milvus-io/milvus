@@ -16,7 +16,6 @@
 
 #include "utils/SignalUtil.h"
 #include "utils/CommonUtil.h"
-#include "utils/LogUtil.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -98,10 +97,8 @@ main(int argc, char *argv[]) {
         }
     }
 
-    zilliz::milvus::server::InitLog(log_config_file);
-
     server::Server* server_ptr = server::Server::Instance();
-    server_ptr->Init(start_daemonized, pid_filename, config_filename);
+    server_ptr->Init(start_daemonized, pid_filename, config_filename, log_config_file);
     return server_ptr->Start();
 }
 

@@ -8,6 +8,7 @@
 
 #include <iostream>
 #include <sstream>
+#include "knowhere/common/exception.h"
 
 #include "knowhere/index/vector_index/cpu_kdt_rng.h"
 #include "knowhere/index/vector_index/definitions.h"
@@ -125,6 +126,10 @@ TEST_P(KDTTest, kdt_serialize) {
     auto result = new_index->Search(query_dataset, search_cfg);
     AssertAnns(result, nq, k);
     PrintResult(result, nq, k);
+    ASSERT_EQ(new_index->Count(), nb);
+    ASSERT_EQ(new_index->Dimension(), dim);
+    ASSERT_THROW({new_index->Clone();}, zilliz::knowhere::KnowhereException);
+    ASSERT_NO_THROW({new_index->Seal();});
 
     {
         int fileno = 0;
