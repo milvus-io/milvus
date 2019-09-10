@@ -5,6 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
 #include <thread>
+#include <easylogging++.h>
 
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
