@@ -13,6 +13,7 @@
 #include "db/Factories.h"
 #include "db/Options.h"
 #include "server/ServerConfig.h"
+#include "knowhere/index/vector_index/gpu_ivf.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -59,6 +60,8 @@ engine::Options BaseTest::GetOptions() {
 void DBTest::SetUp() {
     BaseTest::SetUp();
 
+    zilliz::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(0, 1024*1024*200, 1024*1024*300, 2);
+
     server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
     config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
 
@@ -83,6 +86,8 @@ void DBTest::TearDown() {
     db_->Stop();
     db_->DropAll();
     delete db_;
+
+    zilliz::knowhere::FaissGpuResourceMgr::GetInstance().Free();
 
     engine::ResMgrInst::GetInstance()->Stop();
     engine::SchedInst::GetInstance()->Stop();
