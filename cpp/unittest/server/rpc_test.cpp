@@ -165,10 +165,18 @@ TEST_F(RpcHandlerTest, IndexTest) {
 //    ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
     ::milvus::grpc::TableName table_name;
-    table_name.set_table_name(TABLE_NAME);
     ::milvus::grpc::IndexParam index_param;
     handler->DescribeIndex(&context, &table_name, &index_param);
+    table_name.set_table_name("test4");
+    handler->DescribeIndex(&context, &table_name, &index_param);
+    table_name.set_table_name(TABLE_NAME);
+    handler->DescribeIndex(&context, &table_name, &index_param);
     ::milvus::grpc::Status status;
+    table_name.Clear();
+    handler->DropIndex(&context, &table_name, &status);
+    table_name.set_table_name("test5");
+    handler->DropIndex(&context, &table_name, &status);
+    table_name.set_table_name(TABLE_NAME);
     handler->DropIndex(&context, &table_name, &status);
 }
 
@@ -195,9 +203,31 @@ TEST_F(RpcHandlerTest, SearchTest) {
     ::grpc::ServerContext context;
     ::milvus::grpc::SearchParam request;
     ::milvus::grpc::TopKQueryResultList response;
+    //test null input
+    handler->Search(&context, nullptr, &response);
+
+    //test invalid table name
+    handler->Search(&context, &request, &response);
+
+    //test table not exist
+    request.set_table_name("test3");
+    handler->Search(&context, &request, &response);
+
+    //test invalid topk
     request.set_table_name(TABLE_NAME);
+    handler->Search(&context, &request, &response);
+
+    //test invalid nprobe
     request.set_topk(10);
+    handler->Search(&context, &request, &response);
+
+    //test empty query record array
     request.set_nprobe(32);
+    handler->Search(&context, &request, &response);
+
+    //test search with range
+    ::milvus::grpc::Range *range = request.mutable_query_range_array()->Add();
+
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
     for (auto &record : record_array) {
@@ -206,8 +236,14 @@ TEST_F(RpcHandlerTest, SearchTest) {
             row_record->add_vector_data(rec);
         }
     }
+    request.set_table_name("test2");
+    handler->Search(&context, &request, &response);
+    request.set_table_name(TABLE_NAME);
+
     handler->Search(&context, &request, &response);
     ::milvus::grpc::SearchInFilesParam search_in_files_param;
+    std::string *file_id = search_in_files_param.add_file_id_array();
+    *file_id = "test_tbl";
     handler->SearchInFiles(&context, &search_in_files_param, &response);
 }
 
@@ -264,22 +300,35 @@ TEST_F(RpcHandlerTest, TablesTest) {
         }
     }
     //test vector_id size not equal to row record size
-    vector_ids.set_vector_id_array(0, 1);
+    vector_ids.clear_vector_id_array();
+    vector_ids.add_vector_id_array(1);
     handler->Insert(&context, &request, &vector_ids);
 
     //normally test
     vector_ids.clear_vector_id_array();
     handler->Insert(&context, &request, &vector_ids);
 
-    //Show table
-    ::milvus::grpc::Command cmd;
-    ::grpc::ServerWriter<::milvus::grpc::TableName> *writer;
+    request.clear_row_record_array();
+    vector_ids.clear_vector_id_array();
+    for (uint64_t i = 0; i < 10; ++i) {
+        ::milvus::grpc::RowRecord *grpc_record = request.add_row_record_array();
+        for (size_t j = 0; j < 10; j++) {
+            grpc_record->add_vector_data(record_array[i][j]);
+        }
+    }
+    handler->Insert(&context, &request, &vector_ids);
 
+
+//Show table
+//    ::milvus::grpc::Command cmd;
+//    ::grpc::ServerWriter<::milvus::grpc::TableName> *writer;
 //    status = handler->ShowTables(&context, &cmd, writer);
 //    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     //Count Table
     ::milvus::grpc::TableRowCount count;
+    table_name.Clear();
+    status = handler->CountTable(&context, &table_name, &count);
     table_name.set_table_name(tablename);
     status = handler->CountTable(&context, &table_name, &count);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
@@ -287,6 +336,9 @@ TEST_F(RpcHandlerTest, TablesTest) {
 
 
     //Preload Table
+    table_name.Clear();
+    status = handler->PreloadTable(&context, &table_name, &response);
+    table_name.set_table_name(TABLE_NAME);
     status = handler->PreloadTable(&context, &table_name, &response);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
@@ -307,6 +359,11 @@ TEST_F(RpcHandlerTest, CmdTest) {
     command.set_cmd("version");
     ::milvus::grpc::StringReply reply;
     handler->Cmd(&context, &command, &reply);
+    command.set_cmd("tasktable");
+    handler->Cmd(&context, &command, &reply);
+    command.set_cmd("test");
+    handler->Cmd(&context, &command, &reply);
+
 
     ASSERT_EQ(reply.string_reply(), MILVUS_VERSION);
 }
@@ -315,6 +372,9 @@ TEST_F(RpcHandlerTest, DeleteByRangeTest) {
     ::grpc::ServerContext context;
     ::milvus::grpc::DeleteByRangeParam request;
     ::milvus::grpc::Status status;
+    handler->DeleteByRange(&context, nullptr, &status);
+    handler->DeleteByRange(&context, &request, &status);
+
     request.set_table_name(TABLE_NAME);
     request.mutable_range()->set_start_value(CurrentTmDate(-2));
     request.mutable_range()->set_end_value(CurrentTmDate(-3));

@@ -78,6 +78,7 @@ GrpcMilvusServer::StartService() {
     builder.RegisterService(&service);
 
     server = builder.BuildAndStart();
+//    builder.addTransportFilter();
     server->Wait();
 
 }
