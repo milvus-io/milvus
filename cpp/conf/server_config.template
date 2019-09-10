@@ -3,6 +3,7 @@ server_config:
   port: 19530                 # the port milvus listen to, default: 19530, range: 1025 ~ 65534
   gpu_index: 0                # the gpu milvus use, default: 0, range: 0 ~ gpu number - 1
   mode: single                # milvus deployment type: single, cluster, read_only
+  time_zone: UTC+8            # Use the UTC-x or UTC+x to specify a time zone. eg. UTC+8 for China Standard Time
 
 db_config:
   db_path: @MILVUS_DB_PATH@             # milvus data storage path

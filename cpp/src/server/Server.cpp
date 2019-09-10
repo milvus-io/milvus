@@ -7,6 +7,7 @@
 #include "Server.h"
 #include "server/grpc_impl/GrpcMilvusServer.h"
 #include "utils/Log.h"
+#include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
 #include "metrics/Metrics.h"
@@ -24,11 +25,12 @@
 #include "metrics/Metrics.h"
 #include "DBWrapper.h"
 
+
 namespace zilliz {
 namespace milvus {
 namespace server {
 
-Server*
+Server *
 Server::Instance() {
     static Server server;
     return &server;
@@ -42,10 +44,14 @@ Server::~Server() {
 }
 
 void
-Server::Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename) {
+Server::Init(int64_t daemonized,
+             const std::string &pid_filename,
+             const std::string &config_filename,
+             const std::string &log_config_file) {
     daemonized_ = daemonized;
     pid_filename_ = pid_filename;
     config_filename_ = config_filename;
+    log_config_file_ = log_config_file;
 }
 
 void
@@ -54,7 +60,7 @@ Server::Daemonize() {
         return;
     }
 
-    SERVER_LOG_INFO << "Milvus server run in daemonize mode";
+    std::cout << "Milvus server run in daemonize mode";
 
 //    std::string log_path(GetLogDirFullPath());
 //    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
@@ -101,7 +107,7 @@ Server::Daemonize() {
 
     // Change the working directory to root
     int ret = chdir("/");
-    if(ret != 0){
+    if (ret != 0) {
         return;
     }
 
@@ -110,7 +116,7 @@ Server::Daemonize() {
         close(fd);
     }
 
-    SERVER_LOG_INFO << "Redirect stdin/stdout/stderr to /dev/null";
+    std::cout << "Redirect stdin/stdout/stderr to /dev/null";
 
     // Redirect stdin/stdout/stderr to /dev/null
     stdin = fopen("/dev/null", "r");
@@ -120,17 +126,17 @@ Server::Daemonize() {
     if (!pid_filename_.empty()) {
         pid_fd = open(pid_filename_.c_str(), O_RDWR | O_CREAT, 0640);
         if (pid_fd < 0) {
-            SERVER_LOG_INFO << "Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno);
+            std::cout << "Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
         if (lockf(pid_fd, F_TLOCK, 0) < 0) {
-            SERVER_LOG_INFO << "Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno);
+            std::cout << "Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
 
         std::string pid_file_context = std::to_string(getpid());
         ssize_t res = write(pid_fd, pid_file_context.c_str(), pid_file_context.size());
-        if(res != 0){
+        if (res != 0) {
             return;
         }
     }
@@ -146,13 +152,34 @@ Server::Start() {
     do {
         try {
             // Read config file
-            if(LoadConfig() != SERVER_SUCCESS) {
+            if (LoadConfig() != SERVER_SUCCESS) {
                 return 1;
             }
 
             //log path is defined by LoadConfig, so InitLog must be called after LoadConfig
             ServerConfig &config = ServerConfig::GetInstance();
             ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
+
+            std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
+            if (time_zone.length() == 3) {
+                time_zone = "CUT";
+            } else {
+                int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
+                if (time_bias == 0)
+                    time_zone = "CUT";
+                else if (time_bias > 0) {
+                    time_zone = "CUT" + std::to_string(-time_bias);
+                } else {
+                    time_zone = "CUT+" + std::to_string(-time_bias);
+                }
+            }
+
+            if (setenv("TZ", time_zone.c_str(), 1) != 0) {
+                return -1;
+            }
+            tzset();
+
+            InitLog(log_config_file_);
 
             // Handle Signal
             signal(SIGINT, SignalUtil::HandleSignal);
@@ -164,12 +191,12 @@ Server::Start() {
             std::cout << "Milvus server start successfully." << std::endl;
             StartService();
 
-        } catch(std::exception& ex){
-            SERVER_LOG_ERROR << "Milvus server encounter exception: " << std::string(ex.what())
-                             << "Is another server instance running?";
+        } catch (std::exception &ex) {
+            std::cerr << "Milvus server encounter exception: " << std::string(ex.what())
+                      << "Is another server instance running?";
             break;
         }
-    } while(false);
+    } while (false);
 
     Stop();
     return 0;
@@ -182,12 +209,12 @@ Server::Stop() {
     // Unlock and close lockfile
     if (pid_fd != -1) {
         int ret = lockf(pid_fd, F_ULOCK, 0);
-        if(ret != 0){
+        if (ret != 0) {
             std::cout << "Can't lock file: " << strerror(errno) << std::endl;
             exit(0);
         }
         ret = close(pid_fd);
-        if(ret != 0){
+        if (ret != 0) {
             std::cout << "Can't close file: " << strerror(errno) << std::endl;
             exit(0);
         }
@@ -196,7 +223,7 @@ Server::Stop() {
     // Try to delete lockfile
     if (!pid_filename_.empty()) {
         int ret = unlink(pid_filename_.c_str());
-        if(ret != 0){
+        if (ret != 0) {
             std::cout << "Can't unlink file: " << strerror(errno) << std::endl;
             exit(0);
         }
@@ -214,7 +241,7 @@ ErrorCode
 Server::LoadConfig() {
     ServerConfig::GetInstance().LoadConfigFile(config_filename_);
     ErrorCode err = ServerConfig::GetInstance().ValidateConfig();
-    if(err != SERVER_SUCCESS){
+    if (err != SERVER_SUCCESS) {
         exit(0);
     }
 

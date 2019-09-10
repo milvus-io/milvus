@@ -6,6 +6,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 - MS-119 - The problem of combining the log files
+- MS-121 - The problem that user can't change the time zone
 - MS-411 - Fix metric unittest linking error
 - MS-412 - Fix gpu cache logical error
 - MS-416 - ExecutionEngineImpl::GpuCache has not return value cause crash
