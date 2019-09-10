@@ -105,8 +105,7 @@ ServerConfig::CheckServerConfig() {
     if (ValidationUtil::ValidateStringIsNumber(port_str) != SERVER_SUCCESS) {
         std::cerr << "ERROR: port " << port_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
+    } else {
         int32_t port = std::stol(port_str);
         if (port < 1025 | port > 65534) {
             std::cerr << "ERROR: port " << port_str << " out of range [1025, 65534]" << std::endl;
@@ -118,8 +117,7 @@ ServerConfig::CheckServerConfig() {
     if (ValidationUtil::ValidateStringIsNumber(gpu_index_str) != SERVER_SUCCESS) {
         std::cerr << "ERROR: gpu_index " << gpu_index_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
+    } else {
         int32_t gpu_index = std::stol(gpu_index_str);
         if (ValidationUtil::ValidateGpuIndex(gpu_index) != SERVER_SUCCESS) {
             std::cerr << "ERROR: invalid gpu_index " << gpu_index_str << std::endl;
@@ -130,6 +128,25 @@ ServerConfig::CheckServerConfig() {
     std::string mode = server_config.GetValue(CONFIG_CLUSTER_MODE, "single");
     if (mode != "single" && mode != "cluster" && mode != "read_only") {
         std::cerr << "ERROR: mode " << mode << " is not one of ['single', 'cluster', 'read_only']" << std::endl;
+        okay = false;
+    }
+
+    std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
+    int flag = 0;
+    if(time_zone.length() < 3)
+        flag = 1;
+    else if(time_zone.substr(0, 3) != "UTC")
+        flag = 1;
+    else if(time_zone.length() > 3){
+        try {
+            stoi(time_zone.substr(3, std::string::npos));
+        }
+        catch (std::invalid_argument &) {
+            flag = 1;
+        }
+    }
+    if(flag == 1){
+        std::cerr << "ERROR: time_zone " << time_zone << " is not in a right format" << std::endl;
         okay = false;
     }
 
@@ -359,8 +376,7 @@ ServerConfig::CheckEngineConfig() {
     if (ValidationUtil::ValidateStringIsNumber(omp_thread_num_str) != SERVER_SUCCESS) {
         std::cerr << "ERROR: omp_thread_num " << omp_thread_num_str << " is not a number" << std::endl;
         okay = false;
-    }
-    else {
+    } else {
         int32_t omp_thread = std::stol(omp_thread_num_str);
         uint32_t sys_thread_cnt = 8;
         if (omp_thread > CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
@@ -448,8 +464,7 @@ ServerConfig::CheckResourceConfig() {
         if (ValidationUtil::ValidateStringIsNumber(device_id_str) != SERVER_SUCCESS) {
             std::cerr << "ERROR: device_id " << device_id_str << " is not a number" << std::endl;
             okay = false;
-        }
-        else {
+        } else {
             device_id = std::stol(device_id_str);
         }
 
@@ -461,8 +476,7 @@ ServerConfig::CheckResourceConfig() {
 
         if (type == "DISK") {
             hasDisk = true;
-        }
-        else if (type == "CPU") {
+        } else if (type == "CPU") {
             hasCPU = true;
             if (resource_conf.GetBoolValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, false)) {
                 hasExecutor = true;
@@ -541,8 +555,7 @@ ServerConfig::CheckResourceConfig() {
         if (delimiter_pos == std::string::npos) {
             std::cerr << "ERROR: invalid endpoint format: " << endpoint_str << std::endl;
             okay = false;
-        }
-        else {
+        } else {
             std::string left_resource = endpoint_str.substr(0, delimiter_pos);
             if (resource_list.find(left_resource) == resource_list.end()) {
                 std::cerr << "ERROR: left resource " << left_resource << " does not exist" << std::endl;
