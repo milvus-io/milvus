@@ -378,11 +378,11 @@ TEST_F(DBTest, INDEX_TEST) {
     ASSERT_TRUE(stat.ok());
 
     engine::TableIndex index_out;
-    stat = db_->DescribeIndex(table_info.table_id_, index);
+    stat = db_->DescribeIndex(table_info.table_id_, index_out);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(index.engine_type_, index_out.engine_type_);
     ASSERT_EQ(index.nlist_, index_out.nlist_);
-    ASSERT_EQ(index.metric_type_, index_out.metric_type_);
+    ASSERT_EQ(table_info.metric_type_, index_out.metric_type_);
 
     stat = db_->DropIndex(table_info.table_id_);
     ASSERT_TRUE(stat.ok());
