@@ -108,9 +108,7 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
     std::vector<size_t> ids = {table_file.id_};
     meta::TableFilesSchema files;
     status = impl_->GetTableFiles(table_file.table_id_, ids, files);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(files.size(), 1UL);
-    ASSERT_TRUE(files[0].file_type_ == meta::TableFileSchema::TO_DELETE);
+    ASSERT_EQ(files.size(), 0UL);
 }
 
 TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
@@ -159,8 +157,6 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     for(auto& file : files_get) {
         if (days[i] < days_num) {
             ASSERT_EQ(file.file_type_, meta::TableFileSchema::NEW);
-        } else {
-            ASSERT_EQ(file.file_type_, meta::TableFileSchema::TO_DELETE);
         }
         i++;
     }
@@ -219,9 +215,7 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
     ASSERT_TRUE(status.ok());
 
     for(auto& file : files_get) {
-        if (i < 5) {
-            ASSERT_TRUE(file.file_type_ == meta::TableFileSchema::TO_DELETE);
-        } else {
+        if (i >= 5) {
             ASSERT_EQ(file.file_type_, meta::TableFileSchema::NEW);
         }
         ++i;
@@ -302,38 +296,31 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
 
     meta::TableFilesSchema files;
     status = impl_->FilesToIndex(files);
-    ASSERT_TRUE(status.ok());
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     meta::DatePartionedTableFilesSchema dated_files;
     status = impl_->FilesToMerge(table.table_id_, dated_files);
-    ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(), raw_files_cnt);
 
     status = impl_->FilesToIndex(files);
-    ASSERT_TRUE(status.ok());
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
     meta::DatesT dates = {table_file.date_};
     std::vector<size_t> ids;
     status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
-    ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);
 
     status = impl_->FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
-    ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);
 
     status = impl_->FilesToSearch(table_id, ids, meta::DatesT(), dated_files);
-    ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt+raw_files_cnt+index_files_cnt);
 
     ids.push_back(size_t(9999999999));
     status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
-    ASSERT_TRUE(status.ok());
     ASSERT_EQ(dated_files[table_file.date_].size(),0);
 
     std::vector<int> file_types;
