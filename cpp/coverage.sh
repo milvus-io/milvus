@@ -96,6 +96,9 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "*/cmake_build/*_ep-prefix/*" \
     "src/core/cmake_build*" \
     "src/core/thirdparty*" \
+    "src/grpc*"\
+    "src/server/Server.cpp"\
+    "src/server/grpc_impl/GrpcMilvusServer.cpp"\
 
 # gen html report
 ${LCOV_GEN_CMD} "${FILE_INFO_OUTPUT_NEW}" --output-directory ${DIR_LCOV_OUTPUT}/
