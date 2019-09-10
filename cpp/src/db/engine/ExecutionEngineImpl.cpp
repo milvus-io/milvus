@@ -303,13 +303,15 @@ Status ExecutionEngineImpl::Search(long n,
 }
 
 Status ExecutionEngineImpl::Cache() {
-    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, index_);
+    cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index_, PhysicalSize());
+    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, obj);
 
     return Status::OK();
 }
 
 Status ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
-    zilliz::milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, index_);
+    cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index_, PhysicalSize());
+    zilliz::milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, obj);
 
     return Status::OK();
 }
