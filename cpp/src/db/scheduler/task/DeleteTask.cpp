@@ -17,11 +17,6 @@ DeleteTask::DeleteTask(const DeleteContextPtr& context)
 }
 
 std::shared_ptr<IScheduleTask> DeleteTask::Execute() {
-
-    if(context_ != nullptr && context_->meta() != nullptr) {
-        context_->meta()->DeleteTableFiles(context_->table_id());
-    }
-
     return nullptr;
 }
 

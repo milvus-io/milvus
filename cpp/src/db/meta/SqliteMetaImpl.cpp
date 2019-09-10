@@ -603,6 +603,7 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
         std::map<std::string, TableSchema> groups;
         TableFileSchema table_file;
 
+        Status ret;
         for (auto &file : selected) {
             table_file.id_ = std::get<0>(file);
             table_file.table_id_ = std::get<1>(file);
@@ -616,7 +617,7 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
 
             auto status = utils::GetTableFilePath(options_, table_file);
             if(!status.ok()) {
-                return status;
+                ret = status;
             }
             auto groupItr = groups.find(table_file.table_id_);
             if (groupItr == groups.end()) {
@@ -635,11 +636,11 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
             files.push_back(table_file);
         }
 
+        return ret;
+
     } catch (std::exception &e) {
         return HandleException("Encounter exception when iterate raw files", e.what());
     }
-
-    return Status::OK();
 }
 
 Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
@@ -695,6 +696,7 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
             result = ConnectorPtr->select(select_columns, filter);
         }
 
+        Status ret;
         TableFileSchema table_file;
         for (auto &file : result) {
             table_file.id_ = std::get<0>(file);
@@ -712,7 +714,7 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
 
             auto status = utils::GetTableFilePath(options_, table_file);
             if(!status.ok()) {
-                return status;
+                ret = status;
             }
 
             auto dateItr = files.find(table_file.date_);
@@ -724,13 +726,12 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
         if(files.empty()) {
             ENGINE_LOG_ERROR << "No file to search for table: " << table_id;
         }
+
+        return ret;
+
     } catch (std::exception &e) {
         return HandleException("Encounter exception when iterate index files", e.what());
     }
-
-
-
-    return Status::OK();
 }
 
 Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
@@ -761,6 +762,7 @@ Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
                                                  c(&TableFileSchema::table_id_) == table_id),
                                              order_by(&TableFileSchema::file_size_).desc());
 
+        Status result;
         for (auto &file : selected) {
             TableFileSchema table_file;
             table_file.file_size_ = std::get<4>(file);
@@ -782,7 +784,7 @@ Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
 
             auto status = utils::GetTableFilePath(options_, table_file);
             if(!status.ok()) {
-                return status;
+                result = status;
             }
 
             auto dateItr = files.find(table_file.date_);
@@ -791,11 +793,12 @@ Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
             }
             files[table_file.date_].push_back(table_file);
         }
+
+        return result;
+
     } catch (std::exception &e) {
         return HandleException("Encounter exception when iterate merge files", e.what());
     }
-
-    return Status::OK();
 }
 
 Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
@@ -812,7 +815,8 @@ Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
                                                   &TableFileSchema::engine_type_,
                                                   &TableFileSchema::created_on_),
                                           where(c(&TableFileSchema::table_id_) == table_id and
-                                                  in(&TableFileSchema::id_, ids)
+                                                  in(&TableFileSchema::id_, ids) and
+                                                  c(&TableFileSchema::file_type_) != (int) TableFileSchema::TO_DELETE
                                           ));
 
         TableSchema table_schema;
@@ -822,6 +826,7 @@ Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
             return status;
         }
 
+        Status result;
         for (auto &file : files) {
             TableFileSchema file_schema;
             file_schema.table_id_ = table_id;
@@ -838,18 +843,15 @@ Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
             file_schema.nlist_ = table_schema.nlist_;
             file_schema.metric_type_ = table_schema.metric_type_;
 
-            auto status = utils::GetTableFilePath(options_, file_schema);
-            if(!status.ok()) {
-                return status;
-            }
+            utils::GetTableFilePath(options_, file_schema);
 
             table_files.emplace_back(file_schema);
         }
+
+        return result;
     } catch (std::exception &e) {
         return HandleException("Encounter exception when lookup table files", e.what());
     }
-
-    return Status::OK();
 }
 
 // PXU TODO: Support Swap

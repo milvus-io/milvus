@@ -27,8 +27,8 @@ class CPUKDTRNG : public VectorIndex {
     Load(const BinarySet &index_array) override;
 
  public:
-    PreprocessorPtr
-    BuildPreprocessor(const DatasetPtr &dataset, const Config &config) override;
+    //PreprocessorPtr
+    //BuildPreprocessor(const DatasetPtr &dataset, const Config &config) override;
     int64_t Count() override;
     int64_t Dimension() override;
 
