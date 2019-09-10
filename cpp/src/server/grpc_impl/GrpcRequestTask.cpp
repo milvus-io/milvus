@@ -412,7 +412,6 @@ InsertTask::InsertTask(const ::milvus::grpc::InsertParam *insert_param,
     : GrpcBaseTask(DDL_DML_TASK_GROUP),
       insert_param_(insert_param),
       record_ids_(record_ids) {
-    record_ids_->Clear();
 }
 
 BaseTaskPtr

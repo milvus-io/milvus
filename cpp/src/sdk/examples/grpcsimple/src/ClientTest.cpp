@@ -23,11 +23,11 @@ std::string GetTableName();
 const std::string TABLE_NAME = GetTableName();
 constexpr int64_t TABLE_DIMENSION = 512;
 constexpr int64_t TABLE_INDEX_FILE_SIZE = 1024;
-constexpr int64_t BATCH_ROW_COUNT = 1000000;
+constexpr int64_t BATCH_ROW_COUNT = 100000;
 constexpr int64_t NQ = 100;
 constexpr int64_t TOP_K = 1;
 constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
-constexpr int64_t ADD_VECTOR_LOOP = 10;
+constexpr int64_t ADD_VECTOR_LOOP = 1;
 constexpr int64_t SECONDS_EACH_HOUR = 3600;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
@@ -164,7 +164,7 @@ void DoSearch(std::shared_ptr<Connection> conn,
               const std::string& phase_name) {
     std::vector<Range> query_range_array;
     Range rg;
-    rg.start_value = CurrentTmDate();
+    rg.start_value = CurrentTmDate(1);
     rg.end_value = CurrentTmDate(1);
     query_range_array.emplace_back(rg);
 
