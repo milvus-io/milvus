@@ -280,12 +280,15 @@ void FaissGpuResourceMgr::InitResource() {
 
     is_init = true;
 
+    std::cout << "InitResource" << std::endl;
     for(auto& device : devices_params_) {
         auto& device_id = device.first;
+        std::cout << "Device Id: " << device_id << std::endl;
         auto& device_param = device.second;
         auto& bq = idle_map[device_id];
 
         for (int64_t i = 0; i < device_param.resource_num; ++i) {
+            std::cout << "Resource Id: " << i << std::endl;
             auto raw_resource = std::make_shared<faiss::gpu::StandardGpuResources>();
 
             // TODO(linxj): enable set pinned memory
@@ -295,6 +298,7 @@ void FaissGpuResourceMgr::InitResource() {
             bq.Put(res_wrapper);
         }
     }
+    std::cout << "End initResource" << std::endl;
 }
 
 ResPtr FaissGpuResourceMgr::GetRes(const int64_t &device_id,
