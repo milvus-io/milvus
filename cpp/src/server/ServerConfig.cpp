@@ -202,22 +202,14 @@ ServerConfig::CheckDBConfig() {
     if (ValidationUtil::ValidateStringIsNumber(insert_buffer_size_str) != SERVER_SUCCESS) {
         std::cerr << "ERROR: insert_buffer_size " << insert_buffer_size_str << " is not a number" << std::endl;
         okay = false;
-<<<<<<< HEAD
-    } else {
-=======
     }
     else {
->>>>>>> branch-0.4.0
         uint64_t insert_buffer_size = (uint64_t) std::stol(insert_buffer_size_str);
         insert_buffer_size *= GB;
         unsigned long total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (insert_buffer_size >= total_mem) {
-<<<<<<< HEAD
-            std::cerr << "Error: insert_buffer_size exceed system memory" << std::endl;
-=======
             std::cerr << "ERROR: insert_buffer_size exceed system memory" << std::endl;
->>>>>>> branch-0.4.0
             okay = false;
         }
     }
@@ -274,12 +266,8 @@ ServerConfig::CheckCacheConfig() {
     if (ValidationUtil::ValidateStringIsNumber(cpu_cache_capacity_str) != SERVER_SUCCESS) {
         std::cerr << "ERROR: cpu_cache_capacity " << cpu_cache_capacity_str << " is not a number" << std::endl;
         okay = false;
-<<<<<<< HEAD
-    } else {
-=======
     }
     else {
->>>>>>> branch-0.4.0
         uint64_t cpu_cache_capacity = (uint64_t) std::stol(cpu_cache_capacity_str);
         cpu_cache_capacity *= GB;
         unsigned long total_mem = 0, free_mem = 0;
@@ -287,12 +275,8 @@ ServerConfig::CheckCacheConfig() {
         if (cpu_cache_capacity >= total_mem) {
             std::cerr << "ERROR: cpu_cache_capacity exceed system memory" << std::endl;
             okay = false;
-<<<<<<< HEAD
-        } else if (cpu_cache_capacity > (double) total_mem * 0.9) {
-=======
         }
         else if (cpu_cache_capacity > (double) total_mem * 0.9) {
->>>>>>> branch-0.4.0
             std::cerr << "Warning: cpu_cache_capacity value is too aggressive" << std::endl;
         }
 
@@ -309,14 +293,9 @@ ServerConfig::CheckCacheConfig() {
     if (ValidationUtil::ValidateStringIsDouble(cpu_cache_free_percent_str, cpu_cache_free_percent) != SERVER_SUCCESS) {
         std::cerr << "ERROR: cpu_cache_free_percent " << cpu_cache_free_percent_str << " is not a double" << std::endl;
         okay = false;
-<<<<<<< HEAD
-    } else if (cpu_cache_free_percent < std::numeric_limits<double>::epsilon() || cpu_cache_free_percent > 1.0) {
-        std::cerr << "Error: invalid cpu_cache_free_percent " << cpu_cache_free_percent_str << std::endl;
-=======
     }
     else if (cpu_cache_free_percent < std::numeric_limits<double>::epsilon() || cpu_cache_free_percent > 1.0) {
         std::cerr << "ERROR: invalid cpu_cache_free_percent " << cpu_cache_free_percent_str << std::endl;
->>>>>>> branch-0.4.0
         okay = false;
     }
 
@@ -330,12 +309,8 @@ ServerConfig::CheckCacheConfig() {
     if (ValidationUtil::ValidateStringIsNumber(gpu_cache_capacity_str) != SERVER_SUCCESS) {
         std::cerr << "ERROR: gpu_cache_capacity " << gpu_cache_capacity_str << " is not a number" << std::endl;
         okay = false;
-<<<<<<< HEAD
-    } else {
-=======
     }
     else {
->>>>>>> branch-0.4.0
         uint64_t gpu_cache_capacity = (uint64_t) std::stol(gpu_cache_capacity_str);
         gpu_cache_capacity *= GB;
         int gpu_index = GetConfig(CONFIG_SERVER).GetInt32Value(CONFIG_GPU_INDEX, 0);
@@ -343,13 +318,6 @@ ServerConfig::CheckCacheConfig() {
         if (ValidationUtil::GetGpuMemory(gpu_index, gpu_memory) != SERVER_SUCCESS) {
             std::cerr << "ERROR: could not get gpu memory for device " << gpu_index << std::endl;
             okay = false;
-<<<<<<< HEAD
-        } else if (gpu_cache_capacity >= gpu_memory) {
-            std::cerr << "Error: gpu_cache_capacity " << gpu_cache_capacity
-                      << " exceed total gpu memory " << gpu_memory << std::endl;
-            okay = false;
-        } else if (gpu_cache_capacity > (double) gpu_memory * 0.9) {
-=======
         }
         else if (gpu_cache_capacity >= gpu_memory) {
             std::cerr << "ERROR: gpu_cache_capacity " << gpu_cache_capacity
@@ -357,7 +325,6 @@ ServerConfig::CheckCacheConfig() {
             okay = false;
         }
         else if (gpu_cache_capacity > (double) gpu_memory * 0.9) {
->>>>>>> branch-0.4.0
             std::cerr << "Warning: gpu_cache_capacity value is too aggressive" << std::endl;
         }
     }
@@ -367,14 +334,9 @@ ServerConfig::CheckCacheConfig() {
     if (ValidationUtil::ValidateStringIsDouble(gpu_cache_free_percent_str, gpu_cache_free_percent) != SERVER_SUCCESS) {
         std::cerr << "ERROR: gpu_cache_free_percent " << gpu_cache_free_percent_str << " is not a double" << std::endl;
         okay = false;
-<<<<<<< HEAD
-    } else if (gpu_cache_free_percent < std::numeric_limits<double>::epsilon() || gpu_cache_free_percent > 1.0) {
-        std::cerr << "Error: invalid gpu_cache_free_percent " << gpu_cache_free_percent << std::endl;
-=======
     }
     else if (gpu_cache_free_percent < std::numeric_limits<double>::epsilon() || gpu_cache_free_percent > 1.0) {
         std::cerr << "ERROR: invalid gpu_cache_free_percent " << gpu_cache_free_percent << std::endl;
->>>>>>> branch-0.4.0
         okay = false;
     }
 
@@ -384,14 +346,9 @@ ServerConfig::CheckCacheConfig() {
         if (ValidationUtil::ValidateStringIsNumber(gpu_id) != SERVER_SUCCESS) {
             std::cerr << "ERROR: gpu_id " << gpu_id << " is not a number" << std::endl;
             okay = false;
-<<<<<<< HEAD
-        } else if (ValidationUtil::ValidateGpuIndex(std::stol(gpu_id)) != SERVER_SUCCESS) {
-            std::cerr << "Error: gpu_id " << gpu_id << " is valid" << std::endl;
-=======
         }
         else if (ValidationUtil::ValidateGpuIndex(std::stol(gpu_id)) != SERVER_SUCCESS) {
             std::cerr << "ERROR: gpu_id " << gpu_id << " is invalid" << std::endl;
->>>>>>> branch-0.4.0
             okay = false;
         }
     }
@@ -423,11 +380,7 @@ ServerConfig::CheckEngineConfig() {
         int32_t omp_thread = std::stol(omp_thread_num_str);
         uint32_t sys_thread_cnt = 8;
         if (omp_thread > CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
-<<<<<<< HEAD
-            std::cerr << "Error: omp_thread_num " << omp_thread_num_str << " > system available thread "
-=======
             std::cerr << "ERROR: omp_thread_num " << omp_thread_num_str << " > system available thread "
->>>>>>> branch-0.4.0
                       << sys_thread_cnt << std::endl;
             okay = false;
         }
@@ -528,12 +481,8 @@ ServerConfig::CheckResourceConfig() {
             if (resource_conf.GetBoolValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, false)) {
                 hasExecutor = true;
             }
-<<<<<<< HEAD
-        } else if (type == "GPU") {
-=======
         }
         else if (type == "GPU") {
->>>>>>> branch-0.4.0
             int build_index_gpu_index = GetConfig(CONFIG_SERVER).GetInt32Value(CONFIG_GPU_INDEX, 0);
             if (device_id == build_index_gpu_index) {
                 resource_valid_flag = true;
