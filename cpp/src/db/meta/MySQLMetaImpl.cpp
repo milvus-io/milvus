@@ -881,6 +881,7 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
             res = filesToIndexQuery.store();
         } //Scoped Connection
 
+        Status ret;
         std::map<std::string, TableSchema> groups;
         TableFileSchema table_file;
         for (auto &resRow : res) {
@@ -925,16 +926,17 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
 
             auto status = utils::GetTableFilePath(options_, table_file);
             if(!status.ok()) {
-                return status;
+                ret = status;
             }
 
             files.push_back(table_file);
         }
+
+        return ret;
+
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO INDEX", e.what());
     }
-
-    return Status::OK();
 }
 
 Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
@@ -998,6 +1000,7 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
             return status;
         }
 
+        Status ret;
         TableFileSchema table_file;
         for (auto &resRow : res) {
 
@@ -1031,7 +1034,7 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
 
             auto status = utils::GetTableFilePath(options_, table_file);
             if(!status.ok()) {
-                return status;
+                ret = status;
             }
 
             auto dateItr = files.find(table_file.date_);
@@ -1041,11 +1044,11 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
 
             files[table_file.date_].push_back(table_file);
         }
+
+        return ret;
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", e.what());
     }
-
-    return Status::OK();
 }
 
 Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
@@ -1083,6 +1086,7 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
             res = filesToMergeQuery.store();
         } //Scoped Connection
 
+        Status ret;
         for (auto &resRow : res) {
             TableFileSchema table_file;
             table_file.file_size_ = resRow["file_size"];
@@ -1120,7 +1124,7 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
 
             auto status = utils::GetTableFilePath(options_, table_file);
             if(!status.ok()) {
-                return status;
+                ret = status;
             }
 
             auto dateItr = files.find(table_file.date_);
@@ -1131,11 +1135,11 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
             files[table_file.date_].push_back(table_file);
         }
 
+        return ret;
+
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO MERGE", e.what());
     }
-
-    return Status::OK();
 }
 
 Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
@@ -1165,7 +1169,8 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
             getTableFileQuery << "SELECT id, engine_type, file_id, file_type, file_size, row_count, date, created_on " <<
                               "FROM TableFiles " <<
                               "WHERE table_id = " << quote << table_id << " AND " <<
-                              "(" << idStr << ");";
+                              "(" << idStr << ") AND " <<
+                              "file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::GetTableFiles: " << getTableFileQuery.str();
 
@@ -1174,11 +1179,9 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
 
         TableSchema table_schema;
         table_schema.table_id_ = table_id;
-        auto status = DescribeTable(table_schema);
-        if (!status.ok()) {
-            return status;
-        }
+        DescribeTable(table_schema);
 
+        Status ret;
         for (auto &resRow : res) {
 
             TableFileSchema file_schema;
@@ -1211,18 +1214,16 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
 
             file_schema.dimension_ = table_schema.dimension_;
 
-            auto status = utils::GetTableFilePath(options_, file_schema);
-            if(!status.ok()) {
-                return status;
-            }
+            utils::GetTableFilePath(options_, file_schema);
 
             table_files.emplace_back(file_schema);
         }
+
+        return ret;
+
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN RETRIEVING TABLE FILES", e.what());
     }
-
-    return Status::OK();
 }
 
 // PXU TODO: Support Swap
