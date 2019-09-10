@@ -15,23 +15,24 @@
 #include "utils/CommonUtil.h"
 #include "utils/ValidationUtil.h"
 
+
 namespace zilliz {
 namespace milvus {
 namespace server {
 
-constexpr uint64_t MB = 1024*1024;
-constexpr uint64_t GB = MB*1024;
+constexpr uint64_t MB = 1024 * 1024;
+constexpr uint64_t GB = MB * 1024;
 
-ServerConfig&
+ServerConfig &
 ServerConfig::GetInstance() {
     static ServerConfig config;
     return config;
 }
 
 ErrorCode
-ServerConfig::LoadConfigFile(const std::string& config_filename) {
+ServerConfig::LoadConfigFile(const std::string &config_filename) {
     std::string filename = config_filename;
-    if(filename.empty()){
+    if (filename.empty()) {
         std::cout << "ERROR: a config file is required" << std::endl;
         exit(1);//directly exit program if config file not specified
     }
@@ -43,14 +44,14 @@ ServerConfig::LoadConfigFile(const std::string& config_filename) {
     }
 
     try {
-        ConfigMgr* mgr = const_cast<ConfigMgr*>(ConfigMgr::GetInstance());
+        ConfigMgr *mgr = const_cast<ConfigMgr *>(ConfigMgr::GetInstance());
         ErrorCode err = mgr->LoadConfigFile(filename);
-        if(err != 0) {
+        if (err != 0) {
             std::cout << "Server failed to load config file" << std::endl;
             exit(1);//directly exit program if the config file is illegal
         }
     }
-    catch (YAML::Exception& e) {
+    catch (YAML::Exception &e) {
         std::cout << "Server failed to load config file: " << std::endl;
         return SERVER_UNEXPECTED_ERROR;
     }
@@ -120,7 +121,7 @@ ServerConfig::CheckServerConfig() {
     }
     else {
         int32_t gpu_index = std::stol(gpu_index_str);
-        if(ValidationUtil::ValidateGpuIndex(gpu_index) != SERVER_SUCCESS) {
+        if (ValidationUtil::ValidateGpuIndex(gpu_index) != SERVER_SUCCESS) {
             std::cerr << "Error: invalid gpu_index " << gpu_index_str << std::endl;
             okay = false;
         }
@@ -192,11 +193,11 @@ ServerConfig::CheckDBConfig() {
         okay = false;
     }
     else {
-        uint64_t insert_buffer_size = (uint64_t)std::stol(insert_buffer_size_str);
+        uint64_t insert_buffer_size = (uint64_t) std::stol(insert_buffer_size_str);
         insert_buffer_size *= GB;
         unsigned long total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
-        if(insert_buffer_size >= total_mem) {
+        if (insert_buffer_size >= total_mem) {
             std::cerr << "Error: insert_buffer_size exceed system memory" << std::endl;
             okay = false;
         }
@@ -256,7 +257,7 @@ ServerConfig::CheckCacheConfig() {
         okay = false;
     }
     else {
-        uint64_t cpu_cache_capacity = (uint64_t)std::stol(cpu_cache_capacity_str);
+        uint64_t cpu_cache_capacity = (uint64_t) std::stol(cpu_cache_capacity_str);
         cpu_cache_capacity *= GB;
         unsigned long total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
@@ -264,11 +265,11 @@ ServerConfig::CheckCacheConfig() {
             std::cerr << "Error: cpu_cache_capacity exceed system memory" << std::endl;
             okay = false;
         }
-        else if(cpu_cache_capacity > (double)total_mem*0.9) {
+        else if (cpu_cache_capacity > (double) total_mem * 0.9) {
             std::cerr << "Warning: cpu_cache_capacity value is too aggressive" << std::endl;
         }
 
-        uint64_t insert_buffer_size = (uint64_t)GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
+        uint64_t insert_buffer_size = (uint64_t) GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
         insert_buffer_size *= GB;
         if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
             std::cerr << "Error: sum of cpu_cache_capacity and insert_buffer_size exceed system memory" << std::endl;
@@ -299,7 +300,7 @@ ServerConfig::CheckCacheConfig() {
         okay = false;
     }
     else {
-        uint64_t gpu_cache_capacity = (uint64_t)std::stol(gpu_cache_capacity_str);
+        uint64_t gpu_cache_capacity = (uint64_t) std::stol(gpu_cache_capacity_str);
         gpu_cache_capacity *= GB;
         int gpu_index = GetConfig(CONFIG_SERVER).GetInt32Value(CONFIG_GPU_INDEX, 0);
         size_t gpu_memory;
@@ -312,7 +313,7 @@ ServerConfig::CheckCacheConfig() {
                       << " exceed total gpu memory " << gpu_memory << std::endl;
             okay = false;
         }
-        else if(gpu_cache_capacity > (double)gpu_memory*0.9) {
+        else if (gpu_cache_capacity > (double) gpu_memory * 0.9) {
             std::cerr << "Warning: gpu_cache_capacity value is too aggressive" << std::endl;
         }
     }
@@ -336,7 +337,7 @@ ServerConfig::CheckCacheConfig() {
             okay = false;
         }
         else if (ValidationUtil::ValidateGpuIndex(std::stol(gpu_id)) != SERVER_SUCCESS) {
-            std::cerr << "Error: gpu_id " << gpu_id << " is valid" << std::endl;
+            std::cerr << "Error: gpu_id " << gpu_id << " is invalid" << std::endl;
             okay = false;
         }
     }
@@ -368,8 +369,9 @@ ServerConfig::CheckEngineConfig() {
     else {
         int32_t omp_thread = std::stol(omp_thread_num_str);
         uint32_t sys_thread_cnt = 8;
-        if(omp_thread > CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
-            std::cerr << "Error: omp_thread_num " << omp_thread_num_str << " > system available thread " << sys_thread_cnt << std::endl;
+        if (omp_thread > CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
+            std::cerr << "Error: omp_thread_num " << omp_thread_num_str << " > system available thread "
+                      << sys_thread_cnt << std::endl;
             okay = false;
         }
     }
@@ -446,9 +448,9 @@ ServerConfig::CheckResourceConfig() {
         resource_list.emplace(resource.first);
         auto &resource_conf = resource.second;
         auto type = resource_conf.GetValue(CONFIG_RESOURCE_TYPE);
-        
+
         std::string device_id_str = resource_conf.GetValue(CONFIG_RESOURCE_DEVICE_ID, "0");
-        int32_t device_id;
+        int32_t device_id = -1;
         if (ValidationUtil::ValidateStringIsNumber(device_id_str) != SERVER_SUCCESS) {
             std::cerr << "Error: device_id " << device_id_str << " is not a number" << std::endl;
             okay = false;
@@ -472,9 +474,9 @@ ServerConfig::CheckResourceConfig() {
                 hasExecutor = true;
             }
         }
-        else if(type == "GPU") {
+        else if (type == "GPU") {
             int build_index_gpu_index = GetConfig(CONFIG_SERVER).GetInt32Value(CONFIG_GPU_INDEX, 0);
-            if(device_id == build_index_gpu_index) {
+            if (device_id == build_index_gpu_index) {
                 resource_valid_flag = true;
             }
             if (resource_conf.GetBoolValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, false)) {
@@ -485,20 +487,38 @@ ServerConfig::CheckResourceConfig() {
                 std::cerr << "Error: gpu_resource_num " << gpu_resource_num_str << " is not a number" << std::endl;
                 okay = false;
             }
+            bool mem_valid = true;
             std::string pinned_memory_str = resource_conf.GetValue(CONFIG_RESOURCE_PIN_MEMORY, "300");
             if (ValidationUtil::ValidateStringIsNumber(pinned_memory_str) != SERVER_SUCCESS) {
                 std::cerr << "Error: pinned_memory " << pinned_memory_str << " is not a number" << std::endl;
                 okay = false;
+                mem_valid = false;
             }
             std::string temp_memory_str = resource_conf.GetValue(CONFIG_RESOURCE_TEMP_MEMORY, "300");
             if (ValidationUtil::ValidateStringIsNumber(temp_memory_str) != SERVER_SUCCESS) {
                 std::cerr << "Error: temp_memory " << temp_memory_str << " is not a number" << std::endl;
                 okay = false;
+                mem_valid = false;
+            }
+            if (mem_valid) {
+                size_t gpu_memory;
+                if (ValidationUtil::GetGpuMemory(device_id, gpu_memory) != SERVER_SUCCESS) {
+                    std::cerr << "Error: could not get gpu memory for device " << device_id << std::endl;
+                    okay = false;
+                }
+                else {
+                    size_t prealoc_mem = std::stol(pinned_memory_str) + std::stol(temp_memory_str);
+                    if (prealoc_mem >= gpu_memory) {
+                        std::cerr << "Error: sum of pinned_memory and temp_memory " << prealoc_mem
+                                  << " exceeds total gpu memory " << gpu_memory << " for device " << device_id << std::endl;
+                        okay = false;
+                    }
+                }
             }
         }
     }
 
-    if(!resource_valid_flag) {
+    if (!resource_valid_flag) {
         std::cerr << "Building index GPU can't be found in resource config." << std::endl;
         okay = false;
     }
@@ -510,7 +530,7 @@ ServerConfig::CheckResourceConfig() {
         std::cerr << "No CPU or GPU resource has executor enabled" << std::endl;
         okay = false;
     }
-    
+
     auto connections = resource_config.GetChild(CONFIG_RESOURCE_CONNECTIONS).GetChildren();
     for (auto &connection : connections) {
         auto &connection_conf = connection.second;
@@ -547,7 +567,7 @@ ServerConfig::CheckResourceConfig() {
 
 void
 ServerConfig::PrintAll() const {
-    if(const ConfigMgr* mgr = ConfigMgr::GetInstance()) {
+    if (const ConfigMgr *mgr = ConfigMgr::GetInstance()) {
         std::string str = mgr->DumpString();
 //        SERVER_LOG_INFO << "\n" << str;
         std::cout << "\n" << str << std::endl;
@@ -555,16 +575,16 @@ ServerConfig::PrintAll() const {
 }
 
 ConfigNode
-ServerConfig::GetConfig(const std::string& name) const {
-    const ConfigMgr* mgr = ConfigMgr::GetInstance();
-    const ConfigNode& root_node = mgr->GetRootNode();
+ServerConfig::GetConfig(const std::string &name) const {
+    const ConfigMgr *mgr = ConfigMgr::GetInstance();
+    const ConfigNode &root_node = mgr->GetRootNode();
     return root_node.GetChild(name);
 }
 
-ConfigNode&
-ServerConfig::GetConfig(const std::string& name) {
-    ConfigMgr* mgr = ConfigMgr::GetInstance();
-    ConfigNode& root_node = mgr->GetRootNode();
+ConfigNode &
+ServerConfig::GetConfig(const std::string &name) {
+    ConfigMgr *mgr = ConfigMgr::GetInstance();
+    ConfigNode &root_node = mgr->GetRootNode();
     return root_node.GetChild(name);
 }
 

@@ -31,7 +31,6 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(BUILD_TYPE "release")
 else()
     set(BUILD_TYPE "debug")
-    SET(CMAKE_VERBOSE_MAKEFILE on)
 endif()
 message(STATUS "Build type = ${BUILD_TYPE}")
 
