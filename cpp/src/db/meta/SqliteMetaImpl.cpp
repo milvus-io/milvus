@@ -614,7 +614,10 @@ Status SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
             table_file.engine_type_ = std::get<7>(file);
             table_file.created_on_ = std::get<8>(file);
 
-            utils::GetTableFilePath(options_, table_file);
+            auto status = utils::GetTableFilePath(options_, table_file);
+            if(!status.ok()) {
+                return status;
+            }
             auto groupItr = groups.find(table_file.table_id_);
             if (groupItr == groups.end()) {
                 TableSchema table_schema;
@@ -707,7 +710,11 @@ Status SqliteMetaImpl::FilesToSearch(const std::string &table_id,
             table_file.nlist_ = table_schema.nlist_;
             table_file.metric_type_ = table_schema.metric_type_;
 
-            utils::GetTableFilePath(options_, table_file);
+            auto status = utils::GetTableFilePath(options_, table_file);
+            if(!status.ok()) {
+                return status;
+            }
+
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
                 files[table_file.date_] = TableFilesSchema();
@@ -773,7 +780,11 @@ Status SqliteMetaImpl::FilesToMerge(const std::string &table_id,
             table_file.nlist_ = table_schema.nlist_;
             table_file.metric_type_ = table_schema.metric_type_;
 
-            utils::GetTableFilePath(options_, table_file);
+            auto status = utils::GetTableFilePath(options_, table_file);
+            if(!status.ok()) {
+                return status;
+            }
+
             auto dateItr = files.find(table_file.date_);
             if (dateItr == files.end()) {
                 files[table_file.date_] = TableFilesSchema();
@@ -827,7 +838,10 @@ Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
             file_schema.nlist_ = table_schema.nlist_;
             file_schema.metric_type_ = table_schema.metric_type_;
 
-            utils::GetTableFilePath(options_, file_schema);
+            auto status = utils::GetTableFilePath(options_, file_schema);
+            if(!status.ok()) {
+                return status;
+            }
 
             table_files.emplace_back(file_schema);
         }
