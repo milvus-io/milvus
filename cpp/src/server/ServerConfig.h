@@ -19,6 +19,7 @@ static const char* CONFIG_SERVER_ADDRESS = "address";
 static const char* CONFIG_SERVER_PORT = "port";
 static const char* CONFIG_CLUSTER_MODE = "mode";
 static const char* CONFIG_GPU_INDEX = "gpu_index";
+static const char* CONFIG_TIME_ZONE = "time_zone";
 
 static const char* CONFIG_DB = "db_config";
 static const char* CONFIG_DB_URL = "db_backend_url";
