@@ -50,7 +50,7 @@ DatasetPtr IDMAP::Search(const DatasetPtr &dataset, const Config &config) {
     auto res_ids = (int64_t *) malloc(sizeof(int64_t) * elems);
     auto res_dis = (float *) malloc(sizeof(float) * elems);
 
-    index_->search(rows, (float *) p_data, k, res_dis, res_ids);
+    search_impl(rows, (float *) p_data, k, res_dis, res_ids, Config());
 
     auto id_buf = MakeMutableBufferSmart((uint8_t *) res_ids, sizeof(int64_t) * elems);
     auto dist_buf = MakeMutableBufferSmart((uint8_t *) res_dis, sizeof(float) * elems);
@@ -70,6 +70,11 @@ DatasetPtr IDMAP::Search(const DatasetPtr &dataset, const Config &config) {
     std::vector<ArrayPtr> array{ids, dists};
 
     return std::make_shared<Dataset>(array, nullptr);
+}
+
+void IDMAP::search_impl(int64_t n, const float *data, int64_t k, float *distances, int64_t *labels, const Config &cfg) {
+    index_->search(n, (float *) data, k, distances, labels);
+
 }
 
 void IDMAP::Add(const DatasetPtr &dataset, const Config &config) {
@@ -207,6 +212,7 @@ void GPUIDMAP::LoadImpl(const BinarySet &index_binary) {
 
         if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_) ){
             ResScope rs(gpu_id_, res);
+            res_ = res;
             auto device_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id_, index);
             index_.reset(device_index);
         } else {
@@ -228,6 +234,16 @@ float *GPUIDMAP::GetRawVectors() {
 
 int64_t *GPUIDMAP::GetRawIds() {
     KNOWHERE_THROW_MSG("Not support");
+}
+
+void GPUIDMAP::search_impl(int64_t n,
+                           const float *data,
+                           int64_t k,
+                           float *distances,
+                           int64_t *labels,
+                           const Config &cfg) {
+    ResScope rs(res_);
+    index_->search(n, (float *) data, k, distances, labels);
 }
 
 }
