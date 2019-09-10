@@ -12,6 +12,7 @@
 #include "knowhere/index/vector_index/idmap.h"
 #include "knowhere/adapter/structure.h"
 #include "knowhere/index/vector_index/cloner.h"
+#include "knowhere/common/exception.h"
 
 #include "utils.h"
 
@@ -65,19 +66,20 @@ void PrintResult(const DatasetPtr &result,
 }
 
 TEST_F(IDMAPTest, idmap_basic) {
-    assert(!xb.empty());
+    ASSERT_TRUE(!xb.empty());
     Config Default_cfg;
 
     index_->Train(Config::object{{"dim", dim}, {"metric_type", "L2"}});
     index_->Add(base_dataset, Default_cfg);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    assert(index_->GetRawVectors() != nullptr);
-    assert(index_->GetRawIds() != nullptr);
+    ASSERT_TRUE(index_->GetRawVectors() != nullptr);
+    ASSERT_TRUE(index_->GetRawIds() != nullptr);
     auto result = index_->Search(query_dataset, Config::object{{"k", k}});
     AssertAnns(result, nq, k);
     PrintResult(result, nq, k);
 
+    index_->Seal();
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<IDMAP>();
     new_index->Load(binaryset);
@@ -126,15 +128,15 @@ TEST_F(IDMAPTest, idmap_serialize) {
 }
 
 TEST_F(IDMAPTest, copy_test) {
-    assert(!xb.empty());
+    ASSERT_TRUE(!xb.empty());
     Config Default_cfg;
 
     index_->Train(Config::object{{"dim", dim}, {"metric_type", "L2"}});
     index_->Add(base_dataset, Default_cfg);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    assert(index_->GetRawVectors() != nullptr);
-    assert(index_->GetRawIds() != nullptr);
+    ASSERT_TRUE(index_->GetRawVectors() != nullptr);
+    ASSERT_TRUE(index_->GetRawIds() != nullptr);
     auto result = index_->Search(query_dataset, Config::object{{"k", k}});
     AssertAnns(result, nq, k);
     //PrintResult(result, nq, k);
@@ -151,8 +153,16 @@ TEST_F(IDMAPTest, copy_test) {
         auto clone_index = CopyCpuToGpu(index_, device_id, Config());
         auto clone_result = clone_index->Search(query_dataset, Config::object{{"k", k}});
         AssertAnns(clone_result, nq, k);
-        //assert(std::static_pointer_cast<GPUIDMAP>(clone_index)->GetRawVectors() != nullptr);
-        //assert(std::static_pointer_cast<GPUIDMAP>(clone_index)->GetRawIds() != nullptr);
+        ASSERT_THROW({ std::static_pointer_cast<GPUIDMAP>(clone_index)->GetRawVectors(); },
+                     zilliz::knowhere::KnowhereException);
+        ASSERT_THROW({ std::static_pointer_cast<GPUIDMAP>(clone_index)->GetRawIds(); },
+                     zilliz::knowhere::KnowhereException);
+
+        auto binary = clone_index->Serialize();
+        clone_index->Load(binary);
+        auto new_result = clone_index->Search(query_dataset, Config::object{{"k", k}});
+        AssertAnns(new_result, nq, k);
+
         auto clone_gpu_idx = clone_index->Clone();
         auto clone_gpu_res = clone_gpu_idx->Search(query_dataset, Config::object{{"k", k}});
         AssertAnns(clone_gpu_res, nq, k);
@@ -161,14 +171,13 @@ TEST_F(IDMAPTest, copy_test) {
         auto host_index = CopyGpuToCpu(clone_index, Config());
         auto host_result = host_index->Search(query_dataset, Config::object{{"k", k}});
         AssertAnns(host_result, nq, k);
-        assert(std::static_pointer_cast<IDMAP>(host_index)->GetRawVectors() != nullptr);
-        assert(std::static_pointer_cast<IDMAP>(host_index)->GetRawIds() != nullptr);
+        ASSERT_TRUE(std::static_pointer_cast<IDMAP>(host_index)->GetRawVectors() != nullptr);
+        ASSERT_TRUE(std::static_pointer_cast<IDMAP>(host_index)->GetRawIds() != nullptr);
 
         // gpu to gpu
         auto device_index = CopyCpuToGpu(index_, device_id, Config());
-        auto device_result = device_index->Search(query_dataset, Config::object{{"k", k}});
+        auto new_device_index = std::static_pointer_cast<GPUIDMAP>(device_index)->CopyGpuToGpu(device_id, Config());
+        auto device_result = new_device_index->Search(query_dataset, Config::object{{"k", k}});
         AssertAnns(device_result, nq, k);
-        //assert(std::static_pointer_cast<GPUIDMAP>(device_index)->GetRawVectors() != nullptr);
-        //assert(std::static_pointer_cast<GPUIDMAP>(device_index)->GetRawIds() != nullptr);
     }
 }

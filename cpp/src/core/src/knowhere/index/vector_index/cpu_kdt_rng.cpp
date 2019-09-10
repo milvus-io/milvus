@@ -70,10 +70,10 @@ CPUKDTRNG::Train(const DatasetPtr &origin, const Config &train_config) {
     SetParameters(train_config);
     DatasetPtr dataset = origin->Clone();
 
-    if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
-        && preprocessor_) {
+    //if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
+    //    && preprocessor_) {
         preprocessor_->Preprocess(dataset);
-    }
+    //}
 
     auto vectorset = ConvertToVectorSet(dataset);
     auto metaset = ConvertToMetadataSet(dataset);
@@ -88,10 +88,10 @@ CPUKDTRNG::Add(const DatasetPtr &origin, const Config &add_config) {
     SetParameters(add_config);
     DatasetPtr dataset = origin->Clone();
 
-    if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
-        && preprocessor_) {
+    //if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
+    //    && preprocessor_) {
         preprocessor_->Preprocess(dataset);
-    }
+    //}
 
     auto vectorset = ConvertToVectorSet(dataset);
     auto metaset = ConvertToMetadataSet(dataset);
