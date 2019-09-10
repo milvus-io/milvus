@@ -5,16 +5,16 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
+#include <vector>
 
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngineImpl.h"
 #include "server/ServerConfig.h"
-
-#include <vector>
+#include "utils.h"
 
 using namespace zilliz::milvus;
 
-TEST(EngineTest, FACTORY_TEST) {
+TEST_F(EngineTest, FACTORY_TEST) {
     {
         auto engine_ptr = engine::EngineFactory::Build(
                 512,
@@ -76,7 +76,7 @@ TEST(EngineTest, FACTORY_TEST) {
     }
 }
 
-TEST(EngineTest, ENGINE_IMPL_TEST) {
+TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     uint16_t dimension = 64;
     std::string file_path = "/tmp/milvus_index_1";
     auto engine_ptr = engine::EngineFactory::Build(
@@ -105,19 +105,19 @@ TEST(EngineTest, ENGINE_IMPL_TEST) {
     ASSERT_EQ(engine_ptr->Dimension(), dimension);
     ASSERT_EQ(engine_ptr->Count(), ids.size());
 
-    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-    config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
-
-    status = engine_ptr->CopyToGpu(0);
-    //ASSERT_TRUE(status.ok());
-
-    auto new_engine = engine_ptr->Clone();
-    ASSERT_EQ(new_engine->Dimension(), dimension);
-    ASSERT_EQ(new_engine->Count(), ids.size());
-    status = new_engine->CopyToCpu();
-    //ASSERT_TRUE(status.ok());
-
-    auto engine_build = new_engine->BuildIndex("/tmp/milvus_index_2", engine::EngineType::FAISS_IVFSQ8);
-    //ASSERT_TRUE(status.ok());
+//    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+//    config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
+//
+//    status = engine_ptr->CopyToGpu(0);
+//    //ASSERT_TRUE(status.ok());
+//
+//    auto new_engine = engine_ptr->Clone();
+//    ASSERT_EQ(new_engine->Dimension(), dimension);
+//    ASSERT_EQ(new_engine->Count(), ids.size());
+//    status = new_engine->CopyToCpu();
+//    //ASSERT_TRUE(status.ok());
+//
+//    auto engine_build = new_engine->BuildIndex("/tmp/milvus_index_2", engine::EngineType::FAISS_IVFSQ8);
+//    //ASSERT_TRUE(status.ok());
 
 }
