@@ -32,8 +32,6 @@ class Meta;
 
 class DBImpl : public DB {
  public:
-    using MetaPtr = meta::Meta::Ptr;
-
     explicit DBImpl(const Options &options);
     ~DBImpl();
 
@@ -126,8 +124,8 @@ class DBImpl : public DB {
 
     std::thread bg_timer_thread_;
 
-    MetaPtr meta_ptr_;
-    MemManagerAbstractPtr mem_mgr_;
+    meta::MetaPtr meta_ptr_;
+    MemManagerPtr mem_mgr_;
     std::mutex mem_serialize_mutex_;
 
     server::ThreadPool compact_thread_pool_;

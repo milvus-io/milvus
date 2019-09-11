@@ -11,7 +11,7 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-DeleteContext::DeleteContext(const std::string &table_id, meta::Meta::Ptr &meta_ptr, uint64_t num_resource)
+DeleteContext::DeleteContext(const std::string &table_id, meta::MetaPtr &meta_ptr, uint64_t num_resource)
     : IScheduleContext(ScheduleContextType::kDelete),
       table_id_(table_id),
       meta_ptr_(meta_ptr),

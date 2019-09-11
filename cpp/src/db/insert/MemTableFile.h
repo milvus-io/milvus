@@ -13,13 +13,9 @@ namespace engine {
 class MemTableFile {
 
  public:
+    MemTableFile(const std::string &table_id, const meta::MetaPtr &meta, const Options &options);
 
-    using Ptr = std::shared_ptr<MemTableFile>;
-    using MetaPtr = meta::Meta::Ptr;
-
-    MemTableFile(const std::string &table_id, const std::shared_ptr<meta::Meta> &meta, const Options &options);
-
-    Status Add(const VectorSource::Ptr &source, IDNumbers& vector_ids);
+    Status Add(const VectorSourcePtr &source, IDNumbers& vector_ids);
 
     size_t GetCurrentMem();
 
@@ -37,7 +33,7 @@ class MemTableFile {
 
     meta::TableFileSchema table_file_schema_;
 
-    MetaPtr meta_;
+    meta::MetaPtr meta_;
 
     Options options_;
 
@@ -46,6 +42,8 @@ class MemTableFile {
     ExecutionEnginePtr execution_engine_;
 
 }; //MemTableFile
+
+using MemTableFilePtr = std::shared_ptr<MemTableFile>;
 
 } // namespace engine
 } // namespace milvus

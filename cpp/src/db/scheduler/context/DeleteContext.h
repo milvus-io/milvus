@@ -16,16 +16,16 @@ namespace engine {
 
 class DeleteContext : public IScheduleContext {
 public:
-    DeleteContext(const std::string& table_id, meta::Meta::Ptr& meta_ptr, uint64_t num_resource);
+    DeleteContext(const std::string& table_id, meta::MetaPtr& meta_ptr, uint64_t num_resource);
 
     std::string table_id() const { return table_id_; }
-    meta::Meta::Ptr meta() const { return meta_ptr_; }
+    meta::MetaPtr meta() const { return meta_ptr_; }
     void WaitAndDelete();
     void ResourceDone();
 
 private:
     std::string table_id_;
-    meta::Meta::Ptr meta_ptr_;
+    meta::MetaPtr meta_ptr_;
 
     uint64_t num_resource_;
     uint64_t done_resource = 0;

@@ -99,7 +99,7 @@ TEST(DBSchedulerTest, DELETE_SCHEDULER_TEST) {
         task_list.push_back(task_ptr);
     }
 
-    engine::meta::Meta::Ptr meta_ptr;
+    engine::meta::MetaPtr meta_ptr;
     engine::DeleteContextPtr context_ptr = std::make_shared<engine::DeleteContext>(table_id, meta_ptr, 0);
     ret = engine::TaskDispatchStrategy::Schedule(context_ptr, task_list);
     ASSERT_TRUE(ret);

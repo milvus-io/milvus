@@ -56,12 +56,12 @@ resource_config:
     cpu:
       type: CPU
       device_id: 0
-      enable_executor: false
+      enable_executor: true
 
     gpu0:
       type: GPU
       device_id: 0
-      enable_executor: true
+      enable_executor: false
       gpu_resource_num: 2
       pinned_memory: 300
       temp_memory: 300

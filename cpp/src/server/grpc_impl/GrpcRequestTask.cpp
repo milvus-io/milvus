@@ -571,7 +571,11 @@ SearchTask::Create(const ::milvus::grpc::SearchParam *search_vector_infos,
 ErrorCode
 SearchTask::OnExecute() {
     try {
-        TimeRecorder rc("SearchTask");
+        int64_t top_k = search_param_->topk();
+        int64_t nprobe = search_param_->nprobe();
+
+        std::string hdr = "SearchTask(k=" + std::to_string(top_k) + ", nprob=" + std::to_string(nprobe) + ")";
+        TimeRecorder rc(hdr);
 
         //step 1: check table name
         std::string table_name_ = search_param_->table_name();
@@ -593,13 +597,11 @@ SearchTask::OnExecute() {
         }
 
         //step 3: check search parameter
-        int64_t top_k = search_param_->topk();
         res = ValidationUtil::ValidateSearchTopk(top_k, table_info);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid topk: " + std::to_string(top_k));
         }
 
-        int64_t nprobe = search_param_->nprobe();
         res = ValidationUtil::ValidateSearchNprobe(nprobe, table_info);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid nprobe: " + std::to_string(nprobe));

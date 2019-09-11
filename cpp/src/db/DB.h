@@ -11,6 +11,7 @@
 #include "Types.h"
 
 #include <string>
+#include <memory>
 
 namespace zilliz {
 namespace milvus {
@@ -60,6 +61,8 @@ public:
     virtual Status DropAll() = 0;
 
 }; // DB
+
+using DBPtr = std::shared_ptr<DB>;
 
 } // namespace engine
 } // namespace milvus

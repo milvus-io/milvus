@@ -7,7 +7,7 @@
 #include "db/DB.h"
 #include "db/DBImpl.h"
 #include "db/meta/MetaConsts.h"
-#include "db/Factories.h"
+#include "db/DBFactory.h"
 #include "cache/CpuCacheMgr.h"
 #include "utils/CommonUtil.h"
 
@@ -467,11 +467,6 @@ TEST_F(DBTest2, DELETE_TEST) {
 };
 
 TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
-    auto options = engine::OptionsFactory::Build();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = "sqlite://:@:/";
-    auto db_ = engine::DBFactory::Build(options);
-
     engine::meta::TableSchema table_info = BuildTableSchema();
     engine::Status stat = db_->CreateTable(table_info);
 
