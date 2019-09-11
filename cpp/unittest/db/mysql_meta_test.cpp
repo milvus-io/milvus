@@ -11,7 +11,6 @@
 
 #include "utils.h"
 #include "db/meta/MySQLMetaImpl.h"
-#include "db/Factories.h"
 #include "db/Utils.h"
 #include "db/meta/MetaConsts.h"
 

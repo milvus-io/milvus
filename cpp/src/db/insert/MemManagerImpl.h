@@ -18,11 +18,9 @@ namespace engine {
 
 class MemManagerImpl : public MemManager {
  public:
-    using MetaPtr = meta::Meta::Ptr;
     using Ptr = std::shared_ptr<MemManagerImpl>;
-    using MemTablePtr = typename MemTable::Ptr;
 
-    MemManagerImpl(const std::shared_ptr<meta::Meta> &meta, const Options &options)
+    MemManagerImpl(const meta::MetaPtr &meta, const Options &options)
         : meta_(meta), options_(options) {}
 
     Status InsertVectors(const std::string &table_id,
@@ -49,7 +47,7 @@ class MemManagerImpl : public MemManager {
     using MemList = std::vector<MemTablePtr>;
     MemIdMap mem_id_map_;
     MemList immu_mem_list_;
-    MetaPtr meta_;
+    meta::MetaPtr meta_;
     Options options_;
     std::mutex mutex_;
     std::mutex serialization_mtx_;

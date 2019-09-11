@@ -6,7 +6,7 @@
 
 #include "DBWrapper.h"
 #include "ServerConfig.h"
-#include "db/Factories.h"
+#include "db/DBFactory.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
@@ -96,8 +96,7 @@ ErrorCode DBWrapper::StartService() {
     //create db instance
     std::string msg = opt.meta.path;
     try {
-        engine::DB* db = engine::DBFactory::Build(opt);
-        db_.reset(db);
+        db_ = engine::DBFactory::Build(opt);
     } catch(std::exception& ex) {
         msg = ex.what();
     }

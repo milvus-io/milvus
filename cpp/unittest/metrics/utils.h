@@ -55,7 +55,7 @@ void ASSERT_STATS(zilliz::milvus::engine::Status& stat);
 
 class MetricTest : public ::testing::Test {
 protected:
-    zilliz::milvus::engine::DB* db_;
+    zilliz::milvus::engine::DBPtr db_;
 
     void InitLog();
     virtual void SetUp() override;

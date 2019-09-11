@@ -1,7 +1,10 @@
 #pragma once
 
-#include <set>
+#include "db/Status.h"
+#include "db/Types.h"
 
+#include <set>
+#include <memory>
 
 namespace zilliz {
 namespace milvus {
@@ -25,7 +28,7 @@ class MemManager {
 
 }; // MemManagerAbstract
 
-using MemManagerAbstractPtr = std::shared_ptr<MemManager>;
+using MemManagerPtr = std::shared_ptr<MemManager>;
 
 } // namespace engine
 } // namespace milvus
