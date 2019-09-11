@@ -227,9 +227,25 @@ TEST_F(RpcHandlerTest, SearchTest) {
 
     //test search with range
     ::milvus::grpc::Range *range = request.mutable_query_range_array()->Add();
+    range->set_start_value(CurrentTmDate(-2));
+    range->set_end_value(CurrentTmDate(-3));
 
     std::vector<std::vector<float>> record_array;
-    BuildVectors(0, VECTOR_COUNT, record_array);
+
+    ::milvus::grpc::InsertParam insert_param;
+    for (auto &record : record_array) {
+        ::milvus::grpc::RowRecord *grpc_record = insert_param.add_row_record_array();
+        for (size_t i = 0; i < record.size(); i++) {
+            grpc_record->add_vector_data(record[i]);
+        }
+    }
+    //insert vectors
+    insert_param.set_table_name(TABLE_NAME);
+    ::milvus::grpc::VectorIds vector_ids;
+    handler->Insert(&context, &insert_param, &vector_ids);
+
+    record_array.clear();
+    BuildVectors(0, 10, record_array);
     for (auto &record : record_array) {
         ::milvus::grpc::RowRecord *row_record = request.add_query_record_array();
         for (auto &rec : record) {
@@ -241,10 +257,15 @@ TEST_F(RpcHandlerTest, SearchTest) {
     request.set_table_name(TABLE_NAME);
 
     handler->Search(&context, &request, &response);
+    request.mutable_query_range_array()->Clear();
+    handler->Search(&context, &request, &response);
+
     ::milvus::grpc::SearchInFilesParam search_in_files_param;
     std::string *file_id = search_in_files_param.add_file_id_array();
     *file_id = "test_tbl";
     handler->SearchInFiles(&context, &search_in_files_param, &response);
+    delete file_id;
+    delete range;
 }
 
 TEST_F(RpcHandlerTest, TablesTest) {
