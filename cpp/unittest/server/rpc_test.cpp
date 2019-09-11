@@ -231,7 +231,7 @@ TEST_F(RpcHandlerTest, SearchTest) {
     range->set_end_value(CurrentTmDate(-3));
 
     std::vector<std::vector<float>> record_array;
-
+    BuildVectors(0, VECTOR_COUNT, record_array);
     ::milvus::grpc::InsertParam insert_param;
     for (auto &record : record_array) {
         ::milvus::grpc::RowRecord *grpc_record = insert_param.add_row_record_array();
