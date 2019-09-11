@@ -16,6 +16,7 @@ inline std::string GetFileName(std::string filename) {
     int pos = filename.find_last_of('/');
     return filename.substr(pos + 1);
 }
+void RolloutHandler(const char *filename, std::size_t size);
 
 #define SHOW_LOCATION
 #ifdef SHOW_LOCATION
