@@ -24,7 +24,7 @@
 using namespace zilliz::milvus;
 
 
-TEST_F(MetricTest, Metric_Tes) {
+TEST_F(MetricTest, METRIC_TEST) {
     server::ConfigNode &configNode = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_METRIC);
     configNode.SetValue(server::CONFIG_METRIC_COLLECTOR, "zabbix");
     server::Metrics::GetInstance();
@@ -122,7 +122,7 @@ TEST_F(MetricTest, Metric_Tes) {
     delete [] qxb;
 };
 
-TEST_F(MetricTest, Collector_Metrics_Test){
+TEST_F(MetricTest, COLLECTOR_METRICS_TEST){
     engine::Status status = engine::Status::OK();
     server::CollectInsertMetrics insert_metrics0(0, status);
     status = engine::Status(DB_ERROR, "error");

@@ -113,18 +113,6 @@ ServerConfig::CheckServerConfig() {
         }
     }
 
-    std::string gpu_index_str = server_config.GetValue(CONFIG_GPU_INDEX, "0");
-    if (ValidationUtil::ValidateStringIsNumber(gpu_index_str) != SERVER_SUCCESS) {
-        std::cerr << "ERROR: gpu_index " << gpu_index_str << " is not a number" << std::endl;
-        okay = false;
-    } else {
-        int32_t gpu_index = std::stol(gpu_index_str);
-        if (ValidationUtil::ValidateGpuIndex(gpu_index) != SERVER_SUCCESS) {
-            std::cerr << "ERROR: invalid gpu_index " << gpu_index_str << std::endl;
-            okay = false;
-        }
-    }
-
     std::string mode = server_config.GetValue(CONFIG_CLUSTER_MODE, "single");
     if (mode != "single" && mode != "cluster" && mode != "read_only") {
         std::cerr << "ERROR: mode " << mode << " is not one of ['single', 'cluster', 'read_only']" << std::endl;
@@ -210,6 +198,18 @@ ServerConfig::CheckDBConfig() {
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (insert_buffer_size >= total_mem) {
             std::cerr << "ERROR: insert_buffer_size exceed system memory" << std::endl;
+            okay = false;
+        }
+    }
+
+    std::string gpu_index_str = db_config.GetValue(CONFIG_DB_BUILD_INDEX_GPU, "0");
+    if (ValidationUtil::ValidateStringIsNumber(gpu_index_str) != SERVER_SUCCESS) {
+        std::cerr << "ERROR: gpu_index " << gpu_index_str << " is not a number" << std::endl;
+        okay = false;
+    } else {
+        int32_t gpu_index = std::stol(gpu_index_str);
+        if (ValidationUtil::ValidateGpuIndex(gpu_index) != SERVER_SUCCESS) {
+            std::cerr << "ERROR: invalid gpu_index " << gpu_index_str << std::endl;
             okay = false;
         }
     }
@@ -313,7 +313,7 @@ ServerConfig::CheckCacheConfig() {
     else {
         uint64_t gpu_cache_capacity = (uint64_t) std::stol(gpu_cache_capacity_str);
         gpu_cache_capacity *= GB;
-        int gpu_index = GetConfig(CONFIG_SERVER).GetInt32Value(CONFIG_GPU_INDEX, 0);
+        int gpu_index = GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_BUILD_INDEX_GPU, 0);
         size_t gpu_memory;
         if (ValidationUtil::GetGpuMemory(gpu_index, gpu_memory) != SERVER_SUCCESS) {
             std::cerr << "ERROR: could not get gpu memory for device " << gpu_index << std::endl;
@@ -338,19 +338,6 @@ ServerConfig::CheckCacheConfig() {
     else if (gpu_cache_free_percent < std::numeric_limits<double>::epsilon() || gpu_cache_free_percent > 1.0) {
         std::cerr << "ERROR: invalid gpu_cache_free_percent " << gpu_cache_free_percent << std::endl;
         okay = false;
-    }
-
-    auto conf_gpu_ids = cache_config.GetSequence(server::CONFIG_GPU_IDS);
-
-    for (std::string &gpu_id : conf_gpu_ids) {
-        if (ValidationUtil::ValidateStringIsNumber(gpu_id) != SERVER_SUCCESS) {
-            std::cerr << "ERROR: gpu_id " << gpu_id << " is not a number" << std::endl;
-            okay = false;
-        }
-        else if (ValidationUtil::ValidateGpuIndex(std::stol(gpu_id)) != SERVER_SUCCESS) {
-            std::cerr << "ERROR: gpu_id " << gpu_id << " is invalid" << std::endl;
-            okay = false;
-        }
     }
 
     return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
@@ -483,7 +470,7 @@ ServerConfig::CheckResourceConfig() {
             }
         }
         else if (type == "GPU") {
-            int build_index_gpu_index = GetConfig(CONFIG_SERVER).GetInt32Value(CONFIG_GPU_INDEX, 0);
+            int build_index_gpu_index = GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_BUILD_INDEX_GPU, 0);
             if (device_id == build_index_gpu_index) {
                 resource_valid_flag = true;
             }

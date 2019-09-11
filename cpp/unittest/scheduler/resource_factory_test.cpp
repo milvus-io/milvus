@@ -4,7 +4,7 @@
 
 using namespace zilliz::milvus::engine;
 
-TEST(resource_factory_test, create) {
+TEST(ResourceFactoryTest, CREATE) {
     auto disk = ResourceFactory::Create("ssd", "DISK", 0);
     auto cpu = ResourceFactory::Create("cpu", "CPU", 0);
     auto gpu = ResourceFactory::Create("gpu", "GPU", 0);
