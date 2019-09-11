@@ -142,7 +142,7 @@ INSTANTIATE_TEST_CASE_P(WrapperParam, KnowhereWrapperTest,
                         )
 );
 
-TEST_P(KnowhereWrapperTest, base_test) {
+TEST_P(KnowhereWrapperTest, BASE_TEST) {
     EXPECT_EQ(index_->GetType(), index_type);
 
     auto elems = nq * k;
@@ -154,7 +154,7 @@ TEST_P(KnowhereWrapperTest, base_test) {
     AssertResult(res_ids, res_dis);
 }
 
-TEST_P(KnowhereWrapperTest, to_gpu_test) {
+TEST_P(KnowhereWrapperTest, TO_GPU_TEST) {
     EXPECT_EQ(index_->GetType(), index_type);
 
     auto elems = nq * k;
@@ -174,7 +174,7 @@ TEST_P(KnowhereWrapperTest, to_gpu_test) {
     }
 
     {
-        std::string file_location = "/tmp/test_gpu_file";
+        std::string file_location = "/tmp/knowhere_gpu_file";
         write_index(index_, file_location);
         auto new_index = read_index(file_location);
 
@@ -186,11 +186,11 @@ TEST_P(KnowhereWrapperTest, to_gpu_test) {
     }
 }
 
-TEST_P(KnowhereWrapperTest, to_cpu_test) {
+TEST_P(KnowhereWrapperTest, TO_CPU_TEST) {
     // dev
 }
 
-TEST_P(KnowhereWrapperTest, serialize) {
+TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
     EXPECT_EQ(index_->GetType(), index_type);
 
     auto elems = nq * k;
@@ -215,7 +215,7 @@ TEST_P(KnowhereWrapperTest, serialize) {
     }
 
     {
-        std::string file_location = "/tmp/whatever";
+        std::string file_location = "/tmp/knowhere";
         write_index(index_, file_location);
         auto new_index = read_index(file_location);
         EXPECT_EQ(new_index->GetType(), ConvertToCpuIndexType(index_type));
