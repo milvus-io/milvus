@@ -25,19 +25,19 @@ public:
         return wrapper;
     }
 
-    static std::shared_ptr<engine::DB> DB() {
+    static engine::DBPtr DB() {
         return GetInstance().EngineDB();
     }
 
     ErrorCode StartService();
     ErrorCode StopService();
 
-    std::shared_ptr<engine::DB> EngineDB() {
+    engine::DBPtr EngineDB() {
         return db_;
     }
 
 private:
-    std::shared_ptr<engine::DB> db_;
+    engine::DBPtr db_;
 };
 
 }
