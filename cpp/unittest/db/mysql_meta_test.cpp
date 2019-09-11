@@ -351,7 +351,7 @@ TEST_F(MySqlMetaTest, TABLE_FILES_TEST) {
     status = impl_->DeleteTable(table_id);
     ASSERT_TRUE(status.ok());
 
-    status = impl_->CleanUpFilesWithTTL(1UL);
+    status = impl_->CleanUpFilesWithTTL(0UL);
     ASSERT_TRUE(status.ok());
 }
 

@@ -161,7 +161,17 @@ TEST(UtilTest, LOG_TEST) {
     ASSERT_EQ(fname, "log_config.conf");
 }
 
-TEST(UtilTest, VALIDATE_TABLENAME_TEST) {
+TEST(UtilTest, TIMERECORDER_TEST) {
+    for(int64_t log_level = 0; log_level <= 6; log_level++) {
+        if(log_level == 5) {
+            continue; //skip fatal
+        }
+        server::TimeRecorder rc("time", log_level);
+        rc.RecordSection("end");
+    }
+}
+
+TEST(ValidationUtilTest, VALIDATE_TABLENAME_TEST) {
     std::string table_name = "Normal123_";
     ErrorCode res = server::ValidationUtil::ValidateTableName(table_name);
     ASSERT_EQ(res, SERVER_SUCCESS);
@@ -195,7 +205,7 @@ TEST(UtilTest, VALIDATE_TABLENAME_TEST) {
     ASSERT_EQ(res, SERVER_INVALID_TABLE_NAME);
 }
 
-TEST(UtilTest, VALIDATE_DIMENSIONTEST) {
+TEST(ValidationUtilTest, VALIDATE_DIMENSION_TEST) {
     ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(-1), SERVER_INVALID_VECTOR_DIMENSION);
     ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(0), SERVER_INVALID_VECTOR_DIMENSION);
     ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(16385), SERVER_INVALID_VECTOR_DIMENSION);
@@ -203,7 +213,7 @@ TEST(UtilTest, VALIDATE_DIMENSIONTEST) {
     ASSERT_EQ(server::ValidationUtil::ValidateTableDimension(1), SERVER_SUCCESS);
 }
 
-TEST(UtilTest, VALIDATE_INDEX_TEST) {
+TEST(ValidationUtilTest, VALIDATE_INDEX_TEST) {
     ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType((int)engine::EngineType::INVALID), SERVER_INVALID_INDEX_TYPE);
     for(int i = 1; i <= (int)engine::EngineType::MAX_VALUE; i++) {
         ASSERT_EQ(server::ValidationUtil::ValidateTableIndexType(i), SERVER_SUCCESS);
@@ -221,14 +231,14 @@ TEST(UtilTest, VALIDATE_INDEX_TEST) {
     ASSERT_EQ(server::ValidationUtil::ValidateTableIndexMetricType(2), SERVER_SUCCESS);
 }
 
-TEST(ValidationUtilTest, ValidateTopkTest) {
+TEST(ValidationUtilTest, VALIDATE_TOPK_TEST) {
     engine::meta::TableSchema schema;
     ASSERT_EQ(server::ValidationUtil::ValidateSearchTopk(10, schema), SERVER_SUCCESS);
     ASSERT_NE(server::ValidationUtil::ValidateSearchTopk(65536, schema), SERVER_SUCCESS);
     ASSERT_NE(server::ValidationUtil::ValidateSearchTopk(0, schema), SERVER_SUCCESS);
 }
 
-TEST(ValidationUtilTest, ValidateNprobeTest) {
+TEST(ValidationUtilTest, VALIDATE_NPROBE_TEST) {
     engine::meta::TableSchema schema;
     schema.nlist_ = 100;
     ASSERT_EQ(server::ValidationUtil::ValidateSearchNprobe(10, schema), SERVER_SUCCESS);
@@ -236,7 +246,7 @@ TEST(ValidationUtilTest, ValidateNprobeTest) {
     ASSERT_NE(server::ValidationUtil::ValidateSearchNprobe(101, schema), SERVER_SUCCESS);
 }
 
-TEST(ValidationUtilTest, ValidateGpuTest) {
+TEST(ValidationUtilTest, VALIDATE_GPU_TEST) {
     ASSERT_EQ(server::ValidationUtil::ValidateGpuIndex(0), SERVER_SUCCESS);
     ASSERT_NE(server::ValidationUtil::ValidateGpuIndex(100), SERVER_SUCCESS);
 
@@ -245,14 +255,35 @@ TEST(ValidationUtilTest, ValidateGpuTest) {
     ASSERT_NE(server::ValidationUtil::GetGpuMemory(100, memory), SERVER_SUCCESS);
 }
 
-TEST(UtilTest, TIMERECORDER_TEST) {
-    for(int64_t log_level = 0; log_level <= 6; log_level++) {
-        if(log_level == 5) {
-            continue; //skip fatal
-        }
-        server::TimeRecorder rc("time", log_level);
-        rc.RecordSection("end");
-    }
+TEST(ValidationUtilTest, VALIDATE_IPADDRESS_TEST) {
+    ASSERT_EQ(server::ValidationUtil::ValidateIpAddress("127.0.0.1"), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateIpAddress("not ip"), SERVER_SUCCESS);
+}
+
+TEST(ValidationUtilTest, VALIDATE_NUMBER_TEST) {
+    ASSERT_EQ(server::ValidationUtil::ValidateStringIsNumber("1234"), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateStringIsNumber("not number"), SERVER_SUCCESS);
+}
+
+TEST(ValidationUtilTest, VALIDATE_BOOL_TEST) {
+    std::string str = "true";
+    ASSERT_EQ(server::ValidationUtil::ValidateStringIsBool(str), SERVER_SUCCESS);
+    str = "not bool";
+    ASSERT_NE(server::ValidationUtil::ValidateStringIsBool(str), SERVER_SUCCESS);
+}
+
+TEST(ValidationUtilTest, VALIDATE_DOUBLE_TEST) {
+    double ret = 0.0;
+    ASSERT_EQ(server::ValidationUtil::ValidateStringIsDouble("2.5", ret), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateStringIsDouble("not double", ret), SERVER_SUCCESS);
+}
+
+TEST(ValidationUtilTest, VALIDATE_DBURI_TEST) {
+    ASSERT_EQ(server::ValidationUtil::ValidateDbURI("sqlite://:@:/"), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateDbURI("xxx://:@:/"), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateDbURI("not uri"), SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateDbURI("mysql://root:123456@127.0.0.1:3303/milvus"), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateDbURI("mysql://root:123456@127.0.0.1:port/milvus"), SERVER_SUCCESS);
 }
 
 TEST(UtilTest, ROLLOUTHANDLER_TEST){
