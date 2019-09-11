@@ -164,7 +164,7 @@ void DoSearch(std::shared_ptr<Connection> conn,
               const std::string& phase_name) {
     std::vector<Range> query_range_array;
     Range rg;
-    rg.start_value = CurrentTmDate(1);
+    rg.start_value = CurrentTmDate();
     rg.end_value = CurrentTmDate(1);
     query_range_array.emplace_back(rg);
 
