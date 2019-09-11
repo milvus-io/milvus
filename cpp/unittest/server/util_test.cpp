@@ -6,6 +6,9 @@
 #include <gtest/gtest.h>
 #include <thread>
 #include <easylogging++.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <boost/filesystem.hpp>
 
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
@@ -281,4 +284,31 @@ TEST(ValidationUtilTest, VALIDATE_DBURI_TEST) {
     ASSERT_NE(server::ValidationUtil::ValidateDbURI("not uri"), SERVER_SUCCESS);
     ASSERT_EQ(server::ValidationUtil::ValidateDbURI("mysql://root:123456@127.0.0.1:3303/milvus"), SERVER_SUCCESS);
     ASSERT_NE(server::ValidationUtil::ValidateDbURI("mysql://root:123456@127.0.0.1:port/milvus"), SERVER_SUCCESS);
+}
+
+TEST(UtilTest, ROLLOUTHANDLER_TEST){
+    std::string dir1 = "/tmp/milvus_test";
+    std::string dir2 = "/tmp/milvus_test/log_test";
+    std::string filename[6] = {"log_global.log", "log_debug.log", "log_warning.log", "log_trace.log", "log_error.log", "log_fatal.log"};
+
+    mkdir(dir1.c_str(), S_IRWXU);
+    mkdir(dir2.c_str(), S_IRWXU);
+    for (int i = 0; i < 6; ++i) {
+        std::string tmp = dir2 + "/" + filename[i];
+
+        std::ofstream file;
+        file.open(tmp.c_str());
+        file << "zilliz" << std::endl;
+
+        server::RolloutHandler(tmp.c_str(), 0);
+
+        tmp.append(".1");
+        std::ifstream file2;
+        file2.open(tmp);
+
+        std::string tmp2;
+        file2 >> tmp2;
+        ASSERT_EQ(tmp2, "zilliz");
+    }
+    boost::filesystem::remove_all(dir2);
 }
