@@ -44,19 +44,19 @@ protected:
     ResourcePtr gpu_res;
 };
 
-TEST_F(ResourceMgrBaseTest, add) {
+TEST_F(ResourceMgrBaseTest, ADD) {
     auto resource = std::make_shared<TestResource>("test", 0, true, true);
     auto ret = empty_mgr_->Add(ResourcePtr(resource));
     ASSERT_EQ(ret.lock(), resource);
 }
 
-TEST_F(ResourceMgrBaseTest, add_disk) {
+TEST_F(ResourceMgrBaseTest, ADD_DISK) {
     auto resource = std::make_shared<DiskResource>("disk", 0, true, true);
     auto ret = empty_mgr_->Add(ResourcePtr(resource));
     ASSERT_EQ(ret.lock(), resource);
 }
 
-TEST_F(ResourceMgrBaseTest, connect) {
+TEST_F(ResourceMgrBaseTest, CONNECT) {
     auto resource1 = std::make_shared<TestResource>("resource1", 0, true, true);
     auto resource2 = std::make_shared<TestResource>("resource2", 2, true, true);
     empty_mgr_->Add(resource1);
@@ -66,7 +66,7 @@ TEST_F(ResourceMgrBaseTest, connect) {
 }
 
 
-TEST_F(ResourceMgrBaseTest, invalid_connect) {
+TEST_F(ResourceMgrBaseTest, INVALID_CONNECT) {
     auto resource1 = std::make_shared<TestResource>("resource1", 0, true, true);
     auto resource2 = std::make_shared<TestResource>("resource2", 2, true, true);
     empty_mgr_->Add(resource1);
@@ -76,19 +76,19 @@ TEST_F(ResourceMgrBaseTest, invalid_connect) {
 }
 
 
-TEST_F(ResourceMgrBaseTest, clear) {
+TEST_F(ResourceMgrBaseTest, CLEAR) {
     ASSERT_EQ(mgr1_->GetNumOfResource(), 3);
     mgr1_->Clear();
     ASSERT_EQ(mgr1_->GetNumOfResource(), 0);
 }
 
-TEST_F(ResourceMgrBaseTest, get_disk_resources) {
+TEST_F(ResourceMgrBaseTest, GET_DISK_RESOURCES) {
     auto disks = mgr1_->GetDiskResources();
     ASSERT_EQ(disks.size(), 1);
     ASSERT_EQ(disks[0].lock(), disk_res);
 }
 
-TEST_F(ResourceMgrBaseTest, get_all_resources) {
+TEST_F(ResourceMgrBaseTest, GET_ALL_RESOURCES) {
     bool disk = false, cpu = false, gpu = false;
     auto resources = mgr1_->GetAllResources();
     ASSERT_EQ(resources.size(), 3);
@@ -103,13 +103,13 @@ TEST_F(ResourceMgrBaseTest, get_all_resources) {
     ASSERT_TRUE(gpu);
 }
 
-TEST_F(ResourceMgrBaseTest, get_compute_resources) {
+TEST_F(ResourceMgrBaseTest, GET_COMPUTE_RESOURCES) {
     auto compute_resources = mgr1_->GetComputeResources();
     ASSERT_EQ(compute_resources.size(), 1);
     ASSERT_EQ(compute_resources[0], gpu_res);
 }
 
-TEST_F(ResourceMgrBaseTest, get_resource_by_type_and_deviceid) {
+TEST_F(ResourceMgrBaseTest, GET_RESOURCE_BY_TYPE_AND_DEVICEID) {
     auto cpu = mgr1_->GetResource(ResourceType::CPU, 1);
     ASSERT_EQ(cpu, cpu_res);
 
@@ -117,7 +117,7 @@ TEST_F(ResourceMgrBaseTest, get_resource_by_type_and_deviceid) {
     ASSERT_EQ(invalid, nullptr);
 }
 
-TEST_F(ResourceMgrBaseTest, get_resource_by_name) {
+TEST_F(ResourceMgrBaseTest, GET_RESOURCE_BY_NAME) {
     auto disk = mgr1_->GetResource("disk");
     ASSERT_EQ(disk, disk_res);
 
@@ -125,26 +125,26 @@ TEST_F(ResourceMgrBaseTest, get_resource_by_name) {
     ASSERT_EQ(invalid, nullptr);
 }
 
-TEST_F(ResourceMgrBaseTest, get_num_of_resource) {
+TEST_F(ResourceMgrBaseTest, GET_NUM_OF_RESOURCE) {
     ASSERT_EQ(empty_mgr_->GetNumOfResource(), 0);
     ASSERT_EQ(mgr1_->GetNumOfResource(), 3);
 }
 
-TEST_F(ResourceMgrBaseTest, get_num_of_compute_resource) {
+TEST_F(ResourceMgrBaseTest, GET_NUM_OF_COMPUTE_RESOURCE) {
     ASSERT_EQ(empty_mgr_->GetNumOfComputeResource(), 0);
     ASSERT_EQ(mgr1_->GetNumOfComputeResource(), 1);
 }
 
-TEST_F(ResourceMgrBaseTest, get_num_of_gpu_resource) {
+TEST_F(ResourceMgrBaseTest, GET_NUM_OF_GPU_RESOURCE) {
     ASSERT_EQ(empty_mgr_->GetNumGpuResource(), 0);
     ASSERT_EQ(mgr1_->GetNumGpuResource(), 1);
 }
 
-TEST_F(ResourceMgrBaseTest, dump) {
+TEST_F(ResourceMgrBaseTest, DUMP) {
     ASSERT_FALSE(mgr1_->Dump().empty());
 }
 
-TEST_F(ResourceMgrBaseTest, dump_tasktables) {
+TEST_F(ResourceMgrBaseTest, DUMP_TASKTABLES) {
     ASSERT_FALSE(mgr1_->DumpTaskTables().empty());
 }
 
@@ -169,7 +169,7 @@ class ResourceMgrAdvanceTest : public testing::Test {
     ResourcePtr disk_res;
 };
 
-TEST_F(ResourceMgrAdvanceTest, register_subscriber) {
+TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
     bool flag = false;
     auto callback = [&](EventPtr event) {
         flag = true;

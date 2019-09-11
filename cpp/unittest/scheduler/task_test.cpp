@@ -13,7 +13,7 @@ namespace milvus {
 namespace engine {
 
 
-TEST(TaskTest, invalid_index) {
+TEST(TaskTest, INVALID_INDEX) {
     auto search_task = std::make_shared<XSearchTask>(nullptr);
     search_task->Load(LoadType::TEST, 10);
 }
