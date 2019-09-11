@@ -46,42 +46,42 @@ protected:
     ResourcePtr both_disable_ = nullptr;
 };
 
-TEST_F(ResourceBaseTest, name) {
+TEST_F(ResourceBaseTest, NAME) {
     ASSERT_EQ(only_loader_->name(), name1);
     ASSERT_EQ(only_executor_->name(), name2);
     ASSERT_EQ(both_enable_->name(), name3);
     ASSERT_EQ(both_disable_->name(), name4);
 }
 
-TEST_F(ResourceBaseTest, type) {
+TEST_F(ResourceBaseTest, TYPE) {
     ASSERT_EQ(only_loader_->type(), ResourceType::DISK);
     ASSERT_EQ(only_executor_->type(), ResourceType::CPU);
     ASSERT_EQ(both_enable_->type(), ResourceType::GPU);
     ASSERT_EQ(both_disable_->type(), ResourceType::TEST);
 }
 
-TEST_F(ResourceBaseTest, device_id) {
+TEST_F(ResourceBaseTest, DEVICE_ID) {
     ASSERT_EQ(only_loader_->device_id(), id1);
     ASSERT_EQ(only_executor_->device_id(), id2);
     ASSERT_EQ(both_enable_->device_id(), id3);
     ASSERT_EQ(both_disable_->device_id(), id4);
 }
 
-TEST_F(ResourceBaseTest, has_loader) {
+TEST_F(ResourceBaseTest, HAS_LOADER) {
     ASSERT_TRUE(only_loader_->HasLoader());
     ASSERT_FALSE(only_executor_->HasLoader());
     ASSERT_TRUE(both_enable_->HasLoader());
     ASSERT_FALSE(both_disable_->HasLoader());
 }
 
-TEST_F(ResourceBaseTest, has_executor) {
+TEST_F(ResourceBaseTest, HAS_EXECUTOR) {
     ASSERT_FALSE(only_loader_->HasExecutor());
     ASSERT_TRUE(only_executor_->HasExecutor());
     ASSERT_TRUE(both_enable_->HasExecutor());
     ASSERT_FALSE(both_disable_->HasExecutor());
 }
 
-TEST_F(ResourceBaseTest, dump) {
+TEST_F(ResourceBaseTest, DUMP) {
     ASSERT_FALSE(only_loader_->Dump().empty());
     ASSERT_FALSE(only_executor_->Dump().empty());
     ASSERT_FALSE(both_enable_->Dump().empty());
@@ -165,7 +165,7 @@ protected:
     std::condition_variable cv_;
 };
 
-TEST_F(ResourceAdvanceTest, disk_resource_test) {
+TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
     const uint64_t NUM = 100;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
@@ -190,7 +190,7 @@ TEST_F(ResourceAdvanceTest, disk_resource_test) {
     }
 }
 
-TEST_F(ResourceAdvanceTest, cpu_resource_test) {
+TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
     const uint64_t NUM = 100;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
@@ -215,7 +215,7 @@ TEST_F(ResourceAdvanceTest, cpu_resource_test) {
     }
 }
 
-TEST_F(ResourceAdvanceTest, gpu_resource_test) {
+TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
     const uint64_t NUM = 100;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
@@ -240,7 +240,7 @@ TEST_F(ResourceAdvanceTest, gpu_resource_test) {
     }
 }
 
-TEST_F(ResourceAdvanceTest, test_resource_test) {
+TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     const uint64_t NUM = 100;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;

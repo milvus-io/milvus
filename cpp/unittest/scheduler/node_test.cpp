@@ -28,7 +28,7 @@ protected:
     NodePtr isolated_node2_;
 };
 
-TEST_F(NodeTest, add_neighbour) {
+TEST_F(NodeTest, ADD_NEIGHBOUR) {
     ASSERT_EQ(isolated_node1_->GetNeighbours().size(), 0);
     ASSERT_EQ(isolated_node2_->GetNeighbours().size(), 0);
     auto pcie = Connection("PCIe", 11.0);
@@ -37,7 +37,7 @@ TEST_F(NodeTest, add_neighbour) {
     ASSERT_EQ(isolated_node2_->GetNeighbours().size(), 0);
 }
 
-TEST_F(NodeTest, repeat_add_neighbour) {
+TEST_F(NodeTest, REPEAT_ADD_NEIGHBOUR) {
     ASSERT_EQ(isolated_node1_->GetNeighbours().size(), 0);
     ASSERT_EQ(isolated_node2_->GetNeighbours().size(), 0);
     auto pcie = Connection("PCIe", 11.0);
@@ -47,7 +47,7 @@ TEST_F(NodeTest, repeat_add_neighbour) {
     ASSERT_EQ(isolated_node2_->GetNeighbours().size(), 0);
 }
 
-TEST_F(NodeTest, get_neighbours) {
+TEST_F(NodeTest, GET_NEIGHBOURS) {
     {
         bool n2 = false, n3 = false;
         auto node1_neighbours = node1_->GetNeighbours();
@@ -72,7 +72,7 @@ TEST_F(NodeTest, get_neighbours) {
     }
 }
 
-TEST_F(NodeTest, dump) {
+TEST_F(NodeTest, DUMP) {
     std::cout << node1_->Dump();
     ASSERT_FALSE(node1_->Dump().empty());
 

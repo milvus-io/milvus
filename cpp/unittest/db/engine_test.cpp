@@ -105,9 +105,6 @@ TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     ASSERT_EQ(engine_ptr->Dimension(), dimension);
     ASSERT_EQ(engine_ptr->Count(), ids.size());
 
-//    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-//    config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
-//
 //    status = engine_ptr->CopyToGpu(0);
 //    //ASSERT_TRUE(status.ok());
 //

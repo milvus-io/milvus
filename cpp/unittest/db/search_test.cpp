@@ -288,7 +288,7 @@ TEST(DBSearchTest, PARALLEL_TOPK_TEST) {
 
     DoTopk(5, 10, 4, false);
     DoTopk(20005, 998, 123, true);
-    DoTopk(9987, 12, 10, false);
-    DoTopk(77777, 1000, 1, false);
-    DoTopk(5432, 8899, 8899, true);
+//    DoTopk(9987, 12, 10, false);
+//    DoTopk(77777, 1000, 1, false);
+//    DoTopk(5432, 8899, 8899, true);
 }

@@ -17,36 +17,14 @@ std::mutex GpuCacheMgr::mutex_;
 std::unordered_map<uint64_t, GpuCacheMgrPtr> GpuCacheMgr::instance_;
 
 namespace {
-    constexpr int64_t unit = 1024 * 1024 * 1024;
-
-    std::vector<uint64_t> load() {
-        server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-        auto conf_gpu_ids = config.GetSequence(server::CONFIG_GPU_IDS);
-
-        std::vector<uint64_t > gpu_ids;
-
-        for (auto gpu_id : conf_gpu_ids) {
-            gpu_ids.push_back(std::atoi(gpu_id.c_str()));
-        }
-
-        return gpu_ids;
-    }
-}
-
-
-bool GpuCacheMgr::GpuIdInConfig(uint64_t gpu_id) {
-    static std::vector<uint64_t > ids = load();
-    for (auto id : ids) {
-        if (gpu_id == id) return true;
-    }
-    return false;
+    constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
 }
 
 GpuCacheMgr::GpuCacheMgr() {
     server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
 
     int64_t cap = config.GetInt64Value(server::CONFIG_GPU_CACHE_CAPACITY, 2);
-    cap *= unit;
+    cap *= G_BYTE;
     cache_ = std::make_shared<Cache>(cap, 1UL<<32);
 
     double free_percent = config.GetDoubleValue(server::GPU_CACHE_FREE_PERCENT, 0.85);
@@ -55,6 +33,19 @@ GpuCacheMgr::GpuCacheMgr() {
     } else {
         SERVER_LOG_ERROR << "Invalid gpu_cache_free_percent: " << free_percent <<
                          ", defaultly set to " << cache_->freemem_percent();
+    }
+}
+
+CacheMgr* GpuCacheMgr::GetInstance(uint64_t gpu_id) {
+    if (instance_.find(gpu_id) == instance_.end()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (instance_.find(gpu_id) == instance_.end()) {
+            instance_.insert(std::pair<uint64_t, GpuCacheMgrPtr>(gpu_id, std::make_shared<GpuCacheMgr>()));
+        }
+        return instance_[gpu_id].get();
+    } else {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return instance_[gpu_id].get();
     }
 }
 
