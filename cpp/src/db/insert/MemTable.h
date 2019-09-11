@@ -12,18 +12,14 @@ namespace milvus {
 namespace engine {
 
 class MemTable {
-
  public:
+    using MemTableFileList = std::vector<MemTableFilePtr>;
 
-    using Ptr = std::shared_ptr<MemTable>;
-    using MemTableFileList = std::vector<MemTableFile::Ptr>;
-    using MetaPtr = meta::Meta::Ptr;
+    MemTable(const std::string &table_id, const meta::MetaPtr &meta, const Options &options);
 
-    MemTable(const std::string &table_id, const std::shared_ptr<meta::Meta> &meta, const Options &options);
+    Status Add(VectorSourcePtr &source, IDNumbers &vector_ids);
 
-    Status Add(VectorSource::Ptr &source, IDNumbers &vector_ids);
-
-    void GetCurrentMemTableFile(MemTableFile::Ptr &mem_table_file);
+    void GetCurrentMemTableFile(MemTableFilePtr &mem_table_file);
 
     size_t GetTableFileCount();
 
@@ -40,13 +36,15 @@ class MemTable {
 
     MemTableFileList mem_table_file_list_;
 
-    MetaPtr meta_;
+    meta::MetaPtr meta_;
 
     Options options_;
 
     std::mutex mutex_;
 
 }; //MemTable
+
+using MemTablePtr = std::shared_ptr<MemTable>;
 
 } // namespace engine
 } // namespace milvus

@@ -5,12 +5,11 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <iostream>
-#include <easylogging++.h>
 #include <thread>
 #include <boost/filesystem.hpp>
 
 #include "utils.h"
-#include "db/Factories.h"
+#include "db/DBFactory.h"
 #include "db/Options.h"
 #include "server/ServerConfig.h"
 #include "knowhere/index/vector_index/gpu_ivf.h"
@@ -56,7 +55,7 @@ void BaseTest::TearDown() {
 }
 
 engine::Options BaseTest::GetOptions() {
-    auto options = engine::OptionsFactory::Build();
+    auto options = engine::DBFactory::BuildOption();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = "sqlite://:@:/";
     return options;
@@ -86,7 +85,6 @@ void DBTest::SetUp() {
 void DBTest::TearDown() {
     db_->Stop();
     db_->DropAll();
-    delete db_;
 
     BaseTest::TearDown();
 
@@ -99,7 +97,7 @@ void DBTest::TearDown() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 engine::Options DBTest2::GetOptions() {
-    auto options = engine::OptionsFactory::Build();
+    auto options = engine::DBFactory::BuildOption();
     options.meta.path = "/tmp/milvus_test";
     options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
     options.meta.backend_uri = "sqlite://:@:/";
@@ -125,7 +123,7 @@ void MetaTest::TearDown() {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 engine::Options MySqlDBTest::GetOptions() {
-    auto options = engine::OptionsFactory::Build();
+    auto options = engine::DBFactory::BuildOption();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = DBTestEnvironment::getURI();
 
@@ -154,7 +152,7 @@ void MySqlMetaTest::TearDown() {
 }
 
 zilliz::milvus::engine::Options MySqlMetaTest::GetOptions() {
-    auto options = engine::OptionsFactory::Build();
+    auto options = engine::DBFactory::BuildOption();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = DBTestEnvironment::getURI();
 

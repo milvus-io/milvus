@@ -3,7 +3,6 @@
 #include "db/insert/VectorSource.h"
 #include "db/insert/MemTableFile.h"
 #include "db/insert/MemTable.h"
-#include "db/Factories.h"
 #include "db/Constants.h"
 #include "db/engine/EngineFactory.h"
 #include "db/meta/MetaConsts.h"
@@ -106,7 +105,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     std::vector<float> vectors_100;
     BuildVectors(n_100, vectors_100);
 
-    engine::VectorSource::Ptr source = std::make_shared<engine::VectorSource>(n_100, vectors_100.data());
+    engine::VectorSourcePtr source = std::make_shared<engine::VectorSource>(n_100, vectors_100.data());
 
     engine::IDNumbers vector_ids;
     status = mem_table_file.Add(source, vector_ids);
@@ -124,7 +123,7 @@ TEST_F(MemManagerTest, MEM_TABLE_FILE_TEST) {
     std::vector<float> vectors_128M;
     BuildVectors(n_max, vectors_128M);
 
-    engine::VectorSource::Ptr source_128M = std::make_shared<engine::VectorSource>(n_max, vectors_128M.data());
+    engine::VectorSourcePtr source_128M = std::make_shared<engine::VectorSource>(n_max, vectors_128M.data());
     vector_ids.clear();
     status = mem_table_file.Add(source_128M, vector_ids);
 
@@ -145,7 +144,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     std::vector<float> vectors_100;
     BuildVectors(n_100, vectors_100);
 
-    engine::VectorSource::Ptr source_100 = std::make_shared<engine::VectorSource>(n_100, vectors_100.data());
+    engine::VectorSourcePtr source_100 = std::make_shared<engine::VectorSource>(n_100, vectors_100.data());
 
     engine::MemTable mem_table(TABLE_NAME, impl_, options);
 
@@ -155,7 +154,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     vector_ids = source_100->GetVectorIds();
     ASSERT_EQ(vector_ids.size(), 100);
 
-    engine::MemTableFile::Ptr mem_table_file;
+    engine::MemTableFilePtr mem_table_file;
     mem_table.GetCurrentMemTableFile(mem_table_file);
     size_t singleVectorMem = sizeof(float) * TABLE_DIM;
     ASSERT_EQ(mem_table_file->GetCurrentMem(), n_100 * singleVectorMem);
@@ -165,7 +164,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     BuildVectors(n_max, vectors_128M);
 
     vector_ids.clear();
-    engine::VectorSource::Ptr source_128M = std::make_shared<engine::VectorSource>(n_max, vectors_128M.data());
+    engine::VectorSourcePtr source_128M = std::make_shared<engine::VectorSource>(n_max, vectors_128M.data());
     status = mem_table.Add(source_128M, vector_ids);
     ASSERT_TRUE(status.ok());
 
@@ -181,7 +180,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
     std::vector<float> vectors_1G;
     BuildVectors(n_1G, vectors_1G);
 
-    engine::VectorSource::Ptr source_1G = std::make_shared<engine::VectorSource>(n_1G, vectors_1G.data());
+    engine::VectorSourcePtr source_1G = std::make_shared<engine::VectorSource>(n_1G, vectors_1G.data());
 
     vector_ids.clear();
     status = mem_table.Add(source_1G, vector_ids);

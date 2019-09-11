@@ -5,13 +5,11 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <iostream>
-#include <easylogging++.h>
 #include <thread>
 #include <boost/filesystem.hpp>
 
 #include "utils.h"
-#include "db/Factories.h"
-#include "db/Options.h"
+#include "db/DBFactory.h"
 
 INITIALIZE_EASYLOGGINGPP
 
@@ -43,7 +41,7 @@ void MetricTest::InitLog() {
 }
 
 engine::Options MetricTest::GetOptions() {
-    auto options = engine::OptionsFactory::Build();
+    auto options = engine::DBFactory::BuildOption();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = "sqlite://:@:/";
     return options;
@@ -56,7 +54,7 @@ void MetricTest::SetUp() {
 }
 
 void MetricTest::TearDown() {
-    delete db_;
+    db_->Stop();
     boost::filesystem::remove_all("/tmp/milvus_test");
 }
 

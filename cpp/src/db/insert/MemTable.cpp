@@ -7,7 +7,7 @@ namespace milvus {
 namespace engine {
 
 MemTable::MemTable(const std::string &table_id,
-                   const std::shared_ptr<meta::Meta> &meta,
+                   const meta::MetaPtr &meta,
                    const Options &options) :
     table_id_(table_id),
     meta_(meta),
@@ -15,18 +15,18 @@ MemTable::MemTable(const std::string &table_id,
 
 }
 
-Status MemTable::Add(VectorSource::Ptr &source, IDNumbers &vector_ids) {
+Status MemTable::Add(VectorSourcePtr &source, IDNumbers &vector_ids) {
 
     while (!source->AllAdded()) {
 
-        MemTableFile::Ptr current_mem_table_file;
+        MemTableFilePtr current_mem_table_file;
         if (!mem_table_file_list_.empty()) {
             current_mem_table_file = mem_table_file_list_.back();
         }
 
         Status status;
         if (mem_table_file_list_.empty() || current_mem_table_file->IsFull()) {
-            MemTableFile::Ptr new_mem_table_file = std::make_shared<MemTableFile>(table_id_, meta_, options_);
+            MemTableFilePtr new_mem_table_file = std::make_shared<MemTableFile>(table_id_, meta_, options_);
             status = new_mem_table_file->Add(source, vector_ids);
             if (status.ok()) {
                 mem_table_file_list_.emplace_back(new_mem_table_file);
@@ -44,7 +44,7 @@ Status MemTable::Add(VectorSource::Ptr &source, IDNumbers &vector_ids) {
     return Status::OK();
 }
 
-void MemTable::GetCurrentMemTableFile(MemTableFile::Ptr &mem_table_file) {
+void MemTable::GetCurrentMemTableFile(MemTableFilePtr &mem_table_file) {
     mem_table_file = mem_table_file_list_.back();
 }
 
