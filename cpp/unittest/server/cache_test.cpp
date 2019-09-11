@@ -166,9 +166,6 @@ TEST(CacheTest, CPU_CACHE_TEST) {
 }
 
 TEST(CacheTest, GPU_CACHE_TEST) {
-    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-    config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
-
     cache::CacheMgr* gpu_mgr = cache::GpuCacheMgr::GetInstance(0);
 
     const int dim = 256;

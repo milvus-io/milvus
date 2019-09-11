@@ -25,8 +25,8 @@ namespace {
 
     static const char* TABLE_NAME = "test_group";
     static constexpr int64_t TABLE_DIM = 256;
-    static constexpr int64_t VECTOR_COUNT = 250000;
-    static constexpr int64_t INSERT_LOOP = 10000;
+    static constexpr int64_t VECTOR_COUNT = 25000;
+    static constexpr int64_t INSERT_LOOP = 1000;
     static constexpr int64_t SECONDS_EACH_HOUR = 3600;
     static constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
 

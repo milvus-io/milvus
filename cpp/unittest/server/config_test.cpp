@@ -144,8 +144,4 @@ TEST(ConfigTest, SERVER_CONFIG_TEST) {
     db_config.SetValue(server::CONFIG_DB_INSERT_BUFFER_SIZE, std::to_string(insert_buffer_size));
     err = config.ValidateConfig();
     ASSERT_NE(err, SERVER_SUCCESS);
-
-    server_config.SetValue(server::CONFIG_GPU_INDEX, "9999");
-    err = config.ValidateConfig();
-    ASSERT_NE(err, SERVER_SUCCESS);
 }

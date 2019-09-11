@@ -24,8 +24,6 @@ namespace {
 
 static std::string TABLE_NAME = "test_group";
 static constexpr int64_t TABLE_DIM = 256;
-static constexpr int64_t VECTOR_COUNT = 250000;
-static constexpr int64_t INSERT_LOOP = 10000;
 
 std::string GenTableName() {
     auto now = std::chrono::system_clock::now();
@@ -212,7 +210,7 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     std::map<int64_t, std::vector<float>> search_vectors;
     {
         engine::IDNumbers vector_ids;
-        int64_t nb = 1024000;
+        int64_t nb = 100000;
         std::vector<float> xb;
         BuildVectors(nb, xb);
         engine::Status status = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
@@ -224,7 +222,7 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
         std::mt19937 gen(rd());
         std::uniform_int_distribution<int64_t> dis(0, nb - 1);
 
-        int64_t num_query = 20;
+        int64_t num_query = 10;
         for (int64_t i = 0; i < num_query; ++i) {
             int64_t index = dis(gen);
             std::vector<float> search;
