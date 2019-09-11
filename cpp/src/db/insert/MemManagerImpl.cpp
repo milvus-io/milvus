@@ -10,7 +10,7 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-MemManagerImpl::MemTablePtr MemManagerImpl::GetMemByTable(const std::string &table_id) {
+MemTablePtr MemManagerImpl::GetMemByTable(const std::string &table_id) {
     auto memIt = mem_id_map_.find(table_id);
     if (memIt != mem_id_map_.end()) {
         return memIt->second;
@@ -40,7 +40,7 @@ Status MemManagerImpl::InsertVectorsNoLock(const std::string &table_id,
                                           IDNumbers &vector_ids) {
 
     MemTablePtr mem = GetMemByTable(table_id);
-    VectorSource::Ptr source = std::make_shared<VectorSource>(n, vectors);
+    VectorSourcePtr source = std::make_shared<VectorSource>(n, vectors);
 
     auto status = mem->Add(source, vector_ids);
     if (status.ok()) {

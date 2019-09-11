@@ -44,7 +44,7 @@ protected:
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class DBTest : public BaseTest {
  protected:
-    zilliz::milvus::engine::DB *db_;
+    zilliz::milvus::engine::DBPtr db_;
 
     virtual void SetUp() override;
     virtual void TearDown() override;
