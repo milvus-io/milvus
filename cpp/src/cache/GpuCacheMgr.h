@@ -19,21 +19,7 @@ class GpuCacheMgr : public CacheMgr {
 public:
     GpuCacheMgr();
 
-    static bool GpuIdInConfig(uint64_t gpu_id);
-
-    static CacheMgr* GetInstance(uint64_t gpu_id) {
-        if (instance_.find(gpu_id) == instance_.end()) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (instance_.find(gpu_id) == instance_.end()) {
-                if (GpuIdInConfig(gpu_id)) {
-                    instance_.insert(std::pair<uint64_t, GpuCacheMgrPtr>(gpu_id, std::make_shared<GpuCacheMgr>()));
-                } else {
-                    return nullptr;
-                }
-            }
-        }
-        return instance_[gpu_id].get();
-    }
+    static CacheMgr* GetInstance(uint64_t gpu_id);
 
     void InsertItem(const std::string& key, const DataObjPtr& data) override;
 

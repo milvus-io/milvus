@@ -18,7 +18,6 @@ static const char* CONFIG_SERVER = "server_config";
 static const char* CONFIG_SERVER_ADDRESS = "address";
 static const char* CONFIG_SERVER_PORT = "port";
 static const char* CONFIG_CLUSTER_MODE = "mode";
-static const char* CONFIG_GPU_INDEX = "gpu_index";
 static const char* CONFIG_TIME_ZONE = "time_zone";
 
 static const char* CONFIG_DB = "db_config";
@@ -29,6 +28,7 @@ static const char* CONFIG_DB_ARCHIVE_DISK = "archive_disk_threshold";
 static const char* CONFIG_DB_ARCHIVE_DAYS = "archive_days_threshold";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
 static const char* CONFIG_DB_PARALLEL_REDUCE = "parallel_reduce";
+static const char* CONFIG_DB_BUILD_INDEX_GPU = "build_index_gpu";
 
 static const char* CONFIG_LOG = "log_config";
 
@@ -37,7 +37,6 @@ static const char* CONFIG_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
 static const char* CONFIG_GPU_CACHE_CAPACITY = "gpu_cache_capacity";
 static const char* CACHE_FREE_PERCENT = "cpu_cache_free_percent";
 static const char* CONFIG_INSERT_CACHE_IMMEDIATELY = "insert_cache_immediately";
-static const char* CONFIG_GPU_IDS = "gpu_ids";
 static const char *GPU_CACHE_FREE_PERCENT = "gpu_cache_free_percent";
 
 static const char* CONFIG_METRIC = "metric_config";

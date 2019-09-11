@@ -94,10 +94,6 @@ class SchedulerTest : public testing::Test {
 protected:
     void
     SetUp() override {
-        server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-        config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
-        config.AddSequenceItem(server::CONFIG_GPU_IDS, "1");
-
         ResourcePtr cpu = ResourceFactory::Create("cpu", "CPU", 0, true, false);
         ResourcePtr gpu_0 = ResourceFactory::Create("gpu0", "GPU", 0);
         ResourcePtr gpu_1 = ResourceFactory::Create("gpu1", "GPU", 1);
