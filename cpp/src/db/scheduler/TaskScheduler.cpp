@@ -89,7 +89,6 @@ TaskScheduler::TaskDispatchWorker() {
             return true;
         }
 
-#ifdef NEW_SCHEDULER
         // TODO: Put task into Disk-TaskTable
         auto task = TaskConvert(task_ptr);
         auto disk_list = ResMgrInst::GetInstance()->GetDiskResources();
@@ -98,16 +97,7 @@ TaskScheduler::TaskDispatchWorker() {
                 disk->task_table().Put(task);
             }
         }
-#else
-        //execute task
-        ScheduleTaskPtr next_task = task_ptr->Execute();
-        if(next_task != nullptr) {
-            task_queue_.Put(next_task);
-        }
-#endif
     }
-
-    return true;
 }
 
 bool
@@ -126,8 +116,6 @@ TaskScheduler::TaskWorker() {
             task_queue_.Put(next_task);
         }
     }
-
-    return true;
 }
 
 }
