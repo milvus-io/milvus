@@ -8,7 +8,8 @@
 #include "Log.h"
 #include "Utils.h"
 #include "engine/EngineFactory.h"
-#include "Factories.h"
+#include "insert/MemMenagerFactory.h"
+#include "meta/MetaFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/TaskScheduler.h"
 
@@ -44,7 +45,7 @@ DBImpl::DBImpl(const Options& options)
       shutting_down_(true),
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
-    meta_ptr_ = DBMetaImplFactory::Build(options.meta, options.mode);
+    meta_ptr_ = MetaFactory::Build(options.meta, options.mode);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
     Start();
 }

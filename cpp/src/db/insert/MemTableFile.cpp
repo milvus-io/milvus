@@ -12,7 +12,7 @@ namespace milvus {
 namespace engine {
 
 MemTableFile::MemTableFile(const std::string &table_id,
-                           const std::shared_ptr<meta::Meta> &meta,
+                           const meta::MetaPtr &meta,
                            const Options &options) :
     table_id_(table_id),
     meta_(meta),
@@ -43,7 +43,7 @@ Status MemTableFile::CreateTableFile() {
     return status;
 }
 
-Status MemTableFile::Add(const VectorSource::Ptr &source, IDNumbers& vector_ids) {
+Status MemTableFile::Add(const VectorSourcePtr &source, IDNumbers& vector_ids) {
 
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg = "MemTableFile::Add: table_file_schema dimension = " +
