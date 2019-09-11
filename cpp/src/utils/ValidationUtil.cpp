@@ -224,6 +224,9 @@ ValidationUtil::ValidateDbURI(const std::string &uri) {
             okay = false;
         }
 
+/*
+ *      Could be DNS, skip checking
+ *
         std::string host = pieces_match[4].str();
         if (!host.empty() && host != "localhost") {
             if (ValidateIpAddress(host) != SERVER_SUCCESS) {
@@ -231,6 +234,7 @@ ValidationUtil::ValidateDbURI(const std::string &uri) {
                 okay = false;
             }
         }
+*/
 
         std::string port = pieces_match[5].str();
         if (!port.empty()) {

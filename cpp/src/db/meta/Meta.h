@@ -20,8 +20,6 @@ namespace meta {
 
 class Meta {
  public:
-    using Ptr = std::shared_ptr<Meta>;
-
     virtual ~Meta() = default;
 
     virtual Status CreateTable(TableSchema &table_schema) = 0;
@@ -84,6 +82,8 @@ class Meta {
     virtual Status Count(const std::string &table_id, uint64_t &result) = 0;
 
 }; // MetaData
+
+using MetaPtr = std::shared_ptr<Meta>;
 
 } // namespace meta
 } // namespace engine

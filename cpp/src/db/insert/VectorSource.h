@@ -11,11 +11,7 @@ namespace milvus {
 namespace engine {
 
 class VectorSource {
-
  public:
-
-    using Ptr = std::shared_ptr<VectorSource>;
-
     VectorSource(const size_t &n, const float *vectors);
 
     Status Add(const ExecutionEnginePtr &execution_engine,
@@ -41,6 +37,8 @@ class VectorSource {
     std::shared_ptr<IDGenerator> id_generator_;
 
 }; //VectorSource
+
+using VectorSourcePtr = std::shared_ptr<VectorSource>;
 
 } // namespace engine
 } // namespace milvus
