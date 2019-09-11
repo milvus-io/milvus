@@ -66,9 +66,6 @@ engine::Options BaseTest::GetOptions() {
 void DBTest::SetUp() {
     BaseTest::SetUp();
 
-    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-    config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
-
     auto res_mgr = engine::ResMgrInst::GetInstance();
     res_mgr->Clear();
     res_mgr->Add(engine::ResourceFactory::Create("disk", "DISK", 0, true, false));
