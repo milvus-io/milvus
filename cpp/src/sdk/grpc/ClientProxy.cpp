@@ -240,7 +240,6 @@ ClientProxy::Search(const std::string &table_name,
 
         //step 3: search vectors
         ::milvus::grpc::TopKQueryResultList topk_query_result_list;
-
         Status status = client_ptr_->Search(topk_query_result_list, search_param);
 
         //step 4: convert result array
@@ -255,7 +254,6 @@ ClientProxy::Search(const std::string &table_name,
 
             topk_query_result_array.emplace_back(result);
         }
-
         return status;
 
     } catch (std::exception &ex) {
