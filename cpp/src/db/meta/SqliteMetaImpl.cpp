@@ -8,7 +8,6 @@
 #include "db/Utils.h"
 #include "db/Log.h"
 #include "MetaConsts.h"
-#include "db/Factories.h"
 #include "metrics/Metrics.h"
 
 #include <unistd.h>

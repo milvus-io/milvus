@@ -18,7 +18,6 @@
 #include "utils.h"
 #include "db/DB.h"
 #include "db/meta/SqliteMetaImpl.h"
-#include "db/Factories.h"
 
 
 using namespace zilliz::milvus;
