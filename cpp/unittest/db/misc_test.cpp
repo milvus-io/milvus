@@ -128,13 +128,13 @@ TEST(DBMiscTest, UTILS_TEST) {
        ASSERT_TRUE(boost::filesystem::exists(path));
     }
 
-    options.slave_paths.push_back("/");
-    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
-    ASSERT_FALSE(status.ok());
-
-    options.path = "/";
-    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
-    ASSERT_FALSE(status.ok());
+//    options.slave_paths.push_back("/");
+//    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+//    ASSERT_FALSE(status.ok());
+//
+//    options.path = "/";
+//    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
+//    ASSERT_FALSE(status.ok());
 
     engine::meta::TableFileSchema file;
     file.id_ = 50;
