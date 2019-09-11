@@ -32,18 +32,18 @@ protected:
     std::vector<TaskTableItemPtr> items_;
 };
 
-TEST_F(TaskTableItemTest, construct) {
+TEST_F(TaskTableItemTest, CONSTRUCT) {
     ASSERT_EQ(default_.id, 0);
     ASSERT_EQ(default_.task, nullptr);
     ASSERT_EQ(default_.state, TaskTableItemState::INVALID);
 }
 
-TEST_F(TaskTableItemTest, destruct) {
+TEST_F(TaskTableItemTest, DESTRUCT) {
     auto p_item = new TaskTableItem();
     delete p_item;
 }
 
-TEST_F(TaskTableItemTest, is_finish) {
+TEST_F(TaskTableItemTest, IS_FINISH) {
     for (auto &item : items_) {
         if (item->state == TaskTableItemState::EXECUTED
             || item->state == TaskTableItemState::MOVED) {
@@ -54,13 +54,13 @@ TEST_F(TaskTableItemTest, is_finish) {
     }
 }
 
-TEST_F(TaskTableItemTest, dump) {
+TEST_F(TaskTableItemTest, DUMP) {
     for (auto &item : items_) {
         ASSERT_FALSE(item->Dump().empty());
     }
 }
 
-TEST_F(TaskTableItemTest, load) {
+TEST_F(TaskTableItemTest, LOAD) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Load();
@@ -74,7 +74,7 @@ TEST_F(TaskTableItemTest, load) {
     }
 }
 
-TEST_F(TaskTableItemTest, loaded) {
+TEST_F(TaskTableItemTest, LOADED) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Loaded();
@@ -88,7 +88,7 @@ TEST_F(TaskTableItemTest, loaded) {
     }
 }
 
-TEST_F(TaskTableItemTest, execute) {
+TEST_F(TaskTableItemTest, EXECUTE) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Execute();
@@ -103,7 +103,7 @@ TEST_F(TaskTableItemTest, execute) {
 }
 
 
-TEST_F(TaskTableItemTest, executed) {
+TEST_F(TaskTableItemTest, EXECUTED) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Executed();
@@ -117,7 +117,7 @@ TEST_F(TaskTableItemTest, executed) {
     }
 }
 
-TEST_F(TaskTableItemTest, move) {
+TEST_F(TaskTableItemTest, MOVE) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Move();
@@ -131,7 +131,7 @@ TEST_F(TaskTableItemTest, move) {
     }
 }
 
-TEST_F(TaskTableItemTest, moved) {
+TEST_F(TaskTableItemTest, MOVED) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Moved();
@@ -163,7 +163,7 @@ protected:
     TaskTable empty_table_;
 };
 
-TEST_F(TaskTableBaseTest, subscriber) {
+TEST_F(TaskTableBaseTest, SUBSCRIBER) {
     bool flag = false;
     auto callback = [&]() {
         flag = true;
@@ -174,46 +174,46 @@ TEST_F(TaskTableBaseTest, subscriber) {
 }
 
 
-TEST_F(TaskTableBaseTest, put_task) {
+TEST_F(TaskTableBaseTest, PUT_TASK) {
     empty_table_.Put(task1_);
     ASSERT_EQ(empty_table_.Get(0)->task, task1_);
 }
 
-TEST_F(TaskTableBaseTest, put_invalid_test) {
+TEST_F(TaskTableBaseTest, PUT_INVALID_TEST) {
     empty_table_.Put(invalid_task_);
     ASSERT_EQ(empty_table_.Get(0)->task, invalid_task_);
 }
 
-TEST_F(TaskTableBaseTest, put_batch) {
+TEST_F(TaskTableBaseTest, PUT_BATCH) {
     std::vector<TaskPtr> tasks{task1_, task2_};
     empty_table_.Put(tasks);
     ASSERT_EQ(empty_table_.Get(0)->task, task1_);
     ASSERT_EQ(empty_table_.Get(1)->task, task2_);
 }
 
-TEST_F(TaskTableBaseTest, put_empty_batch) {
+TEST_F(TaskTableBaseTest, PUT_EMPTY_BATCH) {
     std::vector<TaskPtr> tasks{};
     empty_table_.Put(tasks);
 }
 
-TEST_F(TaskTableBaseTest, empty) {
+TEST_F(TaskTableBaseTest, EMPTY) {
     ASSERT_TRUE(empty_table_.Empty());
     empty_table_.Put(task1_);
     ASSERT_FALSE(empty_table_.Empty());
 }
 
-TEST_F(TaskTableBaseTest, size) {
+TEST_F(TaskTableBaseTest, SIZE) {
     ASSERT_EQ(empty_table_.Size(), 0);
     empty_table_.Put(task1_);
     ASSERT_EQ(empty_table_.Size(), 1);
 }
 
-TEST_F(TaskTableBaseTest, operator_) {
+TEST_F(TaskTableBaseTest, OPERATOR) {
     empty_table_.Put(task1_);
     ASSERT_EQ(empty_table_.Get(0), empty_table_[0]);
 }
 
-TEST_F(TaskTableBaseTest, pick_to_load) {
+TEST_F(TaskTableBaseTest, PICK_TO_LOAD) {
     const size_t NUM_TASKS = 10;
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
@@ -226,7 +226,7 @@ TEST_F(TaskTableBaseTest, pick_to_load) {
     ASSERT_EQ(indexes[0], 2);
 }
 
-TEST_F(TaskTableBaseTest, pick_to_load_limit) {
+TEST_F(TaskTableBaseTest, PICK_TO_LOAD_LIMIT) {
     const size_t NUM_TASKS = 10;
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
@@ -241,7 +241,7 @@ TEST_F(TaskTableBaseTest, pick_to_load_limit) {
     ASSERT_EQ(indexes[2], 4);
 }
 
-TEST_F(TaskTableBaseTest, pick_to_load_cache) {
+TEST_F(TaskTableBaseTest, PICK_TO_LOAD_CACHE) {
     const size_t NUM_TASKS = 10;
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
@@ -262,7 +262,7 @@ TEST_F(TaskTableBaseTest, pick_to_load_cache) {
     ASSERT_EQ(indexes[0], 2);
 }
 
-TEST_F(TaskTableBaseTest, pick_to_execute) {
+TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE) {
     const size_t NUM_TASKS = 10;
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
@@ -276,7 +276,7 @@ TEST_F(TaskTableBaseTest, pick_to_execute) {
     ASSERT_EQ(indexes[0], 2);
 }
 
-TEST_F(TaskTableBaseTest, pick_to_execute_limit) {
+TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE_LIMIT) {
     const size_t NUM_TASKS = 10;
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
@@ -292,7 +292,7 @@ TEST_F(TaskTableBaseTest, pick_to_execute_limit) {
     ASSERT_EQ(indexes[1], 3);
 }
 
-TEST_F(TaskTableBaseTest, pick_to_execute_cache) {
+TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE_CACHE) {
     const size_t NUM_TASKS = 10;
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
@@ -340,7 +340,7 @@ protected:
     TaskTable table1_;
 };
 
-TEST_F(TaskTableAdvanceTest, load) {
+TEST_F(TaskTableAdvanceTest, LOAD) {
     std::vector<TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
@@ -359,7 +359,7 @@ TEST_F(TaskTableAdvanceTest, load) {
     }
 }
 
-TEST_F(TaskTableAdvanceTest, loaded) {
+TEST_F(TaskTableAdvanceTest, LOADED) {
     std::vector<TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
@@ -378,7 +378,7 @@ TEST_F(TaskTableAdvanceTest, loaded) {
     }
 }
 
-TEST_F(TaskTableAdvanceTest, execute) {
+TEST_F(TaskTableAdvanceTest, EXECUTE) {
     std::vector<TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
@@ -397,7 +397,7 @@ TEST_F(TaskTableAdvanceTest, execute) {
     }
 }
 
-TEST_F(TaskTableAdvanceTest, executed) {
+TEST_F(TaskTableAdvanceTest, EXECUTED) {
     std::vector<TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
@@ -416,7 +416,7 @@ TEST_F(TaskTableAdvanceTest, executed) {
     }
 }
 
-TEST_F(TaskTableAdvanceTest, move) {
+TEST_F(TaskTableAdvanceTest, MOVE) {
     std::vector<TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
@@ -435,7 +435,7 @@ TEST_F(TaskTableAdvanceTest, move) {
     }
 }
 
-TEST_F(TaskTableAdvanceTest, moved) {
+TEST_F(TaskTableAdvanceTest, MOVED) {
     std::vector<TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);

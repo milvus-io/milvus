@@ -68,7 +68,7 @@ protected:
     const std::string CONFIG_FILE = "/tmp/milvus_sched_test/config.yaml";
 };
 
-TEST_F(SchedInstTest, simple_gpu) {
+TEST_F(SchedInstTest, SIMPLE_GPU) {
     StartSchedulerService();
 }
 

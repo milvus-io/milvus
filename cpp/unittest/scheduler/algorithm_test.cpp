@@ -53,7 +53,7 @@ class AlgorithmTest : public testing::Test {
     ResourceMgrPtr res_mgr_;
 };
 
-TEST_F(AlgorithmTest, ShortestPath_test) {
+TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
     std::vector<std::string> sp;
     uint64_t cost;
     cost = ShortestPath(disk_.lock(), gpu_0_.lock(), res_mgr_, sp);
