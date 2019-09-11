@@ -18,7 +18,6 @@
 
 #include "server/DBWrapper.h"
 #include "server/ServerConfig.h"
-#include "db/Factories.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/ResourceFactory.h"
 #include "utils/CommonUtil.h"
@@ -40,8 +39,6 @@ class RpcHandlerTest : public testing::Test {
  protected:
     void
     SetUp() override {
-        server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-        config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
 
         auto res_mgr = engine::ResMgrInst::GetInstance();
         res_mgr->Clear();
@@ -264,8 +261,8 @@ TEST_F(RpcHandlerTest, SearchTest) {
     std::string *file_id = search_in_files_param.add_file_id_array();
     *file_id = "test_tbl";
     handler->SearchInFiles(&context, &search_in_files_param, &response);
-    delete file_id;
-    delete range;
+//    delete file_id;
+//    delete range;
 }
 
 TEST_F(RpcHandlerTest, TablesTest) {
@@ -380,13 +377,12 @@ TEST_F(RpcHandlerTest, CmdTest) {
     command.set_cmd("version");
     ::milvus::grpc::StringReply reply;
     handler->Cmd(&context, &command, &reply);
+    ASSERT_EQ(reply.string_reply(), MILVUS_VERSION);
+
     command.set_cmd("tasktable");
     handler->Cmd(&context, &command, &reply);
     command.set_cmd("test");
     handler->Cmd(&context, &command, &reply);
-
-
-    ASSERT_EQ(reply.string_reply(), MILVUS_VERSION);
 }
 
 TEST_F(RpcHandlerTest, DeleteByRangeTest) {
@@ -404,10 +400,10 @@ TEST_F(RpcHandlerTest, DeleteByRangeTest) {
     int error_code = status.error_code();
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 
-    request.mutable_range()->set_start_value("aaa");
+    request.mutable_range()->set_start_value("test6");
     grpc_status = handler->DeleteByRange(&context, &request, &status);
     request.mutable_range()->set_start_value(CurrentTmDate(-2));
-    request.mutable_range()->set_end_value("aaa");
+    request.mutable_range()->set_end_value("test6");
     grpc_status = handler->DeleteByRange(&context, &request, &status);
     request.mutable_range()->set_end_value(CurrentTmDate(-2));
     grpc_status = handler->DeleteByRange(&context, &request, &status);
