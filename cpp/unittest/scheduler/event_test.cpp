@@ -15,7 +15,7 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-TEST(EventTest, start_up_event) {
+TEST(EventTest, START_UP_EVENT) {
     ResourceWPtr res(ResourcePtr(nullptr));
     auto event = std::make_shared<StartUpEvent>(res);
     ASSERT_FALSE(event->Dump().empty());
@@ -23,7 +23,7 @@ TEST(EventTest, start_up_event) {
     std::cout << *EventPtr(event);
 }
 
-TEST(EventTest, load_completed_event) {
+TEST(EventTest, LOAD_COMPLETED_EVENT) {
     ResourceWPtr res(ResourcePtr(nullptr));
     auto event = std::make_shared<LoadCompletedEvent>(res, nullptr);
     ASSERT_FALSE(event->Dump().empty());
@@ -31,7 +31,7 @@ TEST(EventTest, load_completed_event) {
     std::cout << *EventPtr(event);
 }
 
-TEST(EventTest, finish_task_event) {
+TEST(EventTest, FINISH_TASK_EVENT) {
     ResourceWPtr res(ResourcePtr(nullptr));
     auto event = std::make_shared<FinishTaskEvent>(res, nullptr);
     ASSERT_FALSE(event->Dump().empty());
@@ -40,7 +40,7 @@ TEST(EventTest, finish_task_event) {
 }
 
 
-TEST(EventTest, tasktable_updated_event) {
+TEST(EventTest, TASKTABLE_UPDATED_EVENT) {
     ResourceWPtr res(ResourcePtr(nullptr));
     auto event = std::make_shared<TaskTableUpdatedEvent>(res);
     ASSERT_FALSE(event->Dump().empty());

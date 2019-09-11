@@ -94,10 +94,6 @@ class SchedulerTest : public testing::Test {
 protected:
     void
     SetUp() override {
-        server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-        config.AddSequenceItem(server::CONFIG_GPU_IDS, "0");
-        config.AddSequenceItem(server::CONFIG_GPU_IDS, "1");
-
         ResourcePtr cpu = ResourceFactory::Create("cpu", "CPU", 0, true, false);
         ResourcePtr gpu_0 = ResourceFactory::Create("gpu0", "GPU", 0);
         ResourcePtr gpu_1 = ResourceFactory::Create("gpu1", "GPU", 1);
@@ -142,7 +138,7 @@ insert_dummy_index_into_gpu_cache(uint64_t device_id) {
     cache::GpuCacheMgr::GetInstance(device_id)->InsertItem("location", obj);
 }
 
-TEST_F(SchedulerTest, OnLoadCompleted) {
+TEST_F(SchedulerTest, ON_LOAD_COMPLETED) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = std::make_shared<meta::TableFileSchema>();
@@ -162,7 +158,7 @@ TEST_F(SchedulerTest, OnLoadCompleted) {
 
 }
 
-TEST_F(SchedulerTest, PushTaskToNeighbourRandomlyTest) {
+TEST_F(SchedulerTest, PUSH_TASK_TO_NEIGHBOUR_RANDOMLY_TEST) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy1 = std::make_shared<meta::TableFileSchema>();
@@ -233,7 +229,7 @@ protected:
 };
 
 
-TEST_F(SchedulerTest2, SpecifiedResourceTest) {
+TEST_F(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = std::make_shared<meta::TableFileSchema>();
