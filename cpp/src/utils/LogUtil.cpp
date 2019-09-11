@@ -27,7 +27,7 @@ static int fatal_idx = 0;
 }
 
 // TODO(yzb) : change the easylogging library to get the log level from parameter rather than filename
-void rolloutHandler(const char *filename, std::size_t size) {
+void RolloutHandler(const char *filename, std::size_t size) {
     char *dirc = strdup(filename);
     char *basec = strdup(filename);
     char *dir = dirname(dirc);
@@ -112,7 +112,7 @@ int32_t InitLog(const std::string &log_config_file) {
     el::Loggers::reconfigureAllLoggers(conf);
 
     el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
-    el::Helpers::installPreRollOutCallback(rolloutHandler);
+    el::Helpers::installPreRollOutCallback(RolloutHandler);
     return 0;
 }
 
