@@ -35,7 +35,6 @@ cache_config:
   gpu_cache_free_percent: 0.85      # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
   gpu_ids:                          # gpu id
     - 0
-    - 1
 
 engine_config:
   use_blas_threshold: 20
