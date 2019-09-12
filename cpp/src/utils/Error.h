@@ -66,6 +66,7 @@ constexpr ErrorCode SERVER_INVALID_NPROBE = ToServerErrorCode(113);
 constexpr ErrorCode SERVER_INVALID_INDEX_NLIST = ToServerErrorCode(114);
 constexpr ErrorCode SERVER_INVALID_INDEX_METRIC_TYPE = ToServerErrorCode(115);
 constexpr ErrorCode SERVER_INVALID_INDEX_FILE_SIZE = ToServerErrorCode(116);
+constexpr ErrorCode SERVER_OUT_OF_MEMORY = ToServerErrorCode(117);
 
 //db error code
 constexpr ErrorCode DB_META_TRANSACTION_FAILED = ToDbErrorCode(1);
