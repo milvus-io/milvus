@@ -269,6 +269,7 @@ Status XSearchTask::MergeResult(SearchContext::Id2DistanceMap &distance_src,
         return Status::OK();
     }
 
+    merge_mutex_.lock();
     if (distance_target.empty()) {
         distance_target.swap(distance_src);
         return Status::OK();
@@ -328,6 +329,7 @@ Status XSearchTask::MergeResult(SearchContext::Id2DistanceMap &distance_src,
     }
 
     distance_target.swap(distance_merged);
+    merge_mutex_.unlock();
 
     return Status::OK();
 }
