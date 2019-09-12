@@ -196,7 +196,7 @@ void IVF::search_impl(int64_t n,
 
 VectorIndexPtr IVF::CopyCpuToGpu(const int64_t& device_id, const Config &config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)){
-        ResScope rs(device_id, res);
+        ResScope rs(res, device_id, false);
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get());
 
         std::shared_ptr<faiss::Index> device_index;
@@ -271,7 +271,7 @@ VectorIndexPtr IVFSQ::Clone_impl(const std::shared_ptr<faiss::Index> &index) {
 
 VectorIndexPtr IVFSQ::CopyCpuToGpu(const int64_t &device_id, const Config &config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)){
-        ResScope rs(device_id, res);
+        ResScope rs(res, device_id, false);
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
 
