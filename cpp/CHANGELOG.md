@@ -31,6 +31,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-492 - Drop index failed if index have been created with index_type: FLAT
 - MS-493 - Knowhere unittest crash
 - MS-453 - GPU search error when nprobe set more than 1024
+- MS-474 - Create index hang if use branch-0.3.1 server config
 - MS-510 - unittest out of memory and crashed
 - MS-507 - Dataset 10m-512, index type sq8，performance in-normal when set CPU_CACHE to 16 or 64
 
@@ -101,6 +102,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-504 - Update node_test in scheduler
 - MS-505 - Install core unit test and add to coverage
 - MS-508 - Update normal_test in scheduler
+- MS-532 - Add grpc server unittest
 - MS-511 - Update resource_test in scheduler
 - MS-517 - Update resource_mgr_test in scheduler
 - MS-518 - Add schedinst_test in scheduler
@@ -115,6 +117,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-533 - Update resource_test to cover dump function
 - MS-523 - Config file validation
 - MS-539 - Remove old task code
+- MS-546 - Add simple mode resource_config
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
