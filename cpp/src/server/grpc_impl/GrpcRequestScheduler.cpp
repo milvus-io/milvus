@@ -48,6 +48,7 @@ namespace {
                 {SERVER_CACHE_ERROR,              ::milvus::grpc::ErrorCode::CACHE_FAILED},
                 {DB_META_TRANSACTION_FAILED,      ::milvus::grpc::ErrorCode::META_FAILED},
                 {SERVER_BUILD_INDEX_ERROR,        ::milvus::grpc::ErrorCode::BUILD_INDEX_ERROR},
+                {SERVER_OUT_OF_MEMORY,            ::milvus::grpc::ErrorCode::OUT_OF_MEMORY},
         };
 
         if(code_map.find(code) != code_map.end()) {
