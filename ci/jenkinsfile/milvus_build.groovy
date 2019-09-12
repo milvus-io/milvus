@@ -3,8 +3,6 @@ container('milvus-build-env') {
         gitlabCommitStatus(name: 'Build Engine') {
             dir ("milvus_engine") {
                 try {
-                    def knowhere_build_dir = "${env.WORKSPACE}/milvus_engine/cpp/src/core/cmake_build"
-
                     checkout([$class: 'GitSCM', branches: [[name: "${SEMVER}"]], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'SubmoduleOption',disableSubmodules: false,parentCredentials: true,recursiveSubmodules: true,reference: '',trackingSubmodules: false]], submoduleCfg: [], userRemoteConfigs: [[credentialsId: "${params.GIT_USER}", url: "git@192.168.1.105:megasearch/milvus.git", name: 'origin', refspec: "+refs/heads/${SEMVER}:refs/remotes/origin/${SEMVER}"]]])
 
                     /*
@@ -17,7 +15,7 @@ container('milvus-build-env') {
                     dir ("cpp") {
                         sh "git config --global user.email \"test@zilliz.com\""
                         sh "git config --global user.name \"test\""
-                        sh "./build.sh -t ${params.BUILD_TYPE} -k ${knowhere_build_dir} -j -u -c"
+                        sh "./build.sh -t ${params.BUILD_TYPE} -j -u -c"
                     }
                 } catch (exc) {
                     updateGitlabCommitStatus name: 'Build Engine', state: 'failed'
