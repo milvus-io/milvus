@@ -20,6 +20,8 @@ namespace engine {
 static constexpr size_t PARALLEL_REDUCE_THRESHOLD = 10000;
 static constexpr size_t PARALLEL_REDUCE_BATCH = 1000;
 
+std::mutex XSearchTask::merge_mutex_;
+
 //bool
 //NeedParallelReduce(uint64_t nq, uint64_t topk) {
 //    server::ServerConfig &config = server::ServerConfig::GetInstance();
@@ -269,6 +271,7 @@ Status XSearchTask::MergeResult(SearchContext::Id2DistanceMap &distance_src,
         return Status::OK();
     }
 
+    merge_mutex_.lock();
     if (distance_target.empty()) {
         distance_target.swap(distance_src);
         return Status::OK();
@@ -328,6 +331,7 @@ Status XSearchTask::MergeResult(SearchContext::Id2DistanceMap &distance_src,
     }
 
     distance_target.swap(distance_merged);
+    merge_mutex_.unlock();
 
     return Status::OK();
 }
