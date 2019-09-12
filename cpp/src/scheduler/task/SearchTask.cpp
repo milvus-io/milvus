@@ -152,10 +152,10 @@ XSearchTask::Execute() {
         return;
     }
 
-    ENGINE_LOG_DEBUG << "Searching in file id " << index_id_ << " with "
+    ENGINE_LOG_DEBUG << "Searching in file id:" << index_id_ << " with "
                      << search_contexts_.size() << " tasks";
 
-    server::TimeRecorder rc("DoSearch file id " + std::to_string(index_id_));
+    server::TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
 
     server::CollectDurationMetrics metrics(index_type_);
 
@@ -171,8 +171,8 @@ XSearchTask::Execute() {
         output_ids.resize(topk * nq);
         output_distance.resize(topk * nq);
         std::string hdr = "context " + context->Identity() +
-                          " nq " + std::to_string(nq) +
-                          " topk " + std::to_string(topk);
+            " nq " + std::to_string(nq) +
+            " topk " + std::to_string(topk);
 
         try {
             //step 2: search
