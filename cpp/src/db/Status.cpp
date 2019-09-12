@@ -69,7 +69,7 @@ std::string Status::ToString() const {
             type = "InvalidPath: ";
             break;
         default:
-            snprintf(tmp, sizeof(tmp), "Unkown code(%d): ",
+            snprintf(tmp, sizeof(tmp), "Error code(0x%x): ",
                     static_cast<int>(code()));
             type = tmp;
             break;
