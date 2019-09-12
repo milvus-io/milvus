@@ -60,18 +60,7 @@ load_simple_config() {
         for (auto &gpu_id : gpu_ids) {
             ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
             ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), io);
-            auto pinned_memory = 300;
-            auto temp_memory = 300;
-            auto resource_num = 2;
-            pinned_memory = 1024 * 1024 * pinned_memory;
-            temp_memory = 1024 * 1024 * temp_memory;
-            knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(gpu_id,
-                                                                    pinned_memory,
-                                                                    temp_memory,
-                                                                    resource_num);
         }
-
-        knowhere::FaissGpuResourceMgr::GetInstance().InitResource();
     }
 }
 
