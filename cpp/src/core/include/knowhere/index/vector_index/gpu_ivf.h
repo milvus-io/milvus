@@ -24,6 +24,9 @@ using ResWPtr = std::weak_ptr<Resource>;
 
 class FaissGpuResourceMgr {
  public:
+    friend class ResScope;
+
+ public:
     using ResBQ = zilliz::milvus::server::BlockingQueue<ResPtr>;
 
     struct DeviceParams {
@@ -71,24 +74,30 @@ class FaissGpuResourceMgr {
  protected:
     bool is_init = false;
 
+    std::map<int64_t ,std::unique_ptr<std::mutex>> mutex_cache_;
     std::map<int64_t, DeviceParams> devices_params_;
-    std::map<int64_t, ResBQ> idle_map;
+    std::map<int64_t, ResBQ> idle_map_;
 };
 
 class ResScope {
  public:
-    ResScope(const int64_t device_id,  ResPtr &res) : resource(res), device_id(device_id), move(true) {
+    ResScope(ResPtr &res, const int64_t& device_id, const bool& isown)
+        : resource(res), device_id(device_id), move(true), own(isown) {
+        if (isown) FaissGpuResourceMgr::GetInstance().mutex_cache_[device_id]->lock();
         res->mutex.lock();
     }
 
-    ResScope(ResPtr &res) : resource(res), device_id(-1), move(false) {
+    // specif for search
+    // get the ownership of gpuresource and gpu
+    ResScope(ResPtr &res, const int64_t &device_id)
+        : resource(res), device_id(device_id), move(false), own(true) {
+        FaissGpuResourceMgr::GetInstance().mutex_cache_[device_id]->lock();
         res->mutex.lock();
     }
 
     ~ResScope() {
-        if (move) {
-            FaissGpuResourceMgr::GetInstance().MoveToIdle(device_id, resource);
-        }
+        if (own) FaissGpuResourceMgr::GetInstance().mutex_cache_[device_id]->unlock();
+        if (move) FaissGpuResourceMgr::GetInstance().MoveToIdle(device_id, resource);
         resource->mutex.unlock();
     }
 
@@ -96,6 +105,7 @@ class ResScope {
     ResPtr resource;
     int64_t device_id;
     bool move = true;
+    bool own = false;
 };
 
 class GPUIndex {
@@ -120,6 +130,7 @@ class GPUIVF : public IVF, public GPUIndex {
     explicit GPUIVF(std::shared_ptr<faiss::Index> index, const int64_t &device_id, ResPtr &resource)
         : IVF(std::move(index)), GPUIndex(device_id, resource) {};
     IndexModelPtr Train(const DatasetPtr &dataset, const Config &config) override;
+    void Add(const DatasetPtr &dataset, const Config &config) override;
     void set_index_model(IndexModelPtr model) override;
     //DatasetPtr Search(const DatasetPtr &dataset, const Config &config) override;
     VectorIndexPtr CopyGpuToCpu(const Config &config) override;
