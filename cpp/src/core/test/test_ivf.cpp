@@ -77,21 +77,21 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                                             Config::object{{"nlist", 100}, {"metric_type", "L2"}},
                                             Config(),
                                             Config::object{{"k", 10}}),
-                            std::make_tuple("IVFPQ",
-                                            Config(),
-                                            Config::object{{"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
-                                            Config(),
-                                            Config::object{{"k", 10}}),
+                            //std::make_tuple("IVFPQ",
+                            //                Config(),
+                            //                Config::object{{"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
+                            //                Config(),
+                            //                Config::object{{"k", 10}}),
                             std::make_tuple("GPUIVF",
                                             Config(),
                                             Config::object{{"nlist", 100}, {"gpu_id", device_id}, {"metric_type", "L2"}},
                                             Config(),
                                             Config::object{{"k", 10}}),
-                            std::make_tuple("GPUIVFPQ",
-                                            Config(),
-                                            Config::object{{"gpu_id", device_id}, {"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
-                                            Config(),
-                                            Config::object{{"k", 10}}),
+                            //std::make_tuple("GPUIVFPQ",
+                            //                Config(),
+                            //                Config::object{{"gpu_id", device_id}, {"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
+                            //                Config(),
+                            //                Config::object{{"k", 10}}),
                             std::make_tuple("IVFSQ",
                                             Config(),
                                             Config::object{{"nlist", 100}, {"nbits", 8}, {"metric_type", "L2"}},
@@ -560,6 +560,71 @@ TEST_F(GPURESTEST, copyandsearch) {
     search_thread.join();
     load_thread.join();
     tc.RecordSection("Copy&search total");
+}
+
+TEST_F(GPURESTEST, TrainAndSearch) {
+    index_type = "GPUIVFSQ";
+    //index_type = "GPUIVF";
+    const int train_count = 1;
+    const int search_count = 5000;
+
+    index_ = IndexFactory(index_type);
+    auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+    index_->set_preprocessor(preprocessor);
+    train_cfg = Config::object{{"gpu_id", device_id}, {"nlist", 1638}, {"nbits", 8}, {"metric_type", "L2"}};
+    auto model = index_->Train(base_dataset, train_cfg);
+    auto new_index = IndexFactory(index_type);
+    new_index->set_index_model(model);
+    new_index->Add(base_dataset, add_cfg);
+    auto cpu_idx = CopyGpuToCpu(new_index, Config());
+    cpu_idx->Seal();
+    auto search_idx = CopyCpuToGpu(cpu_idx, device_id, Config());
+
+    auto train_stage = [&] {
+        train_cfg = Config::object{{"gpu_id", device_id}, {"nlist", 1638}, {"nbits", 8}, {"metric_type", "L2"}};
+        for (int i = 0; i < train_count; ++i) {
+            auto model = index_->Train(base_dataset, train_cfg);
+            auto test_idx = IndexFactory(index_type);
+            test_idx->set_index_model(model);
+            test_idx->Add(base_dataset, add_cfg);
+        }
+    };
+    auto search_stage = [&](VectorIndexPtr& search_idx) {
+        search_cfg = Config::object{{"k", k}};
+        for (int i = 0; i < search_count; ++i) {
+            auto result = search_idx->Search(query_dataset, search_cfg);
+            AssertAnns(result, nq, k);
+        }
+    };
+
+    //TimeRecorder tc("record");
+    //train_stage();
+    //tc.RecordSection("train cost");
+    //search_stage(search_idx);
+    //tc.RecordSection("search cost");
+
+    {
+        // search and build parallel
+        std::thread search_thread(search_stage, std::ref(search_idx));
+        std::thread train_thread(train_stage);
+        train_thread.join();
+        search_thread.join();
+    }
+    {
+        // build parallel
+        std::thread train_1(train_stage);
+        std::thread train_2(train_stage);
+        train_1.join();
+        train_2.join();
+    }
+    {
+        // search parallel
+        auto search_idx_2 = CopyCpuToGpu(cpu_idx, device_id, Config());
+        std::thread search_1(search_stage, std::ref(search_idx));
+        std::thread search_2(search_stage, std::ref(search_idx_2));
+        search_1.join();
+        search_2.join();
+    }
 }
 
 
