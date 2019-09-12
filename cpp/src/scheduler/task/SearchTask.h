@@ -48,6 +48,8 @@ public:
     int index_type_ = 0;
     ExecutionEnginePtr index_engine_ = nullptr;
     bool metric_l2 = true;
+
+    static std::mutex merge_mutex_;
 };
 
 }
