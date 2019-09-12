@@ -23,7 +23,7 @@ namespace {
 GpuCacheMgr::GpuCacheMgr() {
     server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
 
-    int64_t cap = config.GetInt64Value(server::CONFIG_GPU_CACHE_CAPACITY, 2);
+    int64_t cap = config.GetInt64Value(server::CONFIG_GPU_CACHE_CAPACITY, 0);
     cap *= G_BYTE;
     cache_ = std::make_shared<Cache>(cap, 1UL<<32);
 
