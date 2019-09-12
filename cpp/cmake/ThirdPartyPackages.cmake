@@ -283,8 +283,8 @@ if(DEFINED ENV{MILVUS_BOOST_URL})
 else()
     string(REPLACE "." "_" BOOST_VERSION_UNDERSCORES ${BOOST_VERSION})
     set(BOOST_SOURCE_URL
-            "https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz"
-    )
+            "http://192.168.1.201/artifactory/generic-local/tools/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz")
+#            "https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz"
 endif()
 set(BOOST_MD5 "fea771fe8176828fabf9c09242ee8c26")
 
