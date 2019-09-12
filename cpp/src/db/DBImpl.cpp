@@ -424,6 +424,9 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
     scheduler.Schedule(context);
 
     context->WaitResult();
+    if (!context->GetStatus().ok()) {
+        return context->GetStatus();
+    }
 
     //step 3: print time cost information
     double load_cost = context->LoadCost();
