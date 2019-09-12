@@ -40,6 +40,5 @@ engine_config:
 resource_config:
   mode: simple
   resources:
-    - cpu
-#    - gpu0
-#    - gpu1
+#    - cpu
+    - gpu0
