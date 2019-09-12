@@ -94,6 +94,10 @@ class SchedulerTest : public testing::Test {
 protected:
     void
     SetUp() override {
+        constexpr int64_t cache_cap = 1024*1024*1024;
+        cache::GpuCacheMgr::GetInstance(0)->SetCapacity(cache_cap);
+        cache::GpuCacheMgr::GetInstance(1)->SetCapacity(cache_cap);
+
         ResourcePtr cpu = ResourceFactory::Create("cpu", "CPU", 0, true, false);
         ResourcePtr gpu_0 = ResourceFactory::Create("gpu0", "GPU", 0);
         ResourcePtr gpu_1 = ResourceFactory::Create("gpu1", "GPU", 1);
