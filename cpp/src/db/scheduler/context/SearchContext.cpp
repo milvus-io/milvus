@@ -50,6 +50,7 @@ void
 SearchContext::WaitResult() {
     std::unique_lock <std::mutex> lock(mtx_);
     done_cond_.wait(lock, [this] { return map_index_files_.empty(); });
+    SERVER_LOG_DEBUG << "SearchContext " << identity_ << " all done";
 }
 
 }

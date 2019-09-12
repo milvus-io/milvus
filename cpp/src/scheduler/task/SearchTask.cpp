@@ -152,10 +152,10 @@ XSearchTask::Execute() {
         return;
     }
 
-    ENGINE_LOG_DEBUG << "Searching in file id:" << index_id_ << " with "
+    ENGINE_LOG_DEBUG << "Searching in file id " << index_id_ << " with "
                      << search_contexts_.size() << " tasks";
 
-    server::TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
+    server::TimeRecorder rc("DoSearch file id " + std::to_string(index_id_));
 
     server::CollectDurationMetrics metrics(index_type_);
 
@@ -163,32 +163,37 @@ XSearchTask::Execute() {
     std::vector<float> output_distance;
     for (auto &context : search_contexts_) {
         //step 1: allocate memory
-        auto inner_k = context->topk();
+        auto nq = context->nq();
+        auto topk = context->topk();
         auto nprobe = context->nprobe();
-        output_ids.resize(inner_k * context->nq());
-        output_distance.resize(inner_k * context->nq());
+        auto vectors = context->vectors();
+
+        output_ids.resize(topk * nq);
+        output_distance.resize(topk * nq);
+        std::string hdr = "context " + context->Identity() +
+                          " nq " + std::to_string(nq) +
+                          " topk " + std::to_string(topk);
 
         try {
             //step 2: search
-            index_engine_->Search(context->nq(), context->vectors(), inner_k, nprobe, output_distance.data(),
-                                  output_ids.data());
+            index_engine_->Search(nq, vectors, topk, nprobe, output_distance.data(), output_ids.data());
 
-            double span = rc.RecordSection("do search for context:" + context->Identity());
+            double span = rc.RecordSection(hdr + ", do search");
             context->AccumSearchCost(span);
 
 
             //step 3: cluster result
             SearchContext::ResultSet result_set;
-            auto spec_k = index_engine_->Count() < context->topk() ? index_engine_->Count() : context->topk();
-            XSearchTask::ClusterResult(output_ids, output_distance, context->nq(), spec_k, result_set);
+            auto spec_k = index_engine_->Count() < topk ? index_engine_->Count() : topk;
+            XSearchTask::ClusterResult(output_ids, output_distance, nq, spec_k, result_set);
 
-            span = rc.RecordSection("cluster result for context:" + context->Identity());
+            span = rc.RecordSection(hdr + ", cluster result");
             context->AccumReduceCost(span);
 
             // step 4: pick up topk result
-            XSearchTask::TopkResult(result_set, inner_k, metric_l2, context->GetResult());
+            XSearchTask::TopkResult(result_set, topk, metric_l2, context->GetResult());
 
-            span = rc.RecordSection("reduce topk for context:" + context->Identity());
+            span = rc.RecordSection(hdr + ", reduce topk");
             context->AccumReduceCost(span);
         } catch (std::exception &ex) {
             ENGINE_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
