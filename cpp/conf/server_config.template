@@ -36,44 +36,7 @@ engine_config:
   use_blas_threshold: 20
 
 resource_config:
-  # resource list, length: 0~N
-  # please set a DISK resource and a CPU resource least, or system will not return query result.
-  #
-  # example:
-  # resource_name:               # resource name, just using in connections below
-  #   type: DISK                 # resource type, optional: DISK/CPU/GPU
-  #   device_id: 0
-  #   enable_executor: false     # if is enable executor, optional: true, false
-
+  mode: simple
   resources:
-    ssda:
-      type: DISK
-      device_id: 0
-      enable_executor: false
-
-    cpu:
-      type: CPU
-      device_id: 0
-      enable_executor: true
-
-    gpu0:
-      type: GPU
-      device_id: 0
-      enable_executor: false
-      gpu_resource_num: 2
-      pinned_memory: 300
-      temp_memory: 300
-
-  # connection list, length: 0~N
-  # example:
-  # connection_name:
-  #   speed: 100                                        # unit: MS/s
-  #   endpoint: ${resource_name}===${resource_name}
-  connections:
-    io:
-      speed: 500
-      endpoint: ssda===cpu
-    pcie0:
-      speed: 11000
-      endpoint: cpu===gpu0
-
+#    - cpu
+    - gpu0
