@@ -20,7 +20,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <src/scheduler/SchedInst.h>
-#include "knowhere/index/vector_index/gpu_ivf.h"
+#include "wrapper/knowhere/KnowhereResource.h"
 
 #include "metrics/Metrics.h"
 #include "DBWrapper.h"
@@ -250,6 +250,7 @@ Server::LoadConfig() {
 
 void
 Server::StartService() {
+    engine::KnowhereResource::Initialize();
     engine::StartSchedulerService();
     DBWrapper::GetInstance().StartService();
     grpc::GrpcMilvusServer::StartService();
@@ -260,7 +261,7 @@ Server::StopService() {
     grpc::GrpcMilvusServer::StopService();
     DBWrapper::GetInstance().StopService();
     engine::StopSchedulerService();
-    knowhere::FaissGpuResourceMgr::GetInstance().Free(); // free gpu resource.
+    engine::KnowhereResource::Finalize();
 }
 
 }
