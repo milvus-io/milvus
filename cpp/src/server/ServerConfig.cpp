@@ -86,11 +86,12 @@ ErrorCode ServerConfig::ValidateConfig() {
 ErrorCode
 ServerConfig::CheckServerConfig() {
 /*
-    server_config:
-    address: 0.0.0.0            # milvus server ip address
-    port: 19530                 # the port milvus listen to, default: 19530, range: 1025 ~ 65534
-    gpu_index: 0                # the gpu milvus use, default: 0, range: 0 ~ gpu number - 1
-    mode: single                # milvus deployment type: single, cluster, read_only
+  server_config:
+  address: 0.0.0.0            # milvus server ip address (IPv4)
+  port: 19530                 # the port milvus listen to, default: 19530, range: 1025 ~ 65534
+  mode: single                # milvus deployment type: single, cluster, read_only
+  time_zone: UTC+8            # Use the UTC-x or UTC+x to specify a time zone. eg. UTC+8 for China Standard Time
+
 */
     bool okay = true;
     ConfigNode server_config = GetConfig(CONFIG_SERVER);
@@ -144,20 +145,20 @@ ServerConfig::CheckServerConfig() {
 ErrorCode
 ServerConfig::CheckDBConfig() {
 /*
-    db_config:
-    db_path: @MILVUS_DB_PATH@             # milvus data storage path
-    db_slave_path:                        # secondry data storage path, split by semicolon
-    parallel_reduce: false                # use multi-threads to reduce topk result
+  db_config:
+  db_path: @MILVUS_DB_PATH@             # milvus data storage path
+  db_slave_path:                        # secondry data storage path, split by semicolon
 
-    # URI format: dialect://username:password@host:port/database
-    # All parts except dialect are optional, but you MUST include the delimiters
-    # Currently dialect supports mysql or sqlite
-    db_backend_url: sqlite://:@:/
+  # URI format: dialect://username:password@host:port/database
+  # All parts except dialect are optional, but you MUST include the delimiters
+  # Currently dialect supports mysql or sqlite
+  db_backend_url: sqlite://:@:/
 
-    archive_disk_threshold: 0        # triger archive action if storage size exceed this value, 0 means no limit, unit: GB
-    archive_days_threshold: 0        # files older than x days will be archived, 0 means no limit, unit: day
-    insert_buffer_size: 4            # maximum insert buffer size allowed, default: 4, unit: GB, should be at least 1 GB.
-    # the sum of insert_buffer_size and cpu_cache_capacity should be less than total memory, unit: GB
+  archive_disk_threshold: 0        # triger archive action if storage size exceed this value, 0 means no limit, unit: GB
+  archive_days_threshold: 0        # files older than x days will be archived, 0 means no limit, unit: day
+  insert_buffer_size: 4            # maximum insert buffer size allowed, default: 4, unit: GB, should be at least 1 GB.
+                                   # the sum of insert_buffer_size and cpu_cache_capacity should be less than total memory, unit: GB
+  build_index_gpu: 0               # which gpu is used to build index, default: 0, range: 0 ~ gpu number - 1
 */
     bool okay = true;
     ConfigNode db_config = GetConfig(CONFIG_DB);
@@ -249,15 +250,13 @@ ServerConfig::CheckMetricConfig() {
 ErrorCode
 ServerConfig::CheckCacheConfig() {
 /*
-    cache_config:
-    cpu_cache_capacity: 16            # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory
-    cpu_cache_free_percent: 0.85      # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
-    insert_cache_immediately: false   # insert data will be load into cache immediately for hot query
-    gpu_cache_capacity: 5             # how many memory are used as cache in gpu, unit: GB, RANGE: 0 ~ less than total memory
-    gpu_cache_free_percent: 0.85      # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
-    gpu_ids:                          # gpu id
-    - 0
-    - 1
+  cache_config:
+  cpu_cache_capacity: 16            # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory
+  cpu_cache_free_percent: 0.85      # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
+  insert_cache_immediately: false   # insert data will be load into cache immediately for hot query
+  gpu_cache_capacity: 5             # how many memory are used as cache in gpu, unit: GB, RANGE: 0 ~ less than total memory
+  gpu_cache_free_percent: 0.85      # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
+
 */
     bool okay = true;
     ConfigNode cache_config = GetConfig(CONFIG_CACHE);
@@ -379,48 +378,47 @@ ServerConfig::CheckEngineConfig() {
 ErrorCode
 ServerConfig::CheckResourceConfig() {
 /*
+  resource_config:
+  # resource list, length: 0~N
+  # please set a DISK resource and a CPU resource least, or system will not return query result.
+  #
+  # example:
+  # resource_name:               # resource name, just using in connections below
+  #   type: DISK                 # resource type, optional: DISK/CPU/GPU
+  #   device_id: 0
+  #   enable_executor: false     # if is enable executor, optional: true, false
 
-    resource_config:
-    # resource list, length: 0~N
-    # please set a DISK resource and a CPU resource least, or system will not return query result.
-    #
-      # example:
-    # resource_name:               # resource name, just using in connections below
-    #   type: DISK                 # resource type, optional: DISK/CPU/GPU
-    #   device_id: 0
-    #   enable_executor: false     # if is enable executor, optional: true, false
-
-    resources:
+  resources:
     ssda:
-    type: DISK
-    device_id: 0
-    enable_executor: false
+      type: DISK
+      device_id: 0
+      enable_executor: false
 
     cpu:
-    type: CPU
-    device_id: 0
-    enable_executor: false
+      type: CPU
+      device_id: 0
+      enable_executor: true
 
     gpu0:
-    type: GPU
-    device_id: 0
-    enable_executor: true
-    gpu_resource_num: 2
-    pinned_memory: 300
-    temp_memory: 300
+      type: GPU
+      device_id: 0
+      enable_executor: false
+      gpu_resource_num: 2
+      pinned_memory: 300
+      temp_memory: 300
 
-    # connection list, length: 0~N
-    # example:
-    # connection_name:
-    #   speed: 100                                        # unit: MS/s
-    #   endpoint: ${resource_name}===${resource_name}
-    connections:
+  # connection list, length: 0~N
+  # example:
+  # connection_name:
+  #   speed: 100                                        # unit: MS/s
+  #   endpoint: ${resource_name}===${resource_name}
+  connections:
     io:
-    speed: 500
-    endpoint: ssda===cpu
+      speed: 500
+      endpoint: ssda===cpu
     pcie0:
-    speed: 11000
-    endpoint: cpu===gpu0
+      speed: 11000
+      endpoint: cpu===gpu0
 */
     bool okay = true;
     server::ConfigNode resource_config = GetConfig(CONFIG_RESOURCE);
