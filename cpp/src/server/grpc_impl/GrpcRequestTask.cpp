@@ -672,7 +672,7 @@ SearchTask::OnExecute() {
 
         rc.RecordSection("search vectors from engine");
         if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+            return SetError(stat.code(), stat.ToString());
         }
 
         if (results.empty()) {
