@@ -377,6 +377,32 @@ ServerConfig::CheckEngineConfig() {
 
 ErrorCode
 ServerConfig::CheckResourceConfig() {
+    /*
+      resource_config:
+        mode: simple
+        resources:
+          - cpu
+          - gpu0
+          - gpu100
+     */
+    bool okay = true;
+    server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
+    auto mode = config.GetValue("mode", "simple");
+    if (mode != "simple") {
+        std::cerr << "ERROR: invalid resource config: mode is " << mode << std::endl;
+        okay = false;
+    }
+    auto resources = config.GetSequence("resources");
+    if (resources.empty()) {
+        std::cerr << "ERROR: invalid resource config: resources empty" << std::endl;
+        okay = false;
+    }
+
+    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
+}
+
+//ErrorCode
+//ServerConfig::CheckResourceConfig() {
 /*
   resource_config:
   # resource list, length: 0~N
@@ -420,142 +446,143 @@ ServerConfig::CheckResourceConfig() {
       speed: 11000
       endpoint: cpu===gpu0
 */
-    bool okay = true;
-    server::ConfigNode resource_config = GetConfig(CONFIG_RESOURCE);
-    if (resource_config.GetChildren().empty()) {
-        std::cerr << "ERROR: no context under resource" << std::endl;
-        okay = false;
-    }
-
-    auto resources = resource_config.GetChild(CONFIG_RESOURCES).GetChildren();
-
-    if (resources.empty()) {
-        std::cerr << "no resources specified" << std::endl;
-        okay = false;
-    }
-
-    bool resource_valid_flag = false;
-    bool hasDisk = false;
-    bool hasCPU = false;
-    bool hasExecutor = false;
-    std::set<std::string> resource_list;
-    for (auto &resource : resources) {
-        resource_list.emplace(resource.first);
-        auto &resource_conf = resource.second;
-        auto type = resource_conf.GetValue(CONFIG_RESOURCE_TYPE);
-
-        std::string device_id_str = resource_conf.GetValue(CONFIG_RESOURCE_DEVICE_ID, "0");
-        int32_t device_id = -1;
-        if (ValidationUtil::ValidateStringIsNumber(device_id_str) != SERVER_SUCCESS) {
-            std::cerr << "ERROR: device_id " << device_id_str << " is not a number" << std::endl;
-            okay = false;
-        } else {
-            device_id = std::stol(device_id_str);
-        }
-
-        std::string enable_executor_str = resource_conf.GetValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, "off");
-        if (ValidationUtil::ValidateStringIsBool(enable_executor_str) != SERVER_SUCCESS) {
-            std::cerr << "ERROR: invalid enable_executor config: " << enable_executor_str << std::endl;
-            okay = false;
-        }
-
-        if (type == "DISK") {
-            hasDisk = true;
-        } else if (type == "CPU") {
-            hasCPU = true;
-            if (resource_conf.GetBoolValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, false)) {
-                hasExecutor = true;
-            }
-        }
-        else if (type == "GPU") {
-            int build_index_gpu_index = GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_BUILD_INDEX_GPU, 0);
-            if (device_id == build_index_gpu_index) {
-                resource_valid_flag = true;
-            }
-            if (resource_conf.GetBoolValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, false)) {
-                hasExecutor = true;
-            }
-            std::string gpu_resource_num_str = resource_conf.GetValue(CONFIG_RESOURCE_NUM, "2");
-            if (ValidationUtil::ValidateStringIsNumber(gpu_resource_num_str) != SERVER_SUCCESS) {
-                std::cerr << "ERROR: gpu_resource_num " << gpu_resource_num_str << " is not a number" << std::endl;
-                okay = false;
-            }
-            bool mem_valid = true;
-            std::string pinned_memory_str = resource_conf.GetValue(CONFIG_RESOURCE_PIN_MEMORY, "300");
-            if (ValidationUtil::ValidateStringIsNumber(pinned_memory_str) != SERVER_SUCCESS) {
-                std::cerr << "ERROR: pinned_memory " << pinned_memory_str << " is not a number" << std::endl;
-                okay = false;
-                mem_valid = false;
-            }
-            std::string temp_memory_str = resource_conf.GetValue(CONFIG_RESOURCE_TEMP_MEMORY, "300");
-            if (ValidationUtil::ValidateStringIsNumber(temp_memory_str) != SERVER_SUCCESS) {
-                std::cerr << "ERROR: temp_memory " << temp_memory_str << " is not a number" << std::endl;
-                okay = false;
-                mem_valid = false;
-            }
-            if (mem_valid) {
-                size_t gpu_memory;
-                if (ValidationUtil::GetGpuMemory(device_id, gpu_memory) != SERVER_SUCCESS) {
-                    std::cerr << "ERROR: could not get gpu memory for device " << device_id << std::endl;
-                    okay = false;
-                }
-                else {
-                    size_t prealoc_mem = std::stol(pinned_memory_str) + std::stol(temp_memory_str);
-                    if (prealoc_mem >= gpu_memory) {
-                        std::cerr << "ERROR: sum of pinned_memory and temp_memory " << prealoc_mem
-                                  << " exceeds total gpu memory " << gpu_memory << " for device " << device_id << std::endl;
-                        okay = false;
-                    }
-                }
-            }
-        }
-    }
-
-    if (!resource_valid_flag) {
-        std::cerr << "Building index GPU can't be found in resource config." << std::endl;
-        okay = false;
-    }
-    if (!hasDisk || !hasCPU) {
-        std::cerr << "No DISK or CPU resource" << std::endl;
-        okay = false;
-    }
-    if (!hasExecutor) {
-        std::cerr << "No CPU or GPU resource has executor enabled" << std::endl;
-        okay = false;
-    }
-
-    auto connections = resource_config.GetChild(CONFIG_RESOURCE_CONNECTIONS).GetChildren();
-    for (auto &connection : connections) {
-        auto &connection_conf = connection.second;
-
-        std::string speed_str = connection_conf.GetValue(CONFIG_SPEED_CONNECTIONS);
-        if (ValidationUtil::ValidateStringIsNumber(speed_str) != SERVER_SUCCESS) {
-            std::cerr << "ERROR: speed " << speed_str << " is not a number" << std::endl;
-            okay = false;
-        }
-
-        std::string endpoint_str = connection_conf.GetValue(CONFIG_ENDPOINT_CONNECTIONS);
-        std::string delimiter = "===";
-        auto delimiter_pos = endpoint_str.find(delimiter);
-        if (delimiter_pos == std::string::npos) {
-            std::cerr << "ERROR: invalid endpoint format: " << endpoint_str << std::endl;
-            okay = false;
-        } else {
-            std::string left_resource = endpoint_str.substr(0, delimiter_pos);
-            if (resource_list.find(left_resource) == resource_list.end()) {
-                std::cerr << "ERROR: left resource " << left_resource << " does not exist" << std::endl;
-                okay = false;
-            }
-            std::string right_resource = endpoint_str.substr(delimiter_pos + delimiter.length(), endpoint_str.length());
-            if (resource_list.find(right_resource) == resource_list.end()) {
-                std::cerr << "ERROR: right resource " << right_resource << " does not exist" << std::endl;
-                okay = false;
-            }
-        }
-    }
-
-    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
-}
+//    bool okay = true;
+//    server::ConfigNode resource_config = GetConfig(CONFIG_RESOURCE);
+//    if (resource_config.GetChildren().empty()) {
+//        std::cerr << "ERROR: no context under resource" << std::endl;
+//        okay = false;
+//    }
+//
+//    auto resources = resource_config.GetChild(CONFIG_RESOURCES).GetChildren();
+//
+//    if (resources.empty()) {
+//        std::cerr << "no resources specified" << std::endl;
+//        okay = false;
+//    }
+//
+//    bool resource_valid_flag = false;
+//    bool hasDisk = false;
+//    bool hasCPU = false;
+//    bool hasExecutor = false;
+//    std::set<std::string> resource_list;
+//    for (auto &resource : resources) {
+//        resource_list.emplace(resource.first);
+//        auto &resource_conf = resource.second;
+//        auto type = resource_conf.GetValue(CONFIG_RESOURCE_TYPE);
+//
+//        std::string device_id_str = resource_conf.GetValue(CONFIG_RESOURCE_DEVICE_ID, "0");
+//        int32_t device_id = -1;
+//        if (ValidationUtil::ValidateStringIsNumber(device_id_str) != SERVER_SUCCESS) {
+//            std::cerr << "ERROR: device_id " << device_id_str << " is not a number" << std::endl;
+//            okay = false;
+//        } else {
+//            device_id = std::stol(device_id_str);
+//        }
+//
+//        std::string enable_executor_str = resource_conf.GetValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, "off");
+//        if (ValidationUtil::ValidateStringIsBool(enable_executor_str) != SERVER_SUCCESS) {
+//            std::cerr << "ERROR: invalid enable_executor config: " << enable_executor_str << std::endl;
+//            okay = false;
+//        }
+//
+//        if (type == "DISK") {
+//            hasDisk = true;
+//        } else if (type == "CPU") {
+//            hasCPU = true;
+//            if (resource_conf.GetBoolValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, false)) {
+//                hasExecutor = true;
+//            }
+//        }
+//        else if (type == "GPU") {
+//            int build_index_gpu_index = GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_BUILD_INDEX_GPU, 0);
+//            if (device_id == build_index_gpu_index) {
+//                resource_valid_flag = true;
+//            }
+//            if (resource_conf.GetBoolValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, false)) {
+//                hasExecutor = true;
+//            }
+//            std::string gpu_resource_num_str = resource_conf.GetValue(CONFIG_RESOURCE_NUM, "2");
+//            if (ValidationUtil::ValidateStringIsNumber(gpu_resource_num_str) != SERVER_SUCCESS) {
+//                std::cerr << "ERROR: gpu_resource_num " << gpu_resource_num_str << " is not a number" << std::endl;
+//                okay = false;
+//            }
+//            bool mem_valid = true;
+//            std::string pinned_memory_str = resource_conf.GetValue(CONFIG_RESOURCE_PIN_MEMORY, "300");
+//            if (ValidationUtil::ValidateStringIsNumber(pinned_memory_str) != SERVER_SUCCESS) {
+//                std::cerr << "ERROR: pinned_memory " << pinned_memory_str << " is not a number" << std::endl;
+//                okay = false;
+//                mem_valid = false;
+//            }
+//            std::string temp_memory_str = resource_conf.GetValue(CONFIG_RESOURCE_TEMP_MEMORY, "300");
+//            if (ValidationUtil::ValidateStringIsNumber(temp_memory_str) != SERVER_SUCCESS) {
+//                std::cerr << "ERROR: temp_memory " << temp_memory_str << " is not a number" << std::endl;
+//                okay = false;
+//                mem_valid = false;
+//            }
+//            if (mem_valid) {
+//                size_t gpu_memory;
+//                if (ValidationUtil::GetGpuMemory(device_id, gpu_memory) != SERVER_SUCCESS) {
+//                    std::cerr << "ERROR: could not get gpu memory for device " << device_id << std::endl;
+//                    okay = false;
+//                }
+//                else {
+//                    size_t prealoc_mem = std::stol(pinned_memory_str) + std::stol(temp_memory_str);
+//                    if (prealoc_mem >= gpu_memory) {
+//                        std::cerr << "ERROR: sum of pinned_memory and temp_memory " << prealoc_mem
+//                                  << " exceeds total gpu memory " << gpu_memory << " for device " << device_id << std::endl;
+//                        okay = false;
+//                    }
+//                }
+//            }
+//        }
+//    }
+//
+//    if (!resource_valid_flag) {
+//        std::cerr << "Building index GPU can't be found in resource config." << std::endl;
+//        okay = false;
+//    }
+//    if (!hasDisk || !hasCPU) {
+//        std::cerr << "No DISK or CPU resource" << std::endl;
+//        okay = false;
+//    }
+//    if (!hasExecutor) {
+//        std::cerr << "No CPU or GPU resource has executor enabled" << std::endl;
+//        okay = false;
+//    }
+//
+//    auto connections = resource_config.GetChild(CONFIG_RESOURCE_CONNECTIONS).GetChildren();
+//    for (auto &connection : connections) {
+//        auto &connection_conf = connection.second;
+//
+//        std::string speed_str = connection_conf.GetValue(CONFIG_SPEED_CONNECTIONS);
+//        if (ValidationUtil::ValidateStringIsNumber(speed_str) != SERVER_SUCCESS) {
+//            std::cerr << "ERROR: speed " << speed_str << " is not a number" << std::endl;
+//            okay = false;
+//        }
+//
+//        std::string endpoint_str = connection_conf.GetValue(CONFIG_ENDPOINT_CONNECTIONS);
+//        std::string delimiter = "===";
+//        auto delimiter_pos = endpoint_str.find(delimiter);
+//        if (delimiter_pos == std::string::npos) {
+//            std::cerr << "ERROR: invalid endpoint format: " << endpoint_str << std::endl;
+//            okay = false;
+//        } else {
+//            std::string left_resource = endpoint_str.substr(0, delimiter_pos);
+//            if (resource_list.find(left_resource) == resource_list.end()) {
+//                std::cerr << "ERROR: left resource " << left_resource << " does not exist" << std::endl;
+//                okay = false;
+//            }
+//            std::string right_resource = endpoint_str.substr(delimiter_pos + delimiter.length(), endpoint_str.length());
+//            if (resource_list.find(right_resource) == resource_list.end()) {
+//                std::cerr << "ERROR: right resource " << right_resource << " does not exist" << std::endl;
+//                okay = false;
+//            }
+//        }
+//    }
+//
+//    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
+//    return SERVER_SUCCESS;
+//}
 
 void
 ServerConfig::PrintAll() const {
