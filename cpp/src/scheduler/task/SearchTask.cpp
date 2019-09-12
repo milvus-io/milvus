@@ -163,10 +163,10 @@ XSearchTask::Execute() {
     std::vector<float> output_distance;
     for (auto &context : search_contexts_) {
         //step 1: allocate memory
-        auto nq = context->nq();
-        auto topk = context->topk();
-        auto nprobe = context->nprobe();
-        auto vectors = context->vectors();
+        uint64_t nq = context->nq();
+        uint64_t topk = context->topk();
+        uint64_t nprobe = context->nprobe();
+        const float* vectors = context->vectors();
 
         output_ids.resize(topk * nq);
         output_distance.resize(topk * nq);
