@@ -152,10 +152,10 @@ XSearchTask::Execute() {
         return;
     }
 
-    ENGINE_LOG_DEBUG << "Searching in file id " << index_id_ << " with "
+    ENGINE_LOG_DEBUG << "Searching in file id:" << index_id_ << " with "
                      << search_contexts_.size() << " tasks";
 
-    server::TimeRecorder rc("DoSearch file id " + std::to_string(index_id_));
+    server::TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
 
     server::CollectDurationMetrics metrics(index_type_);
 
@@ -163,16 +163,16 @@ XSearchTask::Execute() {
     std::vector<float> output_distance;
     for (auto &context : search_contexts_) {
         //step 1: allocate memory
-        auto nq = context->nq();
-        auto topk = context->topk();
-        auto nprobe = context->nprobe();
-        auto vectors = context->vectors();
+        uint64_t nq = context->nq();
+        uint64_t topk = context->topk();
+        uint64_t nprobe = context->nprobe();
+        const float* vectors = context->vectors();
 
         output_ids.resize(topk * nq);
         output_distance.resize(topk * nq);
         std::string hdr = "context " + context->Identity() +
-                          " nq " + std::to_string(nq) +
-                          " topk " + std::to_string(topk);
+            " nq " + std::to_string(nq) +
+            " topk " + std::to_string(topk);
 
         try {
             //step 2: search
