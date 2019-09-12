@@ -24,6 +24,7 @@ StartSchedulerService() {
     try {
         server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
 
+        //TODO: change const char * to standard
         if (config.GetChildren().empty()) throw "resource_config null exception";
 
         auto resources = config.GetChild(server::CONFIG_RESOURCES).GetChildren();
@@ -80,15 +81,17 @@ StartSchedulerService() {
             auto connection = Connection(connect_name, connect_speed);
             ResMgrInst::GetInstance()->Connect(left, right, connection);
         }
+        ResMgrInst::GetInstance()->Start();
+        SchedInst::GetInstance()->Start();
     } catch (const char* msg) {
         SERVER_LOG_ERROR << msg;
+        std::cerr << msg << std::endl;
+        std::cerr << "Milvus server shut down!" << std::endl;
         // TODO: throw exception instead
         exit(-1);
 //        throw std::exception();
     }
 
-    ResMgrInst::GetInstance()->Start();
-    SchedInst::GetInstance()->Start();
 }
 
 void
