@@ -148,7 +148,6 @@ void
 StartSchedulerService() {
     load_simple_config();
 //    load_advance_config();
-
     ResMgrInst::GetInstance()->Start();
     SchedInst::GetInstance()->Start();
 }

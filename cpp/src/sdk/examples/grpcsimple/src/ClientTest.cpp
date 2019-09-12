@@ -22,10 +22,10 @@ std::string GetTableName();
 
 const std::string TABLE_NAME = GetTableName();
 constexpr int64_t TABLE_DIMENSION = 512;
-constexpr int64_t TABLE_INDEX_FILE_SIZE = 768;
+constexpr int64_t TABLE_INDEX_FILE_SIZE = 1024;
 constexpr int64_t BATCH_ROW_COUNT = 100000;
 constexpr int64_t NQ = 100;
-constexpr int64_t TOP_K = 10;
+constexpr int64_t TOP_K = 1;
 constexpr int64_t SEARCH_TARGET = 5000; //change this value, result is different
 constexpr int64_t ADD_VECTOR_LOOP = 1;
 constexpr int64_t SECONDS_EACH_HOUR = 3600;
@@ -283,14 +283,14 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         int64_t row_count = 0;
         Status stat = conn->CountTable(TABLE_NAME, row_count);
         std::cout << TABLE_NAME << "(" << row_count << " rows)" << std::endl;
-        DoSearch(conn, search_record_array, "Search without index");
+//        DoSearch(conn, search_record_array, "Search without index");
     }
 
     {//wait unit build index finish
         std::cout << "Wait until create all index done" << std::endl;
         IndexParam index;
         index.table_name = TABLE_NAME;
-        index.index_type = IndexType::gpu_ivfflat;
+        index.index_type = IndexType::gpu_ivfsq8;
         index.nlist = 16384;
         Status stat = conn->CreateIndex(index);
         std::cout << "CreateIndex function call status: " << stat.ToString() << std::endl;
@@ -306,7 +306,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//search vectors after build index finish
-        DoSearch(conn, search_record_array, "Search after build index finish");
+        for (uint64_t i = 0; i < 5; ++i) {
+            DoSearch(conn, search_record_array, "Search after build index finish");
+        }
 //        std::cout << conn->DumpTaskTables() << std::endl;
     }
 
@@ -338,7 +340,6 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "Server status before disconnect: " << status << std::endl;
     }
     Connection::Destroy(conn);
-//    conn->Disconnect();
     {//server status
         std::string status = conn->ServerStatus();
         std::cout << "Server status after disconnect: " << status << std::endl;
