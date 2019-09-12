@@ -2,7 +2,17 @@
 
 Please mark all change in change log and use the ticket from JIRA.
 
-# Milvus 0.4.0 (2019-07-28)
+# Milvus 0.5.0 (TODO)
+
+## Bug
+
+## Improvement
+
+## New Feature
+
+## Task
+
+# Milvus 0.4.0 (2019-09-12)
 
 ## Bug
 - MS-119 - The problem of combining the log files
