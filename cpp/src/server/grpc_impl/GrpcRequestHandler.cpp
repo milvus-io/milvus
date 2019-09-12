@@ -97,12 +97,9 @@ GrpcRequestHandler::SearchInFiles(::grpc::ServerContext *context,
     BaseTaskPtr task_ptr = SearchTask::Create(request_mutable->mutable_search_param(), file_id_array, response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
-    if (grpc_status.error_code() != SERVER_SUCCESS) {
-        ::grpc::Status status(::grpc::INVALID_ARGUMENT, grpc_status.reason());
-        return status;
-    } else {
-        return ::grpc::Status::OK;
-    }
+    response->mutable_status()->set_error_code(grpc_status.error_code());
+    response->mutable_status()->set_reason(grpc_status.reason());
+    return ::grpc::Status::OK;
 }
 
 ::grpc::Status
