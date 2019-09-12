@@ -14,6 +14,7 @@
 #include "GrpcMilvusServer.h"
 #include "db/Utils.h"
 #include "scheduler/SchedInst.h"
+//#include <gperftools/profiler.h>
 
 #include "src/server/Server.h"
 
@@ -411,7 +412,6 @@ InsertTask::InsertTask(const ::milvus::grpc::InsertParam *insert_param,
     : GrpcBaseTask(DDL_DML_TASK_GROUP),
       insert_param_(insert_param),
       record_ids_(record_ids) {
-    record_ids_->Clear();
 }
 
 BaseTaskPtr
@@ -474,8 +474,7 @@ InsertTask::OnExecute() {
         rc.RecordSection("check validation");
 
 #ifdef MILVUS_ENABLE_PROFILING
-        std::string fname = "/tmp/insert_" + std::to_string(this->record_array_.size()) +
-                            "_" + GetCurrTimeStr() + ".profiling";
+        std::string fname = "/tmp/insert_" + std::to_string(this->insert_param_->row_record_array_size()) + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
 
@@ -572,7 +571,11 @@ SearchTask::Create(const ::milvus::grpc::SearchParam *search_vector_infos,
 ErrorCode
 SearchTask::OnExecute() {
     try {
-        TimeRecorder rc("SearchTask");
+        int64_t top_k = search_param_->topk();
+        int64_t nprobe = search_param_->nprobe();
+
+        std::string hdr = "SearchTask(k=" + std::to_string(top_k) + ", nprob=" + std::to_string(nprobe) + ")";
+        TimeRecorder rc(hdr);
 
         //step 1: check table name
         std::string table_name_ = search_param_->table_name();
@@ -594,13 +597,11 @@ SearchTask::OnExecute() {
         }
 
         //step 3: check search parameter
-        int64_t top_k = search_param_->topk();
         res = ValidationUtil::ValidateSearchTopk(top_k, table_info);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid topk: " + std::to_string(top_k));
         }
 
-        int64_t nprobe = search_param_->nprobe();
         res = ValidationUtil::ValidateSearchNprobe(nprobe, table_info);
         if (res != SERVER_SUCCESS) {
             return SetError(res, "Invalid nprobe: " + std::to_string(nprobe));
@@ -626,12 +627,6 @@ SearchTask::OnExecute() {
 
         double span_check = rc.RecordSection("check validation");
 
-#ifdef MILVUS_ENABLE_PROFILING
-        std::string fname = "/tmp/search_nq_" + std::to_string(this->record_array_.size()) +
-                            "_top_" + std::to_string(this->top_k_) + "_" +
-                            GetCurrTimeStr() + ".profiling";
-        ProfilerStart(fname.c_str());
-#endif
 
         //step 5: prepare float data
         auto record_array_size = search_param_->query_record_array_size();
@@ -658,6 +653,11 @@ SearchTask::OnExecute() {
         engine::QueryResults results;
         auto record_count = (uint64_t) search_param_->query_record_array().size();
 
+#ifdef MILVUS_ENABLE_PROFILING
+        std::string fname = "/tmp/search_nq_" + std::to_string(this->search_param_->query_record_array_size()) + ".profiling";
+        ProfilerStart(fname.c_str());
+#endif
+
         if (file_id_array_.empty()) {
             stat = DBWrapper::DB()->Query(table_name_, (size_t) top_k, record_count, nprobe, vec_f.data(),
                                           dates, results);
@@ -665,6 +665,10 @@ SearchTask::OnExecute() {
             stat = DBWrapper::DB()->Query(table_name_, file_id_array_, (size_t) top_k,
                                           record_count, nprobe, vec_f.data(), dates, results);
         }
+
+#ifdef MILVUS_ENABLE_PROFILING
+        ProfilerStop();
+#endif
 
         rc.RecordSection("search vectors from engine");
         if (!stat.ok()) {
@@ -690,10 +694,6 @@ SearchTask::OnExecute() {
                 grpc_result->set_distance(pair.second);
             }
         }
-
-#ifdef MILVUS_ENABLE_PROFILING
-        ProfilerStop();
-#endif
 
         //step 8: print time cost percent
         rc.RecordSection("construct result and send");
@@ -831,9 +831,7 @@ DeleteByRangeTask::OnExecute() {
         }
 
 #ifdef MILVUS_ENABLE_PROFILING
-        std::string fname = "/tmp/search_nq_" + std::to_string(this->record_array_.size()) +
-                            "_top_" + std::to_string(this->top_k_) + "_" +
-                            GetCurrTimeStr() + ".profiling";
+        std::string fname = "/tmp/search_nq_" + this->delete_by_range_param_->table_name() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
         engine::Status status = DBWrapper::DB()->DeleteTable(table_name, dates);
