@@ -79,5 +79,5 @@ install(TARGETS test_idmap DESTINATION unittest)
 install(TARGETS test_kdt DESTINATION unittest)
 
 #add_subdirectory(faiss_ori)
-add_subdirectory(test_nsg)
+#add_subdirectory(test_nsg)
 

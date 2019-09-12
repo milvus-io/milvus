@@ -65,14 +65,21 @@ class RpcHandlerTest : public testing::Test {
         ConfigNode &cache_config = ServerConfig::GetInstance().GetConfig(CONFIG_CACHE);
         cache_config.SetValue(CONFIG_INSERT_CACHE_IMMEDIATELY, "");
 
-        ConfigNode &serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
-        serverConfig.SetValue(CONFIG_CLUSTER_MODE, "single");
-
         ConfigNode &engine_config = ServerConfig::GetInstance().GetConfig(CONFIG_ENGINE);
         engine_config.SetValue(CONFIG_OMP_THREAD_NUM, "");
 
+        ConfigNode &serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
+//        serverConfig.SetValue(CONFIG_CLUSTER_MODE, "cluster");
+//        DBWrapper::GetInstance().GetInstance().StartService();
+//        DBWrapper::GetInstance().GetInstance().StopService();
+//
+//        serverConfig.SetValue(CONFIG_CLUSTER_MODE, "read_only");
+//        DBWrapper::GetInstance().GetInstance().StartService();
+//        DBWrapper::GetInstance().GetInstance().StopService();
 
+        serverConfig.SetValue(CONFIG_CLUSTER_MODE, "single");
         DBWrapper::GetInstance().GetInstance().StartService();
+
         //initialize handler, create table
         handler = std::make_shared<GrpcRequestHandler>();
         ::grpc::ServerContext context;
@@ -222,11 +229,6 @@ TEST_F(RpcHandlerTest, SearchTest) {
     request.set_nprobe(32);
     handler->Search(&context, &request, &response);
 
-    //test search with range
-    ::milvus::grpc::Range *range = request.mutable_query_range_array()->Add();
-    range->set_start_value(CurrentTmDate(-2));
-    range->set_end_value(CurrentTmDate(-3));
-
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
     ::milvus::grpc::InsertParam insert_param;
@@ -240,8 +242,8 @@ TEST_F(RpcHandlerTest, SearchTest) {
     insert_param.set_table_name(TABLE_NAME);
     ::milvus::grpc::VectorIds vector_ids;
     handler->Insert(&context, &insert_param, &vector_ids);
+    sleep(7);
 
-    record_array.clear();
     BuildVectors(0, 10, record_array);
     for (auto &record : record_array) {
         ::milvus::grpc::RowRecord *row_record = request.add_query_record_array();
@@ -249,20 +251,24 @@ TEST_F(RpcHandlerTest, SearchTest) {
             row_record->add_vector_data(rec);
         }
     }
+    handler->Search(&context, &request, &response);
+
+    //test search with range
+    ::milvus::grpc::Range *range = request.mutable_query_range_array()->Add();
+    range->set_start_value(CurrentTmDate(-2));
+    range->set_end_value(CurrentTmDate(-3));
+    handler->Search(&context, &request, &response);
+    request.mutable_query_range_array()->Clear();
+
     request.set_table_name("test2");
     handler->Search(&context, &request, &response);
     request.set_table_name(TABLE_NAME);
-
-    handler->Search(&context, &request, &response);
-    request.mutable_query_range_array()->Clear();
     handler->Search(&context, &request, &response);
 
     ::milvus::grpc::SearchInFilesParam search_in_files_param;
     std::string *file_id = search_in_files_param.add_file_id_array();
     *file_id = "test_tbl";
     handler->SearchInFiles(&context, &search_in_files_param, &response);
-//    delete file_id;
-//    delete range;
 }
 
 TEST_F(RpcHandlerTest, TablesTest) {
