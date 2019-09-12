@@ -10,7 +10,7 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-constexpr uint64_t MAXINT = 99999;
+constexpr uint64_t MAXINT = std::numeric_limits<uint32_t >::max();
 
 uint64_t
 ShortestPath(const ResourcePtr &src,

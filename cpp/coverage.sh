@@ -13,6 +13,10 @@ DIR_LCOV_OUTPUT="lcov_out"
 
 DIR_GCNO="cmake_build"
 DIR_UNITTEST="milvus/unittest"
+
+# delete old code coverage info files
+rm -rf lcov_out
+rm -f FILE_INFO_BASE FILE_INFO_MILVUS FILE_INFO_OUTPUT FILE_INFO_OUTPUT_NEW
  
 MYSQL_USER_NAME=root
 MYSQL_PASSWORD=Fantast1c
@@ -84,7 +88,7 @@ done
 
 mysql_exc "DROP DATABASE IF EXISTS ${MYSQL_DB_NAME};"
 
-# gen test converage
+# gen code coverage
 ${LCOV_CMD} -d ${DIR_GCNO} -o "${FILE_INFO_MILVUS}" -c
 # merge coverage
 ${LCOV_CMD} -a ${FILE_INFO_BASE} -a ${FILE_INFO_MILVUS} -o "${FILE_INFO_OUTPUT}"
@@ -96,6 +100,10 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "*/cmake_build/*_ep-prefix/*" \
     "src/core/cmake_build*" \
     "src/core/thirdparty*" \
+    "src/grpc*"\
+    "src/server/Server.cpp"\
+    "src/server/DBWrapper.cpp"\
+    "src/server/grpc_impl/GrpcMilvusServer.cpp"\
 
 # gen html report
 ${LCOV_GEN_CMD} "${FILE_INFO_OUTPUT_NEW}" --output-directory ${DIR_LCOV_OUTPUT}/
