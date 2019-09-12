@@ -1,7 +1,10 @@
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere knowhere_src)
+set(knowhere_src
+        ${MILVUS_ENGINE_SRC}/wrapper/knowhere/data_transfer.cpp
+        ${MILVUS_ENGINE_SRC}/wrapper/knowhere/vec_impl.cpp
+        ${MILVUS_ENGINE_SRC}/wrapper/knowhere/vec_index.cpp)
 
 set(helper
         utils.cpp)
