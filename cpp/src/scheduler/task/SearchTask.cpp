@@ -20,6 +20,8 @@ namespace engine {
 static constexpr size_t PARALLEL_REDUCE_THRESHOLD = 10000;
 static constexpr size_t PARALLEL_REDUCE_BATCH = 1000;
 
+std::mutex XSearchTask::merge_mutex_;
+
 //bool
 //NeedParallelReduce(uint64_t nq, uint64_t topk) {
 //    server::ServerConfig &config = server::ServerConfig::GetInstance();
