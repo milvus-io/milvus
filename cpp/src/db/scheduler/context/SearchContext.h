@@ -38,7 +38,9 @@ public:
     const ResultSet& GetResult() const { return result_; }
     ResultSet& GetResult() { return result_; }
 
-    std::string Identity() const { return identity_; }
+    const std::string& Identity() const { return identity_; }
+    const Status& GetStatus() const { return status_; }
+    Status& GetStatus() { return status_; }
 
     void IndexSearchDone(size_t index_id);
     void WaitResult();
@@ -64,6 +66,7 @@ private:
     std::condition_variable done_cond_;
 
     std::string identity_; //for debug
+    Status status_;
 
     double time_cost_load_ = 0.0; //time cost for load all index files, unit: us
     double time_cost_search_ = 0.0; //time cost for entire search, unit: us

@@ -142,7 +142,7 @@ VectorIndexPtr IDMAP::Clone() {
 
 VectorIndexPtr IDMAP::CopyCpuToGpu(const int64_t &device_id, const Config &config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)){
-        ResScope rs(device_id, res);
+        ResScope rs(res, device_id, false);
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get());
 
         std::shared_ptr<faiss::Index> device_index;
@@ -211,7 +211,7 @@ void GPUIDMAP::LoadImpl(const BinarySet &index_binary) {
         faiss::Index *index = faiss::read_index(&reader);
 
         if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_) ){
-            ResScope rs(gpu_id_, res);
+            ResScope rs(res, gpu_id_, false);
             res_ = res;
             auto device_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id_, index);
             index_.reset(device_index);
@@ -242,7 +242,7 @@ void GPUIDMAP::search_impl(int64_t n,
                            float *distances,
                            int64_t *labels,
                            const Config &cfg) {
-    ResScope rs(res_);
+    ResScope rs(res_, gpu_id_);
     index_->search(n, (float *) data, k, distances, labels);
 }
 
