@@ -98,14 +98,18 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     server::TimeRecorder rc("");
     Status stat = Status::OK();
     std::string error_msg;
+    std::string type_str;
 
     try {
         if (type == LoadType::DISK2CPU) {
             stat = index_engine_->Load();
+            type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
             stat = index_engine_->CopyToGpu(device_id);
+            type_str = "CPU2GPU";
         } else if (type == LoadType::GPU2CPU) {
             stat = index_engine_->CopyToCpu();
+            type_str = "GPU2CPU";
         } else {
             error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
@@ -117,13 +121,18 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     }
 
     if (!stat.ok()) {
-        if (error_msg.empty())
-            error_msg = std::string("Failed to load index file: file not available");
-        //typical error: file not available
-        ENGINE_LOG_ERROR << error_msg;
+        Status s;
+        if (stat.ToString().find("out of memory") != std::string::npos) {
+            error_msg = "out of memory: " + type_str;
+            s = Status(SERVER_OUT_OF_MEMORY, error_msg);
+        } else {
+            error_msg = "Failed to load index file: " + type_str;
+            s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
+        }
 
         for (auto &context : search_contexts_) {
             context->IndexSearchDone(file_->id_);//mark as done avoid dead lock, even failed
+            context->GetStatus() = s;
         }
 
         return;
