@@ -31,8 +31,6 @@ cache_config:
   cpu_cache_capacity: 16            # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory
   cpu_cache_free_percent: 0.85      # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
   insert_cache_immediately: false   # insert data will be load into cache immediately for hot query
-  gpu_cache_capacity: 5             # how many memory are used as cache in gpu, unit: GB, RANGE: 0 ~ less than total memory
-  gpu_cache_free_percent: 0.85      # old data will be erased from cache when cache is full, this value specify how much memory should be kept, range: greater than zero ~ 1.0
 
 engine_config:
   use_blas_threshold: 20
