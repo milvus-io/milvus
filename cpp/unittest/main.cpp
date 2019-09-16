@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
-#include <easylogging++.h>
+#include "utils/easylogging++.h"
 
 #include "server/ServerConfig.h"
 #include "utils/CommonUtil.h"
