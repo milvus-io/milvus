@@ -179,7 +179,7 @@ spec:
                                         gitlabCommitStatus(name: 'Deloy Test') {
                                             container('milvus-testframework') {
                                                 script {
-                                                    load "${env.WORKSPACE}/ci/jenkinsfile/dev_test.groovy"
+                                                    load "${env.WORKSPACE}/ci/jenkinsfile/dev_test_all.groovy"
                                                     load "${env.WORKSPACE}/ci/jenkinsfile/upload_dev_test_out.groovy"
                                                 }
                                             }
