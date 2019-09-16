@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <gtest/gtest.h>
-#include <easylogging++.h>
+#include "utils/easylogging++.h"
 
 #include <wrapper/knowhere/vec_index.h>
 #include "knowhere/index/vector_index/gpu_ivf.h"

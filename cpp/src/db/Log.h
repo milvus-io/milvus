@@ -5,7 +5,7 @@
  ******************************************************************************/
 #pragma once
 
-#include <easylogging++.h>
+#include "utils/easylogging++.h"
 
 namespace zilliz {
 namespace milvus {

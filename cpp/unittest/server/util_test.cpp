@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
 #include <thread>
-#include <easylogging++.h>
+#include "utils/easylogging++.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <boost/filesystem.hpp>
@@ -290,6 +290,7 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST){
     std::string dir1 = "/tmp/milvus_test";
     std::string dir2 = "/tmp/milvus_test/log_test";
     std::string filename[6] = {"log_global.log", "log_debug.log", "log_warning.log", "log_trace.log", "log_error.log", "log_fatal.log"};
+    el::Level list[6] = {el::Level::Global, el::Level::Debug, el::Level::Warning, el::Level::Trace, el::Level::Error, el::Level::Fatal};
 
     mkdir(dir1.c_str(), S_IRWXU);
     mkdir(dir2.c_str(), S_IRWXU);
@@ -300,7 +301,7 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST){
         file.open(tmp.c_str());
         file << "zilliz" << std::endl;
 
-        server::RolloutHandler(tmp.c_str(), 0);
+        server::RolloutHandler(tmp.c_str(), 0, list[i]);
 
         tmp.append(".1");
         std::ifstream file2;

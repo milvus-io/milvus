@@ -11,7 +11,7 @@
 #include <cstring>
 #include <string>
 #include <signal.h>
-#include <easylogging++.h>
+#include "utils/easylogging++.h"
 #include "metrics/Metrics.h"
 
 #include "utils/SignalUtil.h"
