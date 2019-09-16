@@ -1,4 +1,4 @@
-timeout(time: 30, unit: 'MINUTES') {
+timeout(time: 60, unit: 'MINUTES') {
     try {
         dir ("${PROJECT_NAME}_test") {
             checkout([$class: 'GitSCM', branches: [[name: "${SEMVER}"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: "${params.GIT_USER}", url: "git@192.168.1.105:Test/milvus_test.git", name: 'origin', refspec: "+refs/heads/${SEMVER}:refs/remotes/origin/${SEMVER}"]]])
@@ -20,7 +20,7 @@ timeout(time: 30, unit: 'MINUTES') {
             }
         }
         dir ("${PROJECT_NAME}_test") {
-            sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --level=1 --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.milvus-2.svc.cluster.local"
+            sh "pytest . --alluredir=\"test_out/dev/single/mysql\" --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.milvus-2.svc.cluster.local"
         }
     } catch (exc) {
         echo 'Milvus Test Failed !'
