@@ -19,7 +19,6 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         ARROW
         BOOST
         BZip2
-#        Easylogging++
         FAISS
         GTest
         Knowhere
@@ -56,8 +55,6 @@ macro(build_dependency DEPENDENCY_NAME)
         build_arrow()
     elseif("${DEPENDENCY_NAME}" STREQUAL "BZip2")
         build_bzip2()
-#    elseif("${DEPENDENCY_NAME}" STREQUAL "Easylogging++")
-#        build_easyloggingpp()
     elseif("${DEPENDENCY_NAME}" STREQUAL "FAISS")
         build_faiss()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "GTest")
@@ -294,13 +291,6 @@ else()
     set(BZIP2_SOURCE_URL "https://sourceware.org/pub/bzip2/bzip2-${BZIP2_VERSION}.tar.gz")
 endif()
 set(BZIP2_MD5 "00b516f4704d4a7cb50a1d97e6e8e15b")
-
-#if(DEFINED ENV{MILVUS_EASYLOGGINGPP_URL})
-#    set(EASYLOGGINGPP_SOURCE_URL "$ENV{MILVUS_EASYLOGGINGPP_URL}")
-#else()
-#    set(EASYLOGGINGPP_SOURCE_URL "https://github.com/zuhd-org/easyloggingpp/archive/${EASYLOGGINGPP_VERSION}.tar.gz")
-#endif()
-#set(EASYLOGGINGPP_MD5 "b78cd319db4be9b639927657b8aa7732")
 
 if(DEFINED ENV{MILVUS_FAISS_URL})
     set(FAISS_SOURCE_URL "$ENV{MILVUS_FAISS_URL}")
@@ -813,84 +803,6 @@ if(MILVUS_WITH_KNOWHERE)
     include_directories(SYSTEM "${KNOWHERE_INCLUDE_DIR}")
     include_directories(SYSTEM "${KNOWHERE_INCLUDE_DIR}/SPTAG/AnnService")
 endif()
-
-# ----------------------------------------------------------------------
-# Easylogging++
-
-#macro(build_easyloggingpp)
-#    message(STATUS "Building Easylogging++-${EASYLOGGINGPP_VERSION} from source")
-#    set(EASYLOGGINGPP_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/easyloggingpp_ep-prefix/src/easyloggingpp_ep")
-#    set(EASYLOGGINGPP_INCLUDE_DIR "${EASYLOGGINGPP_PREFIX}/include")
-#    set(EASYLOGGINGPP_STATIC_LIB
-#            "${EASYLOGGINGPP_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}easyloggingpp${CMAKE_STATIC_LIBRARY_SUFFIX}")
-#
-#    set(EASYLOGGINGPP_CMAKE_ARGS
-#            ${EP_COMMON_CMAKE_ARGS}
-#            "-DCMAKE_INSTALL_PREFIX=${EASYLOGGINGPP_PREFIX}"
-#            -DCMAKE_INSTALL_LIBDIR=lib
-#            -Dtest=OFF
-#            -Dbuild_static_lib=ON)
-#
-#    if(USE_JFROG_CACHE STREQUAL "ON")
-#        set(EASYLOGGINGPP_CACHE_PACKAGE_NAME "easyloggingpp_${EASYLOGGINGPP_MD5}.tar.gz")
-#        set(EASYLOGGINGPP_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${EASYLOGGINGPP_CACHE_PACKAGE_NAME}")
-#        set(EASYLOGGINGPP_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${EASYLOGGINGPP_CACHE_PACKAGE_NAME}")
-#
-#        execute_process(COMMAND wget -q --method HEAD ${EASYLOGGINGPP_CACHE_URL} RESULT_VARIABLE return_code)
-#        message(STATUS "Check the remote cache file ${EASYLOGGINGPP_CACHE_URL}. return code = ${return_code}")
-#        if (NOT return_code EQUAL 0)
-#            externalproject_add(easyloggingpp_ep
-#                URL
-#                ${EASYLOGGINGPP_SOURCE_URL}
-#                ${EP_LOG_OPTIONS}
-#                CMAKE_ARGS
-#                ${EASYLOGGINGPP_CMAKE_ARGS}
-#                BUILD_COMMAND
-#                ${MAKE}
-#                ${MAKE_BUILD_ARGS}
-#                BUILD_BYPRODUCTS
-#                ${EASYLOGGINGPP_STATIC_LIB})
-#
-#            ExternalProject_Create_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/easyloggingpp_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${EASYLOGGINGPP_CACHE_URL})
-#        else()
-#            file(DOWNLOAD ${EASYLOGGINGPP_CACHE_URL} ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} STATUS status)
-#            list(GET status 0 status_code)
-#            message(STATUS "DOWNLOADING FROM ${EASYLOGGINGPP_CACHE_URL} TO ${EASYLOGGINGPP_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-#            if (status_code EQUAL 0)
-#                ExternalProject_Use_Cache(easyloggingpp_ep ${EASYLOGGINGPP_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-#            endif()
-#        endif()
-#    else()
-#        externalproject_add(easyloggingpp_ep
-#                URL
-#                ${EASYLOGGINGPP_SOURCE_URL}
-#                ${EP_LOG_OPTIONS}
-#                CMAKE_ARGS
-#                ${EASYLOGGINGPP_CMAKE_ARGS}
-#                BUILD_COMMAND
-#                ${MAKE}
-#                ${MAKE_BUILD_ARGS}
-#                BUILD_BYPRODUCTS
-#                ${EASYLOGGINGPP_STATIC_LIB})
-#    endif()
-#
-#    file(MAKE_DIRECTORY "${EASYLOGGINGPP_INCLUDE_DIR}")
-#    add_library(easyloggingpp STATIC IMPORTED)
-#    set_target_properties(
-#            easyloggingpp
-#            PROPERTIES IMPORTED_LOCATION "${EASYLOGGINGPP_STATIC_LIB}"
-#            INTERFACE_INCLUDE_DIRECTORIES "${EASYLOGGINGPP_INCLUDE_DIR}")
-#
-#    add_dependencies(easyloggingpp easyloggingpp_ep)
-#endmacro()
-#
-#if(MILVUS_WITH_EASYLOGGINGPP)
-#    resolve_dependency(Easylogging++)
-#
-#    get_target_property(EASYLOGGINGPP_INCLUDE_DIR easyloggingpp INTERFACE_INCLUDE_DIRECTORIES)
-#    link_directories(SYSTEM "${EASYLOGGINGPP_PREFIX}/lib")
-#    include_directories(SYSTEM "${EASYLOGGINGPP_INCLUDE_DIR}")
-#endif()
 
 # ----------------------------------------------------------------------
 # OpenBLAS
