@@ -25,7 +25,6 @@ set(unittest_libs
         gmock
         gtest_main
         gmock_main
-        easyloggingpp
         pthread
         metrics
         gfortran

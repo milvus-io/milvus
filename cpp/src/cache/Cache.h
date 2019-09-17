@@ -6,35 +6,20 @@
 
 #pragma once
 
+#include "LRU.h"
+#include "utils/Log.h"
+
 #include <string>
 #include <mutex>
 #include <atomic>
-
-#include "LRU.h"
-#include "DataObj.h"
+#include <set>
 
 namespace zilliz {
 namespace milvus {
 namespace cache {
 
-const std::string SWAP_DIR = ".CACHE";
-
+template<typename ItemObj>
 class Cache {
-private:
-    class CacheObj {
-    public:
-        CacheObj() = delete;
-
-        CacheObj(const DataObjPtr& data)
-        : data_(data) {
-        }
-
-    public:
-        DataObjPtr data_ = nullptr;
-    };
-
-    using CacheObjPtr = std::shared_ptr<CacheObj>;
-
 public:
     //mem_capacity, units:GB
     Cache(int64_t capacity_gb, uint64_t cache_max_count);
@@ -49,11 +34,13 @@ public:
 
     size_t size() const;
     bool exists(const std::string& key);
-    DataObjPtr get(const std::string& key);
-    void insert(const std::string& key, const DataObjPtr& data);
+    ItemObj get(const std::string& key);
+    void insert(const std::string& key, const ItemObj& item);
     void erase(const std::string& key);
     void print();
     void clear();
+
+private:
     void free_memory();
 
 private:
@@ -61,13 +48,12 @@ private:
     int64_t capacity_;
     double freemem_percent_;
 
-    LRU<std::string, CacheObjPtr> lru_;
+    LRU<std::string, ItemObj> lru_;
     mutable std::mutex mutex_;
 };
-
-using CachePtr = std::shared_ptr<Cache>;
 
 }   // cache
 }   // milvus
 }   // zilliz
 
+#include "cache/Cache.inl"

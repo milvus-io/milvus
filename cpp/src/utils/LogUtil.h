@@ -7,6 +7,7 @@
 
 #include <string>
 #include <sstream>
+#include "easylogging++.h"
 
 namespace zilliz {
 namespace milvus {
@@ -16,7 +17,7 @@ inline std::string GetFileName(std::string filename) {
     int pos = filename.find_last_of('/');
     return filename.substr(pos + 1);
 }
-void RolloutHandler(const char *filename, std::size_t size);
+void RolloutHandler(const char *filename, std::size_t size, el::Level level);
 
 #define SHOW_LOCATION
 #ifdef SHOW_LOCATION

@@ -9,7 +9,7 @@
 #include "db/meta/MetaConsts.h"
 
 #include <gtest/gtest.h>
-#include <easylogging++.h>
+#include "utils/easylogging++.h"
 #include <boost/filesystem.hpp>
 
 #include <thread>
