@@ -28,13 +28,11 @@ set(MILVUS_VERSION "${GIT_BRANCH_NAME}")
 string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]" MILVUS_VERSION "${MILVUS_VERSION}")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(BUILD_TYPE "release")
+    set(BUILD_TYPE "Release")
 else()
-    set(BUILD_TYPE "debug")
+    set(BUILD_TYPE "Debug")
 endif()
 message(STATUS "Build type = ${BUILD_TYPE}")
-
-add_definitions(-DNEW_SCHEDULER)
 
 project(milvus VERSION "${MILVUS_VERSION}")
 project(milvus_engine LANGUAGES CUDA CXX)
@@ -69,32 +67,29 @@ set(MILVUS_BINARY_DIR ${PROJECT_BINARY_DIR})
 
 find_package(CUDA)
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES -arch sm_60 --expt-extended-lambda")
-set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
-message(STATUS "CUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}")
-message(STATUS "CUDA_NVCC_FLAGS=${CUDA_NVCC_FLAGS}")
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
-    message(STATUS "building milvus_engine on x86 architecture")
+    message(STATUS "Building milvus_engine on x86 architecture")
     set(MILVUS_BUILD_ARCH x86_64)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(ppc)")
-    message(STATUS "building milvus_engine on ppc architecture")
+    message(STATUS "Building milvus_engine on ppc architecture")
     set(MILVUS_BUILD_ARCH ppc64le)
 else()
-    message(WARNING "unknown processor type")
+    message(WARNING "Unknown processor type")
     message(WARNING "CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
     set(MILVUS_BUILD_ARCH unknown)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
 endif()
-
-set(ALLOW_DUPLICATE_CUSTOM_TARGETS TRUE)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -103,39 +98,19 @@ include(DefineOptions)
 include(BuildUtils)
 include(ThirdPartyPackages)
 
-include_directories(${MILVUS_SOURCE_DIR})
-link_directories(${MILVUS_BINARY_DIR})
+config_summary()
 
-## Following should be check
-
-set(MILVUS_ENGINE_INCLUDE ${PROJECT_SOURCE_DIR}/include)
 set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
-
-add_compile_definitions(PROFILER=${PROFILER})
-
-message(STATUS "MILVUS_ENABLE_PROFILING = ${MILVUS_ENABLE_PROFILING}")
-if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
-    ADD_DEFINITIONS(-DMILVUS_ENABLE_PROFILING)
-endif()
-
-include_directories(${MILVUS_ENGINE_INCLUDE})
-include_directories(${MILVUS_ENGINE_SRC})
-
-link_directories(${CMAKE_CURRRENT_BINARY_DIR})
-
 add_subdirectory(src)
 
-if (BUILD_COVERAGE STREQUAL "ON")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
-endif()
-
-
 if (BUILD_UNIT_TEST STREQUAL "ON")
+    if (BUILD_COVERAGE STREQUAL "ON")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+    endif()
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/unittest)
 endif()
 
 add_custom_target(Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean)
-
 
 if("${MILVUS_DB_PATH}" STREQUAL "")
     set(MILVUS_DB_PATH "/tmp/milvus")
@@ -143,7 +118,6 @@ endif()
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/server_config.yaml)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.template ${CMAKE_CURRENT_SOURCE_DIR}/conf/log_config.conf)
 
-#install
 install(DIRECTORY scripts/
         DESTINATION scripts
         FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
@@ -155,12 +129,3 @@ install(FILES
         conf/log_config.conf
         DESTINATION
         conf)
-install(FILES
-        ./Milvus-EULA-cn.md
-        ./Milvus-EULA-en.md
-        DESTINATION
-        license
-        )
-
-
-config_summary()
