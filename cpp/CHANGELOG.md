@@ -7,6 +7,8 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Bug
 
 ## Improvement
+- MS-556 - Add Job Definition in Scheduler
+
 
 ## New Feature
 
