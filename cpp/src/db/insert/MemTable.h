@@ -18,9 +18,9 @@
 
 #pragma once
 
-#include "db/Status.h"
 #include "MemTableFile.h"
 #include "VectorSource.h"
+#include "utils/Status.h"
 
 #include <mutex>
 
