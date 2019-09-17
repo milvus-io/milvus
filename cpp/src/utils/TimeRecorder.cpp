@@ -21,7 +21,6 @@
 
 namespace zilliz {
 namespace milvus {
-namespace server {
 
 TimeRecorder::TimeRecorder(const std::string &header,
                            int64_t log_level) :
@@ -101,6 +100,5 @@ TimeRecorder::ElapseFromBegin(const std::string &msg) {
     return span;
 }
 
-}
 }
 }

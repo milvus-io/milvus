@@ -18,7 +18,7 @@
 
 #include "DBFactory.h"
 #include "DBImpl.h"
-#include "Exception.h"
+#include "utils/Exception.h"
 #include "meta/MetaFactory.h"
 #include "meta/SqliteMetaImpl.h"
 #include "meta/MySQLMetaImpl.h"

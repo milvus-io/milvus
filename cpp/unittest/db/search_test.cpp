@@ -238,7 +238,7 @@ TEST(DBSearchTest, PARALLEL_CLUSTER_TEST) {
     engine::SearchContext::ResultSet src_result;
 
     auto DoCluster = [&](int64_t nq, int64_t topk) {
-        server::TimeRecorder rc("DoCluster");
+        TimeRecorder rc("DoCluster");
         src_result.clear();
         BuildResult(nq, topk, ascending, target_ids, target_distence);
         rc.RecordSection("build id/dietance map");
@@ -280,7 +280,7 @@ TEST(DBSearchTest, PARALLEL_TOPK_TEST) {
         src_result.clear();
         insufficient_result.clear();
 
-        server::TimeRecorder rc("DoCluster");
+        TimeRecorder rc("DoCluster");
 
         BuildResult(nq, topk, ascending, target_ids, target_distence);
         auto status = engine::XSearchTask::ClusterResult(target_ids, target_distence, nq, topk, src_result);
