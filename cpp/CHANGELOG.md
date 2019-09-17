@@ -16,6 +16,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Task
 - MS-554 - Change license to Apache 2.0
+- MS-561 - Add contributing guidelines, code of conduct and Readme docs
 
 # Milvus 0.4.0 (2019-09-12)
 
