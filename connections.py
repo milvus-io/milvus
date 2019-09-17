@@ -25,7 +25,7 @@ class Connection:
             self.conn.connect(uri=self.uri)
         except Exception as e:
             if not self.error_handlers:
-                raise exceptions.ConnectionConnectError(message='')
+                raise exceptions.ConnectionConnectError()
             for handler in self.error_handlers:
                 handler(e)
 
@@ -97,8 +97,8 @@ if __name__ == '__main__':
     def f():
         print('ffffffff')
 
-    # m = c.connect(func=f)
-    # m()
+    m = c.connect(func=f)
+    m()
 
     c.conn = success_conn
     m = c.connect(func=f)
