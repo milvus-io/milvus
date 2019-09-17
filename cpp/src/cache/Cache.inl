@@ -56,11 +56,11 @@ void Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         return;
     }
 
-    if(item->size() > capacity_) {
-        SERVER_LOG_ERROR << "Item size " << item->size()
-                        << " is too large to insert into cache, capacity " << capacity_;
-        return;
-    }
+//    if(item->size() > capacity_) {
+//        SERVER_LOG_ERROR << "Item size " << item->size()
+//                        << " is too large to insert into cache, capacity " << capacity_;
+//        return;
+//    }
 
     //calculate usage
     {

@@ -162,7 +162,7 @@ TEST(CacheTest, CPU_CACHE_TEST) {
         engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 6000000);
         cache::DataObjPtr data_obj = std::make_shared<cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_6g", data_obj);
-        ASSERT_FALSE(cpu_mgr->ItemExists("index_6g"));//data greater than capacity can not be inserted sucessfully
+        ASSERT_TRUE(cpu_mgr->ItemExists("index_6g"));
     }
 
     cpu_mgr->PrintInfo();
