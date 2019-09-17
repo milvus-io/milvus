@@ -37,9 +37,9 @@ constexpr int32_t DEFAULT_INDEX_FILE_SIZE = ONE_GB;
 constexpr int64_t FLAG_MASK_NO_USERID = 0x1;
 constexpr int64_t FLAG_MASK_HAS_USERID = 0x1<<1;
 
-typedef int DateT;
+using DateT = int ;
 const DateT EmptyDate = -1;
-typedef std::vector<DateT> DatesT;
+using DatesT = std::vector<DateT>;
 
 struct TableSchema {
     typedef enum {
@@ -88,8 +88,9 @@ struct TableFileSchema {
     int32_t metric_type_ = DEFAULT_METRIC_TYPE; //not persist to meta
 }; // TableFileSchema
 
-typedef std::vector<TableFileSchema> TableFilesSchema;
-typedef std::map<DateT, TableFilesSchema> DatePartionedTableFilesSchema;
+using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
+using TableFilesSchema = std::vector<TableFileSchema>;
+using DatePartionedTableFilesSchema = std::map<DateT, TableFilesSchema>;
 
 } // namespace meta
 } // namespace engine
