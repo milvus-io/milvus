@@ -89,7 +89,7 @@ class ConnectionMgr:
             threaded = {
                     threading.get_ident() : this_conn
             }
-            c[name] = threaded
+            self.conns[name] = threaded
             return this_conn
 
         tid = threading.get_ident()

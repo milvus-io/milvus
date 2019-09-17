@@ -22,6 +22,8 @@ config(LOG_LEVEL, LOG_PATH, LOG_NAME, TIMEZONE)
 TIMEOUT = env.int('TIMEOUT', 60)
 MAX_RETRY = env.int('MAX_RETRY', 3)
 
+SERVER_PORT = env.int('SERVER_PORT', 19530)
+WOSERVER = env.str('WOSERVER')
 
 if __name__ == '__main__':
     import logging
