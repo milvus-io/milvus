@@ -4,22 +4,21 @@
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "utils/Log.h"
-#include "CacheMgr.h"
-#include "metrics/Metrics.h"
-
 namespace zilliz {
 namespace milvus {
 namespace cache {
 
-CacheMgr::CacheMgr() {
+template<typename ItemObj>
+CacheMgr<ItemObj>::CacheMgr() {
 }
 
-CacheMgr::~CacheMgr() {
+template<typename ItemObj>
+CacheMgr<ItemObj>::~CacheMgr() {
 
 }
 
-uint64_t CacheMgr::ItemCount() const {
+template<typename ItemObj>
+uint64_t CacheMgr<ItemObj>::ItemCount() const {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
@@ -28,7 +27,8 @@ uint64_t CacheMgr::ItemCount() const {
     return (uint64_t)(cache_->size());
 }
 
-bool CacheMgr::ItemExists(const std::string& key) {
+template<typename ItemObj>
+bool CacheMgr<ItemObj>::ItemExists(const std::string& key) {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return false;
@@ -37,7 +37,8 @@ bool CacheMgr::ItemExists(const std::string& key) {
     return cache_->exists(key);
 }
 
-DataObjPtr CacheMgr::GetItem(const std::string& key) {
+template<typename ItemObj>
+ItemObj CacheMgr<ItemObj>::GetItem(const std::string& key) {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return nullptr;
@@ -46,16 +47,8 @@ DataObjPtr CacheMgr::GetItem(const std::string& key) {
     return cache_->get(key);
 }
 
-engine::VecIndexPtr CacheMgr::GetIndex(const std::string& key) {
-    DataObjPtr obj = GetItem(key);
-    if(obj != nullptr) {
-        return obj->data();
-    }
-
-    return nullptr;
-}
-
-void CacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
+template<typename ItemObj>
+void CacheMgr<ItemObj>::InsertItem(const std::string& key, const ItemObj& data) {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
@@ -65,18 +58,8 @@ void CacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
     server::Metrics::GetInstance().CacheAccessTotalIncrement();
 }
 
-void CacheMgr::InsertItem(const std::string& key, const engine::VecIndexPtr& index) {
-    if(cache_ == nullptr) {
-        SERVER_LOG_ERROR << "Cache doesn't exist";
-        return;
-    }
-
-    DataObjPtr obj = std::make_shared<DataObj>(index);
-    cache_->insert(key, obj);
-    server::Metrics::GetInstance().CacheAccessTotalIncrement();
-}
-
-void CacheMgr::EraseItem(const std::string& key) {
+template<typename ItemObj>
+void CacheMgr<ItemObj>::EraseItem(const std::string& key) {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
@@ -86,7 +69,8 @@ void CacheMgr::EraseItem(const std::string& key) {
     server::Metrics::GetInstance().CacheAccessTotalIncrement();
 }
 
-void CacheMgr::PrintInfo() {
+template<typename ItemObj>
+void CacheMgr<ItemObj>::PrintInfo() {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
@@ -95,7 +79,8 @@ void CacheMgr::PrintInfo() {
     cache_->print();
 }
 
-void CacheMgr::ClearCache() {
+template<typename ItemObj>
+void CacheMgr<ItemObj>::ClearCache() {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
@@ -104,7 +89,8 @@ void CacheMgr::ClearCache() {
     cache_->clear();
 }
 
-int64_t CacheMgr::CacheUsage() const {
+template<typename ItemObj>
+int64_t CacheMgr<ItemObj>::CacheUsage() const {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
@@ -113,7 +99,8 @@ int64_t CacheMgr::CacheUsage() const {
     return cache_->usage();
 }
 
-int64_t CacheMgr::CacheCapacity() const {
+template<typename ItemObj>
+int64_t CacheMgr<ItemObj>::CacheCapacity() const {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
@@ -122,7 +109,8 @@ int64_t CacheMgr::CacheCapacity() const {
     return cache_->capacity();
 }
 
-void CacheMgr::SetCapacity(int64_t capacity) {
+template<typename ItemObj>
+void CacheMgr<ItemObj>::SetCapacity(int64_t capacity) {
     if(cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;

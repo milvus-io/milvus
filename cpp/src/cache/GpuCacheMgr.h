@@ -5,6 +5,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "CacheMgr.h"
+#include "DataObj.h"
+
 #include <unordered_map>
 #include <memory>
 
@@ -15,13 +17,13 @@ namespace cache {
 class GpuCacheMgr;
 using GpuCacheMgrPtr = std::shared_ptr<GpuCacheMgr>;
 
-class GpuCacheMgr : public CacheMgr {
+class GpuCacheMgr : public CacheMgr<DataObjPtr> {
 public:
     GpuCacheMgr();
 
-    static CacheMgr* GetInstance(uint64_t gpu_id);
+    static GpuCacheMgr* GetInstance(uint64_t gpu_id);
 
-    void InsertItem(const std::string& key, const DataObjPtr& data) override;
+    engine::VecIndexPtr GetIndex(const std::string& key);
 
 private:
     static std::mutex mutex_;
