@@ -22,7 +22,7 @@
 #include "task/DeleteTask.h"
 #include "cache/CpuCacheMgr.h"
 #include "utils/Error.h"
-#include "db/Log.h"
+#include "utils/Log.h"
 
 namespace zilliz {
 namespace milvus {

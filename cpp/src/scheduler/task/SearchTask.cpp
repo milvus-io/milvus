@@ -15,12 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "src/metrics/Metrics.h"
-#include "src/utils/TimeRecorder.h"
-#include "src/db/engine/EngineFactory.h"
-#include "src/db/Log.h"
 #include "SearchTask.h"
+#include "metrics/Metrics.h"
+#include "db/engine/EngineFactory.h"
+#include "utils/TimeRecorder.h"
+#include "utils/Log.h"
 
 #include <thread>
 
@@ -109,7 +108,7 @@ XSearchTask::XSearchTask(TableFileSchemaPtr file)
 
 void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
-    server::TimeRecorder rc("");
+    TimeRecorder rc("");
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
@@ -178,7 +177,7 @@ XSearchTask::Execute() {
     ENGINE_LOG_DEBUG << "Searching in file id:" << index_id_ << " with "
                      << search_contexts_.size() << " tasks";
 
-    server::TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
+    TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
 
     server::CollectDurationMetrics metrics(index_type_);
 

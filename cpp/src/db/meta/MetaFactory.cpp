@@ -15,12 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "MetaFactory.h"
 #include "SqliteMetaImpl.h"
 #include "MySQLMetaImpl.h"
-#include "db/Log.h"
-#include "db/Exception.h"
+#include "utils/Log.h"
+#include "utils/Exception.h"
 
 #include <stdlib.h>
 #include <time.h>

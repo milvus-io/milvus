@@ -32,7 +32,6 @@
 
 namespace zilliz {
 namespace milvus {
-namespace server {
 
 class ThreadPool {
 public:
@@ -124,7 +123,6 @@ inline ThreadPool::~ThreadPool() {
         worker.join();
 }
 
-}
 }
 }
 

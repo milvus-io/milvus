@@ -15,20 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <stdexcept>
-#include "src/cache/GpuCacheMgr.h"
-
-#include "src/metrics/Metrics.h"
-#include "db/Log.h"
-#include "utils/CommonUtil.h"
-
-#include "src/cache/CpuCacheMgr.h"
 #include "ExecutionEngineImpl.h"
+#include "cache/GpuCacheMgr.h"
+#include "cache/CpuCacheMgr.h"
+#include "metrics/Metrics.h"
+#include "utils/Log.h"
+#include "utils/CommonUtil.h"
+#include "utils/Exception.h"
+
 #include "wrapper/knowhere/vec_index.h"
 #include "wrapper/knowhere/vec_impl.h"
 #include "knowhere/common/exception.h"
-#include "db/Exception.h"
 
+#include <stdexcept>
 
 namespace zilliz {
 namespace milvus {

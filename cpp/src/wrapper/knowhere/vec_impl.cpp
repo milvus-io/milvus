@@ -16,7 +16,7 @@
 // under the License.
 
 
-#include <src/utils/Log.h>
+#include "utils/Log.h"
 #include "knowhere/index/vector_index/idmap.h"
 #include "knowhere/index/vector_index/gpu_ivf.h"
 #include "knowhere/common/exception.h"
@@ -24,7 +24,6 @@
 
 #include "vec_impl.h"
 #include "data_transfer.h"
-#include "wrapper_log.h"
 
 
 namespace zilliz {

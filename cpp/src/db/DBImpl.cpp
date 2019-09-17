@@ -16,28 +16,27 @@
 // under the License.
 
 #include "DBImpl.h"
-#include "src/db/meta/SqliteMetaImpl.h"
-#include "Log.h"
-#include "Utils.h"
+#include "cache/CpuCacheMgr.h"
+#include "cache/GpuCacheMgr.h"
 #include "engine/EngineFactory.h"
 #include "insert/MemMenagerFactory.h"
+#include "meta/SqliteMetaImpl.h"
 #include "meta/MetaFactory.h"
+#include "meta/MetaConsts.h"
 #include "metrics/Metrics.h"
 #include "scheduler/TaskScheduler.h"
-
 #include "scheduler/context/DeleteContext.h"
+#include "scheduler/SchedInst.h"
 #include "utils/TimeRecorder.h"
-#include "meta/MetaConsts.h"
+#include "utils/Log.h"
+#include "Utils.h"
 
 #include <assert.h>
 #include <chrono>
 #include <thread>
 #include <iostream>
 #include <cstring>
-#include <cache/CpuCacheMgr.h>
 #include <boost/filesystem.hpp>
-#include "scheduler/SchedInst.h"
-#include <src/cache/GpuCacheMgr.h>
 
 namespace zilliz {
 namespace milvus {
@@ -421,7 +420,7 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
                           const meta::DatesT& dates, QueryResults& results) {
     server::CollectQueryMetrics metrics(nq);
 
-    server::TimeRecorder rc("");
+    TimeRecorder rc("");
 
     //step 1: get files to search
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size() << " date range count: " << dates.size();
@@ -444,9 +443,9 @@ Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSch
     double load_cost = context->LoadCost();
     double search_cost = context->SearchCost();
     double reduce_cost = context->ReduceCost();
-    std::string load_info = server::TimeRecorder::GetTimeSpanStr(load_cost);
-    std::string search_info = server::TimeRecorder::GetTimeSpanStr(search_cost);
-    std::string reduce_info = server::TimeRecorder::GetTimeSpanStr(reduce_cost);
+    std::string load_info = TimeRecorder::GetTimeSpanStr(load_cost);
+    std::string search_info = TimeRecorder::GetTimeSpanStr(search_cost);
+    std::string reduce_info = TimeRecorder::GetTimeSpanStr(reduce_cost);
     if(search_cost > 0.0 || reduce_cost > 0.0) {
         double total_cost = load_cost + search_cost + reduce_cost;
         double load_percent = load_cost/total_cost;
