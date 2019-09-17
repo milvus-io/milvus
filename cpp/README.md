@@ -84,7 +84,8 @@ If you encounter the following error message,
 
 please reinstall CMake with curl:
 
-1. ```shell
+1. Install curl development files:
+   ```shell
    CentOS 7:   
    $ yum install curl-devel
    Ubuntu 16.04: 
