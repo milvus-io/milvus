@@ -6,22 +6,21 @@
 #pragma once
 
 #include "CacheMgr.h"
+#include "DataObj.h"
 
 namespace zilliz {
 namespace milvus {
 namespace cache {
 
-class CpuCacheMgr : public CacheMgr {
+class CpuCacheMgr : public CacheMgr<DataObjPtr> {
 private:
     CpuCacheMgr();
 
 public:
     //TODO: use smart pointer instead
-    static CacheMgr* GetInstance() {
-        static CpuCacheMgr s_mgr;
-        return &s_mgr;
-    }
+    static CpuCacheMgr* GetInstance();
 
+    engine::VecIndexPtr GetIndex(const std::string& key);
 };
 
 }

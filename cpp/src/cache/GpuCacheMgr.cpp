@@ -25,7 +25,7 @@ GpuCacheMgr::GpuCacheMgr() {
 
     int64_t cap = config.GetInt64Value(server::CONFIG_GPU_CACHE_CAPACITY, 0);
     cap *= G_BYTE;
-    cache_ = std::make_shared<Cache>(cap, 1UL<<32);
+    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
 
     double free_percent = config.GetDoubleValue(server::GPU_CACHE_FREE_PERCENT, 0.85);
     if (free_percent > 0.0 && free_percent <= 1.0) {
@@ -36,7 +36,7 @@ GpuCacheMgr::GpuCacheMgr() {
     }
 }
 
-CacheMgr* GpuCacheMgr::GetInstance(uint64_t gpu_id) {
+GpuCacheMgr* GpuCacheMgr::GetInstance(uint64_t gpu_id) {
     if (instance_.find(gpu_id) == instance_.end()) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (instance_.find(gpu_id) == instance_.end()) {
@@ -49,14 +49,13 @@ CacheMgr* GpuCacheMgr::GetInstance(uint64_t gpu_id) {
     }
 }
 
-void GpuCacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
-    //TODO: copy data to gpu
-    if (cache_ == nullptr) {
-        SERVER_LOG_ERROR << "Cache doesn't exist";
-        return;
+engine::VecIndexPtr GpuCacheMgr::GetIndex(const std::string& key) {
+    DataObjPtr obj = GetItem(key);
+    if(obj != nullptr) {
+        return obj->data();
     }
 
-    cache_->insert(key, data);
+    return nullptr;
 }
 
 }
