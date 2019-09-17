@@ -7,22 +7,23 @@
 #pragma once
 
 #include "Cache.h"
+#include "utils/Log.h"
+#include "metrics/Metrics.h"
 
 namespace zilliz {
 namespace milvus {
 namespace cache {
 
+template<typename ItemObj>
 class CacheMgr {
 public:
     virtual uint64_t ItemCount() const;
 
     virtual bool ItemExists(const std::string& key);
 
-    virtual DataObjPtr GetItem(const std::string& key);
-    virtual engine::VecIndexPtr GetIndex(const std::string& key);
+    virtual ItemObj GetItem(const std::string& key);
 
-    virtual void InsertItem(const std::string& key, const DataObjPtr& data);
-    virtual void InsertItem(const std::string& key, const engine::VecIndexPtr& index);
+    virtual void InsertItem(const std::string& key, const ItemObj& data);
 
     virtual void EraseItem(const std::string& key);
 
@@ -39,6 +40,7 @@ protected:
     virtual ~CacheMgr();
 
 protected:
+    using CachePtr = std::shared_ptr<Cache<ItemObj>>;
     CachePtr cache_;
 };
 
@@ -46,3 +48,5 @@ protected:
 }
 }
 }
+
+#include "cache/CacheMgr.inl"
