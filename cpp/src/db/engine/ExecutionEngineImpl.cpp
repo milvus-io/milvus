@@ -124,7 +124,7 @@ Status ExecutionEngineImpl::Serialize() {
 }
 
 Status ExecutionEngineImpl::Load(bool to_cache) {
-    index_ = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    index_ = cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
         try {
@@ -151,7 +151,7 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
 }
 
 Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
-    auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
+    auto index = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
@@ -178,7 +178,7 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 }
 
 Status ExecutionEngineImpl::CopyToCpu() {
-    auto index = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    auto index = cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
@@ -221,7 +221,7 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
     }
     ENGINE_LOG_DEBUG << "Merge index file: " << location << " to: " << location_;
 
-    auto to_merge = zilliz::milvus::cache::CpuCacheMgr::GetInstance()->GetIndex(location);
+    auto to_merge = cache::CpuCacheMgr::GetInstance()->GetIndex(location);
     if (!to_merge) {
         try {
             double physical_size = server::CommonUtil::GetFileSize(location);
