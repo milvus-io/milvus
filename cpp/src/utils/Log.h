@@ -6,7 +6,7 @@
 #pragma once
 
 #include "Error.h"
-#include <easylogging++.h>
+#include "easylogging++.h"
 
 namespace zilliz {
 namespace milvus {

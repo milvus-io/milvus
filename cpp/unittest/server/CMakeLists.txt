@@ -39,6 +39,11 @@ set(db_scheduler_srcs
         ${scheduler_task_files}
         )
 
+set(util_files
+        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp
+        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc
+        ${MILVUS_ENGINE_SRC}/utils/easylogging++.h)
+
 set(db_src
         ${config_files}
         ${cache_srcs}
