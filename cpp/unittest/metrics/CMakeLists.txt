@@ -37,9 +37,9 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/src/metrics metrics_src)
 aux_source_directory(./ test_srcs)
 
 set(util_files
+        ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp
-        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc
-        ${MILVUS_ENGINE_SRC}/utils/easylogging++.h)
+        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
