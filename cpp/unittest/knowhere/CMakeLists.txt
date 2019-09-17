@@ -7,7 +7,9 @@ set(knowhere_src
         ${MILVUS_ENGINE_SRC}/wrapper/knowhere/vec_index.cpp)
 
 set(helper
-        utils.cpp)
+        utils.cpp
+        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc
+        ${MILVUS_ENGINE_SRC}/utils/easylogging++.h)
 
 set(knowhere_libs
         knowhere

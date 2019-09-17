@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
 #include <thread>
-#include <easylogging++.h>
+#include "utils/easylogging++.h"
 #include <boost/filesystem.hpp>
 
 #include "db/Exception.h"
