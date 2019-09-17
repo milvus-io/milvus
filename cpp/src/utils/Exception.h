@@ -22,7 +22,6 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
 
 class Exception : public std::exception {
 public:
@@ -61,6 +60,5 @@ public:
     OutOfRangeException(const std::string& message) : Exception(message) {};
 };
 
-} // namespace engine
 } // namespace milvus
 } // namespace zilliz

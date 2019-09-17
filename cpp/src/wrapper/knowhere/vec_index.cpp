@@ -24,7 +24,7 @@
 
 #include "vec_index.h"
 #include "vec_impl.h"
-#include "wrapper_log.h"
+#include "utils/Log.h"
 
 #include <cuda.h>
 

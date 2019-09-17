@@ -18,7 +18,7 @@
 #include "MySQLMetaImpl.h"
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
-#include "db/Log.h"
+#include "utils/Log.h"
 #include "MetaConsts.h"
 #include "metrics/Metrics.h"
 

@@ -17,13 +17,12 @@
 
 #pragma once
 
-#include "Error.h"
 #include "easylogging++.h"
 
 namespace zilliz {
 namespace milvus {
-namespace server {
 
+/////////////////////////////////////////////////////////////////////////////////////////////////
 #define SERVER_DOMAIN_NAME "[SERVER] "
 #define SERVER_ERROR_TEXT "SERVER Error:"
 
@@ -34,20 +33,27 @@ namespace server {
 #define SERVER_LOG_ERROR LOG(ERROR) << SERVER_DOMAIN_NAME
 #define SERVER_LOG_FATAL LOG(FATAL) << SERVER_DOMAIN_NAME
 
-#define SERVER_ERROR(error)                             \
-    ({                                                  \
-        SERVER_LOG_ERROR << SERVER_ERROR_TEXT << error; \
-        (error);                                        \
-    })
+/////////////////////////////////////////////////////////////////////////////////////////////////
+#define ENGINE_DOMAIN_NAME "[ENGINE] "
+#define ENGINE_ERROR_TEXT "ENGINE Error:"
 
-#define SERVER_CHECK(func)                                  \
-    {                                                       \
-        zilliz::milvus::server::ServerError error = func;  \
-        if (error != zilliz::milvus::server::SERVER_SUCCESS) { \
-            return SERVER_ERROR(error);                     \
-        }                                                   \
-    }                                                       \
+#define ENGINE_LOG_TRACE LOG(TRACE) << ENGINE_DOMAIN_NAME
+#define ENGINE_LOG_DEBUG LOG(DEBUG) << ENGINE_DOMAIN_NAME
+#define ENGINE_LOG_INFO LOG(INFO) << ENGINE_DOMAIN_NAME
+#define ENGINE_LOG_WARNING LOG(WARNING) << ENGINE_DOMAIN_NAME
+#define ENGINE_LOG_ERROR LOG(ERROR) << ENGINE_DOMAIN_NAME
+#define ENGINE_LOG_FATAL LOG(FATAL) << ENGINE_DOMAIN_NAME
 
-} // namespace sql
+/////////////////////////////////////////////////////////////////////////////////////////////////
+#define WRAPPER_DOMAIN_NAME "[WRAPPER] "
+#define WRAPPER_ERROR_TEXT "WRAPPER Error:"
+
+#define WRAPPER_LOG_TRACE LOG(TRACE) << WRAPPER_DOMAIN_NAME
+#define WRAPPER_LOG_DEBUG LOG(DEBUG) << WRAPPER_DOMAIN_NAME
+#define WRAPPER_LOG_INFO LOG(INFO) << WRAPPER_DOMAIN_NAME
+#define WRAPPER_LOG_WARNING LOG(WARNING) << WRAPPER_DOMAIN_NAME
+#define WRAPPER_LOG_ERROR LOG(ERROR) << WRAPPER_DOMAIN_NAME
+#define WRAPPER_LOG_FATAL LOG(FATAL) << WRAPPER_DOMAIN_NAME
+
+} // namespace milvus
 } // namespace zilliz
-} // namespace server

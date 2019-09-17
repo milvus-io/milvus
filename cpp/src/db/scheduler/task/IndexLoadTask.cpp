@@ -18,8 +18,8 @@
 
 #include "IndexLoadTask.h"
 #include "SearchTask.h"
-#include "db/Log.h"
 #include "db/engine/EngineFactory.h"
+#include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "metrics/Metrics.h"
 

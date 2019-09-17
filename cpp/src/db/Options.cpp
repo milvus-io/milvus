@@ -15,14 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "Options.h"
+#include "utils/Exception.h"
+#include "utils/easylogging++.h"
+
 #include <stdlib.h>
 #include <assert.h>
-#include "utils/easylogging++.h"
 #include <boost/algorithm/string.hpp>
-
-#include "Options.h"
-#include "db/meta/SqliteMetaImpl.h"
-#include "Exception.h"
 
 namespace zilliz {
 namespace milvus {

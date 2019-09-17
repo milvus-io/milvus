@@ -17,7 +17,7 @@
 
 
 #include "MemTable.h"
-#include "db/Log.h"
+#include "utils/Log.h"
 
 
 namespace zilliz {

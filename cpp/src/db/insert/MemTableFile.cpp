@@ -18,9 +18,9 @@
 
 #include "MemTableFile.h"
 #include "db/Constants.h"
-#include "db/Log.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
+#include "utils/Log.h"
 
 #include <cmath>
 

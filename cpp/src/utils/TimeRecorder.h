@@ -23,7 +23,6 @@
 
 namespace zilliz {
 namespace milvus {
-namespace server {
 
 class TimeRecorder {
     using stdclock = std::chrono::high_resolution_clock;
@@ -50,6 +49,5 @@ private:
     int64_t log_level_;
 };
 
-}
 }
 }
