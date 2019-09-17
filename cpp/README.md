@@ -93,7 +93,6 @@ please reinstall CMake with curl:
    ```
 
 2. Install [CMake 3.14](https://github.com/Kitware/CMake/releases/download/v3.14.6/cmake-3.14.6.tar.gz): 
-
    ```shell
    $ ./bootstrap --system-curl 
    $ make 
