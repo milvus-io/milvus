@@ -8,9 +8,9 @@ Milvus is an open source vector search engine that makes incredibly fast queryin
 
 Milvus was developed by researchers and engineers in ZILLIZ, a tech startup that intends to reinvent data science, with the purpose of providing enterprises with efficient and scalable similarity search and analysis of feature vectors and unstructured data. 
 
-Milvus provides stable [Python](https://www.tensorflow.org/api_docs/python) and [C++](https://www.tensorflow.org/api_docs/cc) APIs, as well as RESTful API.
+Milvus provides stable Python and C++ APIs, as well as RESTful API.
 
-Keep up-to-date with newest releases and latest updates by subscribing to xxx.
+Keep up-to-date with newest releases and latest updates by reading [Releases](milvus-io/doc/master/releases).
 
 - GPU-accelerated search engine
 
