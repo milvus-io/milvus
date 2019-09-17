@@ -20,8 +20,6 @@
 
 aux_source_directory(interface interface_files)
 
-aux_source_directory(util util_files)
-
 include_directories(/usr/include)
 include_directories(include)
 include_directories(/usr/local/include)
@@ -42,12 +40,15 @@ set(grpc_service_files
 add_library(milvus_sdk STATIC
         ${interface_files}
         ${grpc_client_files}
-        ${util_files}
         ${grpc_service_files}
         )
 
 target_link_libraries(milvus_sdk
-        ${third_party_libs}
+        ${client_grpc_lib}
+        bzip2
+        lz4
+        snappy
+        zlib
         )
 
 install(TARGETS milvus_sdk DESTINATION lib)

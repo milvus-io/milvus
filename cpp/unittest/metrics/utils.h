@@ -42,7 +42,7 @@
 #define STOP_TIMER(name)
 #endif
 
-void ASSERT_STATS(zilliz::milvus::engine::Status& stat);
+void ASSERT_STATS(zilliz::milvus::Status& stat);
 
 //class TestEnv : public ::testing::Environment {
 //public:
