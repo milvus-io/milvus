@@ -166,7 +166,7 @@ TEST(UtilTest, TIMERECORDER_TEST) {
         if(log_level == 5) {
             continue; //skip fatal
         }
-        server::TimeRecorder rc("time", log_level);
+        TimeRecorder rc("time", log_level);
         rc.RecordSection("end");
     }
 }

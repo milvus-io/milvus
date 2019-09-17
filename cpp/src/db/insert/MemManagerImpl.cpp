@@ -1,6 +1,6 @@
 #include "MemManagerImpl.h"
 #include "VectorSource.h"
-#include "db/Log.h"
+#include "utils/Log.h"
 #include "db/Constants.h"
 
 #include <thread>

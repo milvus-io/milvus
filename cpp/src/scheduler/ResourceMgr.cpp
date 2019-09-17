@@ -5,7 +5,7 @@
  * Proprietary and confidential.
  ******************************************************************************/
 #include "ResourceMgr.h"
-#include "db/Log.h"
+#include "utils/Log.h"
 
 
 namespace zilliz {

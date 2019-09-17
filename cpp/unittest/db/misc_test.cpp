@@ -3,18 +3,17 @@
 // Unauthorized copying of this file, via any medium is strictly prohibited.
 // Proprietary and confidential.
 ////////////////////////////////////////////////////////////////////////////////
-#include <gtest/gtest.h>
-#include <thread>
-#include "utils/easylogging++.h"
-#include <boost/filesystem.hpp>
-
-#include "db/Exception.h"
 #include "db/Status.h"
 #include "db/Options.h"
 #include "db/meta/SqliteMetaImpl.h"
 #include "db/engine/EngineFactory.h"
 #include "db/Utils.h"
+#include "utils/Exception.h"
+#include "utils/easylogging++.h"
 
+#include <gtest/gtest.h>
+#include <thread>
+#include <boost/filesystem.hpp>
 #include <vector>
 
 using namespace zilliz::milvus;
@@ -27,11 +26,11 @@ namespace {
 }
 
 TEST(DBMiscTest, EXCEPTION_TEST) {
-    engine::Exception ex1("");
+    Exception ex1("");
     std::string what = ex1.what();
     ASSERT_FALSE(what.empty());
 
-    engine::OutOfRangeException ex2;
+    OutOfRangeException ex2;
     what = ex2.what();
     ASSERT_FALSE(what.empty());
 }

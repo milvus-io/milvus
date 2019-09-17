@@ -128,11 +128,11 @@ class DBImpl : public DB {
     MemManagerPtr mem_mgr_;
     std::mutex mem_serialize_mutex_;
 
-    server::ThreadPool compact_thread_pool_;
+    ThreadPool compact_thread_pool_;
     std::list<std::future<void>> compact_thread_results_;
     std::set<std::string> compact_table_ids_;
 
-    server::ThreadPool index_thread_pool_;
+    ThreadPool index_thread_pool_;
     std::list<std::future<void>> index_thread_results_;
 
     std::mutex build_index_mutex_;

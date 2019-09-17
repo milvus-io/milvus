@@ -5,7 +5,7 @@
  ******************************************************************************/
 #include "SearchTask.h"
 #include "metrics/Metrics.h"
-#include "db/Log.h"
+#include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
 #include <thread>
