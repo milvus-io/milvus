@@ -5,7 +5,7 @@
  ******************************************************************************/
 #include <stdlib.h>
 #include <assert.h>
-#include <easylogging++.h>
+#include "utils/easylogging++.h"
 #include <boost/algorithm/string.hpp>
 
 #include "Options.h"

@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <gtest/gtest.h>
 #include <thread>
-#include <easylogging++.h>
+#include "utils/easylogging++.h"
 #include <stdlib.h>
 #include <time.h>
 

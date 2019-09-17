@@ -75,6 +75,7 @@ set(db_files
         ${db_scheduler_files}
         ${metrics_files}
         ${knowhere_files}
+        ${utils_files}
         )
 
 set(s3_client_files
@@ -96,7 +97,6 @@ set(client_grpc_lib
 
 set(third_party_libs
         knowhere
-        easyloggingpp
         sqlite
         ${client_grpc_lib}
         yaml-cpp
@@ -147,7 +147,6 @@ target_link_libraries(milvus_engine ${engine_libs} ${third_party_libs})
 add_library(metrics STATIC ${metrics_files})
 
 set(metrics_lib
-        easyloggingpp
         yaml-cpp
         prometheus-cpp-push
         prometheus-cpp-pull
