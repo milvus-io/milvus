@@ -1,28 +1,41 @@
-////////////////////////////////////////////////////////////////////////////////
-// Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
-// Unauthorized copying of this file, via any medium is strictly prohibited.
-// Proprietary and confidential.
-////////////////////////////////////////////////////////////////////////////////
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 
 #pragma once
 
 #include "Cache.h"
+#include "utils/Log.h"
+#include "metrics/Metrics.h"
 
 namespace zilliz {
 namespace milvus {
 namespace cache {
 
+template<typename ItemObj>
 class CacheMgr {
 public:
     virtual uint64_t ItemCount() const;
 
     virtual bool ItemExists(const std::string& key);
 
-    virtual DataObjPtr GetItem(const std::string& key);
-    virtual engine::VecIndexPtr GetIndex(const std::string& key);
+    virtual ItemObj GetItem(const std::string& key);
 
-    virtual void InsertItem(const std::string& key, const DataObjPtr& data);
-    virtual void InsertItem(const std::string& key, const engine::VecIndexPtr& index);
+    virtual void InsertItem(const std::string& key, const ItemObj& data);
 
     virtual void EraseItem(const std::string& key);
 
@@ -39,6 +52,7 @@ protected:
     virtual ~CacheMgr();
 
 protected:
+    using CachePtr = std::shared_ptr<Cache<ItemObj>>;
     CachePtr cache_;
 };
 
@@ -46,3 +60,5 @@ protected:
 }
 }
 }
+
+#include "cache/CacheMgr.inl"
