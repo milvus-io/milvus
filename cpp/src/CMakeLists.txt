@@ -25,12 +25,14 @@ aux_source_directory(wrapper/knowhere knowhere_files)
 
 aux_source_directory(scheduler/action scheduler_action_files)
 aux_source_directory(scheduler/event scheduler_event_files)
+aux_source_directory(scheduler/job scheduler_job_files)
 aux_source_directory(scheduler/resource scheduler_resource_files)
 aux_source_directory(scheduler/task scheduler_task_files)
 aux_source_directory(scheduler scheduler_root_files)
 set(scheduler_srcs
         ${scheduler_action_files}
         ${scheduler_event_files}
+        ${scheduler_job_files}
         ${scheduler_resource_files}
         ${scheduler_task_files}
         ${scheduler_root_files}
