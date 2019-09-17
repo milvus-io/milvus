@@ -5,7 +5,7 @@
  ******************************************************************************/
 #include "EngineFactory.h"
 #include "ExecutionEngineImpl.h"
-#include "db/Log.h"
+#include "utils/Log.h"
 
 namespace zilliz {
 namespace milvus {

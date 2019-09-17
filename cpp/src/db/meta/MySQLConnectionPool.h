@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <atomic>
 
-#include "db/Log.h"
+#include "utils/Log.h"
 
 namespace zilliz {
 namespace milvus {
