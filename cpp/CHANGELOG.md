@@ -14,6 +14,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## New Feature
 
 ## Task
+- MS-554 - Change license to Apache 2.0
 
 # Milvus 0.4.0 (2019-09-12)
 
