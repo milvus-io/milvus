@@ -9,6 +9,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Improvement
 - MS-552 - Add and change the easylogging library
 - MS-553 - Refine cache code
+- MS-557 - Merge Log.h
 
 ## New Feature
 
