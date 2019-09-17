@@ -20,6 +20,7 @@ from utils.logger_helper import config
 config(LOG_LEVEL, LOG_PATH, LOG_NAME, TIMEZONE)
 
 TIMEOUT = env.int('TIMEOUT', 60)
+MAX_RETRY = env.int('MAX_RETRY', 3)
 
 
 if __name__ == '__main__':

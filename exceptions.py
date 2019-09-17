@@ -8,3 +8,6 @@ class BaseException(Exception):
 
 class ConnectionConnectError(BaseException):
     code = codes.CONNECT_ERROR_CODE
+
+class ConnectionNotFoundError(BaseException):
+    code = codes.CONNECTTION_NOT_FOUND_CODE
