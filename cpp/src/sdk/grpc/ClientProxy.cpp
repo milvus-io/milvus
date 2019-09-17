@@ -51,7 +51,7 @@ ClientProxy::Connect(const ConnectParam &param) {
 Status
 ClientProxy::Connect(const std::string &uri) {
     if (!UriCheck(uri)) {
-        return Status::Invalid("Invalid uri");
+        return Status(StatusCode::InvalidAgument, "Invalid uri");
     }
     size_t index = uri.find_first_of(':', 0);
 

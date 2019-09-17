@@ -57,7 +57,7 @@ TEST_F(MetricTest, METRIC_TEST) {
     engine::meta::TableSchema group_info;
     group_info.dimension_ = group_dim;
     group_info.table_id_ = group_name;
-    engine::Status stat = db_->CreateTable(group_info);
+    auto stat = db_->CreateTable(group_info);
 
     engine::meta::TableSchema group_info_get;
     group_info_get.table_id_ = group_name;
@@ -134,9 +134,9 @@ TEST_F(MetricTest, METRIC_TEST) {
 };
 
 TEST_F(MetricTest, COLLECTOR_METRICS_TEST){
-    engine::Status status = engine::Status::OK();
+    auto status = Status::OK();
     server::CollectInsertMetrics insert_metrics0(0, status);
-    status = engine::Status(DB_ERROR, "error");
+    status = Status(DB_ERROR, "error");
     server::CollectInsertMetrics insert_metrics1(0, status);
 
     server::CollectQueryMetrics query_metrics(10);
