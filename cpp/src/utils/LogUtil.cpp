@@ -5,8 +5,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include "LogUtil.h"
 #include "server/ServerConfig.h"
+#include "easylogging++.h"
 
-#include <easylogging++.h>
 #include <ctype.h>
 
 #include <string>
@@ -27,7 +27,7 @@ static int fatal_idx = 0;
 }
 
 // TODO(yzb) : change the easylogging library to get the log level from parameter rather than filename
-void RolloutHandler(const char *filename, std::size_t size) {
+void RolloutHandler(const char *filename, std::size_t size, el::Level level) {
     char *dirc = strdup(filename);
     char *basec = strdup(filename);
     char *dir = dirname(dirc);
@@ -48,22 +48,22 @@ void RolloutHandler(const char *filename, std::size_t size) {
     int ret;
     std::string m(std::string(dir) + "/" + s);
     s = m;
-    if ((position = s.find("global")) != std::string::npos) {
+    if (level == el::Level::Global) {
         s.append("." + std::to_string(++global_idx));
         ret = rename(m.c_str(), s.c_str());
-    } else if ((position = s.find("debug")) != std::string::npos) {
+    } else if (level == el::Level::Debug) {
         s.append("." + std::to_string(++debug_idx));
         ret = rename(m.c_str(), s.c_str());
-    } else if ((position = s.find("warning")) != std::string::npos) {
+    } else if (level == el::Level::Warning) {
         s.append("." + std::to_string(++warning_idx));
         ret = rename(m.c_str(), s.c_str());
-    } else if ((position = s.find("trace")) != std::string::npos) {
+    } else if (level == el::Level::Trace) {
         s.append("." + std::to_string(++trace_idx));
         ret = rename(m.c_str(), s.c_str());
-    } else if ((position = s.find("error")) != std::string::npos) {
+    } else if (level == el::Level::Error) {
         s.append("." + std::to_string(++error_idx));
         ret = rename(m.c_str(), s.c_str());
-    } else if ((position = s.find("fatal")) != std::string::npos) {
+    } else if (level == el::Level::Fatal) {
         s.append("." + std::to_string(++fatal_idx));
         ret = rename(m.c_str(), s.c_str());
     } else {
@@ -113,6 +113,7 @@ int32_t InitLog(const std::string &log_config_file) {
 
     el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
     el::Helpers::installPreRollOutCallback(RolloutHandler);
+    el::Loggers::addFlag(el::LoggingFlag::DisableApplicationAbortOnFatalLog);
     return 0;
 }
 
