@@ -19,14 +19,13 @@
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
-include_directories(/usr/include)
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-set(helper_files ${helper_files}
+set(util_files
         ${MILVUS_ENGINE_SRC}/utils/StringHelpFunctions.cpp
         ${MILVUS_ENGINE_SRC}/utils/LogUtil.cpp
         ${MILVUS_ENGINE_SRC}/utils/SignalUtil.cpp)
@@ -39,19 +38,11 @@ set(grpc_service_files
         )
 
 set(server_test_files
-        ${cache_files}
-        ${config_files}
-        ${db_main_files}
-        ${db_engine_files}
-        ${db_insert_files}
-        ${db_meta_files}
-        ${db_scheduler_files}
-        ${scheduler_files}
+        ${common_files}
         ${server_files}
         ${grpc_server_files}
         ${grpc_service_files}
-        ${knowhere_files}
-        ${helper_files}
+        ${util_files}
         ${unittest_files}
         ${test_files}
         )
@@ -65,22 +56,13 @@ set(client_grpc_lib
         grpc_protobuf
         grpc_protoc)
 
-set(require_libs
+target_link_libraries(server_test
         knowhere
         stdc++
-        sqlite
-        mysqlpp
-        boost_system_static
-        boost_filesystem_static
         snappy
         bz2
         zstd
-        lz4
         ${client_grpc_lib}
-        )
-
-target_link_libraries(server_test
-        ${require_libs}
         ${unittest_libs}
         )
 
