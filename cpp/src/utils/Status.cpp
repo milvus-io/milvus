@@ -21,9 +21,9 @@
 namespace zilliz {
 namespace milvus {
 
-constexpr int CODE_WIDTH = sizeof(ErrorCode);
+constexpr int CODE_WIDTH = sizeof(StatusCode);
 
-Status::Status(ErrorCode code, const std::string& msg) {
+Status::Status(StatusCode code, const std::string& msg) {
     //4 bytes store code
     //4 bytes store message length
     //the left bytes store message string
@@ -50,7 +50,8 @@ Status::Status(const Status &s)
     CopyFrom(s);
 }
 
-Status &Status::operator=(const Status &s) {
+Status&
+Status::operator=(const Status &s) {
     CopyFrom(s);
     return *this;
 }
@@ -60,12 +61,14 @@ Status::Status(Status &&s)
     MoveFrom(s);
 }
 
-Status &Status::operator=(Status &&s) {
+Status&
+Status::operator=(Status &&s) {
     MoveFrom(s);
     return *this;
 }
 
-void Status::CopyFrom(const Status &s) {
+void
+Status::CopyFrom(const Status &s) {
     delete state_;
     state_ = nullptr;
     if(s.state_ == nullptr) {
@@ -73,19 +76,37 @@ void Status::CopyFrom(const Status &s) {
     }
 
     uint32_t length = 0;
-    std::memcpy(&length, s.state_ + CODE_WIDTH, sizeof(length));
+    memcpy(&length, s.state_ + CODE_WIDTH, sizeof(length));
     int buff_len = length + sizeof(length) + CODE_WIDTH;
     state_ = new char[buff_len];
     memcpy((void*)state_, (void*)s.state_, buff_len);
 }
 
-void Status::MoveFrom(Status &s) {
+void
+Status::MoveFrom(Status &s) {
     delete state_;
     state_ = s.state_;
     s.state_ = nullptr;
 }
 
-std::string Status::ToString() const {
+std::string
+Status::message() const {
+    if (state_ == nullptr) {
+        return "";
+    }
+
+    std::string msg;
+    uint32_t length = 0;
+    memcpy(&length, state_ + CODE_WIDTH, sizeof(length));
+    if(length > 0) {
+        msg.append(state_ + sizeof(length) + CODE_WIDTH, length);
+    }
+
+    return msg;
+}
+
+std::string
+Status::ToString() const {
     if (state_ == nullptr) {
         return "OK";
     }
@@ -115,12 +136,7 @@ std::string Status::ToString() const {
             break;
     }
 
-    uint32_t length = 0;
-    memcpy(&length, state_ + CODE_WIDTH, sizeof(length));
-    if(length > 0) {
-        result.append(state_ + sizeof(length) + CODE_WIDTH, length);
-    }
-
+    result += message();
     return result;
 }
 

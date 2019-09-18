@@ -41,17 +41,17 @@ ServerConfig::GetInstance() {
     return config;
 }
 
-ErrorCode
+Status
 ServerConfig::LoadConfigFile(const std::string &config_filename) {
     std::string filename = config_filename;
     if (filename.empty()) {
-        std::cout << "ERROR: a config file is required" << std::endl;
+        std::cerr << "ERROR: a config file is required" << std::endl;
         exit(1);//directly exit program if config file not specified
     }
     struct stat directoryStat;
     int statOK = stat(filename.c_str(), &directoryStat);
     if (statOK != 0) {
-        std::cout << "ERROR: " << filename << " not found!" << std::endl;
+        std::cerr << "ERROR: " << filename << " not found!" << std::endl;
         exit(1);//directly exit program if config file not found
     }
 
@@ -59,43 +59,44 @@ ServerConfig::LoadConfigFile(const std::string &config_filename) {
         ConfigMgr *mgr = const_cast<ConfigMgr *>(ConfigMgr::GetInstance());
         ErrorCode err = mgr->LoadConfigFile(filename);
         if (err != 0) {
-            std::cout << "Server failed to load config file" << std::endl;
+            std::cerr << "Server failed to load config file" << std::endl;
             exit(1);//directly exit program if the config file is illegal
         }
     }
     catch (YAML::Exception &e) {
-        std::cout << "Server failed to load config file: " << std::endl;
-        return SERVER_UNEXPECTED_ERROR;
+        std::cerr << "Server failed to load config file: " << std::endl;
+        exit(1);//directly exit program if the config file is illegal
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
-ErrorCode ServerConfig::ValidateConfig() {
+Status
+ServerConfig::ValidateConfig() {
 
     bool okay = true;
-    if (CheckServerConfig() != SERVER_SUCCESS) {
+    if (!CheckServerConfig().ok()) {
         okay = false;
     }
-    if (CheckDBConfig() != SERVER_SUCCESS) {
+    if (!CheckDBConfig().ok()) {
         okay = false;
     }
-    if (CheckMetricConfig() != SERVER_SUCCESS) {
+    if (!CheckMetricConfig().ok()) {
         okay = false;
     }
-    if (CheckCacheConfig() != SERVER_SUCCESS) {
+    if (!CheckCacheConfig().ok()) {
         okay = false;
     }
-    if (CheckEngineConfig() != SERVER_SUCCESS) {
+    if (!CheckEngineConfig().ok()) {
         okay = false;
     }
-    if (CheckResourceConfig() != SERVER_SUCCESS) {
+    if (!CheckResourceConfig().ok()) {
         okay = false;
     }
-    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
+    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Config validation not pass"));
 }
 
-ErrorCode
+Status
 ServerConfig::CheckServerConfig() {
 /*
   server_config:
@@ -109,13 +110,13 @@ ServerConfig::CheckServerConfig() {
     ConfigNode server_config = GetConfig(CONFIG_SERVER);
 
     std::string ip_address = server_config.GetValue(CONFIG_SERVER_ADDRESS, "127.0.0.1");
-    if (ValidationUtil::ValidateIpAddress(ip_address) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateIpAddress(ip_address).ok()) {
         std::cerr << "ERROR: invalid server IP address: " << ip_address << std::endl;
         okay = false;
     }
 
     std::string port_str = server_config.GetValue(CONFIG_SERVER_PORT, "19530");
-    if (ValidationUtil::ValidateStringIsNumber(port_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsNumber(port_str).ok()) {
         std::cerr << "ERROR: port " << port_str << " is not a number" << std::endl;
         okay = false;
     } else {
@@ -151,10 +152,10 @@ ServerConfig::CheckServerConfig() {
         okay = false;
     }
 
-    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
+    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Server config is illegal"));
 }
 
-ErrorCode
+Status
 ServerConfig::CheckDBConfig() {
 /*
   db_config:
@@ -182,25 +183,25 @@ ServerConfig::CheckDBConfig() {
     }
 
     std::string db_backend_url = db_config.GetValue(CONFIG_DB_URL);
-    if (ValidationUtil::ValidateDbURI(db_backend_url) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateDbURI(db_backend_url).ok()) {
         std::cerr << "ERROR: invalid db_backend_url: " << db_backend_url << std::endl;
         okay = false;
     }
 
     std::string archive_disk_threshold_str = db_config.GetValue(CONFIG_DB_INSERT_BUFFER_SIZE, "0");
-    if (ValidationUtil::ValidateStringIsNumber(archive_disk_threshold_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsNumber(archive_disk_threshold_str).ok()) {
         std::cerr << "ERROR: archive_disk_threshold " << archive_disk_threshold_str << " is not a number" << std::endl;
         okay = false;
     }
 
     std::string archive_days_threshold_str = db_config.GetValue(CONFIG_DB_INSERT_BUFFER_SIZE, "0");
-    if (ValidationUtil::ValidateStringIsNumber(archive_days_threshold_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsNumber(archive_days_threshold_str).ok()) {
         std::cerr << "ERROR: archive_days_threshold " << archive_days_threshold_str << " is not a number" << std::endl;
         okay = false;
     }
 
     std::string insert_buffer_size_str = db_config.GetValue(CONFIG_DB_INSERT_BUFFER_SIZE, "4");
-    if (ValidationUtil::ValidateStringIsNumber(insert_buffer_size_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsNumber(insert_buffer_size_str).ok()) {
         std::cerr << "ERROR: insert_buffer_size " << insert_buffer_size_str << " is not a number" << std::endl;
         okay = false;
     }
@@ -216,21 +217,21 @@ ServerConfig::CheckDBConfig() {
     }
 
     std::string gpu_index_str = db_config.GetValue(CONFIG_DB_BUILD_INDEX_GPU, "0");
-    if (ValidationUtil::ValidateStringIsNumber(gpu_index_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsNumber(gpu_index_str).ok()) {
         std::cerr << "ERROR: gpu_index " << gpu_index_str << " is not a number" << std::endl;
         okay = false;
     } else {
         int32_t gpu_index = std::stol(gpu_index_str);
-        if (ValidationUtil::ValidateGpuIndex(gpu_index) != SERVER_SUCCESS) {
+        if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
             std::cerr << "ERROR: invalid gpu_index " << gpu_index_str << std::endl;
             okay = false;
         }
     }
 
-    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
+    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "DB config is illegal"));
 }
 
-ErrorCode
+Status
 ServerConfig::CheckMetricConfig() {
 /*
     metric_config:
@@ -245,21 +246,21 @@ ServerConfig::CheckMetricConfig() {
     ConfigNode metric_config = GetConfig(CONFIG_METRIC);
 
     std::string is_startup_str = metric_config.GetValue(CONFIG_METRIC_IS_STARTUP, "off");
-    if (ValidationUtil::ValidateStringIsBool(is_startup_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsBool(is_startup_str).ok()) {
         std::cerr << "ERROR: invalid is_startup config: " << is_startup_str << std::endl;
         okay = false;
     }
 
     std::string port_str = metric_config.GetChild(CONFIG_PROMETHEUS).GetValue(CONFIG_METRIC_PROMETHEUS_PORT, "8080");
-    if (ValidationUtil::ValidateStringIsNumber(port_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsNumber(port_str).ok()) {
         std::cerr << "ERROR: port specified in prometheus_config " << port_str << " is not a number" << std::endl;
         okay = false;
     }
 
-    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
+    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Metric config is illegal"));
 }
 
-ErrorCode
+Status
 ServerConfig::CheckCacheConfig() {
 /*
   cache_config:
@@ -274,7 +275,7 @@ ServerConfig::CheckCacheConfig() {
     ConfigNode cache_config = GetConfig(CONFIG_CACHE);
 
     std::string cpu_cache_capacity_str = cache_config.GetValue(CONFIG_CPU_CACHE_CAPACITY, "16");
-    if (ValidationUtil::ValidateStringIsNumber(cpu_cache_capacity_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsNumber(cpu_cache_capacity_str).ok()) {
         std::cerr << "ERROR: cpu_cache_capacity " << cpu_cache_capacity_str << " is not a number" << std::endl;
         okay = false;
     }
@@ -301,7 +302,7 @@ ServerConfig::CheckCacheConfig() {
 
     std::string cpu_cache_free_percent_str = cache_config.GetValue(CACHE_FREE_PERCENT, "0.85");
     double cpu_cache_free_percent;
-    if (ValidationUtil::ValidateStringIsDouble(cpu_cache_free_percent_str, cpu_cache_free_percent) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsDouble(cpu_cache_free_percent_str, cpu_cache_free_percent).ok()) {
         std::cerr << "ERROR: cpu_cache_free_percent " << cpu_cache_free_percent_str << " is not a double" << std::endl;
         okay = false;
     }
@@ -311,13 +312,13 @@ ServerConfig::CheckCacheConfig() {
     }
 
     std::string insert_cache_immediately_str = cache_config.GetValue(CONFIG_INSERT_CACHE_IMMEDIATELY, "false");
-    if (ValidationUtil::ValidateStringIsBool(insert_cache_immediately_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsBool(insert_cache_immediately_str).ok()) {
         std::cerr << "ERROR: invalid insert_cache_immediately config: " << insert_cache_immediately_str << std::endl;
         okay = false;
     }
 
     std::string gpu_cache_capacity_str = cache_config.GetValue(CONFIG_GPU_CACHE_CAPACITY, "0");
-    if (ValidationUtil::ValidateStringIsNumber(gpu_cache_capacity_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsNumber(gpu_cache_capacity_str).ok()) {
         std::cerr << "ERROR: gpu_cache_capacity " << gpu_cache_capacity_str << " is not a number" << std::endl;
         okay = false;
     }
@@ -326,7 +327,7 @@ ServerConfig::CheckCacheConfig() {
         gpu_cache_capacity *= GB;
         int gpu_index = GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_BUILD_INDEX_GPU, 0);
         size_t gpu_memory;
-        if (ValidationUtil::GetGpuMemory(gpu_index, gpu_memory) != SERVER_SUCCESS) {
+        if (!ValidationUtil::GetGpuMemory(gpu_index, gpu_memory).ok()) {
             std::cerr << "ERROR: could not get gpu memory for device " << gpu_index << std::endl;
             okay = false;
         }
@@ -342,7 +343,7 @@ ServerConfig::CheckCacheConfig() {
 
     std::string gpu_cache_free_percent_str = cache_config.GetValue(GPU_CACHE_FREE_PERCENT, "0.85");
     double gpu_cache_free_percent;
-    if (ValidationUtil::ValidateStringIsDouble(gpu_cache_free_percent_str, gpu_cache_free_percent) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsDouble(gpu_cache_free_percent_str, gpu_cache_free_percent).ok()) {
         std::cerr << "ERROR: gpu_cache_free_percent " << gpu_cache_free_percent_str << " is not a double" << std::endl;
         okay = false;
     }
@@ -351,10 +352,10 @@ ServerConfig::CheckCacheConfig() {
         okay = false;
     }
 
-    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
+    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Cache config is illegal"));
 }
 
-ErrorCode
+Status
 ServerConfig::CheckEngineConfig() {
 /*
     engine_config:
@@ -365,13 +366,13 @@ ServerConfig::CheckEngineConfig() {
     ConfigNode engine_config = GetConfig(CONFIG_ENGINE);
 
     std::string use_blas_threshold_str = engine_config.GetValue(CONFIG_DCBT, "20");
-    if (ValidationUtil::ValidateStringIsNumber(use_blas_threshold_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsNumber(use_blas_threshold_str).ok()) {
         std::cerr << "ERROR: use_blas_threshold " << use_blas_threshold_str << " is not a number" << std::endl;
         okay = false;
     }
 
     std::string omp_thread_num_str = engine_config.GetValue(CONFIG_OMP_THREAD_NUM, "0");
-    if (ValidationUtil::ValidateStringIsNumber(omp_thread_num_str) != SERVER_SUCCESS) {
+    if (!ValidationUtil::ValidateStringIsNumber(omp_thread_num_str).ok()) {
         std::cerr << "ERROR: omp_thread_num " << omp_thread_num_str << " is not a number" << std::endl;
         okay = false;
     } else {
@@ -384,10 +385,10 @@ ServerConfig::CheckEngineConfig() {
         }
     }
 
-    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
+    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Engine config is illegal"));
 }
 
-ErrorCode
+Status
 ServerConfig::CheckResourceConfig() {
     /*
       resource_config:
@@ -410,10 +411,10 @@ ServerConfig::CheckResourceConfig() {
         okay = false;
     }
 
-    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
+    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Resource config is illegal"));
 }
 
-//ErrorCode
+//Status
 //ServerConfig::CheckResourceConfig() {
 /*
   resource_config:
@@ -484,7 +485,7 @@ ServerConfig::CheckResourceConfig() {
 //
 //        std::string device_id_str = resource_conf.GetValue(CONFIG_RESOURCE_DEVICE_ID, "0");
 //        int32_t device_id = -1;
-//        if (ValidationUtil::ValidateStringIsNumber(device_id_str) != SERVER_SUCCESS) {
+//        if (!ValidationUtil::ValidateStringIsNumber(device_id_str).ok()) {
 //            std::cerr << "ERROR: device_id " << device_id_str << " is not a number" << std::endl;
 //            okay = false;
 //        } else {
@@ -492,7 +493,7 @@ ServerConfig::CheckResourceConfig() {
 //        }
 //
 //        std::string enable_executor_str = resource_conf.GetValue(CONFIG_RESOURCE_ENABLE_EXECUTOR, "off");
-//        if (ValidationUtil::ValidateStringIsBool(enable_executor_str) != SERVER_SUCCESS) {
+//        if (!ValidationUtil::ValidateStringIsBool(enable_executor_str).ok()) {
 //            std::cerr << "ERROR: invalid enable_executor config: " << enable_executor_str << std::endl;
 //            okay = false;
 //        }
@@ -514,26 +515,26 @@ ServerConfig::CheckResourceConfig() {
 //                hasExecutor = true;
 //            }
 //            std::string gpu_resource_num_str = resource_conf.GetValue(CONFIG_RESOURCE_NUM, "2");
-//            if (ValidationUtil::ValidateStringIsNumber(gpu_resource_num_str) != SERVER_SUCCESS) {
+//            if (!ValidationUtil::ValidateStringIsNumber(gpu_resource_num_str).ok()) {
 //                std::cerr << "ERROR: gpu_resource_num " << gpu_resource_num_str << " is not a number" << std::endl;
 //                okay = false;
 //            }
 //            bool mem_valid = true;
 //            std::string pinned_memory_str = resource_conf.GetValue(CONFIG_RESOURCE_PIN_MEMORY, "300");
-//            if (ValidationUtil::ValidateStringIsNumber(pinned_memory_str) != SERVER_SUCCESS) {
+//            if (!ValidationUtil::ValidateStringIsNumber(pinned_memory_str).ok()) {
 //                std::cerr << "ERROR: pinned_memory " << pinned_memory_str << " is not a number" << std::endl;
 //                okay = false;
 //                mem_valid = false;
 //            }
 //            std::string temp_memory_str = resource_conf.GetValue(CONFIG_RESOURCE_TEMP_MEMORY, "300");
-//            if (ValidationUtil::ValidateStringIsNumber(temp_memory_str) != SERVER_SUCCESS) {
+//            if (!ValidationUtil::ValidateStringIsNumber(temp_memory_str).ok()) {
 //                std::cerr << "ERROR: temp_memory " << temp_memory_str << " is not a number" << std::endl;
 //                okay = false;
 //                mem_valid = false;
 //            }
 //            if (mem_valid) {
 //                size_t gpu_memory;
-//                if (ValidationUtil::GetGpuMemory(device_id, gpu_memory) != SERVER_SUCCESS) {
+//                if (!ValidationUtil::GetGpuMemory(device_id, gpu_memory).ok()) {
 //                    std::cerr << "ERROR: could not get gpu memory for device " << device_id << std::endl;
 //                    okay = false;
 //                }
@@ -592,8 +593,7 @@ ServerConfig::CheckResourceConfig() {
 //        }
 //    }
 //
-//    return (okay ? SERVER_SUCCESS : SERVER_INVALID_ARGUMENT);
-//    return SERVER_SUCCESS;
+//    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Resource config is illegal"));
 //}
 
 void

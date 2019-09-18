@@ -17,7 +17,7 @@
 
 #pragma once
 #include "GrpcRequestScheduler.h"
-#include "utils/Error.h"
+#include "utils/Status.h"
 #include "db/Types.h"
 
 #include "milvus.grpc.pb.h"
@@ -41,7 +41,7 @@ protected:
     explicit
     CreateTableTask(const ::milvus::grpc::TableSchema *request);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 private:
@@ -57,7 +57,7 @@ public:
 protected:
     HasTableTask(const std::string &request, bool &has_table);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 
@@ -75,7 +75,7 @@ public:
 protected:
     DescribeTableTask(const std::string &table_name, ::milvus::grpc::TableSchema *schema);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 
@@ -94,7 +94,7 @@ protected:
     explicit
     DropTableTask(const std::string &table_name);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 
@@ -112,7 +112,7 @@ protected:
     explicit
     CreateIndexTask(const ::milvus::grpc::IndexParam *index_Param);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 
@@ -130,7 +130,7 @@ protected:
     explicit
     ShowTablesTask(::grpc::ServerWriter<::milvus::grpc::TableName> *writer);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 private:
@@ -148,7 +148,7 @@ protected:
     InsertTask(const ::milvus::grpc::InsertParam *insert_Param,
                      ::milvus::grpc::VectorIds *record_ids_);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 private:
@@ -169,7 +169,7 @@ protected:
                const std::vector<std::string> &file_id_array,
                ::milvus::grpc::TopKQueryResultList *response);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 private:
@@ -187,7 +187,7 @@ public:
 protected:
     CountTableTask(const std::string &table_name, int64_t &row_count);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 private:
@@ -204,7 +204,7 @@ public:
 protected:
     CmdTask(const std::string &cmd, std::string &result);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 private:
@@ -221,7 +221,7 @@ public:
 protected:
     DeleteByRangeTask(const ::milvus::grpc::DeleteByRangeParam *delete_by_range_param);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 private:
@@ -237,7 +237,7 @@ public:
 protected:
     PreloadTableTask(const std::string &table_name);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 private:
@@ -255,7 +255,7 @@ protected:
     DescribeIndexTask(const std::string &table_name,
             ::milvus::grpc::IndexParam *index_param);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 private:
@@ -272,7 +272,7 @@ public:
 protected:
     DropIndexTask(const std::string &table_name);
 
-    ErrorCode
+    Status
     OnExecute() override;
 
 private:
