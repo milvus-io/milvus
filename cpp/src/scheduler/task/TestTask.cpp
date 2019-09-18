@@ -25,7 +25,7 @@ namespace milvus {
 namespace engine {
 
 
-TestTask::TestTask(TableFileSchemaPtr &file) : XSearchTask(file) {}
+TestTask::TestTask(meta::TableFileSchemaPtr &file) : XSearchTask(file) {}
 
 void
 TestTask::Load(LoadType type, uint8_t device_id) {
