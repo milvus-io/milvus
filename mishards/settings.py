@@ -8,8 +8,6 @@ env.read_env()
 
 DEBUG = env.bool('DEBUG', False)
 
-METADATA_URI = env.str('METADATA_URI', '')
-
 LOG_LEVEL = env.str('LOG_LEVEL', 'DEBUG' if DEBUG else 'INFO')
 LOG_PATH = env.str('LOG_PATH', '/tmp/mishards')
 LOG_NAME = env.str('LOG_NAME', 'logfile')
