@@ -60,7 +60,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 Tables.table_id==table_id,
                 Tables.state!=Tables.TO_DELETE
             )).first()
-        logger.error(table)
 
         if not table:
             raise exceptions.TableNotFoundError(table_id)
