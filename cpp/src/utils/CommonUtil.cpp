@@ -162,6 +162,11 @@ uint64_t CommonUtil::GetFileSize(const std::string &path) {
     }
 }
 
+std::string CommonUtil::GetFileName(std::string filename) {
+    int pos = filename.find_last_of('/');
+    return filename.substr(pos + 1);
+}
+
 std::string CommonUtil::GetExePath() {
     const size_t buf_len = 1024;
     char buf[buf_len];

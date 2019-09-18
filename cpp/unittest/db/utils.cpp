@@ -66,7 +66,7 @@ void BaseTest::TearDown() {
     zilliz::knowhere::FaissGpuResourceMgr::GetInstance().Free();
 }
 
-engine::Options BaseTest::GetOptions() {
+engine::DBOptions BaseTest::GetOptions() {
     auto options = engine::DBFactory::BuildOption();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = "sqlite://:@:/";
@@ -108,7 +108,7 @@ void DBTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-engine::Options DBTest2::GetOptions() {
+engine::DBOptions DBTest2::GetOptions() {
     auto options = engine::DBFactory::BuildOption();
     options.meta.path = "/tmp/milvus_test";
     options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
@@ -134,7 +134,7 @@ void MetaTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-engine::Options MySqlDBTest::GetOptions() {
+engine::DBOptions MySqlDBTest::GetOptions() {
     auto options = engine::DBFactory::BuildOption();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = DBTestEnvironment::getURI();
@@ -163,7 +163,7 @@ void MySqlMetaTest::TearDown() {
     boost::filesystem::remove_all(options.meta.path);
 }
 
-zilliz::milvus::engine::Options MySqlMetaTest::GetOptions() {
+engine::DBOptions MySqlMetaTest::GetOptions() {
     auto options = engine::DBFactory::BuildOption();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = DBTestEnvironment::getURI();

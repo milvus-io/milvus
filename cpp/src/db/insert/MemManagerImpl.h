@@ -38,7 +38,7 @@ class MemManagerImpl : public MemManager {
  public:
     using Ptr = std::shared_ptr<MemManagerImpl>;
 
-    MemManagerImpl(const meta::MetaPtr &meta, const Options &options)
+    MemManagerImpl(const meta::MetaPtr &meta, const DBOptions &options)
         : meta_(meta), options_(options) {}
 
     Status InsertVectors(const std::string &table_id,
@@ -66,7 +66,7 @@ class MemManagerImpl : public MemManager {
     MemIdMap mem_id_map_;
     MemList immu_mem_list_;
     meta::MetaPtr meta_;
-    Options options_;
+    DBOptions options_;
     std::mutex mutex_;
     std::mutex serialization_mtx_;
 }; // NewMemManager

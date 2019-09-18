@@ -72,5 +72,5 @@ protected:
     void InitLog();
     virtual void SetUp() override;
     virtual void TearDown() override;
-    virtual zilliz::milvus::engine::Options GetOptions();
+    virtual zilliz::milvus::engine::DBOptions GetOptions();
 };
