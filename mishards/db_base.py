@@ -17,13 +17,12 @@ class DB:
                 echo=echo,
                 max_overflow=0)
         self.uri = uri
-        session = sessionmaker()
-        session.configure(bind=self.engine)
-        self.db_session = session()
+        self.session = sessionmaker()
+        self.session.configure(bind=self.engine)
 
     @property
     def Session(self):
-        return self.db_session
+        return self.session()
 
     def drop_all(self):
         self.Model.metadata.drop_all(self.engine)
