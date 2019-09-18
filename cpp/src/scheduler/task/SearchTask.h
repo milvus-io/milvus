@@ -18,6 +18,8 @@
 #pragma once
 
 #include "Task.h"
+#include "db/meta/MetaTypes.h"
+#include "scheduler/job/SearchJob.h"
 
 
 namespace zilliz {
@@ -28,7 +30,7 @@ namespace engine {
 class XSearchTask : public Task {
 public:
     explicit
-    XSearchTask(TableFileSchemaPtr file);
+    XSearchTask(meta::TableFileSchemaPtr file);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -41,20 +43,20 @@ public:
                                 const std::vector<float> &output_distence,
                                 uint64_t nq,
                                 uint64_t topk,
-                                SearchContext::ResultSet &result_set);
+                                scheduler::ResultSet &result_set);
 
-    static Status MergeResult(SearchContext::Id2DistanceMap &distance_src,
-                              SearchContext::Id2DistanceMap &distance_target,
+    static Status MergeResult(scheduler::Id2DistanceMap &distance_src,
+                              scheduler::Id2DistanceMap &distance_target,
                               uint64_t topk,
                               bool ascending);
 
-    static Status TopkResult(SearchContext::ResultSet &result_src,
+    static Status TopkResult(scheduler::ResultSet &result_src,
                              uint64_t topk,
                              bool ascending,
-                             SearchContext::ResultSet &result_target);
+                             scheduler::ResultSet &result_target);
 
 public:
-    TableFileSchemaPtr file_;
+    meta::TableFileSchemaPtr file_;
 
     size_t index_id_ = 0;
     int index_type_ = 0;
