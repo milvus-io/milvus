@@ -27,43 +27,35 @@
 #include <condition_variable>
 #include <memory>
 
+#include "job/Job.h"
+#include "job/SearchJob.h"
+#include "job/DeleteJob.h"
+#include "task/Task.h"
+#include "task/SearchTask.h"
+#include "task/DeleteTask.h"
+
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-enum class JobType {
-    INVALID,
-    SEARCH,
-    DELETE,
-    BUILD,
-};
+using engine::TaskPtr;
+using engine::XSearchTask;
+using engine::XDeleteTask;
 
-using JobId = std::uint64_t;
-
-class Job {
+class TaskCreator {
 public:
-    inline JobId
-    id() const {
-        return id_;
-    }
+    static std::vector<TaskPtr>
+    Create(const JobPtr &job);
 
-    inline JobType
-    type() const {
-        return type_;
-    }
+public:
+    static std::vector<TaskPtr>
+    Create(const SearchJobPtr &job);
 
-protected:
-    Job(JobId id, JobType type) : id_(id), type_(type) {}
-
-private:
-    JobId id_;
-    JobType type_;
+    static std::vector<TaskPtr>
+    Create(const DeleteJobPtr &job);
 };
 
-using JobPtr = std::shared_ptr<Job>;
-
 }
 }
 }
-
