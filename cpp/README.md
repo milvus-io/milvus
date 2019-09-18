@@ -10,7 +10,7 @@ Milvus was developed by researchers and engineers in ZILLIZ, a tech startup that
 
 Milvus provides stable Python and C++ APIs, as well as RESTful API.
 
-Keep up-to-date with newest releases and latest updates by reading [Releases](milvus-io/doc/master/releases).
+Keep up-to-date with newest releases and latest updates by reading [Releases](https://www.milvus-io/docs/master/releases).
 
 - GPU-accelerated search engine
 
@@ -24,13 +24,16 @@ Keep up-to-date with newest releases and latest updates by reading [Releases](mi
 
   The data is stored and computed on a distributed architecture. This lets you scale data sizes up and down without redesigning the system.
 
+## Architecture
+![Milvus_arch](https://www.milvus-io/docs/master/assets/milvus_arch.png)
+
 ## Get started
 
 ### Install and start Milvus server
 
 #### Use Docker
 
-Use Docker to install Milvus is a breeze. See the [Milvus install guide](doc/master/userguide/install_milvus.md) for details.
+Use Docker to install Milvus is a breeze. See the [Milvus install guide](https://www.milvus-io/docs/master/userguide/install_milvus.md) for details.
 
 #### Use source code
 
@@ -143,7 +146,7 @@ To stop Milvus server, run:
 $ ./stop_server.sh
 ```
 
-To edit Milvus settings in `conf/server_config.yaml` and `conf/log_config.conf`, please read [Milvus Configuration](milvus-io/milvus/doc/master/reference/milvus_config.md).
+To edit Milvus settings in `conf/server_config.yaml` and `conf/log_config.conf`, please read [Milvus Configuration](https://www.milvus-io/docs/master/reference/milvus_config.md).
 
 ### Try your first Milvus program
 
@@ -187,7 +190,7 @@ For public discussion of Milvus, please join our [discussion group].
 
 ## Milvus Roadmap
 
-Please read our [roadmap](milvus-io/milvus/doc/master/roadmap.md) to learn about upcoming features.
+Please read our [roadmap](milvus-io/milvus/docs/master/roadmap.md) to learn about upcoming features.
 
 ## Resources
 
@@ -199,7 +202,7 @@ Please read our [roadmap](milvus-io/milvus/doc/master/roadmap.md) to learn about
 
 [Milvus CSDN](https://mp.csdn.net/mdeditor/100041006#)
 
-[Milvus roadmap](milvus-io/milvus/doc/master/roadmap.md)
+[Milvus roadmap](https://www.milvus-io/docs/master/roadmap.md)
 
 [Milvus white paper]
 
