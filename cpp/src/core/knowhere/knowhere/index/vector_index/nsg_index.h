@@ -18,47 +18,36 @@
 
 #pragma once
 
-#include "src/wrapper/vec_index.h"
+#include "vector_index.h"
 
-#include <memory>
 
 namespace zilliz {
-namespace milvus {
-namespace cache {
+namespace knowhere {
 
-class DataObj {
-public:
-    DataObj(const engine::VecIndexPtr& index)
-            : index_(index)
-    {}
+namespace algo {
+class NsgIndex;
+}
 
-    DataObj(const engine::VecIndexPtr& index, int64_t size)
-            : index_(index),
-              size_(size)
-    {}
+class NSG : public VectorIndex {
+ public:
+    explicit NSG(const int64_t& gpu_num):gpu_(gpu_num){}
+    NSG() = default;
 
-    engine::VecIndexPtr data() { return index_; }
-    const engine::VecIndexPtr& data() const { return index_; }
-
-    int64_t size() const {
-        if(index_ == nullptr) {
-            return 0;
-        }
-
-        if(size_ > 0) {
-            return size_;
-        }
-
-        return index_->Count() * index_->Dimension() * sizeof(float);
-    }
-
-private:
-    engine::VecIndexPtr index_ = nullptr;
-    int64_t size_ = 0;
+    IndexModelPtr Train(const DatasetPtr &dataset, const Config &config) override;
+    DatasetPtr Search(const DatasetPtr &dataset, const Config &config) override;
+    void Add(const DatasetPtr &dataset, const Config &config) override;
+    BinarySet Serialize() override;
+    void Load(const BinarySet &index_binary) override;
+    int64_t Count() override;
+    int64_t Dimension() override;
+    VectorIndexPtr Clone() override;
+    void Seal() override;
+ private:
+    std::shared_ptr<algo::NsgIndex> index_;
+    int64_t gpu_;
 };
 
-using DataObjPtr = std::shared_ptr<DataObj>;
+using NSGIndexPtr = std::shared_ptr<NSG>();
 
-}
 }
 }

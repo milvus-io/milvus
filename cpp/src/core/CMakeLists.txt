@@ -84,7 +84,7 @@ include(DefineOptionsCore)
 include(BuildUtilsCore)
 include(ThirdPartyPackagesCore)
 
-add_subdirectory(src)
+add_subdirectory(knowhere)
 
 if (BUILD_COVERAGE STREQUAL "ON")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")

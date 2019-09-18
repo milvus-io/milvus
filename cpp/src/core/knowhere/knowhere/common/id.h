@@ -18,47 +18,43 @@
 
 #pragma once
 
-#include "src/wrapper/vec_index.h"
+//#include "zcommon/id/id.h"
+//using ID = zilliz::common::ID;
 
-#include <memory>
+#include <stdint.h>
+#include <string>
 
 namespace zilliz {
-namespace milvus {
-namespace cache {
+namespace knowhere {
 
-class DataObj {
-public:
-    DataObj(const engine::VecIndexPtr& index)
-            : index_(index)
-    {}
 
-    DataObj(const engine::VecIndexPtr& index, int64_t size)
-            : index_(index),
-              size_(size)
-    {}
 
-    engine::VecIndexPtr data() { return index_; }
-    const engine::VecIndexPtr& data() const { return index_; }
+class ID {
+ public:
+    constexpr static int64_t kIDSize = 20;
 
-    int64_t size() const {
-        if(index_ == nullptr) {
-            return 0;
-        }
+ public:
+    const int32_t *
+    data() const { return content_; }
 
-        if(size_ > 0) {
-            return size_;
-        }
+    int32_t *
+    mutable_data() { return content_; }
 
-        return index_->Count() * index_->Dimension() * sizeof(float);
-    }
+    bool
+    IsValid() const;
 
-private:
-    engine::VecIndexPtr index_ = nullptr;
-    int64_t size_ = 0;
+    std::string
+    ToString() const;
+
+    bool
+    operator==(const ID &that) const;
+
+    bool
+    operator<(const ID &that) const;
+
+ protected:
+    int32_t content_[5] = {};
 };
 
-using DataObjPtr = std::shared_ptr<DataObj>;
-
-}
-}
-}
+} // namespace knowhere
+} // namespace zilliz
