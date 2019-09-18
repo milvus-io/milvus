@@ -431,19 +431,14 @@ TEST_F(RpcHandlerTest, DeleteByRangeTest) {
 //////////////////////////////////////////////////////////////////////
 class DummyTask : public GrpcBaseTask {
  public:
-    ErrorCode
+    Status
     OnExecute() override {
-        return 0;
+        return Status::OK();
     }
 
     static BaseTaskPtr
     Create(std::string& dummy) {
         return std::shared_ptr<GrpcBaseTask>(new DummyTask(dummy));
-    }
-
-    ErrorCode
-    DummySetError(ErrorCode error_code, const std::string &msg) {
-        return SetError(error_code, msg);
     }
 
  public:
@@ -464,11 +459,8 @@ class RpcSchedulerTest : public testing::Test {
 };
 
 TEST_F(RpcSchedulerTest, BaseTaskTest){
-    ErrorCode error_code = task_ptr->Execute();
-    ASSERT_EQ(error_code, 0);
-
-    error_code = task_ptr->DummySetError(0, "test error");
-    ASSERT_EQ(error_code, 0);
+    auto status = task_ptr->Execute();
+    ASSERT_TRUE(status.ok());
 
     GrpcRequestScheduler::GetInstance().Start();
     ::milvus::grpc::Status grpc_status;

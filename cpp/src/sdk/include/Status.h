@@ -40,14 +40,12 @@ enum class StatusCode {
     ServerFailed,
 };
 
-using ErrorCode = StatusCode;
-
 /**
 * @brief Status for SDK interface return
 */
 class Status {
 public:
-    Status(ErrorCode code, const std::string &msg);
+    Status(StatusCode code, const std::string &msg);
     Status();
     ~Status();
 
@@ -67,13 +65,13 @@ public:
     bool
     ok() const { return state_ == nullptr || code() == StatusCode::OK; }
 
-    std::string
-    ToString() const;
-
-    ErrorCode
+    StatusCode
     code() const {
-        return (state_ == nullptr) ? StatusCode::OK : *(ErrorCode*)(state_);
+        return (state_ == nullptr) ? StatusCode::OK : *(StatusCode*)(state_);
     }
+
+    std::string
+    message() const;
 
 private:
     inline void
