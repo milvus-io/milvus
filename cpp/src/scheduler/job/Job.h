@@ -62,6 +62,7 @@ private:
 };
 
 using JobPtr = std::shared_ptr<Job>;
+using JobWPtr = std::weak_ptr<Job>;
 
 }
 }

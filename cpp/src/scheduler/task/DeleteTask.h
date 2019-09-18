@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include <src/db/scheduler/context/DeleteContext.h>
+#include "scheduler/job/DeleteJob.h"
 #include "Task.h"
 
 
@@ -28,7 +28,7 @@ namespace engine {
 class XDeleteTask : public Task {
 public:
     explicit
-    XDeleteTask(DeleteContextPtr &delete_context);
+    XDeleteTask(const scheduler::DeleteJobPtr &job);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -37,7 +37,7 @@ public:
     Execute() override;
 
 public:
-    DeleteContextPtr delete_context_ptr_;
+    scheduler::DeleteJobPtr delete_job_;
 };
 
 }

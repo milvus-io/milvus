@@ -17,10 +17,12 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
+
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+
 
 set(db_test_files
         ${common_files}
