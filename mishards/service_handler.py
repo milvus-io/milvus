@@ -9,9 +9,9 @@ from milvus.grpc_gen import milvus_pb2, milvus_pb2_grpc, status_pb2
 from milvus.grpc_gen.milvus_pb2 import TopKQueryResult
 from milvus.client import types
 
-import settings
-from grpc_utils.grpc_args_parser import GrpcArgsParser as Parser
-import exceptions
+from mishards import (settings, exceptions)
+from mishards.grpc_utils.grpc_args_parser import GrpcArgsParser as Parser
+from mishards.models import Tables, TableFiles
 
 logger = logging.getLogger(__name__)
 

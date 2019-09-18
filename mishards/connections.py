@@ -4,9 +4,8 @@ from functools import wraps
 from contextlib import contextmanager
 from milvus import Milvus
 
-import settings
-import exceptions
-from utils import singleton
+from mishards import (settings, exceptions)
+from mishards.utils import singleton
 
 logger = logging.getLogger(__name__)
 

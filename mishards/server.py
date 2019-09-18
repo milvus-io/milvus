@@ -4,8 +4,8 @@ import time
 from concurrent import futures
 from grpc._cython import cygrpc
 from milvus.grpc_gen.milvus_pb2_grpc import add_MilvusServiceServicer_to_server
-from service_handler import ServiceHandler
-import settings
+from mishards.service_handler import ServiceHandler
+import mishards.settings
 
 logger = logging.getLogger(__name__)
 

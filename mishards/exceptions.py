@@ -1,4 +1,4 @@
-import exception_codes as codes
+import mishards.exception_codes as codes
 
 class BaseException(Exception):
     code = codes.INVALID_CODE

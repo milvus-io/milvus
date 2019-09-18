@@ -15,8 +15,10 @@ LOG_PATH = env.str('LOG_PATH', '/tmp/mishards')
 LOG_NAME = env.str('LOG_NAME', 'logfile')
 TIMEZONE = env.str('TIMEZONE', 'UTC')
 
-from utils.logger_helper import config
+from mishards.utils.logger_helper import config
 config(LOG_LEVEL, LOG_PATH, LOG_NAME, TIMEZONE)
+
+SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
 
 TIMEOUT = env.int('TIMEOUT', 60)
 MAX_RETRY = env.int('MAX_RETRY', 3)
