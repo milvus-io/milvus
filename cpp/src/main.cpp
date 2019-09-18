@@ -109,9 +109,9 @@ main(int argc, char *argv[]) {
         }
     }
 
-    server::Server* server_ptr = server::Server::Instance();
-    server_ptr->Init(start_daemonized, pid_filename, config_filename, log_config_file);
-    return server_ptr->Start();
+    server::Server& server = server::Server::Instance();
+    server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
+    return server.Start();
 }
 
 void
