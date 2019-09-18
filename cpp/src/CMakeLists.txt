@@ -27,55 +27,55 @@ foreach (dir ${CORE_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()
 
-aux_source_directory(cache cache_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
 
-aux_source_directory(config config_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
 
-aux_source_directory(db db_main_files)
-aux_source_directory(db/engine db_engine_files)
-aux_source_directory(db/insert db_insert_files)
-aux_source_directory(db/meta db_meta_files)
-aux_source_directory(db/scheduler scheduler_files)
-aux_source_directory(db/scheduler/context scheduler_context_files)
-aux_source_directory(db/scheduler/task scheduler_task_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler db_scheduler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context db_scheduler_context_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task db_scheduler_task_files)
 set(db_scheduler_files
-        ${scheduler_files}
-        ${scheduler_context_files}
-        ${scheduler_task_files}
+        ${db_scheduler_files}
+        ${db_scheduler_context_files}
+        ${db_scheduler_task_files}
         )
 
 set(grpc_service_files
-        grpc/gen-milvus/milvus.grpc.pb.cc
-        grpc/gen-milvus/milvus.pb.cc
-        grpc/gen-status/status.grpc.pb.cc
-        grpc/gen-status/status.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
         )
 
-aux_source_directory(metrics metrics_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 
-aux_source_directory(scheduler/action scheduler_action_files)
-aux_source_directory(scheduler/event scheduler_event_files)
-aux_source_directory(scheduler/job scheduler_job_files)
-aux_source_directory(scheduler/resource scheduler_resource_files)
-aux_source_directory(scheduler/task scheduler_task_files)
-aux_source_directory(scheduler scheduler_root_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/job scheduler_job_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_files)
 set(scheduler_files
+        ${scheduler_main_files}
         ${scheduler_action_files}
         ${scheduler_event_files}
         ${scheduler_job_files}
         ${scheduler_resource_files}
         ${scheduler_task_files}
-        ${scheduler_root_files}
         )
 
-aux_source_directory(server server_files)
-aux_source_directory(server/grpc_impl grpc_server_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_server_files)
 
-aux_source_directory(utils utils_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 
-aux_source_directory(wrapper/knowhere knowhere_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere wrapper_knowhere_files)
 
-set(db_files
+set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
         ${cache_files}
         ${db_main_files}
@@ -85,30 +85,32 @@ set(db_files
         ${db_scheduler_files}
         ${metrics_files}
         ${utils_files}
-        ${knowhere_files}
+        ${wrapper_knowhere_files}
         )
 
-include_directories(/usr/include)
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
-include_directories(grpc/gen-status)
-include_directories(grpc/gen-milvus)
+include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
+include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 set(client_grpc_lib
         grpcpp_channelz
         grpc++
         grpc
         grpc_protobuf
-        grpc_protoc)
+        grpc_protoc
+        )
 
 set(prometheus_lib
         prometheus-cpp-push
         prometheus-cpp-pull
-        prometheus-cpp-core)
+        prometheus-cpp-core
+        )
 
 set(boost_lib
         boost_system_static
         boost_filesystem_static
-        boost_serialization_static)
+        boost_serialization_static
+        )
 
 set(third_party_libs
         sqlite
@@ -149,7 +151,7 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
             )
 endif ()
 
-cuda_add_library(milvus_engine STATIC ${db_files})
+cuda_add_library(milvus_engine STATIC ${engine_files})
 target_link_libraries(milvus_engine ${engine_libs} ${third_party_libs})
 
 add_library(metrics STATIC ${metrics_files})
