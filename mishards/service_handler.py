@@ -11,6 +11,7 @@ from milvus.client import types
 
 import settings
 from grpc_utils.grpc_args_parser import GrpcArgsParser as Parser
+import exceptions
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
     def query_conn(self, name):
         conn = self.conn_mgr.conn(name)
-        conn and conn.on_connect()
+        if not conn:
+            raise exceptions.ConnectionNotFoundError(name)
+        conn.on_connect()
         return conn.conn
 
     def _format_date(self, start, end):
@@ -51,7 +54,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
     def _get_routing_file_ids(self, table_id, range_array):
         return {
-            'TEST': {
+            'milvus-ro-servers-0': {
                 'table_id': table_id,
                 'file_ids': [123]
                 }

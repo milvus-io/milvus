@@ -43,5 +43,5 @@ class Server:
     def stop(self):
         logger.info('Server is shuting down ......')
         self.exit_flag = True
-        self.server.stop(0)
+        self.server_impl.stop(0)
         logger.info('Server is closed')

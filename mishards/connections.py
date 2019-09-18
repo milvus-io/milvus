@@ -29,7 +29,7 @@ class Connection:
             self.conn.connect(uri=self.uri)
         except Exception as e:
             if not self.error_handlers:
-                raise exceptions.ConnectionConnectError()
+                raise exceptions.ConnectionConnectError(e)
             for handler in self.error_handlers:
                 handler(e)
 
@@ -77,6 +77,10 @@ class ConnectionMgr:
         self.metas = {}
         self.conns = {}
 
+    @property
+    def conn_names(self):
+        return set(self.metas.keys()) - set(['WOSERVER'])
+
     def conn(self, name, throw=False):
         c = self.conns.get(name, None)
         if not c:
@@ -116,7 +120,8 @@ class ConnectionMgr:
         return self.on_diff_meta(name, url)
 
     def on_same_meta(self, name, url):
-        logger.warn('Register same meta: {}:{}'.format(name, url))
+        # logger.warn('Register same meta: {}:{}'.format(name, url))
+        pass
 
     def on_diff_meta(self, name, url):
         logger.warn('Received {} with diff url={}'.format(name, url))

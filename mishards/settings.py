@@ -7,7 +7,6 @@ env = Env()
 env.read_env()
 
 DEBUG = env.bool('DEBUG', False)
-TESTING = env.bool('TESTING', False)
 
 METADATA_URI = env.str('METADATA_URI', '')
 
@@ -25,6 +24,16 @@ SEARCH_WORKER_SIZE = env.int('SEARCH_WORKER_SIZE', 10)
 
 SERVER_PORT = env.int('SERVER_PORT', 19530)
 WOSERVER = env.str('WOSERVER')
+
+SD_NAMESPACE = env.str('SD_NAMESPACE', '')
+SD_IN_CLUSTER = env.bool('SD_IN_CLUSTER', False)
+SD_POLL_INTERVAL = env.int('SD_POLL_INTERVAL', 5)
+SD_ROSERVER_POD_PATT = env.str('SD_ROSERVER_POD_PATT', '')
+SD_LABEL_SELECTOR = env.str('SD_LABEL_SELECTOR', '')
+
+TESTING = env.bool('TESTING', False)
+TESTING_WOSERVER = env.str('TESTING_WOSERVER', 'tcp://127.0.0.1:19530')
+
 
 if __name__ == '__main__':
     import logging
