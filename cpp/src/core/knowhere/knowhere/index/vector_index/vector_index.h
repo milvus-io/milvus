@@ -18,47 +18,47 @@
 
 #pragma once
 
-#include "src/wrapper/vec_index.h"
 
 #include <memory>
 
+#include "knowhere/common/config.h"
+#include "knowhere/common/dataset.h"
+#include "knowhere/index/index.h"
+#include "knowhere/index/preprocessor/preprocessor.h"
+
+
 namespace zilliz {
-namespace milvus {
-namespace cache {
+namespace knowhere {
 
-class DataObj {
-public:
-    DataObj(const engine::VecIndexPtr& index)
-            : index_(index)
-    {}
+class VectorIndex;
+using VectorIndexPtr = std::shared_ptr<VectorIndex>;
 
-    DataObj(const engine::VecIndexPtr& index, int64_t size)
-            : index_(index),
-              size_(size)
-    {}
 
-    engine::VecIndexPtr data() { return index_; }
-    const engine::VecIndexPtr& data() const { return index_; }
+class VectorIndex : public Index {
+ public:
+    virtual PreprocessorPtr
+    BuildPreprocessor(const DatasetPtr &dataset, const Config &config) { return nullptr; }
 
-    int64_t size() const {
-        if(index_ == nullptr) {
-            return 0;
-        }
+    virtual IndexModelPtr
+    Train(const DatasetPtr &dataset, const Config &config) { return nullptr; }
 
-        if(size_ > 0) {
-            return size_;
-        }
+    virtual void
+    Add(const DatasetPtr &dataset, const Config &config) = 0;
 
-        return index_->Count() * index_->Dimension() * sizeof(float);
-    }
+    virtual void
+    Seal() = 0;
 
-private:
-    engine::VecIndexPtr index_ = nullptr;
-    int64_t size_ = 0;
+    virtual VectorIndexPtr
+    Clone() = 0;
+
+    virtual int64_t
+    Count() = 0;
+
+    virtual int64_t
+    Dimension() = 0;
 };
 
-using DataObjPtr = std::shared_ptr<DataObj>;
 
-}
-}
-}
+
+} // namespace knowhere
+} // namespace zilliz

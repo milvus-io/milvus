@@ -18,47 +18,51 @@
 
 #pragma once
 
-#include "src/wrapper/vec_index.h"
-
 #include <memory>
 
+#include "knowhere/common/binary_set.h"
+#include "knowhere/common/dataset.h"
+#include "index_type.h"
+#include "index_model.h"
+#include "knowhere/index/preprocessor/preprocessor.h"
+
+
 namespace zilliz {
-namespace milvus {
-namespace cache {
+namespace knowhere {
 
-class DataObj {
-public:
-    DataObj(const engine::VecIndexPtr& index)
-            : index_(index)
-    {}
 
-    DataObj(const engine::VecIndexPtr& index, int64_t size)
-            : index_(index),
-              size_(size)
-    {}
+class Index {
+ public:
+    virtual BinarySet
+    Serialize() = 0;
 
-    engine::VecIndexPtr data() { return index_; }
-    const engine::VecIndexPtr& data() const { return index_; }
+    virtual void
+    Load(const BinarySet &index_binary) = 0;
 
-    int64_t size() const {
-        if(index_ == nullptr) {
-            return 0;
-        }
+    // @throw
+    virtual DatasetPtr
+    Search(const DatasetPtr &dataset, const Config &config) = 0;
 
-        if(size_ > 0) {
-            return size_;
-        }
+ public:
+    IndexType
+    idx_type() const { return idx_type_; }
 
-        return index_->Count() * index_->Dimension() * sizeof(float);
-    }
+    void
+    set_idx_type(IndexType idx_type) { idx_type_ = idx_type; }
 
-private:
-    engine::VecIndexPtr index_ = nullptr;
-    int64_t size_ = 0;
+    virtual void
+    set_preprocessor(PreprocessorPtr preprocessor) {}
+
+    virtual void
+    set_index_model(IndexModelPtr model) {}
+
+ private:
+    IndexType idx_type_;
 };
 
-using DataObjPtr = std::shared_ptr<DataObj>;
 
-}
-}
-}
+using IndexPtr = std::shared_ptr<Index>;
+
+
+} // namespace knowhere
+} // namespace zilliz

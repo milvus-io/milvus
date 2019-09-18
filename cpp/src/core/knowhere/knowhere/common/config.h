@@ -18,47 +18,15 @@
 
 #pragma once
 
-#include "src/wrapper/vec_index.h"
+#include <jsoncons/json.hpp>
 
-#include <memory>
 
 namespace zilliz {
-namespace milvus {
-namespace cache {
+namespace knowhere {
 
-class DataObj {
-public:
-    DataObj(const engine::VecIndexPtr& index)
-            : index_(index)
-    {}
 
-    DataObj(const engine::VecIndexPtr& index, int64_t size)
-            : index_(index),
-              size_(size)
-    {}
+using Config = jsoncons::json;
 
-    engine::VecIndexPtr data() { return index_; }
-    const engine::VecIndexPtr& data() const { return index_; }
 
-    int64_t size() const {
-        if(index_ == nullptr) {
-            return 0;
-        }
-
-        if(size_ > 0) {
-            return size_;
-        }
-
-        return index_->Count() * index_->Dimension() * sizeof(float);
-    }
-
-private:
-    engine::VecIndexPtr index_ = nullptr;
-    int64_t size_ = 0;
-};
-
-using DataObjPtr = std::shared_ptr<DataObj>;
-
-}
-}
-}
+} // namespace knowhere
+} // namespace zilliz
