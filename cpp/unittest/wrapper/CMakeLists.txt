@@ -20,12 +20,12 @@
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-set(knowhere_files
+set(wrapper_knowhere_files
         ${MILVUS_ENGINE_SRC}/wrapper/knowhere/data_transfer.cpp
         ${MILVUS_ENGINE_SRC}/wrapper/knowhere/vec_impl.cpp
         ${MILVUS_ENGINE_SRC}/wrapper/knowhere/vec_index.cpp)
 
-set(helper_files
+set(util_files
         utils.cpp
         ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc
         )
@@ -36,7 +36,7 @@ set(knowhere_libs
         cublas
         )
 
-add_executable(knowhere_test knowhere_test.cpp ${knowhere_files} ${helper_files})
-target_link_libraries(knowhere_test ${knowhere_libs} ${unittest_libs})
+add_executable(wrapper_test wrapper_test.cpp ${wrapper_knowhere_files} ${util_files})
+target_link_libraries(wrapper_test ${knowhere_libs} ${unittest_libs})
 
-install(TARGETS knowhere_test DESTINATION unittest)
+install(TARGETS wrapper_test DESTINATION unittest)

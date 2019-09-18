@@ -23,31 +23,14 @@ include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 set(scheduler_test_files
-        ${cache_files}
-        ${config_files}
-        ${db_main_files}
-        ${db_engine_files}
-        ${db_insert_files}
-        ${db_meta_files}
-        ${db_scheduler_files}
-        ${scheduler_files}
-        ${knowhere_files}
-        ${helper_files}
+        ${common_files}
         ${unittest_files}
         ${test_files}
         )
 
 cuda_add_executable(scheduler_test ${scheduler_test_files})
 
-set(scheduler_libs
-        sqlite
-        boost_system_static
-        boost_filesystem_static
-        lz4
-        mysqlpp
-        )
-
-target_link_libraries(scheduler_test ${scheduler_libs} knowhere ${unittest_libs})
+target_link_libraries(scheduler_test knowhere ${unittest_libs})
 
 install(TARGETS scheduler_test DESTINATION unittest)
 

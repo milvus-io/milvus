@@ -28,37 +28,37 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task scheduler_task_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler db_scheduler_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context db_scheduler_context_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task db_scheduler_task_files)
 set(db_scheduler_files
-        ${scheduler_files}
-        ${scheduler_context_files}
-        ${scheduler_task_files}
+        ${db_scheduler_files}
+        ${db_scheduler_context_files}
+        ${db_scheduler_task_files}
         )
 
 set(grpc_service_files
-        grpc/gen-milvus/milvus.grpc.pb.cc
-        grpc/gen-milvus/milvus.pb.cc
-        grpc/gen-status/status.grpc.pb.cc
-        grpc/gen-status/status.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
+        ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/job scheduler_job_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_root_files)
 set(scheduler_files
+        ${scheduler_main_files}
         ${scheduler_action_files}
         ${scheduler_event_files}
         ${scheduler_job_files}
         ${scheduler_resource_files}
         ${scheduler_task_files}
-        ${scheduler_root_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
@@ -66,10 +66,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_server_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere knowhere_files)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/db db_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere wrapper_knowhere_files)
 
 set(unittest_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
@@ -83,7 +80,26 @@ set(helper_files
         ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc
         )
 
+set(common_files
+        ${cache_files}
+        ${config_files}
+        ${db_main_files}
+        ${db_engine_files}
+        ${db_insert_files}
+        ${db_meta_files}
+        ${db_scheduler_files}
+        ${metrics_files}
+        ${scheduler_files}
+        ${wrapper_knowhere_files}
+        ${helper_files}
+        )
+
 set(unittest_libs
+        sqlite
+        boost_system_static
+        boost_filesystem_static
+        lz4
+        mysqlpp
         yaml-cpp
         gtest
         gmock
@@ -107,7 +123,7 @@ foreach(dir ${CORE_INCLUDE_DIRS})
 endforeach()
 
 add_subdirectory(db)
-add_subdirectory(knowhere)
+add_subdirectory(wrapper)
 add_subdirectory(metrics)
 add_subdirectory(scheduler)
 add_subdirectory(server)

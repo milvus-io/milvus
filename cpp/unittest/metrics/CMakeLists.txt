@@ -19,35 +19,16 @@
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
-include_directories(/usr/include)
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 set(metrics_test_files
-        ${cache_files}
-        ${config_files}
-        ${db_main_files}
-        ${db_engine_files}
-        ${db_insert_files}
-        ${db_meta_files}
-        ${db_scheduler_files}
-        ${metrics_files}
-        ${scheduler_files}
-        ${knowhere_files}
-        ${helper_files}
+        ${common_files}
         ${test_files}
         )
 
 add_executable(metrics_test ${metrics_test_files})
 
-target_link_libraries(metrics_test
-        knowhere
-        sqlite
-        boost_system_static
-        boost_filesystem_static
-        lz4
-        mysqlpp
-        ${unittest_libs}
-        )
+target_link_libraries(metrics_test knowhere ${unittest_libs})
 
 install(TARGETS metrics_test DESTINATION unittest)
