@@ -18,10 +18,10 @@
 
 #pragma once
 
-#include "db/Status.h"
 #include "db/meta/Meta.h"
 #include "db/IDGenerator.h"
 #include "db/engine/ExecutionEngine.h"
+#include "utils/Status.h"
 
 
 namespace zilliz {

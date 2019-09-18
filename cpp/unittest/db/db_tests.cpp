@@ -154,7 +154,7 @@ TEST_F(DBTest, CONFIG_TEST) {
 
 TEST_F(DBTest, DB_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
@@ -230,7 +230,7 @@ TEST_F(DBTest, DB_TEST) {
 
 TEST_F(DBTest, SEARCH_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
@@ -296,7 +296,7 @@ TEST_F(DBTest, SEARCH_TEST) {
 
 TEST_F(DBTest, PRELOADTABLE_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
@@ -331,7 +331,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
     db_->Stop();
 
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
     ASSERT_FALSE(stat.ok());
 
     stat = db_->DescribeTable(table_info);
@@ -373,7 +373,7 @@ TEST_F(DBTest, SHUTDOWN_TEST) {
 
 TEST_F(DBTest, INDEX_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     int64_t nb = VECTOR_COUNT;
     std::vector<float> xb;
@@ -403,7 +403,7 @@ TEST_F(DBTest, INDEX_TEST) {
 TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     std::vector<engine::meta::TableSchema> table_schema_array;
     stat = db_->AllTables(table_schema_array);
@@ -446,7 +446,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
 TEST_F(DBTest2, DELETE_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
@@ -480,7 +480,7 @@ TEST_F(DBTest2, DELETE_TEST) {
 
 TEST_F(DBTest2, DELETE_BY_RANGE_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;

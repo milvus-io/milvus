@@ -170,7 +170,7 @@ CreateTableTask::OnExecute() {
         table_info.metric_type_ = schema_->metric_type();
 
         //step 3: create table
-        engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
+        auto stat = DBWrapper::DB()->CreateTable(table_info);
         if (!stat.ok()) {
             //table could exist
             if(stat.code() == DB_ALREADY_EXIST) {
@@ -214,7 +214,7 @@ DescribeTableTask::OnExecute() {
         //step 2: get table info
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
-        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
+        auto stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
@@ -261,7 +261,7 @@ CreateIndexTask::OnExecute() {
         }
 
         bool has_table = false;
-        engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table);
+        auto stat = DBWrapper::DB()->HasTable(table_name_, has_table);
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
@@ -323,7 +323,7 @@ HasTableTask::OnExecute() {
         }
 
         //step 2: check table existence
-        engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table_);
+        auto stat = DBWrapper::DB()->HasTable(table_name_, has_table_);
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
@@ -362,7 +362,7 @@ DropTableTask::OnExecute() {
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
-        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
+        auto stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
             if (stat.code() == DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
@@ -403,7 +403,7 @@ ShowTablesTask::Create(::grpc::ServerWriter<::milvus::grpc::TableName> *writer) 
 ErrorCode
 ShowTablesTask::OnExecute() {
     std::vector<engine::meta::TableSchema> schema_array;
-    engine::Status stat = DBWrapper::DB()->AllTables(schema_array);
+    auto stat = DBWrapper::DB()->AllTables(schema_array);
     if (!stat.ok()) {
         return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
     }
@@ -460,7 +460,7 @@ InsertTask::OnExecute() {
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = insert_param_->table_name();
-        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
+        auto stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
             if (stat.code() == DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST,
@@ -599,7 +599,7 @@ SearchTask::OnExecute() {
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
-        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
+        auto stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
             if (stat.code() == DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
@@ -746,7 +746,7 @@ CountTableTask::OnExecute() {
 
         //step 2: get row count
         uint64_t row_count = 0;
-        engine::Status stat = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
+        auto stat = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
@@ -819,7 +819,7 @@ DeleteByRangeTask::OnExecute() {
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name;
-        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
+        auto stat = DBWrapper::DB()->DescribeTable(table_info);
         if (!stat.ok()) {
             if (stat.code(), DB_NOT_FOUND) {
                 return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name + " not exists");
@@ -846,8 +846,8 @@ DeleteByRangeTask::OnExecute() {
         std::string fname = "/tmp/search_nq_" + this->delete_by_range_param_->table_name() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
-        engine::Status status = DBWrapper::DB()->DeleteTable(table_name, dates);
-        if (!status.ok()) {
+        stat = DBWrapper::DB()->DeleteTable(table_name, dates);
+        if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
 
@@ -882,7 +882,7 @@ PreloadTableTask::OnExecute() {
         }
 
         //step 2: check table existence
-        engine::Status stat = DBWrapper::DB()->PreloadTable(table_name_);
+        auto stat = DBWrapper::DB()->PreloadTable(table_name_);
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
@@ -923,7 +923,7 @@ DescribeIndexTask::OnExecute() {
 
         //step 2: check table existence
         engine::TableIndex index;
-        engine::Status stat = DBWrapper::DB()->DescribeIndex(table_name_, index);
+        auto stat = DBWrapper::DB()->DescribeIndex(table_name_, index);
         if (!stat.ok()) {
             return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
         }
