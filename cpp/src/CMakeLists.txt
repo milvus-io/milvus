@@ -17,41 +17,24 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
+include_directories(${MILVUS_SOURCE_DIR})
+include_directories(${MILVUS_ENGINE_SRC})
 
 add_subdirectory(core)
 
 set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
-foreach(dir ${CORE_INCLUDE_DIRS})
+foreach (dir ${CORE_INCLUDE_DIRS})
     include_directories(${dir})
-endforeach()
+endforeach ()
 
 aux_source_directory(cache cache_files)
+
 aux_source_directory(config config_files)
-aux_source_directory(server server_files)
-aux_source_directory(server/grpc_impl grpcserver_files)
-aux_source_directory(utils utils_files)
+
 aux_source_directory(db db_main_files)
 aux_source_directory(db/engine db_engine_files)
 aux_source_directory(db/insert db_insert_files)
 aux_source_directory(db/meta db_meta_files)
-aux_source_directory(metrics metrics_files)
-aux_source_directory(wrapper/knowhere knowhere_files)
-
-aux_source_directory(scheduler/action scheduler_action_files)
-aux_source_directory(scheduler/event scheduler_event_files)
-aux_source_directory(scheduler/job scheduler_job_files)
-aux_source_directory(scheduler/resource scheduler_resource_files)
-aux_source_directory(scheduler/task scheduler_task_files)
-aux_source_directory(scheduler scheduler_root_files)
-set(scheduler_srcs
-        ${scheduler_action_files}
-        ${scheduler_event_files}
-        ${scheduler_job_files}
-        ${scheduler_resource_files}
-        ${scheduler_task_files}
-        ${scheduler_root_files}
-        )
-
 aux_source_directory(db/scheduler scheduler_files)
 aux_source_directory(db/scheduler/context scheduler_context_files)
 aux_source_directory(db/scheduler/task scheduler_task_files)
@@ -60,24 +43,37 @@ set(db_scheduler_files
         ${scheduler_context_files}
         ${scheduler_task_files}
         )
-set(license_check_files
-        license/LicenseLibrary.cpp
-        license/LicenseCheck.cpp
-        )
-
-set(license_generator_files
-        license/LicenseGenerator.cpp
-        license/LicenseLibrary.cpp
-        )
 
 set(grpc_service_files
-        metrics/SystemInfo.cpp
-        metrics/SystemInfo.h
         grpc/gen-milvus/milvus.grpc.pb.cc
         grpc/gen-milvus/milvus.pb.cc
         grpc/gen-status/status.grpc.pb.cc
         grpc/gen-status/status.pb.cc
-        scheduler/Utils.h)
+        )
+
+aux_source_directory(metrics metrics_files)
+
+aux_source_directory(scheduler/action scheduler_action_files)
+aux_source_directory(scheduler/event scheduler_event_files)
+aux_source_directory(scheduler/job scheduler_job_files)
+aux_source_directory(scheduler/resource scheduler_resource_files)
+aux_source_directory(scheduler/task scheduler_task_files)
+aux_source_directory(scheduler scheduler_root_files)
+set(scheduler_files
+        ${scheduler_action_files}
+        ${scheduler_event_files}
+        ${scheduler_job_files}
+        ${scheduler_resource_files}
+        ${scheduler_task_files}
+        ${scheduler_root_files}
+        )
+
+aux_source_directory(server server_files)
+aux_source_directory(server/grpc_impl grpc_server_files)
+
+aux_source_directory(utils utils_files)
+
+aux_source_directory(wrapper/knowhere knowhere_files)
 
 set(db_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -88,17 +84,12 @@ set(db_files
         ${db_meta_files}
         ${db_scheduler_files}
         ${metrics_files}
-        ${knowhere_files}
         ${utils_files}
+        ${knowhere_files}
         )
-
-set(s3_client_files
-        storage/s3/S3ClientWrapper.cpp
-        storage/s3/S3ClientWrapper.h)
 
 include_directories(/usr/include)
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
-include_directories(/usr/include/mysql)
 include_directories(grpc/gen-status)
 include_directories(grpc/gen-milvus)
 
@@ -109,17 +100,22 @@ set(client_grpc_lib
         grpc_protobuf
         grpc_protoc)
 
+set(prometheus_lib
+        prometheus-cpp-push
+        prometheus-cpp-pull
+        prometheus-cpp-core)
+
+set(boost_lib
+        boost_system_static
+        boost_filesystem_static
+        boost_serialization_static)
+
 set(third_party_libs
-        knowhere
         sqlite
         ${client_grpc_lib}
         yaml-cpp
-        prometheus-cpp-push
-        prometheus-cpp-pull
-        prometheus-cpp-core
-        boost_system_static
-        boost_filesystem_static
-        boost_serialization_static
+        ${prometheus_lib}
+        ${boost_lib}
         bzip2
         lz4
         snappy
@@ -131,13 +127,12 @@ set(third_party_libs
         ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         cudart
         )
-
 if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
     set(third_party_libs ${third_party_libs}
             gperftools
-            libunwind)
-endif()
-
+            libunwind
+            )
+endif ()
 
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 set(engine_libs
@@ -149,11 +144,10 @@ set(engine_libs
 
 if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
     set(engine_libs
-	    ${engine_libs}
-	    libquadmath.a
-	    )
+            ${engine_libs}
+            libquadmath.a
+            )
 endif ()
-
 
 cuda_add_library(milvus_engine STATIC ${db_files})
 target_link_libraries(milvus_engine ${engine_libs} ${third_party_libs})
@@ -162,9 +156,7 @@ add_library(metrics STATIC ${metrics_files})
 
 set(metrics_lib
         yaml-cpp
-        prometheus-cpp-push
-        prometheus-cpp-pull
-        prometheus-cpp-core
+        ${prometheus_lib}
         )
 
 target_link_libraries(metrics ${metrics_lib})
@@ -176,21 +168,17 @@ set(server_libs
         metrics
         )
 
-set(knowhere_libs
-        knowhere
-        )
-
 add_executable(milvus_server
         ${config_files}
-        ${server_files}
-        ${grpcserver_files}
-        ${utils_files}
-        ${grpc_service_files}
         ${metrics_files}
-        ${scheduler_srcs}
+        ${scheduler_files}
+        ${server_files}
+        ${grpc_server_files}
+        ${grpc_service_files}
+        ${utils_files}
         )
 
-target_link_libraries(milvus_server ${server_libs} ${knowhere_libs} ${third_party_libs})
+target_link_libraries(milvus_server ${server_libs} knowhere ${third_party_libs})
 
 install(TARGETS milvus_server DESTINATION bin)
 
