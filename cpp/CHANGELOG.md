@@ -136,6 +136,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-523 - Config file validation
 - MS-539 - Remove old task code
 - MS-546 - Add simple mode resource_config
+- MS-570 - Add prometheus docker-compose file
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
