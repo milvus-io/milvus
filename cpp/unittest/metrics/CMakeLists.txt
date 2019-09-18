@@ -17,86 +17,35 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-include_directories(../../src)
-
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_src)
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere knowhere_src)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/src/metrics metrics_src)
-aux_source_directory(./ test_srcs)
-
-set(util_files
-        ${MILVUS_ENGINE_SRC}/utils/Status.cpp
-        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp
-        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc)
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task scheduler_task_files)
-set(db_scheduler_srcs
-        ${scheduler_files}
-        ${scheduler_context_files}
-        ${scheduler_task_files}
-        )
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
 include_directories(/usr/include)
-include_directories(../../third_party/build/include)
-link_directories(../../third_party/build/lib)
-include_directories(/usr/local/cuda/include)
-link_directories("/usr/local/cuda/lib64")
-include_directories(../../src/metrics)
+include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
+link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-include_directories(/usr/include/mysql)
-
-set(count_test_src
+set(metrics_test_files
+        ${cache_files}
         ${config_files}
-        ${cache_srcs}
         ${db_main_files}
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
-        ${db_scheduler_srcs}
-        ${wrapper_src}
-        ${scheduler_action_srcs}
-        ${scheduler_event_srcs}
-        ${scheduler_resource_srcs}
-        ${scheduler_task_srcs}
-        ${scheduler_srcs}
-        ${knowhere_src}
-        ${metrics_src}
-        ${test_srcs}
-        ${util_files}
+        ${db_scheduler_files}
+        ${metrics_files}
+        ${scheduler_files}
+        ${knowhere_files}
+        ${helper_files}
+        ${test_files}
         )
 
-add_executable(metrics_test ${count_test_src} ${require_files} )
-
-set(knowhere_libs
-        knowhere
-        )
+add_executable(metrics_test ${metrics_test_files})
 
 target_link_libraries(metrics_test
-        ${knowhere_libs}
-        cudart
-        cublas
+        knowhere
         sqlite
         boost_system_static
         boost_filesystem_static
         lz4
-        metrics
-        gtest
-        pthread
-        z
         mysqlpp
         ${unittest_libs}
         )

@@ -51,13 +51,6 @@ message(STATUS "Build type = ${BUILD_TYPE}")
 project(milvus VERSION "${MILVUS_VERSION}")
 project(milvus_engine LANGUAGES CUDA CXX)
 
-# Ensure that a default make is set
-if("${MAKE}" STREQUAL "")
-    if(NOT MSVC)
-        find_program(MAKE make)
-    endif()
-endif()
-
 set(MILVUS_VERSION_MAJOR "${milvus_VERSION_MAJOR}")
 set(MILVUS_VERSION_MINOR "${milvus_VERSION_MINOR}")
 set(MILVUS_VERSION_PATCH "${milvus_VERSION_PATCH}")
@@ -75,9 +68,6 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.macro ${CMAKE_CURRENT_SOURC
 message(STATUS "Milvus version: "
         "${MILVUS_VERSION_MAJOR}.${MILVUS_VERSION_MINOR}.${MILVUS_VERSION_PATCH} "
         "(full: '${MILVUS_VERSION}')")
-
-set(MILVUS_SOURCE_DIR ${PROJECT_SOURCE_DIR})
-set(MILVUS_BINARY_DIR ${PROJECT_BINARY_DIR})
 
 find_package(CUDA)
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES -arch sm_60 --expt-extended-lambda")
@@ -105,7 +95,27 @@ else()
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
 endif()
 
+# Ensure that a default make is set
+if("${MAKE}" STREQUAL "")
+    if(NOT MSVC)
+        find_program(MAKE make)
+    endif()
+endif()
+
+find_path(MYSQL_INCLUDE_DIR
+            NAMES "mysql.h"
+            PATH_SUFFIXES "mysql")
+if (${MYSQL_INCLUDE_DIR} STREQUAL "MYSQL_INCLUDE_DIR-NOTFOUND")
+    message(FATAL_ERROR "Could not found MySQL include directory")
+else()
+    include_directories(${MYSQL_INCLUDE_DIR})
+endif()
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+set(MILVUS_SOURCE_DIR ${PROJECT_SOURCE_DIR})
+set(MILVUS_BINARY_DIR ${PROJECT_BINARY_DIR})
+set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
 
 include(ExternalProject)
 include(DefineOptions)
@@ -114,7 +124,6 @@ include(ThirdPartyPackages)
 
 config_summary()
 
-set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
 add_subdirectory(src)
 
 if (BUILD_UNIT_TEST STREQUAL "ON")
