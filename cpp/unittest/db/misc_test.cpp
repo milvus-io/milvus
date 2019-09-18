@@ -15,11 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "db/Status.h"
 #include "db/Options.h"
 #include "db/meta/SqliteMetaImpl.h"
 #include "db/engine/EngineFactory.h"
 #include "db/Utils.h"
+#include "utils/Status.h"
 #include "utils/Exception.h"
 #include "utils/easylogging++.h"
 
@@ -30,13 +30,6 @@
 
 using namespace zilliz::milvus;
 
-namespace {
-    void CopyStatus(engine::Status& st1, engine::Status& st2) {
-        st1 = st2;
-    }
-
-}
-
 TEST(DBMiscTest, EXCEPTION_TEST) {
     Exception ex1("");
     std::string what = ex1.what();
@@ -45,36 +38,6 @@ TEST(DBMiscTest, EXCEPTION_TEST) {
     OutOfRangeException ex2;
     what = ex2.what();
     ASSERT_FALSE(what.empty());
-}
-
-TEST(DBMiscTest, STATUS_TEST) {
-    engine::Status status = engine::Status::OK();
-    std::string str = status.ToString();
-    ASSERT_FALSE(str.empty());
-
-    status = engine::Status(DB_ERROR, "mistake");
-    ASSERT_EQ(status.code(), DB_ERROR);
-    str = status.ToString();
-    ASSERT_FALSE(str.empty());
-
-    status = engine::Status(DB_NOT_FOUND, "mistake");
-    ASSERT_EQ(status.code(), DB_NOT_FOUND);
-    str = status.ToString();
-    ASSERT_FALSE(str.empty());
-
-    status = engine::Status(DB_ALREADY_EXIST, "mistake");
-    ASSERT_EQ(status.code(), DB_ALREADY_EXIST);
-    str = status.ToString();
-    ASSERT_FALSE(str.empty());
-
-    status = engine::Status(DB_META_TRANSACTION_FAILED, "mistake");
-    ASSERT_EQ(status.code(), DB_META_TRANSACTION_FAILED);
-    str = status.ToString();
-    ASSERT_FALSE(str.empty());
-
-    engine::Status status_copy = engine::Status::OK();
-    CopyStatus(status_copy, status);
-    ASSERT_EQ(status.code(), DB_META_TRANSACTION_FAILED);
 }
 
 TEST(DBMiscTest, OPTIONS_TEST) {

@@ -37,6 +37,10 @@ namespace {
 
 static const char* LOG_FILE_PATH = "./milvus/conf/log_config.conf";
 
+void CopyStatus(Status& st1, Status& st2) {
+    st1 = st2;
+}
+
 }
 
 TEST(UtilTest, EXCEPTION_TEST) {
@@ -181,6 +185,44 @@ TEST(UtilTest, TIMERECORDER_TEST) {
         TimeRecorder rc("time", log_level);
         rc.RecordSection("end");
     }
+}
+
+TEST(UtilTest, STATUS_TEST) {
+    auto status = Status::OK();
+    std::string str = status.ToString();
+    ASSERT_FALSE(str.empty());
+
+    status = Status(DB_ERROR, "mistake");
+    ASSERT_EQ(status.code(), DB_ERROR);
+    str = status.ToString();
+    ASSERT_FALSE(str.empty());
+
+    status = Status(DB_NOT_FOUND, "mistake");
+    ASSERT_EQ(status.code(), DB_NOT_FOUND);
+    str = status.ToString();
+    ASSERT_FALSE(str.empty());
+
+    status = Status(DB_ALREADY_EXIST, "mistake");
+    ASSERT_EQ(status.code(), DB_ALREADY_EXIST);
+    str = status.ToString();
+    ASSERT_FALSE(str.empty());
+
+    status = Status(DB_META_TRANSACTION_FAILED, "mistake");
+    ASSERT_EQ(status.code(), DB_META_TRANSACTION_FAILED);
+    str = status.ToString();
+    ASSERT_FALSE(str.empty());
+
+    auto status_copy = Status::OK();
+    CopyStatus(status_copy, status);
+    ASSERT_EQ(status.code(), DB_META_TRANSACTION_FAILED);
+
+    auto status_ref(status);
+    ASSERT_EQ(status_ref.code(), status.code());
+    ASSERT_EQ(status_ref.ToString(), status.ToString());
+
+    auto status_move = std::move(status);
+    ASSERT_EQ(status_move.code(), status_ref.code());
+    ASSERT_EQ(status_move.ToString(), status_ref.ToString());
 }
 
 TEST(ValidationUtilTest, VALIDATE_TABLENAME_TEST) {

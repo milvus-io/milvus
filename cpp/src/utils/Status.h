@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+
 #pragma once
 
 #include "utils/Error.h"
@@ -23,7 +24,6 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
 
 class Status {
  public:
@@ -31,51 +31,40 @@ class Status {
     Status();
     ~Status();
 
-    Status(const Status &rhs);
+    Status(const Status &s);
 
     Status &
-    operator=(const Status &rhs);
+    operator=(const Status &s);
 
-    Status(Status &&rhs) noexcept : state_(rhs.state_) { rhs.state_ = nullptr; }
+    Status(Status &&s);
 
     Status &
-    operator=(Status &&rhs_) noexcept;
+    operator=(Status &&s);
 
     static Status
     OK() { return Status(); }
 
-    bool ok() const { return state_ == nullptr || code() == DB_SUCCESS; }
+    bool
+    ok() const { return state_ == nullptr || code() == 0; }
 
-    std::string ToString() const;
+    std::string
+    ToString() const;
 
-    ErrorCode code() const {
-        return (state_ == nullptr) ? DB_SUCCESS : *(ErrorCode*)(state_);
+    ErrorCode
+    code() const {
+        return (state_ == nullptr) ? 0 : *(ErrorCode*)(state_);
     }
 
- private:
+private:
+    inline void
+    CopyFrom(const Status &s);
+
+    inline void
+    MoveFrom(Status &s);
+
+private:
     const char *state_ = nullptr;
-
-    static const char *CopyState(const char *s);
-
 }; // Status
 
-inline Status::Status(const Status &rhs) {
-    state_ = (rhs.state_ == nullptr) ? nullptr : CopyState(rhs.state_);
-}
-
-inline Status &Status::operator=(const Status &rhs) {
-    if (state_ != rhs.state_) {
-        delete[] state_;
-        state_ = (rhs.state_ == nullptr) ? nullptr : CopyState(rhs.state_);
-    }
-    return *this;
-}
-
-inline Status &Status::operator=(Status &&rhs) noexcept {
-    std::swap(state_, rhs.state_);
-    return *this;
-}
-
-} // namespace engine
 } // namespace milvus
 } // namespace zilliz
