@@ -138,11 +138,11 @@ Server::Daemonize() {
     if (!pid_filename_.empty()) {
         pid_fd = open(pid_filename_.c_str(), O_RDWR | O_CREAT, 0640);
         if (pid_fd < 0) {
-            std::cout << "Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno);
+            std::cerr << "Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
         if (lockf(pid_fd, F_TLOCK, 0) < 0) {
-            std::cout << "Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno);
+            std::cerr << "Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
 
@@ -216,18 +216,18 @@ Server::Start() {
 
 void
 Server::Stop() {
-    std::cout << "Milvus server is going to shutdown ..." << std::endl;
+    std::cerr << "Milvus server is going to shutdown ..." << std::endl;
 
     // Unlock and close lockfile
     if (pid_fd != -1) {
         int ret = lockf(pid_fd, F_ULOCK, 0);
         if (ret != 0) {
-            std::cout << "Can't lock file: " << strerror(errno) << std::endl;
+            std::cerr << "Can't lock file: " << strerror(errno) << std::endl;
             exit(0);
         }
         ret = close(pid_fd);
         if (ret != 0) {
-            std::cout << "Can't close file: " << strerror(errno) << std::endl;
+            std::cerr << "Can't close file: " << strerror(errno) << std::endl;
             exit(0);
         }
     }
@@ -236,24 +236,23 @@ Server::Stop() {
     if (!pid_filename_.empty()) {
         int ret = unlink(pid_filename_.c_str());
         if (ret != 0) {
-            std::cout << "Can't unlink file: " << strerror(errno) << std::endl;
+            std::cerr << "Can't unlink file: " << strerror(errno) << std::endl;
             exit(0);
         }
     }
 
-    running_ = 0;
-
     StopService();
 
-    std::cout << "Milvus server is closed!" << std::endl;
+    std::cerr << "Milvus server is closed!" << std::endl;
 }
 
 
 ErrorCode
 Server::LoadConfig() {
     ServerConfig::GetInstance().LoadConfigFile(config_filename_);
-    ErrorCode err = ServerConfig::GetInstance().ValidateConfig();
-    if (err != SERVER_SUCCESS) {
+    auto status = ServerConfig::GetInstance().ValidateConfig();
+    if (!status.ok()) {
+        std::cerr << "Failed to load config file: " << config_filename_ << std::endl;
         exit(0);
     }
 

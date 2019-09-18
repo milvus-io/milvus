@@ -58,7 +58,7 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
 };
 
 
-void
+Status
 GrpcMilvusServer::StartService() {
     if (server != nullptr) {
         std::cout << "stop service!\n";
@@ -92,13 +92,16 @@ GrpcMilvusServer::StartService() {
     server = builder.BuildAndStart();
     server->Wait();
 
+    return Status::OK();
 }
 
-void
+Status
 GrpcMilvusServer::StopService() {
     if (server != nullptr) {
         server->Shutdown();
     }
+
+    return Status::OK();
 }
 
 }

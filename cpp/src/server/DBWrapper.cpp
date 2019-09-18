@@ -33,7 +33,7 @@ DBWrapper::DBWrapper() {
 
 }
 
-ErrorCode DBWrapper::StartService() {
+Status DBWrapper::StartService() {
     //db config
     zilliz::milvus::engine::Options opt;
     ConfigNode& db_config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
@@ -60,7 +60,7 @@ ErrorCode DBWrapper::StartService() {
         opt.mode = zilliz::milvus::engine::Options::MODE::READ_ONLY;
     }
     else {
-        std::cout << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
+        std::cerr << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
         kill(0, SIGUSR1);
     }
 
@@ -91,16 +91,16 @@ ErrorCode DBWrapper::StartService() {
     opt.meta.archive_conf.SetCriterias(criterial);
 
     //create db root folder
-    ErrorCode err = CommonUtil::CreateDirectory(opt.meta.path);
-    if(err != SERVER_SUCCESS) {
-        std::cout << "ERROR! Failed to create database root path: " << opt.meta.path << std::endl;
+    Status status = CommonUtil::CreateDirectory(opt.meta.path);
+    if(!status.ok()) {
+        std::cerr << "ERROR! Failed to create database root path: " << opt.meta.path << std::endl;
         kill(0, SIGUSR1);
     }
 
     for(auto& path : opt.meta.slave_paths) {
-        err = CommonUtil::CreateDirectory(path);
-        if(err != SERVER_SUCCESS) {
-            std::cout << "ERROR! Failed to create database slave path: " << path << std::endl;
+        status = CommonUtil::CreateDirectory(path);
+        if(!status.ok()) {
+            std::cerr << "ERROR! Failed to create database slave path: " << path << std::endl;
             kill(0, SIGUSR1);
         }
     }
@@ -114,21 +114,21 @@ ErrorCode DBWrapper::StartService() {
     }
 
     if(db_ == nullptr) {
-        std::cout << "ERROR! Failed to open database: " << msg << std::endl;
+        std::cerr << "ERROR! Failed to open database: " << msg << std::endl;
         kill(0, SIGUSR1);
     }
 
     db_->Start();
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
-ErrorCode DBWrapper::StopService() {
+Status DBWrapper::StopService() {
     if(db_) {
         db_->Stop();
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 }
