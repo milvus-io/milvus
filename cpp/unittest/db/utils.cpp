@@ -80,7 +80,7 @@ void DBTest::SetUp() {
     auto res_mgr = engine::ResMgrInst::GetInstance();
     res_mgr->Clear();
     res_mgr->Add(engine::ResourceFactory::Create("disk", "DISK", 0, true, false));
-    res_mgr->Add(engine::ResourceFactory::Create("cpu", "CPU", 0, true, true));
+    res_mgr->Add(engine::ResourceFactory::Create("cpu", "CPU", 0, true, false));
     res_mgr->Add(engine::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
 
     auto default_conn = engine::Connection("IO", 500.0);
@@ -89,6 +89,8 @@ void DBTest::SetUp() {
     res_mgr->Connect("cpu", "gtx1660", PCIE);
     res_mgr->Start();
     engine::SchedInst::GetInstance()->Start();
+
+    engine::JobMgrInst::GetInstance()->Start();
 
     auto options = GetOptions();
     db_ = engine::DBFactory::Build(options);
@@ -100,8 +102,9 @@ void DBTest::TearDown() {
 
     BaseTest::TearDown();
 
-    engine::ResMgrInst::GetInstance()->Stop();
+    engine::JobMgrInst::GetInstance()->Stop();
     engine::SchedInst::GetInstance()->Stop();
+    engine::ResMgrInst::GetInstance()->Stop();
 
     auto options = GetOptions();
     boost::filesystem::remove_all(options.meta.path);

@@ -59,6 +59,9 @@ public:
     ResultSet &
     GetResult();
 
+    Status &
+    GetStatus();
+
 public:
     uint64_t
     topk() const {
@@ -94,6 +97,7 @@ private:
     Id2IndexMap index_files_;
     // TODO: column-base better ?
     ResultSet result_;
+    Status status_;
 
     std::mutex mutex_;
     std::condition_variable cv_;

@@ -19,6 +19,7 @@
 
 #include "ResourceMgr.h"
 #include "Scheduler.h"
+#include "JobMgr.h"
 
 #include <mutex>
 #include <memory>
@@ -61,6 +62,24 @@ public:
 
 private:
     static SchedulerPtr instance;
+    static std::mutex mutex_;
+};
+
+class JobMgrInst {
+public:
+    static scheduler::JobMgrPtr
+    GetInstance() {
+        if (instance == nullptr) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (instance == nullptr) {
+                instance = std::make_shared<scheduler::JobMgr>(ResMgrInst::GetInstance());
+            }
+        }
+        return instance;
+    }
+
+private:
+    static scheduler::JobMgrPtr instance;
     static std::mutex mutex_;
 };
 

@@ -26,6 +26,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere knowhere_src)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_srcs)
+aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/job scheduler_job_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_srcs)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_srcs)
@@ -37,14 +38,6 @@ set(util_files
         ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp
         ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc)
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task scheduler_task_files)
-set(db_scheduler_srcs
-        ${scheduler_files}
-        ${scheduler_context_files}
-        ${scheduler_task_files}
-        )
 
 include_directories(/usr/local/cuda/include)
 link_directories("/usr/local/cuda/lib64")
@@ -62,6 +55,7 @@ set(db_test_src
     ${wrapper_src}
     ${scheduler_action_srcs}
     ${scheduler_event_srcs}
+    ${scheduler_job_srcs}
     ${scheduler_resource_srcs}
     ${scheduler_task_srcs}
     ${scheduler_srcs}

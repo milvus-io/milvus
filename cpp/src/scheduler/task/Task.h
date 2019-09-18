@@ -17,9 +17,9 @@
 
 #pragma once
 
-#include "db/scheduler/context/SearchContext.h"
-#include "db/scheduler/task/IScheduleTask.h"
 #include "scheduler/tasklabel/TaskLabel.h"
+#include "scheduler/job/Job.h"
+#include "utils/Status.h"
 #include "Path.h"
 
 #include <string>
@@ -84,7 +84,8 @@ public:
 
 public:
     Path task_path_;
-    std::vector<SearchContextPtr> search_contexts_;
+//    std::vector<SearchContextPtr> search_contexts_;
+    scheduler::JobWPtr job_;
     TaskType type_;
     TaskLabelPtr label_ = nullptr;
 };
