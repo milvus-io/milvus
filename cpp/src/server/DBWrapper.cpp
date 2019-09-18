@@ -24,6 +24,7 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <omp.h>
+#include <faiss/utils.h>
 
 namespace zilliz {
 namespace milvus {
@@ -33,9 +34,9 @@ DBWrapper::DBWrapper() {
 
 }
 
-ErrorCode DBWrapper::StartService() {
+Status DBWrapper::StartService() {
     //db config
-    zilliz::milvus::engine::Options opt;
+    engine::DBOptions opt;
     ConfigNode& db_config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
     opt.meta.backend_uri = db_config.GetValue(CONFIG_DB_URL);
     std::string db_path = db_config.GetValue(CONFIG_DB_PATH);
@@ -51,16 +52,16 @@ ErrorCode DBWrapper::StartService() {
     ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
     std::string mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
     if (mode == "single") {
-        opt.mode = zilliz::milvus::engine::Options::MODE::SINGLE;
+        opt.mode = engine::DBOptions::MODE::SINGLE;
     }
     else if (mode == "cluster") {
-        opt.mode = zilliz::milvus::engine::Options::MODE::CLUSTER;
+        opt.mode = engine::DBOptions::MODE::CLUSTER;
     }
     else if (mode == "read_only") {
-        opt.mode = zilliz::milvus::engine::Options::MODE::READ_ONLY;
+        opt.mode = engine::DBOptions::MODE::READ_ONLY;
     }
     else {
-        std::cout << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
+        std::cerr << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
         kill(0, SIGUSR1);
     }
 
@@ -78,6 +79,8 @@ ErrorCode DBWrapper::StartService() {
         }
     }
 
+    faiss::distance_compute_blas_threshold = engine_config.GetInt32Value(CONFIG_DCBT, 20);//init faiss global variable
+
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
     int64_t disk = db_config.GetInt64Value(CONFIG_DB_ARCHIVE_DISK, 0);
@@ -91,16 +94,16 @@ ErrorCode DBWrapper::StartService() {
     opt.meta.archive_conf.SetCriterias(criterial);
 
     //create db root folder
-    ErrorCode err = CommonUtil::CreateDirectory(opt.meta.path);
-    if(err != SERVER_SUCCESS) {
-        std::cout << "ERROR! Failed to create database root path: " << opt.meta.path << std::endl;
+    Status status = CommonUtil::CreateDirectory(opt.meta.path);
+    if(!status.ok()) {
+        std::cerr << "ERROR! Failed to create database root path: " << opt.meta.path << std::endl;
         kill(0, SIGUSR1);
     }
 
     for(auto& path : opt.meta.slave_paths) {
-        err = CommonUtil::CreateDirectory(path);
-        if(err != SERVER_SUCCESS) {
-            std::cout << "ERROR! Failed to create database slave path: " << path << std::endl;
+        status = CommonUtil::CreateDirectory(path);
+        if(!status.ok()) {
+            std::cerr << "ERROR! Failed to create database slave path: " << path << std::endl;
             kill(0, SIGUSR1);
         }
     }
@@ -114,21 +117,21 @@ ErrorCode DBWrapper::StartService() {
     }
 
     if(db_ == nullptr) {
-        std::cout << "ERROR! Failed to open database: " << msg << std::endl;
+        std::cerr << "ERROR! Failed to open database: " << msg << std::endl;
         kill(0, SIGUSR1);
     }
 
     db_->Start();
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
-ErrorCode DBWrapper::StopService() {
+Status DBWrapper::StopService() {
     if(db_) {
         db_->Stop();
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 }

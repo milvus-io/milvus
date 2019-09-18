@@ -19,57 +19,60 @@
 #pragma once
 
 #include "db/meta/MetaTypes.h"
-#include "Error.h"
+#include "utils/Status.h"
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 
 class ValidationUtil {
+private:
+    ValidationUtil() = default;
+
 public:
-    static ErrorCode
+    static Status
     ValidateTableName(const std::string &table_name);
 
-    static ErrorCode
+    static Status
     ValidateTableDimension(int64_t dimension);
 
-    static ErrorCode
+    static Status
     ValidateTableIndexType(int32_t index_type);
 
-    static ErrorCode
+    static Status
     ValidateTableIndexNlist(int32_t nlist);
 
-    static ErrorCode
+    static Status
     ValidateTableIndexFileSize(int64_t index_file_size);
 
-    static ErrorCode
+    static Status
     ValidateTableIndexMetricType(int32_t metric_type);
 
-    static ErrorCode
+    static Status
     ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema);
 
-    static ErrorCode
+    static Status
     ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema);
 
-    static ErrorCode
+    static Status
     ValidateGpuIndex(uint32_t gpu_index);
 
-    static ErrorCode
+    static Status
     GetGpuMemory(uint32_t gpu_index, size_t &memory);
 
-    static ErrorCode
+    static Status
     ValidateIpAddress(const std::string &ip_address);
 
-    static ErrorCode
+    static Status
     ValidateStringIsNumber(const std::string &str);
 
-    static ErrorCode
+    static Status
     ValidateStringIsBool(std::string &str);
 
-    static ErrorCode
+    static Status
     ValidateStringIsDouble(const std::string &str, double &val);
 
-    static ErrorCode
+    static Status
     ValidateDbURI(const std::string &uri);
 };
 

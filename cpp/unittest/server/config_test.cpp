@@ -107,11 +107,11 @@ TEST(ConfigTest, CONFIG_TEST) {
 
 TEST(ConfigTest, SERVER_CONFIG_TEST) {
     server::ServerConfig& config = server::ServerConfig::GetInstance();
-    ErrorCode err = config.LoadConfigFile(CONFIG_FILE_PATH);
-    ASSERT_EQ(err, SERVER_SUCCESS);
+    auto status = config.LoadConfigFile(CONFIG_FILE_PATH);
+    ASSERT_TRUE(status.ok());
 
-    err = server::ServerConfig::GetInstance().ValidateConfig();
-    ASSERT_EQ(err, SERVER_SUCCESS);
+    status = server::ServerConfig::GetInstance().ValidateConfig();
+    ASSERT_TRUE(status.ok());
 
     const server::ServerConfig& config_const = config;
     server::ConfigNode node1 = config_const.GetConfig("server_config");
@@ -137,23 +137,23 @@ TEST(ConfigTest, SERVER_CONFIG_TEST) {
     server::ConfigNode& db_config = config.GetConfig("db_config");
     server::ConfigNode& cache_config = config.GetConfig(server::CONFIG_CACHE);
     cache_config.SetValue(server::CACHE_FREE_PERCENT, "2.0");
-    err = config.ValidateConfig();
-    ASSERT_NE(err, SERVER_SUCCESS);
+    status = config.ValidateConfig();
+    ASSERT_FALSE(status.ok());
 
     size_t cache_cap = 16;
     size_t insert_buffer_size = (total_mem - cache_cap*GB + 1*GB)/GB;
     db_config.SetValue(server::CONFIG_DB_INSERT_BUFFER_SIZE, std::to_string(insert_buffer_size));
     cache_config.SetValue(server::CONFIG_CPU_CACHE_CAPACITY, std::to_string(cache_cap));
-    err = config.ValidateConfig();
-    ASSERT_NE(err, SERVER_SUCCESS);
+    status = config.ValidateConfig();
+    ASSERT_FALSE(status.ok());
 
     cache_cap = total_mem/GB + 2;
     cache_config.SetValue(server::CONFIG_CPU_CACHE_CAPACITY, std::to_string(cache_cap));
-    err = config.ValidateConfig();
-    ASSERT_NE(err, SERVER_SUCCESS);
+    status = config.ValidateConfig();
+    ASSERT_FALSE(status.ok());
 
     insert_buffer_size = total_mem/GB + 2;
     db_config.SetValue(server::CONFIG_DB_INSERT_BUFFER_SIZE, std::to_string(insert_buffer_size));
-    err = config.ValidateConfig();
-    ASSERT_NE(err, SERVER_SUCCESS);
+    status = config.ValidateConfig();
+    ASSERT_FALSE(status.ok());
 }

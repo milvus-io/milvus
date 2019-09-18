@@ -31,7 +31,7 @@ namespace engine {
 
 MemTableFile::MemTableFile(const std::string &table_id,
                            const meta::MetaPtr &meta,
-                           const Options &options) :
+                           const DBOptions &options) :
     table_id_(table_id),
     meta_(meta),
     options_(options) {
@@ -67,7 +67,7 @@ Status MemTableFile::Add(const VectorSourcePtr &source, IDNumbers& vector_ids) {
         std::string err_msg = "MemTableFile::Add: table_file_schema dimension = " +
             std::to_string(table_file_schema_.dimension_) + ", table_id = " + table_file_schema_.table_id_;
         ENGINE_LOG_ERROR << err_msg;
-        return Status(DB_ERROR, "not able to create table file");
+        return Status(DB_ERROR, "Not able to create table file");
     }
 
     size_t single_vector_mem_size = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
