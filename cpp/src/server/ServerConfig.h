@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "utils/Error.h"
+#include "utils/Status.h"
 #include "config/ConfigNode.h"
 
 #include "yaml-cpp/yaml.h"
@@ -78,20 +78,20 @@ class ServerConfig {
  public:
     static ServerConfig &GetInstance();
 
-    ErrorCode LoadConfigFile(const std::string& config_filename);
-    ErrorCode ValidateConfig();
+    Status LoadConfigFile(const std::string& config_filename);
+    Status ValidateConfig();
     void PrintAll() const;
 
     ConfigNode GetConfig(const std::string& name) const;
     ConfigNode& GetConfig(const std::string& name);
 
  private:
-    ErrorCode CheckServerConfig();
-    ErrorCode CheckDBConfig();
-    ErrorCode CheckMetricConfig();
-    ErrorCode CheckCacheConfig();
-    ErrorCode CheckEngineConfig();
-    ErrorCode CheckResourceConfig();
+    Status CheckServerConfig();
+    Status CheckDBConfig();
+    Status CheckMetricConfig();
+    Status CheckCacheConfig();
+    Status CheckEngineConfig();
+    Status CheckResourceConfig();
 };
 
 }

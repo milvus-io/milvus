@@ -14,55 +14,65 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-
 #pragma once
 
-#include "VectorSource.h"
-#include "db/meta/Meta.h"
-#include "db/engine/ExecutionEngine.h"
-#include "utils/Status.h"
+#include <string>
+#include <vector>
+#include <list>
+#include <queue>
+#include <deque>
+#include <unordered_map>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <memory>
+
+#include "job/Job.h"
+#include "task/Task.h"
+#include "ResourceMgr.h"
 
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
-class MemTableFile {
+using engine::TaskPtr;
+using engine::ResourceMgrPtr;
 
- public:
-    MemTableFile(const std::string &table_id, const meta::MetaPtr &meta, const DBOptions &options);
+class JobMgr {
+public:
+    explicit
+    JobMgr(ResourceMgrPtr res_mgr);
 
-    Status Add(const VectorSourcePtr &source, IDNumbers& vector_ids);
+    void
+    Start();
 
-    size_t GetCurrentMem();
+    void
+    Stop();
 
-    size_t GetMemLeft();
+public:
+    void
+    Put(const JobPtr &job);
 
-    bool IsFull();
+private:
+    void
+    worker_function();
 
-    Status Serialize();
+    std::vector<TaskPtr>
+    build_task(const JobPtr &job);
 
- private:
+private:
+    bool running_ = false;
+    std::queue<JobPtr> queue_;
 
-    Status CreateTableFile();
+    std::thread worker_thread_;
 
-    const std::string table_id_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
 
-    meta::TableFileSchema table_file_schema_;
+    ResourceMgrPtr res_mgr_ = nullptr;
+};
 
-    meta::MetaPtr meta_;
-
-    DBOptions options_;
-
-    size_t current_mem_;
-
-    ExecutionEnginePtr execution_engine_;
-
-}; //MemTableFile
-
-using MemTableFilePtr = std::shared_ptr<MemTableFile>;
-
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}
+}
+}

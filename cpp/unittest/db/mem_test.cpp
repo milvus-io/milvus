@@ -216,7 +216,7 @@ TEST_F(MemManagerTest, MEM_TABLE_TEST) {
 
 TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
@@ -230,8 +230,8 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
         int64_t nb = 100000;
         std::vector<float> xb;
         BuildVectors(nb, xb);
-        engine::Status status = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
-        ASSERT_TRUE(status.ok());
+        stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        ASSERT_TRUE(stat.ok());
 
         std::this_thread::sleep_for(std::chrono::seconds(3));
 
@@ -262,7 +262,7 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
 
 TEST_F(MemManagerTest2, INSERT_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
@@ -278,8 +278,8 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
         std::vector<float> xb;
         BuildVectors(nb, xb);
         engine::IDNumbers vector_ids;
-        engine::Status status = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
-        ASSERT_TRUE(status.ok());
+        stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+        ASSERT_TRUE(stat.ok());
     }
     auto end_time = METRICS_NOW_TIME;
     auto total_time = METRICS_MICROSECONDS(start_time, end_time);
@@ -288,7 +288,7 @@ TEST_F(MemManagerTest2, INSERT_TEST) {
 
 TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
@@ -359,7 +359,7 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
 
 TEST_F(MemManagerTest2, VECTOR_IDS_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;

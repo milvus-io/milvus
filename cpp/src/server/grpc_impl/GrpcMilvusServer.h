@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "utils/Status.h"
+
 #include <cstdint>
 #include <string>
 
@@ -27,10 +29,10 @@ namespace grpc {
 
 class GrpcMilvusServer {
 public:
-    static void
+    static Status
     StartService();
 
-    static void
+    static Status
     StopService();
 };
 

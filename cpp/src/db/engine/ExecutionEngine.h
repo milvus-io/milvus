@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "db/Status.h"
+#include "utils/Status.h"
 
 #include <vector>
 #include <memory>

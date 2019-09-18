@@ -50,7 +50,7 @@ protected:
 
     virtual void SetUp() override;
     virtual void TearDown() override;
-    virtual zilliz::milvus::engine::Options GetOptions();
+    virtual zilliz::milvus::engine::DBOptions GetOptions();
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -65,7 +65,7 @@ class DBTest : public BaseTest {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class DBTest2 : public DBTest {
  protected:
-    virtual zilliz::milvus::engine::Options GetOptions() override;
+    virtual zilliz::milvus::engine::DBOptions GetOptions() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -84,7 +84,7 @@ class MetaTest : public BaseTest {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class MySqlDBTest : public DBTest {
 protected:
-    zilliz::milvus::engine::Options GetOptions();
+    zilliz::milvus::engine::DBOptions GetOptions();
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -94,7 +94,7 @@ class MySqlMetaTest : public BaseTest {
 
     virtual void SetUp() override;
     virtual void TearDown() override;
-    zilliz::milvus::engine::Options GetOptions();
+    zilliz::milvus::engine::DBOptions GetOptions();
 };
 
 

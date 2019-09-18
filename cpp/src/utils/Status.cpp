@@ -14,19 +14,16 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-#include <stdio.h>
-#include <cstring>
-#include <assert.h>
 #include "Status.h"
+
+#include <cstring>
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
 
-constexpr int CODE_WIDTH = sizeof(ErrorCode);
+constexpr int CODE_WIDTH = sizeof(StatusCode);
 
-Status::Status(ErrorCode code, const std::string& msg) {
+Status::Status(StatusCode code, const std::string& msg) {
     //4 bytes store code
     //4 bytes store message length
     //the left bytes store message string
@@ -45,55 +42,103 @@ Status::Status()
 }
 
 Status::~Status() {
-    delete[] state_;
+    delete state_;
 }
 
-const char* Status::CopyState(const char* state) {
+Status::Status(const Status &s)
+    : state_(nullptr) {
+    CopyFrom(s);
+}
+
+Status&
+Status::operator=(const Status &s) {
+    CopyFrom(s);
+    return *this;
+}
+
+Status::Status(Status &&s)
+    : state_(nullptr) {
+    MoveFrom(s);
+}
+
+Status&
+Status::operator=(Status &&s) {
+    MoveFrom(s);
+    return *this;
+}
+
+void
+Status::CopyFrom(const Status &s) {
+    delete state_;
+    state_ = nullptr;
+    if(s.state_ == nullptr) {
+        return;
+    }
+
     uint32_t length = 0;
-    std::memcpy(&length, state + CODE_WIDTH, sizeof(length));
+    memcpy(&length, s.state_ + CODE_WIDTH, sizeof(length));
     int buff_len = length + sizeof(length) + CODE_WIDTH;
-    char* result = new char[buff_len];
-    memcpy(result, state, buff_len);
-    return result;
+    state_ = new char[buff_len];
+    memcpy((void*)state_, (void*)s.state_, buff_len);
 }
 
-std::string Status::ToString() const {
-    if (state_ == nullptr) return "OK";
-    char tmp[32];
-    const char* type;
+void
+Status::MoveFrom(Status &s) {
+    delete state_;
+    state_ = s.state_;
+    s.state_ = nullptr;
+}
+
+std::string
+Status::message() const {
+    if (state_ == nullptr) {
+        return "";
+    }
+
+    std::string msg;
+    uint32_t length = 0;
+    memcpy(&length, state_ + CODE_WIDTH, sizeof(length));
+    if(length > 0) {
+        msg.append(state_ + sizeof(length) + CODE_WIDTH, length);
+    }
+
+    return msg;
+}
+
+std::string
+Status::ToString() const {
+    if (state_ == nullptr) {
+        return "OK";
+    }
+
+    std::string result;
     switch (code()) {
         case DB_SUCCESS:
-            type = "OK";
+            result = "OK ";
             break;
         case DB_ERROR:
-            type = "Error: ";
+            result = "Error: ";
             break;
         case DB_META_TRANSACTION_FAILED:
-            type = "DBTransactionError: ";
+            result = "Database error: ";
             break;
         case DB_NOT_FOUND:
-            type = "NotFound: ";
+            result = "Not found: ";
             break;
         case DB_ALREADY_EXIST:
-            type = "AlreadyExist: ";
+            result = "Already exist: ";
             break;
         case DB_INVALID_PATH:
-            type = "InvalidPath: ";
+            result = "Invalid path: ";
             break;
         default:
-            snprintf(tmp, sizeof(tmp), "Error code(0x%x): ",
-                    static_cast<int>(code()));
-            type = tmp;
+            result = "Error code(" + std::to_string(code()) + "): ";
             break;
     }
 
-    std::string result(type);
-    uint32_t length = 0;
-    memcpy(&length, state_ + CODE_WIDTH, sizeof(length));
-    result.append(state_ + sizeof(length) + CODE_WIDTH, length);
+    result += message();
     return result;
 }
 
-} // namespace engine
 } // namespace milvus
 } // namespace zilliz
