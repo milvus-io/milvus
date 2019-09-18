@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "utils/Error.h"
+#include "utils/Status.h"
 #include "db/DB.h"
 
 #include <memory>
@@ -41,8 +41,8 @@ public:
         return GetInstance().EngineDB();
     }
 
-    ErrorCode StartService();
-    ErrorCode StopService();
+    Status StartService();
+    Status StopService();
 
     engine::DBPtr EngineDB() {
         return db_;

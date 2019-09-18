@@ -77,33 +77,26 @@ namespace {
 
     constexpr long DAY_SECONDS = 24 * 60 * 60;
 
-    void
+    Status
     ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range> &range_array,
-                              std::vector<DB_DATE> &dates,
-                              ErrorCode &error_code,
-                              std::string &error_msg) {
+                              std::vector<DB_DATE> &dates) {
         dates.clear();
         for (auto &range : range_array) {
             time_t tt_start, tt_end;
             tm tm_start, tm_end;
             if (!CommonUtil::TimeStrToTime(range.start_value(), tt_start, tm_start)) {
-                error_code = SERVER_INVALID_TIME_RANGE;
-                error_msg = "Invalid time range: " + range.start_value();
-                return;
+                return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.start_value());
             }
 
             if (!CommonUtil::TimeStrToTime(range.end_value(), tt_end, tm_end)) {
-                error_code = SERVER_INVALID_TIME_RANGE;
-                error_msg = "Invalid time range: " + range.start_value();
-                return;
+                return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.start_value());
             }
 
             long days = (tt_end > tt_start) ? (tt_end - tt_start) / DAY_SECONDS : (tt_start - tt_end) /
                                                                                   DAY_SECONDS;
             if (days == 0) {
-                error_code = SERVER_INVALID_TIME_RANGE;
-                error_msg = "Invalid time range: " + range.start_value() + " to " + range.end_value();
-                return;
+                return Status(SERVER_INVALID_TIME_RANGE,
+                              "Invalid time range: " + range.start_value() + " to " + range.end_value());
             }
 
             //range: [start_day, end_day)
@@ -117,6 +110,8 @@ namespace {
                 dates.push_back(date);
             }
         }
+
+        return Status::OK();
     }
 }
 
@@ -136,30 +131,30 @@ CreateTableTask::Create(const ::milvus::grpc::TableSchema *schema) {
     return std::shared_ptr<GrpcBaseTask>(new CreateTableTask(schema));
 }
 
-ErrorCode
+Status
 CreateTableTask::OnExecute() {
     TimeRecorder rc("CreateTableTask");
 
     try {
         //step 1: check arguments
-        ErrorCode res = ValidationUtil::ValidateTableName(schema_->table_name().table_name());
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + schema_->table_name().table_name());
+        auto status = ValidationUtil::ValidateTableName(schema_->table_name().table_name());
+        if (!status.ok()) {
+            return status;
         }
 
-        res = ValidationUtil::ValidateTableDimension(schema_->dimension());
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table dimension: " + std::to_string(schema_->dimension()));
+        status = ValidationUtil::ValidateTableDimension(schema_->dimension());
+        if (!status.ok()) {
+            return status;
         }
 
-        res = ValidationUtil::ValidateTableIndexFileSize(schema_->index_file_size());
-        if(res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid index file size: " + std::to_string(schema_->index_file_size()));
+        status = ValidationUtil::ValidateTableIndexFileSize(schema_->index_file_size());
+        if (!status.ok()) {
+            return status;
         }
 
-        res = ValidationUtil::ValidateTableIndexMetricType(schema_->metric_type());
-        if(res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid index metric type: " + std::to_string(schema_->metric_type()));
+        status = ValidationUtil::ValidateTableIndexMetricType(schema_->metric_type());
+        if (!status.ok()) {
+            return status;
         }
 
         //step 2: construct table schema
@@ -170,22 +165,22 @@ CreateTableTask::OnExecute() {
         table_info.metric_type_ = schema_->metric_type();
 
         //step 3: create table
-        engine::Status stat = DBWrapper::DB()->CreateTable(table_info);
-        if (!stat.ok()) {
+        status = DBWrapper::DB()->CreateTable(table_info);
+        if (!status.ok()) {
             //table could exist
-            if(stat.code() == DB_ALREADY_EXIST) {
-                return SetError(SERVER_INVALID_TABLE_NAME, stat.ToString());
+            if(status.code() == DB_ALREADY_EXIST) {
+                return Status(SERVER_INVALID_TABLE_NAME, status.message());
             }
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+            return status;
         }
 
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
     rc.ElapseFromBegin("totally cost");
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -200,23 +195,23 @@ DescribeTableTask::Create(const std::string &table_name, ::milvus::grpc::TableSc
     return std::shared_ptr<GrpcBaseTask>(new DescribeTableTask(table_name, schema));
 }
 
-ErrorCode
+Status
 DescribeTableTask::OnExecute() {
     TimeRecorder rc("DescribeTableTask");
 
     try {
         //step 1: check arguments
-        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + table_name_);
+        auto status = ValidationUtil::ValidateTableName(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         //step 2: get table info
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
-        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
-        if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+        status = DBWrapper::DB()->DescribeTable(table_info);
+        if (!status.ok()) {
+            return status;
         }
 
         schema_->mutable_table_name()->set_table_name(table_info.table_id_);
@@ -225,12 +220,12 @@ DescribeTableTask::OnExecute() {
         schema_->set_metric_type(table_info.metric_type_);
 
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
     rc.ElapseFromBegin("totally cost");
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -248,54 +243,54 @@ CreateIndexTask::Create(const ::milvus::grpc::IndexParam *index_param) {
     return std::shared_ptr<GrpcBaseTask>(new CreateIndexTask(index_param));
 }
 
-ErrorCode
+Status
 CreateIndexTask::OnExecute() {
     try {
         TimeRecorder rc("CreateIndexTask");
 
         //step 1: check arguments
         std::string table_name_ = index_param_->table_name().table_name();
-        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + table_name_);
+        auto status = ValidationUtil::ValidateTableName(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         bool has_table = false;
-        engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table);
-        if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+        status = DBWrapper::DB()->HasTable(table_name_, has_table);
+        if (!status.ok()) {
+            return status;
         }
 
         if (!has_table) {
-            return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+            return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
         }
 
         auto &grpc_index = index_param_->index();
-        res = ValidationUtil::ValidateTableIndexType(grpc_index.index_type());
-        if(res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid index type: " + std::to_string(grpc_index.index_type()));
+        status = ValidationUtil::ValidateTableIndexType(grpc_index.index_type());
+        if (!status.ok()) {
+            return status;
         }
 
-        res = ValidationUtil::ValidateTableIndexNlist(grpc_index.nlist());
-        if(res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid index nlist: " + std::to_string(grpc_index.nlist()));
+        status = ValidationUtil::ValidateTableIndexNlist(grpc_index.nlist());
+        if (!status.ok()) {
+            return status;
         }
 
         //step 2: check table existence
         engine::TableIndex index;
         index.engine_type_ = grpc_index.index_type();
         index.nlist_ = grpc_index.nlist();
-        stat = DBWrapper::DB()->CreateIndex(table_name_, index);
-        if (!stat.ok()) {
-            return SetError(SERVER_BUILD_INDEX_ERROR, stat.ToString());
+        status = DBWrapper::DB()->CreateIndex(table_name_, index);
+        if (!status.ok()) {
+            return status;
         }
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -311,29 +306,29 @@ HasTableTask::Create(const std::string &table_name, bool &has_table) {
     return std::shared_ptr<GrpcBaseTask>(new HasTableTask(table_name, has_table));
 }
 
-ErrorCode
+Status
 HasTableTask::OnExecute() {
     try {
         TimeRecorder rc("HasTableTask");
 
         //step 1: check arguments
-        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + table_name_);
+        auto status = ValidationUtil::ValidateTableName(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         //step 2: check table existence
-        engine::Status stat = DBWrapper::DB()->HasTable(table_name_, has_table_);
-        if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+        status = DBWrapper::DB()->HasTable(table_name_, has_table_);
+        if (!status.ok()) {
+            return status;
         }
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -348,26 +343,26 @@ DropTableTask::Create(const std::string &table_name) {
     return std::shared_ptr<GrpcBaseTask>(new DropTableTask(table_name));
 }
 
-ErrorCode
+Status
 DropTableTask::OnExecute() {
     try {
         TimeRecorder rc("DropTableTask");
 
         //step 1: check arguments
-        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + table_name_);
+        auto status = ValidationUtil::ValidateTableName(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
-        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
-        if (!stat.ok()) {
-            if (stat.code() == DB_NOT_FOUND) {
-                return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+        status = DBWrapper::DB()->DescribeTable(table_info);
+        if (!status.ok()) {
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
             } else {
-                return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+                return status;
             }
         }
 
@@ -375,17 +370,17 @@ DropTableTask::OnExecute() {
 
         //step 3: Drop table
         std::vector<DB_DATE> dates;
-        stat = DBWrapper::DB()->DeleteTable(table_name_, dates);
-        if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+        status = DBWrapper::DB()->DeleteTable(table_name_, dates);
+        if (!status.ok()) {
+            return status;
         }
 
         rc.ElapseFromBegin("total cost");
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -400,22 +395,22 @@ ShowTablesTask::Create(::grpc::ServerWriter<::milvus::grpc::TableName> *writer) 
     return std::shared_ptr<GrpcBaseTask>(new ShowTablesTask(writer));
 }
 
-ErrorCode
+Status
 ShowTablesTask::OnExecute() {
     std::vector<engine::meta::TableSchema> schema_array;
-    engine::Status stat = DBWrapper::DB()->AllTables(schema_array);
-    if (!stat.ok()) {
-        return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+    auto statuts = DBWrapper::DB()->AllTables(schema_array);
+    if (!statuts.ok()) {
+        return statuts;
     }
 
     for (auto &schema : schema_array) {
         ::milvus::grpc::TableName tableName;
         tableName.set_table_name(schema.table_id_);
         if (!writer_->Write(tableName)) {
-            return SetError(SERVER_WRITE_ERROR, "Write table name failed!");
+            return Status(SERVER_WRITE_ERROR, "Write table name failed!");
         }
     }
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -436,23 +431,23 @@ InsertTask::Create(const ::milvus::grpc::InsertParam *insert_param,
     return std::shared_ptr<GrpcBaseTask>(new InsertTask(insert_param, record_ids));
 }
 
-ErrorCode
+Status
 InsertTask::OnExecute() {
     try {
         TimeRecorder rc("InsertVectorTask");
 
         //step 1: check arguments
-        ErrorCode res = ValidationUtil::ValidateTableName(insert_param_->table_name());
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + insert_param_->table_name());
+        auto status = ValidationUtil::ValidateTableName(insert_param_->table_name());
+        if (!status.ok()) {
+            return status;
         }
         if (insert_param_->row_record_array().empty()) {
-            return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
         }
 
         if (!record_ids_->vector_id_array().empty()) {
             if (record_ids_->vector_id_array().size() != insert_param_->row_record_array_size()) {
-                return SetError(SERVER_ILLEGAL_VECTOR_ID,
+                return Status(SERVER_ILLEGAL_VECTOR_ID,
                         "Size of vector ids is not equal to row record array size");
             }
         }
@@ -460,13 +455,13 @@ InsertTask::OnExecute() {
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = insert_param_->table_name();
-        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
-        if (!stat.ok()) {
-            if (stat.code() == DB_NOT_FOUND) {
-                return SetError(SERVER_TABLE_NOT_EXIST,
+        status = DBWrapper::DB()->DescribeTable(table_info);
+        if (!status.ok()) {
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST,
                                 "Table " + insert_param_->table_name() + " not exists");
             } else {
-                return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+                return status;
             }
         }
 
@@ -475,12 +470,12 @@ InsertTask::OnExecute() {
         bool user_provide_ids = !insert_param_->row_id_array().empty();
         //user already provided id before, all insert action require user id
         if((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) && !user_provide_ids) {
-            return SetError(SERVER_ILLEGAL_VECTOR_ID, "Table vector ids are user defined, please provide id for this batch");
+            return Status(SERVER_ILLEGAL_VECTOR_ID, "Table vector ids are user defined, please provide id for this batch");
         }
 
         //user didn't provided id before, no need to provide user id
         if((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) && user_provide_ids) {
-            return SetError(SERVER_ILLEGAL_VECTOR_ID, "Table vector ids are auto generated, no need to provide id for this batch");
+            return Status(SERVER_ILLEGAL_VECTOR_ID, "Table vector ids are auto generated, no need to provide id for this batch");
         }
 
         rc.RecordSection("check validation");
@@ -496,7 +491,7 @@ InsertTask::OnExecute() {
         // TODO: change to one dimension array in protobuf or use multiple-thread to copy the data
         for (size_t i = 0; i < insert_param_->row_record_array_size(); i++) {
             if (insert_param_->row_record_array(i).vector_data().empty()) {
-                return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array data is empty");
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array data is empty");
             }
             uint64_t vec_dim = insert_param_->row_record_array(i).vector_data().size();
             if (vec_dim != table_info.dimension_) {
@@ -504,7 +499,7 @@ InsertTask::OnExecute() {
                 std::string error_msg = "Invalid row record dimension: " + std::to_string(vec_dim)
                                         + " vs. table dimension:" +
                                         std::to_string(table_info.dimension_);
-                return SetError(error_code, error_msg);
+                return Status(error_code, error_msg);
             }
             memcpy(&vec_f[i * table_info.dimension_],
                    insert_param_->row_record_array(i).vector_data().data(),
@@ -522,10 +517,10 @@ InsertTask::OnExecute() {
             memcpy(target_data, src_data, (size_t)(sizeof(int64_t)*insert_param_->row_id_array_size()));
         }
 
-        stat = DBWrapper::DB()->InsertVectors(insert_param_->table_name(), vec_count, vec_f.data(), vec_ids);
+        status = DBWrapper::DB()->InsertVectors(insert_param_->table_name(), vec_count, vec_f.data(), vec_ids);
         rc.ElapseFromBegin("add vectors to engine");
-        if (!stat.ok()) {
-            return SetError(SERVER_CACHE_ERROR, "Cache error: " + stat.ToString());
+        if (!status.ok()) {
+            return status;
         }
         for (int64_t id : vec_ids) {
             record_ids_->add_vector_id_array(id);
@@ -535,13 +530,13 @@ InsertTask::OnExecute() {
         if (ids_size != vec_count) {
             std::string msg = "Add " + std::to_string(vec_count) + " vectors but only return "
                               + std::to_string(ids_size) + " id";
-            return SetError(SERVER_ILLEGAL_VECTOR_ID, msg);
+            return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
         }
 
         //step 6: update table flag
         user_provide_ids ? table_info.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
                 : table_info.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
-        stat = DBWrapper::DB()->UpdateTableFlag(insert_param_->table_name(), table_info.flag_);
+        status = DBWrapper::DB()->UpdateTableFlag(insert_param_->table_name(), table_info.flag_);
 
 #ifdef MILVUS_ENABLE_PROFILING
         ProfilerStop();
@@ -551,10 +546,10 @@ InsertTask::OnExecute() {
         rc.ElapseFromBegin("total cost");
 
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -580,7 +575,7 @@ SearchTask::Create(const ::milvus::grpc::SearchParam *search_vector_infos,
                                                         response));
 }
 
-ErrorCode
+Status
 SearchTask::OnExecute() {
     try {
         int64_t top_k = search_param_->topk();
@@ -591,53 +586,51 @@ SearchTask::OnExecute() {
 
         //step 1: check table name
         std::string table_name_ = search_param_->table_name();
-        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + table_name_);
+        auto status = ValidationUtil::ValidateTableName(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name_;
-        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
-        if (!stat.ok()) {
-            if (stat.code() == DB_NOT_FOUND) {
-                return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+        status = DBWrapper::DB()->DescribeTable(table_info);
+        if (!status.ok()) {
+            if (status.code() == DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
             } else {
-                return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+                return status;
             }
         }
 
         //step 3: check search parameter
-        res = ValidationUtil::ValidateSearchTopk(top_k, table_info);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid topk: " + std::to_string(top_k));
+        status = ValidationUtil::ValidateSearchTopk(top_k, table_info);
+        if (!status.ok()) {
+            return status;
         }
 
-        res = ValidationUtil::ValidateSearchNprobe(nprobe, table_info);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid nprobe: " + std::to_string(nprobe));
+        status = ValidationUtil::ValidateSearchNprobe(nprobe, table_info);
+        if (!status.ok()) {
+            return status;
         }
 
         if (search_param_->query_record_array().empty()) {
-            return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
         }
 
         //step 4: check date range, and convert to db dates
         std::vector<DB_DATE> dates;
-        ErrorCode error_code = SERVER_SUCCESS;
-        std::string error_msg;
-
         std::vector<::milvus::grpc::Range> range_array;
         for (size_t i = 0; i < search_param_->query_range_array_size(); i++) {
             range_array.emplace_back(search_param_->query_range_array(i));
         }
-        ConvertTimeRangeToDBDates(range_array, dates, error_code, error_msg);
-        if (error_code != SERVER_SUCCESS) {
-            return SetError(error_code, error_msg);
+
+        status = ConvertTimeRangeToDBDates(range_array, dates);
+        if (!status.ok()) {
+            return status;
         }
 
-        double span_check = rc.RecordSection("check validation");
+        rc.RecordSection("check validation");
 
 
         //step 5: prepare float data
@@ -645,14 +638,14 @@ SearchTask::OnExecute() {
         std::vector<float> vec_f(record_array_size * table_info.dimension_, 0);
         for (size_t i = 0; i < record_array_size; i++) {
             if (search_param_->query_record_array(i).vector_data().empty()) {
-                return SetError(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array data is empty");
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array data is empty");
             }
             uint64_t query_vec_dim = search_param_->query_record_array(i).vector_data().size();
             if (query_vec_dim != table_info.dimension_) {
                 ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
                 std::string error_msg = "Invalid row record dimension: " + std::to_string(query_vec_dim)
                                         + " vs. table dimension:" + std::to_string(table_info.dimension_);
-                return SetError(error_code, error_msg);
+                return Status(error_code, error_msg);
             }
 
             memcpy(&vec_f[i * table_info.dimension_],
@@ -671,11 +664,11 @@ SearchTask::OnExecute() {
 #endif
 
         if (file_id_array_.empty()) {
-            stat = DBWrapper::DB()->Query(table_name_, (size_t) top_k, record_count, nprobe, vec_f.data(),
-                                          dates, results);
+            status = DBWrapper::DB()->Query(table_name_, (size_t) top_k, record_count, nprobe,
+                    vec_f.data(), dates, results);
         } else {
-            stat = DBWrapper::DB()->Query(table_name_, file_id_array_, (size_t) top_k,
-                                          record_count, nprobe, vec_f.data(), dates, results);
+            status = DBWrapper::DB()->Query(table_name_, file_id_array_, (size_t) top_k,
+                    record_count, nprobe, vec_f.data(), dates, results);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -683,18 +676,18 @@ SearchTask::OnExecute() {
 #endif
 
         rc.RecordSection("search vectors from engine");
-        if (!stat.ok()) {
-            return SetError(stat.code(), stat.ToString());
+        if (!status.ok()) {
+            return status;
         }
 
         if (results.empty()) {
-            return SERVER_SUCCESS; //empty table
+            return Status::OK(); //empty table
         }
 
         if (results.size() != record_count) {
             std::string msg = "Search " + std::to_string(record_count) + " vectors but only return "
                               + std::to_string(results.size()) + " results";
-            return SetError(SERVER_ILLEGAL_SEARCH_RESULT, msg);
+            return Status(SERVER_ILLEGAL_SEARCH_RESULT, msg);
         }
 
         //step 7: construct result array
@@ -713,10 +706,10 @@ SearchTask::OnExecute() {
 
 
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -732,23 +725,22 @@ CountTableTask::Create(const std::string &table_name, int64_t &row_count) {
     return std::shared_ptr<GrpcBaseTask>(new CountTableTask(table_name, row_count));
 }
 
-ErrorCode
+Status
 CountTableTask::OnExecute() {
     try {
         TimeRecorder rc("GetTableRowCountTask");
 
         //step 1: check arguments
-        ErrorCode res = SERVER_SUCCESS;
-        res = ValidationUtil::ValidateTableName(table_name_);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + table_name_);
+        auto status = ValidationUtil::ValidateTableName(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         //step 2: get row count
         uint64_t row_count = 0;
-        engine::Status stat = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
-        if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+        status = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
+        if (!status.ok()) {
+            return status;
         }
 
         row_count_ = (int64_t) row_count;
@@ -756,10 +748,10 @@ CountTableTask::OnExecute() {
         rc.ElapseFromBegin("total cost");
 
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -775,7 +767,7 @@ CmdTask::Create(const std::string &cmd, std::string &result) {
     return std::shared_ptr<GrpcBaseTask>(new CmdTask(cmd, result));
 }
 
-ErrorCode
+Status
 CmdTask::OnExecute() {
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
@@ -786,7 +778,7 @@ CmdTask::OnExecute() {
         result_ = "OK";
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -804,27 +796,27 @@ DeleteByRangeTask::Create(const ::milvus::grpc::DeleteByRangeParam *delete_by_ra
     return std::shared_ptr<GrpcBaseTask>(new DeleteByRangeTask(delete_by_range_param));
 }
 
-ErrorCode
+Status
 DeleteByRangeTask::OnExecute() {
     try {
         TimeRecorder rc("DeleteByRangeTask");
 
         //step 1: check arguments
         std::string table_name = delete_by_range_param_->table_name();
-        ErrorCode res = ValidationUtil::ValidateTableName(table_name);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + table_name);
+        auto status = ValidationUtil::ValidateTableName(table_name);
+        if (!status.ok()) {
+            return status;
         }
 
         //step 2: check table existence
         engine::meta::TableSchema table_info;
         table_info.table_id_ = table_name;
-        engine::Status stat = DBWrapper::DB()->DescribeTable(table_info);
-        if (!stat.ok()) {
-            if (stat.code(), DB_NOT_FOUND) {
-                return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name + " not exists");
+        status = DBWrapper::DB()->DescribeTable(table_info);
+        if (!status.ok()) {
+            if (status.code(), DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name + " not exists");
             } else {
-                return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+                return status;
             }
         }
 
@@ -837,25 +829,25 @@ DeleteByRangeTask::OnExecute() {
 
         std::vector<::milvus::grpc::Range> range_array;
         range_array.emplace_back(delete_by_range_param_->range());
-        ConvertTimeRangeToDBDates(range_array, dates, error_code, error_msg);
-        if (error_code != SERVER_SUCCESS) {
-            return SetError(error_code, error_msg);
+        status = ConvertTimeRangeToDBDates(range_array, dates);
+        if (!status.ok()) {
+            return status;
         }
 
 #ifdef MILVUS_ENABLE_PROFILING
         std::string fname = "/tmp/search_nq_" + this->delete_by_range_param_->table_name() + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
-        engine::Status status = DBWrapper::DB()->DeleteTable(table_name, dates);
+        status = DBWrapper::DB()->DeleteTable(table_name, dates);
         if (!status.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+            return status;
         }
 
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
     
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -870,29 +862,29 @@ PreloadTableTask::Create(const std::string &table_name){
     return std::shared_ptr<GrpcBaseTask>(new PreloadTableTask(table_name));
 }
 
-ErrorCode
+Status
 PreloadTableTask::OnExecute() {
     try {
         TimeRecorder rc("PreloadTableTask");
 
         //step 1: check arguments
-        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + table_name_);
+        auto status = ValidationUtil::ValidateTableName(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         //step 2: check table existence
-        engine::Status stat = DBWrapper::DB()->PreloadTable(table_name_);
-        if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+        status = DBWrapper::DB()->PreloadTable(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -910,22 +902,22 @@ DescribeIndexTask::Create(const std::string &table_name,
     return std::shared_ptr<GrpcBaseTask>(new DescribeIndexTask(table_name, index_param));
 }
 
-ErrorCode
+Status
 DescribeIndexTask::OnExecute() {
     try {
         TimeRecorder rc("DescribeIndexTask");
 
         //step 1: check arguments
-        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + table_name_);
+        auto status = ValidationUtil::ValidateTableName(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         //step 2: check table existence
         engine::TableIndex index;
-        engine::Status stat = DBWrapper::DB()->DescribeIndex(table_name_, index);
-        if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+        status = DBWrapper::DB()->DescribeIndex(table_name_, index);
+        if (!status.ok()) {
+            return status;
         }
 
         index_param_->mutable_table_name()->set_table_name(table_name_);
@@ -934,10 +926,10 @@ DescribeIndexTask::OnExecute() {
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -952,39 +944,39 @@ DropIndexTask::Create(const std::string &table_name){
     return std::shared_ptr<GrpcBaseTask>(new DropIndexTask(table_name));
 }
 
-ErrorCode
+Status
 DropIndexTask::OnExecute() {
     try {
         TimeRecorder rc("DropIndexTask");
 
         //step 1: check arguments
-        ErrorCode res = ValidationUtil::ValidateTableName(table_name_);
-        if (res != SERVER_SUCCESS) {
-            return SetError(res, "Invalid table name: " + table_name_);
+        auto status = ValidationUtil::ValidateTableName(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         bool has_table = false;
-        auto stat = DBWrapper::DB()->HasTable(table_name_, has_table);
-        if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+        status = DBWrapper::DB()->HasTable(table_name_, has_table);
+        if (!status.ok()) {
+            return status;
         }
 
         if (!has_table) {
-            return SetError(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+            return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
         }
 
         //step 2: check table existence
-        stat = DBWrapper::DB()->DropIndex(table_name_);
-        if (!stat.ok()) {
-            return SetError(DB_META_TRANSACTION_FAILED, stat.ToString());
+        status = DBWrapper::DB()->DropIndex(table_name_);
+        if (!status.ok()) {
+            return status;
         }
 
         rc.ElapseFromBegin("totally cost");
     } catch (std::exception &ex) {
-        return SetError(SERVER_UNEXPECTED_ERROR, ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 }

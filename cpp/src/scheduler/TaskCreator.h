@@ -14,31 +14,48 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 #pragma once
 
-#include "Status.h"
+#include <string>
+#include <vector>
+#include <list>
+#include <queue>
+#include <deque>
+#include <unordered_map>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <memory>
 
-#include <exception>
+#include "job/Job.h"
+#include "job/SearchJob.h"
+#include "job/DeleteJob.h"
+#include "task/Task.h"
+#include "task/SearchTask.h"
+#include "task/DeleteTask.h"
 
+
+namespace zilliz {
 namespace milvus {
-class Exception : public std::exception {
+namespace scheduler {
+
+using engine::TaskPtr;
+using engine::XSearchTask;
+using engine::XDeleteTask;
+
+class TaskCreator {
 public:
-    Exception(StatusCode error_code,
-            const std::string &message = std::string())
-        : error_code_(error_code), message_(message) {}
+    static std::vector<TaskPtr>
+    Create(const JobPtr &job);
 
 public:
-    StatusCode error_code() const {
-        return error_code_;
-    }
+    static std::vector<TaskPtr>
+    Create(const SearchJobPtr &job);
 
-    virtual const char *what() const noexcept {
-        return message_.c_str();
-    }
-
-private:
-    StatusCode error_code_;
-    std::string message_;
+    static std::vector<TaskPtr>
+    Create(const DeleteJobPtr &job);
 };
+
+}
+}
 }

@@ -52,7 +52,7 @@ void MetricTest::InitLog() {
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
-engine::Options MetricTest::GetOptions() {
+engine::DBOptions MetricTest::GetOptions() {
     auto options = engine::DBFactory::BuildOption();
     options.meta.path = "/tmp/milvus_test";
     options.meta.backend_uri = "sqlite://:@:/";

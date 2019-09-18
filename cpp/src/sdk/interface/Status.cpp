@@ -17,127 +17,92 @@
 
 #include "Status.h"
 
+#include <cstring>
+
 namespace milvus {
 
-Status::~Status() noexcept {
-    if (state_ != nullptr) {
-        delete state_;
-        state_ = nullptr;
+constexpr int CODE_WIDTH = sizeof(StatusCode);
+
+Status::Status(StatusCode code, const std::string& msg) {
+    //4 bytes store code
+    //4 bytes store message length
+    //the left bytes store message string
+    const uint32_t length = (uint32_t)msg.size();
+    char* result = new char[length + sizeof(length) + CODE_WIDTH];
+    memcpy(result, &code, CODE_WIDTH);
+    memcpy(result + CODE_WIDTH, &length, sizeof(length));
+    memcpy(result + sizeof(length) + CODE_WIDTH, msg.data(), length);
+
+    state_ = result;
+}
+
+Status::Status()
+        : state_(nullptr) {
+
+}
+
+Status::~Status() {
+    delete state_;
+}
+
+Status::Status(const Status &s)
+        : state_(nullptr) {
+    CopyFrom(s);
+}
+
+Status&
+Status::operator=(const Status &s) {
+    CopyFrom(s);
+    return *this;
+}
+
+Status::Status(Status &&s)
+        : state_(nullptr) {
+    MoveFrom(s);
+}
+
+Status&
+Status::operator=(Status &&s) {
+    MoveFrom(s);
+    return *this;
+}
+
+void
+Status::CopyFrom(const Status &s) {
+    delete state_;
+    state_ = nullptr;
+    if(s.state_ == nullptr) {
+        return;
     }
+
+    uint32_t length = 0;
+    memcpy(&length, s.state_ + CODE_WIDTH, sizeof(length));
+    int buff_len = length + sizeof(length) + CODE_WIDTH;
+    state_ = new char[buff_len];
+    memcpy((void*)state_, (void*)s.state_, buff_len);
 }
 
-static inline std::ostream &operator<<(std::ostream &os, const Status &x) {
-    os << x.ToString();
-    return os;
-}
-
-void Status::MoveFrom(Status &s) {
+void
+Status::MoveFrom(Status &s) {
     delete state_;
     state_ = s.state_;
     s.state_ = nullptr;
 }
 
-Status::Status(const Status &s)
-        : state_((s.state_ == nullptr) ? nullptr : new State(*s.state_)) {}
-
-Status::Status(Status &&s) noexcept {
-    MoveFrom(s);
-}
-
-Status &Status::operator=(const Status &s) {
-    if (state_ != s.state_) {
-        CopyFrom(s);
-    }
-    return *this;
-}
-
-Status &Status::operator=(Status &&s) noexcept {
-    MoveFrom(s);
-    return *this;
-}
-
-Status Status::operator&(const Status &status) const noexcept {
-    if (ok()) {
-        return status;
-    } else {
-        return *this;
-    }
-}
-
-Status Status::operator&(Status &&s) const noexcept {
-    if (ok()) {
-        return std::move(s);
-    } else {
-        return *this;
-    }
-}
-
-Status &Status::operator&=(const Status &s) noexcept {
-    if (ok() && !s.ok()) {
-        CopyFrom(s);
-    }
-    return *this;
-}
-
-Status &Status::operator&=(Status &&s) noexcept {
-    if (ok() && !s.ok()) {
-        MoveFrom(s);
-    }
-    return *this;
-}
-
-Status::Status(StatusCode code, const std::string &message) {
-    state_ = new State;
-    state_->code = code;
-    state_->message = message;
-}
-
-void Status::CopyFrom(const Status &status) {
-    delete state_;
-    if (status.state_ == nullptr) {
-        state_ = nullptr;
-    } else {
-        state_ = new State(*status.state_);
-    }
-}
-
-std::string Status::CodeAsString() const {
+std::string
+Status::message() const {
     if (state_ == nullptr) {
-        return "OK";
+        return "";
     }
 
-    const char *type = nullptr;
-    switch (code()) {
-        case StatusCode::OK:
-            type = "OK";
-            break;
-        case StatusCode::InvalidAgument:
-            type = "Invalid agument";
-            break;
-        case StatusCode::UnknownError:
-            type = "Unknown error";
-            break;
-        case StatusCode::NotSupported:
-            type = "Not Supported";
-            break;
-        case StatusCode::NotConnected:
-            type = "Not Connected";
-            break;
-        default:
-            type = "Unknown";
-            break;
+    std::string msg;
+    uint32_t length = 0;
+    memcpy(&length, state_ + CODE_WIDTH, sizeof(length));
+    if(length > 0) {
+        msg.append(state_ + sizeof(length) + CODE_WIDTH, length);
     }
-    return std::string(type);
-}
 
-std::string Status::ToString() const {
-    std::string result(CodeAsString());
-    if (state_ == nullptr) {
-        return result;
-    }
-    result += ": ";
-    result += state_->message;
-    return result;
+    return msg;
 }
 
 }
