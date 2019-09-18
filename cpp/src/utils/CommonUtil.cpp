@@ -73,35 +73,35 @@ bool CommonUtil::IsDirectoryExist(const std::string &path) {
     return true;
 }
 
-ErrorCode CommonUtil::CreateDirectory(const std::string &path) {
+Status CommonUtil::CreateDirectory(const std::string &path) {
     if(path.empty()) {
-        return SERVER_SUCCESS;
+        return Status::OK();
     }
 
     struct stat directory_stat;
     int status = stat(path.c_str(), &directory_stat);
     if (status == 0) {
-        return SERVER_SUCCESS;//already exist
+        return Status::OK();//already exist
     }
 
     fs::path fs_path(path);
     fs::path parent_path = fs_path.parent_path();
-    ErrorCode err = CreateDirectory(parent_path.string());
-    if(err != SERVER_SUCCESS){
-        return err;
+    Status err_status = CreateDirectory(parent_path.string());
+    if(!err_status.ok()){
+        return err_status;
     }
 
     status = stat(path.c_str(), &directory_stat);
     if (status == 0) {
-        return SERVER_SUCCESS;//already exist
+        return Status::OK();//already exist
     }
 
     int makeOK = mkdir(path.c_str(), S_IRWXU|S_IRGRP|S_IROTH);
     if (makeOK != 0) {
-        return SERVER_UNEXPECTED_ERROR;
+        return Status(SERVER_UNEXPECTED_ERROR, "failed to create directory: " + path);
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 namespace {
@@ -134,18 +134,19 @@ namespace {
     }
 }
 
-ErrorCode CommonUtil::DeleteDirectory(const std::string &path) {
+Status CommonUtil::DeleteDirectory(const std::string &path) {
     if(path.empty()) {
-        return SERVER_SUCCESS;
+        return Status::OK();
     }
 
     struct stat directory_stat;
     int statOK = stat(path.c_str(), &directory_stat);
-    if (statOK != 0)
-        return SERVER_SUCCESS;
+    if (statOK != 0) {
+        return Status::OK();
+    }
 
     RemoveDirectory(path);
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 bool CommonUtil::IsFileExist(const std::string &path) {

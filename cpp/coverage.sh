@@ -104,6 +104,8 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "src/server/Server.cpp"\
     "src/server/DBWrapper.cpp"\
     "src/server/grpc_impl/GrpcMilvusServer.cpp"\
+    "src/utils/easylogging++.h"\
+    "src/utils/easylogging++.cc"\
 
 # gen html report
 ${LCOV_GEN_CMD} "${FILE_INFO_OUTPUT_NEW}" --output-directory ${DIR_LCOV_OUTPUT}/
