@@ -31,7 +31,7 @@ namespace engine {
 
 MemTableFile::MemTableFile(const std::string &table_id,
                            const meta::MetaPtr &meta,
-                           const Options &options) :
+                           const DBOptions &options) :
     table_id_(table_id),
     meta_(meta),
     options_(options) {

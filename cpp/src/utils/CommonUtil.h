@@ -38,6 +38,7 @@ class CommonUtil {
     static Status CreateDirectory(const std::string &path);
     static Status DeleteDirectory(const std::string &path);
 
+    static std::string GetFileName(std::string filename);
     static std::string GetExePath();
 
     static bool TimeStrToTime(const std::string& time_str,
