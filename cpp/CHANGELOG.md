@@ -13,12 +13,15 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-556 - Add Job Definition in Scheduler
 - MS-558 - Refine status code
 - MS-562 - Add JobMgr and TaskCreator in Scheduler
+- MS-566 - Refactor cmake
 - MS-555 - Remove old scheduler
 
 ## New Feature
 
 ## Task
 - MS-554 - Change license to Apache 2.0
+- MS-561 - Add contributing guidelines, code of conduct and README docs
+- MS-567 - Add NOTICE.md
 
 # Milvus 0.4.0 (2019-09-12)
 

@@ -80,17 +80,17 @@ Status CreateTablePath(const DBMetaOptions& options, const std::string& table_id
     std::string db_path = options.path;
     std::string table_path = db_path + TABLES_FOLDER + table_id;
     auto status = server::CommonUtil::CreateDirectory(table_path);
-    if (status != 0) {
-        ENGINE_LOG_ERROR << "Create directory " << table_path << " Error";
-        return Status(DB_ERROR, "Failed to create table path");
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << status.message();
+        return status;
     }
 
     for(auto& path : options.slave_paths) {
         table_path = path + TABLES_FOLDER + table_id;
         status = server::CommonUtil::CreateDirectory(table_path);
-        if (status != 0) {
-            ENGINE_LOG_ERROR << "Create directory " << table_path << " Error";
-            return Status(DB_ERROR, "Failed to create table path");
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << status.message();
+            return status;
         }
     }
 
@@ -120,9 +120,9 @@ Status CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& 
     std::string parent_path = GetTableFileParentFolder(options, table_file);
 
     auto status = server::CommonUtil::CreateDirectory(parent_path);
-    if (status != 0) {
-        ENGINE_LOG_ERROR << "Create directory " << parent_path << " Error";
-        return Status(DB_ERROR, "Failed to create partition directory");
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << status.message();
+        return status;
     }
 
     table_file.location_ = parent_path + "/" + table_file.file_id_;
@@ -148,7 +148,9 @@ Status GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& tab
     }
 
     std::string msg = "Table file doesn't exist: " + file_path;
-    ENGINE_LOG_ERROR << msg;
+    ENGINE_LOG_ERROR << msg << " in path: " << options.path
+                     << " for table: " << table_file.table_id_;
+
     return Status(DB_ERROR, msg);
 }
 

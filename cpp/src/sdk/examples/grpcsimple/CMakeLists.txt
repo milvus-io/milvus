@@ -20,11 +20,6 @@
 
 aux_source_directory(src src_files)
 
-include_directories(src)
-include_directories(../../include)
-
-link_directories(${CMAKE_BINARY_DIR})
-
 add_executable(sdk_simple
         main.cpp
         ${src_files}

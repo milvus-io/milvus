@@ -26,7 +26,7 @@ namespace engine {
 
 MemTable::MemTable(const std::string &table_id,
                    const meta::MetaPtr &meta,
-                   const Options &options) :
+                   const DBOptions &options) :
     table_id_(table_id),
     meta_(meta),
     options_(options) {
@@ -54,7 +54,7 @@ Status MemTable::Add(VectorSourcePtr &source, IDNumbers &vector_ids) {
         }
 
         if (!status.ok()) {
-            std::string err_msg = "MemTable::Add failed: " + status.ToString();
+            std::string err_msg = "Insert failed: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;
             return Status(DB_ERROR, err_msg);
         }
@@ -74,7 +74,7 @@ Status MemTable::Serialize() {
     for (auto mem_table_file = mem_table_file_list_.begin(); mem_table_file != mem_table_file_list_.end();) {
         auto status = (*mem_table_file)->Serialize();
         if (!status.ok()) {
-            std::string err_msg = "MemTable::Serialize failed: " + status.ToString();
+            std::string err_msg = "Insert data serialize failed: " + status.ToString();
             ENGINE_LOG_ERROR << err_msg;
             return Status(DB_ERROR, err_msg);
         }

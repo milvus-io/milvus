@@ -33,7 +33,7 @@ class MemTable {
  public:
     using MemTableFileList = std::vector<MemTableFilePtr>;
 
-    MemTable(const std::string &table_id, const meta::MetaPtr &meta, const Options &options);
+    MemTable(const std::string &table_id, const meta::MetaPtr &meta, const DBOptions &options);
 
     Status Add(VectorSourcePtr &source, IDNumbers &vector_ids);
 
@@ -56,7 +56,7 @@ class MemTable {
 
     meta::MetaPtr meta_;
 
-    Options options_;
+    DBOptions options_;
 
     std::mutex mutex_;
 
