@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "./Error.h"
+#include "utils/Status.h"
 
 #include <vector>
 
@@ -41,9 +41,9 @@ public:
     // ,b,                | b |
     // ,,                 |   |
     // a                    a
-    static ErrorCode SplitStringByDelimeter(const std::string &str,
-                                            const std::string &delimeter,
-                                            std::vector<std::string> &result);
+    static Status SplitStringByDelimeter(const std::string &str,
+                                         const std::string &delimeter,
+                                         std::vector<std::string> &result);
 
     //assume the table has two columns, quote='\"', delimeter=','
     //  a,b             a | b
@@ -52,10 +52,10 @@ public:
     //  "aa,bb"         aa,bb
     //  55,1122\"aa,bb\",yyy,\"kkk\"    55 | 1122aa,bb | yyy | kkk
     //  "55,1122"aa,bb",yyy,"kkk"   illegal
-    static ErrorCode SplitStringByQuote(const std::string &str,
-                                        const std::string &delimeter,
-                                        const std::string &quote,
-                                        std::vector<std::string> &result);
+    static Status SplitStringByQuote(const std::string &str,
+                                     const std::string &delimeter,
+                                     const std::string &quote,
+                                     std::vector<std::string> &result);
 
 };
 
