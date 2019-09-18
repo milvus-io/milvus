@@ -21,6 +21,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <boost/filesystem.hpp>
+#include <src/utils/SignalUtil.h>
 
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
@@ -49,6 +50,10 @@ TEST(UtilTest, EXCEPTION_TEST) {
     ASSERT_EQ(ex.error_code(), SERVER_UNEXPECTED_ERROR);
     std::string msg = ex.what();
     ASSERT_EQ(msg, err_msg);
+}
+
+TEST(UtilTest, SIGNAL_TEST) {
+    server::SignalUtil::PrintStacktrace();
 }
 
 TEST(UtilTest, COMMON_TEST) {
@@ -167,13 +172,13 @@ TEST(UtilTest, BLOCKINGQUEUE_TEST) {
 }
 
 TEST(UtilTest, LOG_TEST) {
-    int32_t res = server::InitLog(LOG_FILE_PATH);
-    ASSERT_EQ(res, 0);
+    auto status = server::InitLog(LOG_FILE_PATH);
+    ASSERT_TRUE(status.ok());
 
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::NewLineForContainer));
     EXPECT_FALSE(el::Loggers::hasFlag(el::LoggingFlag::LogDetailedCrashReason));
 
-    std::string fname = server::GetFileName(LOG_FILE_PATH);
+    std::string fname = server::CommonUtil::GetFileName(LOG_FILE_PATH);
     ASSERT_EQ(fname, "log_config.conf");
 }
 

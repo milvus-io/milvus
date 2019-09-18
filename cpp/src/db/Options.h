@@ -58,15 +58,12 @@ struct DBMetaOptions {
     ArchiveConf archive_conf = ArchiveConf("delete");
 }; // DBMetaOptions
 
-struct Options {
-
+struct DBOptions {
     typedef enum {
         SINGLE,
         CLUSTER,
         READ_ONLY
     } MODE;
-
-    Options();
 
     uint16_t  merge_trigger_number = 2;
     DBMetaOptions meta;
