@@ -27,43 +27,52 @@
 #include <condition_variable>
 #include <memory>
 
+#include "job/Job.h"
+#include "task/Task.h"
+#include "ResourceMgr.h"
+
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-enum class JobType {
-    INVALID,
-    SEARCH,
-    DELETE,
-    BUILD,
-};
+using engine::TaskPtr;
+using engine::ResourceMgrPtr;
 
-using JobId = std::uint64_t;
-
-class Job {
+class JobMgr {
 public:
-    inline JobId
-    id() const {
-        return id_;
-    }
+    explicit
+    JobMgr(ResourceMgrPtr res_mgr);
 
-    inline JobType
-    type() const {
-        return type_;
-    }
+    void
+    Start();
 
-protected:
-    Job(JobId id, JobType type) : id_(id), type_(type) {}
+    void
+    Stop();
+
+public:
+    void
+    Put(const JobPtr &job);
 
 private:
-    JobId id_;
-    JobType type_;
+    void
+    worker_function();
+
+    std::vector<TaskPtr>
+    build_task(const JobPtr &job);
+
+private:
+    bool running_ = false;
+    std::queue<JobPtr> queue_;
+
+    std::thread worker_thread_;
+
+    std::mutex mutex_;
+    std::condition_variable cv_;
+
+    ResourceMgrPtr res_mgr_ = nullptr;
 };
 
-using JobPtr = std::shared_ptr<Job>;
-
 }
 }
 }
-
