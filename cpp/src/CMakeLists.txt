@@ -35,7 +35,7 @@ aux_source_directory(db/engine db_engine_files)
 aux_source_directory(db/insert db_insert_files)
 aux_source_directory(db/meta db_meta_files)
 aux_source_directory(metrics metrics_files)
-aux_source_directory(wrapper/knowhere knowhere_files)
+aux_source_directory(wrapper wrapper_files)
 
 aux_source_directory(scheduler/action scheduler_action_files)
 aux_source_directory(scheduler/event scheduler_event_files)
@@ -88,7 +88,7 @@ set(db_files
         ${db_meta_files}
         ${db_scheduler_files}
         ${metrics_files}
-        ${knowhere_files}
+        ${wrapper_files}
         ${utils_files}
         )
 
