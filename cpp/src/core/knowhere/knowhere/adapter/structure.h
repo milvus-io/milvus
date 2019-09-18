@@ -18,47 +18,37 @@
 
 #pragma once
 
-#include "src/wrapper/vec_index.h"
-
 #include <memory>
+#include "knowhere/common/dataset.h"
+
 
 namespace zilliz {
-namespace milvus {
-namespace cache {
+namespace knowhere {
 
-class DataObj {
-public:
-    DataObj(const engine::VecIndexPtr& index)
-            : index_(index)
-    {}
+extern ArrayPtr
+ConstructInt64ArraySmart(uint8_t *data, int64_t size);
 
-    DataObj(const engine::VecIndexPtr& index, int64_t size)
-            : index_(index),
-              size_(size)
-    {}
+extern ArrayPtr
+ConstructFloatArraySmart(uint8_t *data, int64_t size);
 
-    engine::VecIndexPtr data() { return index_; }
-    const engine::VecIndexPtr& data() const { return index_; }
+extern TensorPtr
+ConstructFloatTensorSmart(uint8_t *data, int64_t size, std::vector<int64_t> shape);
 
-    int64_t size() const {
-        if(index_ == nullptr) {
-            return 0;
-        }
+extern ArrayPtr
+ConstructInt64Array(uint8_t *data, int64_t size);
 
-        if(size_ > 0) {
-            return size_;
-        }
+extern ArrayPtr
+ConstructFloatArray(uint8_t *data, int64_t size);
 
-        return index_->Count() * index_->Dimension() * sizeof(float);
-    }
+extern TensorPtr
+ConstructFloatTensor(uint8_t *data, int64_t size, std::vector<int64_t> shape);
 
-private:
-    engine::VecIndexPtr index_ = nullptr;
-    int64_t size_ = 0;
-};
+extern FieldPtr
+ConstructInt64Field(const std::string &name);
 
-using DataObjPtr = std::shared_ptr<DataObj>;
+extern FieldPtr
+ConstructFloatField(const std::string &name);
 
-}
+
 }
 }

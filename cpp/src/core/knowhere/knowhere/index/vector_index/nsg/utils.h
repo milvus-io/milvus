@@ -18,46 +18,21 @@
 
 #pragma once
 
-#include "src/wrapper/vec_index.h"
+#include <x86intrin.h>
+#include <iostream>
 
-#include <memory>
+#include <faiss/AutoTune.h>
+
+#include "nsg.h"
+#include "knowhere/common/config.h"
+
 
 namespace zilliz {
-namespace milvus {
-namespace cache {
+namespace knowhere {
+namespace algo {
 
-class DataObj {
-public:
-    DataObj(const engine::VecIndexPtr& index)
-            : index_(index)
-    {}
-
-    DataObj(const engine::VecIndexPtr& index, int64_t size)
-            : index_(index),
-              size_(size)
-    {}
-
-    engine::VecIndexPtr data() { return index_; }
-    const engine::VecIndexPtr& data() const { return index_; }
-
-    int64_t size() const {
-        if(index_ == nullptr) {
-            return 0;
-        }
-
-        if(size_ > 0) {
-            return size_;
-        }
-
-        return index_->Count() * index_->Dimension() * sizeof(float);
-    }
-
-private:
-    engine::VecIndexPtr index_ = nullptr;
-    int64_t size_ = 0;
-};
-
-using DataObjPtr = std::shared_ptr<DataObj>;
+extern int InsertIntoPool(Neighbor *addr, unsigned K, Neighbor nn);
+extern float calculate(const float *a, const float *b, unsigned size);
 
 }
 }

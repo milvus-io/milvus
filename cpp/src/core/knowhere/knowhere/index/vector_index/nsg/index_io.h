@@ -18,46 +18,14 @@
 
 #pragma once
 
-#include "src/wrapper/vec_index.h"
-
-#include <memory>
+#include "nsg.h"
 
 namespace zilliz {
-namespace milvus {
-namespace cache {
+namespace knowhere {
+namespace algo {
 
-class DataObj {
-public:
-    DataObj(const engine::VecIndexPtr& index)
-            : index_(index)
-    {}
-
-    DataObj(const engine::VecIndexPtr& index, int64_t size)
-            : index_(index),
-              size_(size)
-    {}
-
-    engine::VecIndexPtr data() { return index_; }
-    const engine::VecIndexPtr& data() const { return index_; }
-
-    int64_t size() const {
-        if(index_ == nullptr) {
-            return 0;
-        }
-
-        if(size_ > 0) {
-            return size_;
-        }
-
-        return index_->Count() * index_->Dimension() * sizeof(float);
-    }
-
-private:
-    engine::VecIndexPtr index_ = nullptr;
-    int64_t size_ = 0;
-};
-
-using DataObjPtr = std::shared_ptr<DataObj>;
+void read_from_file(NsgIndex* index, const char *filename);
+void write_to_file(NsgIndex* index, const char *filename);
 
 }
 }
