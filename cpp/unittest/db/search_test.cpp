@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "db/scheduler/task/SearchTask.h"
 #include "server/ServerConfig.h"
 #include "utils/TimeRecorder.h"
 
@@ -50,9 +49,9 @@ void BuildResult(uint64_t nq,
     }
 }
 
-void CheckResult(const engine::SearchContext::Id2DistanceMap& src_1,
-        const engine::SearchContext::Id2DistanceMap& src_2,
-        const engine::SearchContext::Id2DistanceMap& target,
+void CheckResult(const scheduler::Id2DistanceMap& src_1,
+        const scheduler::Id2DistanceMap& src_2,
+        const scheduler::Id2DistanceMap& target,
         bool ascending) {
     for(uint64_t i = 0; i < target.size() - 1; i++) {
         if(ascending) {
@@ -81,7 +80,7 @@ void CheckResult(const engine::SearchContext::Id2DistanceMap& src_1,
 
 void CheckCluster(const std::vector<long>& target_ids,
         const std::vector<float>& target_distence,
-        const engine::SearchContext::ResultSet& src_result,
+        const scheduler::ResultSet& src_result,
         int64_t nq,
         int64_t topk) {
     ASSERT_EQ(src_result.size(), nq);
@@ -98,7 +97,7 @@ void CheckCluster(const std::vector<long>& target_ids,
     }
 }
 
-void CheckTopkResult(const engine::SearchContext::ResultSet& src_result,
+void CheckTopkResult(const scheduler::ResultSet& src_result,
                      bool ascending,
                      int64_t nq,
                      int64_t topk) {
@@ -127,7 +126,7 @@ TEST(DBSearchTest, TOPK_TEST) {
     bool ascending = true;
     std::vector<long> target_ids;
     std::vector<float> target_distence;
-    engine::SearchContext::ResultSet src_result;
+    scheduler::ResultSet src_result;
     auto status = engine::XSearchTask::ClusterResult(target_ids, target_distence, NQ, TOP_K, src_result);
     ASSERT_FALSE(status.ok());
     ASSERT_TRUE(src_result.empty());
@@ -137,7 +136,7 @@ TEST(DBSearchTest, TOPK_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(src_result.size(), NQ);
 
-    engine::SearchContext::ResultSet target_result;
+    scheduler::ResultSet target_result;
     status = engine::XSearchTask::TopkResult(target_result, TOP_K, ascending, target_result);
     ASSERT_TRUE(status.ok());
 
@@ -179,7 +178,7 @@ TEST(DBSearchTest, MERGE_TEST) {
     std::vector<float> target_distence;
     std::vector<long> src_ids;
     std::vector<float> src_distence;
-    engine::SearchContext::ResultSet src_result, target_result;
+    scheduler::ResultSet src_result, target_result;
 
     uint64_t src_count = 5, target_count = 8;
     BuildResult(1, src_count, ascending, src_ids, src_distence);
@@ -190,8 +189,8 @@ TEST(DBSearchTest, MERGE_TEST) {
     ASSERT_TRUE(status.ok());
 
     {
-        engine::SearchContext::Id2DistanceMap src = src_result[0];
-        engine::SearchContext::Id2DistanceMap target = target_result[0];
+        scheduler::Id2DistanceMap src = src_result[0];
+        scheduler::Id2DistanceMap target = target_result[0];
         status = engine::XSearchTask::MergeResult(src, target, 10, ascending);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), 10);
@@ -199,8 +198,8 @@ TEST(DBSearchTest, MERGE_TEST) {
     }
 
     {
-        engine::SearchContext::Id2DistanceMap src = src_result[0];
-        engine::SearchContext::Id2DistanceMap target;
+        scheduler::Id2DistanceMap src = src_result[0];
+        scheduler::Id2DistanceMap target;
         status = engine::XSearchTask::MergeResult(src, target, 10, ascending);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), src_count);
@@ -209,8 +208,8 @@ TEST(DBSearchTest, MERGE_TEST) {
     }
 
     {
-        engine::SearchContext::Id2DistanceMap src = src_result[0];
-        engine::SearchContext::Id2DistanceMap target = target_result[0];
+        scheduler::Id2DistanceMap src = src_result[0];
+        scheduler::Id2DistanceMap target = target_result[0];
         status = engine::XSearchTask::MergeResult(src, target, 30, ascending);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), src_count + target_count);
@@ -218,8 +217,8 @@ TEST(DBSearchTest, MERGE_TEST) {
     }
 
     {
-        engine::SearchContext::Id2DistanceMap target = src_result[0];
-        engine::SearchContext::Id2DistanceMap src = target_result[0];
+        scheduler::Id2DistanceMap target = src_result[0];
+        scheduler::Id2DistanceMap src = target_result[0];
         status = engine::XSearchTask::MergeResult(src, target, 30, ascending);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), src_count + target_count);
@@ -235,7 +234,7 @@ TEST(DBSearchTest, PARALLEL_CLUSTER_TEST) {
     bool ascending = true;
     std::vector<long> target_ids;
     std::vector<float> target_distence;
-    engine::SearchContext::ResultSet src_result;
+    scheduler::ResultSet src_result;
 
     auto DoCluster = [&](int64_t nq, int64_t topk) {
         TimeRecorder rc("DoCluster");
@@ -270,11 +269,11 @@ TEST(DBSearchTest, PARALLEL_TOPK_TEST) {
 
     std::vector<long> target_ids;
     std::vector<float> target_distence;
-    engine::SearchContext::ResultSet src_result;
+    scheduler::ResultSet src_result;
 
     std::vector<long> insufficient_ids;
     std::vector<float> insufficient_distence;
-    engine::SearchContext::ResultSet insufficient_result;
+    scheduler::ResultSet insufficient_result;
 
     auto DoTopk = [&](int64_t nq, int64_t topk,int64_t insufficient_topk, bool ascending) {
         src_result.clear();

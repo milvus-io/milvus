@@ -15,7 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <src/scheduler/tasklabel/BroadcastLabel.h>
 #include "TaskCreator.h"
+#include "tasklabel/DefaultLabel.h"
 
 
 namespace zilliz {
@@ -43,6 +45,8 @@ TaskCreator::Create(const SearchJobPtr &job) {
     std::vector<TaskPtr> tasks;
     for (auto &index_file : job->index_files()) {
         auto task = std::make_shared<XSearchTask>(index_file.second);
+        task->label() = std::make_shared<engine::DefaultLabel>();
+        task->job_ = job;
         tasks.emplace_back(task);
     }
 
@@ -52,8 +56,10 @@ TaskCreator::Create(const SearchJobPtr &job) {
 std::vector<TaskPtr>
 TaskCreator::Create(const DeleteJobPtr &job) {
     std::vector<TaskPtr> tasks;
-//    auto task = std::make_shared<XDeleteTask>(job);
-//    tasks.emplace_back(task);
+    auto task = std::make_shared<XDeleteTask>(job);
+    task->label() = std::make_shared<engine::BroadcastLabel>();
+    task->job_ = job;
+    tasks.emplace_back(task);
 
     return tasks;
 }

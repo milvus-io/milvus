@@ -46,7 +46,7 @@ TEST(NormalTest, INST_TEST) {
 
     const uint64_t NUM_TASK = 1000;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    TableFileSchemaPtr dummy = nullptr;
+    meta::TableFileSchemaPtr dummy = nullptr;
 
     auto disks = res_mgr->GetDiskResources();
     ASSERT_FALSE(disks.empty());
