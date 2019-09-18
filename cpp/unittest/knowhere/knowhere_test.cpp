@@ -19,7 +19,7 @@
 #include <gtest/gtest.h>
 #include "utils/easylogging++.h"
 
-#include <wrapper/knowhere/vec_index.h>
+#include "src/wrapper/vec_index.h"
 #include "knowhere/index/vector_index/gpu_ivf.h"
 
 #include "utils.h"
