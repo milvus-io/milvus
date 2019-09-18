@@ -18,47 +18,35 @@
 
 #pragma once
 
-#include "src/wrapper/vec_index.h"
+#include <string>
+#include <vector>
 
-#include <memory>
 
 namespace zilliz {
-namespace milvus {
-namespace cache {
+namespace knowhere {
 
-class DataObj {
-public:
-    DataObj(const engine::VecIndexPtr& index)
-            : index_(index)
-    {}
+using KDTParameter = std::pair<std::string, std::string>;
 
-    DataObj(const engine::VecIndexPtr& index, int64_t size)
-            : index_(index),
-              size_(size)
-    {}
+class KDTParameterManagement {
+ public:
+    const std::vector<KDTParameter> &
+    GetKDTParameters();
 
-    engine::VecIndexPtr data() { return index_; }
-    const engine::VecIndexPtr& data() const { return index_; }
-
-    int64_t size() const {
-        if(index_ == nullptr) {
-            return 0;
-        }
-
-        if(size_ > 0) {
-            return size_;
-        }
-
-        return index_->Count() * index_->Dimension() * sizeof(float);
+ public:
+    static KDTParameterManagement &
+    GetInstance() {
+        static KDTParameterManagement instance;
+        return instance;
     }
 
-private:
-    engine::VecIndexPtr index_ = nullptr;
-    int64_t size_ = 0;
+    KDTParameterManagement(const KDTParameterManagement &) = delete;
+    KDTParameterManagement &operator=(const KDTParameterManagement &) = delete;
+ private:
+    KDTParameterManagement();
+
+ private:
+    std::vector<KDTParameter> kdt_parameters_;
 };
 
-using DataObjPtr = std::shared_ptr<DataObj>;
-
-}
-}
-}
+} // namespace knowhere
+} // namespace zilliz
