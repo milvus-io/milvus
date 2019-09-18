@@ -18,47 +18,23 @@
 
 #pragma once
 
-#include "src/wrapper/vec_index.h"
-
 #include <memory>
 
+#include "arrow/type.h"
+
+
 namespace zilliz {
-namespace milvus {
-namespace cache {
+namespace knowhere {
 
-class DataObj {
-public:
-    DataObj(const engine::VecIndexPtr& index)
-            : index_(index)
-    {}
 
-    DataObj(const engine::VecIndexPtr& index, int64_t size)
-            : index_(index),
-              size_(size)
-    {}
+using DataType = arrow::DataType;
+using Field = arrow::Field;
+using FieldPtr = std::shared_ptr<arrow::Field>;
+using Schema = arrow::Schema;
+using SchemaPtr = std::shared_ptr<Schema>;
+using SchemaConstPtr = std::shared_ptr<const Schema>;
 
-    engine::VecIndexPtr data() { return index_; }
-    const engine::VecIndexPtr& data() const { return index_; }
 
-    int64_t size() const {
-        if(index_ == nullptr) {
-            return 0;
-        }
 
-        if(size_ > 0) {
-            return size_;
-        }
-
-        return index_->Count() * index_->Dimension() * sizeof(float);
-    }
-
-private:
-    engine::VecIndexPtr index_ = nullptr;
-    int64_t size_ = 0;
-};
-
-using DataObjPtr = std::shared_ptr<DataObj>;
-
-}
-}
-}
+} // namespace knowhere
+} // namespace zilliz
