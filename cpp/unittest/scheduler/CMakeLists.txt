@@ -17,79 +17,20 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere knowhere_src)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler scheduler_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context scheduler_context_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task scheduler_task_files)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/event scheduler_event_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/resource scheduler_resource_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/task scheduler_task_srcs)
-aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_srcs)
-aux_source_directory(./ test_srcs)
+include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
+link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-set(util_files
-        ${MILVUS_ENGINE_SRC}/utils/Status.cpp
-        ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp
-        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc)
-
-set(db_scheduler_srcs
-        ${scheduler_files}
-        ${scheduler_context_files}
-        ${scheduler_task_files})
-
-include_directories(/usr/local/cuda/include)
-link_directories("/usr/local/cuda/lib64")
-
-include_directories(/usr/include/mysql)
-
-set(scheduler_test_src
-        ${unittest_srcs}
-        ${test_srcs}
-        ${scheduler_action_srcs}
-        ${scheduler_event_srcs}
-        ${scheduler_resource_srcs}
-        ${scheduler_task_srcs}
-        ${scheduler_srcs}
-
-        ${config_files}
-        ${cache_srcs}
-        ${db_main_files}
-        ${db_engine_files}
-        ${db_insert_files}
-        ${db_meta_files}
-        ${db_scheduler_srcs}
-        ${wrapper_src}
-        ${knowhere_src}
-        ${util_files}
-        ${require_files}
+set(scheduler_test_files
+        ${common_files}
+        ${unittest_files}
+        ${test_files}
         )
 
-cuda_add_executable(scheduler_test ${scheduler_test_src})
+cuda_add_executable(scheduler_test ${scheduler_test_files})
 
-set(scheduler_libs
-        sqlite
-        boost_system_static
-        boost_filesystem_static
-        lz4
-        mysqlpp
-        )
-
-set(knowhere_libs
-        knowhere
-        cudart
-        cublas
-        )
-
-
-target_link_libraries(scheduler_test ${scheduler_libs} ${knowhere_libs} ${unittest_libs})
+target_link_libraries(scheduler_test knowhere ${unittest_libs})
 
 install(TARGETS scheduler_test DESTINATION unittest)
 
