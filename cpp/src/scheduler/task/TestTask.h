@@ -26,7 +26,8 @@ namespace engine {
 
 class TestTask : public XSearchTask {
 public:
-    TestTask(TableFileSchemaPtr& file);
+    explicit
+    TestTask(meta::TableFileSchemaPtr& file);
 
 public:
     void
