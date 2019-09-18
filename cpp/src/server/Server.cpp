@@ -32,7 +32,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <src/scheduler/SchedInst.h>
-#include "wrapper/knowhere/KnowhereResource.h"
+#include "src/wrapper/KnowhereResource.h"
 
 #include "metrics/Metrics.h"
 #include "DBWrapper.h"

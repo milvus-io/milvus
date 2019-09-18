@@ -28,7 +28,12 @@ SearchJob::SearchJob(zilliz::milvus::scheduler::JobId id,
                      uint64_t topk,
                      uint64_t nq,
                      uint64_t nprobe,
-                     const float *vectors) : Job(id, JobType::SEARCH) {}
+                     const float *vectors)
+    : Job(id, JobType::SEARCH),
+      topk_(topk),
+      nq_(nq),
+      nprobe_(nprobe),
+      vectors_(vectors) {}
 
 bool
 SearchJob::AddIndexFile(const TableFileSchemaPtr &index_file) {
@@ -62,6 +67,11 @@ SearchJob::SearchDone(size_t index_id) {
 ResultSet &
 SearchJob::GetResult() {
     return result_;
+}
+
+Status&
+SearchJob::GetStatus() {
+    return status_;
 }
 
 

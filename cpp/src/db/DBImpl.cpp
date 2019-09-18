@@ -24,8 +24,8 @@
 #include "meta/MetaFactory.h"
 #include "meta/MetaConsts.h"
 #include "metrics/Metrics.h"
-#include "scheduler/TaskScheduler.h"
-#include "scheduler/context/DeleteContext.h"
+#include "scheduler/job/SearchJob.h"
+#include "scheduler/job/DeleteJob.h"
 #include "scheduler/SchedInst.h"
 #include "utils/TimeRecorder.h"
 #include "utils/Log.h"
@@ -133,12 +133,10 @@ Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& date
         meta_ptr_->DeleteTable(table_id); //soft delete table
 
         //scheduler will determine when to delete table files
-        TaskScheduler& scheduler = TaskScheduler::GetInstance();
-        DeleteContextPtr context = std::make_shared<DeleteContext>(table_id,
-                                                               meta_ptr_,
-                                                               ResMgrInst::GetInstance()->GetNumOfComputeResource());
-        scheduler.Schedule(context);
-        context->WaitAndDelete();
+        auto nres = ResMgrInst::GetInstance()->GetNumOfComputeResource();
+        scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(0, table_id, meta_ptr_, nres);
+        JobMgrInst::GetInstance()->Put(job);
+        job->WaitAndDelete();
     } else {
         meta_ptr_->DropPartitionsByDates(table_id, dates);
     }
@@ -418,51 +416,50 @@ Status DBImpl::Size(uint64_t& result) {
 Status DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files,
                           uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
                           const meta::DatesT& dates, QueryResults& results) {
+    using namespace scheduler;
     server::CollectQueryMetrics metrics(nq);
 
     TimeRecorder rc("");
 
     //step 1: get files to search
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size() << " date range count: " << dates.size();
-    SearchContextPtr context = std::make_shared<SearchContext>(k, nq, nprobe, vectors);
-    for (auto &file : files) {
+    SearchJobPtr job = std::make_shared<SearchJob>(0, k, nq, nprobe, vectors);
+     for (auto &file : files) {
         TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
-        context->AddIndexFile(file_ptr);
+        job->AddIndexFile(file_ptr);
     }
 
     //step 2: put search task to scheduler
-    TaskScheduler& scheduler = TaskScheduler::GetInstance();
-    scheduler.Schedule(context);
-
-    context->WaitResult();
-    if (!context->GetStatus().ok()) {
-        return context->GetStatus();
+    JobMgrInst::GetInstance()->Put(job);
+    job->WaitResult();
+    if (!job->GetStatus().ok()) {
+        return job->GetStatus();
     }
 
     //step 3: print time cost information
-    double load_cost = context->LoadCost();
-    double search_cost = context->SearchCost();
-    double reduce_cost = context->ReduceCost();
-    std::string load_info = TimeRecorder::GetTimeSpanStr(load_cost);
-    std::string search_info = TimeRecorder::GetTimeSpanStr(search_cost);
-    std::string reduce_info = TimeRecorder::GetTimeSpanStr(reduce_cost);
-    if(search_cost > 0.0 || reduce_cost > 0.0) {
-        double total_cost = load_cost + search_cost + reduce_cost;
-        double load_percent = load_cost/total_cost;
-        double search_percent = search_cost/total_cost;
-        double reduce_percent = reduce_cost/total_cost;
-
-        ENGINE_LOG_DEBUG << "Engine load index totally cost: " << load_info << " percent: " << load_percent*100 << "%";
-        ENGINE_LOG_DEBUG << "Engine search index totally cost: " << search_info << " percent: " << search_percent*100 << "%";
-        ENGINE_LOG_DEBUG << "Engine reduce topk totally cost: " << reduce_info << " percent: " << reduce_percent*100 << "%";
-    } else {
-        ENGINE_LOG_DEBUG << "Engine load cost: " << load_info
-            << " search cost: " << search_info
-            << " reduce cost: " << reduce_info;
-    }
+//    double load_cost = context->LoadCost();
+//    double search_cost = context->SearchCost();
+//    double reduce_cost = context->ReduceCost();
+//    std::string load_info = TimeRecorder::GetTimeSpanStr(load_cost);
+//    std::string search_info = TimeRecorder::GetTimeSpanStr(search_cost);
+//    std::string reduce_info = TimeRecorder::GetTimeSpanStr(reduce_cost);
+//    if(search_cost > 0.0 || reduce_cost > 0.0) {
+//        double total_cost = load_cost + search_cost + reduce_cost;
+//        double load_percent = load_cost/total_cost;
+//        double search_percent = search_cost/total_cost;
+//        double reduce_percent = reduce_cost/total_cost;
+//
+//        ENGINE_LOG_DEBUG << "Engine load index totally cost: " << load_info << " percent: " << load_percent*100 << "%";
+//        ENGINE_LOG_DEBUG << "Engine search index totally cost: " << search_info << " percent: " << search_percent*100 << "%";
+//        ENGINE_LOG_DEBUG << "Engine reduce topk totally cost: " << reduce_info << " percent: " << reduce_percent*100 << "%";
+//    } else {
+//        ENGINE_LOG_DEBUG << "Engine load cost: " << load_info
+//            << " search cost: " << search_info
+//            << " reduce cost: " << reduce_info;
+//    }
 
     //step 4: construct results
-    results = context->GetResult();
+    results = job->GetResult();
     rc.ElapseFromBegin("Engine query totally cost");
 
     return Status::OK();

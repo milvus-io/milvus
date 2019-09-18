@@ -20,22 +20,9 @@
 
 aux_source_directory(interface interface_files)
 
-include_directories(/usr/include)
 include_directories(include)
-include_directories(/usr/local/include)
-
 
 aux_source_directory(grpc grpc_client_files)
-
-include_directories(${CMAKE_SOURCE_DIR}/src/grpc/gen-milvus)
-include_directories(${CMAKE_SOURCE_DIR}/src/grpc/gen-status)
-
-set(grpc_service_files
-        ${CMAKE_SOURCE_DIR}/src/grpc/gen-milvus/milvus.grpc.pb.cc
-        ${CMAKE_SOURCE_DIR}/src/grpc/gen-milvus/milvus.pb.cc
-        ${CMAKE_SOURCE_DIR}/src/grpc/gen-status/status.grpc.pb.cc
-        ${CMAKE_SOURCE_DIR}/src/grpc/gen-status/status.pb.cc
-        )
 
 add_library(milvus_sdk STATIC
         ${interface_files}

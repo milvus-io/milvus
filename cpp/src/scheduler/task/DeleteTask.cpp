@@ -23,8 +23,8 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-XDeleteTask::XDeleteTask(DeleteContextPtr &delete_context)
-    : Task(TaskType::DeleteTask), delete_context_ptr_(delete_context) {}
+XDeleteTask::XDeleteTask(const scheduler::DeleteJobPtr &delete_job)
+    : Task(TaskType::DeleteTask), delete_job_(delete_job) {}
 
 void
 XDeleteTask::Load(LoadType type, uint8_t device_id) {
@@ -33,7 +33,7 @@ XDeleteTask::Load(LoadType type, uint8_t device_id) {
 
 void
 XDeleteTask::Execute() {
-    delete_context_ptr_->ResourceDone();
+    delete_job_->ResourceDone();
 }
 
 }

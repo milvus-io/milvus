@@ -16,27 +16,18 @@
 
 set(MILVUS_THIRDPARTY_DEPENDENCIES
 
-        ARROW
         BOOST
         BZip2
-        FAISS
         GTest
-        Knowhere
-        JSONCONS
-        LAPACK
         Lz4
         MySQLPP
-        OpenBLAS
         Prometheus
-        RocksDB
         Snappy
         SQLite
         SQLite_ORM
-        Thrift
         yaml-cpp
         ZLIB
         ZSTD
-        AWS
         libunwind
         gperftools
         GRPC)
@@ -51,30 +42,16 @@ foreach(DEPENDENCY ${MILVUS_THIRDPARTY_DEPENDENCIES})
 endforeach()
 
 macro(build_dependency DEPENDENCY_NAME)
-    if("${DEPENDENCY_NAME}" STREQUAL "ARROW")
-        build_arrow()
-    elseif("${DEPENDENCY_NAME}" STREQUAL "BZip2")
+    if("${DEPENDENCY_NAME}" STREQUAL "BZip2")
         build_bzip2()
-    elseif("${DEPENDENCY_NAME}" STREQUAL "FAISS")
-        build_faiss()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "GTest")
         build_gtest()
-    elseif("${DEPENDENCY_NAME}" STREQUAL "LAPACK")
-        build_lapack()
-    elseif("${DEPENDENCY_NAME}" STREQUAL "Knowhere")
-        build_knowhere()
     elseif("${DEPENDENCY_NAME}" STREQUAL "Lz4")
         build_lz4()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "MySQLPP")
         build_mysqlpp()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "JSONCONS")
-        build_jsoncons()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "OpenBLAS")
-        build_openblas()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "Prometheus")
         build_prometheus()
-    elseif ("${DEPENDENCY_NAME}" STREQUAL "RocksDB")
-        build_rocksdb()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "Snappy")
         build_snappy()
     elseif ("${DEPENDENCY_NAME}" STREQUAL "SQLite")
@@ -87,8 +64,6 @@ macro(build_dependency DEPENDENCY_NAME)
         build_zlib()
     elseif("${DEPENDENCY_NAME}" STREQUAL "ZSTD")
         build_zstd()
-    elseif("${DEPENDENCY_NAME}" STREQUAL "AWS")
-        build_aws()
     elseif("${DEPENDENCY_NAME}" STREQUAL "libunwind")
         build_libunwind()
     elseif("${DEPENDENCY_NAME}" STREQUAL "gperftools")
@@ -280,8 +255,7 @@ if(DEFINED ENV{MILVUS_BOOST_URL})
 else()
     string(REPLACE "." "_" BOOST_VERSION_UNDERSCORES ${BOOST_VERSION})
     set(BOOST_SOURCE_URL
-            "http://192.168.1.201/artifactory/generic-local/tools/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz")
-#            "https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz"
+            "https://dl.bintray.com/boostorg/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORES}.tar.gz")
 endif()
 set(BOOST_MD5 "fea771fe8176828fabf9c09242ee8c26")
 
@@ -292,22 +266,6 @@ else()
 endif()
 set(BZIP2_MD5 "00b516f4704d4a7cb50a1d97e6e8e15b")
 
-if(DEFINED ENV{MILVUS_FAISS_URL})
-    set(FAISS_SOURCE_URL "$ENV{MILVUS_FAISS_URL}")
-else()
-    set(FAISS_SOURCE_URL "http://192.168.1.105:6060/jinhai/faiss/-/archive/${FAISS_VERSION}/faiss-${FAISS_VERSION}.tar.gz")
-    # set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/${FAISS_VERSION}.tar.gz")
-endif()
-
-# set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
-set(FAISS_MD5 "31167ecbd1903fec600dc4ac00b9be9e")
-
-if(DEFINED ENV{MILVUS_KNOWHERE_URL})
-    set(KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}")
-else()
-    set(KNOWHERE_SOURCE_URL "${CMAKE_SOURCE_DIR}/thirdparty/knowhere")
-endif()
-
 if (DEFINED ENV{MILVUS_GTEST_URL})
     set(GTEST_SOURCE_URL "$ENV{MILVUS_GTEST_URL}")
 else ()
@@ -315,20 +273,6 @@ else ()
             "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
 endif()
 set(GTEST_MD5 "2e6fbeb6a91310a16efe181886c59596")
-
-if (DEFINED ENV{MILVUS_JSONCONS_URL})
-    set(JSONCONS_SOURCE_URL "$ENV{MILVUS_JSONCONS_URL}")
-else ()
-    set(JSONCONS_SOURCE_URL
-            "https://github.com/danielaparker/jsoncons/archive/v${JSONCONS_VERSION}.tar.gz")
-endif()
-
-if(DEFINED ENV{MILVUS_LAPACK_URL})
-    set(LAPACK_SOURCE_URL "$ENV{MILVUS_LAPACK_URL}")
-else()
-    set(LAPACK_SOURCE_URL "https://github.com/Reference-LAPACK/lapack/archive/${LAPACK_VERSION}.tar.gz")
-endif()
-set(LAPACK_MD5 "96591affdbf58c450d45c1daa540dbd2")
 
 if(DEFINED ENV{MILVUS_LZ4_URL})
     set(LZ4_SOURCE_URL "$ENV{MILVUS_LZ4_URL}")
@@ -344,29 +288,12 @@ else()
 endif()
 set(MYSQLPP_MD5 "cda38b5ecc0117de91f7c42292dd1e79")
 
-if (DEFINED ENV{MILVUS_OPENBLAS_URL})
-    set(OPENBLAS_SOURCE_URL "$ENV{MILVUS_OPENBLAS_URL}")
-else ()
-    set(OPENBLAS_SOURCE_URL
-            "https://github.com/xianyi/OpenBLAS/archive/${OPENBLAS_VERSION}.tar.gz")
-endif()
-set(OPENBLAS_MD5 "8a110a25b819a4b94e8a9580702b6495")
-
 if (DEFINED ENV{MILVUS_PROMETHEUS_URL})
     set(PROMETHEUS_SOURCE_URL "$ENV{PROMETHEUS_OPENBLAS_URL}")
 else ()
     set(PROMETHEUS_SOURCE_URL
             https://github.com/jupp0r/prometheus-cpp.git)
 endif()
-
-
-if (DEFINED ENV{MILVUS_ROCKSDB_URL})
-    set(ROCKSDB_SOURCE_URL "$ENV{MILVUS_ROCKSDB_URL}")
-else ()
-    set(ROCKSDB_SOURCE_URL
-            "https://github.com/facebook/rocksdb/archive/${ROCKSDB_VERSION}.tar.gz")
-endif()
-set(ROCKSDB_MD5 "a8f2f594182e97a08629bcc66dfd3fa0")
 
 if(DEFINED ENV{MILVUS_SNAPPY_URL})
     set(SNAPPY_SOURCE_URL "$ENV{MILVUS_SNAPPY_URL}")
@@ -413,13 +340,6 @@ else()
 endif()
 set(ZSTD_MD5 "340c837db48354f8d5eafe74c6077120")
 
-if(DEFINED ENV{MILVUS_AWS_URL})
-    set(AWS_SOURCE_URL "$ENV{MILVUS_AWS_URL}")
-else()
-    set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
-endif()
-set(AWS_MD5 "9217f5bc8bf23dea04f4466521c85fd9")
-
 if(DEFINED ENV{MILVUS_LIBUNWIND_URL})
     set(LIBUNWIND_SOURCE_URL "$ENV{MILVUS_LIBUNWIND_URL}")
 else()
@@ -444,120 +364,6 @@ else()
 endif()
 set(GRPC_MD5 "7ec59ad54c85a12dcbbfede09bf413a9")
 
-
-# ----------------------------------------------------------------------
-# ARROW
-
-macro(build_arrow)
-    message(STATUS "Building Apache ARROW-${ARROW_VERSION} from source")
-    set(ARROW_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep/cpp")
-    set(ARROW_STATIC_LIB_NAME arrow)
-
-    set(ARROW_STATIC_LIB
-            "${ARROW_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ARROW_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
-            )
-    set(ARROW_INCLUDE_DIR "${ARROW_PREFIX}/include")
-    set(ARROW_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
-            -DARROW_BUILD_STATIC=ON
-            -DARROW_BUILD_SHARED=OFF
-            -DARROW_PARQUET=ON
-            -DARROW_USE_GLOG=OFF
-            -DCMAKE_INSTALL_PREFIX=${ARROW_PREFIX}
-            "-DCMAKE_LIBRARY_PATH=${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs"
-            -DCMAKE_BUILD_TYPE=Release)
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        execute_process(COMMAND sh -c "git ls-remote --heads --tags ${ARROW_SOURCE_URL} ${ARROW_VERSION} | cut -f 1" OUTPUT_VARIABLE ARROW_LAST_COMMIT_ID)
-        if(${ARROW_LAST_COMMIT_ID} MATCHES "^[^#][a-z0-9]+")
-            string(MD5 ARROW_COMBINE_MD5 "${ARROW_LAST_COMMIT_ID}")
-            set(ARROW_CACHE_PACKAGE_NAME "arrow_${ARROW_COMBINE_MD5}.tar.gz")
-            set(ARROW_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ARROW_CACHE_PACKAGE_NAME}")
-            set(ARROW_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ARROW_CACHE_PACKAGE_NAME}")
-
-            execute_process(COMMAND wget -q --method HEAD ${ARROW_CACHE_URL} RESULT_VARIABLE return_code)
-            message(STATUS "Check the remote cache file ${ARROW_CACHE_URL}. return code = ${return_code}")
-            if (NOT return_code EQUAL 0)
-                externalproject_add(arrow_ep
-                        GIT_REPOSITORY
-                        ${ARROW_SOURCE_URL}
-                        GIT_TAG
-                        ${ARROW_VERSION}
-                        GIT_SHALLOW
-                        TRUE
-                        SOURCE_SUBDIR
-                        cpp
-                        ${EP_LOG_OPTIONS}
-                        CMAKE_ARGS
-                        ${ARROW_CMAKE_ARGS}
-                        BUILD_COMMAND
-                        ${MAKE}
-                        ${MAKE_BUILD_ARGS}
-                        INSTALL_COMMAND
-                        ${MAKE} install
-                        BUILD_BYPRODUCTS
-                        "${ARROW_STATIC_LIB}"
-                        )
-
-                ExternalProject_Create_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ARROW_CACHE_URL})
-            else()
-                file(DOWNLOAD ${ARROW_CACHE_URL} ${ARROW_CACHE_PACKAGE_PATH} STATUS status)
-                list(GET status 0 status_code)
-                message(STATUS "DOWNLOADING FROM ${ARROW_CACHE_URL} TO ${ARROW_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-                if (status_code EQUAL 0)
-                    ExternalProject_Use_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-                endif()
-            endif()
-        else()
-            message(FATAL_ERROR "The last commit ID of \"${ARROW_SOURCE_URL}\" repository don't match!")
-        endif()
-    else()
-        externalproject_add(arrow_ep
-                GIT_REPOSITORY
-                ${ARROW_SOURCE_URL}
-                GIT_TAG
-                ${ARROW_VERSION}
-                GIT_SHALLOW
-                TRUE
-                SOURCE_SUBDIR
-                cpp
-                ${EP_LOG_OPTIONS}
-                CMAKE_ARGS
-                ${ARROW_CMAKE_ARGS}
-                BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
-                INSTALL_COMMAND
-                ${MAKE} install
-                BUILD_BYPRODUCTS
-                "${ARROW_STATIC_LIB}"
-                )
-    endif()
-
-    file(MAKE_DIRECTORY "${ARROW_INCLUDE_DIR}")
-    add_library(arrow STATIC IMPORTED)
-    set_target_properties(arrow
-            PROPERTIES IMPORTED_LOCATION "${ARROW_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INCLUDE_DIR}")
-
-    add_dependencies(arrow arrow_ep)
-
-    set(JEMALLOC_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep-build/jemalloc_ep-prefix/src/jemalloc_ep")
-
-    add_custom_command(TARGET arrow_ep POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${ARROW_PREFIX}/lib/
-            COMMAND ${CMAKE_COMMAND} -E copy ${JEMALLOC_PREFIX}/lib/libjemalloc_pic.a ${ARROW_PREFIX}/lib/
-            DEPENDS ${JEMALLOC_PREFIX}/lib/libjemalloc_pic.a)
-
-endmacro()
-
-if(MILVUS_WITH_ARROW)
-
-    resolve_dependency(ARROW)
-
-    link_directories(SYSTEM ${ARROW_PREFIX}/lib/)
-    include_directories(SYSTEM ${ARROW_INCLUDE_DIR})
-endif()
 
 # ----------------------------------------------------------------------
 # Add Boost dependencies (code adapted from Apache Kudu (incubating))
@@ -756,370 +562,6 @@ if(MILVUS_WITH_BZ2)
 endif()
 
 # ----------------------------------------------------------------------
-# Knowhere
-
-macro(build_knowhere)
-    message(STATUS "Building knowhere from source")
-    set(KNOWHERE_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/knowhere_ep-prefix/src/knowhere_ep")
-    set(KNOWHERE_INCLUDE_DIR "${KNOWHERE_PREFIX}/include")
-    set(KNOWHERE_STATIC_LIB
-            "${KNOWHERE_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}knowhere${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-    set(KNOWHERE_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
-            "-DCMAKE_INSTALL_PREFIX=${KNOWHERE_PREFIX}"
-            -DCMAKE_INSTALL_LIBDIR=lib
-            "-DCMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER}"
-            "-DCUDA_TOOLKIT_ROOT_DIR=${CUDA_TOOLKIT_ROOT_DIR}"
-            -DCMAKE_BUILD_TYPE=Release)
-
-    externalproject_add(knowhere_ep
-            URL
-            ${KNOWHERE_SOURCE_URL}
-            ${EP_LOG_OPTIONS}
-            CMAKE_ARGS
-            ${KNOWHERE_CMAKE_ARGS}
-            BUILD_COMMAND
-            ${MAKE}
-            ${MAKE_BUILD_ARGS}
-            BUILD_BYPRODUCTS
-            ${KNOWHERE_STATIC_LIB})
-
-    file(MAKE_DIRECTORY "${KNOWHERE_INCLUDE_DIR}")
-    add_library(knowhere STATIC IMPORTED)
-    set_target_properties(
-            knowhere
-            PROPERTIES IMPORTED_LOCATION "${KNOWHERE_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${KNOWHERE_INCLUDE_DIR}")
-
-    add_dependencies(knowhere knowhere_ep)
-endmacro()
-
-if(MILVUS_WITH_KNOWHERE)
-    resolve_dependency(Knowhere)
-
-    get_target_property(KNOWHERE_INCLUDE_DIR knowhere INTERFACE_INCLUDE_DIRECTORIES)
-    link_directories(SYSTEM "${KNOWHERE_PREFIX}/lib")
-    include_directories(SYSTEM "${KNOWHERE_INCLUDE_DIR}")
-    include_directories(SYSTEM "${KNOWHERE_INCLUDE_DIR}/SPTAG/AnnService")
-endif()
-
-# ----------------------------------------------------------------------
-# OpenBLAS
-
-macro(build_openblas)
-    message(STATUS "Building OpenBLAS-${OPENBLAS_VERSION} from source")
-    set(OPENBLAS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
-    set(OPENBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
-    set(OPENBLAS_STATIC_LIB
-            "${OPENBLAS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        set(OPENBLAS_CACHE_PACKAGE_NAME "openblas_${OPENBLAS_MD5}.tar.gz")
-        set(OPENBLAS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${OPENBLAS_CACHE_PACKAGE_NAME}")
-        set(OPENBLAS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${OPENBLAS_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${OPENBLAS_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${OPENBLAS_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(openblas_ep
-                    URL
-                    ${OPENBLAS_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    CONFIGURE_COMMAND
-                    ""
-                    BUILD_IN_SOURCE
-                    1
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    INSTALL_COMMAND
-                    ${MAKE}
-                    PREFIX=${OPENBLAS_PREFIX}
-                    install
-                    BUILD_BYPRODUCTS
-                    ${OPENBLAS_STATIC_LIB})
-
-            ExternalProject_Create_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/openblas_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${OPENBLAS_CACHE_URL})
-        else()
-            file(DOWNLOAD ${OPENBLAS_CACHE_URL} ${OPENBLAS_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${OPENBLAS_CACHE_URL} TO ${OPENBLAS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(openblas_ep
-                URL
-                ${OPENBLAS_SOURCE_URL}
-                ${EP_LOG_OPTIONS}
-                CONFIGURE_COMMAND
-                ""
-                BUILD_IN_SOURCE
-                1
-                BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
-                INSTALL_COMMAND
-                ${MAKE}
-                PREFIX=${OPENBLAS_PREFIX}
-                install
-                BUILD_BYPRODUCTS
-                ${OPENBLAS_STATIC_LIB})
-    endif()
-
-    file(MAKE_DIRECTORY "${OPENBLAS_INCLUDE_DIR}")
-    add_library(openblas STATIC IMPORTED)
-    set_target_properties(
-            openblas
-            PROPERTIES IMPORTED_LOCATION "${OPENBLAS_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${OPENBLAS_INCLUDE_DIR}")
-
-    add_dependencies(openblas openblas_ep)
-endmacro()
-
-# ----------------------------------------------------------------------
-# LAPACK
-
-macro(build_lapack)
-    message(STATUS "Building LAPACK-${LAPACK_VERSION} from source")
-    set(LAPACK_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/lapack_ep-prefix/src/lapack_ep")
-    set(LAPACK_INCLUDE_DIR "${LAPACK_PREFIX}/include")
-    set(LAPACK_STATIC_LIB
-            "${LAPACK_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}lapack${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-    set(LAPACK_CMAKE_ARGS
-            ${EP_COMMON_CMAKE_ARGS}
-            "-DCMAKE_INSTALL_PREFIX=${LAPACK_PREFIX}"
-            -DCMAKE_INSTALL_LIBDIR=lib)
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        set(LAPACK_CACHE_PACKAGE_NAME "lapack_${LAPACK_MD5}.tar.gz")
-        set(LAPACK_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${LAPACK_CACHE_PACKAGE_NAME}")
-        set(LAPACK_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${LAPACK_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${LAPACK_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${LAPACK_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(lapack_ep
-                    URL
-                    ${LAPACK_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    CMAKE_ARGS
-                    ${LAPACK_CMAKE_ARGS}
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    BUILD_BYPRODUCTS
-                    ${LAPACK_STATIC_LIB})
-
-            ExternalProject_Create_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/lapack_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LAPACK_CACHE_URL})
-        else()
-            file(DOWNLOAD ${LAPACK_CACHE_URL} ${LAPACK_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${LAPACK_CACHE_URL} TO ${LAPACK_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(lapack_ep
-                    URL
-                    ${LAPACK_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    CMAKE_ARGS
-                    ${LAPACK_CMAKE_ARGS}
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    BUILD_BYPRODUCTS
-                    ${LAPACK_STATIC_LIB})
-    endif()
-
-    file(MAKE_DIRECTORY "${LAPACK_INCLUDE_DIR}")
-    add_library(lapack STATIC IMPORTED)
-    set_target_properties(
-            lapack
-            PROPERTIES IMPORTED_LOCATION "${LAPACK_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${LAPACK_INCLUDE_DIR}")
-
-    add_dependencies(lapack lapack_ep)
-endmacro()
-
-# ----------------------------------------------------------------------
-# FAISS
-
-if(NOT DEFINED BUILD_FAISS_WITH_MKL)
-    set(BUILD_FAISS_WITH_MKL OFF)
-endif()
-
-if(EXISTS "/proc/cpuinfo")
-    FILE(READ /proc/cpuinfo PROC_CPUINFO)
-
-    SET(VENDOR_ID_RX "vendor_id[ \t]*:[ \t]*([a-zA-Z]+)\n")
-    STRING(REGEX MATCH "${VENDOR_ID_RX}" VENDOR_ID "${PROC_CPUINFO}")
-    STRING(REGEX REPLACE "${VENDOR_ID_RX}" "\\1" VENDOR_ID "${VENDOR_ID}")
-
-    if(NOT ${VENDOR_ID} STREQUAL "GenuineIntel")
-        set(BUILD_FAISS_WITH_MKL OFF)
-    endif()
-endif()
-
-macro(build_faiss)
-    message(STATUS "Building FAISS-${FAISS_VERSION} from source")
-    set(FAISS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/faiss_ep-prefix/src/faiss_ep")
-    set(FAISS_INCLUDE_DIR "${FAISS_PREFIX}/include")
-    set(FAISS_STATIC_LIB
-            "${FAISS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}faiss${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-    set(FAISS_CONFIGURE_ARGS
-            "--prefix=${FAISS_PREFIX}"
-            "CFLAGS=${EP_C_FLAGS}"
-            "CXXFLAGS=${EP_CXX_FLAGS}"
-            --without-python)
-
-    set(FAISS_CFLAGS ${EP_C_FLAGS})
-    set(FAISS_CXXFLAGS ${EP_CXX_FLAGS})
-
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
-        message(STATUS "Build Faiss with MKL")
-        if(NOT DEFINED MKL_LIB_PATH)
-            set(MKL_LIB_PATH "/opt/intel/compilers_and_libraries_${MKL_VERSION}/linux/mkl/lib/intel64")
-            message(STATUS "MKL_LIB_PATH = ${MKL_LIB_PATH}")
-        endif()
-
-        set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "CPPFLAGS=-DFINTEGER=long -DMKL_ILP64 -m64 -I${MKL_LIB_PATH}/../../include"
-                "LDFLAGS=-L${MKL_LIB_PATH}"
-                "LIBS=-Wl,--start-group ${MKL_LIB_PATH}/libmkl_intel_ilp64.a ${MKL_LIB_PATH}/libmkl_gnu_thread.a ${MKL_LIB_PATH}/libmkl_core.a -Wl,--end-group -lgomp -lpthread -lm -ldl")
-
-    else()
-        message(STATUS "Build Faiss with OpenBlas/LAPACK")
-        set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "LDFLAGS=-L${OPENBLAS_PREFIX}/lib -L${LAPACK_PREFIX}/lib")
-    endif()
-
-    if(${MILVUS_WITH_FAISS_GPU_VERSION} STREQUAL "ON")
-        set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
-                "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
-                "--with-cuda-arch=-gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_75,code=sm_75"
-                )
-    else()
-        set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS} --without-cuda)
-    endif()
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        string(MD5 FAISS_COMBINE_MD5 "${FAISS_MD5}${LAPACK_MD5}${OPENBLAS_MD5}")
-        set(FAISS_CACHE_PACKAGE_NAME "faiss_${FAISS_COMBINE_MD5}.tar.gz")
-        set(FAISS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${FAISS_CACHE_PACKAGE_NAME}")
-        set(FAISS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${FAISS_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${FAISS_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${FAISS_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(faiss_ep
-                    URL
-                    ${FAISS_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    CONFIGURE_COMMAND
-                    "./configure"
-                    ${FAISS_CONFIGURE_ARGS}
-                    BUILD_COMMAND
-                    ${MAKE} ${MAKE_BUILD_ARGS} VERBOSE=1
-                    BUILD_IN_SOURCE
-                    1
-                    INSTALL_COMMAND
-                    ${MAKE} install
-                    BUILD_BYPRODUCTS
-                    ${FAISS_STATIC_LIB})
-
-            if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
-                ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
-            endif()
-
-            ExternalProject_Create_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/faiss_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${FAISS_CACHE_URL})
-        else()
-            file(DOWNLOAD ${FAISS_CACHE_URL} ${FAISS_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${FAISS_CACHE_URL} TO ${FAISS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(faiss_ep
-                URL
-                ${FAISS_SOURCE_URL}
-                ${EP_LOG_OPTIONS}
-                CONFIGURE_COMMAND
-                "./configure"
-                ${FAISS_CONFIGURE_ARGS}
-                BUILD_COMMAND
-                ${MAKE} ${MAKE_BUILD_ARGS} VERBOSE=1
-                BUILD_IN_SOURCE
-                1
-                INSTALL_COMMAND
-                ${MAKE} install
-                BUILD_BYPRODUCTS
-                ${FAISS_STATIC_LIB})
-
-        if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
-            ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
-        endif()
-    endif()
-
-    file(MAKE_DIRECTORY "${FAISS_INCLUDE_DIR}")
-    add_library(faiss SHARED IMPORTED)
-
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "ON")
-        set(MKL_LIBS ${MKL_LIB_PATH}/libmkl_intel_ilp64.a
-                     ${MKL_LIB_PATH}/libmkl_gnu_thread.a
-                     ${MKL_LIB_PATH}/libmkl_core.a)
-
-        set_target_properties(
-                faiss
-                PROPERTIES IMPORTED_LOCATION "${FAISS_STATIC_LIB}"
-                INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
-                INTERFACE_LINK_LIBRARIES "${MKL_LIBS}" )
-    else()
-        set_target_properties(
-                faiss
-                PROPERTIES IMPORTED_LOCATION "${FAISS_STATIC_LIB}"
-                INTERFACE_INCLUDE_DIRECTORIES "${FAISS_INCLUDE_DIR}"
-                INTERFACE_LINK_LIBRARIES "openblas;lapack" )
-    endif()
-
-    add_dependencies(faiss faiss_ep)
-
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
-        add_dependencies(faiss openblas_ep)
-        add_dependencies(faiss lapack_ep)
-    endif()
-
-endmacro()
-
-if(MILVUS_WITH_FAISS)
-
-    if(${BUILD_FAISS_WITH_MKL} STREQUAL "OFF")
-        resolve_dependency(OpenBLAS)
-        get_target_property(OPENBLAS_INCLUDE_DIR openblas INTERFACE_INCLUDE_DIRECTORIES)
-        include_directories(SYSTEM "${OPENBLAS_INCLUDE_DIR}")
-        link_directories(SYSTEM ${OPENBLAS_PREFIX}/lib)
-
-        resolve_dependency(LAPACK)
-        get_target_property(LAPACK_INCLUDE_DIR lapack INTERFACE_INCLUDE_DIRECTORIES)
-        include_directories(SYSTEM "${LAPACK_INCLUDE_DIR}")
-        link_directories(SYSTEM "${LAPACK_PREFIX}/lib")
-    endif()
-
-    resolve_dependency(FAISS)
-    get_target_property(FAISS_INCLUDE_DIR faiss INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM "${FAISS_INCLUDE_DIR}")
-    link_directories(SYSTEM ${FAISS_PREFIX}/lib/)
-endif()
-
-# ----------------------------------------------------------------------
 # Google gtest
 
 macro(build_gtest)
@@ -1230,30 +672,6 @@ if (MILVUS_BUILD_TESTS)
     get_target_property(GTEST_INCLUDE_DIR gtest INTERFACE_INCLUDE_DIRECTORIES)
     link_directories(SYSTEM "${GTEST_PREFIX}/lib")
     include_directories(SYSTEM ${GTEST_INCLUDE_DIR})
-endif()
-
-# ----------------------------------------------------------------------
-# JSONCONS
-
-macro(build_jsoncons)
-    message(STATUS "Building JSONCONS-${JSONCONS_VERSION} from source")
-
-    set(JSONCONS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/jsoncons_ep-prefix")
-    set(JSONCONS_TAR_NAME "${JSONCONS_PREFIX}/jsoncons-${JSONCONS_VERSION}.tar.gz")
-    set(JSONCONS_INCLUDE_DIR "${JSONCONS_PREFIX}/jsoncons-${JSONCONS_VERSION}/include")
-    if (NOT EXISTS ${JSONCONS_INCLUDE_DIR})
-        file(MAKE_DIRECTORY ${JSONCONS_PREFIX})
-        file(DOWNLOAD ${JSONCONS_SOURCE_URL}
-                ${JSONCONS_TAR_NAME})
-        execute_process(COMMAND ${CMAKE_COMMAND} -E tar -xf ${JSONCONS_TAR_NAME}
-                WORKING_DIRECTORY ${JSONCONS_PREFIX})
-
-    endif ()
-endmacro()
-
-if(MILVUS_WITH_JSONCONS)
-    resolve_dependency(JSONCONS)
-    include_directories(SYSTEM "${JSONCONS_INCLUDE_DIR}")
 endif()
 
 # ----------------------------------------------------------------------
@@ -1561,95 +979,6 @@ if(MILVUS_WITH_PROMETHEUS)
     link_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/)
     include_directories(SYSTEM ${PROMETHEUS_PREFIX}/core/include)
 
-endif()
-
-# ----------------------------------------------------------------------
-# RocksDB
-
-macro(build_rocksdb)
-    message(STATUS "Building RocksDB-${ROCKSDB_VERSION} from source")
-    set(ROCKSDB_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/rocksdb_ep-prefix/src/rocksdb_ep")
-    set(ROCKSDB_INCLUDE_DIRS "${ROCKSDB_PREFIX}/include")
-    set(ROCKSDB_STATIC_LIB_NAME rocksdb)
-    set(ROCKSDB_STATIC_LIB
-            "${ROCKSDB_PREFIX}/lib/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${ROCKSDB_STATIC_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
-            )
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        string(MD5 ROCKSDB_COMBINE_MD5 "${ROCKSDB_LAST_COMMIT_ID}")
-        set(ROCKSDB_CACHE_PACKAGE_NAME "rocksdb_${ROCKSDB_MD5}.tar.gz")
-        set(ROCKSDB_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${ROCKSDB_CACHE_PACKAGE_NAME}")
-        set(ROCKSDB_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${ROCKSDB_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${ROCKSDB_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${ROCKSDB_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(rocksdb_ep
-                    URL
-                    ${ROCKSDB_SOURCE_URL}
-                    ${EP_LOG_OPTIONS}
-                    CONFIGURE_COMMAND
-                    ""
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    static_lib
-                    "prefix=${ROCKSDB_PREFIX}"
-                    BUILD_IN_SOURCE
-                    1
-                    INSTALL_COMMAND
-                    ${MAKE}
-                    install-static
-                    "INSTALL_PATH=${ROCKSDB_PREFIX}/lib"
-                    BUILD_BYPRODUCTS
-                    "${ROCKSDB_STATIC_LIB}")
-
-            ExternalProject_Create_Cache(rocksdb_ep ${ROCKSDB_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/rocksdb_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ROCKSDB_CACHE_URL})
-        else()
-            file(DOWNLOAD ${ROCKSDB_CACHE_URL} ${ROCKSDB_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${ROCKSDB_CACHE_URL} TO ${ROCKSDB_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(rocksdb_ep ${ROCKSDB_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(rocksdb_ep
-                URL
-                ${ROCKSDB_SOURCE_URL}
-                ${EP_LOG_OPTIONS}
-                CONFIGURE_COMMAND
-                ""
-                BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
-                static_lib
-                "prefix=${ROCKSDB_PREFIX}"
-                BUILD_IN_SOURCE
-                1
-                INSTALL_COMMAND
-                ${MAKE}
-                install-static
-                "INSTALL_PATH=${ROCKSDB_PREFIX}/lib"
-                BUILD_BYPRODUCTS
-                "${ROCKSDB_STATIC_LIB}")
-    endif()
-
-    file(MAKE_DIRECTORY "${ROCKSDB_PREFIX}/include")
-
-    add_library(rocksdb STATIC IMPORTED)
-    set_target_properties(rocksdb
-            PROPERTIES IMPORTED_LOCATION "${ROCKSDB_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ROCKSDB_INCLUDE_DIRS}")
-    add_dependencies(rocksdb rocksdb_ep)
-endmacro()
-
-if(MILVUS_WITH_ROCKSDB)
-
-    resolve_dependency(RocksDB)
-
-    link_directories(SYSTEM ${ROCKSDB_PREFIX}/lib/lib/)
-    include_directories(SYSTEM ${ROCKSDB_INCLUDE_DIRS})
 endif()
 
 # ----------------------------------------------------------------------
@@ -2092,116 +1421,6 @@ if(MILVUS_WITH_ZSTD)
 endif()
 
 # ----------------------------------------------------------------------
-# aws
-macro(build_aws)
-    message(STATUS "Building aws-${AWS_VERSION} from source")
-    set(AWS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/aws_ep-prefix/src/aws_ep")
-
-    set(AWS_CMAKE_ARGS
-            ${EP_COMMON_TOOLCHAIN}
-            "-DCMAKE_INSTALL_PREFIX=${AWS_PREFIX}"
-            -DCMAKE_BUILD_TYPE=Release
-            -DCMAKE_INSTALL_LIBDIR=lib
-            -DBUILD_ONLY=s3
-            -DBUILD_SHARED_LIBS=off
-            -DENABLE_TESTING=off
-            -DENABLE_UNITY_BUILD=on
-            -DNO_ENCRYPTION=off)
-
-    set(AWS_CPP_SDK_CORE_STATIC_LIB
-            "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-core${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(AWS_CPP_SDK_S3_STATIC_LIB
-            "${AWS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}aws-cpp-sdk-s3${CMAKE_STATIC_LIBRARY_SUFFIX}")
-    set(AWS_INCLUDE_DIR "${AWS_PREFIX}/include")
-    set(AWS_CMAKE_ARGS
-            ${AWS_CMAKE_ARGS}
-            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DCMAKE_C_FLAGS=${EP_C_FLAGS}
-            -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
-
-    if(USE_JFROG_CACHE STREQUAL "ON")
-        set(AWS_CACHE_PACKAGE_NAME "aws_${AWS_MD5}.tar.gz")
-        set(AWS_CACHE_URL "${JFROG_ARTFACTORY_CACHE_URL}/${AWS_CACHE_PACKAGE_NAME}")
-        set(AWS_CACHE_PACKAGE_PATH "${THIRDPARTY_PACKAGE_CACHE}/${AWS_CACHE_PACKAGE_NAME}")
-
-        execute_process(COMMAND wget -q --method HEAD ${AWS_CACHE_URL} RESULT_VARIABLE return_code)
-        message(STATUS "Check the remote file ${AWS_CACHE_URL}. return code = ${return_code}")
-        if (NOT return_code EQUAL 0)
-            externalproject_add(aws_ep
-                    ${EP_LOG_OPTIONS}
-                    CMAKE_ARGS
-                    ${AWS_CMAKE_ARGS}
-                    BUILD_COMMAND
-                    ${MAKE}
-                    ${MAKE_BUILD_ARGS}
-                    INSTALL_DIR
-                    ${AWS_PREFIX}
-                    URL
-                    ${AWS_SOURCE_URL}
-                    BUILD_BYPRODUCTS
-                    "${AWS_CPP_SDK_S3_STATIC_LIB}"
-                    "${AWS_CPP_SDK_CORE_STATIC_LIB}")
-
-            ExternalProject_Create_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} "${CMAKE_CURRENT_BINARY_DIR}/aws_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${AWS_CACHE_URL})
-        else()
-            file(DOWNLOAD ${AWS_CACHE_URL} ${AWS_CACHE_PACKAGE_PATH} STATUS status)
-            list(GET status 0 status_code)
-            message(STATUS "DOWNLOADING FROM ${AWS_CACHE_URL} TO ${AWS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
-            if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(aws_ep ${AWS_CACHE_PACKAGE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
-            endif()
-        endif()
-    else()
-        externalproject_add(aws_ep
-                ${EP_LOG_OPTIONS}
-                CMAKE_ARGS
-                ${AWS_CMAKE_ARGS}
-                BUILD_COMMAND
-                ${MAKE}
-                ${MAKE_BUILD_ARGS}
-                INSTALL_DIR
-                ${AWS_PREFIX}
-                URL
-                ${AWS_SOURCE_URL}
-                BUILD_BYPRODUCTS
-                "${AWS_CPP_SDK_S3_STATIC_LIB}"
-                "${AWS_CPP_SDK_CORE_STATIC_LIB}")
-    endif()
-
-    file(MAKE_DIRECTORY "${AWS_INCLUDE_DIR}")
-    add_library(aws-cpp-sdk-s3 STATIC IMPORTED)
-    set_target_properties(aws-cpp-sdk-s3
-            PROPERTIES
-            IMPORTED_LOCATION "${AWS_CPP_SDK_S3_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${AWS_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
-
-    add_library(aws-cpp-sdk-core STATIC IMPORTED)
-    set_target_properties(aws-cpp-sdk-core
-            PROPERTIES IMPORTED_LOCATION "${AWS_CPP_SDK_CORE_STATIC_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${AWS_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "${AWS_PREFIX}/lib/libaws-c-event-stream.a;${AWS_PREFIX}/lib/libaws-checksums.a;${AWS_PREFIX}/lib/libaws-c-common.a")
-
-    add_dependencies(aws-cpp-sdk-s3 aws_ep)
-    add_dependencies(aws-cpp-sdk-core aws_ep)
-
-endmacro()
-
-if(MILVUS_WITH_AWS)
-    resolve_dependency(AWS)
-
-    link_directories(SYSTEM ${AWS_PREFIX}/lib)
-
-    get_target_property(AWS_CPP_SDK_S3_INCLUDE_DIR aws-cpp-sdk-s3 INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${AWS_CPP_SDK_S3_INCLUDE_DIR})
-
-    get_target_property(AWS_CPP_SDK_CORE_INCLUDE_DIR aws-cpp-sdk-core INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(SYSTEM ${AWS_CPP_SDK_CORE_INCLUDE_DIR})
-
-endif()
-
-# ----------------------------------------------------------------------
 # libunwind
 
 macro(build_libunwind)
@@ -2465,12 +1684,14 @@ macro(build_grpc)
     add_dependencies(grpc_protoc grpc_ep)
 endmacro()
 
-resolve_dependency(GRPC)
+if(MILVUS_WITH_GRPC)
+    resolve_dependency(GRPC)
 
-get_target_property(GRPC_INCLUDE_DIR grpc INTERFACE_INCLUDE_DIRECTORIES)
-include_directories(SYSTEM ${GRPC_INCLUDE_DIR})
-link_directories(SYSTEM ${GRPC_PREFIX}/lib)
+    get_target_property(GRPC_INCLUDE_DIR grpc INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${GRPC_INCLUDE_DIR})
+    link_directories(SYSTEM ${GRPC_PREFIX}/lib)
 
-set(GRPC_THIRD_PARTY_DIR ${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/third_party)
-include_directories(SYSTEM ${GRPC_THIRD_PARTY_DIR}/protobuf/src)
-link_directories(SYSTEM ${GRPC_PROTOBUF_LIB_DIR})
+    set(GRPC_THIRD_PARTY_DIR ${CMAKE_CURRENT_BINARY_DIR}/grpc_ep-prefix/src/grpc_ep/third_party)
+    include_directories(SYSTEM ${GRPC_THIRD_PARTY_DIR}/protobuf/src)
+    link_directories(SYSTEM ${GRPC_PROTOBUF_LIB_DIR})
+endif()
