@@ -25,7 +25,7 @@
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/resource/Resource.h"
 #include "utils/Error.h"
-#include "wrapper/knowhere/vec_index.h"
+#include "src/wrapper/vec_index.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 
 

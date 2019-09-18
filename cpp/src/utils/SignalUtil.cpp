@@ -31,23 +31,19 @@ void SignalUtil::HandleSignal(int signum){
     switch(signum){
         case SIGINT:
         case SIGUSR2:{
-            server::Server* server_ptr = server::Server::Instance();
-            server_ptr->Stop();
+            SERVER_LOG_INFO << "Server received signal:" << std::to_string(signum);
+
+            server::Server& server_ptr = server::Server::Instance();
+            server_ptr.Stop();
 
             exit(0);
         }
         default:{
-            SERVER_LOG_INFO << "Server received signal:" << std::to_string(signum);
+            SERVER_LOG_INFO << "Server received critical signal:" << std::to_string(signum);
             SignalUtil::PrintStacktrace();
 
-            std::string info = "Server encounter critical signal:";
-            info += std::to_string(signum);
-//            SendSignalMessage(signum, info);
-
-            SERVER_LOG_INFO << info;
-
-            server::Server* server_ptr = server::Server::Instance();
-            server_ptr->Stop();
+            server::Server& server_ptr = server::Server::Instance();
+            server_ptr.Stop();
 
             exit(1);
         }

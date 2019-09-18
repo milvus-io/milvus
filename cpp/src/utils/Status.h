@@ -25,9 +25,11 @@
 namespace zilliz {
 namespace milvus {
 
+using StatusCode = ErrorCode;
+
 class Status {
  public:
-    Status(ErrorCode code, const std::string &msg);
+    Status(StatusCode code, const std::string &msg);
     Status();
     ~Status();
 
@@ -47,13 +49,16 @@ class Status {
     bool
     ok() const { return state_ == nullptr || code() == 0; }
 
+    StatusCode
+    code() const {
+        return (state_ == nullptr) ? 0 : *(StatusCode*)(state_);
+    }
+
+    std::string
+    message() const;
+
     std::string
     ToString() const;
-
-    ErrorCode
-    code() const {
-        return (state_ == nullptr) ? 0 : *(ErrorCode*)(state_);
-    }
 
 private:
     inline void

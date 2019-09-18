@@ -31,8 +31,7 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-MemManagerPtr MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta,
-                                        const Options& options) {
+MemManagerPtr MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options) {
     return std::make_shared<MemManagerImpl>(meta, options);
 }
 
