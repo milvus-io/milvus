@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "utils/Status.h"
 #include "utils/BlockingQueue.h"
 #include "status.grpc.pb.h"
 #include "status.pb.h"
@@ -37,24 +38,22 @@ protected:
     virtual ~GrpcBaseTask();
 
 public:
-    ErrorCode Execute();
+    Status Execute();
 
     void Done();
 
-    ErrorCode WaitToFinish();
+    Status WaitToFinish();
 
     std::string TaskGroup() const { return task_group_; }
 
-    ErrorCode ErrorID() const { return error_code_; }
-
-    std::string ErrorMsg() const { return error_msg_; }
+    const Status& status() const { return status_; }
 
     bool IsAsync() const { return async_; }
 
 protected:
-    virtual ErrorCode OnExecute() = 0;
+    virtual Status OnExecute() = 0;
 
-    ErrorCode SetError(ErrorCode error_code, const std::string &msg);
+    Status SetStatus(ErrorCode error_code, const std::string &msg);
 
 protected:
     mutable std::mutex finish_mtx_;
@@ -63,8 +62,7 @@ protected:
     std::string task_group_;
     bool async_;
     bool done_;
-    ErrorCode error_code_;
-    std::string error_msg_;
+    Status status_;
 };
 
 using BaseTaskPtr = std::shared_ptr<GrpcBaseTask>;
@@ -83,7 +81,7 @@ public:
 
     void Stop();
 
-    ErrorCode ExecuteTask(const BaseTaskPtr &task_ptr);
+    Status ExecuteTask(const BaseTaskPtr &task_ptr);
 
     static void ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Status *grpc_status);
 
@@ -94,7 +92,7 @@ protected:
 
     void TakeTaskToExecute(TaskQueuePtr task_queue);
 
-    ErrorCode PutTaskToQueue(const BaseTaskPtr &task_ptr);
+    Status PutTaskToQueue(const BaseTaskPtr &task_ptr);
 
 private:
     mutable std::mutex queue_mtx_;

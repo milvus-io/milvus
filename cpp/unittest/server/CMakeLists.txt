@@ -54,9 +54,9 @@ set(db_scheduler_srcs
         )
 
 set(util_files
+        ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         ${MILVUS_ENGINE_SRC}/utils/ValidationUtil.cpp
-        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc
-        ${MILVUS_ENGINE_SRC}/utils/easylogging++.h)
+        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc)
 
 set(db_src
         ${config_files}

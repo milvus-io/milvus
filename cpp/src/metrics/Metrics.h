@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+
 #pragma once
 
 #include "MetricBase.h"
@@ -63,7 +64,7 @@ protected:
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectInsertMetrics : CollectMetricsBase {
 public:
-    CollectInsertMetrics(size_t n, engine::Status& status) : n_(n), status_(status) {
+    CollectInsertMetrics(size_t n, Status& status) : n_(n), status_(status) {
     }
 
     ~CollectInsertMetrics() {
@@ -87,7 +88,7 @@ public:
 
 private:
     size_t n_;
-    engine::Status& status_;
+    Status& status_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

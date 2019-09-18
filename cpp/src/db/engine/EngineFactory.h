@@ -15,10 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+
 #pragma once
 
-#include "db/Status.h"
 #include "ExecutionEngine.h"
+#include "utils/Status.h"
 
 namespace zilliz {
 namespace milvus {

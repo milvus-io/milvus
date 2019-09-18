@@ -11,6 +11,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-553 - Refine cache code
 - MS-557 - Merge Log.h
 - MS-556 - Add Job Definition in Scheduler
+- MS-558 - Refine status code
+- MS-562 - Add JobMgr and TaskCreator in Scheduler
 
 ## New Feature
 

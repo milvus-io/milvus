@@ -26,7 +26,7 @@ namespace engine {
 
 class MemManagerFactory {
 public:
-    static MemManagerPtr Build(const std::shared_ptr<meta::Meta> &meta, const Options &options);
+    static MemManagerPtr Build(const std::shared_ptr<meta::Meta> &meta, const DBOptions &options);
 };
 
 }

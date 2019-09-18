@@ -27,9 +27,6 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-Options::Options() {
-}
-
 ArchiveConf::ArchiveConf(const std::string& type, const std::string& criterias) {
     ParseType(type);
     ParseCritirias(criterias);

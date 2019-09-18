@@ -34,11 +34,9 @@
 #include "scheduler/ResourceFactory.h"
 #include "utils/CommonUtil.h"
 
+using namespace zilliz::milvus;
 
-namespace zilliz {
-namespace milvus {
-namespace server {
-namespace grpc {
+namespace {
 
 static const char *TABLE_NAME = "test_grpc";
 static constexpr int64_t TABLE_DIM = 256;
@@ -65,35 +63,35 @@ class RpcHandlerTest : public testing::Test {
         res_mgr->Start();
         engine::SchedInst::GetInstance()->Start();
 
-        zilliz::milvus::engine::Options opt;
+        engine::DBOptions opt;
 
-        ConfigNode &db_config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
-        db_config.SetValue(CONFIG_DB_URL, "sqlite://:@:/");
-        db_config.SetValue(CONFIG_DB_PATH, "/tmp/milvus_test");
-        db_config.SetValue(CONFIG_DB_SLAVE_PATH, "");
-        db_config.SetValue(CONFIG_DB_ARCHIVE_DISK, "");
-        db_config.SetValue(CONFIG_DB_ARCHIVE_DAYS, "");
+        server::ConfigNode &db_config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_DB);
+        db_config.SetValue(server::CONFIG_DB_URL, "sqlite://:@:/");
+        db_config.SetValue(server::CONFIG_DB_PATH, "/tmp/milvus_test");
+        db_config.SetValue(server::CONFIG_DB_SLAVE_PATH, "");
+        db_config.SetValue(server::CONFIG_DB_ARCHIVE_DISK, "");
+        db_config.SetValue(server::CONFIG_DB_ARCHIVE_DAYS, "");
 
-        ConfigNode &cache_config = ServerConfig::GetInstance().GetConfig(CONFIG_CACHE);
-        cache_config.SetValue(CONFIG_INSERT_CACHE_IMMEDIATELY, "");
+        server::ConfigNode &cache_config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+        cache_config.SetValue(server::CONFIG_INSERT_CACHE_IMMEDIATELY, "");
 
-        ConfigNode &engine_config = ServerConfig::GetInstance().GetConfig(CONFIG_ENGINE);
-        engine_config.SetValue(CONFIG_OMP_THREAD_NUM, "");
+        server::ConfigNode &engine_config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_ENGINE);
+        engine_config.SetValue(server::CONFIG_OMP_THREAD_NUM, "");
 
-        ConfigNode &serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
-//        serverConfig.SetValue(CONFIG_CLUSTER_MODE, "cluster");
+        server::ConfigNode &serverConfig = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_SERVER);
+//        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
 //        DBWrapper::GetInstance().GetInstance().StartService();
 //        DBWrapper::GetInstance().GetInstance().StopService();
 //
-//        serverConfig.SetValue(CONFIG_CLUSTER_MODE, "read_only");
+//        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "read_only");
 //        DBWrapper::GetInstance().GetInstance().StartService();
 //        DBWrapper::GetInstance().GetInstance().StopService();
 
-        serverConfig.SetValue(CONFIG_CLUSTER_MODE, "single");
-        DBWrapper::GetInstance().GetInstance().StartService();
+        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "single");
+        server::DBWrapper::GetInstance().StartService();
 
         //initialize handler, create table
-        handler = std::make_shared<GrpcRequestHandler>();
+        handler = std::make_shared<server::grpc::GrpcRequestHandler>();
         ::grpc::ServerContext context;
         ::milvus::grpc::TableSchema request;
         ::milvus::grpc::Status status;
@@ -106,16 +104,15 @@ class RpcHandlerTest : public testing::Test {
 
     void
     TearDown() override {
-        DBWrapper::GetInstance().StopService();
+        server::DBWrapper::GetInstance().StopService();
         engine::ResMgrInst::GetInstance()->Stop();
         engine::SchedInst::GetInstance()->Stop();
         boost::filesystem::remove_all("/tmp/milvus_test");
     }
  protected:
-    std::shared_ptr<GrpcRequestHandler> handler;
+    std::shared_ptr<server::grpc::GrpcRequestHandler> handler;
 };
 
-namespace {
 void BuildVectors(int64_t from, int64_t to,
                   std::vector<std::vector<float >> &vector_record_array) {
     if (to <= from) {
@@ -146,6 +143,7 @@ std::string CurrentTmDate(int64_t offset_day = 0) {
 
     return str;
 }
+
 }
 
 TEST_F(RpcHandlerTest, HasTableTest) {
@@ -429,31 +427,27 @@ TEST_F(RpcHandlerTest, DeleteByRangeTest) {
 }
 
 //////////////////////////////////////////////////////////////////////
-class DummyTask : public GrpcBaseTask {
- public:
-    ErrorCode
+namespace {
+class DummyTask : public server::grpc::GrpcBaseTask {
+public:
+    Status
     OnExecute() override {
-        return 0;
+        return Status::OK();
     }
 
-    static BaseTaskPtr
-    Create(std::string& dummy) {
-        return std::shared_ptr<GrpcBaseTask>(new DummyTask(dummy));
+    static server::grpc::BaseTaskPtr
+    Create(std::string &dummy) {
+        return std::shared_ptr<server::grpc::GrpcBaseTask>(new DummyTask(dummy));
     }
 
-    ErrorCode
-    DummySetError(ErrorCode error_code, const std::string &msg) {
-        return SetError(error_code, msg);
-    }
-
- public:
+public:
     explicit DummyTask(std::string &dummy) : GrpcBaseTask(dummy) {
 
     }
 };
 
 class RpcSchedulerTest : public testing::Test {
- protected:
+protected:
     void
     SetUp() override {
         std::string dummy = "dql";
@@ -463,28 +457,22 @@ class RpcSchedulerTest : public testing::Test {
     std::shared_ptr<DummyTask> task_ptr;
 };
 
+}
+
 TEST_F(RpcSchedulerTest, BaseTaskTest){
-    ErrorCode error_code = task_ptr->Execute();
-    ASSERT_EQ(error_code, 0);
+    auto status = task_ptr->Execute();
+    ASSERT_TRUE(status.ok());
 
-    error_code = task_ptr->DummySetError(0, "test error");
-    ASSERT_EQ(error_code, 0);
-
-    GrpcRequestScheduler::GetInstance().Start();
+    server::grpc::GrpcRequestScheduler::GetInstance().Start();
     ::milvus::grpc::Status grpc_status;
     std::string dummy = "dql";
-    BaseTaskPtr base_task_ptr = DummyTask::Create(dummy);
-    GrpcRequestScheduler::GetInstance().ExecTask(base_task_ptr, &grpc_status);
+    server::grpc::BaseTaskPtr base_task_ptr = DummyTask::Create(dummy);
+    server::grpc::GrpcRequestScheduler::GetInstance().ExecTask(base_task_ptr, &grpc_status);
 
-    GrpcRequestScheduler::GetInstance().ExecuteTask(task_ptr);
+    server::grpc::GrpcRequestScheduler::GetInstance().ExecuteTask(task_ptr);
     task_ptr = nullptr;
-    GrpcRequestScheduler::GetInstance().ExecuteTask(task_ptr);
+    server::grpc::GrpcRequestScheduler::GetInstance().ExecuteTask(task_ptr);
 
-    GrpcRequestScheduler::GetInstance().Stop();
-}
-
-}
-}
-}
+    server::grpc::GrpcRequestScheduler::GetInstance().Stop();
 }
 
