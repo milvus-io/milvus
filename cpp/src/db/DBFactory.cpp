@@ -33,14 +33,14 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-Options DBFactory::BuildOption() {
+DBOptions DBFactory::BuildOption() {
     auto meta = MetaFactory::BuildOption();
-    Options options;
+        DBOptions options;
     options.meta = meta;
     return options;
 }
 
-DBPtr DBFactory::Build(const Options& options) {
+DBPtr DBFactory::Build(const DBOptions& options) {
     return std::make_shared<DBImpl>(options);
 }
 

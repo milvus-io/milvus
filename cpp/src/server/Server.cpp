@@ -42,10 +42,10 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-Server *
+Server&
 Server::Instance() {
     static Server server;
-    return &server;
+    return server;
 }
 
 Server::Server() {
