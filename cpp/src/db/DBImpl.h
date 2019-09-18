@@ -29,7 +29,6 @@
 #include <thread>
 #include <list>
 #include <set>
-#include "scheduler/context/SearchContext.h"
 
 
 namespace zilliz {
