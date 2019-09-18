@@ -21,9 +21,9 @@
 
 namespace milvus {
 
-constexpr int CODE_WIDTH = sizeof(ErrorCode);
+constexpr int CODE_WIDTH = sizeof(StatusCode);
 
-Status::Status(ErrorCode code, const std::string& msg) {
+Status::Status(StatusCode code, const std::string& msg) {
     //4 bytes store code
     //4 bytes store message length
     //the left bytes store message string
@@ -50,7 +50,8 @@ Status::Status(const Status &s)
     CopyFrom(s);
 }
 
-Status &Status::operator=(const Status &s) {
+Status&
+Status::operator=(const Status &s) {
     CopyFrom(s);
     return *this;
 }
@@ -60,12 +61,14 @@ Status::Status(Status &&s)
     MoveFrom(s);
 }
 
-Status &Status::operator=(Status &&s) {
+Status&
+Status::operator=(Status &&s) {
     MoveFrom(s);
     return *this;
 }
 
-void Status::CopyFrom(const Status &s) {
+void
+Status::CopyFrom(const Status &s) {
     delete state_;
     state_ = nullptr;
     if(s.state_ == nullptr) {
@@ -73,58 +76,33 @@ void Status::CopyFrom(const Status &s) {
     }
 
     uint32_t length = 0;
-    std::memcpy(&length, s.state_ + CODE_WIDTH, sizeof(length));
+    memcpy(&length, s.state_ + CODE_WIDTH, sizeof(length));
     int buff_len = length + sizeof(length) + CODE_WIDTH;
     state_ = new char[buff_len];
     memcpy((void*)state_, (void*)s.state_, buff_len);
 }
 
-void Status::MoveFrom(Status &s) {
+void
+Status::MoveFrom(Status &s) {
     delete state_;
     state_ = s.state_;
     s.state_ = nullptr;
 }
 
-std::string Status::ToString() const {
+std::string
+Status::message() const {
     if (state_ == nullptr) {
-        return "OK";
+        return "";
     }
 
-    std::string result;
-    switch (code()) {
-        case StatusCode::OK:
-            result = "OK ";
-            break;
-        case StatusCode::UnknownError:
-            result = "Unknown error: ";
-            break;
-        case StatusCode::NotSupported:
-            result = "Not supported: ";
-            break;
-        case StatusCode::NotConnected:
-            result = "Not connected: ";
-            break;
-        case StatusCode::InvalidAgument:
-            result = "Invalid agument: ";
-            break;
-        case StatusCode::RPCFailed:
-            result = "Remote call failed: ";
-            break;
-        case StatusCode::ServerFailed:
-            result = "Service error: ";
-            break;
-        default:
-            result = "Error code(" + std::to_string((int)code()) + "): ";
-            break;
-    }
-
+    std::string msg;
     uint32_t length = 0;
     memcpy(&length, state_ + CODE_WIDTH, sizeof(length));
     if(length > 0) {
-        result.append(state_ + sizeof(length) + CODE_WIDTH, length);
+        msg.append(state_ + sizeof(length) + CODE_WIDTH, length);
     }
 
-    return result;
+    return msg;
 }
 
 }

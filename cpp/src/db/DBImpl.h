@@ -44,7 +44,7 @@ class Meta;
 
 class DBImpl : public DB {
  public:
-    explicit DBImpl(const Options &options);
+    explicit DBImpl(const DBOptions &options);
     ~DBImpl();
 
     Status Start() override;
@@ -76,28 +76,28 @@ class DBImpl : public DB {
     Status DropIndex(const std::string& table_id) override;
 
     Status Query(const std::string &table_id,
-            uint64_t k,
-            uint64_t nq,
-            uint64_t nprobe,
-            const float *vectors,
-            QueryResults &results) override;
+                 uint64_t k,
+                 uint64_t nq,
+                 uint64_t nprobe,
+                 const float *vectors,
+                 QueryResults &results) override;
 
     Status Query(const std::string &table_id,
-          uint64_t k,
-          uint64_t nq,
-          uint64_t nprobe,
-          const float *vectors,
-          const meta::DatesT &dates,
-          QueryResults &results) override;
+                 uint64_t k,
+                 uint64_t nq,
+                 uint64_t nprobe,
+                 const float *vectors,
+                 const meta::DatesT &dates,
+                 QueryResults &results) override;
 
     Status Query(const std::string &table_id,
-          const std::vector<std::string> &file_ids,
-          uint64_t k,
-          uint64_t nq,
-          uint64_t nprobe,
-          const float *vectors,
-          const meta::DatesT &dates,
-          QueryResults &results) override;
+                 const std::vector<std::string> &file_ids,
+                 uint64_t k,
+                 uint64_t nq,
+                 uint64_t nprobe,
+                 const float *vectors,
+                 const meta::DatesT &dates,
+                 QueryResults &results) override;
 
     Status Size(uint64_t &result) override;
 
@@ -130,7 +130,7 @@ class DBImpl : public DB {
     Status MemSerialize();
 
  private:
-    const Options options_;
+    const DBOptions options_;
 
     std::atomic<bool> shutting_down_;
 

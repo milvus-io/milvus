@@ -75,8 +75,7 @@ namespace {
 GrpcBaseTask::GrpcBaseTask(const std::string &task_group, bool async)
         : task_group_(task_group),
           async_(async),
-          done_(false),
-          error_code_(SERVER_SUCCESS) {
+          done_(false) {
 
 }
 
@@ -84,10 +83,10 @@ GrpcBaseTask::~GrpcBaseTask() {
     WaitToFinish();
 }
 
-ErrorCode GrpcBaseTask::Execute() {
-    error_code_ = OnExecute();
+Status GrpcBaseTask::Execute() {
+    status_ = OnExecute();
     Done();
-    return error_code_;
+    return status_;
 }
 
 void GrpcBaseTask::Done() {
@@ -95,19 +94,17 @@ void GrpcBaseTask::Done() {
     finish_cond_.notify_all();
 }
 
-ErrorCode GrpcBaseTask::SetError(ErrorCode error_code, const std::string &error_msg) {
-    error_code_ = error_code;
-    error_msg_ = error_msg;
-
-    SERVER_LOG_ERROR << error_msg_;
-    return error_code_;
+Status GrpcBaseTask::SetStatus(ErrorCode error_code, const std::string &error_msg) {
+    status_ = Status(error_code, error_msg);
+    SERVER_LOG_ERROR << error_msg;
+    return status_;
 }
 
-ErrorCode GrpcBaseTask::WaitToFinish() {
+Status GrpcBaseTask::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);
     finish_cond_.wait(lock, [this] { return done_; });
 
-    return error_code_;
+    return status_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -130,10 +127,10 @@ void GrpcRequestScheduler::ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Statu
 
     if (!task_ptr->IsAsync()) {
         task_ptr->WaitToFinish();
-        ErrorCode err = task_ptr->ErrorID();
-        if (err != SERVER_SUCCESS) {
-            grpc_status->set_reason(task_ptr->ErrorMsg());
-            grpc_status->set_error_code(ErrorMap(err));
+        const Status& status = task_ptr->status();
+        if (!status.ok()) {
+            grpc_status->set_reason(status.message());
+            grpc_status->set_error_code(ErrorMap(status.code()));
         }
     }
 }
@@ -171,19 +168,19 @@ void GrpcRequestScheduler::Stop() {
     SERVER_LOG_INFO << "Scheduler stopped";
 }
 
-ErrorCode GrpcRequestScheduler::ExecuteTask(const BaseTaskPtr &task_ptr) {
+Status GrpcRequestScheduler::ExecuteTask(const BaseTaskPtr &task_ptr) {
     if (task_ptr == nullptr) {
-        return SERVER_NULL_POINTER;
+        return Status::OK();
     }
 
-    ErrorCode err = PutTaskToQueue(task_ptr);
-    if (err != SERVER_SUCCESS) {
-        SERVER_LOG_ERROR << "Put task to queue failed with code: " << err;
-        return err;
+    auto status = PutTaskToQueue(task_ptr);
+    if (!status.ok()) {
+        SERVER_LOG_ERROR << "Put task to queue failed with code: " << status.ToString();
+        return status;
     }
 
     if (task_ptr->IsAsync()) {
-        return SERVER_SUCCESS;//async execution, caller need to call WaitToFinish at somewhere
+        return Status::OK(); //async execution, caller need to call WaitToFinish at somewhere
     }
 
     return task_ptr->WaitToFinish();//sync execution
@@ -203,9 +200,9 @@ void GrpcRequestScheduler::TakeTaskToExecute(TaskQueuePtr task_queue) {
         }
 
         try {
-            ErrorCode err = task->Execute();
-            if (err != SERVER_SUCCESS) {
-                SERVER_LOG_ERROR << "Task failed with code: " << err;
+            auto status = task->Execute();
+            if (!status.ok()) {
+                SERVER_LOG_ERROR << "Task failed with code: " << status.ToString();
             }
         } catch (std::exception &ex) {
             SERVER_LOG_ERROR << "Task failed to execute: " << ex.what();
@@ -213,7 +210,7 @@ void GrpcRequestScheduler::TakeTaskToExecute(TaskQueuePtr task_queue) {
     }
 }
 
-ErrorCode GrpcRequestScheduler::PutTaskToQueue(const BaseTaskPtr &task_ptr) {
+Status GrpcRequestScheduler::PutTaskToQueue(const BaseTaskPtr &task_ptr) {
     std::lock_guard<std::mutex> lock(queue_mtx_);
 
     std::string group_name = task_ptr->TaskGroup();
@@ -230,7 +227,7 @@ ErrorCode GrpcRequestScheduler::PutTaskToQueue(const BaseTaskPtr &task_ptr) {
         SERVER_LOG_INFO << "Create new thread for task group: " << group_name;
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 }

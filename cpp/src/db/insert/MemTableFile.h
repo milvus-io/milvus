@@ -31,7 +31,7 @@ namespace engine {
 class MemTableFile {
 
  public:
-    MemTableFile(const std::string &table_id, const meta::MetaPtr &meta, const Options &options);
+    MemTableFile(const std::string &table_id, const meta::MetaPtr &meta, const DBOptions &options);
 
     Status Add(const VectorSourcePtr &source, IDNumbers& vector_ids);
 
@@ -53,7 +53,7 @@ class MemTableFile {
 
     meta::MetaPtr meta_;
 
-    Options options_;
+    DBOptions options_;
 
     size_t current_mem_;
 

@@ -190,7 +190,7 @@ void DoSearch(std::shared_ptr<Connection> conn,
     {
         TimeRecorder rc(phase_name);
         Status stat = conn->Search(TABLE_NAME, record_array, query_range_array, TOP_K, 32, topk_query_result_array);
-        std::cout << "SearchVector function call status: " << stat.ToString() << std::endl;
+        std::cout << "SearchVector function call status: " << stat.message() << std::endl;
     }
     auto finish = std::chrono::high_resolution_clock::now();
     std::cout << "SEARCHVECTOR COST: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
@@ -207,7 +207,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {//connect server
         ConnectParam param = {address, port};
         Status stat = conn->Connect(param);
-        std::cout << "Connect function call status: " << stat.ToString() << std::endl;
+        std::cout << "Connect function call status: " << stat.message() << std::endl;
     }
 
     {//server version
@@ -223,7 +223,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {
         std::vector<std::string> tables;
         Status stat = conn->ShowTables(tables);
-        std::cout << "ShowTables function call status: " << stat.ToString() << std::endl;
+        std::cout << "ShowTables function call status: " << stat.message() << std::endl;
         std::cout << "All tables: " << std::endl;
         for(auto& table : tables) {
             int64_t row_count = 0;
@@ -236,7 +236,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {//create table
         TableSchema tb_schema = BuildTableSchema();
         Status stat = conn->CreateTable(tb_schema);
-        std::cout << "CreateTable function call status: " << stat.ToString() << std::endl;
+        std::cout << "CreateTable function call status: " << stat.message() << std::endl;
         PrintTableSchema(tb_schema);
 
         bool has_table = conn->HasTable(tb_schema.table_name);
@@ -248,7 +248,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     {//describe table
         TableSchema tb_schema;
         Status stat = conn->DescribeTable(TABLE_NAME, tb_schema);
-        std::cout << "DescribeTable function call status: " << stat.ToString() << std::endl;
+        std::cout << "DescribeTable function call status: " << stat.message() << std::endl;
         PrintTableSchema(tb_schema);
     }
 
@@ -279,7 +279,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
             std::cout << "InsertVector cost: " << std::chrono::duration_cast<std::chrono::duration<double>>(finish - start).count() << "s\n";
 
 
-            std::cout << "InsertVector function call status: " << stat.ToString() << std::endl;
+            std::cout << "InsertVector function call status: " << stat.message() << std::endl;
             std::cout << "Returned id array count: " << record_ids.size() << std::endl;
 
             if(search_record_array.size() < NQ) {
@@ -305,16 +305,16 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         index.index_type = IndexType::gpu_ivfsq8;
         index.nlist = 16384;
         Status stat = conn->CreateIndex(index);
-        std::cout << "CreateIndex function call status: " << stat.ToString() << std::endl;
+        std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
 
         IndexParam index2;
         stat = conn->DescribeIndex(TABLE_NAME, index2);
-        std::cout << "DescribeIndex function call status: " << stat.ToString() << std::endl;
+        std::cout << "DescribeIndex function call status: " << stat.message() << std::endl;
     }
 
     {//preload table
         Status stat = conn->PreloadTable(TABLE_NAME);
-        std::cout << "PreloadTable function call status: " << stat.ToString() << std::endl;
+        std::cout << "PreloadTable function call status: " << stat.message() << std::endl;
     }
 
     {//search vectors after build index finish
@@ -326,7 +326,7 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {//delete index
         Status stat = conn->DropIndex(TABLE_NAME);
-        std::cout << "DropIndex function call status: " << stat.ToString() << std::endl;
+        std::cout << "DropIndex function call status: " << stat.message() << std::endl;
 
         int64_t row_count = 0;
         stat = conn->CountTable(TABLE_NAME, row_count);
@@ -339,12 +339,12 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         rg.end_value = CurrentTmDate(-3);
 
         Status stat = conn->DeleteByRange(rg, TABLE_NAME);
-        std::cout << "DeleteByRange function call status: " << stat.ToString() << std::endl;
+        std::cout << "DeleteByRange function call status: " << stat.message() << std::endl;
     }
 
     {//delete table
         Status stat = conn->DropTable(TABLE_NAME);
-        std::cout << "DeleteTable function call status: " << stat.ToString() << std::endl;
+        std::cout << "DeleteTable function call status: " << stat.message() << std::endl;
     }
 
     {//server status
