@@ -73,7 +73,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_server_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere wrapper_knowhere_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
 set(engine_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
@@ -85,7 +85,7 @@ set(engine_files
         ${db_scheduler_files}
         ${metrics_files}
         ${utils_files}
-        ${wrapper_knowhere_files}
+        ${wrapper_files}
         )
 
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
