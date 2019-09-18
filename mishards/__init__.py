@@ -2,7 +2,7 @@ from mishards import settings
 
 from mishards.db_base import DB
 db = DB()
-db.init_db(uri=settings.SQLALCHEMY_DATABASE_URI)
+db.init_db(uri=settings.SQLALCHEMY_DATABASE_URI, echo=settings.SQL_ECHO)
 
 from mishards.connections import ConnectionMgr
 connect_mgr = ConnectionMgr()

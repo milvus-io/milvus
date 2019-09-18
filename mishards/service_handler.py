@@ -4,14 +4,17 @@ import datetime
 from contextlib import contextmanager
 from collections import defaultdict
 
+from sqlalchemy import and_
+
 from concurrent.futures import ThreadPoolExecutor
 from milvus.grpc_gen import milvus_pb2, milvus_pb2_grpc, status_pb2
 from milvus.grpc_gen.milvus_pb2 import TopKQueryResult
 from milvus.client import types
 
-from mishards import (settings, exceptions)
+from mishards import (db, settings, exceptions)
 from mishards.grpc_utils.grpc_args_parser import GrpcArgsParser as Parser
 from mishards.models import Tables, TableFiles
+from mishards.hash_ring import HashRing
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +56,34 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         return self._format_date(start, end)
 
     def _get_routing_file_ids(self, table_id, range_array):
-        return {
-            'milvus-ro-servers-0': {
-                'table_id': table_id,
-                'file_ids': [123]
+        table = db.Session.query(Tables).filter(and_(
+                Tables.table_id==table_id,
+                Tables.state!=Tables.TO_DELETE
+            )).first()
+        logger.error(table)
+
+        if not table:
+            raise exceptions.TableNotFoundError(table_id)
+        files = table.files_to_search(range_array)
+
+        servers = self.conn_mgr.conn_names
+        logger.info('Available servers: {}'.format(servers))
+
+        ring = HashRing(servers)
+
+        routing = {}
+
+        for f in files:
+            target_host = ring.get_node(str(f.id))
+            sub = routing.get(target_host, None)
+            if not sub:
+                routing[target_host] = {
+                    'table_id': table_id,
+                    'file_ids': []
                 }
-        }
+            routing[target_host]['file_ids'].append(str(f.id))
+
+        return routing
 
     def _do_merge(self, files_n_topk_results, topk, reverse=False):
         if not files_n_topk_results:
@@ -88,7 +113,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     def _do_query(self, table_id, table_meta, vectors, topk, nprobe, range_array=None, **kwargs):
         range_array = [self._range_to_date(r) for r in range_array] if range_array else None
         routing = self._get_routing_file_ids(table_id, range_array)
-        logger.debug(routing)
+        logger.info('Routing: {}'.format(routing))
 
         rs = []
         all_topk_results = []

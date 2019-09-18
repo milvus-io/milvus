@@ -250,8 +250,8 @@ class ServiceFounder(object):
         self.listener.daemon = True
         self.listener.start()
         self.event_handler.start()
-        while self.listener.at_start_up:
-            time.sleep(1)
+        # while self.listener.at_start_up:
+        #     time.sleep(1)
 
         self.pod_heartbeater.start()
 

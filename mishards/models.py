@@ -32,8 +32,8 @@ class TableFiles(db.Model):
     date = Column(Integer)
 
     table = relationship(
-        'Table',
-        primaryjoin='and_(foreign(TableFile.table_id) == Table.table_id)',
+        'Tables',
+        primaryjoin='and_(foreign(TableFiles.table_id) == Tables.table_id)',
         backref=backref('files', uselist=True, lazy='dynamic')
     )
 
@@ -57,15 +57,15 @@ class Tables(db.Model):
 
     def files_to_search(self, date_range=None):
         cond = or_(
-                TableFile.file_type==TableFile.FILE_TYPE_RAW,
-                TableFile.file_type==TableFile.FILE_TYPE_TO_INDEX,
-                TableFile.file_type==TableFile.FILE_TYPE_INDEX,
+                TableFiles.file_type==TableFiles.FILE_TYPE_RAW,
+                TableFiles.file_type==TableFiles.FILE_TYPE_TO_INDEX,
+                TableFiles.file_type==TableFiles.FILE_TYPE_INDEX,
         )
         if date_range:
             cond = and_(
                 cond,
                 or_(
-                    and_(TableFile.date>=d[0], TableFile.date<d[1]) for d in date_range
+                    and_(TableFiles.date>=d[0], TableFiles.date<d[1]) for d in date_range
                     )
             )
 

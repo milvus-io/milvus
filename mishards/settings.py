@@ -19,6 +19,7 @@ from mishards.utils.logger_helper import config
 config(LOG_LEVEL, LOG_PATH, LOG_NAME, TIMEZONE)
 
 SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
+SQL_ECHO = env.bool('SQL_ECHO', False)
 
 TIMEOUT = env.int('TIMEOUT', 60)
 MAX_RETRY = env.int('MAX_RETRY', 3)
