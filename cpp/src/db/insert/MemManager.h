@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "db/Status.h"
+#include "utils/Status.h"
 #include "db/Types.h"
 
 #include <set>

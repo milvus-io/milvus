@@ -59,7 +59,7 @@ namespace {
 
 TEST_F(MySqlDBTest, DB_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
@@ -144,7 +144,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
 
 TEST_F(MySqlDBTest, SEARCH_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
@@ -196,7 +196,7 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
 
 TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 
     std::vector<engine::meta::TableSchema> table_schema_array;
     stat = db_->AllTables(table_schema_array);
@@ -241,7 +241,7 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
 
 TEST_F(MySqlDBTest, DELETE_TEST) {
     engine::meta::TableSchema table_info = BuildTableSchema();
-    engine::Status stat = db_->CreateTable(table_info);
+    auto stat = db_->CreateTable(table_info);
 //    std::cout << stat.ToString() << std::endl;
 
     engine::meta::TableSchema table_info_get;
