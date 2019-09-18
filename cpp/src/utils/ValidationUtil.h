@@ -26,6 +26,9 @@ namespace milvus {
 namespace server {
 
 class ValidationUtil {
+private:
+    ValidationUtil() = default;
+
 public:
     static Status
     ValidateTableName(const std::string &table_name);

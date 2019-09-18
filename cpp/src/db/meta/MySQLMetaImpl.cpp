@@ -135,7 +135,7 @@ Status MySQLMetaImpl::Initialize() {
         ENGINE_LOG_DEBUG << "MySQL connection pool: maximum pool size = " << std::to_string(maxPoolSize);
         try {
 
-            if (mode_ != Options::MODE::READ_ONLY) {
+            if (mode_ != DBOptions::MODE::READ_ONLY) {
                 CleanUp();
             }
 
@@ -621,7 +621,7 @@ Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
 
         } //Scoped Connection
 
-        if (mode_ == Options::MODE::CLUSTER) {
+        if (mode_ == DBOptions::MODE::CLUSTER) {
             DeleteTableFiles(table_id);
         }
 

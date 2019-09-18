@@ -27,15 +27,19 @@ namespace milvus {
 namespace server {
 
 class Server {
-   public:
-    static Server* Instance();
+public:
+    static Server &Instance();
 
-    void Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename, const std::string &log_config_file);
+    void Init(int64_t daemonized, const std::string &pid_filename, const std::string &config_filename,
+              const std::string &log_config_file);
+
     int Start();
+
     void Stop();
 
-   private:
+private:
     Server();
+
     ~Server();
 
     void Daemonize();
@@ -43,9 +47,10 @@ class Server {
     ErrorCode LoadConfig();
 
     void StartService();
+
     void StopService();
 
-   private:
+private:
     int64_t daemonized_ = 0;
     int pid_fd = -1;
     std::string pid_filename_;

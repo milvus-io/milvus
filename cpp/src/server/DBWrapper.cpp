@@ -24,6 +24,7 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <omp.h>
+#include <faiss/utils.h>
 
 namespace zilliz {
 namespace milvus {
@@ -35,7 +36,7 @@ DBWrapper::DBWrapper() {
 
 Status DBWrapper::StartService() {
     //db config
-    zilliz::milvus::engine::Options opt;
+    engine::DBOptions opt;
     ConfigNode& db_config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
     opt.meta.backend_uri = db_config.GetValue(CONFIG_DB_URL);
     std::string db_path = db_config.GetValue(CONFIG_DB_PATH);
@@ -51,13 +52,13 @@ Status DBWrapper::StartService() {
     ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
     std::string mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
     if (mode == "single") {
-        opt.mode = zilliz::milvus::engine::Options::MODE::SINGLE;
+        opt.mode = engine::DBOptions::MODE::SINGLE;
     }
     else if (mode == "cluster") {
-        opt.mode = zilliz::milvus::engine::Options::MODE::CLUSTER;
+        opt.mode = engine::DBOptions::MODE::CLUSTER;
     }
     else if (mode == "read_only") {
-        opt.mode = zilliz::milvus::engine::Options::MODE::READ_ONLY;
+        opt.mode = engine::DBOptions::MODE::READ_ONLY;
     }
     else {
         std::cerr << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
@@ -77,6 +78,8 @@ Status DBWrapper::StartService() {
             omp_set_num_threads(omp_thread);
         }
     }
+
+    faiss::distance_compute_blas_threshold = engine_config.GetInt32Value(CONFIG_DCBT, 20);//init faiss global variable
 
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
