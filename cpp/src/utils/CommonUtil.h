@@ -17,10 +17,11 @@
 
 #pragma once
 
+#include "utils/Status.h"
+
 #include <string>
 #include <time.h>
 
-#include "Error.h"
 
 namespace zilliz {
 namespace milvus {
@@ -34,8 +35,8 @@ class CommonUtil {
     static bool IsFileExist(const std::string &path);
     static uint64_t GetFileSize(const std::string &path);
     static bool IsDirectoryExist(const std::string &path);
-    static ErrorCode CreateDirectory(const std::string &path);
-    static ErrorCode DeleteDirectory(const std::string &path);
+    static Status CreateDirectory(const std::string &path);
+    static Status DeleteDirectory(const std::string &path);
 
     static std::string GetExePath();
 

@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "utils/Error.h"
+#include "utils/Status.h"
 
 #include <cstdint>
 #include <string>
@@ -40,7 +40,6 @@ class Server {
 
     void Daemonize();
 
-    static void HandleSignal(int signal);
     ErrorCode LoadConfig();
 
     void StartService();
@@ -48,7 +47,6 @@ class Server {
 
    private:
     int64_t daemonized_ = 0;
-    int64_t running_ = 1;
     int pid_fd = -1;
     std::string pid_filename_;
     std::string config_filename_;

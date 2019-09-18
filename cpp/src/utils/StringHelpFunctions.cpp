@@ -36,11 +36,11 @@ void StringHelpFunctions::TrimStringQuote(std::string &string, const std::string
     }
 }
 
-ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
-                                                      const std::string &delimeter,
-                                                      std::vector<std::string> &result) {
+Status StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
+                                                   const std::string &delimeter,
+                                                   std::vector<std::string> &result) {
     if(str.empty()) {
-        return SERVER_SUCCESS;
+        return Status::OK();
     }
 
     size_t last = 0;
@@ -55,13 +55,13 @@ ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
         result.emplace_back(temp);
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
-    ErrorCode StringHelpFunctions::SplitStringByQuote(const std::string &str,
-                                                      const std::string &delimeter,
-                                                      const std::string &quote,
-                                                      std::vector<std::string> &result) {
+Status StringHelpFunctions::SplitStringByQuote(const std::string &str,
+                                               const std::string &delimeter,
+                                               const std::string &quote,
+                                               std::vector<std::string> &result) {
     if (quote.empty()) {
         return SplitStringByDelimeter(str, delimeter, result);
     }
@@ -88,7 +88,7 @@ ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
         std::string postfix = process_str.substr(last);
         index = postfix.find_first_of(quote, 0);
         if (index == std::string::npos) {
-            return SERVER_UNEXPECTED_ERROR;
+            return Status(SERVER_UNEXPECTED_ERROR, "");
         }
         std::string quoted_text = postfix.substr(0, index);
         append_prefix += quoted_text;
@@ -105,7 +105,7 @@ ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
         result.emplace_back(append_prefix);
 
         if (last == postfix.length()) {
-            return SERVER_SUCCESS;
+            return Status::OK();
         }
 
         process_str = postfix.substr(index + 1);
@@ -117,7 +117,7 @@ ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
         return SplitStringByDelimeter(process_str, delimeter, result);
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 }
