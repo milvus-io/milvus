@@ -21,7 +21,7 @@
 #include "server/ServerConfig.h"
 
 #include "utils/Error.h"
-#include "wrapper/knowhere/vec_index.h"
+#include "src/wrapper/vec_index.h"
 
 using namespace zilliz::milvus;
 

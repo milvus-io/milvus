@@ -1,6 +1,6 @@
 include_directories(${CORE_SOURCE_DIR}/thirdparty)
 include_directories(${CORE_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
-include_directories(${CORE_SOURCE_DIR}/include)
+include_directories(${CORE_SOURCE_DIR}/knowhere)
 include_directories(${CORE_SOURCE_DIR}/thirdparty/jsoncons-0.126.0/include)
 include_directories(/usr/local/cuda/include)
 link_directories(/usr/local/cuda/lib64)
@@ -25,13 +25,13 @@ set(basic_libs
 
 #<IVF-TEST>
 set(ivf_srcs
-        ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/ivf.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/gpu_ivf.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/cloner.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/idmap.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/adapter/structure.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/common/exception.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/common/timer.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/ivf.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu_ivf.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/cloner.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/idmap.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/structure.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/common/exception.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/common/timer.cpp
         utils.cpp
         )
 if(NOT TARGET test_ivf)
@@ -41,13 +41,13 @@ target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
 
 #<IDMAP-TEST>
 set(idmap_srcs
-        ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/idmap.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/ivf.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/cloner.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/gpu_ivf.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/adapter/structure.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/common/exception.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/common/timer.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/idmap.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/ivf.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/cloner.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/gpu_ivf.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/structure.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/common/exception.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/common/timer.cpp
         utils.cpp
         )
 if(NOT TARGET test_idmap)
@@ -57,14 +57,14 @@ target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
 
 #<KDT-TEST>
 set(kdt_srcs
-        ${CORE_SOURCE_DIR}/src/knowhere/index/preprocessor/normalize.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/kdt_parameters.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/index/vector_index/cpu_kdt_rng.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/adapter/structure.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/adapter/sptag.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/common/exception.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/adapter/arrow.cpp
-        ${CORE_SOURCE_DIR}/src/knowhere/common/timer.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/preprocessor/normalize.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/kdt_parameters.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/cpu_kdt_rng.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/structure.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/sptag.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/common/exception.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/arrow.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/common/timer.cpp
         utils.cpp
         )
 if(NOT TARGET test_kdt)
