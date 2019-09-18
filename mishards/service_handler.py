@@ -145,7 +145,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             for res in rs:
                 res.result()
 
-        reverse = table_meta.metric_type == types.MetricType.L2
+        reverse = table_meta.metric_type == types.MetricType.IP
         return self._do_merge(all_topk_results, topk, reverse=reverse)
 
     def CreateTable(self, request, context):
