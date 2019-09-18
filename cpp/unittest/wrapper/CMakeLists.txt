@@ -20,10 +20,10 @@
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-set(wrapper_knowhere_files
-        ${MILVUS_ENGINE_SRC}/wrapper/knowhere/data_transfer.cpp
-        ${MILVUS_ENGINE_SRC}/wrapper/knowhere/vec_impl.cpp
-        ${MILVUS_ENGINE_SRC}/wrapper/knowhere/vec_index.cpp)
+set(wrapper_files
+        ${MILVUS_ENGINE_SRC}/wrapper/data_transfer.cpp
+        ${MILVUS_ENGINE_SRC}/wrapper/vec_impl.cpp
+        ${MILVUS_ENGINE_SRC}/wrapper/vec_index.cpp)
 
 set(util_files
         utils.cpp
@@ -36,7 +36,7 @@ set(knowhere_libs
         cublas
         )
 
-add_executable(wrapper_test wrapper_test.cpp ${wrapper_knowhere_files} ${util_files})
+add_executable(wrapper_test wrapper_test.cpp ${wrapper_files} ${util_files})
 target_link_libraries(wrapper_test ${knowhere_libs} ${unittest_libs})
 
 install(TARGETS wrapper_test DESTINATION unittest)

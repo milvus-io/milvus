@@ -66,7 +66,7 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_server_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
 
-aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper/knowhere wrapper_knowhere_files)
+aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
 set(unittest_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
@@ -90,7 +90,7 @@ set(common_files
         ${db_scheduler_files}
         ${metrics_files}
         ${scheduler_files}
-        ${wrapper_knowhere_files}
+        ${wrapper_files}
         ${helper_files}
         )
 

@@ -23,8 +23,8 @@
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
 
-#include "wrapper/knowhere/vec_index.h"
-#include "wrapper/knowhere/vec_impl.h"
+#include "src/wrapper/vec_index.h"
+#include "src/wrapper/vec_impl.h"
 #include "knowhere/common/exception.h"
 
 #include <stdexcept>
