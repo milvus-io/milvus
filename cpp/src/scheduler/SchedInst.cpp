@@ -33,6 +33,9 @@ std::mutex ResMgrInst::mutex_;
 SchedulerPtr SchedInst::instance = nullptr;
 std::mutex SchedInst::mutex_;
 
+scheduler::JobMgrPtr JobMgrInst::instance = nullptr;
+std::mutex JobMgrInst::mutex_;
+
 void
 load_simple_config() {
     server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
@@ -151,12 +154,14 @@ StartSchedulerService() {
 //    load_advance_config();
     ResMgrInst::GetInstance()->Start();
     SchedInst::GetInstance()->Start();
+    JobMgrInst::GetInstance()->Start();
 }
 
 void
 StopSchedulerService() {
-    ResMgrInst::GetInstance()->Stop();
+    JobMgrInst::GetInstance()->Stop();
     SchedInst::GetInstance()->Stop();
+    ResMgrInst::GetInstance()->Stop();
 }
 }
 }

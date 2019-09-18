@@ -73,6 +73,8 @@ private:
     ResourceMgrPtr res_mgr_ = nullptr;
 };
 
+using JobMgrPtr = std::shared_ptr<JobMgr>;
+
 }
 }
 }
