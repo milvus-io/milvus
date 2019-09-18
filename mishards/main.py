@@ -7,6 +7,7 @@ from mishards import  connect_mgr, grpc_server as server
 
 def main():
     connect_mgr.register('WOSERVER', settings.WOSERVER)
+    connect_mgr.register('TEST', 'tcp://127.0.0.1:19530')
     server.run(port=settings.SERVER_PORT)
     return 0
 

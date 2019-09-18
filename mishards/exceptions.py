@@ -11,3 +11,6 @@ class ConnectionConnectError(BaseException):
 
 class ConnectionNotFoundError(BaseException):
     code = codes.CONNECTTION_NOT_FOUND_CODE
+
+class TableNotFoundError(BaseException):
+    code = codes.TABLE_NOT_FOUND_CODE
