@@ -25,6 +25,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-561 - Add contributing guidelines, code of conduct and README docs
 - MS-567 - Add NOTICE.md
 - MS-569 - Complete the NOTICE.md
+- MS-575 - Add Clang-format & Clang-tidy & Cpplint
 
 # Milvus 0.4.0 (2019-09-12)
 
