@@ -30,7 +30,6 @@
 #include "cloner.h"
 #include "knowhere/adapter/faiss_adopt.h"
 #include "gpu_ivf.h"
-#include "knowhere/common/Log.h"
 
 #include <algorithm>
 
@@ -224,7 +223,6 @@ VectorIndexPtr GPUIVFPQ::CopyGpuToCpu(const Config &config) {
 }
 
 IndexModelPtr GPUIVFSQ::Train(const DatasetPtr &dataset, const Config &config) {
-    KNOWHERE_LOG_WARNING << "lalalalalalala";
     auto nlist = config["nlist"].as<size_t>();
     auto nbits = config["nbits"].as<size_t>(); // TODO(linxj):  gpu only support SQ4 SQ8 SQ16
     gpu_id_ = config.get_with_default("gpu_id", gpu_id_);
