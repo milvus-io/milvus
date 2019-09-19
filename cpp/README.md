@@ -4,9 +4,9 @@ Firstly, welcome, and thanks for your interest in [Milvus](https://milvus.io)! N
 
 ## What is Milvus
 
-Milvus is an open source vector search engine that makes incredibly fast querying speed enhancement over current solutions of massive vector processing. Built on optimized indexing algorithm, it is compatible with major AI/ML models.
+Milvus is an open source vector search engine that supports similarity search of large-scale vectors. Built on optimized indexing algorithm, it is compatible with major AI/ML models.
 
-Milvus was developed by researchers and engineers in ZILLIZ, a tech startup that intends to reinvent data science, with the purpose of providing enterprises with efficient and scalable similarity search and analysis of feature vectors and unstructured data. 
+Milvus was developed by ZILLIZ, a tech startup that intends to reinvent data science, with the purpose of providing enterprises with efficient and scalable similarity search and analysis of feature vectors and unstructured data. 
 
 Milvus provides stable Python and C++ APIs, as well as RESTful API.
 
@@ -182,11 +182,11 @@ $ python3 example.py
 
 Contributions are welcomed and greatly appreciated. If you want to contribute to Milvus, please read the [contribution guidelines](CONTRIBUTING.md). This project adheres to the [code of conduct](CODE OF CONDUCT.md) of Milvus. By participating, you are expected to uphold this code.
 
-We use [GitHub issues] to track issues and bugs. For general questions and discussions, please go to [Milvus Forum]. 
+We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issues and bugs. For general questions and discussions, please go to [Milvus Forum]. 
 
 ## Join the Milvus community
 
-For public discussion of Milvus, please join our [discussion group]. 
+For public discussion of Milvus, please join our [discussion group](milvusio.slack.com). 
 
 ## Milvus Roadmap
 
@@ -194,7 +194,7 @@ Please read our [roadmap](milvus-io/milvus/docs/master/roadmap.md) to learn abou
 
 ## Resources
 
-[Milvus official website](https://milvus.io)
+[Milvus official website](https://www.milvus.io)
 
 [Milvus docs](https://www.milvus.io/docs/en/QuickStart/)
 
@@ -204,7 +204,6 @@ Please read our [roadmap](milvus-io/milvus/docs/master/roadmap.md) to learn abou
 
 [Milvus roadmap](https://www.milvus-io/docs/master/roadmap.md)
 
-[Milvus white paper]
 
 ## License
 
