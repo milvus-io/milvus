@@ -32,8 +32,8 @@ JobMgr::JobMgr(ResourceMgrPtr res_mgr)
 void
 JobMgr::Start() {
     if (not running_) {
-        worker_thread_ = std::thread(&JobMgr::worker_function, this);
         running_ = true;
+        worker_thread_ = std::thread(&JobMgr::worker_function, this);
     }
 }
 
