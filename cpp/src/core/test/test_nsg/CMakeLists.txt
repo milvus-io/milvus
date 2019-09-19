@@ -34,6 +34,7 @@ if(NOT TARGET test_nsg)
             test_nsg.cpp
             ${interface_src}
             ${nsg_src}
+            ${util_srcs}
             )
 endif()
 
