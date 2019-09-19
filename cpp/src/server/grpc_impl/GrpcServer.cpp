@@ -16,7 +16,7 @@
 // under the License.
 
 #include "milvus.grpc.pb.h"
-#include "GrpcMilvusServer.h"
+#include "GrpcServer.h"
 #include "server/ServerConfig.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
@@ -34,7 +34,6 @@
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
-#include <grpcpp/grpcpp.h>
 
 
 namespace zilliz {
@@ -52,18 +51,19 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
         args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
     }
 
-    void UpdatePlugins(std::vector<std::unique_ptr<::grpc::ServerBuilderPlugin>> *
-    plugins) override {}
+    void UpdatePlugins(std::vector<std::unique_ptr<::grpc::ServerBuilderPlugin>> *plugins) override {
+
+    }
 };
 
 
 void
-GrpcMilvusServer::Start() {
-    thread_ptr_ = std::make_shared<std::thread>(&GrpcMilvusServer::StartService, this);
+GrpcServer::Start() {
+    thread_ptr_ = std::make_shared<std::thread>(&GrpcServer::StartService, this);
 }
 
 void
-GrpcMilvusServer::Stop() {
+GrpcServer::Stop() {
     StopService();
     if (thread_ptr_) {
         thread_ptr_->join();
@@ -72,7 +72,7 @@ GrpcMilvusServer::Stop() {
 }
 
 Status
-GrpcMilvusServer::StartService() {
+GrpcServer::StartService() {
     ServerConfig &config = ServerConfig::GetInstance();
     ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
     ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
@@ -102,7 +102,7 @@ GrpcMilvusServer::StartService() {
 }
 
 Status
-GrpcMilvusServer::StopService() {
+GrpcServer::StopService() {
     if (server_ptr_ != nullptr) {
         server_ptr_->Shutdown();
     }

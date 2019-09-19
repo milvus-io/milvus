@@ -37,13 +37,11 @@ class Server {
               const std::string &config_filename,
               const std::string &log_config_file);
 
-    int Start();
-
+    void Start();
     void Stop();
 
  private:
     Server();
-
     ~Server();
 
     void Daemonize();
@@ -51,7 +49,6 @@ class Server {
     ErrorCode LoadConfig();
 
     void StartService();
-
     void StopService();
 
  private:
@@ -60,9 +57,6 @@ class Server {
     std::string pid_filename_;
     std::string config_filename_;
     std::string log_config_file_;
-
-    std::mutex mutex_;
-    bool running_ = true;
 };  // Server
 
 }   // server
