@@ -246,32 +246,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         for query_range in request.query_range_array:
             query_range_array.append(
                 Range(query_range.start_value, query_range.end_value))
-        # except (TableNotFoundException, exceptions.GRPCInvlidArgument) as exc:
-        #     return milvus_pb2.TopKQueryResultList(
-        #         status=status_pb2.Status(error_code=exc.code, reason=exc.message)
-        #     )
-        # except Exception as e:
-        #     return milvus_pb2.TopKQueryResultList(
-        #         status=status_pb2.Status(error_code=status_pb2.UNEXPECTED_ERROR, reason=str(e))
-        #     )
 
         results = self._do_query(table_name, table_meta, query_record_array, topk,
                                          nprobe, query_range_array)
-        # try:
-        #     results = workflow.query_vectors(table_name, table_meta, query_record_array, topk,
-        #                                      nprobe, query_range_array)
-        # except (exceptions.GRPCQueryInvalidRangeException, TableNotFoundException) as exc:
-        #     return milvus_pb2.TopKQueryResultList(
-        #         status=status_pb2.Status(error_code=exc.code, reason=exc.message)
-        #     )
-        # except exceptions.ServiceNotFoundException as exc:
-        #     return milvus_pb2.TopKQueryResultList(
-        #         status=status_pb2.Status(error_code=status_pb2.UNEXPECTED_ERROR, reason=exc.message)
-        #     )
-        # except Exception as e:
-        #     logger.error(e)
-        #     results = workflow.query_vectors(table_name, table_meta, query_record_array,
-        #                                      topk, nprobe, query_range_array)
 
         now = time.time()
         logger.info('SearchVector takes: {}'.format(now - start))
