@@ -21,23 +21,27 @@
 
 #include <cstdint>
 #include <string>
+#include <mutex>
+
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 
 class Server {
-public:
+ public:
     static Server &Instance();
 
-    void Init(int64_t daemonized, const std::string &pid_filename, const std::string &config_filename,
+    void Init(int64_t daemonized,
+              const std::string &pid_filename,
+              const std::string &config_filename,
               const std::string &log_config_file);
 
     int Start();
 
     void Stop();
 
-private:
+ private:
     Server();
 
     ~Server();
@@ -50,12 +54,15 @@ private:
 
     void StopService();
 
-private:
+ private:
     int64_t daemonized_ = 0;
     int pid_fd = -1;
     std::string pid_filename_;
     std::string config_filename_;
     std::string log_config_file_;
+
+    std::mutex mutex_;
+    bool running_ = true;
 };  // Server
 
 }   // server

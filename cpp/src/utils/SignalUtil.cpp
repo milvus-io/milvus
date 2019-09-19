@@ -31,7 +31,7 @@ void SignalUtil::HandleSignal(int signum){
     switch(signum){
         case SIGINT:
         case SIGUSR2:{
-            SERVER_LOG_INFO << "Server received signal:" << std::to_string(signum);
+            SERVER_LOG_INFO << "Server received signal: " << signum;
 
             server::Server& server_ptr = server::Server::Instance();
             server_ptr.Stop();
@@ -39,7 +39,7 @@ void SignalUtil::HandleSignal(int signum){
             exit(0);
         }
         default:{
-            SERVER_LOG_INFO << "Server received critical signal:" << std::to_string(signum);
+            SERVER_LOG_INFO << "Server received critical signal: " << signum;
             SignalUtil::PrintStacktrace();
 
             server::Server& server_ptr = server::Server::Instance();
