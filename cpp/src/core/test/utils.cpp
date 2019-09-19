@@ -18,6 +18,15 @@
 
 #include "utils.h"
 
+INITIALIZE_EASYLOGGINGPP
+
+void InitLog() {
+    el::Configurations defaultConf;
+    defaultConf.setToDefault();
+    defaultConf.set(el::Level::Debug,
+                    el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
+    el::Loggers::reconfigureLogger("default", defaultConf);
+}
 
 void DataGen::Init_with_default() {
     Generate(dim, nb, nq);
