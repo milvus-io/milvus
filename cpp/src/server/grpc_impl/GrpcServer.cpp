@@ -16,7 +16,7 @@
 // under the License.
 
 #include "milvus.grpc.pb.h"
-#include "GrpcMilvusServer.h"
+#include "GrpcServer.h"
 #include "server/ServerConfig.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
@@ -34,7 +34,6 @@
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
-#include <grpcpp/grpcpp.h>
 
 
 namespace zilliz {
@@ -42,7 +41,6 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-static std::unique_ptr<::grpc::Server> server;
 
 constexpr long MESSAGE_SIZE = -1;
 
@@ -53,18 +51,28 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
         args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
     }
 
-    void UpdatePlugins(std::vector<std::unique_ptr<::grpc::ServerBuilderPlugin>> *
-    plugins) override {}
+    void UpdatePlugins(std::vector<std::unique_ptr<::grpc::ServerBuilderPlugin>> *plugins) override {
+
+    }
 };
 
 
-Status
-GrpcMilvusServer::StartService() {
-    if (server != nullptr) {
-        std::cout << "stop service!\n";
-        StopService();
-    }
+void
+GrpcServer::Start() {
+    thread_ptr_ = std::make_shared<std::thread>(&GrpcServer::StartService, this);
+}
 
+void
+GrpcServer::Stop() {
+    StopService();
+    if (thread_ptr_) {
+        thread_ptr_->join();
+        thread_ptr_ = nullptr;
+    }
+}
+
+Status
+GrpcServer::StartService() {
     ServerConfig &config = ServerConfig::GetInstance();
     ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
     ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
@@ -87,16 +95,16 @@ GrpcMilvusServer::StartService() {
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
 
-    server = builder.BuildAndStart();
-    server->Wait();
+    server_ptr_ = builder.BuildAndStart();
+    server_ptr_->Wait();
 
     return Status::OK();
 }
 
 Status
-GrpcMilvusServer::StopService() {
-    if (server != nullptr) {
-        server->Shutdown();
+GrpcServer::StopService() {
+    if (server_ptr_ != nullptr) {
+        server_ptr_->Shutdown();
     }
 
     return Status::OK();

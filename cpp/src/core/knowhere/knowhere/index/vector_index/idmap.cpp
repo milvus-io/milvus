@@ -224,9 +224,9 @@ void GPUIDMAP::LoadImpl(const BinarySet &index_binary) {
 
         if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_) ){
             ResScope rs(res, gpu_id_, false);
-            res_ = res;
             auto device_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id_, index);
             index_.reset(device_index);
+            res_ = res;
         } else {
             KNOWHERE_THROW_MSG("Load error, can't get gpu resource");
         }

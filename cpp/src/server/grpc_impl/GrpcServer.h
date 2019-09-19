@@ -21,43 +21,38 @@
 
 #include <cstdint>
 #include <string>
+#include <thread>
+#include <grpcpp/grpcpp.h>
 
 
 namespace zilliz {
 namespace milvus {
 namespace server {
+namespace grpc {
 
-class Server {
+class GrpcServer {
  public:
-    static Server &Instance();
-
-    void Init(int64_t daemonized,
-              const std::string &pid_filename,
-              const std::string &config_filename,
-              const std::string &log_config_file);
+    static GrpcServer &GetInstance() {
+        static GrpcServer grpc_server;
+        return grpc_server;
+    }
 
     void Start();
     void Stop();
 
  private:
-    Server();
-    ~Server();
+    GrpcServer() = default;
+    ~GrpcServer() = default;
 
-    void Daemonize();
-
-    ErrorCode LoadConfig();
-
-    void StartService();
-    void StopService();
+    Status StartService();
+    Status StopService();
 
  private:
-    int64_t daemonized_ = 0;
-    int pid_fd = -1;
-    std::string pid_filename_;
-    std::string config_filename_;
-    std::string log_config_file_;
-};  // Server
+    std::unique_ptr<::grpc::Server> server_ptr_;
+    std::shared_ptr<std::thread> thread_ptr_;
+};
 
-}   // server
-}   // sql
-}   // zilliz
+}
+}
+}
+}

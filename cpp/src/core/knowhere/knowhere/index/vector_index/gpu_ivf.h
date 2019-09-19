@@ -18,118 +18,18 @@
 
 #pragma once
 
-#include <faiss/gpu/StandardGpuResources.h>
 
 #include "ivf.h"
-#include "src/utils/BlockingQueue.h"
+#include "FaissGpuResourceMgr.h"
 
 
 namespace zilliz {
 namespace knowhere {
 
-struct Resource {
-    explicit Resource(std::shared_ptr<faiss::gpu::StandardGpuResources> &r): faiss_res(r) {
-        static int64_t global_id = 0;
-        id = global_id++;
-    }
-
-    std::shared_ptr<faiss::gpu::StandardGpuResources> faiss_res;
-    int64_t id;
-    std::mutex mutex;
-};
-using ResPtr = std::shared_ptr<Resource>;
-using ResWPtr = std::weak_ptr<Resource>;
-
-class FaissGpuResourceMgr {
- public:
-    friend class ResScope;
-
- public:
-    using ResBQ = zilliz::milvus::server::BlockingQueue<ResPtr>;
-
-    struct DeviceParams {
-        int64_t temp_mem_size = 0;
-        int64_t pinned_mem_size = 0;
-        int64_t resource_num = 2;
-    };
-
- public:
-    static FaissGpuResourceMgr &
-    GetInstance();
-
-    // Free gpu resource, avoid cudaGetDevice error when deallocate.
-    // this func should be invoke before main return
-    void
-    Free();
-
-    void
-    AllocateTempMem(ResPtr &resource, const int64_t& device_id, const int64_t& size);
-
-    void
-    InitDevice(int64_t device_id,
-               int64_t pin_mem_size = 0,
-               int64_t temp_mem_size = 0,
-               int64_t res_num = 2);
-
-    void
-    InitResource();
-
-    // allocate gpu memory invoke by build or copy_to_gpu
-    ResPtr
-    GetRes(const int64_t &device_id, const int64_t& alloc_size = 0);
-
-    // allocate gpu memory before search
-    // this func will return True if the device is idle and exists an idle resource.
-    //bool
-    //GetRes(const int64_t& device_id, ResPtr &res, const int64_t& alloc_size = 0);
-
-    void
-    MoveToIdle(const int64_t &device_id, const ResPtr& res);
-
-    void
-    Dump();
-
- protected:
-    bool is_init = false;
-
-    std::map<int64_t ,std::unique_ptr<std::mutex>> mutex_cache_;
-    std::map<int64_t, DeviceParams> devices_params_;
-    std::map<int64_t, ResBQ> idle_map_;
-};
-
-class ResScope {
- public:
-    ResScope(ResPtr &res, const int64_t& device_id, const bool& isown)
-        : resource(res), device_id(device_id), move(true), own(isown) {
-        if (isown) FaissGpuResourceMgr::GetInstance().mutex_cache_[device_id]->lock();
-        res->mutex.lock();
-    }
-
-    // specif for search
-    // get the ownership of gpuresource and gpu
-    ResScope(ResPtr &res, const int64_t &device_id)
-        : resource(res), device_id(device_id), move(false), own(true) {
-        FaissGpuResourceMgr::GetInstance().mutex_cache_[device_id]->lock();
-        res->mutex.lock();
-    }
-
-    ~ResScope() {
-        if (own) FaissGpuResourceMgr::GetInstance().mutex_cache_[device_id]->unlock();
-        if (move) FaissGpuResourceMgr::GetInstance().MoveToIdle(device_id, resource);
-        resource->mutex.unlock();
-    }
-
- private:
-    ResPtr resource;
-    int64_t device_id;
-    bool move = true;
-    bool own = false;
-};
-
 class GPUIndex {
  public:
     explicit GPUIndex(const int &device_id) : gpu_id_(device_id) {}
-    GPUIndex(const int& device_id, ResPtr resource): gpu_id_(device_id), res_(std::move(resource)){}
+    GPUIndex(const int& device_id, const ResPtr& resource): gpu_id_(device_id), res_(resource){}
 
     virtual VectorIndexPtr CopyGpuToCpu(const Config &config) = 0;
     virtual VectorIndexPtr CopyGpuToGpu(const int64_t &device_id, const Config &config) = 0;
@@ -139,7 +39,7 @@ class GPUIndex {
 
  protected:
     int64_t gpu_id_;
-    ResPtr res_ = nullptr;
+    ResWPtr res_;
 };
 
 class GPUIVF : public IVF, public GPUIndex {

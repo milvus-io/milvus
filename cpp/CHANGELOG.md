@@ -5,6 +5,8 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.0 (TODO)
 
 ## Bug
+- MS-568 - Fix gpuresource free error
+- MS-572 - Milvus crash when get SIGINT
 - MS-577 - Unittest Query randomly hung
 
 ## Improvement
@@ -23,6 +25,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-554 - Change license to Apache 2.0
 - MS-561 - Add contributing guidelines, code of conduct and README docs
 - MS-567 - Add NOTICE.md
+- MS-569 - Complete the NOTICE.md
+- MS-575 - Add Clang-format & Clang-tidy & Cpplint
 
 # Milvus 0.4.0 (2019-09-12)
 
@@ -141,6 +145,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-523 - Config file validation
 - MS-539 - Remove old task code
 - MS-546 - Add simple mode resource_config
+- MS-570 - Add prometheus docker-compose file
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
