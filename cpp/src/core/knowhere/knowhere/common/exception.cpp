@@ -19,6 +19,7 @@
 #include <cstdio>
 
 #include "exception.h"
+#include "Log.h"
 
 namespace zilliz {
 namespace knowhere {
