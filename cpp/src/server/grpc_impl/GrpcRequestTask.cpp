@@ -23,7 +23,7 @@
 #include "utils/ValidationUtil.h"
 #include "../DBWrapper.h"
 #include "version.h"
-#include "GrpcMilvusServer.h"
+#include "GrpcServer.h"
 #include "db/Utils.h"
 #include "scheduler/SchedInst.h"
 //#include <gperftools/profiler.h>

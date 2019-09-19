@@ -32,6 +32,7 @@ set(ivf_srcs
         ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/structure.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/exception.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/timer.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissGpuResourceMgr.cpp
         utils.cpp
         )
 if(NOT TARGET test_ivf)
@@ -48,6 +49,7 @@ set(idmap_srcs
         ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/structure.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/exception.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/timer.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissGpuResourceMgr.cpp
         utils.cpp
         )
 if(NOT TARGET test_idmap)
