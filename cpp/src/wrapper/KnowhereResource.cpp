@@ -17,7 +17,7 @@
 
 
 #include "KnowhereResource.h"
-#include "knowhere/index/vector_index/FaissGpuResourceMgr.h"
+#include "knowhere/index/vector_index/utils/FaissGpuResourceMgr.h"
 #include "server/ServerConfig.h"
 
 #include <map>

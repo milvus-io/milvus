@@ -18,19 +18,35 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include <string>
+#include <vector>
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+using KDTParameter = std::pair<std::string, std::string>;
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+class KDTParameterMgr {
+ public:
+    const std::vector<KDTParameter> &
+    GetKDTParameters();
 
-}
-}
-}
+ public:
+    static KDTParameterMgr &
+    GetInstance() {
+        static KDTParameterMgr instance;
+        return instance;
+    }
+
+    KDTParameterMgr(const KDTParameterMgr &) = delete;
+    KDTParameterMgr &operator=(const KDTParameterMgr &) = delete;
+ private:
+    KDTParameterMgr();
+
+ private:
+    std::vector<KDTParameter> kdt_parameters_;
+};
+
+} // namespace knowhere
+} // namespace zilliz
