@@ -62,6 +62,7 @@ class RpcHandlerTest : public testing::Test {
         res_mgr->Connect("cpu", "gtx1660", PCIE);
         res_mgr->Start();
         engine::SchedInst::GetInstance()->Start();
+        engine::JobMgrInst::GetInstance()->Start();
 
         engine::DBOptions opt;
 
@@ -105,6 +106,7 @@ class RpcHandlerTest : public testing::Test {
     void
     TearDown() override {
         server::DBWrapper::GetInstance().StopService();
+        engine::JobMgrInst::GetInstance()->Stop();
         engine::ResMgrInst::GetInstance()->Stop();
         engine::SchedInst::GetInstance()->Stop();
         boost::filesystem::remove_all("/tmp/milvus_test");
