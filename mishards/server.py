@@ -31,7 +31,6 @@ class Server:
         woserver = settings.WOSERVER if not settings.TESTING else settings.TESTING_WOSERVER
         url = urlparse(woserver)
         ip = socket.gethostbyname(url.hostname)
-        logger.error(ip)
         socket.inet_pton(socket.AF_INET, ip)
         self.conn_mgr.register('WOSERVER',
                 '{}://{}:{}'.format(url.scheme, ip, url.port))
