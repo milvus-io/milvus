@@ -18,19 +18,37 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include <memory>
+#include "knowhere/common/Dataset.h"
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+extern ArrayPtr
+ConstructInt64ArraySmart(uint8_t *data, int64_t size);
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+extern ArrayPtr
+ConstructFloatArraySmart(uint8_t *data, int64_t size);
 
-}
+extern TensorPtr
+ConstructFloatTensorSmart(uint8_t *data, int64_t size, std::vector<int64_t> shape);
+
+extern ArrayPtr
+ConstructInt64Array(uint8_t *data, int64_t size);
+
+extern ArrayPtr
+ConstructFloatArray(uint8_t *data, int64_t size);
+
+extern TensorPtr
+ConstructFloatTensor(uint8_t *data, int64_t size, std::vector<int64_t> shape);
+
+extern FieldPtr
+ConstructInt64Field(const std::string &name);
+
+extern FieldPtr
+ConstructFloatField(const std::string &name);
+
+
 }
 }

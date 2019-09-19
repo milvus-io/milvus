@@ -23,7 +23,7 @@
 #include <cstdio>
 #include <fstream>
 
-#include "knowhere/adapter/structure.h"
+#include "knowhere/adapter/Structure.h"
 #include "knowhere/common/Log.h"
 
 class DataGen  {

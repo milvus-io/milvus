@@ -15,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "knowhere/index/vector_index/ivf.h"
-#include "knowhere/index/vector_index/idmap.h"
-#include "knowhere/index/vector_index/gpu_ivf.h"
-#include "knowhere/index/vector_index/cpu_kdt_rng.h"
-#include "knowhere/index/vector_index/nsg_index.h"
-#include "knowhere/common/exception.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexKDT.h"
+#include "knowhere/index/vector_index/IndexNSG.h"
+#include "knowhere/common/Exception.h"
 
 #include "vec_index.h"
 #include "vec_impl.h"

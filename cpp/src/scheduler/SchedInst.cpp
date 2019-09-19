@@ -19,7 +19,7 @@
 #include "SchedInst.h"
 #include "server/ServerConfig.h"
 #include "ResourceFactory.h"
-#include "knowhere/index/vector_index/gpu_ivf.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "Utils.h"
 
 
