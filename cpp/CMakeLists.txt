@@ -21,6 +21,8 @@
 cmake_minimum_required(VERSION 3.14)
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 MACRO (GET_CURRENT_TIME CURRENT_TIME)
     execute_process(COMMAND "date" +"%Y-%m-%d %H:%M.%S" OUTPUT_VARIABLE ${CURRENT_TIME})
 ENDMACRO (GET_CURRENT_TIME)
@@ -40,6 +42,10 @@ endif()
 
 set(MILVUS_VERSION "${GIT_BRANCH_NAME}")
 string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]" MILVUS_VERSION "${MILVUS_VERSION}")
+
+set(CLANG_FORMAT_VERSION "6.0")
+find_package(ClangTools)
+set(BUILD_SUPPORT_DIR "${CMAKE_SOURCE_DIR}/build-support")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(BUILD_TYPE "Release")
@@ -111,8 +117,6 @@ else()
     include_directories(${MYSQL_INCLUDE_DIR})
 endif()
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-
 set(MILVUS_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 set(MILVUS_BINARY_DIR ${PROJECT_BINARY_DIR})
 set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
@@ -152,3 +156,9 @@ install(FILES
         conf/log_config.conf
         DESTINATION
         conf)
+
+add_custom_target(format ${BUILD_SUPPORT_DIR}/run_clang_format.py
+  ${CLANG_FORMAT_BIN}
+  ${BUILD_SUPPORT_DIR}/clang_format_exclusions.txt
+  ${CMAKE_CURRENT_SOURCE_DIR}/src)
+

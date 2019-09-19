@@ -62,6 +62,7 @@ class RpcHandlerTest : public testing::Test {
         res_mgr->Connect("cpu", "gtx1660", PCIE);
         res_mgr->Start();
         engine::SchedInst::GetInstance()->Start();
+        engine::JobMgrInst::GetInstance()->Start();
 
         engine::DBOptions opt;
 
@@ -105,6 +106,7 @@ class RpcHandlerTest : public testing::Test {
     void
     TearDown() override {
         server::DBWrapper::GetInstance().StopService();
+        engine::JobMgrInst::GetInstance()->Stop();
         engine::ResMgrInst::GetInstance()->Stop();
         engine::SchedInst::GetInstance()->Stop();
         boost::filesystem::remove_all("/tmp/milvus_test");
@@ -146,7 +148,7 @@ std::string CurrentTmDate(int64_t offset_day = 0) {
 
 }
 
-TEST_F(RpcHandlerTest, HasTableTest) {
+TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::TableName request;
     ::milvus::grpc::BoolReply reply;
@@ -158,7 +160,7 @@ TEST_F(RpcHandlerTest, HasTableTest) {
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 }
 
-TEST_F(RpcHandlerTest, IndexTest) {
+TEST_F(RpcHandlerTest, INDEX_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::IndexParam request;
     ::milvus::grpc::Status response;
@@ -194,7 +196,7 @@ TEST_F(RpcHandlerTest, IndexTest) {
     handler->DropIndex(&context, &table_name, &status);
 }
 
-TEST_F(RpcHandlerTest, InsertTest) {
+TEST_F(RpcHandlerTest, INSERT_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::InsertParam request;
     ::milvus::grpc::Status response;
@@ -213,7 +215,7 @@ TEST_F(RpcHandlerTest, InsertTest) {
     ASSERT_EQ(vector_ids.vector_id_array_size(), VECTOR_COUNT);
 }
 
-TEST_F(RpcHandlerTest, SearchTest) {
+TEST_F(RpcHandlerTest, SEARCH_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::SearchParam request;
     ::milvus::grpc::TopKQueryResultList response;
@@ -281,7 +283,7 @@ TEST_F(RpcHandlerTest, SearchTest) {
     handler->SearchInFiles(&context, &search_in_files_param, &response);
 }
 
-TEST_F(RpcHandlerTest, TablesTest) {
+TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::TableSchema tableschema;
     ::milvus::grpc::Status response;
@@ -387,7 +389,7 @@ TEST_F(RpcHandlerTest, TablesTest) {
     ASSERT_EQ(error_code, ::milvus::grpc::ErrorCode::SUCCESS);
 }
 
-TEST_F(RpcHandlerTest, CmdTest) {
+TEST_F(RpcHandlerTest, CMD_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::Command command;
     command.set_cmd("version");
@@ -401,7 +403,7 @@ TEST_F(RpcHandlerTest, CmdTest) {
     handler->Cmd(&context, &command, &reply);
 }
 
-TEST_F(RpcHandlerTest, DeleteByRangeTest) {
+TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
     ::grpc::ServerContext context;
     ::milvus::grpc::DeleteByRangeParam request;
     ::milvus::grpc::Status status;
@@ -459,7 +461,7 @@ protected:
 
 }
 
-TEST_F(RpcSchedulerTest, BaseTaskTest){
+TEST_F(RpcSchedulerTest, BASE_TASK_TEST){
     auto status = task_ptr->Execute();
     ASSERT_TRUE(status.ok());
 
