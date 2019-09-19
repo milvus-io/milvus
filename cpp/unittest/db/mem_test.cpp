@@ -63,8 +63,8 @@ void BuildVectors(int64_t n, std::vector<float> &vectors) {
     vectors.resize(n * TABLE_DIM);
     float *data = vectors.data();
     for (int i = 0; i < n; i++) {
-        for (int j = 0; j < TABLE_DIM; j++) data[TABLE_DIM * i + j] = drand48();
-        data[TABLE_DIM * i] += i / 2000.;
+        for (int j = 0; j < TABLE_DIM; j++)
+            data[TABLE_DIM * i + j] = drand48();
     }
 }
 }
@@ -224,39 +224,42 @@ TEST_F(MemManagerTest2, SERIAL_INSERT_SEARCH_TEST) {
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
-    std::map<int64_t, std::vector<float>> search_vectors;
-    {
-        engine::IDNumbers vector_ids;
-        int64_t nb = 100000;
-        std::vector<float> xb;
-        BuildVectors(nb, xb);
-        stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
-        ASSERT_TRUE(stat.ok());
+    int64_t nb = 100000;
+    std::vector<float> xb;
+    BuildVectors(nb, xb);
 
-        std::this_thread::sleep_for(std::chrono::seconds(3));
-
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<int64_t> dis(0, nb - 1);
-
-        int64_t num_query = 10;
-        for (int64_t i = 0; i < num_query; ++i) {
-            int64_t index = dis(gen);
-            std::vector<float> search;
-            for (int64_t j = 0; j < TABLE_DIM; j++) {
-                search.push_back(xb[index * TABLE_DIM + j]);
-            }
-            search_vectors.insert(std::make_pair(vector_ids[index], search));
-        }
+    engine::IDNumbers vector_ids;
+    for(int64_t i = 0; i < nb; i++) {
+        vector_ids.push_back(i);
     }
 
-    int k = 10;
+    stat = db_->InsertVectors(TABLE_NAME, nb, xb.data(), vector_ids);
+    ASSERT_TRUE(stat.ok());
+
+    std::this_thread::sleep_for(std::chrono::seconds(3));//ensure raw data write to disk
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int64_t> dis(0, nb - 1);
+
+    int64_t num_query = 10;
+    std::map<int64_t, std::vector<float>> search_vectors;
+    for (int64_t i = 0; i < num_query; ++i) {
+        int64_t index = dis(gen);
+        std::vector<float> search;
+        for (int64_t j = 0; j < TABLE_DIM; j++) {
+            search.push_back(xb[index * TABLE_DIM + j]);
+        }
+        search_vectors.insert(std::make_pair(vector_ids[index], search));
+    }
+
+    int topk = 10, nprobe = 10;
     for (auto &pair : search_vectors) {
         auto &search = pair.second;
         engine::QueryResults results;
-        stat = db_->Query(TABLE_NAME, k, 1, 10, search.data(), results);
+        stat = db_->Query(TABLE_NAME, topk, 1, nprobe, search.data(), results);
         ASSERT_EQ(results[0][0].first, pair.first);
-        ASSERT_LT(results[0][0].second, 0.00001);
+        ASSERT_LT(results[0][0].second, 1e-4);
     }
 }
 
