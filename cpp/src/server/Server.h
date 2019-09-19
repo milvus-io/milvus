@@ -22,24 +22,25 @@
 #include <cstdint>
 #include <string>
 
+
 namespace zilliz {
 namespace milvus {
 namespace server {
 
 class Server {
-public:
+ public:
     static Server &Instance();
 
-    void Init(int64_t daemonized, const std::string &pid_filename, const std::string &config_filename,
+    void Init(int64_t daemonized,
+              const std::string &pid_filename,
+              const std::string &config_filename,
               const std::string &log_config_file);
 
-    int Start();
-
+    void Start();
     void Stop();
 
-private:
+ private:
     Server();
-
     ~Server();
 
     void Daemonize();
@@ -47,10 +48,9 @@ private:
     ErrorCode LoadConfig();
 
     void StartService();
-
     void StopService();
 
-private:
+ private:
     int64_t daemonized_ = 0;
     int pid_fd = -1;
     std::string pid_filename_;

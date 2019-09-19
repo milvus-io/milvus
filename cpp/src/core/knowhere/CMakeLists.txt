@@ -48,6 +48,7 @@ set(index_srcs
         knowhere/index/vector_index/nsg/nsg_io.cpp
         knowhere/index/vector_index/nsg/utils.cpp
         knowhere/index/vector_index/cloner.cpp
+        knowhere/index/vector_index/FaissGpuResourceMgr.cpp
         )
 
 set(depend_libs
