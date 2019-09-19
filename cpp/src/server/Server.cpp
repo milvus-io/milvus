@@ -42,7 +42,7 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-Server&
+Server &
 Server::Instance() {
     static Server server;
     return server;
@@ -203,6 +203,10 @@ Server::Start() {
             std::cout << "Milvus server start successfully." << std::endl;
             StartService();
 
+            while (running_) {
+                sleep(10);
+            }
+
         } catch (std::exception &ex) {
             std::cerr << "Milvus server encounter exception: " << std::string(ex.what())
                       << "Is another server instance running?";
@@ -210,7 +214,6 @@ Server::Start() {
         }
     } while (false);
 
-    Stop();
     return 0;
 }
 
@@ -242,6 +245,10 @@ Server::Stop() {
     }
 
     StopService();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        running_ = false;
+    }
 
     std::cerr << "Milvus server is closed!" << std::endl;
 }
@@ -264,12 +271,12 @@ Server::StartService() {
     engine::KnowhereResource::Initialize();
     engine::StartSchedulerService();
     DBWrapper::GetInstance().StartService();
-    grpc::GrpcMilvusServer::StartService();
+    grpc::GrpcMilvusServer::GetInstance().Start();
 }
 
 void
 Server::StopService() {
-    grpc::GrpcMilvusServer::StopService();
+    grpc::GrpcMilvusServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
     engine::StopSchedulerService();
     engine::KnowhereResource::Finalize();

@@ -42,7 +42,6 @@ namespace milvus {
 namespace server {
 namespace grpc {
 
-static std::unique_ptr<::grpc::Server> server;
 
 constexpr long MESSAGE_SIZE = -1;
 
@@ -58,13 +57,22 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
 };
 
 
+void
+GrpcMilvusServer::Start() {
+    thread_ptr_ = std::make_shared<std::thread>(&GrpcMilvusServer::StartService, this);
+}
+
+void
+GrpcMilvusServer::Stop() {
+    StopService();
+    if (thread_ptr_) {
+        thread_ptr_->join();
+        thread_ptr_ = nullptr;
+    }
+}
+
 Status
 GrpcMilvusServer::StartService() {
-    if (server != nullptr) {
-        std::cout << "stop service!\n";
-        StopService();
-    }
-
     ServerConfig &config = ServerConfig::GetInstance();
     ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
     ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
@@ -87,16 +95,16 @@ GrpcMilvusServer::StartService() {
     builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
 
-    server = builder.BuildAndStart();
-    server->Wait();
+    server_ptr_ = builder.BuildAndStart();
+    server_ptr_->Wait();
 
     return Status::OK();
 }
 
 Status
 GrpcMilvusServer::StopService() {
-    if (server != nullptr) {
-        server->Shutdown();
+    if (server_ptr_ != nullptr) {
+        server_ptr_->Shutdown();
     }
 
     return Status::OK();

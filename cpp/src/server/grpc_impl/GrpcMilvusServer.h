@@ -21,6 +21,8 @@
 
 #include <cstdint>
 #include <string>
+#include <thread>
+#include <grpcpp/grpcpp.h>
 
 namespace zilliz {
 namespace milvus {
@@ -28,12 +30,25 @@ namespace server {
 namespace grpc {
 
 class GrpcMilvusServer {
-public:
-    static Status
-    StartService();
+ public:
+    static GrpcMilvusServer& GetInstance() {
+        static GrpcMilvusServer grpc_server;
+        return grpc_server;
+    }
 
-    static Status
-    StopService();
+    void Start();
+    void Stop();
+
+ private:
+    GrpcMilvusServer() = default;
+    ~GrpcMilvusServer() = default;
+
+    Status StartService();
+    Status StopService();
+
+ private:
+    std::unique_ptr<::grpc::Server> server_ptr_;
+    std::shared_ptr<std::thread> thread_ptr_;
 };
 
 }
