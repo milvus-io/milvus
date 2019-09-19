@@ -24,6 +24,7 @@
 #include <fstream>
 
 #include "knowhere/adapter/structure.h"
+#include "knowhere/common/Log.h"
 
 class DataGen  {
  protected:
@@ -64,6 +65,8 @@ extern void GenBase(const int64_t &dim,
                     const int64_t &nb,
                     float *xb,
                     int64_t *ids);
+
+extern void InitLog();
 
 zilliz::knowhere::DatasetPtr
 generate_dataset(int64_t nb, int64_t dim, float *xb, long *ids);
