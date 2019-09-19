@@ -24,14 +24,14 @@ class Connection:
     def __str__(self):
         return 'Connection:name=\"{}\";uri=\"{}\"'.format(self.name, self.uri)
 
-    def _connect(self):
+    def _connect(self, metadata=None):
         try:
             self.conn.connect(uri=self.uri)
         except Exception as e:
             if not self.error_handlers:
-                raise exceptions.ConnectionConnectError(e)
+                raise exceptions.ConnectionConnectError(message=str(e), metadata=metadata)
             for handler in self.error_handlers:
-                handler(e)
+                handler(e, metadata=metadata)
 
     @property
     def can_retry(self):
@@ -47,14 +47,15 @@ class Connection:
         else:
             logger.warn('{} is retrying {}'.format(self, self.retried))
 
-    def on_connect(self):
+    def on_connect(self, metadata=None):
         while not self.connected and self.can_retry:
             self.retried += 1
             self.on_retry()
-            self._connect()
+            self._connect(metadata=metadata)
 
         if not self.can_retry and not self.connected:
-            raise exceptions.ConnectionConnectError(message='Max retry {} reached!'.format(self.max_retry))
+            raise exceptions.ConnectionConnectError(message='Max retry {} reached!'.format(self.max_retry,
+                metadata=metadata))
 
         self.retried = 0
 
@@ -81,14 +82,15 @@ class ConnectionMgr:
     def conn_names(self):
         return set(self.metas.keys()) - set(['WOSERVER'])
 
-    def conn(self, name, throw=False):
+    def conn(self, name, metadata, throw=False):
         c = self.conns.get(name, None)
         if not c:
             url = self.metas.get(name, None)
             if not url:
                 if not throw:
                     return None
-                raise exceptions.ConnectionNotFoundError('Connection {} not found'.format(name))
+                raise exceptions.ConnectionNotFoundError(message='Connection {} not found'.format(name),
+                        metadata=metadata)
             this_conn = Connection(name=name, uri=url, max_retry=settings.MAX_RETRY)
             threaded = {
                     threading.get_ident() : this_conn
@@ -103,7 +105,8 @@ class ConnectionMgr:
             if not url:
                 if not throw:
                     return None
-                raise exceptions.ConnectionNotFoundError('Connection {} not found'.format(name))
+                raise exceptions.ConnectionNotFoundError('Connection {} not found'.format(name),
+                        metadata=metadata)
             this_conn = Connection(name=name, uri=url, max_retry=settings.MAX_RETRY)
             c[tid] = this_conn
             return this_conn

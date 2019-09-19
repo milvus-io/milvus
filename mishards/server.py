@@ -2,6 +2,7 @@ import logging
 import grpc
 import time
 import socket
+import inspect
 from urllib.parse import urlparse
 from functools import wraps
 from concurrent import futures
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 class Server:
     def __init__(self, conn_mgr, port=19530, max_workers=10, **kwargs):
         self.pre_run_handlers = set()
+        self.error_handler = {}
         self.exit_flag = False
         self.port = int(port)
         self.conn_mgr = conn_mgr
@@ -39,6 +41,14 @@ class Server:
         logger.info('Regiterring {} into server pre_run_handlers'.format(func))
         self.pre_run_handlers.add(func)
         return func
+
+    def errorhandler(self, exception):
+        if inspect.isclass(exception) and issubclass(exception, Exception):
+            def wrapper(func):
+                self.error_handlers[exception] = func
+                return func
+            return wrapper
+        return exception
 
     def on_pre_run(self):
         for handler in self.pre_run_handlers:
