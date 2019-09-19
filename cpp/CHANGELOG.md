@@ -5,6 +5,7 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.0 (TODO)
 
 ## Bug
+- MS-568 - Fix gpuresource free error
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
