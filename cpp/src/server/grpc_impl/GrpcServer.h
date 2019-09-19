@@ -24,15 +24,16 @@
 #include <thread>
 #include <grpcpp/grpcpp.h>
 
+
 namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
 
-class GrpcMilvusServer {
+class GrpcServer {
  public:
-    static GrpcMilvusServer& GetInstance() {
-        static GrpcMilvusServer grpc_server;
+    static GrpcServer &GetInstance() {
+        static GrpcServer grpc_server;
         return grpc_server;
     }
 
@@ -40,8 +41,8 @@ class GrpcMilvusServer {
     void Stop();
 
  private:
-    GrpcMilvusServer() = default;
-    ~GrpcMilvusServer() = default;
+    GrpcServer() = default;
+    ~GrpcServer() = default;
 
     Status StartService();
     Status StopService();
