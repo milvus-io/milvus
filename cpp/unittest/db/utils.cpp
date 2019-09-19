@@ -25,9 +25,7 @@
 #include "cache/CpuCacheMgr.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
-#include "server/ServerConfig.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/utils/FaissGpuResourceMgr.h"
+#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 
 INITIALIZE_EASYLOGGINGPP
 

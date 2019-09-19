@@ -20,7 +20,7 @@
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/utils/Cloner.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 
 #include "vec_impl.h"
 #include "data_transfer.h"

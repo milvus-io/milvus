@@ -42,13 +42,19 @@ set(index_srcs
         knowhere/index/vector_index/IndexIDMAP.cpp
         knowhere/index/vector_index/IndexIVF.cpp
         knowhere/index/vector_index/IndexGPUIVF.cpp
-        knowhere/index/vector_index/utils/KDTParameterMgr.cpp
+        knowhere/index/vector_index/helpers/KDTParameterMgr.cpp
         knowhere/index/vector_index/IndexNSG.cpp
         knowhere/index/vector_index/nsg/NSG.cpp
         knowhere/index/vector_index/nsg/NSGIO.cpp
         knowhere/index/vector_index/nsg/NSGHelper.cpp
-        knowhere/index/vector_index/utils/Cloner.cpp
-        knowhere/index/vector_index/utils/FaissGpuResourceMgr.cpp
+        knowhere/index/vector_index/helpers/Cloner.cpp
+        knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
+        knowhere/index/vector_index/IndexIVFSQ.cpp
+        knowhere/index/vector_index/IndexGPUIVFSQ.cpp
+        knowhere/index/vector_index/IndexIVFPQ.cpp
+        knowhere/index/vector_index/IndexGPUIVFPQ.cpp
+        knowhere/index/vector_index/FaissBaseIndex.cpp
+        knowhere/index/vector_index/helpers/FaissIO.cpp
         )
 
 set(depend_libs

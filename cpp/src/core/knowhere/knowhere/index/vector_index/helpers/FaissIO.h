@@ -18,18 +18,31 @@
 
 #pragma once
 
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
-#include "NSG.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
-
+#include <faiss/AuxIndexStructures.h>
 
 namespace zilliz {
 namespace knowhere {
-namespace algo {
 
-extern void write_index(NsgIndex* index, MemoryIOWriter& writer);
-extern NsgIndex* read_index(MemoryIOReader& reader);
+struct MemoryIOWriter : public faiss::IOWriter {
+    uint8_t *data_ = nullptr;
+    size_t total = 0;
+    size_t rp = 0;
 
-}
-}
-}
+    size_t
+    operator()(const void *ptr, size_t size, size_t nitems) override;
+};
+
+struct MemoryIOReader : public faiss::IOReader {
+    uint8_t *data_;
+    size_t rp = 0;
+    size_t total = 0;
+
+    size_t
+    operator()(void *ptr, size_t size, size_t nitems) override;
+};
+
+} // knowhere
+} // zilliz
+
+
+

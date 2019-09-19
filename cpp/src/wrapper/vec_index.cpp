@@ -16,8 +16,12 @@
 // under the License.
 
 #include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
+#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
+#include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/common/Exception.h"

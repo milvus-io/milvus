@@ -20,18 +20,17 @@
 #include <faiss/gpu/GpuIndexFlat.h>
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
-#include <faiss/gpu/GpuIndexIVFPQ.h>
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/IndexIVFPQ.h>
 #include <faiss/index_io.h>
 
 
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/utils/Cloner.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/adapter/VectorAdapter.h"
 #include "IndexGPUIVF.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 
-#include <algorithm>
 
 namespace zilliz {
 namespace knowhere {
@@ -185,84 +184,6 @@ void GPUIVF::Add(const DatasetPtr &dataset, const Config &config) {
     else {
         KNOWHERE_THROW_MSG("Add IVF can't get gpu resource");
     }
-}
-
-IndexModelPtr GPUIVFPQ::Train(const DatasetPtr &dataset, const Config &config) {
-    auto nlist = config["nlist"].as<size_t>();
-    auto M = config["M"].as<size_t>();        // number of subquantizers(subvectors)
-    auto nbits = config["nbits"].as<size_t>();// number of bit per subvector index
-    auto gpu_num = config.get_with_default("gpu_id", gpu_id_);
-    auto metric_type = config["metric_type"].as_string() == "L2" ?
-                       faiss::METRIC_L2 : faiss::METRIC_L2; // IP not support.
-
-    GETTENSOR(dataset)
-
-    // TODO(linxj): set device here.
-    // TODO(linxj): set gpu resource here.
-    faiss::gpu::StandardGpuResources res;
-    faiss::gpu::GpuIndexIVFPQ device_index(&res, dim, nlist, M, nbits, metric_type);
-    device_index.train(rows, (float *) p_data);
-
-    std::shared_ptr<faiss::Index> host_index = nullptr;
-    host_index.reset(faiss::gpu::index_gpu_to_cpu(&device_index));
-
-    return std::make_shared<IVFIndexModel>(host_index);
-}
-
-std::shared_ptr<faiss::IVFSearchParameters> GPUIVFPQ::GenParams(const Config &config) {
-    auto params = std::make_shared<faiss::IVFPQSearchParameters>();
-    params->nprobe = config.get_with_default("nprobe", size_t(1));
-    //params->scan_table_threshold = 0;
-    //params->polysemous_ht = 0;
-    //params->max_codes = 0;
-
-    return params;
-}
-
-VectorIndexPtr GPUIVFPQ::CopyGpuToCpu(const Config &config) {
-    KNOWHERE_THROW_MSG("not support yet");
-}
-
-IndexModelPtr GPUIVFSQ::Train(const DatasetPtr &dataset, const Config &config) {
-    auto nlist = config["nlist"].as<size_t>();
-    auto nbits = config["nbits"].as<size_t>(); // TODO(linxj):  gpu only support SQ4 SQ8 SQ16
-    gpu_id_ = config.get_with_default("gpu_id", gpu_id_);
-    auto metric_type = config["metric_type"].as_string() == "L2" ?
-                       faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
-
-    GETTENSOR(dataset)
-
-    std::stringstream index_type;
-    index_type << "IVF" << nlist << "," << "SQ" << nbits;
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), metric_type);
-
-    auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
-    if (temp_resource != nullptr) {
-        ResScope rs(temp_resource, gpu_id_, true);
-        auto device_index = faiss::gpu::index_cpu_to_gpu(temp_resource->faiss_res.get(), gpu_id_, build_index);
-        device_index->train(rows, (float *) p_data);
-
-        std::shared_ptr<faiss::Index> host_index = nullptr;
-        host_index.reset(faiss::gpu::index_gpu_to_cpu(device_index));
-
-        delete device_index;
-        delete build_index;
-
-        return std::make_shared<IVFIndexModel>(host_index);
-    } else {
-        KNOWHERE_THROW_MSG("Build IVFSQ can't get gpu resource");
-    }
-}
-
-VectorIndexPtr GPUIVFSQ::CopyGpuToCpu(const Config &config) {
-    std::lock_guard<std::mutex> lk(mutex_);
-
-    faiss::Index *device_index = index_.get();
-    faiss::Index *host_index = faiss::gpu::index_gpu_to_cpu(device_index);
-
-    std::shared_ptr<faiss::Index> new_index;
-    new_index.reset(host_index);
-    return std::make_shared<IVFSQ>(new_index);
 }
 
 void GPUIndex::SetGpuDevice(const int &gpu_id) {

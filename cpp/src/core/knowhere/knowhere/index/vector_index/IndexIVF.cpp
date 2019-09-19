@@ -238,7 +238,7 @@ void IVF::Seal() {
 }
 
 
-IVFIndexModel::IVFIndexModel(std::shared_ptr<faiss::Index> index) : BasicIndex(std::move(index)) {}
+IVFIndexModel::IVFIndexModel(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {}
 
 BinarySet IVFIndexModel::Serialize() {
     if (!index_ || !index_->is_trained) {
@@ -257,159 +257,8 @@ void IVFIndexModel::SealImpl() {
     // do nothing
 }
 
-IndexModelPtr IVFSQ::Train(const DatasetPtr &dataset, const Config &config) {
-    auto nlist = config["nlist"].as<size_t>();
-    auto nbits = config["nbits"].as<size_t>(); // TODO(linxj): only support SQ4 SQ6 SQ8 SQ16
-    auto metric_type = config["metric_type"].as_string() == "L2" ?
-                       faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
 
-    GETTENSOR(dataset)
 
-    std::stringstream index_type;
-    index_type << "IVF" << nlist << "," << "SQ" << nbits;
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), metric_type);
-    build_index->train(rows, (float *) p_data);
-
-    std::shared_ptr<faiss::Index> ret_index;
-    ret_index.reset(build_index);
-    return std::make_shared<IVFIndexModel>(ret_index);
-}
-
-VectorIndexPtr IVFSQ::Clone_impl(const std::shared_ptr<faiss::Index> &index) {
-    return std::make_shared<IVFSQ>(index);
-}
-
-VectorIndexPtr IVFSQ::CopyCpuToGpu(const int64_t &device_id, const Config &config) {
-    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)){
-        ResScope rs(res, device_id, false);
-        faiss::gpu::GpuClonerOptions option;
-        option.allInGpu = true;
-
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get(), &option);
-
-        std::shared_ptr<faiss::Index> device_index;
-        device_index.reset(gpu_index);
-        return std::make_shared<GPUIVFSQ>(device_index, device_id, res);
-    } else {
-        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
-    }
-}
-
-IndexModelPtr IVFPQ::Train(const DatasetPtr &dataset, const Config &config) {
-    auto nlist = config["nlist"].as<size_t>();
-    auto M = config["M"].as<size_t>();        // number of subquantizers(subvector)
-    auto nbits = config["nbits"].as<size_t>();// number of bit per subvector index
-    auto metric_type = config["metric_type"].as_string() == "L2" ?
-                       faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
-
-    GETTENSOR(dataset)
-
-    faiss::Index *coarse_quantizer = new faiss::IndexFlat(dim, metric_type);
-    auto index = std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim, nlist, M, nbits);
-    index->train(rows, (float *) p_data);
-
-    return std::make_shared<IVFIndexModel>(index);
-}
-
-std::shared_ptr<faiss::IVFSearchParameters> IVFPQ::GenParams(const Config &config) {
-    auto params = std::make_shared<faiss::IVFPQSearchParameters>();
-    params->nprobe = config.get_with_default("nprobe", size_t(1));
-    //params->scan_table_threshold = 0;
-    //params->polysemous_ht = 0;
-    //params->max_codes = 0;
-
-    return params;
-}
-
-VectorIndexPtr IVFPQ::Clone_impl(const std::shared_ptr<faiss::Index> &index) {
-    return std::make_shared<IVFPQ>(index);
-}
-
-BasicIndex::BasicIndex(std::shared_ptr<faiss::Index> index) : index_(std::move(index)) {}
-
-BinarySet BasicIndex::SerializeImpl() {
-    try {
-        faiss::Index *index = index_.get();
-
-        SealImpl();
-
-        MemoryIOWriter writer;
-        faiss::write_index(index, &writer);
-        auto data = std::make_shared<uint8_t>();
-        data.reset(writer.data_);
-
-        BinarySet res_set;
-        // TODO(linxj): use virtual func Name() instead of raw string.
-        res_set.Append("IVF", data, writer.rp);
-        return res_set;
-    } catch (std::exception &e) {
-        KNOWHERE_THROW_MSG(e.what());
-    }
-}
-
-void BasicIndex::LoadImpl(const BinarySet &index_binary) {
-    auto binary = index_binary.GetByName("IVF");
-
-    MemoryIOReader reader;
-    reader.total = binary->size;
-    reader.data_ = binary->data.get();
-
-    faiss::Index *index = faiss::read_index(&reader);
-
-    index_.reset(index);
-}
-
-void BasicIndex::SealImpl() {
-// TODO(linxj): enable
-//#ifdef ZILLIZ_FAISS
-    faiss::Index *index = index_.get();
-    auto idx = dynamic_cast<faiss::IndexIVF *>(index);
-    if (idx != nullptr) {
-        idx->to_readonly();
-    }
-    //else {
-    //    KNOHWERE_ERROR_MSG("Seal failed");
-    //}
-//#endif
-}
-
-// TODO(linxj): Get From Config File
-static size_t magic_num = 2;
-size_t MemoryIOWriter::operator()(const void *ptr, size_t size, size_t nitems) {
-    auto total_need = size * nitems + rp;
-
-    if (!data_) { // data == nullptr
-        total = total_need * magic_num;
-        rp = size * nitems;
-        data_ = new uint8_t[total];
-        memcpy((void *) (data_), ptr, rp);
-    }
-
-    if (total_need > total) {
-        total = total_need * magic_num;
-        auto new_data = new uint8_t[total];
-        memcpy((void *) new_data, (void *) data_, rp);
-        delete data_;
-        data_ = new_data;
-
-        memcpy((void *) (data_ + rp), ptr, size * nitems);
-        rp = total_need;
-    } else {
-        memcpy((void *) (data_ + rp), ptr, size * nitems);
-        rp = total_need;
-    }
-
-    return nitems;
-}
-
-size_t MemoryIOReader::operator()(void *ptr, size_t size, size_t nitems) {
-    if (rp >= total) return 0;
-    size_t nremain = (total - rp) / size;
-    if (nremain < nitems) nitems = nremain;
-    memcpy(ptr, (void *) (data_ + rp), size * nitems);
-    rp += size * nitems;
-    return nitems;
-}
 
 
 }

@@ -18,6 +18,8 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "Cloner.h"
@@ -43,7 +45,7 @@ VectorIndexPtr CopyCpuToGpu(const VectorIndexPtr &index, const int64_t &device_i
     if (auto cpu_index = std::dynamic_pointer_cast<IVFSQ>(index)) {
         return cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVFPQ>(index)) {
-        KNOWHERE_THROW_MSG("IVFPQ not support tranfer to gpu");
+        KNOWHERE_THROW_MSG("IVFPQ not support transfer to gpu");
     } else if (auto cpu_index = std::dynamic_pointer_cast<IVF>(index)) {
         return cpu_index->CopyCpuToGpu(device_id, config);
     } else if (auto cpu_index = std::dynamic_pointer_cast<IDMAP>(index)) {
