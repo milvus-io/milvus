@@ -87,13 +87,17 @@ main(int argc, char *argv[]) {
                 break;
             }
 
-            case 'd':start_daemonized = 1;
+            case 'd':
+                start_daemonized = 1;
                 break;
-            case 'h':print_help(app_name);
+            case 'h':
+                print_help(app_name);
                 return EXIT_SUCCESS;
-            case '?':print_help(app_name);
+            case '?':
+                print_help(app_name);
                 return EXIT_FAILURE;
-            default:print_help(app_name);
+            default:
+                print_help(app_name);
                 break;
         }
     }
