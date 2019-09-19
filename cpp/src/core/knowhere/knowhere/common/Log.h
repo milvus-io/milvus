@@ -15,28 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
+
 #pragma once
 
-#include "utils/Status.h"
-
-#include <cstdint>
-#include <string>
+#include "utils/easylogging++.h"
 
 namespace zilliz {
-namespace milvus {
-namespace server {
-namespace grpc {
+namespace knowhere {
+#define KNOWHERE_DOMAIN_NAME "[KNOWHERE] "
+#define KNOWHERE_ERROR_TEXT "KNOWHERE Error:"
 
-class GrpcMilvusServer {
-public:
-    static Status
-    StartService();
-
-    static Status
-    StopService();
-};
-
-}
-}
-}
-}
+#define KNOWHERE_LOG_TRACE LOG(TRACE) << KNOWHERE_DOMAIN_NAME
+#define KNOWHERE_LOG_DEBUG LOG(DEBUG) << KNOWHERE_DOMAIN_NAME
+#define KNOWHERE_LOG_INFO LOG(INFO) << KNOWHERE_DOMAIN_NAME
+#define KNOWHERE_LOG_WARNING LOG(WARNING) << KNOWHERE_DOMAIN_NAME
+#define KNOWHERE_LOG_ERROR LOG(ERROR) << KNOWHERE_DOMAIN_NAME
+#define KNOWHERE_LOG_FATAL LOG(FATAL) << KNOWHERE_DOMAIN_NAME
+} // namespace knowhere
+} // namespace zilliz

@@ -17,7 +17,7 @@
 
 #include <thread>
 #include "Server.h"
-#include "server/grpc_impl/GrpcMilvusServer.h"
+#include "server/grpc_impl/GrpcServer.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
@@ -42,7 +42,7 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-Server&
+Server &
 Server::Instance() {
     static Server server;
     return server;
@@ -154,71 +154,61 @@ Server::Daemonize() {
     }
 }
 
-int
+void
 Server::Start() {
-
     if (daemonized_) {
         Daemonize();
     }
 
-    do {
-        try {
-            // Read config file
-            if (LoadConfig() != SERVER_SUCCESS) {
-                return 1;
-            }
-
-            //log path is defined by LoadConfig, so InitLog must be called after LoadConfig
-            ServerConfig &config = ServerConfig::GetInstance();
-            ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-
-            std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
-            if (time_zone.length() == 3) {
-                time_zone = "CUT";
-            } else {
-                int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
-                if (time_bias == 0)
-                    time_zone = "CUT";
-                else if (time_bias > 0) {
-                    time_zone = "CUT" + std::to_string(-time_bias);
-                } else {
-                    time_zone = "CUT+" + std::to_string(-time_bias);
-                }
-            }
-
-            if (setenv("TZ", time_zone.c_str(), 1) != 0) {
-                return -1;
-            }
-            tzset();
-
-            InitLog(log_config_file_);
-
-            // Handle Signal
-            signal(SIGINT, SignalUtil::HandleSignal);
-            signal(SIGHUP, SignalUtil::HandleSignal);
-            signal(SIGTERM, SignalUtil::HandleSignal);
-            server::Metrics::GetInstance().Init();
-            server::SystemInfo::GetInstance().Init();
-
-            std::cout << "Milvus server start successfully." << std::endl;
-            StartService();
-
-        } catch (std::exception &ex) {
-            std::cerr << "Milvus server encounter exception: " << std::string(ex.what())
-                      << "Is another server instance running?";
-            break;
+    try {
+        /* Read config file */
+        if (LoadConfig() != SERVER_SUCCESS) {
+            std::cerr << "Milvus server fail to load config file" << std::endl;
+            return;
         }
-    } while (false);
 
-    Stop();
-    return 0;
+        /* log path is defined in Config file, so InitLog must be called after LoadConfig */
+        ServerConfig &config = ServerConfig::GetInstance();
+        ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
+
+        std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
+        if (time_zone.length() == 3) {
+            time_zone = "CUT";
+        } else {
+            int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
+            if (time_bias == 0)
+                time_zone = "CUT";
+            else if (time_bias > 0) {
+                time_zone = "CUT" + std::to_string(-time_bias);
+            } else {
+                time_zone = "CUT+" + std::to_string(-time_bias);
+            }
+        }
+
+        if (setenv("TZ", time_zone.c_str(), 1) != 0) {
+            std::cerr << "Fail to setenv" << std::endl;
+            return;
+        }
+        tzset();
+
+        InitLog(log_config_file_);
+
+        server::Metrics::GetInstance().Init();
+        server::SystemInfo::GetInstance().Init();
+
+        std::cout << "Milvus server start successfully." << std::endl;
+        StartService();
+
+    } catch (std::exception &ex) {
+        std::cerr << "Milvus server encounter exception: " << ex.what();
+    }
 }
 
 void
 Server::Stop() {
     std::cerr << "Milvus server is going to shutdown ..." << std::endl;
 
-    // Unlock and close lockfile
+    /* Unlock and close lockfile */
     if (pid_fd != -1) {
         int ret = lockf(pid_fd, F_ULOCK, 0);
         if (ret != 0) {
@@ -232,7 +222,7 @@ Server::Stop() {
         }
     }
 
-    // Try to delete lockfile
+    /* delete lockfile */
     if (!pid_filename_.empty()) {
         int ret = unlink(pid_filename_.c_str());
         if (ret != 0) {
@@ -264,12 +254,12 @@ Server::StartService() {
     engine::KnowhereResource::Initialize();
     engine::StartSchedulerService();
     DBWrapper::GetInstance().StartService();
-    grpc::GrpcMilvusServer::StartService();
+    grpc::GrpcServer::GetInstance().Start();
 }
 
 void
 Server::StopService() {
-    grpc::GrpcMilvusServer::StopService();
+    grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
     engine::StopSchedulerService();
     engine::KnowhereResource::Finalize();

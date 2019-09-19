@@ -67,9 +67,9 @@ void GPUIVF::set_index_model(IndexModelPtr model) {
     auto host_index = std::static_pointer_cast<IVFIndexModel>(model);
     if (auto gpures = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_)) {
         ResScope rs(gpures, gpu_id_, false);
-        res_ = gpures;
-        auto device_index = faiss::gpu::index_cpu_to_gpu(res_->faiss_res.get(), gpu_id_, host_index->index_.get());
+        auto device_index = faiss::gpu::index_cpu_to_gpu(gpures->faiss_res.get(), gpu_id_, host_index->index_.get());
         index_.reset(device_index);
+        res_ = gpures;
     } else {
         KNOWHERE_THROW_MSG("load index model error, can't get gpu_resource");
     }
@@ -114,9 +114,9 @@ void GPUIVF::LoadImpl(const BinarySet &index_binary) {
 
         if (auto temp_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_)) {
             ResScope rs(temp_res, gpu_id_, false);
-            res_ = temp_res;
-            auto device_index = faiss::gpu::index_cpu_to_gpu(res_->faiss_res.get(), gpu_id_, index);
+            auto device_index = faiss::gpu::index_cpu_to_gpu(temp_res->faiss_res.get(), gpu_id_, index);
             index_.reset(device_index);
+            res_ = temp_res;
         } else {
             KNOWHERE_THROW_MSG("Load error, can't get gpu resource");
         }
@@ -176,12 +176,13 @@ VectorIndexPtr GPUIVF::CopyGpuToGpu(const int64_t &device_id, const Config &conf
     auto host_index = CopyGpuToCpu(config);
     return std::static_pointer_cast<IVF>(host_index)->CopyCpuToGpu(device_id, config);
 }
+
 void GPUIVF::Add(const DatasetPtr &dataset, const Config &config) {
-    auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
-    if (temp_resource != nullptr) {
-        ResScope rs(temp_resource, gpu_id_, true);
+    if (auto spt = res_.lock()) {
+        ResScope rs(res_, gpu_id_);
         IVF::Add(dataset, config);
-    } else {
+    }
+    else {
         KNOWHERE_THROW_MSG("Add IVF can't get gpu resource");
     }
 }
@@ -262,108 +263,6 @@ VectorIndexPtr GPUIVFSQ::CopyGpuToCpu(const Config &config) {
     std::shared_ptr<faiss::Index> new_index;
     new_index.reset(host_index);
     return std::make_shared<IVFSQ>(new_index);
-}
-
-FaissGpuResourceMgr &FaissGpuResourceMgr::GetInstance() {
-    static FaissGpuResourceMgr instance;
-    return instance;
-}
-
-void FaissGpuResourceMgr::AllocateTempMem(ResPtr &resource,
-                                          const int64_t &device_id,
-                                          const int64_t &size) {
-    if (size) {
-        resource->faiss_res->setTempMemory(size);
-    }
-    else {
-        auto search = devices_params_.find(device_id);
-        if (search != devices_params_.end()) {
-            resource->faiss_res->setTempMemory(search->second.temp_mem_size);
-        }
-        // else do nothing. allocate when use.
-    }
-}
-
-void FaissGpuResourceMgr::InitDevice(int64_t device_id,
-                                     int64_t pin_mem_size,
-                                     int64_t temp_mem_size,
-                                     int64_t res_num) {
-    DeviceParams params;
-    params.pinned_mem_size = pin_mem_size;
-    params.temp_mem_size = temp_mem_size;
-    params.resource_num = res_num;
-
-    devices_params_.emplace(device_id, params);
-}
-
-void FaissGpuResourceMgr::InitResource() {
-    if(is_init) return ;
-
-    is_init = true;
-
-    //std::cout << "InitResource" << std::endl;
-    for(auto& device : devices_params_) {
-        auto& device_id = device.first;
-
-        mutex_cache_.emplace(device_id, std::make_unique<std::mutex>());
-
-        //std::cout << "Device Id: " << device_id << std::endl;
-        auto& device_param = device.second;
-        auto& bq = idle_map_[device_id];
-
-        for (int64_t i = 0; i < device_param.resource_num; ++i) {
-            //std::cout << "Resource Id: " << i << std::endl;
-            auto raw_resource = std::make_shared<faiss::gpu::StandardGpuResources>();
-
-            // TODO(linxj): enable set pinned memory
-            auto res_wrapper = std::make_shared<Resource>(raw_resource);
-            AllocateTempMem(res_wrapper, device_id, 0);
-
-            bq.Put(res_wrapper);
-        }
-    }
-    //std::cout << "End initResource" << std::endl;
-}
-
-ResPtr FaissGpuResourceMgr::GetRes(const int64_t &device_id,
-                                   const int64_t &alloc_size) {
-    InitResource();
-
-    auto finder = idle_map_.find(device_id);
-    if (finder != idle_map_.end()) {
-        auto& bq = finder->second;
-        auto&& resource = bq.Take();
-        AllocateTempMem(resource, device_id, alloc_size);
-        return resource;
-    }
-    return nullptr;
-}
-
-void FaissGpuResourceMgr::MoveToIdle(const int64_t &device_id, const ResPtr &res) {
-    auto finder = idle_map_.find(device_id);
-    if (finder != idle_map_.end()) {
-        auto& bq = finder->second;
-        bq.Put(res);
-    }
-}
-
-void FaissGpuResourceMgr::Free() {
-    for (auto &item : idle_map_) {
-        auto& bq = item.second;
-        while (!bq.Empty()) {
-            bq.Take();
-        }
-    }
-    is_init = false;
-}
-
-void
-FaissGpuResourceMgr::Dump() {
-    for (auto &item : idle_map_) {
-        auto& bq = item.second;
-        std::cout << "device_id: " << item.first
-                  << ", resource count:" << bq.Size();
-    }
 }
 
 void GPUIndex::SetGpuDevice(const int &gpu_id) {

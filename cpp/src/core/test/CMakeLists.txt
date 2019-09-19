@@ -22,6 +22,9 @@ set(basic_libs
         gomp gfortran pthread
         )
 
+set(util_srcs
+        ${MILVUS_ENGINE_SRC}/utils/easylogging++.cc
+        )
 
 #<IVF-TEST>
 set(ivf_srcs
@@ -32,10 +35,11 @@ set(ivf_srcs
         ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/structure.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/exception.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/timer.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissGpuResourceMgr.cpp
         utils.cpp
         )
 if(NOT TARGET test_ivf)
-    add_executable(test_ivf test_ivf.cpp ${ivf_srcs})
+    add_executable(test_ivf test_ivf.cpp ${ivf_srcs} ${util_srcs})
 endif()
 target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
 
@@ -48,10 +52,11 @@ set(idmap_srcs
         ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/structure.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/exception.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/timer.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissGpuResourceMgr.cpp
         utils.cpp
         )
 if(NOT TARGET test_idmap)
-    add_executable(test_idmap test_idmap.cpp ${idmap_srcs})
+    add_executable(test_idmap test_idmap.cpp ${idmap_srcs} ${util_srcs})
 endif()
 target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
 
@@ -68,7 +73,7 @@ set(kdt_srcs
         utils.cpp
         )
 if(NOT TARGET test_kdt)
-    add_executable(test_kdt test_kdt.cpp ${kdt_srcs})
+    add_executable(test_kdt test_kdt.cpp ${kdt_srcs} ${util_srcs})
 endif()
 target_link_libraries(test_kdt
         SPTAGLibStatic
