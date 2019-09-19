@@ -25,6 +25,7 @@
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "IndexIDMAP.h"
 
 

@@ -18,18 +18,35 @@
 
 #pragma once
 
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
-#include "NSG.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
+#include <memory>
+
+#include <faiss/Index.h>
+
+#include "knowhere/common/BinarySet.h"
 
 
 namespace zilliz {
 namespace knowhere {
-namespace algo {
 
-extern void write_index(NsgIndex* index, MemoryIOWriter& writer);
-extern NsgIndex* read_index(MemoryIOReader& reader);
+class FaissBaseIndex {
+ protected:
+    explicit FaissBaseIndex(std::shared_ptr<faiss::Index> index);
 
-}
-}
-}
+    virtual BinarySet
+    SerializeImpl();
+
+    virtual void
+    LoadImpl(const BinarySet &index_binary);
+
+    virtual void
+    SealImpl();
+
+ protected:
+    std::shared_ptr<faiss::Index> index_ = nullptr;
+};
+
+} // knowhere
+} // zilliz
+
+
+

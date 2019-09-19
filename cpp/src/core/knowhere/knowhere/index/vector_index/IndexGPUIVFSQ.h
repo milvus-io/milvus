@@ -18,18 +18,26 @@
 
 #pragma once
 
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
-#include "NSG.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
+#include "IndexGPUIVF.h"
 
 
 namespace zilliz {
 namespace knowhere {
-namespace algo {
 
-extern void write_index(NsgIndex* index, MemoryIOWriter& writer);
-extern NsgIndex* read_index(MemoryIOReader& reader);
+class GPUIVFSQ : public GPUIVF {
+public:
+    explicit GPUIVFSQ(const int &device_id) : GPUIVF(device_id) {}
 
-}
-}
-}
+    explicit GPUIVFSQ(std::shared_ptr<faiss::Index> index, const int64_t &device_id, ResPtr &resource)
+            : GPUIVF(std::move(index), device_id, resource) {};
+
+    IndexModelPtr
+    Train(const DatasetPtr &dataset, const Config &config) override;
+
+    VectorIndexPtr
+    CopyGpuToCpu(const Config &config) override;
+};
+
+} // knowhere
+} // zilliz
+

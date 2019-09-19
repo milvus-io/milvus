@@ -18,18 +18,30 @@
 
 #pragma once
 
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
-#include "NSG.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
-
+#include "IndexIVF.h"
 
 namespace zilliz {
 namespace knowhere {
-namespace algo {
 
-extern void write_index(NsgIndex* index, MemoryIOWriter& writer);
-extern NsgIndex* read_index(MemoryIOReader& reader);
+class IVFPQ : public IVF {
+public:
+    explicit IVFPQ(std::shared_ptr<faiss::Index> index) : IVF(std::move(index)) {}
 
-}
-}
-}
+    IVFPQ() = default;
+
+    IndexModelPtr
+    Train(const DatasetPtr &dataset, const Config &config) override;
+
+protected:
+    std::shared_ptr<faiss::IVFSearchParameters>
+    GenParams(const Config &config) override;
+
+    VectorIndexPtr
+    Clone_impl(const std::shared_ptr<faiss::Index> &index) override;
+};
+
+} // knowhere
+} // zilliz
+
+
+

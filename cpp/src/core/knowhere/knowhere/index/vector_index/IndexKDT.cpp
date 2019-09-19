@@ -25,9 +25,9 @@
 #undef mkdir
 
 #include "IndexKDT.h"
-#include "knowhere/index/vector_index/utils/Definitions.h"
+#include "knowhere/index/vector_index/helpers/Definitions.h"
 //#include "knowhere/index/preprocessor/normalize.h"
-#include "knowhere/index/vector_index/utils/KDTParameterMgr.h"
+#include "knowhere/index/vector_index/helpers/KDTParameterMgr.h"
 #include "knowhere/adapter/SptagAdapter.h"
 #include "knowhere/common/Exception.h"
 
