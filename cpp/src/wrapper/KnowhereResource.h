@@ -19,7 +19,6 @@
 #pragma once
 
 #include "utils/Error.h"
-#include "knowhere/index/vector_index/gpu_ivf.h"
 
 namespace zilliz {
 namespace milvus {
