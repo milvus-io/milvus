@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "knowhere/index/vector_index/utils/Definitions.h"
+#include "knowhere/index/vector_index/helpers/Definitions.h"
 #include "SptagAdapter.h"
 #include "Structure.h"
 

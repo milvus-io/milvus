@@ -25,10 +25,10 @@
 namespace zilliz {
 namespace knowhere {
 
-class IDMAP : public VectorIndex, public BasicIndex {
+class IDMAP : public VectorIndex, public FaissBaseIndex {
  public:
-    IDMAP() : BasicIndex(nullptr) {};
-    explicit IDMAP(std::shared_ptr<faiss::Index> index) : BasicIndex(std::move(index)) {};
+    IDMAP() : FaissBaseIndex(nullptr) {};
+    explicit IDMAP(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {};
     BinarySet Serialize() override;
     void Load(const BinarySet &index_binary) override;
     void Train(const Config &config);
