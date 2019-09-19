@@ -18,19 +18,24 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include <memory>
+
+#include "knowhere/common/Dataset.h"
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+class Preprocessor {
+ public:
+    virtual DatasetPtr
+    Preprocess(const DatasetPtr &input) = 0;
+};
 
-}
-}
-}
+
+using PreprocessorPtr = std::shared_ptr<Preprocessor>;
+
+
+} // namespace knowhere
+} // namespace zilliz

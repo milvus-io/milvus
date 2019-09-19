@@ -18,18 +18,21 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include <x86intrin.h>
+#include <iostream>
+
+#include <faiss/AutoTune.h>
+
+#include "NSG.h"
+#include "knowhere/common/Config.h"
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
+namespace algo {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
-
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+extern int InsertIntoPool(Neighbor *addr, unsigned K, Neighbor nn);
+extern float calculate(const float *a, const float *b, unsigned size);
 
 }
 }

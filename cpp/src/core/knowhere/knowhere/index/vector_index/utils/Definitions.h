@@ -18,19 +18,15 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
-
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
+namespace definition {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+#define META_ROWS ("rows")
+#define META_DIM ("dimension")
+#define META_K ("k")
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
-
-}
-}
-}
+} // definition
+} // knowhere
+} // zilliz
