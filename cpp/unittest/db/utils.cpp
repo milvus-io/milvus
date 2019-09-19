@@ -21,6 +21,8 @@
 #include <boost/filesystem.hpp>
 
 #include "utils.h"
+#include "cache/GpuCacheMgr.h"
+#include "cache/CpuCacheMgr.h"
 #include "db/DBFactory.h"
 #include "db/Options.h"
 #include "server/ServerConfig.h"
@@ -63,6 +65,8 @@ void BaseTest::SetUp() {
 }
 
 void BaseTest::TearDown() {
+    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->ClearCache();
+    zilliz::milvus::cache::GpuCacheMgr::GetInstance(0)->ClearCache();
     zilliz::knowhere::FaissGpuResourceMgr::GetInstance().Free();
 }
 
@@ -100,11 +104,11 @@ void DBTest::TearDown() {
     db_->Stop();
     db_->DropAll();
 
-    BaseTest::TearDown();
-
     engine::JobMgrInst::GetInstance()->Stop();
     engine::SchedInst::GetInstance()->Stop();
     engine::ResMgrInst::GetInstance()->Stop();
+
+    BaseTest::TearDown();
 
     auto options = GetOptions();
     boost::filesystem::remove_all(options.meta.path);

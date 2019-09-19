@@ -152,7 +152,7 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
 endif ()
 
 cuda_add_library(milvus_engine STATIC ${engine_files})
-target_link_libraries(milvus_engine ${engine_libs} ${third_party_libs})
+target_link_libraries(milvus_engine ${engine_libs} knowhere ${third_party_libs})
 
 add_library(metrics STATIC ${metrics_files})
 
@@ -180,7 +180,7 @@ add_executable(milvus_server
         ${utils_files}
         )
 
-target_link_libraries(milvus_server ${server_libs} knowhere ${third_party_libs})
+target_link_libraries(milvus_server ${server_libs})
 
 install(TARGETS milvus_server DESTINATION bin)
 
