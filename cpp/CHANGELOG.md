@@ -6,6 +6,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## Bug
 - MS-568 - Fix gpuresource free error
+- MS-572 - Milvus crash when get SIGINT
 
 ## Improvement
 - MS-552 - Add and change the easylogging library

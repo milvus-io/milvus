@@ -22,28 +22,29 @@
 #include <signal.h>
 #include <execinfo.h>
 
+
 namespace zilliz {
 namespace milvus {
 namespace server {
 
-void SignalUtil::HandleSignal(int signum){
+void SignalUtil::HandleSignal(int signum) {
 
-    switch(signum){
+    switch (signum) {
         case SIGINT:
-        case SIGUSR2:{
-            SERVER_LOG_INFO << "Server received signal:" << std::to_string(signum);
+        case SIGUSR2: {
+            SERVER_LOG_INFO << "Server received signal: " << signum;
 
-            server::Server& server_ptr = server::Server::Instance();
-            server_ptr.Stop();
+            server::Server &server = server::Server::Instance();
+            server.Stop();
 
             exit(0);
         }
-        default:{
-            SERVER_LOG_INFO << "Server received critical signal:" << std::to_string(signum);
+        default: {
+            SERVER_LOG_INFO << "Server received critical signal: " << signum;
             SignalUtil::PrintStacktrace();
 
-            server::Server& server_ptr = server::Server::Instance();
-            server_ptr.Stop();
+            server::Server &server = server::Server::Instance();
+            server.Stop();
 
             exit(1);
         }
@@ -54,16 +55,15 @@ void SignalUtil::PrintStacktrace() {
     SERVER_LOG_INFO << "Call stack:";
 
     const int size = 32;
-    void* array[size];
+    void *array[size];
     int stack_num = backtrace(array, size);
-    char ** stacktrace = backtrace_symbols(array, stack_num);
+    char **stacktrace = backtrace_symbols(array, stack_num);
     for (int i = 0; i < stack_num; ++i) {
         std::string info = stacktrace[i];
         SERVER_LOG_INFO << info;
     }
     free(stacktrace);
 }
-
 
 }
 }
