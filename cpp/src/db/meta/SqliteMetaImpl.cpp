@@ -128,16 +128,16 @@ void SqliteMetaImpl::ValidateMetaSchema() {
 }
 
 Status SqliteMetaImpl::Initialize() {
-    if (!boost::filesystem::is_directory(options_.path)) {
-        auto ret = boost::filesystem::create_directory(options_.path);
+    if (!boost::filesystem::is_directory(options_.path_)) {
+        auto ret = boost::filesystem::create_directory(options_.path_);
         if (!ret) {
-            std::string msg = "Failed to create db directory " + options_.path;
+            std::string msg = "Failed to create db directory " + options_.path_;
             ENGINE_LOG_ERROR << msg;
             return Status(DB_INVALID_PATH, msg);
         }
     }
 
-    ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(options_.path + "/meta.sqlite"));
+    ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(options_.path_ + "/meta.sqlite"));
 
     ValidateMetaSchema();
 
@@ -886,7 +886,7 @@ Status SqliteMetaImpl::GetTableFiles(const std::string& table_id,
 
 // PXU TODO: Support Swap
 Status SqliteMetaImpl::Archive() {
-    auto &criterias = options_.archive_conf.GetCriterias();
+    auto &criterias = options_.archive_conf_.GetCriterias();
     if (criterias.size() == 0) {
         return Status::OK();
     }

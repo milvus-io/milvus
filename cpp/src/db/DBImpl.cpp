@@ -56,7 +56,7 @@ DBImpl::DBImpl(const DBOptions& options)
       shutting_down_(true),
       compact_thread_pool_(1, 1),
       index_thread_pool_(1, 1) {
-    meta_ptr_ = MetaFactory::Build(options.meta, options.mode);
+    meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
     Start();
 }
@@ -77,7 +77,7 @@ Status DBImpl::Start() {
     shutting_down_.store(false, std::memory_order_release);
 
     //for distribute version, some nodes are read only
-    if (options_.mode != DBOptions::MODE::READ_ONLY) {
+    if (options_.mode_ != DBOptions::MODE::READ_ONLY) {
         ENGINE_LOG_TRACE << "StartTimerTasks";
         bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
     }
@@ -98,7 +98,7 @@ Status DBImpl::Stop() {
     //wait compaction/buildindex finish
     bg_timer_thread_.join();
 
-    if (options_.mode != DBOptions::MODE::READ_ONLY) {
+    if (options_.mode_ != DBOptions::MODE::READ_ONLY) {
         meta_ptr_->CleanUp();
     }
 
@@ -649,7 +649,7 @@ Status DBImpl::BackgroundMergeFiles(const std::string& table_id) {
     bool has_merge = false;
     for (auto& kv : raw_files) {
         auto files = kv.second;
-        if (files.size() < options_.merge_trigger_number) {
+        if (files.size() < options_.merge_trigger_number_) {
             ENGINE_LOG_DEBUG << "Files number not greater equal than merge trigger number, skip merge action";
             continue;
         }
@@ -684,7 +684,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     meta_ptr_->Archive();
 
     int ttl = 5*meta::M_SEC;//default: file will be deleted after 5 minutes
-    if (options_.mode == DBOptions::MODE::CLUSTER) {
+    if (options_.mode_ == DBOptions::MODE::CLUSTER) {
         ttl = meta::D_SEC;
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
