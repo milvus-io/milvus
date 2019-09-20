@@ -19,6 +19,7 @@
 #include "db/IDGenerator.h"
 #include "db/Utils.h"
 #include "utils/Log.h"
+#include "utils/Exception.h"
 #include "MetaConsts.h"
 #include "metrics/Metrics.h"
 
@@ -55,7 +56,7 @@ Status HandleException(const std::string &desc, const char* what = nullptr) {
 
 inline auto StoragePrototype(const std::string &path) {
     return make_storage(path,
-                        make_table("Tables",
+                        make_table(META_TABLES,
                                    make_column("id", &TableSchema::id_, primary_key()),
                                    make_column("table_id", &TableSchema::table_id_, unique()),
                                    make_column("state", &TableSchema::state_),
@@ -66,7 +67,7 @@ inline auto StoragePrototype(const std::string &path) {
                                    make_column("engine_type", &TableSchema::engine_type_),
                                    make_column("nlist", &TableSchema::nlist_),
                                    make_column("metric_type", &TableSchema::metric_type_)),
-                        make_table("TableFiles",
+                        make_table(META_TABLEFILES,
                                    make_column("id", &TableFileSchema::id_, primary_key()),
                                    make_column("table_id", &TableFileSchema::table_id_),
                                    make_column("engine_type", &TableFileSchema::engine_type_),
@@ -121,6 +122,17 @@ Status SqliteMetaImpl::Initialize() {
     }
 
     ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(options_.path + "/meta.sqlite"));
+
+    //old meta could be recreated since schema changed, throw exception if meta schema is not compatible
+    auto ret = ConnectorPtr->sync_schema_simulate();
+    if(ret.find(META_TABLES) != ret.end()
+        && sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLES]) {
+            throw Exception(DB_INCOMPATIB_META, "Meta schema is created by Milvus old version");
+    }
+    if(ret.find(META_TABLEFILES) != ret.end()
+       && sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLEFILES]) {
+        throw Exception(DB_INCOMPATIB_META, "Meta schema is created by Milvus old version");
+    }
 
     ConnectorPtr->sync_schema();
     ConnectorPtr->open_forever(); // thread safe option
@@ -1246,8 +1258,8 @@ Status SqliteMetaImpl::DropAll() {
     ENGINE_LOG_DEBUG << "Drop all sqlite meta";
 
     try {
-        ConnectorPtr->drop_table("Tables");
-        ConnectorPtr->drop_table("TableFiles");
+        ConnectorPtr->drop_table(META_TABLES);
+        ConnectorPtr->drop_table(META_TABLEFILES);
     } catch (std::exception &e) {
         return HandleException("Encounter exception when drop all meta", e.what());
     }

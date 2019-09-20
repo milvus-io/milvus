@@ -17,7 +17,7 @@
 
 #include "Options.h"
 #include "utils/Exception.h"
-#include "utils/easylogging++.h"
+#include "utils/Log.h"
 
 #include <stdlib.h>
 #include <assert.h>
@@ -56,11 +56,11 @@ void ArchiveConf::ParseCritirias(const std::string& criterias) {
         std::vector<std::string> kv;
         boost::algorithm::split(kv, token, boost::is_any_of(":"));
         if (kv.size() != 2) {
-            LOG(WARNING) << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
+            ENGINE_LOG_WARNING << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
             continue;
         }
         if (kv[0] != "disk" && kv[0] != "days") {
-            LOG(WARNING) << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
+            ENGINE_LOG_WARNING << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
             continue;
         }
         try {
@@ -68,20 +68,22 @@ void ArchiveConf::ParseCritirias(const std::string& criterias) {
             criterias_[kv[0]] = value;
         }
         catch (std::out_of_range&){
-            LOG(ERROR) << "Out of range: '" << kv[1] << "'";
-            throw OutOfRangeException();
+            std::string msg = "Out of range: '" + kv[1] + "'";
+            ENGINE_LOG_ERROR << msg;
+            throw InvalidArgumentException(msg);
         }
         catch (...){
-            LOG(ERROR) << "Invalid argument: '" << kv[1] << "'";
-            throw InvalidArgumentException();
+            std::string msg = "Invalid argument: '" + kv[1] + "'";
+            ENGINE_LOG_ERROR << msg;
+            throw InvalidArgumentException(msg);
         }
     }
 }
 
 void ArchiveConf::ParseType(const std::string& type) {
     if (type != "delete" && type != "swap") {
-        LOG(ERROR) << "Invalid argument: type='" << type << "'";
-        throw InvalidArgumentException();
+        std::string msg = "Invalid argument: type='" + type + "'";
+        throw InvalidArgumentException(msg);
     }
     type_ = type;
 }
