@@ -20,13 +20,14 @@
 #include "MySQLMetaImpl.h"
 #include "utils/Log.h"
 #include "utils/Exception.h"
+#include "db/Utils.h"
 
 #include <stdlib.h>
 #include <time.h>
 #include <sstream>
 #include <cstdlib>
 #include <string>
-#include <regex>
+#include <string.h>
 
 namespace zilliz {
 namespace milvus {
@@ -49,37 +50,22 @@ namespace engine {
     meta::MetaPtr MetaFactory::Build(const DBMetaOptions &metaOptions, const int &mode) {
         std::string uri = metaOptions.backend_uri;
 
-        std::string dialectRegex = "(.*)";
-        std::string usernameRegex = "(.*)";
-        std::string passwordRegex = "(.*)";
-        std::string hostRegex = "(.*)";
-        std::string portRegex = "(.*)";
-        std::string dbNameRegex = "(.*)";
-        std::string uriRegexStr = dialectRegex + "\\:\\/\\/" +
-                                  usernameRegex + "\\:" +
-                                  passwordRegex + "\\@" +
-                                  hostRegex + "\\:" +
-                                  portRegex + "\\/" +
-                                  dbNameRegex;
-        std::regex uriRegex(uriRegexStr);
-        std::smatch pieces_match;
-
-        if (std::regex_match(uri, pieces_match, uriRegex)) {
-            std::string dialect = pieces_match[1].str();
-            std::transform(dialect.begin(), dialect.end(), dialect.begin(), ::tolower);
-            if (dialect.find("mysql") != std::string::npos) {
-                ENGINE_LOG_INFO << "Using MySQL";
-                return std::make_shared<meta::MySQLMetaImpl>(metaOptions, mode);
-            } else if (dialect.find("sqlite") != std::string::npos) {
-                ENGINE_LOG_INFO << "Using SQLite";
-                return std::make_shared<meta::SqliteMetaImpl>(metaOptions);
-            } else {
-                ENGINE_LOG_ERROR << "Invalid dialect in URI: dialect = " << dialect;
-                throw InvalidArgumentException("URI dialect is not mysql / sqlite");
-            }
-        } else {
+        utils::MetaUriInfo uri_info;
+        auto status = utils::ParseMetaUri(uri, uri_info);
+        if(!status.ok()) {
             ENGINE_LOG_ERROR << "Wrong URI format: URI = " << uri;
             throw InvalidArgumentException("Wrong URI format ");
+        }
+
+        if (strcasecmp(uri_info.dialect_.c_str(), "mysql") == 0) {
+            ENGINE_LOG_INFO << "Using MySQL";
+            return std::make_shared<meta::MySQLMetaImpl>(metaOptions, mode);
+        } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
+            ENGINE_LOG_INFO << "Using SQLite";
+            return std::make_shared<meta::SqliteMetaImpl>(metaOptions);
+        } else {
+            ENGINE_LOG_ERROR << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
+            throw InvalidArgumentException("URI dialect is not mysql / sqlite");
         }
     }
 
