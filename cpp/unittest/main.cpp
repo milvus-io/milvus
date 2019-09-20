@@ -15,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <gtest/gtest.h>
-#include <gmock/gmock.h>
 #include "utils/easylogging++.h"
-
 #include "server/ServerConfig.h"
 #include "utils/CommonUtil.h"
+
+#include <gtest/gtest.h>
+#include <gmock/gmock.h>
 
 INITIALIZE_EASYLOGGINGPP
 

@@ -15,20 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <gtest/gtest.h>
-#include <thread>
-#include "utils/easylogging++.h"
-#include <stdlib.h>
-#include <time.h>
-
 #include "utils.h"
 #include "db/meta/MySQLMetaImpl.h"
 #include "db/Utils.h"
 #include "db/meta/MetaConsts.h"
 
-#include "mysql++/mysql++.h"
-
 #include <iostream>
+#include <thread>
+#include <stdlib.h>
+#include <time.h>
+#include <gtest/gtest.h>
+#include <mysql++/mysql++.h>
 
 using namespace zilliz::milvus;
 using namespace zilliz::milvus::engine;
