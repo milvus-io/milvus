@@ -25,7 +25,7 @@
 
 #include "src/wrapper/vec_index.h"
 #include "src/wrapper/vec_impl.h"
-#include "knowhere/common/exception.h"
+#include "knowhere/common/Exception.h"
 
 #include <stdexcept>
 

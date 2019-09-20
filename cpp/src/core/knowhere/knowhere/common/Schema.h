@@ -18,19 +18,23 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include <memory>
+
+#include <arrow/type.h>
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+using DataType = arrow::DataType;
+using Field = arrow::Field;
+using FieldPtr = std::shared_ptr<arrow::Field>;
+using Schema = arrow::Schema;
+using SchemaPtr = std::shared_ptr<Schema>;
+using SchemaConstPtr = std::shared_ptr<const Schema>;
 
-}
-}
-}
+
+
+} // namespace knowhere
+} // namespace zilliz

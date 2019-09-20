@@ -18,19 +18,26 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include <memory>
 
+#include <SPTAG/AnnService/inc/Core/VectorIndex.h>
+
+#include "knowhere/common/Dataset.h"
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+std::shared_ptr<SPTAG::VectorSet>
+ConvertToVectorSet(const DatasetPtr &dataset);
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+std::shared_ptr<SPTAG::MetadataSet>
+ConvertToMetadataSet(const DatasetPtr &dataset);
 
-}
-}
-}
+std::vector<SPTAG::QueryResult>
+ConvertToQueryResult(const DatasetPtr &dataset, const Config &config);
+
+DatasetPtr
+ConvertToDataset(std::vector<SPTAG::QueryResult> query_results);
+
+} // namespace knowhere
+} // namespace zilliz

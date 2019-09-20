@@ -18,19 +18,30 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
-
+#include "IndexIVF.h"
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+class IVFPQ : public IVF {
+public:
+    explicit IVFPQ(std::shared_ptr<faiss::Index> index) : IVF(std::move(index)) {}
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+    IVFPQ() = default;
 
-}
-}
-}
+    IndexModelPtr
+    Train(const DatasetPtr &dataset, const Config &config) override;
+
+protected:
+    std::shared_ptr<faiss::IVFSearchParameters>
+    GenParams(const Config &config) override;
+
+    VectorIndexPtr
+    Clone_impl(const std::shared_ptr<faiss::Index> &index) override;
+};
+
+} // knowhere
+} // zilliz
+
+
+

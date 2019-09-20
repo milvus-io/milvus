@@ -18,20 +18,37 @@
 
 #pragma once
 
-#include "utils/easylogging++.h"
+#include <arrow/array.h>
+
+#include "Schema.h"
+
 
 namespace zilliz {
 namespace knowhere {
 
-#define KNOWHERE_DOMAIN_NAME "[KNOWHERE] "
-#define KNOWHERE_ERROR_TEXT "KNOWHERE Error:"
+using ArrayData = arrow::ArrayData;
+using ArrayDataPtr = std::shared_ptr<ArrayData>;
 
-#define KNOWHERE_LOG_TRACE LOG(TRACE) << KNOWHERE_DOMAIN_NAME
-#define KNOWHERE_LOG_DEBUG LOG(DEBUG) << KNOWHERE_DOMAIN_NAME
-#define KNOWHERE_LOG_INFO LOG(INFO) << KNOWHERE_DOMAIN_NAME
-#define KNOWHERE_LOG_WARNING LOG(WARNING) << KNOWHERE_DOMAIN_NAME
-#define KNOWHERE_LOG_ERROR LOG(ERROR) << KNOWHERE_DOMAIN_NAME
-#define KNOWHERE_LOG_FATAL LOG(FATAL) << KNOWHERE_DOMAIN_NAME
+using Array = arrow::Array;
+using ArrayPtr = std::shared_ptr<Array>;
+
+using BooleanArray = arrow::BooleanArray;
+using BooleanArrayPtr = std::shared_ptr<arrow::BooleanArray>;
+
+template<typename DType>
+using NumericArray = arrow::NumericArray<DType>;
+template<typename DType>
+using NumericArrayPtr = std::shared_ptr<arrow::NumericArray<DType>>;
+
+using BinaryArray = arrow::BinaryArray;
+using BinaryArrayPtr = std::shared_ptr<arrow::BinaryArray>;
+
+using FixedSizeBinaryArray = arrow::FixedSizeBinaryArray;
+using FixedSizeBinaryArrayPtr = std::shared_ptr<arrow::FixedSizeBinaryArray>;
+
+using Decimal128Array = arrow::Decimal128Array;
+using Decimal128ArrayPtr = std::shared_ptr<arrow::Decimal128Array>;
+
 
 } // namespace knowhere
 } // namespace zilliz

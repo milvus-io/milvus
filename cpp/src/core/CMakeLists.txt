@@ -93,7 +93,7 @@ endif()
 set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
 
 if(BUILD_UNIT_TEST STREQUAL "ON")
-    add_subdirectory(test)
+#    add_subdirectory(test)
 endif()
 
 config_summary()

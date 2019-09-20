@@ -20,7 +20,7 @@
 #include "utils/easylogging++.h"
 
 #include "src/wrapper/vec_index.h"
-#include "knowhere/index/vector_index/gpu_ivf.h"
+#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 
 #include "utils.h"
 
