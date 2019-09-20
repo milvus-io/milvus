@@ -18,19 +18,19 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include <memory>
+
+#include "knowhere/common/Array.h"
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+ArrayPtr
+CopyArray(const ArrayPtr &origin);
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+SchemaPtr
+CopySchema(const SchemaPtr &origin);
 
-}
-}
-}
+} // namespace knowhere
+} // namespace zilliz

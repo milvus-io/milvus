@@ -18,19 +18,26 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include "IndexGPUIVF.h"
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+class GPUIVFSQ : public GPUIVF {
+public:
+    explicit GPUIVFSQ(const int &device_id) : GPUIVF(device_id) {}
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+    explicit GPUIVFSQ(std::shared_ptr<faiss::Index> index, const int64_t &device_id, ResPtr &resource)
+            : GPUIVF(std::move(index), device_id, resource) {};
 
-}
-}
-}
+    IndexModelPtr
+    Train(const DatasetPtr &dataset, const Config &config) override;
+
+    VectorIndexPtr
+    CopyGpuToCpu(const Config &config) override;
+};
+
+} // knowhere
+} // zilliz
+

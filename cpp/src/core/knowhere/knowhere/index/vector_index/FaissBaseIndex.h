@@ -18,19 +18,35 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include <memory>
+
+#include <faiss/Index.h>
+
+#include "knowhere/common/BinarySet.h"
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+class FaissBaseIndex {
+ protected:
+    explicit FaissBaseIndex(std::shared_ptr<faiss::Index> index);
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+    virtual BinarySet
+    SerializeImpl();
 
-}
-}
-}
+    virtual void
+    LoadImpl(const BinarySet &index_binary);
+
+    virtual void
+    SealImpl();
+
+ protected:
+    std::shared_ptr<faiss::Index> index_ = nullptr;
+};
+
+} // knowhere
+} // zilliz
+
+
+
