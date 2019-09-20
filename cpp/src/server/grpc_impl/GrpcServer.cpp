@@ -76,8 +76,8 @@ GrpcServer::StartService() {
     ServerConfig &config = ServerConfig::GetInstance();
     ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
     ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
-    std::string address = server_config.GetValue(CONFIG_SERVER_ADDRESS, "127.0.0.1");
-    int32_t port = server_config.GetInt32Value(CONFIG_SERVER_PORT, 19530);
+    std::string address = server_config.GetValue(CONFIG_SERVER_ADDRESS, CONFIG_SERVER_ADDRESS_DEFAULT);
+    int32_t port = server_config.GetInt32Value(CONFIG_SERVER_PORT, std::stoi(CONFIG_SERVER_PORT_DEFAULT));
 
     std::string server_address(address + ":" + std::to_string(port));
 

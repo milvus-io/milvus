@@ -32,7 +32,8 @@ Metrics::GetInstance() {
 MetricsBase &
 Metrics::CreateMetricsCollector() {
     ConfigNode &config = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);
-    std::string collector_type_str = config.GetValue(CONFIG_METRIC_COLLECTOR);
+    std::string collector_type_str =
+        config.GetValue(CONFIG_METRIC_COLLECTOR, CONFIG_METRIC_COLLECTOR_DEFAULT);
 
     if (collector_type_str == "prometheus") {
         return PrometheusMetrics::GetInstance();
