@@ -16,64 +16,127 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import fnmatch
-import os
-import subprocess
+from __future__ import print_function
+import lintutils
+from subprocess import PIPE
+import argparse
+import difflib
+import multiprocessing as mp
 import sys
-
-if len(sys.argv) < 4:
-    sys.stderr.write("Usage: %s $CLANG_FORMAT_VERSION exclude_globs.txt "
-                     "$source_dir\n" %
-                     sys.argv[0])
-    sys.exit(1)
-
-CLANG_FORMAT = sys.argv[1]
-EXCLUDE_GLOBS_FILENAME = sys.argv[2]
-SOURCE_DIR = sys.argv[3]
-
-if len(sys.argv) > 4:
-    CHECK_FORMAT = int(sys.argv[4]) == 1
-else:
-    CHECK_FORMAT = False
+from functools import partial
 
 
-exclude_globs = [line.strip() for line in open(EXCLUDE_GLOBS_FILENAME, "r")]
+# examine the output of clang-format and if changes are
+# present assemble a (unified)patch of the difference
+def _check_one_file(completed_processes, filename):
+    with open(filename, "rb") as reader:
+        original = reader.read()
 
-files_to_format = []
-matches = []
-for directory, subdirs, files in os.walk(SOURCE_DIR):
-    for name in files:
-        name = os.path.join(directory, name)
-        if not (name.endswith('.h') or name.endswith('.cpp') or name.endswith('.cuh') or name.endswith('.cu')):
-            continue
+    returncode, stdout, stderr = completed_processes[filename]
+    formatted = stdout
+    if formatted != original:
+        # Run the equivalent of diff -u
+        diff = list(difflib.unified_diff(
+            original.decode('utf8').splitlines(True),
+            formatted.decode('utf8').splitlines(True),
+            fromfile=filename,
+            tofile="{} (after clang format)".format(
+                filename)))
+    else:
+        diff = None
 
-        excluded = False
-        for g in exclude_globs:
-            if fnmatch.fnmatch(name, g):
-                excluded = True
-                break
-        if not excluded:
-            files_to_format.append(name)
+    return filename, diff
 
-if CHECK_FORMAT:
-    output = subprocess.check_output([CLANG_FORMAT, '-output-replacements-xml']
-                                     + files_to_format,
-                                     stderr=subprocess.STDOUT).decode('utf8')
 
-    to_fix = []
-    for line in output.split('\n'):
-        if 'offset' in line:
-            to_fix.append(line)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Runs clang-format on all of the source "
+        "files. If --fix is specified enforce format by "
+        "modifying in place, otherwise compare the output "
+        "with the existing file and output any necessary "
+        "changes as a patch in unified diff format")
+    parser.add_argument("--clang_format_binary",
+                        required=True,
+                        help="Path to the clang-format binary")
+    parser.add_argument("--exclude_globs",
+                        help="Filename containing globs for files "
+                        "that should be excluded from the checks")
+    parser.add_argument("--source_dir",
+                        required=True,
+                        help="Root directory of the source code")
+    parser.add_argument("--fix", default=False,
+                        action="store_true",
+                        help="If specified, will re-format the source "
+                        "code instead of comparing the re-formatted "
+                        "output, defaults to %(default)s")
+    parser.add_argument("--quiet", default=False,
+                        action="store_true",
+                        help="If specified, only print errors")
+    arguments = parser.parse_args()
 
-    if len(to_fix) > 0:
-        print("clang-format checks failed, run 'make format' to fix")
-        sys.exit(-1)
-else:
-    try:
-        cmd = [CLANG_FORMAT, '-i'] + files_to_format
-        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-    except Exception as e:
-        print(e)
-        print(' '.join(cmd))
-        raise
+    exclude_globs = []
+    if arguments.exclude_globs:
+        for line in open(arguments.exclude_globs):
+            exclude_globs.append(line.strip())
+
+    formatted_filenames = []
+    for path in lintutils.get_sources(arguments.source_dir, exclude_globs):
+        formatted_filenames.append(str(path))
+
+    if arguments.fix:
+        if not arguments.quiet:
+            print("\n".join(map(lambda x: "Formatting {}".format(x),
+                                formatted_filenames)))
+
+        # Break clang-format invocations into chunks: each invocation formats
+        # 16 files. Wait for all processes to complete
+        results = lintutils.run_parallel([
+            [arguments.clang_format_binary, "-i"] + some
+            for some in lintutils.chunk(formatted_filenames, 16)
+        ])
+        for returncode, stdout, stderr in results:
+            # if any clang-format reported a parse error, bubble it
+            if returncode != 0:
+                sys.exit(returncode)
+
+    else:
+        # run an instance of clang-format for each source file in parallel,
+        # then wait for all processes to complete
+        results = lintutils.run_parallel([
+            [arguments.clang_format_binary, filename]
+            for filename in formatted_filenames
+        ], stdout=PIPE, stderr=PIPE)
+        for returncode, stdout, stderr in results:
+            # if any clang-format reported a parse error, bubble it
+            if returncode != 0:
+                sys.exit(returncode)
+
+        error = False
+        checker = partial(_check_one_file, {
+            filename: result
+            for filename, result in zip(formatted_filenames, results)
+        })
+        pool = mp.Pool()
+        try:
+            # check the output from each invocation of clang-format in parallel
+            for filename, diff in pool.imap(checker, formatted_filenames):
+                if not arguments.quiet:
+                    print("Checking {}".format(filename))
+                if diff:
+                    print("{} had clang-format style issues".format(filename))
+                    # Print out the diff to stderr
+                    error = True
+                    # pad with a newline
+                    print(file=sys.stderr)
+                    diff_out = []
+                    for diff_str in diff:
+                        diff_out.append(diff_str.encode('raw_unicode_escape'))
+                    sys.stderr.writelines(diff_out)
+        except Exception:
+            error = True
+            raise
+        finally:
+            pool.terminate()
+            pool.join()
+        sys.exit(1 if error else 0)
 
