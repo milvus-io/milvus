@@ -18,20 +18,51 @@
 
 #pragma once
 
-#include "utils/easylogging++.h"
+#include <memory>
+
+#include "knowhere/common/BinarySet.h"
+#include "knowhere/common/Dataset.h"
+#include "IndexType.h"
+#include "IndexModel.h"
+#include "knowhere/index/preprocessor/Preprocessor.h"
+
 
 namespace zilliz {
 namespace knowhere {
 
-#define KNOWHERE_DOMAIN_NAME "[KNOWHERE] "
-#define KNOWHERE_ERROR_TEXT "KNOWHERE Error:"
 
-#define KNOWHERE_LOG_TRACE LOG(TRACE) << KNOWHERE_DOMAIN_NAME
-#define KNOWHERE_LOG_DEBUG LOG(DEBUG) << KNOWHERE_DOMAIN_NAME
-#define KNOWHERE_LOG_INFO LOG(INFO) << KNOWHERE_DOMAIN_NAME
-#define KNOWHERE_LOG_WARNING LOG(WARNING) << KNOWHERE_DOMAIN_NAME
-#define KNOWHERE_LOG_ERROR LOG(ERROR) << KNOWHERE_DOMAIN_NAME
-#define KNOWHERE_LOG_FATAL LOG(FATAL) << KNOWHERE_DOMAIN_NAME
+class Index {
+ public:
+    virtual BinarySet
+    Serialize() = 0;
+
+    virtual void
+    Load(const BinarySet &index_binary) = 0;
+
+    // @throw
+    virtual DatasetPtr
+    Search(const DatasetPtr &dataset, const Config &config) = 0;
+
+ public:
+    IndexType
+    idx_type() const { return idx_type_; }
+
+    void
+    set_idx_type(IndexType idx_type) { idx_type_ = idx_type; }
+
+    virtual void
+    set_preprocessor(PreprocessorPtr preprocessor) {}
+
+    virtual void
+    set_index_model(IndexModelPtr model) {}
+
+ private:
+    IndexType idx_type_;
+};
+
+
+using IndexPtr = std::shared_ptr<Index>;
+
 
 } // namespace knowhere
 } // namespace zilliz

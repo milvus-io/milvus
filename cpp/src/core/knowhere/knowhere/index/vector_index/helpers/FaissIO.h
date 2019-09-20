@@ -18,19 +18,31 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
-
+#include <faiss/AuxIndexStructures.h>
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+struct MemoryIOWriter : public faiss::IOWriter {
+    uint8_t *data_ = nullptr;
+    size_t total = 0;
+    size_t rp = 0;
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+    size_t
+    operator()(const void *ptr, size_t size, size_t nitems) override;
+};
 
-}
-}
-}
+struct MemoryIOReader : public faiss::IOReader {
+    uint8_t *data_;
+    size_t rp = 0;
+    size_t total = 0;
+
+    size_t
+    operator()(void *ptr, size_t size, size_t nitems) override;
+};
+
+} // knowhere
+} // zilliz
+
+
+
