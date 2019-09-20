@@ -45,14 +45,18 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
       nlist_(nlist) {
 
     index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
-    if (!index_) throw Exception("Create Empty VecIndex");
+    if (!index_) {
+        throw Exception(DB_ERROR, "Could not create VecIndex");
+    }
 
     Config build_cfg;
     build_cfg["dim"] = dimension;
     build_cfg["metric_type"] = (metric_type_ == MetricType::IP) ? "IP" : "L2";
     AutoGenParams(index_->GetType(), 0, build_cfg);
     auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(build_cfg);
-    if (ec != KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
+    if (ec != KNOWHERE_SUCCESS) {
+        throw Exception(DB_ERROR, "Build index error");
+    }
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index,
@@ -273,7 +277,7 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
 
     auto to_index = CreatetVecIndex(engine_type);
     if (!to_index) {
-        throw Exception("Create Empty VecIndex");
+        throw Exception(DB_ERROR, "Could not create VecIndex");
     }
 
     Config build_cfg;
@@ -287,7 +291,7 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
                                  from_index->GetRawVectors(),
                                  from_index->GetRawIds(),
                                  build_cfg);
-    if (ec != KNOWHERE_SUCCESS) { throw Exception("Build index error"); }
+    if (ec != KNOWHERE_SUCCESS) { throw Exception(DB_ERROR, "Build index error"); }
 
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }

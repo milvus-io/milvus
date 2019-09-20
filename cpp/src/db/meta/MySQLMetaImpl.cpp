@@ -153,8 +153,9 @@ Status MySQLMetaImpl::Initialize() {
                 }
                 Query InitializeQuery = connectionPtr->query();
 
-                InitializeQuery << "CREATE TABLE IF NOT EXISTS Tables (" <<
-                                "id BIGINT PRIMARY KEY AUTO_INCREMENT, " <<
+                InitializeQuery << "CREATE TABLE IF NOT EXISTS " <<
+                                META_TABLES << " " <<
+                                "(id BIGINT PRIMARY KEY AUTO_INCREMENT, " <<
                                 "table_id VARCHAR(255) UNIQUE NOT NULL, " <<
                                 "state INT NOT NULL, " <<
                                 "dimension SMALLINT NOT NULL, " <<
@@ -171,8 +172,9 @@ Status MySQLMetaImpl::Initialize() {
                     return HandleException("Initialization Error", InitializeQuery.error());
                 }
 
-                InitializeQuery << "CREATE TABLE IF NOT EXISTS TableFiles (" <<
-                                "id BIGINT PRIMARY KEY AUTO_INCREMENT, " <<
+                InitializeQuery << "CREATE TABLE IF NOT EXISTS " <<
+                                META_TABLEFILES << " " <<
+                                "(id BIGINT PRIMARY KEY AUTO_INCREMENT, " <<
                                 "table_id VARCHAR(255) NOT NULL, " <<
                                 "engine_type INT DEFAULT 1 NOT NULL, " <<
                                 "file_id VARCHAR(255) NOT NULL, " <<
@@ -233,7 +235,8 @@ Status MySQLMetaImpl::DropPartitionsByDates(const std::string &table_id,
 
             Query dropPartitionsByDatesQuery = connectionPtr->query();
 
-            dropPartitionsByDatesQuery << "UPDATE TableFiles " <<
+            dropPartitionsByDatesQuery << "UPDATE " <<
+                                       META_TABLEFILES << " " <<
                                        "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << "," <<
                                        "updated_time = " << utils::GetMicroSecTimeStamp() << " " <<
                                        "WHERE table_id = " << quote << table_id << " AND " <<
@@ -266,7 +269,8 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
             if (table_schema.table_id_.empty()) {
                 NextTableId(table_schema.table_id_);
             } else {
-                createTableQuery << "SELECT state FROM Tables " <<
+                createTableQuery << "SELECT state FROM " <<
+                                 META_TABLES << " " <<
                                  "WHERE table_id = " << quote << table_schema.table_id_ << ";";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CreateTable: " << createTableQuery.str();
@@ -297,8 +301,9 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
             std::string nlist = std::to_string(table_schema.nlist_);
             std::string metric_type = std::to_string(table_schema.metric_type_);
 
-            createTableQuery << "INSERT INTO Tables VALUES" <<
-                             "(" << id << ", " << quote << table_id << ", " << state << ", " << dimension << ", " <<
+            createTableQuery << "INSERT INTO " <<
+                             META_TABLES << " " <<
+                             "VALUES(" << id << ", " << quote << table_id << ", " << state << ", " << dimension << ", " <<
                              created_on << ", " << flag << ", " << index_file_size << ", " << engine_type << ", " <<
                              nlist << ", " << metric_type << ");";
 
@@ -348,7 +353,8 @@ Status MySQLMetaImpl::FilesByType(const std::string &table_id,
 
             Query hasNonIndexFilesQuery = connectionPtr->query();
             //since table_id is a unique column we just need to check whether it exists or not
-            hasNonIndexFilesQuery << "SELECT file_id, file_type FROM TableFiles " <<
+            hasNonIndexFilesQuery << "SELECT file_id, file_type FROM " <<
+                                  META_TABLEFILES << " " <<
                                   "WHERE table_id = " << quote << table_id << " AND " <<
                                   "file_type in (" << types << ");";
 
@@ -418,8 +424,8 @@ Status MySQLMetaImpl::UpdateTableIndex(const std::string &table_id, const TableI
             }
 
             Query updateTableIndexParamQuery = connectionPtr->query();
-            updateTableIndexParamQuery << "SELECT id, state, dimension, created_on " <<
-                                       "FROM Tables " <<
+            updateTableIndexParamQuery << "SELECT id, state, dimension, created_on FROM " <<
+                                       META_TABLES << " " <<
                                        "WHERE table_id = " << quote << table_id << " AND " <<
                                        "state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
@@ -435,7 +441,8 @@ Status MySQLMetaImpl::UpdateTableIndex(const std::string &table_id, const TableI
                 uint16_t dimension = resRow["dimension"];
                 int64_t created_on = resRow["created_on"];
 
-                updateTableIndexParamQuery << "UPDATE Tables " <<
+                updateTableIndexParamQuery << "UPDATE " <<
+                                           META_TABLES << " " <<
                                            "SET id = " << id << ", " <<
                                            "state = " << state << ", " <<
                                            "dimension = " << dimension << ", " <<
@@ -476,7 +483,8 @@ Status MySQLMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag)
             }
 
             Query updateTableFlagQuery = connectionPtr->query();
-            updateTableFlagQuery << "UPDATE Tables " <<
+            updateTableFlagQuery << "UPDATE " <<
+                                 META_TABLES << " " <<
                                  "SET flag = " << flag << " " <<
                                  "WHERE table_id = " << quote << table_id << ";";
 
@@ -507,8 +515,8 @@ Status MySQLMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex
             }
 
             Query describeTableIndexQuery = connectionPtr->query();
-            describeTableIndexQuery << "SELECT engine_type, nlist, index_file_size, metric_type " <<
-                                       "FROM Tables " <<
+            describeTableIndexQuery << "SELECT engine_type, nlist, index_file_size, metric_type FROM " <<
+                                       META_TABLES << " " <<
                                        "WHERE table_id = " << quote << table_id << " AND " <<
                                        "state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
@@ -549,7 +557,8 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
             Query dropTableIndexQuery = connectionPtr->query();
 
             //soft delete index files
-            dropTableIndexQuery << "UPDATE TableFiles " <<
+            dropTableIndexQuery << "UPDATE " <<
+                                META_TABLEFILES << " " <<
                                 "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << "," <<
                                 "updated_time = " << utils::GetMicroSecTimeStamp() << " " <<
                                 "WHERE table_id = " << quote << table_id << " AND " <<
@@ -562,7 +571,8 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
             }
 
             //set all backup file to raw
-            dropTableIndexQuery << "UPDATE TableFiles " <<
+            dropTableIndexQuery << "UPDATE " <<
+                                META_TABLEFILES << " " <<
                                 "SET file_type = " << std::to_string(TableFileSchema::RAW) << "," <<
                                 "updated_time = " << utils::GetMicroSecTimeStamp() << " " <<
                                 "WHERE table_id = " << quote << table_id << " AND " <<
@@ -575,7 +585,8 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
             }
 
             //set table index type to raw
-            dropTableIndexQuery << "UPDATE Tables " <<
+            dropTableIndexQuery << "UPDATE " <<
+                                META_TABLES << " " <<
                                 "SET engine_type = " << std::to_string(DEFAULT_ENGINE_TYPE) << "," <<
                                 "nlist = " << std::to_string(DEFAULT_NLIST) << ", " <<
                                 "metric_type = " << std::to_string(DEFAULT_METRIC_TYPE) << " " <<
@@ -609,7 +620,8 @@ Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
             //soft delete table
             Query deleteTableQuery = connectionPtr->query();
 //
-            deleteTableQuery << "UPDATE Tables " <<
+            deleteTableQuery << "UPDATE " <<
+                             META_TABLES << " " <<
                              "SET state = " << std::to_string(TableSchema::TO_DELETE) << " " <<
                              "WHERE table_id = " << quote << table_id << ";";
 
@@ -645,7 +657,8 @@ Status MySQLMetaImpl::DeleteTableFiles(const std::string &table_id) {
             //soft delete table files
             Query deleteTableFilesQuery = connectionPtr->query();
             //
-            deleteTableFilesQuery << "UPDATE TableFiles " <<
+            deleteTableFilesQuery << "UPDATE " <<
+                                  META_TABLEFILES << " " <<
                                   "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << ", " <<
                                   "updated_time = " << std::to_string(utils::GetMicroSecTimeStamp()) << " " <<
                                   "WHERE table_id = " << quote << table_id << " AND " <<
@@ -676,9 +689,8 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
             }
 
             Query describeTableQuery = connectionPtr->query();
-            describeTableQuery << "SELECT id, state, dimension, created_on, " <<
-                               "flag, index_file_size, engine_type, nlist, metric_type " <<
-                               "FROM Tables " <<
+            describeTableQuery << "SELECT id, state, dimension, created_on, flag, index_file_size, engine_type, nlist, metric_type FROM " <<
+                               META_TABLES << " " <<
                                "WHERE table_id = " << quote << table_schema.table_id_ << " " <<
                                "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
@@ -732,7 +744,8 @@ Status MySQLMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
             Query hasTableQuery = connectionPtr->query();
             //since table_id is a unique column we just need to check whether it exists or not
             hasTableQuery << "SELECT EXISTS " <<
-                          "(SELECT 1 FROM Tables " <<
+                          "(SELECT 1 FROM " <<
+                          META_TABLES << " " <<
                           "WHERE table_id = " << quote << table_id << " " <<
                           "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ") " <<
                           "AS " << quote << "check" << ";";
@@ -764,8 +777,8 @@ Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
             }
 
             Query allTablesQuery = connectionPtr->query();
-            allTablesQuery << "SELECT id, table_id, dimension, engine_type, nlist, index_file_size, metric_type " <<
-                           "FROM Tables " <<
+            allTablesQuery << "SELECT id, table_id, dimension, engine_type, nlist, index_file_size, metric_type FROM " <<
+                           META_TABLES << " " <<
                            "WHERE state <> " << std::to_string(TableSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::AllTables: " << allTablesQuery.str();
@@ -846,8 +859,9 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
 
             Query createTableFileQuery = connectionPtr->query();
 
-            createTableFileQuery << "INSERT INTO TableFiles VALUES" <<
-                                 "(" << id << ", " << quote << table_id << ", " << engine_type << ", " <<
+            createTableFileQuery << "INSERT INTO " <<
+                                 META_TABLEFILES << " " <<
+                                 "VALUES(" << id << ", " << quote << table_id << ", " << engine_type << ", " <<
                                  quote << file_id << ", " << file_type << ", " << file_size << ", " <<
                                  row_count << ", " << updated_time << ", " << created_on << ", " << date << ");";
 
@@ -883,8 +897,8 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
             }
 
             Query filesToIndexQuery = connectionPtr->query();
-            filesToIndexQuery << "SELECT id, table_id, engine_type, file_id, file_type, file_size, row_count, date, created_on " <<
-                              "FROM TableFiles " <<
+            filesToIndexQuery << "SELECT id, table_id, engine_type, file_id, file_type, file_size, row_count, date, created_on FROM " <<
+                              META_TABLEFILES << " " <<
                               "WHERE file_type = " << std::to_string(TableFileSchema::TO_INDEX) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::FilesToIndex: " << filesToIndexQuery.str();
@@ -967,8 +981,8 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
             }
 
             Query filesToSearchQuery = connectionPtr->query();
-            filesToSearchQuery << "SELECT id, table_id, engine_type, file_id, file_type, file_size, row_count, date " <<
-                               "FROM TableFiles " <<
+            filesToSearchQuery << "SELECT id, table_id, engine_type, file_id, file_type, file_size, row_count, date FROM " <<
+                               META_TABLEFILES << " " <<
                                "WHERE table_id = " << quote << table_id;
 
             if (!partition.empty()) {
@@ -1086,8 +1100,8 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
             }
 
             Query filesToMergeQuery = connectionPtr->query();
-            filesToMergeQuery << "SELECT id, table_id, file_id, file_type, file_size, row_count, date, engine_type, created_on " <<
-                              "FROM TableFiles " <<
+            filesToMergeQuery << "SELECT id, table_id, file_id, file_type, file_size, row_count, date, engine_type, created_on FROM " <<
+                              META_TABLEFILES << " " <<
                               "WHERE table_id = " << quote << table_id << " AND " <<
                               "file_type = " << std::to_string(TableFileSchema::RAW) << " " <<
                               "ORDER BY row_count DESC" << ";";
@@ -1177,8 +1191,8 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
             }
 
             Query getTableFileQuery = connectionPtr->query();
-            getTableFileQuery << "SELECT id, engine_type, file_id, file_type, file_size, row_count, date, created_on " <<
-                              "FROM TableFiles " <<
+            getTableFileQuery << "SELECT id, engine_type, file_id, file_type, file_size, row_count, date, created_on FROM " <<
+                              META_TABLEFILES << " " <<
                               "WHERE table_id = " << quote << table_id << " AND " <<
                               "(" << idStr << ") AND " <<
                               "file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
@@ -1259,7 +1273,8 @@ Status MySQLMetaImpl::Archive() {
                 }
 
                 Query archiveQuery = connectionPtr->query();
-                archiveQuery << "UPDATE TableFiles " <<
+                archiveQuery << "UPDATE " <<
+                             META_TABLEFILES << " " <<
                              "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << " " <<
                              "WHERE created_on < " << std::to_string(now - usecs) << " AND " <<
                              "file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
@@ -1299,8 +1314,8 @@ Status MySQLMetaImpl::Size(uint64_t &result) {
             }
 
             Query getSizeQuery = connectionPtr->query();
-            getSizeQuery << "SELECT IFNULL(SUM(file_size),0) AS sum " <<
-                         "FROM TableFiles " <<
+            getSizeQuery << "SELECT IFNULL(SUM(file_size),0) AS sum FROM " <<
+                         META_TABLEFILES << " " <<
                          "WHERE file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::Size: " << getSizeQuery.str();
@@ -1339,8 +1354,8 @@ Status MySQLMetaImpl::DiscardFiles(long long to_discard_size) {
             }
 
             Query discardFilesQuery = connectionPtr->query();
-            discardFilesQuery << "SELECT id, file_size " <<
-                              "FROM TableFiles " <<
+            discardFilesQuery << "SELECT id, file_size FROM " <<
+                              META_TABLEFILES << " " <<
                               "WHERE file_type <> " << std::to_string(TableFileSchema::TO_DELETE) << " " <<
                               "ORDER BY id ASC " <<
                               "LIMIT 10;";
@@ -1369,7 +1384,8 @@ Status MySQLMetaImpl::DiscardFiles(long long to_discard_size) {
             std::string idsToDiscardStr = idsToDiscardSS.str();
             idsToDiscardStr = idsToDiscardStr.substr(0, idsToDiscardStr.size() - 4); //remove the last " OR "
 
-            discardFilesQuery << "UPDATE TableFiles " <<
+            discardFilesQuery << "UPDATE " <<
+                              META_TABLEFILES << " " <<
                               "SET file_type = " << std::to_string(TableFileSchema::TO_DELETE) << ", " <<
                               "updated_time = " << std::to_string(utils::GetMicroSecTimeStamp()) << " " <<
                               "WHERE " << idsToDiscardStr << ";";
@@ -1406,7 +1422,8 @@ Status MySQLMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
 
             //if the table has been deleted, just mark the table file as TO_DELETE
             //clean thread will delete the file later
-            updateTableFileQuery << "SELECT state FROM Tables " <<
+            updateTableFileQuery << "SELECT state FROM " <<
+                                 META_TABLES << " " <<
                                  "WHERE table_id = " << quote << file_schema.table_id_ << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::UpdateTableFile: " << updateTableFileQuery.str();
@@ -1433,7 +1450,8 @@ Status MySQLMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
             std::string created_on = std::to_string(file_schema.created_on_);
             std::string date = std::to_string(file_schema.date_);
 
-            updateTableFileQuery << "UPDATE TableFiles " <<
+            updateTableFileQuery << "UPDATE " <<
+                                 META_TABLEFILES << " " <<
                                  "SET table_id = " << quote << table_id << ", " <<
                                  "engine_type = " << engine_type << ", " <<
                                  "file_id = " << quote << file_id << ", " <<
@@ -1470,7 +1488,8 @@ Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string &table_id) {
 
         Query updateTableFilesToIndexQuery = connectionPtr->query();
 
-        updateTableFilesToIndexQuery << "UPDATE TableFiles " <<
+        updateTableFilesToIndexQuery << "UPDATE " <<
+                                     META_TABLEFILES << " " <<
                                      "SET file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " " <<
                                      "WHERE table_id = " << quote << table_id << " AND " <<
                                      "file_type = " << std::to_string(TableFileSchema::RAW) << ";";
@@ -1508,7 +1527,8 @@ Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
                 }
 
                 updateTableFilesQuery << "SELECT EXISTS " <<
-                                      "(SELECT 1 FROM Tables " <<
+                                      "(SELECT 1 FROM " <<
+                                      META_TABLES << " " <<
                                       "WHERE table_id = " << quote << file_schema.table_id_ << " " <<
                                       "AND state <> " << std::to_string(TableSchema::TO_DELETE) << ") " <<
                                       "AS " << quote << "check" << ";";
@@ -1539,7 +1559,8 @@ Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
                 std::string created_on = std::to_string(file_schema.created_on_);
                 std::string date = std::to_string(file_schema.date_);
 
-                updateTableFilesQuery << "UPDATE TableFiles " <<
+                updateTableFilesQuery << "UPDATE " <<
+                                      META_TABLEFILES << " " <<
                                       "SET table_id = " << quote << table_id << ", " <<
                                       "engine_type = " << engine_type << ", " <<
                                       "file_id = " << quote << file_id << ", " <<
@@ -1582,8 +1603,8 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
             }
 
             Query cleanUpFilesWithTTLQuery = connectionPtr->query();
-            cleanUpFilesWithTTLQuery << "SELECT id, table_id, file_id, date " <<
-                                     "FROM TableFiles " <<
+            cleanUpFilesWithTTLQuery << "SELECT id, table_id, file_id, date FROM " <<
+                                     META_TABLEFILES << " " <<
                                      "WHERE file_type = " << std::to_string(TableFileSchema::TO_DELETE) << " AND " <<
                                      "updated_time < " << std::to_string(now - seconds * US_PS) << ";";
 
@@ -1626,8 +1647,9 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
                 std::string idsToDeleteStr = idsToDeleteSS.str();
                 idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4); //remove the last " OR "
-                cleanUpFilesWithTTLQuery << "DELETE FROM TableFiles WHERE " <<
-                                         idsToDeleteStr << ";";
+                cleanUpFilesWithTTLQuery << "DELETE FROM " <<
+                                         META_TABLEFILES << " " <<
+                                         "WHERE " << idsToDeleteStr << ";";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
@@ -1653,8 +1675,8 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
             }
 
             Query cleanUpFilesWithTTLQuery = connectionPtr->query();
-            cleanUpFilesWithTTLQuery << "SELECT id, table_id " <<
-                                     "FROM Tables " <<
+            cleanUpFilesWithTTLQuery << "SELECT id, table_id FROM " <<
+                                     META_TABLES << " " <<
                                      "WHERE state = " << std::to_string(TableSchema::TO_DELETE) << ";";
 
             ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
@@ -1675,8 +1697,9 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 }
                 std::string idsToDeleteStr = idsToDeleteSS.str();
                 idsToDeleteStr = idsToDeleteStr.substr(0, idsToDeleteStr.size() - 4); //remove the last " OR "
-                cleanUpFilesWithTTLQuery << "DELETE FROM Tables WHERE " <<
-                                         idsToDeleteStr << ";";
+                cleanUpFilesWithTTLQuery << "DELETE FROM " <<
+                                         META_TABLES << " " <<
+                                         "WHERE " << idsToDeleteStr << ";";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
 
@@ -1704,8 +1727,8 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
             for(auto& table_id : table_ids) {
                 Query cleanUpFilesWithTTLQuery = connectionPtr->query();
-                cleanUpFilesWithTTLQuery << "SELECT file_id " <<
-                                         "FROM TableFiles " <<
+                cleanUpFilesWithTTLQuery << "SELECT file_id FROM " <<
+                                         META_TABLEFILES << " " <<
                                          "WHERE table_id = " << quote << table_id << ";";
 
                 ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUpFilesWithTTL: " << cleanUpFilesWithTTLQuery.str();
@@ -1736,7 +1759,7 @@ Status MySQLMetaImpl::CleanUp() {
         cleanUpQuery << "SELECT table_name " <<
                      "FROM information_schema.tables " <<
                      "WHERE table_schema = " << quote << mysql_connection_pool_->getDB() << " " <<
-                     "AND table_name = " << quote << "TableFiles" << ";";
+                     "AND table_name = " << quote << META_TABLEFILES << ";";
 
         ENGINE_LOG_DEBUG << "MySQLMetaImpl::CleanUp: " << cleanUpQuery.str();
 
@@ -1744,7 +1767,7 @@ Status MySQLMetaImpl::CleanUp() {
 
         if (!res.empty()) {
             ENGINE_LOG_DEBUG << "Remove table file type as NEW";
-            cleanUpQuery << "DELETE FROM TableFiles WHERE file_type IN ("
+            cleanUpQuery << "DELETE FROM " << META_TABLEFILES << " WHERE file_type IN ("
                     << std::to_string(TableFileSchema::NEW) << ","
                     << std::to_string(TableFileSchema::NEW_MERGE) << ","
                     << std::to_string(TableFileSchema::NEW_INDEX) << ");";
@@ -1785,8 +1808,8 @@ Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 
 
             Query countQuery = connectionPtr->query();
-            countQuery << "SELECT row_count " <<
-                       "FROM TableFiles " <<
+            countQuery << "SELECT row_count FROM " <<
+                       META_TABLEFILES << " " <<
                        "WHERE table_id = " << quote << table_id << " AND " <<
                        "(file_type = " << std::to_string(TableFileSchema::RAW) << " OR " <<
                        "file_type = " << std::to_string(TableFileSchema::TO_INDEX) << " OR " <<
@@ -1820,7 +1843,7 @@ Status MySQLMetaImpl::DropAll() {
         }
 
         Query dropTableQuery = connectionPtr->query();
-        dropTableQuery << "DROP TABLE IF EXISTS Tables, TableFiles;";
+        dropTableQuery << "DROP TABLE IF EXISTS " << META_TABLES << ", " << META_TABLEFILES << ";";
 
         ENGINE_LOG_DEBUG << "MySQLMetaImpl::DropAll: " << dropTableQuery.str();
 

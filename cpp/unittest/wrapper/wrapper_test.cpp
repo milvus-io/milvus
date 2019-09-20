@@ -16,13 +16,12 @@
 // under the License.
 
 
-#include <gtest/gtest.h>
 #include "utils/easylogging++.h"
-
-#include "src/wrapper/vec_index.h"
+#include "wrapper/vec_index.h"
 #include "knowhere/index/vector_index/gpu_ivf.h"
-
 #include "utils.h"
+
+#include <gtest/gtest.h>
 
 INITIALIZE_EASYLOGGINGPP
 
