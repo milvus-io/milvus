@@ -196,8 +196,8 @@ Server::Start() {
         server::Metrics::GetInstance().Init();
         server::SystemInfo::GetInstance().Init();
 
-        std::cout << "Milvus server start successfully." << std::endl;
         StartService();
+        std::cout << "Milvus server start successfully." << std::endl;
 
     } catch (std::exception &ex) {
         std::cerr << "Milvus server encounter exception: " << ex.what();

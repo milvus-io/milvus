@@ -17,10 +17,8 @@
 
 #include "LogUtil.h"
 #include "server/ServerConfig.h"
-#include "easylogging++.h"
 
 #include <ctype.h>
-
 #include <string>
 #include <libgen.h>
 

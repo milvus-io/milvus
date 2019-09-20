@@ -86,6 +86,7 @@ constexpr ErrorCode DB_ERROR = ToDbErrorCode(2);
 constexpr ErrorCode DB_NOT_FOUND = ToDbErrorCode(3);
 constexpr ErrorCode DB_ALREADY_EXIST = ToDbErrorCode(4);
 constexpr ErrorCode DB_INVALID_PATH = ToDbErrorCode(5);
+constexpr ErrorCode DB_INCOMPATIB_META = ToDbErrorCode(6);
 
 //knowhere error code
 constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);

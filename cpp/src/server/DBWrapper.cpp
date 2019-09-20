@@ -109,15 +109,10 @@ Status DBWrapper::StartService() {
     }
 
     //create db instance
-    std::string msg = opt.meta.path;
     try {
         db_ = engine::DBFactory::Build(opt);
     } catch(std::exception& ex) {
-        msg = ex.what();
-    }
-
-    if(db_ == nullptr) {
-        std::cerr << "ERROR! Failed to open database: " << msg << std::endl;
+        std::cerr << "ERROR! Failed to open database: " << ex.what() << std::endl;
         kill(0, SIGUSR1);
     }
 
