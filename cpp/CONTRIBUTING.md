@@ -1,6 +1,6 @@
 # Contributing to Milvus
 
-First of all, thanks for taking the time to contribute to Milvus!:tada::clap: It's people like you that help Milvus come to fruition.
+First of all, thanks for taking the time to contribute to Milvus! It's people like you that help Milvus come to fruition.
 
 The following are a set of guidelines for contributing to Milvus. Following these guidelines helps contributing to this project easy and transparent. These are mostly guideline, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
