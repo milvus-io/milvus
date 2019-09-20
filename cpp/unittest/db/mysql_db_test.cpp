@@ -21,7 +21,6 @@
 #include "db/meta/MetaConsts.h"
 
 #include <gtest/gtest.h>
-#include "utils/easylogging++.h"
 #include <boost/filesystem.hpp>
 
 #include <thread>

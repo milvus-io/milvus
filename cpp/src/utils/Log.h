@@ -24,7 +24,6 @@ namespace milvus {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define SERVER_DOMAIN_NAME "[SERVER] "
-#define SERVER_ERROR_TEXT "SERVER Error:"
 
 #define SERVER_LOG_TRACE LOG(TRACE) << SERVER_DOMAIN_NAME
 #define SERVER_LOG_DEBUG LOG(DEBUG) << SERVER_DOMAIN_NAME
@@ -35,7 +34,6 @@ namespace milvus {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define ENGINE_DOMAIN_NAME "[ENGINE] "
-#define ENGINE_ERROR_TEXT "ENGINE Error:"
 
 #define ENGINE_LOG_TRACE LOG(TRACE) << ENGINE_DOMAIN_NAME
 #define ENGINE_LOG_DEBUG LOG(DEBUG) << ENGINE_DOMAIN_NAME
@@ -46,7 +44,6 @@ namespace milvus {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define WRAPPER_DOMAIN_NAME "[WRAPPER] "
-#define WRAPPER_ERROR_TEXT "WRAPPER Error:"
 
 #define WRAPPER_LOG_TRACE LOG(TRACE) << WRAPPER_DOMAIN_NAME
 #define WRAPPER_LOG_DEBUG LOG(DEBUG) << WRAPPER_DOMAIN_NAME

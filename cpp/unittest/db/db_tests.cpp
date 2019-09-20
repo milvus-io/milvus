@@ -24,10 +24,7 @@
 #include "utils/CommonUtil.h"
 
 #include <gtest/gtest.h>
-#include "utils/easylogging++.h"
-
 #include <boost/filesystem.hpp>
-
 #include <thread>
 #include <random>
 

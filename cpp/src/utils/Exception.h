@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "utils/Error.h"
+
 #include <exception>
 #include <string>
 
@@ -25,13 +27,14 @@ namespace milvus {
 
 class Exception : public std::exception {
 public:
-    Exception(const std::string& message)
-        : message_(message) {
+    Exception(ErrorCode code, const std::string& message)
+        : code_(code_),
+          message_(message) {
         }
 
-    Exception()
-        : message_() {
-        }
+    ErrorCode code() const throw() {
+        return code_;
+    }
 
     virtual const char* what() const throw() {
         if (message_.empty()) {
@@ -44,20 +47,21 @@ public:
     virtual ~Exception() throw() {};
 
 protected:
-
+    ErrorCode code_;
     std::string message_;
 };
 
 class InvalidArgumentException : public Exception {
 public:
-    InvalidArgumentException() : Exception("Invalid Argument"){};
-    InvalidArgumentException(const std::string& message) : Exception(message) {};
-};
+    InvalidArgumentException()
+        : Exception(SERVER_INVALID_ARGUMENT, "Invalid Argument") {
 
-class OutOfRangeException : public Exception {
-public:
-    OutOfRangeException() : Exception("Out Of Range"){};
-    OutOfRangeException(const std::string& message) : Exception(message) {};
+    };
+    InvalidArgumentException(const std::string& message)
+        : Exception(SERVER_INVALID_ARGUMENT, message) {
+
+    };
+
 };
 
 } // namespace milvus
