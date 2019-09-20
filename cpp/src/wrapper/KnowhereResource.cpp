@@ -41,14 +41,15 @@ ErrorCode KnowhereResource::Initialize() {
     server::ServerConfig& root_config = server::ServerConfig::GetInstance();
     server::ConfigNode& db_config = root_config.GetConfig(server::CONFIG_DB);
 
-    int32_t build_index_gpu = db_config.GetInt32Value(server::CONFIG_DB_BUILD_INDEX_GPU, 0);
+    int32_t build_index_gpu =
+        db_config.GetInt32Value(server::CONFIG_DB_BUILD_INDEX_GPU, std::stoi(server::CONFIG_DB_BUILD_INDEX_GPU_DEFAULT));
     gpu_resources.insert(std::make_pair(build_index_gpu, GpuResourceSetting()));
 
     //get search gpu resource
     server::ConfigNode& res_config = root_config.GetConfig(server::CONFIG_RESOURCE);
-    auto resources = res_config.GetSequence("resources");
+    auto pool = res_config.GetSequence(server::CONFIG_RESOURCE_POOL);
     std::set<uint64_t> gpu_ids;
-    for (auto &resource : resources) {
+    for (auto &resource : pool) {
         if (resource.length() < 4 || resource.substr(0, 3) != "gpu") {
             // invalid
             continue;

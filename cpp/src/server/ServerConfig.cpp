@@ -109,50 +109,51 @@ ServerConfig::CheckServerConfig() {
     bool okay = true;
     ConfigNode server_config = GetConfig(CONFIG_SERVER);
 
-    std::string ip_address = server_config.GetValue(CONFIG_SERVER_ADDRESS, "127.0.0.1");
+    std::string ip_address = server_config.GetValue(CONFIG_SERVER_ADDRESS, CONFIG_SERVER_ADDRESS_DEFAULT);
     if (!ValidationUtil::ValidateIpAddress(ip_address).ok()) {
         std::cerr << "ERROR: invalid server IP address: " << ip_address << std::endl;
         okay = false;
     }
 
-    std::string port_str = server_config.GetValue(CONFIG_SERVER_PORT, "19530");
+    std::string port_str = server_config.GetValue(CONFIG_SERVER_PORT, CONFIG_SERVER_PORT_DEFAULT);
     if (!ValidationUtil::ValidateStringIsNumber(port_str).ok()) {
         std::cerr << "ERROR: port " << port_str << " is not a number" << std::endl;
         okay = false;
     } else {
         int32_t port = std::stol(port_str);
-        if (port < 1025 | port > 65534) {
-            std::cerr << "ERROR: port " << port_str << " out of range [1025, 65534]" << std::endl;
+        if (!(port > 1024 && port < 65535)) {
+            std::cerr << "ERROR: port " << port_str << " out of range (1024, 65535)" << std::endl;
             okay = false;
         }
     }
 
-    std::string mode = server_config.GetValue(CONFIG_CLUSTER_MODE, "single");
+    std::string mode = server_config.GetValue(CONFIG_SERVER_MODE, CONFIG_SERVER_MODE_DEFAULT);
     if (mode != "single" && mode != "cluster" && mode != "read_only") {
         std::cerr << "ERROR: mode " << mode << " is not one of ['single', 'cluster', 'read_only']" << std::endl;
         okay = false;
     }
 
-    std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
+    std::string time_zone = server_config.GetValue(CONFIG_SERVER_TIME_ZONE, CONFIG_SERVER_TIME_ZONE_DEFAULT);
     int flag = 0;
-    if(time_zone.length() < 3)
+    if (time_zone.length() <= 3) {
         flag = 1;
-    else if(time_zone.substr(0, 3) != "UTC")
-        flag = 1;
-    else if(time_zone.length() > 3){
-        try {
-            stoi(time_zone.substr(3, std::string::npos));
-        }
-        catch (std::invalid_argument &) {
+    } else {
+        if (time_zone.substr(0, 3) != "UTC") {
             flag = 1;
+        } else {
+            try {
+                stoi(time_zone.substr(3));
+            } catch (...) {
+                flag = 1;
+            }
         }
     }
-    if(flag == 1){
-        std::cerr << "ERROR: time_zone " << time_zone << " is not in a right format" << std::endl;
+    if (flag == 1) {
+        std::cerr << "ERROR: time_zone " << time_zone << " format wrong" << std::endl;
         okay = false;
     }
 
-    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Server config is illegal"));
+    return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Illegal server config"));
 }
 
 Status
@@ -182,25 +183,25 @@ ServerConfig::CheckDBConfig() {
         okay = false;
     }
 
-    std::string db_backend_url = db_config.GetValue(CONFIG_DB_URL);
+    std::string db_backend_url = db_config.GetValue(CONFIG_DB_BACKEND_URL);
     if (!ValidationUtil::ValidateDbURI(db_backend_url).ok()) {
         std::cerr << "ERROR: invalid db_backend_url: " << db_backend_url << std::endl;
         okay = false;
     }
 
-    std::string archive_disk_threshold_str = db_config.GetValue(CONFIG_DB_INSERT_BUFFER_SIZE, "0");
+    std::string archive_disk_threshold_str = db_config.GetValue(CONFIG_DB_ARCHIVE_DISK_THRESHOLD, CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT);
     if (!ValidationUtil::ValidateStringIsNumber(archive_disk_threshold_str).ok()) {
         std::cerr << "ERROR: archive_disk_threshold " << archive_disk_threshold_str << " is not a number" << std::endl;
         okay = false;
     }
 
-    std::string archive_days_threshold_str = db_config.GetValue(CONFIG_DB_INSERT_BUFFER_SIZE, "0");
+    std::string archive_days_threshold_str = db_config.GetValue(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD, CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT);
     if (!ValidationUtil::ValidateStringIsNumber(archive_days_threshold_str).ok()) {
         std::cerr << "ERROR: archive_days_threshold " << archive_days_threshold_str << " is not a number" << std::endl;
         okay = false;
     }
 
-    std::string insert_buffer_size_str = db_config.GetValue(CONFIG_DB_INSERT_BUFFER_SIZE, "4");
+    std::string insert_buffer_size_str = db_config.GetValue(CONFIG_DB_BUFFER_SIZE, CONFIG_DB_BUFFER_SIZE_DEFAULT);
     if (!ValidationUtil::ValidateStringIsNumber(insert_buffer_size_str).ok()) {
         std::cerr << "ERROR: insert_buffer_size " << insert_buffer_size_str << " is not a number" << std::endl;
         okay = false;
@@ -216,7 +217,7 @@ ServerConfig::CheckDBConfig() {
         }
     }
 
-    std::string gpu_index_str = db_config.GetValue(CONFIG_DB_BUILD_INDEX_GPU, "0");
+    std::string gpu_index_str = db_config.GetValue(CONFIG_DB_BUILD_INDEX_GPU, CONFIG_DB_BUILD_INDEX_GPU_DEFAULT);
     if (!ValidationUtil::ValidateStringIsNumber(gpu_index_str).ok()) {
         std::cerr << "ERROR: gpu_index " << gpu_index_str << " is not a number" << std::endl;
         okay = false;
@@ -245,13 +246,14 @@ ServerConfig::CheckMetricConfig() {
     bool okay = true;
     ConfigNode metric_config = GetConfig(CONFIG_METRIC);
 
-    std::string is_startup_str = metric_config.GetValue(CONFIG_METRIC_IS_STARTUP, "off");
+    std::string is_startup_str =
+        metric_config.GetValue(CONFIG_METRIC_AUTO_BOOTUP, CONFIG_METRIC_AUTO_BOOTUP_DEFAULT);
     if (!ValidationUtil::ValidateStringIsBool(is_startup_str).ok()) {
         std::cerr << "ERROR: invalid is_startup config: " << is_startup_str << std::endl;
         okay = false;
     }
 
-    std::string port_str = metric_config.GetChild(CONFIG_PROMETHEUS).GetValue(CONFIG_METRIC_PROMETHEUS_PORT, "8080");
+    std::string port_str = metric_config.GetChild(CONFIG_METRIC_PROMETHEUS).GetValue(CONFIG_METRIC_PROMETHEUS_PORT, "8080");
     if (!ValidationUtil::ValidateStringIsNumber(port_str).ok()) {
         std::cerr << "ERROR: port specified in prometheus_config " << port_str << " is not a number" << std::endl;
         okay = false;
@@ -274,7 +276,8 @@ ServerConfig::CheckCacheConfig() {
     bool okay = true;
     ConfigNode cache_config = GetConfig(CONFIG_CACHE);
 
-    std::string cpu_cache_capacity_str = cache_config.GetValue(CONFIG_CPU_CACHE_CAPACITY, "16");
+    std::string cpu_cache_capacity_str =
+        cache_config.GetValue(CONFIG_CACHE_CPU_MEM_CAPACITY, CONFIG_CACHE_CPU_MEM_CAPACITY_DEFAULT);
     if (!ValidationUtil::ValidateStringIsNumber(cpu_cache_capacity_str).ok()) {
         std::cerr << "ERROR: cpu_cache_capacity " << cpu_cache_capacity_str << " is not a number" << std::endl;
         okay = false;
@@ -292,15 +295,17 @@ ServerConfig::CheckCacheConfig() {
             std::cerr << "Warning: cpu_cache_capacity value is too aggressive" << std::endl;
         }
 
-        uint64_t insert_buffer_size = (uint64_t) GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_INSERT_BUFFER_SIZE, 4);
-        insert_buffer_size *= GB;
-        if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
+        uint64_t buffer_size =
+            (uint64_t) GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_BUFFER_SIZE, std::stoi(CONFIG_DB_BUFFER_SIZE_DEFAULT));
+        buffer_size *= GB;
+        if (buffer_size + cpu_cache_capacity >= total_mem) {
             std::cerr << "ERROR: sum of cpu_cache_capacity and insert_buffer_size exceed system memory" << std::endl;
             okay = false;
         }
     }
 
-    std::string cpu_cache_free_percent_str = cache_config.GetValue(CACHE_FREE_PERCENT, "0.85");
+    std::string cpu_cache_free_percent_str =
+        cache_config.GetValue(CONFIG_CACHE_CPU_MEM_THRESHOLD, CONFIG_CACHE_CPU_MEM_THRESHOLD_DEFAULT);
     double cpu_cache_free_percent;
     if (!ValidationUtil::ValidateStringIsDouble(cpu_cache_free_percent_str, cpu_cache_free_percent).ok()) {
         std::cerr << "ERROR: cpu_cache_free_percent " << cpu_cache_free_percent_str << " is not a double" << std::endl;
@@ -311,13 +316,15 @@ ServerConfig::CheckCacheConfig() {
         okay = false;
     }
 
-    std::string insert_cache_immediately_str = cache_config.GetValue(CONFIG_INSERT_CACHE_IMMEDIATELY, "false");
+    std::string insert_cache_immediately_str =
+        cache_config.GetValue(CONFIG_CACHE_INSERT_IMMEDIATELY, CONFIG_CACHE_INSERT_IMMEDIATELY_DEFAULT);
     if (!ValidationUtil::ValidateStringIsBool(insert_cache_immediately_str).ok()) {
         std::cerr << "ERROR: invalid insert_cache_immediately config: " << insert_cache_immediately_str << std::endl;
         okay = false;
     }
 
-    std::string gpu_cache_capacity_str = cache_config.GetValue(CONFIG_GPU_CACHE_CAPACITY, "0");
+    std::string gpu_cache_capacity_str =
+        cache_config.GetValue(CONFIG_CACHE_GPU_MEM_CAPACITY, CONFIG_CACHE_GPU_MEM_CAPACITY_DEFAULT);
     if (!ValidationUtil::ValidateStringIsNumber(gpu_cache_capacity_str).ok()) {
         std::cerr << "ERROR: gpu_cache_capacity " << gpu_cache_capacity_str << " is not a number" << std::endl;
         okay = false;
@@ -325,7 +332,7 @@ ServerConfig::CheckCacheConfig() {
     else {
         uint64_t gpu_cache_capacity = (uint64_t) std::stol(gpu_cache_capacity_str);
         gpu_cache_capacity *= GB;
-        int gpu_index = GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_BUILD_INDEX_GPU, 0);
+        int gpu_index = GetConfig(CONFIG_DB).GetInt32Value(CONFIG_DB_BUILD_INDEX_GPU, std::stoi(CONFIG_DB_BUILD_INDEX_GPU_DEFAULT));
         size_t gpu_memory;
         if (!ValidationUtil::GetGpuMemory(gpu_index, gpu_memory).ok()) {
             std::cerr << "ERROR: could not get gpu memory for device " << gpu_index << std::endl;
@@ -341,7 +348,8 @@ ServerConfig::CheckCacheConfig() {
         }
     }
 
-    std::string gpu_cache_free_percent_str = cache_config.GetValue(GPU_CACHE_FREE_PERCENT, "0.85");
+    std::string gpu_cache_free_percent_str =
+        cache_config.GetValue(CONFIG_CACHE_GPU_MEM_THRESHOLD, CONFIG_CACHE_GPU_MEM_THRESHOLD_DEFAULT);
     double gpu_cache_free_percent;
     if (!ValidationUtil::ValidateStringIsDouble(gpu_cache_free_percent_str, gpu_cache_free_percent).ok()) {
         std::cerr << "ERROR: gpu_cache_free_percent " << gpu_cache_free_percent_str << " is not a double" << std::endl;
@@ -365,13 +373,15 @@ ServerConfig::CheckEngineConfig() {
     bool okay = true;
     ConfigNode engine_config = GetConfig(CONFIG_ENGINE);
 
-    std::string use_blas_threshold_str = engine_config.GetValue(CONFIG_DCBT, "20");
+    std::string use_blas_threshold_str =
+        engine_config.GetValue(CONFIG_ENGINE_BLAS_THRESHOLD, CONFIG_ENGINE_BLAS_THRESHOLD_DEFAULT);
     if (!ValidationUtil::ValidateStringIsNumber(use_blas_threshold_str).ok()) {
         std::cerr << "ERROR: use_blas_threshold " << use_blas_threshold_str << " is not a number" << std::endl;
         okay = false;
     }
 
-    std::string omp_thread_num_str = engine_config.GetValue(CONFIG_OMP_THREAD_NUM, "0");
+    std::string omp_thread_num_str =
+        engine_config.GetValue(CONFIG_ENGINE_OMP_THREAD_NUM, CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT);
     if (!ValidationUtil::ValidateStringIsNumber(omp_thread_num_str).ok()) {
         std::cerr << "ERROR: omp_thread_num " << omp_thread_num_str << " is not a number" << std::endl;
         okay = false;
@@ -393,20 +403,20 @@ ServerConfig::CheckResourceConfig() {
     /*
       resource_config:
         mode: simple
-        resources:
+        pool:
           - cpu
           - gpu0
           - gpu100
      */
     bool okay = true;
     server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
-    auto mode = config.GetValue("mode", "simple");
+    auto mode = config.GetValue(CONFIG_RESOURCE_MODE, CONFIG_RESOURCE_MODE_DEFAULT);
     if (mode != "simple") {
         std::cerr << "ERROR: invalid resource config: mode is " << mode << std::endl;
         okay = false;
     }
-    auto resources = config.GetSequence("resources");
-    if (resources.empty()) {
+    auto pool = config.GetSequence(CONFIG_RESOURCE_POOL);
+    if (pool.empty()) {
         std::cerr << "ERROR: invalid resource config: resources empty" << std::endl;
         okay = false;
     }

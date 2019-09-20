@@ -43,16 +43,9 @@ namespace milvus {
 namespace server {
 
 Server &
-Server::Instance() {
+Server::GetInstance() {
     static Server server;
     return server;
-}
-
-Server::Server() {
-
-}
-Server::~Server() {
-
 }
 
 void
@@ -171,7 +164,7 @@ Server::Start() {
         ServerConfig &config = ServerConfig::GetInstance();
         ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
 
-        std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
+        std::string time_zone = server_config.GetValue(CONFIG_SERVER_TIME_ZONE, CONFIG_SERVER_TIME_ZONE_DEFAULT);
         if (time_zone.length() == 3) {
             time_zone = "CUT";
         } else {
