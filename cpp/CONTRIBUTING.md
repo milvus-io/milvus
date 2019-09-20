@@ -1,6 +1,6 @@
 # Contributing to Milvus
 
-First of all, thanks for taking the time to contribute to Milvus! It's people like you that help Milvus come to fruition.
+First of all, thanks for taking the time to contribute to Milvus!:tada::clap: It's people like you that help Milvus come to fruition.
 
 The following are a set of guidelines for contributing to Milvus. Following these guidelines helps contributing to this project easy and transparent. These are mostly guideline, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
@@ -21,8 +21,8 @@ Before you make any contributions, make sure you follow this list.
 Contributions to Milvus fall into the following categories.
 
 1. To report a bug or a problem with documentation, please file an [issue](https://github.com/milvus-io/milvus/issues/new/choose) providing the details of the problem. If you believe the issue needs priority attention, please comment on the issue to notify the team.
-2. To propose a new feature, please file a new feature request [issue](https://github.com/milvus-io/milvus/issues/new/choose). Describe the intended feature and discuss the design and implementation with the team and community. Once the team agrees that the plan looks good, go ahead and implement it, following the [Contributing code].
-3. To implement a feature or bug-fix for an existing outstanding issue, follow the [Contributing code]. If you need more context on a particular issue, comment on the issue to let people know.
+2. To propose a new feature, please file a new feature request [issue](https://github.com/milvus-io/milvus/issues/new/choose). Describe the intended feature and discuss the design and implementation with the team and community. Once the team agrees that the plan looks good, go ahead and implement it, following the [Contributing code](CONTRIBUTING.md#contributing-code).
+3. To implement a feature or bug-fix for an existing outstanding issue, follow the [Contributing code](CONTRIBUTING.md#contributing-code). If you need more context on a particular issue, comment on the issue to let people know.
 
 ## How can I contribute?
 
@@ -43,6 +43,7 @@ Before sending your pull requests for review, make sure your changes are consist
 
 
 ## Coding Style
+
 
 ## Run unit test
 
