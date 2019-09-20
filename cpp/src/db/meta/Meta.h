@@ -31,6 +31,9 @@ namespace milvus {
 namespace engine {
 namespace meta {
 
+static const char* META_TABLES = "Tables";
+static const char* META_TABLEFILES = "TableFiles";
+
 class Meta {
  public:
     virtual ~Meta() = default;

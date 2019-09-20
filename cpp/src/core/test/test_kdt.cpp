@@ -20,12 +20,12 @@
 
 #include <iostream>
 #include <sstream>
-#include "knowhere/common/exception.h"
+#include "knowhere/common/Exception.h"
 
-#include "knowhere/index/vector_index/cpu_kdt_rng.h"
-#include "knowhere/index/vector_index/definitions.h"
-#include "knowhere/adapter/sptag.h"
-#include "knowhere/adapter/structure.h"
+#include "knowhere/index/vector_index/IndexKDT.h"
+#include "knowhere/index/vector_index/utils/Definitions.h"
+#include "knowhere/adapter/SptagAdapter.h"
+#include "knowhere/adapter/Structure.h"
 
 #include "utils.h"
 

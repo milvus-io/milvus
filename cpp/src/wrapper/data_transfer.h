@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "knowhere/adapter/structure.h"
+#include "knowhere/adapter/Structure.h"
 
 
 namespace zilliz {
