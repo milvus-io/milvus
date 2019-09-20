@@ -17,10 +17,10 @@
 
 
 #include "utils/Log.h"
-#include "knowhere/index/vector_index/idmap.h"
-#include "knowhere/index/vector_index/gpu_ivf.h"
-#include "knowhere/common/exception.h"
-#include "knowhere/index/vector_index/cloner.h"
+#include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 
 #include "vec_impl.h"
 #include "data_transfer.h"
@@ -153,7 +153,7 @@ IndexType VecIndexImpl::GetType() {
 
 VecIndexPtr VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg) {
     // TODO(linxj): exception handle
-    auto gpu_index = zilliz::knowhere::CopyCpuToGpu(index_, device_id, cfg);
+    auto gpu_index = zilliz::knowhere::cloner::CopyCpuToGpu(index_, device_id, cfg);
     auto new_index = std::make_shared<VecIndexImpl>(gpu_index, ConvertToGpuIndexType(type));
     new_index->dim = dim;
     return new_index;
@@ -161,7 +161,7 @@ VecIndexPtr VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg)
 
 VecIndexPtr VecIndexImpl::CopyToCpu(const Config &cfg) {
     // TODO(linxj): exception handle
-    auto cpu_index = zilliz::knowhere::CopyGpuToCpu(index_, cfg);
+    auto cpu_index = zilliz::knowhere::cloner::CopyGpuToCpu(index_, cfg);
     auto new_index = std::make_shared<VecIndexImpl>(cpu_index, ConvertToCpuIndexType(type));
     new_index->dim = dim;
     return new_index;

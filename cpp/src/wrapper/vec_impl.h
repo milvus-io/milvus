@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "knowhere/index/vector_index/vector_index.h"
+#include "knowhere/index/vector_index/VectorIndex.h"
 
 #include "vec_index.h"
 

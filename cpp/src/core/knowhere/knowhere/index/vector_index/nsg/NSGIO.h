@@ -18,18 +18,17 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
+#include "NSG.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
+namespace algo {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
-
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+extern void write_index(NsgIndex* index, MemoryIOWriter& writer);
+extern NsgIndex* read_index(MemoryIOReader& reader);
 
 }
 }

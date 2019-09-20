@@ -25,12 +25,12 @@
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 
-#include "knowhere/index/vector_index/gpu_ivf.h"
-#include "knowhere/index/vector_index/ivf.h"
-#include "knowhere/adapter/structure.h"
-#include "knowhere/index/vector_index/cloner.h"
-#include "knowhere/common/exception.h"
-#include "knowhere/common/timer.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/adapter/Structure.h"
+#include "knowhere/index/vector_index/utils/Cloner.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/common/Timer.h"
 
 #include "utils.h"
 
