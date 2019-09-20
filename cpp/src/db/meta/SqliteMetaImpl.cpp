@@ -84,7 +84,6 @@ inline auto StoragePrototype(const std::string &path) {
 
 using ConnectorT = decltype(StoragePrototype(""));
 static std::unique_ptr<ConnectorT> ConnectorPtr;
-using ConditionT = decltype(c(&TableFileSchema::id_) == 1UL);
 
 SqliteMetaImpl::SqliteMetaImpl(const DBMetaOptions &options_)
     : options_(options_) {
@@ -111,6 +110,23 @@ Status SqliteMetaImpl::NextFileId(std::string &file_id) {
     return Status::OK();
 }
 
+void SqliteMetaImpl::ValidateMetaSchema() {
+    if(ConnectorPtr == nullptr) {
+        return;
+    }
+
+    //old meta could be recreated since schema changed, throw exception if meta schema is not compatible
+    auto ret = ConnectorPtr->sync_schema_simulate();
+    if(ret.find(META_TABLES) != ret.end()
+       && sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLES]) {
+        throw Exception(DB_INCOMPATIB_META, "Meta Tables schema is created by Milvus old version");
+    }
+    if(ret.find(META_TABLEFILES) != ret.end()
+       && sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLEFILES]) {
+        throw Exception(DB_INCOMPATIB_META, "Meta TableFiles schema is created by Milvus old version");
+    }
+}
+
 Status SqliteMetaImpl::Initialize() {
     if (!boost::filesystem::is_directory(options_.path)) {
         auto ret = boost::filesystem::create_directory(options_.path);
@@ -123,16 +139,7 @@ Status SqliteMetaImpl::Initialize() {
 
     ConnectorPtr = std::make_unique<ConnectorT>(StoragePrototype(options_.path + "/meta.sqlite"));
 
-    //old meta could be recreated since schema changed, throw exception if meta schema is not compatible
-    auto ret = ConnectorPtr->sync_schema_simulate();
-    if(ret.find(META_TABLES) != ret.end()
-        && sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLES]) {
-            throw Exception(DB_INCOMPATIB_META, "Meta schema is created by Milvus old version");
-    }
-    if(ret.find(META_TABLEFILES) != ret.end()
-       && sqlite_orm::sync_schema_result::dropped_and_recreated == ret[META_TABLEFILES]) {
-        throw Exception(DB_INCOMPATIB_META, "Meta schema is created by Milvus old version");
-    }
+    ValidateMetaSchema();
 
     ConnectorPtr->sync_schema();
     ConnectorPtr->open_forever(); // thread safe option

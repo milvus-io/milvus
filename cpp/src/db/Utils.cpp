@@ -21,6 +21,7 @@
 
 #include <mutex>
 #include <chrono>
+#include <regex>
 #include <boost/filesystem.hpp>
 
 namespace zilliz {
@@ -193,6 +194,41 @@ meta::DateT GetDateWithDelta(int day_delta) {
 
 meta::DateT GetDate() {
     return GetDate(std::time(nullptr), 0);
+}
+
+// URI format: dialect://username:password@host:port/database
+Status ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
+    std::string dialect_regex = "(.*)";
+    std::string username_tegex = "(.*)";
+    std::string password_regex = "(.*)";
+    std::string host_regex = "(.*)";
+    std::string port_regex = "(.*)";
+    std::string db_name_regex = "(.*)";
+    std::string uri_regex_str =
+            dialect_regex + "\\:\\/\\/" +
+            username_tegex + "\\:" +
+            password_regex + "\\@" +
+            host_regex + "\\:" +
+            port_regex + "\\/" +
+            db_name_regex;
+
+    std::regex uri_regex(uri_regex_str);
+    std::smatch pieces_match;
+
+    if (std::regex_match(uri, pieces_match, uri_regex)) {
+        info.dialect_ = pieces_match[1].str();
+        info.username_ = pieces_match[2].str();
+        info.password_ = pieces_match[3].str();
+        info.host_ = pieces_match[4].str();
+        info.port_ = pieces_match[5].str();
+        info.db_name_ = pieces_match[6].str();
+
+        //TODO: verify host, port...
+    } else {
+        return Status(DB_INVALID_META_URI, "Invalid meta uri: " + uri);
+    }
+
+    return Status::OK();
 }
 
 } // namespace utils
