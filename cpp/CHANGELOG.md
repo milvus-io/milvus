@@ -18,6 +18,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-562 - Add JobMgr and TaskCreator in Scheduler
 - MS-566 - Refactor cmake
 - MS-555 - Remove old scheduler
+- MS-578 - Makesure milvus5.0 don't crack 0.3.1 data
 
 ## New Feature
 

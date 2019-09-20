@@ -21,7 +21,6 @@
 #include "db/Utils.h"
 #include "utils/Status.h"
 #include "utils/Exception.h"
-#include "utils/easylogging++.h"
 
 #include <gtest/gtest.h>
 #include <thread>
@@ -31,13 +30,13 @@
 using namespace zilliz::milvus;
 
 TEST(DBMiscTest, EXCEPTION_TEST) {
-    Exception ex1("");
+    Exception ex1(100, "error");
     std::string what = ex1.what();
-    ASSERT_FALSE(what.empty());
+    ASSERT_EQ(what, "error");
+    ASSERT_EQ(ex1.code(), 100);
 
-    OutOfRangeException ex2;
-    what = ex2.what();
-    ASSERT_FALSE(what.empty());
+    InvalidArgumentException ex2;
+    ASSERT_EQ(ex2.code(), SERVER_INVALID_ARGUMENT);
 }
 
 TEST(DBMiscTest, OPTIONS_TEST) {
