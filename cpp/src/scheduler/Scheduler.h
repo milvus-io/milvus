@@ -122,6 +122,8 @@ private:
 private:
     bool running_;
 
+    std::unordered_map<uint64_t, std::function<void(EventPtr)>> event_register_;
+
     ResourceMgrWPtr res_mgr_;
     std::queue<EventPtr> event_queue_;
     std::thread worker_thread_;

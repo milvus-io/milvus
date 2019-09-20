@@ -18,6 +18,7 @@
 #pragma once
 
 #include "../resource/Resource.h"
+#include "../ResourceMgr.h"
 
 
 namespace zilliz {
@@ -34,6 +35,15 @@ public:
 
     static void
     PushTaskToResource(const TaskPtr &task, const ResourcePtr &dest);
+
+    static void
+    DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource, std::shared_ptr<LoadCompletedEvent> event);
+
+    static void
+    SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr,
+                                        ResourcePtr resource,
+                                        std::shared_ptr<LoadCompletedEvent> event);
+
 };
 
 
