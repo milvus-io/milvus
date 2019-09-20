@@ -121,12 +121,12 @@ TEST_F(MySqlMetaTest, TABLE_FILE_TEST) {
 
 TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
-    DBMetaOptions options = GetOptions().meta;
+    DBMetaOptions options = GetOptions().meta_;
 
     int days_num = rand() % 100;
     std::stringstream ss;
     ss << "days:" << days_num;
-    options.archive_conf = ArchiveConf("delete", ss.str());
+    options.archive_conf_ = ArchiveConf("delete", ss.str());
     int mode = DBOptions::MODE::SINGLE;
     meta::MySQLMetaImpl impl(options, mode);
 
@@ -184,9 +184,9 @@ TEST_F(MySqlMetaTest, ARCHIVE_TEST_DAYS) {
 }
 
 TEST_F(MySqlMetaTest, ARCHIVE_TEST_DISK) {
-    DBMetaOptions options = GetOptions().meta;
+    DBMetaOptions options = GetOptions().meta_;
 
-    options.archive_conf = ArchiveConf("delete", "disk:11");
+    options.archive_conf_ = ArchiveConf("delete", "disk:11");
     int mode = DBOptions::MODE::SINGLE;
     auto impl = meta::MySQLMetaImpl(options, mode);
     auto table_id = "meta_test_group";

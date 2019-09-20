@@ -117,11 +117,11 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
 TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
     DBMetaOptions options;
-    options.path = "/tmp/milvus_test";
+    options.path_ = "/tmp/milvus_test";
     int days_num = rand() % 100;
     std::stringstream ss;
     ss << "days:" << days_num;
-    options.archive_conf = ArchiveConf("delete", ss.str());
+    options.archive_conf_ = ArchiveConf("delete", ss.str());
 
     meta::SqliteMetaImpl impl(options);
     auto table_id = "meta_test_table";
@@ -168,8 +168,8 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
 
 TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     DBMetaOptions options;
-    options.path = "/tmp/milvus_test";
-    options.archive_conf = ArchiveConf("delete", "disk:11");
+    options.path_ = "/tmp/milvus_test";
+    options.archive_conf_ = ArchiveConf("delete", "disk:11");
 
     meta::SqliteMetaImpl impl(options);
     auto table_id = "meta_test_group";
