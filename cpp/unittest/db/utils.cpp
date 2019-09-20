@@ -71,8 +71,8 @@ void BaseTest::TearDown() {
 
 engine::DBOptions BaseTest::GetOptions() {
     auto options = engine::DBFactory::BuildOption();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = "sqlite://:@:/";
+    options.meta_.path_ = "/tmp/milvus_test";
+    options.meta_.backend_uri_ = "sqlite://:@:/";
     return options;
 }
 
@@ -110,15 +110,15 @@ void DBTest::TearDown() {
     BaseTest::TearDown();
 
     auto options = GetOptions();
-    boost::filesystem::remove_all(options.meta.path);
+    boost::filesystem::remove_all(options.meta_.path_);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 engine::DBOptions DBTest2::GetOptions() {
     auto options = engine::DBFactory::BuildOption();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.archive_conf = engine::ArchiveConf("delete", "disk:1");
-    options.meta.backend_uri = "sqlite://:@:/";
+    options.meta_.path_ = "/tmp/milvus_test";
+    options.meta_.archive_conf_ = engine::ArchiveConf("delete", "disk:1");
+    options.meta_.backend_uri_ = "sqlite://:@:/";
     return options;
 }
 
@@ -127,7 +127,7 @@ void MetaTest::SetUp() {
     BaseTest::SetUp();
 
     auto options = GetOptions();
-    impl_ = std::make_shared<engine::meta::SqliteMetaImpl>(options.meta);
+    impl_ = std::make_shared<engine::meta::SqliteMetaImpl>(options.meta_);
 }
 
 void MetaTest::TearDown() {
@@ -136,17 +136,17 @@ void MetaTest::TearDown() {
     BaseTest::TearDown();
 
     auto options = GetOptions();
-    boost::filesystem::remove_all(options.meta.path);
+    boost::filesystem::remove_all(options.meta_.path_);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 engine::DBOptions MySqlDBTest::GetOptions() {
     auto options = engine::DBFactory::BuildOption();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = DBTestEnvironment::getURI();
+    options.meta_.path_ = "/tmp/milvus_test";
+    options.meta_.backend_uri_ = DBTestEnvironment::getURI();
 
-    if(options.meta.backend_uri.empty()) {
-        options.meta.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
+    if(options.meta_.backend_uri_.empty()) {
+        options.meta_.backend_uri_ = "mysql://root:Fantast1c@192.168.1.194:3306/";
     }
 
     return options;
@@ -157,7 +157,7 @@ void MySqlMetaTest::SetUp() {
     BaseTest::SetUp();
 
     auto options = GetOptions();
-    impl_ = std::make_shared<engine::meta::MySQLMetaImpl>(options.meta, options.mode);
+    impl_ = std::make_shared<engine::meta::MySQLMetaImpl>(options.meta_, options.mode_);
 }
 
 void MySqlMetaTest::TearDown() {
@@ -166,16 +166,16 @@ void MySqlMetaTest::TearDown() {
     BaseTest::TearDown();
 
     auto options = GetOptions();
-    boost::filesystem::remove_all(options.meta.path);
+    boost::filesystem::remove_all(options.meta_.path_);
 }
 
 engine::DBOptions MySqlMetaTest::GetOptions() {
     auto options = engine::DBFactory::BuildOption();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = DBTestEnvironment::getURI();
+    options.meta_.path_ = "/tmp/milvus_test";
+    options.meta_.backend_uri_ = DBTestEnvironment::getURI();
 
-    if(options.meta.backend_uri.empty()) {
-        options.meta.backend_uri = "mysql://root:Fantast1c@192.168.1.194:3306/";
+    if(options.meta_.backend_uri_.empty()) {
+        options.meta_.backend_uri_ = "mysql://root:Fantast1c@192.168.1.194:3306/";
     }
 
     return options;

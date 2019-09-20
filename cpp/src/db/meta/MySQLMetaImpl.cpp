@@ -194,7 +194,7 @@ void MySQLMetaImpl::ValidateMetaSchema() {
         return;
     }
 
-    ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+    ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
     if (connectionPtr == nullptr) {
         return;
     }
@@ -239,16 +239,16 @@ void MySQLMetaImpl::ValidateMetaSchema() {
 
 Status MySQLMetaImpl::Initialize() {
     //step 1: create db root path
-    if (!boost::filesystem::is_directory(options_.path)) {
-        auto ret = boost::filesystem::create_directory(options_.path);
+    if (!boost::filesystem::is_directory(options_.path_)) {
+        auto ret = boost::filesystem::create_directory(options_.path_);
         if (!ret) {
-            std::string msg = "Failed to create db directory " + options_.path;
+            std::string msg = "Failed to create db directory " + options_.path_;
             ENGINE_LOG_ERROR << msg;
             return Status(DB_META_TRANSACTION_FAILED, msg);
         }
     }
 
-    std::string uri = options_.backend_uri;
+    std::string uri = options_.backend_uri_;
 
     //step 2: parse and check meta uri
     utils::MetaUriInfo uri_info;
@@ -289,7 +289,7 @@ Status MySQLMetaImpl::Initialize() {
         }
 
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -351,7 +351,7 @@ Status MySQLMetaImpl::DropPartitionsByDates(const std::string &table_id,
         dateListStr = dateListStr.substr(0, dateListStr.size() - 2); //remove the last ", "
 
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -383,7 +383,7 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
     try {
         server::MetricCollector metric;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -462,7 +462,7 @@ Status MySQLMetaImpl::FilesByType(const std::string &table_id,
 
         StoreQueryResult res;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -542,7 +542,7 @@ Status MySQLMetaImpl::UpdateTableIndex(const std::string &table_id, const TableI
         server::MetricCollector metric;
 
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -601,7 +601,7 @@ Status MySQLMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag)
         server::MetricCollector metric;
 
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -633,7 +633,7 @@ Status MySQLMetaImpl::DescribeTableIndex(const std::string &table_id, TableIndex
         server::MetricCollector metric;
 
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -673,7 +673,7 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
         server::MetricCollector metric;
 
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -736,7 +736,7 @@ Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
     try {
         server::MetricCollector metric;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -773,7 +773,7 @@ Status MySQLMetaImpl::DeleteTableFiles(const std::string &table_id) {
     try {
         server::MetricCollector metric;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -807,7 +807,7 @@ Status MySQLMetaImpl::DescribeTable(TableSchema &table_schema) {
         server::MetricCollector metric;
         StoreQueryResult res;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -860,7 +860,7 @@ Status MySQLMetaImpl::HasTable(const std::string &table_id, bool &has_or_not) {
         server::MetricCollector metric;
         StoreQueryResult res;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -895,7 +895,7 @@ Status MySQLMetaImpl::AllTables(std::vector<TableSchema> &table_schema_array) {
         server::MetricCollector metric;
         StoreQueryResult res;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -976,7 +976,7 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
         std::string date = std::to_string(file_schema.date_);
 
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1015,7 +1015,7 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
         server::MetricCollector metric;
         StoreQueryResult res;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1099,7 +1099,7 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
         server::MetricCollector metric;
         StoreQueryResult res;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1218,7 +1218,7 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
 
         StoreQueryResult res;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1309,7 +1309,7 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
     try {
         StoreQueryResult res;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1378,7 +1378,7 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
 
 // PXU TODO: Support Swap
 Status MySQLMetaImpl::Archive() {
-    auto &criterias = options_.archive_conf.GetCriterias();
+    auto &criterias = options_.archive_conf_.GetCriterias();
     if (criterias.empty()) {
         return Status::OK();
     }
@@ -1391,7 +1391,7 @@ Status MySQLMetaImpl::Archive() {
             long now = utils::GetMicroSecTimeStamp();
 
             try {
-                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+                ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
                 if (connectionPtr == nullptr) {
                     return Status(DB_ERROR, "Failed to connect to database server");
@@ -1432,7 +1432,7 @@ Status MySQLMetaImpl::Size(uint64_t &result) {
     try {
         StoreQueryResult res;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1472,7 +1472,7 @@ Status MySQLMetaImpl::DiscardFiles(long long to_discard_size) {
         server::MetricCollector metric;
         bool status;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1537,7 +1537,7 @@ Status MySQLMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
     try {
         server::MetricCollector metric;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1605,7 +1605,7 @@ Status MySQLMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
 
 Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string &table_id) {
     try {
-        ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+        ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
         if (connectionPtr == nullptr) {
             return Status(DB_ERROR, "Failed to connect to database server");
@@ -1636,7 +1636,7 @@ Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
     try {
         server::MetricCollector metric;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1721,7 +1721,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         server::MetricCollector metric;
 
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1793,7 +1793,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         server::MetricCollector metric;
 
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1844,7 +1844,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
         server::MetricCollector metric;
 
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1874,7 +1874,7 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
 
 Status MySQLMetaImpl::CleanUp() {
     try {
-        ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+        ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
         if (connectionPtr == nullptr) {
             return Status(DB_ERROR, "Failed to connect to database server");
@@ -1925,7 +1925,7 @@ Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 
         StoreQueryResult res;
         {
-            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+            ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
             if (connectionPtr == nullptr) {
                 return Status(DB_ERROR, "Failed to connect to database server");
@@ -1961,7 +1961,7 @@ Status MySQLMetaImpl::Count(const std::string &table_id, uint64_t &result) {
 Status MySQLMetaImpl::DropAll() {
     try {
         ENGINE_LOG_DEBUG << "Drop all mysql meta";
-        ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab);
+        ScopedConnection connectionPtr(*mysql_connection_pool_, safe_grab_);
 
         if (connectionPtr == nullptr) {
             return Status(DB_ERROR, "Failed to connect to database server");
