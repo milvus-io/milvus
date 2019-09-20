@@ -25,7 +25,6 @@
 #include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/common/Exception.h"
-
 #include "vec_index.h"
 #include "vec_impl.h"
 #include "utils/Log.h"
@@ -39,23 +38,19 @@ namespace engine {
 
 static constexpr float TYPICAL_COUNT = 1000000.0;
 
-struct FileIOWriter {
-    std::fstream fs;
-    std::string name;
-
-    FileIOWriter(const std::string &fname);
-    ~FileIOWriter();
-    size_t operator()(void *ptr, size_t size);
-};
-
 struct FileIOReader {
     std::fstream fs;
     std::string name;
 
     FileIOReader(const std::string &fname);
+
     ~FileIOReader();
-    size_t operator()(void *ptr, size_t size);
-    size_t operator()(void *ptr, size_t size, size_t pos);
+
+    size_t
+    operator()(void *ptr, size_t size);
+
+    size_t
+    operator()(void *ptr, size_t size, size_t pos);
 };
 
 FileIOReader::FileIOReader(const std::string &fname) {
@@ -67,13 +62,26 @@ FileIOReader::~FileIOReader() {
     fs.close();
 }
 
-size_t FileIOReader::operator()(void *ptr, size_t size) {
+size_t
+FileIOReader::operator()(void *ptr, size_t size) {
     fs.read(reinterpret_cast<char *>(ptr), size);
 }
 
-size_t FileIOReader::operator()(void *ptr, size_t size, size_t pos) {
+size_t
+FileIOReader::operator()(void *ptr, size_t size, size_t pos) {
     return 0;
 }
+
+
+
+struct FileIOWriter {
+    std::fstream fs;
+    std::string name;
+
+    FileIOWriter(const std::string &fname);
+    ~FileIOWriter();
+    size_t operator()(void *ptr, size_t size);
+};
 
 FileIOWriter::FileIOWriter(const std::string &fname) {
     name = fname;
@@ -84,12 +92,14 @@ FileIOWriter::~FileIOWriter() {
     fs.close();
 }
 
-size_t FileIOWriter::operator()(void *ptr, size_t size) {
+size_t
+FileIOWriter::operator()(void *ptr, size_t size) {
     fs.write(reinterpret_cast<char *>(ptr), size);
 }
 
 
-VecIndexPtr GetVecIndexFactory(const IndexType &type, const Config &cfg) {
+VecIndexPtr
+GetVecIndexFactory(const IndexType &type, const Config &cfg) {
     std::shared_ptr<zilliz::knowhere::VectorIndex> index;
     auto gpu_device = cfg.get_with_default("gpu_id", 0);
     switch (type) {
@@ -145,13 +155,15 @@ VecIndexPtr GetVecIndexFactory(const IndexType &type, const Config &cfg) {
     return std::make_shared<VecIndexImpl>(index, type);
 }
 
-VecIndexPtr LoadVecIndex(const IndexType &index_type, const zilliz::knowhere::BinarySet &index_binary) {
+VecIndexPtr
+LoadVecIndex(const IndexType &index_type, const zilliz::knowhere::BinarySet &index_binary) {
     auto index = GetVecIndexFactory(index_type);
     index->Load(index_binary);
     return index;
 }
 
-VecIndexPtr read_index(const std::string &location) {
+VecIndexPtr
+read_index(const std::string &location) {
     knowhere::BinarySet load_data_list;
     FileIOReader reader(location);
     reader.fs.seekg(0, reader.fs.end);
@@ -195,7 +207,8 @@ VecIndexPtr read_index(const std::string &location) {
     return LoadVecIndex(current_type, load_data_list);
 }
 
-ErrorCode write_index(VecIndexPtr index, const std::string &location) {
+Status
+write_index(VecIndexPtr index, const std::string &location) {
     try {
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
@@ -215,28 +228,29 @@ ErrorCode write_index(VecIndexPtr index, const std::string &location) {
         }
     } catch (knowhere::KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_UNEXPECTED_ERROR;
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
         std::string estring(e.what());
         if (estring.find("No space left on device") != estring.npos) {
             WRAPPER_LOG_ERROR << "No space left on the device";
-            return KNOWHERE_NO_SPACE;
+            return Status(KNOWHERE_NO_SPACE, "No space left on the device");
         } else {
-            return KNOWHERE_ERROR;
+            return Status(KNOWHERE_ERROR, e.what());
         }
     }
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
 
 // TODO(linxj): redo here.
-void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Config &cfg) {
+void
+AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Config &cfg) {
     auto nlist = cfg.get_with_default("nlist", 0);
     if (size <= TYPICAL_COUNT / 16384 + 1) {
         //handle less row count, avoid nlist set to 0
         cfg["nlist"] = 1;
-    } else if (int(size / TYPICAL_COUNT) *nlist == 0) {
+    } else if (int(size / TYPICAL_COUNT) * nlist == 0) {
         //calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
         cfg["nlist"] = int(size / TYPICAL_COUNT * 16384);
     }
@@ -270,7 +284,8 @@ void AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Co
 #define GPU_MAX_NRPOBE 1024
 #endif
 
-void ParameterValidation(const IndexType &type, Config &cfg) {
+void
+ParameterValidation(const IndexType &type, Config &cfg) {
     switch (type) {
         case IndexType::FAISS_IVFSQ8_GPU:
         case IndexType::FAISS_IVFFLAT_GPU:
@@ -291,7 +306,8 @@ void ParameterValidation(const IndexType &type, Config &cfg) {
     }
 }
 
-IndexType ConvertToCpuIndexType(const IndexType &type) {
+IndexType
+ConvertToCpuIndexType(const IndexType &type) {
     // TODO(linxj): add IDMAP
     switch (type) {
         case IndexType::FAISS_IVFFLAT_GPU:
@@ -308,7 +324,8 @@ IndexType ConvertToCpuIndexType(const IndexType &type) {
     }
 }
 
-IndexType ConvertToGpuIndexType(const IndexType &type) {
+IndexType
+ConvertToGpuIndexType(const IndexType &type) {
     switch (type) {
         case IndexType::FAISS_IVFFLAT_MIX:
         case IndexType::FAISS_IVFFLAT_CPU: {

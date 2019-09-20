@@ -21,7 +21,6 @@
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
-
 #include "vec_impl.h"
 #include "data_transfer.h"
 
@@ -32,12 +31,13 @@ namespace engine {
 
 using namespace zilliz::knowhere;
 
-ErrorCode VecIndexImpl::BuildAll(const long &nb,
-                                             const float *xb,
-                                             const long *ids,
-                                             const Config &cfg,
-                                             const long &nt,
-                                             const float *xt) {
+Status
+VecIndexImpl::BuildAll(const long &nb,
+                       const float *xb,
+                       const long *ids,
+                       const Config &cfg,
+                       const long &nt,
+                       const float *xt) {
     try {
         dim = cfg["dim"].as<int>();
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
@@ -49,36 +49,38 @@ ErrorCode VecIndexImpl::BuildAll(const long &nb,
         index_->Add(dataset, cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_UNEXPECTED_ERROR;
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_INVALID_ARGUMENT;
+        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_ERROR;
+        return Status(KNOWHERE_ERROR, e.what());
     }
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
-ErrorCode VecIndexImpl::Add(const long &nb, const float *xb, const long *ids, const Config &cfg) {
+Status
+VecIndexImpl::Add(const long &nb, const float *xb, const long *ids, const Config &cfg) {
     try {
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         index_->Add(dataset, cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_UNEXPECTED_ERROR;
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_INVALID_ARGUMENT;
+        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_ERROR;
+        return Status(KNOWHERE_ERROR, e.what());
     }
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
-ErrorCode VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) {
+Status
+VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) {
     try {
         auto k = cfg["k"].as<int>();
         auto dataset = GenDataset(nq, dim, xq);
@@ -117,41 +119,47 @@ ErrorCode VecIndexImpl::Search(const long &nq, const float *xq, float *dist, lon
 
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_UNEXPECTED_ERROR;
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_INVALID_ARGUMENT;
+        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_ERROR;
+        return Status(KNOWHERE_ERROR, e.what());
     }
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
-zilliz::knowhere::BinarySet VecIndexImpl::Serialize() {
+zilliz::knowhere::BinarySet
+VecIndexImpl::Serialize() {
     type = ConvertToCpuIndexType(type);
     return index_->Serialize();
 }
 
-ErrorCode VecIndexImpl::Load(const zilliz::knowhere::BinarySet &index_binary) {
+Status
+VecIndexImpl::Load(const zilliz::knowhere::BinarySet &index_binary) {
     index_->Load(index_binary);
     dim = Dimension();
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
-int64_t VecIndexImpl::Dimension() {
+int64_t
+VecIndexImpl::Dimension() {
     return index_->Dimension();
 }
 
-int64_t VecIndexImpl::Count() {
+int64_t
+VecIndexImpl::Count() {
     return index_->Count();
 }
 
-IndexType VecIndexImpl::GetType() {
+IndexType
+VecIndexImpl::GetType() {
     return type;
 }
 
-VecIndexPtr VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg) {
+VecIndexPtr
+VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg) {
     // TODO(linxj): exception handle
     auto gpu_index = zilliz::knowhere::cloner::CopyCpuToGpu(index_, device_id, cfg);
     auto new_index = std::make_shared<VecIndexImpl>(gpu_index, ConvertToGpuIndexType(type));
@@ -159,7 +167,8 @@ VecIndexPtr VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg)
     return new_index;
 }
 
-VecIndexPtr VecIndexImpl::CopyToCpu(const Config &cfg) {
+VecIndexPtr
+VecIndexImpl::CopyToCpu(const Config &cfg) {
     // TODO(linxj): exception handle
     auto cpu_index = zilliz::knowhere::cloner::CopyGpuToCpu(index_, cfg);
     auto new_index = std::make_shared<VecIndexImpl>(cpu_index, ConvertToCpuIndexType(type));
@@ -167,32 +176,37 @@ VecIndexPtr VecIndexImpl::CopyToCpu(const Config &cfg) {
     return new_index;
 }
 
-VecIndexPtr VecIndexImpl::Clone() {
+VecIndexPtr
+VecIndexImpl::Clone() {
     // TODO(linxj): exception handle
     auto clone_index = std::make_shared<VecIndexImpl>(index_->Clone(), type);
     clone_index->dim = dim;
     return clone_index;
 }
 
-int64_t VecIndexImpl::GetDeviceId() {
-    if (auto device_idx = std::dynamic_pointer_cast<GPUIndex>(index_)){
+int64_t
+VecIndexImpl::GetDeviceId() {
+    if (auto device_idx = std::dynamic_pointer_cast<GPUIndex>(index_)) {
         return device_idx->GetGpuDevice();
     }
     // else
     return -1; // -1 == cpu
 }
 
-float *BFIndex::GetRawVectors() {
+float *
+BFIndex::GetRawVectors() {
     auto raw_index = std::dynamic_pointer_cast<IDMAP>(index_);
     if (raw_index) { return raw_index->GetRawVectors(); }
     return nullptr;
 }
 
-int64_t *BFIndex::GetRawIds() {
+int64_t *
+BFIndex::GetRawIds() {
     return std::static_pointer_cast<IDMAP>(index_)->GetRawIds();
 }
 
-ErrorCode BFIndex::Build(const Config &cfg) {
+ErrorCode
+BFIndex::Build(const Config &cfg) {
     try {
         dim = cfg["dim"].as<int>();
         std::static_pointer_cast<IDMAP>(index_)->Train(cfg);
@@ -209,12 +223,13 @@ ErrorCode BFIndex::Build(const Config &cfg) {
     return KNOWHERE_SUCCESS;
 }
 
-ErrorCode BFIndex::BuildAll(const long &nb,
-                                        const float *xb,
-                                        const long *ids,
-                                        const Config &cfg,
-                                        const long &nt,
-                                        const float *xt) {
+Status
+BFIndex::BuildAll(const long &nb,
+                  const float *xb,
+                  const long *ids,
+                  const Config &cfg,
+                  const long &nt,
+                  const float *xt) {
     try {
         dim = cfg["dim"].as<int>();
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
@@ -223,24 +238,25 @@ ErrorCode BFIndex::BuildAll(const long &nb,
         index_->Add(dataset, cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_UNEXPECTED_ERROR;
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_INVALID_ARGUMENT;
+        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_ERROR;
+        return Status(KNOWHERE_ERROR, e.what());
     }
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
 // TODO(linxj): add lock here.
-ErrorCode IVFMixIndex::BuildAll(const long &nb,
-                                            const float *xb,
-                                            const long *ids,
-                                            const Config &cfg,
-                                            const long &nt,
-                                            const float *xt) {
+Status
+IVFMixIndex::BuildAll(const long &nb,
+                      const float *xb,
+                      const long *ids,
+                      const Config &cfg,
+                      const long &nt,
+                      const float *xt) {
     try {
         dim = cfg["dim"].as<int>();
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
@@ -257,26 +273,27 @@ ErrorCode IVFMixIndex::BuildAll(const long &nb,
             type = ConvertToCpuIndexType(type);
         } else {
             WRAPPER_LOG_ERROR << "Build IVFMIXIndex Failed";
-            return KNOWHERE_ERROR;
+            return Status(KNOWHERE_ERROR, "Build IVFMIXIndex Failed");
         }
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_UNEXPECTED_ERROR;
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (jsoncons::json_exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_INVALID_ARGUMENT;
+        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_ERROR;
+        return Status(KNOWHERE_ERROR, e.what());
     }
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
-ErrorCode IVFMixIndex::Load(const zilliz::knowhere::BinarySet &index_binary) {
+Status
+IVFMixIndex::Load(const zilliz::knowhere::BinarySet &index_binary) {
     //index_ = std::make_shared<IVF>();
     index_->Load(index_binary);
     dim = Dimension();
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
 }

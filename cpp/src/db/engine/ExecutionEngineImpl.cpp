@@ -99,11 +99,8 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 }
 
 Status ExecutionEngineImpl::AddWithIds(long n, const float *xdata, const long *xids) {
-    auto ec = index_->Add(n, xdata, xids);
-    if (ec != KNOWHERE_SUCCESS) {
-        return Status(DB_ERROR, "Add error");
-    }
-    return Status::OK();
+    auto status = index_->Add(n, xdata, xids);
+    return status;
 }
 
 size_t ExecutionEngineImpl::Count() const {
@@ -131,11 +128,8 @@ size_t ExecutionEngineImpl::PhysicalSize() const {
 }
 
 Status ExecutionEngineImpl::Serialize() {
-    auto ec = write_index(index_, location_);
-    if (ec != KNOWHERE_SUCCESS) {
-        return Status(DB_ERROR, "Serialize: write to disk error");
-    }
-    return Status::OK();
+    auto status = write_index(index_, location_);
+    return status;
 }
 
 Status ExecutionEngineImpl::Load(bool to_cache) {
@@ -254,12 +248,11 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
     }
 
     if (auto file_index = std::dynamic_pointer_cast<BFIndex>(to_merge)) {
-        auto ec = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
-        if (ec != KNOWHERE_SUCCESS) {
+        auto status = index_->Add(file_index->Count(), file_index->GetRawVectors(), file_index->GetRawIds());
+        if (!status.ok()) {
             ENGINE_LOG_ERROR << "Merge: Add Error";
-            return Status(DB_ERROR, "Merge: Add Error");
         }
-        return Status::OK();
+        return status;
     } else {
         return Status(DB_ERROR, "file index type is not idmap");
     }
@@ -287,11 +280,11 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
     build_cfg["nlist"] = nlist_;
     AutoGenParams(to_index->GetType(), Count(), build_cfg);
 
-    auto ec = to_index->BuildAll(Count(),
+    auto status = to_index->BuildAll(Count(),
                                  from_index->GetRawVectors(),
                                  from_index->GetRawIds(),
                                  build_cfg);
-    if (ec != KNOWHERE_SUCCESS) { throw Exception(DB_ERROR, "Build index error"); }
+    if (!status.ok()) { throw Exception(DB_ERROR, status.message()); }
 
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
@@ -309,12 +302,11 @@ Status ExecutionEngineImpl::Search(long n,
 
     ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
     auto cfg = Config::object{{"k", k}, {"nprobe", nprobe}};
-    auto ec = index_->Search(n, data, distances, labels, cfg);
-    if (ec != KNOWHERE_SUCCESS) {
+    auto status = index_->Search(n, data, distances, labels, cfg);
+    if (!status.ok()) {
         ENGINE_LOG_ERROR << "Search error";
-        return Status(DB_ERROR, "Search: Search Error");
     }
-    return Status::OK();
+    return status;
 }
 
 Status ExecutionEngineImpl::Cache() {
