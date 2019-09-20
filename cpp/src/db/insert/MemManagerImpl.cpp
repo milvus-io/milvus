@@ -43,7 +43,7 @@ Status MemManagerImpl::InsertVectors(const std::string &table_id_,
                                     const float *vectors_,
                                     IDNumbers &vector_ids_) {
 
-    while (GetCurrentMem() > options_.insert_buffer_size) {
+    while (GetCurrentMem() > options_.insert_buffer_size_) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 

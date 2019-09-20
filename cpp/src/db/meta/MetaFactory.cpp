@@ -43,12 +43,12 @@ namespace engine {
         }
 
         DBMetaOptions meta;
-        meta.path = p;
+        meta.path_ = p;
         return meta;
     }
 
     meta::MetaPtr MetaFactory::Build(const DBMetaOptions &metaOptions, const int &mode) {
-        std::string uri = metaOptions.backend_uri;
+        std::string uri = metaOptions.backend_uri_;
 
         utils::MetaUriInfo uri_info;
         auto status = utils::ParseMetaUri(uri, uri_info);

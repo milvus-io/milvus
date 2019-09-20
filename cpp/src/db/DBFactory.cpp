@@ -36,7 +36,7 @@ namespace engine {
 DBOptions DBFactory::BuildOption() {
     auto meta = MetaFactory::BuildOption();
         DBOptions options;
-    options.meta = meta;
+    options.meta_ = meta;
     return options;
 }
 

@@ -38,12 +38,12 @@ Status DBWrapper::StartService() {
     //db config
     engine::DBOptions opt;
     ConfigNode& db_config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
-    opt.meta.backend_uri = db_config.GetValue(CONFIG_DB_URL);
+    opt.meta_.backend_uri_ = db_config.GetValue(CONFIG_DB_URL);
     std::string db_path = db_config.GetValue(CONFIG_DB_PATH);
-    opt.meta.path = db_path + "/db";
+    opt.meta_.path_ = db_path + "/db";
 
     std::string db_slave_path = db_config.GetValue(CONFIG_DB_SLAVE_PATH);
-    StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta.slave_paths);
+    StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta_.slave_paths_);
 
     // cache config
     ConfigNode& cache_config = ServerConfig::GetInstance().GetConfig(CONFIG_CACHE);
@@ -52,13 +52,13 @@ Status DBWrapper::StartService() {
     ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
     std::string mode = serverConfig.GetValue(CONFIG_CLUSTER_MODE, "single");
     if (mode == "single") {
-        opt.mode = engine::DBOptions::MODE::SINGLE;
+        opt.mode_ = engine::DBOptions::MODE::SINGLE;
     }
     else if (mode == "cluster") {
-        opt.mode = engine::DBOptions::MODE::CLUSTER;
+        opt.mode_ = engine::DBOptions::MODE::CLUSTER;
     }
     else if (mode == "read_only") {
-        opt.mode = engine::DBOptions::MODE::READ_ONLY;
+        opt.mode_ = engine::DBOptions::MODE::READ_ONLY;
     }
     else {
         std::cerr << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
@@ -91,16 +91,16 @@ Status DBWrapper::StartService() {
     if(days > 0) {
         criterial[engine::ARCHIVE_CONF_DAYS] = days;
     }
-    opt.meta.archive_conf.SetCriterias(criterial);
+    opt.meta_.archive_conf_.SetCriterias(criterial);
 
     //create db root folder
-    Status status = CommonUtil::CreateDirectory(opt.meta.path);
+    Status status = CommonUtil::CreateDirectory(opt.meta_.path_);
     if(!status.ok()) {
-        std::cerr << "ERROR! Failed to create database root path: " << opt.meta.path << std::endl;
+        std::cerr << "ERROR! Failed to create database root path: " << opt.meta_.path_ << std::endl;
         kill(0, SIGUSR1);
     }
 
-    for(auto& path : opt.meta.slave_paths) {
+    for(auto& path : opt.meta_.slave_paths_) {
         status = CommonUtil::CreateDirectory(path);
         if(!status.ok()) {
             std::cerr << "ERROR! Failed to create database slave path: " << path << std::endl;
