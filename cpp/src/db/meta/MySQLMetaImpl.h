@@ -103,8 +103,11 @@ class MySQLMetaImpl : public Meta {
     Status NextFileId(std::string &file_id);
     Status NextTableId(std::string &table_id);
     Status DiscardFiles(long long to_discard_size);
+
+    void ValidateMetaSchema();
     Status Initialize();
 
+private:
     const DBMetaOptions options_;
     const int mode_;
 
