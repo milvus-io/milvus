@@ -45,6 +45,13 @@ string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]" MILVUS_VERSION "${MILVUS_VERSION}")
 
 set(CLANG_FORMAT_VERSION "6.0")
 find_package(ClangTools)
+if("$ENV{CMAKE_EXPORT_COMPILE_COMMANDS}" STREQUAL "1" OR CLANG_TIDY_FOUND)
+  # Generate a Clang compile_commands.json "compilation database" file for use
+  # with various development tools, such as Vim's YouCompleteMe plugin.
+  # See http://clang.llvm.org/docs/JSONCompilationDatabase.html
+  set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
+endif()
+
 set(BUILD_SUPPORT_DIR "${CMAKE_SOURCE_DIR}/build-support")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -198,6 +205,40 @@ if(${CLANG_FORMAT_FOUND})
                     ${CLANG_FORMAT_BIN}
                     --exclude_globs
                     ${LINT_EXCLUSIONS_FILE}
+                    --source_dir
+                    ${CMAKE_CURRENT_SOURCE_DIR}/src
+                    ${MILVUS_LINT_QUIET})
+endif()
+
+#
+# "make clang-tidy" and "make check-clang-tidy" targets
+#
+if(${CLANG_TIDY_FOUND})
+  # runs clang-tidy and attempts to fix any warning automatically
+  add_custom_target(clang-tidy
+                    ${PYTHON_EXECUTABLE}
+                    ${BUILD_SUPPORT_DIR}/run_clang_tidy.py
+                    --clang_tidy_binary
+                    ${CLANG_TIDY_BIN}
+                    --exclude_globs
+                    ${LINT_EXCLUSIONS_FILE}
+                    --compile_commands
+                    ${CMAKE_BINARY_DIR}/compile_commands.json
+                    --source_dir
+                    ${CMAKE_CURRENT_SOURCE_DIR}/src
+                    --fix
+                    ${MILVUS_LINT_QUIET})
+
+  # runs clang-tidy and exits with a non-zero exit code if any errors are found.
+  add_custom_target(check-clang-tidy
+                    ${PYTHON_EXECUTABLE}
+                    ${BUILD_SUPPORT_DIR}/run_clang_tidy.py
+                    --clang_tidy_binary
+                    ${CLANG_TIDY_BIN}
+                    --exclude_globs
+                    ${LINT_EXCLUSIONS_FILE}
+                    --compile_commands
+                    ${CMAKE_BINARY_DIR}/compile_commands.json
                     --source_dir
                     ${CMAKE_CURRENT_SOURCE_DIR}/src
                     ${MILVUS_LINT_QUIET})
