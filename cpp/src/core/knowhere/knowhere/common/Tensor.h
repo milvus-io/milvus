@@ -18,19 +18,18 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include <memory>
+
+#include <arrow/tensor.h>
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+using Tensor = arrow::Tensor;
+using TensorPtr = std::shared_ptr<Tensor>;
 
-}
-}
-}
+
+} // namespace knowhere
+} // namespace zilliz

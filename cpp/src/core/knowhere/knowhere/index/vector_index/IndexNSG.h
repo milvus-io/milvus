@@ -18,19 +18,36 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include "VectorIndex.h"
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
-
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
-
+namespace algo {
+class NsgIndex;
 }
+
+class NSG : public VectorIndex {
+ public:
+    explicit NSG(const int64_t& gpu_num):gpu_(gpu_num){}
+    NSG() = default;
+
+    IndexModelPtr Train(const DatasetPtr &dataset, const Config &config) override;
+    DatasetPtr Search(const DatasetPtr &dataset, const Config &config) override;
+    void Add(const DatasetPtr &dataset, const Config &config) override;
+    BinarySet Serialize() override;
+    void Load(const BinarySet &index_binary) override;
+    int64_t Count() override;
+    int64_t Dimension() override;
+    VectorIndexPtr Clone() override;
+    void Seal() override;
+ private:
+    std::shared_ptr<algo::NsgIndex> index_;
+    int64_t gpu_;
+};
+
+using NSGIndexPtr = std::shared_ptr<NSG>();
+
 }
 }
