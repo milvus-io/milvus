@@ -30,11 +30,13 @@ namespace {
 
 CpuCacheMgr::CpuCacheMgr() {
     server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-    int64_t cap = config.GetInt64Value(server::CONFIG_CPU_CACHE_CAPACITY, 16);
+    int64_t cap =
+        config.GetInt64Value(server::CONFIG_CACHE_CPU_MEM_CAPACITY, std::stoi(server::CONFIG_CACHE_CPU_MEM_CAPACITY_DEFAULT));
     cap *= unit;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
 
-    double free_percent = config.GetDoubleValue(server::CACHE_FREE_PERCENT, 0.85);
+    double free_percent =
+        config.GetDoubleValue(server::CONFIG_CACHE_CPU_MEM_THRESHOLD, std::stof(server::CONFIG_CACHE_CPU_MEM_THRESHOLD_DEFAULT));
     if(free_percent > 0.0 && free_percent <= 1.0) {
         cache_->set_freemem_percent(free_percent);
     } else {

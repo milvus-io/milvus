@@ -26,52 +26,69 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
+/* server config */
 static const char* CONFIG_SERVER = "server_config";
 static const char* CONFIG_SERVER_ADDRESS = "address";
+static const char* CONFIG_SERVER_ADDRESS_DEFAULT = "127.0.0.1";
 static const char* CONFIG_SERVER_PORT = "port";
-static const char* CONFIG_CLUSTER_MODE = "mode";
-static const char* CONFIG_TIME_ZONE = "time_zone";
+static const char* CONFIG_SERVER_PORT_DEFAULT = "19530";
+static const char* CONFIG_SERVER_MODE = "mode";
+static const char* CONFIG_SERVER_MODE_DEFAULT = "single";
+static const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
+static const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
 
+/* db config */
 static const char* CONFIG_DB = "db_config";
-static const char* CONFIG_DB_URL = "db_backend_url";
 static const char* CONFIG_DB_PATH = "db_path";
+static const char* CONFIG_DB_PATH_DEFAULT = "/tmp/milvus";
 static const char* CONFIG_DB_SLAVE_PATH = "db_slave_path";
-static const char* CONFIG_DB_ARCHIVE_DISK = "archive_disk_threshold";
-static const char* CONFIG_DB_ARCHIVE_DAYS = "archive_days_threshold";
-static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
-static const char* CONFIG_DB_PARALLEL_REDUCE = "parallel_reduce";
+static const char* CONFIG_DB_SLAVE_PATH_DEFAULT = "";
+static const char* CONFIG_DB_BACKEND_URL = "db_backend_url";
+static const char* CONFIG_DB_BACKEND_URL_DEFAULT = "sqlite://:@:/";
+static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
+static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
+static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD = "archive_days_threshold";
+static const char* CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT = "0";
+static const char* CONFIG_DB_BUFFER_SIZE = "buffer_size";
+static const char* CONFIG_DB_BUFFER_SIZE_DEFAULT = "4";
 static const char* CONFIG_DB_BUILD_INDEX_GPU = "build_index_gpu";
+static const char* CONFIG_DB_BUILD_INDEX_GPU_DEFAULT = "0";
 
-static const char* CONFIG_LOG = "log_config";
-
+/* cache config */
 static const char* CONFIG_CACHE = "cache_config";
-static const char* CONFIG_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
-static const char* CONFIG_GPU_CACHE_CAPACITY = "gpu_cache_capacity";
-static const char* CACHE_FREE_PERCENT = "cpu_cache_free_percent";
-static const char* CONFIG_INSERT_CACHE_IMMEDIATELY = "insert_cache_immediately";
-static const char *GPU_CACHE_FREE_PERCENT = "gpu_cache_free_percent";
+static const char* CONFIG_CACHE_CPU_MEM_CAPACITY = "cpu_mem_capacity";
+static const char* CONFIG_CACHE_CPU_MEM_CAPACITY_DEFAULT = "16";
+static const char* CONFIG_CACHE_GPU_MEM_CAPACITY = "gpu_mem_capacity";
+static const char* CONFIG_CACHE_GPU_MEM_CAPACITY_DEFAULT = "0";
+static const char* CONFIG_CACHE_CPU_MEM_THRESHOLD = "cpu_mem_threshold";
+static const char* CONFIG_CACHE_CPU_MEM_THRESHOLD_DEFAULT = "0.85";
+static const char* CONFIG_CACHE_GPU_MEM_THRESHOLD = "gpu_mem_threshold";
+static const char* CONFIG_CACHE_GPU_MEM_THRESHOLD_DEFAULT = "0.85";
+static const char* CONFIG_CACHE_INSERT_IMMEDIATELY = "insert_immediately";
+static const char* CONFIG_CACHE_INSERT_IMMEDIATELY_DEFAULT = "0";
 
+/* metric config */
 static const char* CONFIG_METRIC = "metric_config";
-static const char* CONFIG_METRIC_IS_STARTUP = "is_startup";
+static const char* CONFIG_METRIC_AUTO_BOOTUP = "auto_bootup";
+static const char* CONFIG_METRIC_AUTO_BOOTUP_DEFAULT = "0";
 static const char* CONFIG_METRIC_COLLECTOR = "collector";
-static const char* CONFIG_PROMETHEUS = "prometheus_config";
+static const char* CONFIG_METRIC_COLLECTOR_DEFAULT = "prometheus";
+static const char* CONFIG_METRIC_PROMETHEUS = "prometheus_config";
 static const char* CONFIG_METRIC_PROMETHEUS_PORT = "port";
+static const char* CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT = "8080";
 
+/* engine config */
 static const char* CONFIG_ENGINE = "engine_config";
-static const char* CONFIG_DCBT = "use_blas_threshold";
-static const char* CONFIG_OMP_THREAD_NUM = "omp_thread_num";
+static const char* CONFIG_ENGINE_BLAS_THRESHOLD = "blas_threshold";
+static const char* CONFIG_ENGINE_BLAS_THRESHOLD_DEFAULT = "20";
+static const char* CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
+static const char* CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
 
+/* resource config */
 static const char* CONFIG_RESOURCE = "resource_config";
-static const char* CONFIG_RESOURCES = "resources";
-static const char* CONFIG_RESOURCE_TYPE = "type";
-static const char* CONFIG_RESOURCE_DEVICE_ID = "device_id";
-static const char* CONFIG_RESOURCE_ENABLE_EXECUTOR = "enable_executor";
-static const char* CONFIG_RESOURCE_NUM = "gpu_resource_num";
-static const char* CONFIG_RESOURCE_PIN_MEMORY = "pinned_memory";
-static const char* CONFIG_RESOURCE_TEMP_MEMORY = "temp_memory";
-static const char* CONFIG_RESOURCE_CONNECTIONS = "connections";
-static const char* CONFIG_SPEED_CONNECTIONS = "speed";
-static const char* CONFIG_ENDPOINT_CONNECTIONS = "endpoint";
+static const char* CONFIG_RESOURCE_MODE = "mode";
+static const char* CONFIG_RESOURCE_MODE_DEFAULT = "simple";
+static const char* CONFIG_RESOURCE_POOL = "pool";
 
 
 class ServerConfig {
