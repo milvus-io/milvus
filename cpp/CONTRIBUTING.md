@@ -20,8 +20,8 @@ Before you make any contributions, make sure you follow this list.
 
 Contributions to Milvus fall into the following categories.
 
-1. To report a bug or a problem with documentation, please file an [issue](https://github.com/milvus-io/milvus/issues/new) providing the details of the problem. If you believe the issue needs priority attention, please comment on the issue to notify the team.
-2. To propose a new feature, please file a new feature request [issue](https://github.com/milvus-io/milvus/issues/new). Describe the intended feature and discuss the design and implementation with the team and community. Once the team agrees that the plan looks good, go ahead and implement it, following the [Contributing code].
+1. To report a bug or a problem with documentation, please file an [issue](https://github.com/milvus-io/milvus/issues/new/choose) providing the details of the problem. If you believe the issue needs priority attention, please comment on the issue to notify the team.
+2. To propose a new feature, please file a new feature request [issue](https://github.com/milvus-io/milvus/issues/new/choose). Describe the intended feature and discuss the design and implementation with the team and community. Once the team agrees that the plan looks good, go ahead and implement it, following the [Contributing code].
 3. To implement a feature or bug-fix for an existing outstanding issue, follow the [Contributing code]. If you need more context on a particular issue, comment on the issue to let people know.
 
 ## How can I contribute?
