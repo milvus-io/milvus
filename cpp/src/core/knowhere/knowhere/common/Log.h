@@ -22,6 +22,7 @@
 
 namespace zilliz {
 namespace knowhere {
+
 #define KNOWHERE_DOMAIN_NAME "[KNOWHERE] "
 #define KNOWHERE_ERROR_TEXT "KNOWHERE Error:"
 
@@ -31,5 +32,6 @@ namespace knowhere {
 #define KNOWHERE_LOG_WARNING LOG(WARNING) << KNOWHERE_DOMAIN_NAME
 #define KNOWHERE_LOG_ERROR LOG(ERROR) << KNOWHERE_DOMAIN_NAME
 #define KNOWHERE_LOG_FATAL LOG(FATAL) << KNOWHERE_DOMAIN_NAME
+
 } // namespace knowhere
 } // namespace zilliz

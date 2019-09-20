@@ -29,26 +29,32 @@ if(NOT TARGET SPTAGLibStatic)
 endif()
 
 set(external_srcs
-        knowhere/adapter/sptag.cpp
-        knowhere/adapter/structure.cpp
-        knowhere/adapter/arrow.cpp
-        knowhere/common/exception.cpp
-        knowhere/common/timer.cpp
+        knowhere/adapter/SptagAdapter.cpp
+        knowhere/adapter/Structure.cpp
+        knowhere/adapter/ArrowAdapter.cpp
+        knowhere/common/Exception.cpp
+        knowhere/common/Timer.cpp
         )
 
 set(index_srcs
-        knowhere/index/preprocessor/normalize.cpp
-        knowhere/index/vector_index/cpu_kdt_rng.cpp
-        knowhere/index/vector_index/idmap.cpp
-        knowhere/index/vector_index/ivf.cpp
-        knowhere/index/vector_index/gpu_ivf.cpp
-        knowhere/index/vector_index/kdt_parameters.cpp
-        knowhere/index/vector_index/nsg_index.cpp
-        knowhere/index/vector_index/nsg/nsg.cpp
-        knowhere/index/vector_index/nsg/nsg_io.cpp
-        knowhere/index/vector_index/nsg/utils.cpp
-        knowhere/index/vector_index/cloner.cpp
-        knowhere/index/vector_index/FaissGpuResourceMgr.cpp
+        knowhere/index/preprocessor/Normalize.cpp
+        knowhere/index/vector_index/IndexKDT.cpp
+        knowhere/index/vector_index/IndexIDMAP.cpp
+        knowhere/index/vector_index/IndexIVF.cpp
+        knowhere/index/vector_index/IndexGPUIVF.cpp
+        knowhere/index/vector_index/helpers/KDTParameterMgr.cpp
+        knowhere/index/vector_index/IndexNSG.cpp
+        knowhere/index/vector_index/nsg/NSG.cpp
+        knowhere/index/vector_index/nsg/NSGIO.cpp
+        knowhere/index/vector_index/nsg/NSGHelper.cpp
+        knowhere/index/vector_index/helpers/Cloner.cpp
+        knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
+        knowhere/index/vector_index/IndexIVFSQ.cpp
+        knowhere/index/vector_index/IndexGPUIVFSQ.cpp
+        knowhere/index/vector_index/IndexIVFPQ.cpp
+        knowhere/index/vector_index/IndexGPUIVFPQ.cpp
+        knowhere/index/vector_index/FaissBaseIndex.cpp
+        knowhere/index/vector_index/helpers/FaissIO.cpp
         )
 
 set(depend_libs

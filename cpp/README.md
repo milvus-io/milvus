@@ -68,16 +68,10 @@ $ sudo ln -s /path/to/libmysqlclient.so /path/to/libmysqlclient_r.so
 ###### Step 2 Build
 
 ```shell
-TBD
-cd [Milvus sourcecode path]/cpp/thirdparty
-git clone git@192.168.1.105:megasearch/knowhere.git
-cd knowhere
-./build.sh -t Debug
-or ./build.sh -t Release
-
-cd [sourcecode path]/cpp
-./build.sh -t Debug
-or ./build.sh -t Release
+$ cd [Milvus sourcecode path]/cpp
+$ ./build.sh -t Debug
+or 
+$ ./build.sh -t Release
 ```
 
 When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/cpp/milvus`.

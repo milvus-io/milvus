@@ -21,10 +21,10 @@
 #include <iostream>
 #include <sstream>
 
-#include "knowhere/index/vector_index/idmap.h"
-#include "knowhere/adapter/structure.h"
-#include "knowhere/index/vector_index/cloner.h"
-#include "knowhere/common/exception.h"
+#include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/adapter/Structure.h"
+#include "knowhere/index/vector_index/utils/Cloner.h"
+#include "knowhere/common/Exception.h"
 
 #include "utils.h"
 

@@ -15,14 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <gtest/gtest.h>
-#include <thread>
-#include "utils/easylogging++.h"
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <boost/filesystem.hpp>
-#include <src/utils/SignalUtil.h>
-
+#include "utils/SignalUtil.h"
 #include "utils/CommonUtil.h"
 #include "utils/Error.h"
 #include "utils/StringHelpFunctions.h"
@@ -31,6 +24,12 @@
 #include "utils/LogUtil.h"
 #include "utils/ValidationUtil.h"
 #include "db/engine/ExecutionEngine.h"
+
+#include <thread>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <boost/filesystem.hpp>
+#include <gtest/gtest.h>
 
 using namespace zilliz::milvus;
 

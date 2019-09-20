@@ -15,16 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <gtest/gtest.h>
-#include <thread>
-#include "utils/easylogging++.h"
-#include <stdlib.h>
-#include <time.h>
-
 #include "utils.h"
 #include "db/meta/SqliteMetaImpl.h"
 #include "db/Utils.h"
 #include "db/meta/MetaConsts.h"
+
+#include <gtest/gtest.h>
+#include <thread>
+#include <stdlib.h>
+#include <time.h>
 
 using namespace zilliz::milvus;
 using namespace zilliz::milvus::engine;
