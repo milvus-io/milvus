@@ -90,6 +90,8 @@ else()
     set(MILVUS_BUILD_ARCH unknown)
 endif()
 
+find_package (Python COMPONENTS Interpreter Development)
+
 find_package(CUDA)
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -std=c++11 -D_FORCE_INLINES --expt-extended-lambda")
 
@@ -157,8 +159,47 @@ install(FILES
         DESTINATION
         conf)
 
-add_custom_target(format ${BUILD_SUPPORT_DIR}/run_clang_format.py
-  ${CLANG_FORMAT_BIN}
-  ${BUILD_SUPPORT_DIR}/clang_format_exclusions.txt
-  ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+#
+# "make lint" target
+#
+if(NOT MILVUS_VERBOSE_LINT)
+  set(MILVUS_LINT_QUIET "--quiet")
+endif()
+
+if(NOT LINT_EXCLUSIONS_FILE)
+  # source files matching a glob from a line in this file
+  # will be excluded from linting (cpplint, clang-tidy, clang-format)
+  set(LINT_EXCLUSIONS_FILE ${BUILD_SUPPORT_DIR}/lint_exclusions.txt)
+endif()
+
+#
+# "make format" and "make check-format" targets
+#
+if(${CLANG_FORMAT_FOUND})
+  # runs clang format and updates files in place.
+  add_custom_target(format
+                    ${PYTHON_EXECUTABLE}
+                    ${BUILD_SUPPORT_DIR}/run_clang_format.py
+                    --clang_format_binary
+                    ${CLANG_FORMAT_BIN}
+                    --exclude_globs
+                    ${LINT_EXCLUSIONS_FILE}
+                    --source_dir
+                    ${CMAKE_CURRENT_SOURCE_DIR}/src
+                    --fix
+                    ${MILVUS_LINT_QUIET})
+
+  # runs clang format and exits with a non-zero exit code if any files need to be reformatted
+  add_custom_target(check-format
+                    ${PYTHON_EXECUTABLE}
+                    ${BUILD_SUPPORT_DIR}/run_clang_format.py
+                    --clang_format_binary
+                    ${CLANG_FORMAT_BIN}
+                    --exclude_globs
+                    ${LINT_EXCLUSIONS_FILE}
+                    --source_dir
+                    ${CMAKE_CURRENT_SOURCE_DIR}/src
+                    ${MILVUS_LINT_QUIET})
+endif()
 
