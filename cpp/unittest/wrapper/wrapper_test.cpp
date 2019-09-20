@@ -15,10 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "utils/easylogging++.h"
-#include "wrapper/vec_index.h"
-#include "knowhere/index/vector_index/gpu_ivf.h"
+#include "src/wrapper/vec_index.h"
+#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "utils.h"
 
 #include <gtest/gtest.h>

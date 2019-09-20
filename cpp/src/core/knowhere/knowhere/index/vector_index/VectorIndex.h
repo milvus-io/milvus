@@ -18,19 +18,47 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+
+#include <memory>
+
+#include "knowhere/common/Config.h"
+#include "knowhere/common/Dataset.h"
+#include "knowhere/index/Index.h"
+#include "knowhere/index/preprocessor/Preprocessor.h"
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+class VectorIndex;
+using VectorIndexPtr = std::shared_ptr<VectorIndex>;
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
 
-}
-}
-}
+class VectorIndex : public Index {
+ public:
+    virtual PreprocessorPtr
+    BuildPreprocessor(const DatasetPtr &dataset, const Config &config) { return nullptr; }
+
+    virtual IndexModelPtr
+    Train(const DatasetPtr &dataset, const Config &config) { return nullptr; }
+
+    virtual void
+    Add(const DatasetPtr &dataset, const Config &config) = 0;
+
+    virtual void
+    Seal() = 0;
+
+    virtual VectorIndexPtr
+    Clone() = 0;
+
+    virtual int64_t
+    Count() = 0;
+
+    virtual int64_t
+    Dimension() = 0;
+};
+
+
+
+} // namespace knowhere
+} // namespace zilliz

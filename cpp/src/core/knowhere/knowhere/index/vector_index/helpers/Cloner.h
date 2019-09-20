@@ -18,19 +18,20 @@
 
 #pragma once
 
-#include "knowhere/adapter/Structure.h"
+#include "knowhere/index/vector_index/VectorIndex.h"
 
 
 namespace zilliz {
-namespace milvus {
-namespace engine {
+namespace knowhere {
+namespace cloner {
 
-extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+// TODO(linxj): rename CopyToGpu
+extern VectorIndexPtr
+CopyCpuToGpu(const VectorIndexPtr &index, const int64_t &device_id, const Config &config);
 
-extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+extern VectorIndexPtr
+CopyGpuToCpu(const VectorIndexPtr &index, const Config &config);
 
-}
-}
-}
+} // cloner
+} // knowhere
+} // zilliz

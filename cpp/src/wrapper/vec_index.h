@@ -23,8 +23,8 @@
 
 #include "utils/Error.h"
 
-#include "knowhere/common/config.h"
-#include "knowhere/common/binary_set.h"
+#include "knowhere/common/Config.h"
+#include "knowhere/common/BinarySet.h"
 
 
 namespace zilliz {
