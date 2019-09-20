@@ -102,10 +102,6 @@ main(int argc, char *argv[]) {
         }
     }
 
-    server::Server &server = server::Server::Instance();
-    server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
-    server.Start();
-
     /* Handle Signal */
     signal(SIGHUP, server::SignalUtil::HandleSignal);
     signal(SIGINT, server::SignalUtil::HandleSignal);
@@ -113,6 +109,10 @@ main(int argc, char *argv[]) {
     signal(SIGSEGV, server::SignalUtil::HandleSignal);
     signal(SIGUSR2, server::SignalUtil::HandleSignal);
     signal(SIGTERM, server::SignalUtil::HandleSignal);
+
+    server::Server &server = server::Server::Instance();
+    server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
+    server.Start();
 
     /* wait signal */
     pause();
