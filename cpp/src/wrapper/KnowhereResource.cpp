@@ -28,7 +28,8 @@ namespace engine {
 
 constexpr int64_t M_BYTE = 1024 * 1024;
 
-ErrorCode KnowhereResource::Initialize() {
+Status
+KnowhereResource::Initialize() {
     struct GpuResourceSetting {
         int64_t pinned_memory = 300*M_BYTE;
         int64_t temp_memory = 300*M_BYTE;
@@ -65,12 +66,13 @@ ErrorCode KnowhereResource::Initialize() {
                                                                 iter->second.resource_num);
     }
 
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
-ErrorCode KnowhereResource::Finalize() {
+Status
+KnowhereResource::Finalize() {
     knowhere::FaissGpuResourceMgr::GetInstance().Free(); // free gpu resource.
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
 }

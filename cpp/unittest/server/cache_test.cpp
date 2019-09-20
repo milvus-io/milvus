@@ -19,7 +19,6 @@
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "server/ServerConfig.h"
-
 #include "utils/Error.h"
 #include "src/wrapper/vec_index.h"
 
@@ -48,13 +47,13 @@ public:
 
     }
 
-    virtual ErrorCode BuildAll(const long &nb,
+    virtual Status BuildAll(const long &nb,
                                const float *xb,
                                const long *ids,
                                const engine::Config &cfg,
                                const long &nt = 0,
                                const float *xt = nullptr) {
-        return 0;
+        return Status();
     }
 
     engine::VecIndexPtr Clone() override {
@@ -69,19 +68,19 @@ public:
         return engine::IndexType::INVALID;
     }
 
-    virtual ErrorCode Add(const long &nb,
+    virtual Status Add(const long &nb,
                           const float *xb,
                           const long *ids,
                           const engine::Config &cfg = engine::Config()) {
-        return 0;
+        return Status();
     }
 
-    virtual ErrorCode Search(const long &nq,
+    virtual Status Search(const long &nq,
                              const float *xq,
                              float *dist,
                              long *ids,
                              const engine::Config &cfg = engine::Config()) {
-        return 0;
+        return Status();
     }
 
     engine::VecIndexPtr CopyToGpu(const int64_t &device_id,
@@ -106,8 +105,8 @@ public:
         return binset;
     }
 
-    virtual ErrorCode Load(const zilliz::knowhere::BinarySet &index_binary) {
-        return 0;
+    virtual Status Load(const zilliz::knowhere::BinarySet &index_binary) {
+        return Status();
     }
 
 public:
