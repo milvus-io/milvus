@@ -15,13 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/ServerConfig.h"
-#include "utils/TimeRecorder.h"
-
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>
-#include <src/scheduler/task/SearchTask.h>
+
+#include "scheduler/task/SearchTask.h"
+#include "utils/TimeRecorder.h"
 
 
 using namespace zilliz::milvus;

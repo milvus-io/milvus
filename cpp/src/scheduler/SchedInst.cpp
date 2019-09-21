@@ -17,7 +17,7 @@
 
 
 #include "SchedInst.h"
-#include "server/ServerConfig.h"
+#include "server/Config.h"
 #include "ResourceFactory.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "Utils.h"
@@ -38,7 +38,7 @@ std::mutex JobMgrInst::mutex_;
 
 void
 load_simple_config() {
-    server::ServerConfig &config = server::ServerConfig::GetInstance();
+    server::Config &config = server::Config::GetInstance();
     auto mode = config.GetResourceConfigMode();
     auto pool = config.GetResourceConfigPool();
     bool cpu = false;
@@ -81,7 +81,7 @@ load_simple_config() {
 void
 load_advance_config() {
 //    try {
-//        server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
+//        server::ConfigNode &config = server::Config::GetInstance().GetConfig(server::CONFIG_RESOURCE);
 //
 //        if (config.GetChildren().empty()) throw "resource_config null exception";
 //

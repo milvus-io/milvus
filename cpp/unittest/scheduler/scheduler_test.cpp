@@ -15,17 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "scheduler/Scheduler.h"
 #include <gtest/gtest.h>
-#include <src/scheduler/tasklabel/DefaultLabel.h>
-#include <src/server/ServerConfig.h>
+#include "scheduler/tasklabel/DefaultLabel.h"
 #include "cache/DataObj.h"
 #include "cache/GpuCacheMgr.h"
+#include "scheduler/Scheduler.h"
 #include "scheduler/task/TestTask.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/resource/Resource.h"
 #include "utils/Error.h"
-#include "src/wrapper/vec_index.h"
+#include "wrapper/vec_index.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 
 

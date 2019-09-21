@@ -17,7 +17,7 @@
 
 
 #include "DBWrapper.h"
-#include "ServerConfig.h"
+#include "Config.h"
 #include "db/DBFactory.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
@@ -35,7 +35,7 @@ DBWrapper::DBWrapper() {
 }
 
 Status DBWrapper::StartService() {
-    ServerConfig& config = ServerConfig::GetInstance();
+    Config& config = Config::GetInstance();
 
     //db config
     engine::DBOptions opt;

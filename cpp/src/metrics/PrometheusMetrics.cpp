@@ -16,8 +16,9 @@
 // under the License.
 
 
-#include <cache/GpuCacheMgr.h>
+#include "cache/GpuCacheMgr.h"
 #include "PrometheusMetrics.h"
+#include "server/Config.h"
 #include "utils/Log.h"
 #include "SystemInfo.h"
 
@@ -29,7 +30,7 @@ namespace server {
 ErrorCode
 PrometheusMetrics::Init() {
     try {
-        ServerConfig &config = ServerConfig::GetInstance();
+        Config &config = Config::GetInstance();
         startup_ = config.GetMetricConfigAutoBootup();
         if (!startup_) return SERVER_SUCCESS;
 

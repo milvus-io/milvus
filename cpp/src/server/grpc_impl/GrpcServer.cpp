@@ -17,7 +17,7 @@
 
 #include "milvus.grpc.pb.h"
 #include "GrpcServer.h"
-#include "server/ServerConfig.h"
+#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "GrpcRequestHandler.h"
@@ -73,7 +73,7 @@ GrpcServer::Stop() {
 
 Status
 GrpcServer::StartService() {
-    ServerConfig &config = ServerConfig::GetInstance();
+    Config &config = Config::GetInstance();
     std::string address = config.GetServerConfigAddress();
     std::string port = config.GetServerConfigPort();
 
