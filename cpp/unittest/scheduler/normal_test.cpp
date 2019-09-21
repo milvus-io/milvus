@@ -26,7 +26,7 @@
 #include <gtest/gtest.h>
 
 
-using namespace zilliz::milvus::engine;
+using namespace zilliz::milvus::scheduler;
 
 
 TEST(NormalTest, INST_TEST) {
@@ -46,7 +46,7 @@ TEST(NormalTest, INST_TEST) {
 
     const uint64_t NUM_TASK = 1000;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    meta::TableFileSchemaPtr dummy = nullptr;
+    TableFileSchemaPtr dummy = nullptr;
 
     auto disks = res_mgr->GetDiskResources();
     ASSERT_FALSE(disks.empty());

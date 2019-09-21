@@ -39,10 +39,6 @@ namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-using engine::TaskPtr;
-using engine::XSearchTask;
-using engine::XDeleteTask;
-
 class TaskCreator {
 public:
     static std::vector<TaskPtr>
