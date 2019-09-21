@@ -25,7 +25,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 Scheduler::Scheduler(ResourceMgrWPtr res_mgr)
     : running_(false),

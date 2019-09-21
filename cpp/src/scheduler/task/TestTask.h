@@ -22,12 +22,12 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 class TestTask : public XSearchTask {
 public:
     explicit
-    TestTask(meta::TableFileSchemaPtr& file);
+    TestTask(TableFileSchemaPtr& file);
 
 public:
     void
