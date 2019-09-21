@@ -13,8 +13,14 @@ class ConnectionConnectError(BaseException):
 class ConnectionNotFoundError(BaseException):
     code = codes.CONNECTTION_NOT_FOUND_CODE
 
+class DBError(BaseException):
+    code = codes.DB_ERROR_CODE
+
 class TableNotFoundError(BaseException):
     code = codes.TABLE_NOT_FOUND_CODE
 
 class InvalidArgumentError(BaseException):
-    code = codes.INVALID_ARGUMENT
+    code = codes.INVALID_ARGUMENT_CODE
+
+class InvalidRangeError(BaseException):
+    code = codes.INVALID_DATE_RANGE_CODE

@@ -29,6 +29,9 @@ def resp_handler(err, error_code):
     if resp_class == milvus_pb2.TableRowCount:
         return resp_class(status=status, table_row_count=-1)
 
+    if resp_class == milvus_pb2.TableName:
+        return resp_class(status=status, table_name=[])
+
     status.error_code = status_pb2.UNEXPECTED_ERROR
     return status
 
@@ -41,3 +44,13 @@ def TableNotFoundErrorHandler(err):
 def InvalidArgumentErrorHandler(err):
     logger.error(err)
     return resp_handler(err, status_pb2.ILLEGAL_ARGUMENT)
+
+@server.errorhandler(exceptions.DBError)
+def DBErrorHandler(err):
+    logger.error(err)
+    return resp_handler(err, status_pb2.UNEXPECTED_ERROR)
+
+@server.errorhandler(exceptions.InvalidRangeError)
+def InvalidArgumentErrorHandler(err):
+    logger.error(err)
+    return resp_handler(err, status_pb2.ILLEGAL_RANGE)
