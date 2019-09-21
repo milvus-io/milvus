@@ -7,7 +7,7 @@ db.init_db(uri=settings.SQLALCHEMY_DATABASE_URI, echo=settings.SQL_ECHO)
 from mishards.connections import ConnectionMgr
 connect_mgr = ConnectionMgr()
 
-from mishards.service_founder import ServiceFounder
+from sd.service_founder import ServiceFounder
 discover = ServiceFounder(namespace=settings.SD_NAMESPACE,
         conn_mgr=connect_mgr,
         pod_patt=settings.SD_ROSERVER_POD_PATT,
