@@ -91,9 +91,9 @@ static const char* CONFIG_RESOURCE_MODE_DEFAULT = "simple";
 static const char* CONFIG_RESOURCE_POOL = "pool";
 
 
-class ServerConfig {
+class Config {
  public:
-    static ServerConfig &GetInstance();
+    static Config &GetInstance();
 
     Status LoadConfigFile(const std::string& filename);
     Status ValidateConfig();

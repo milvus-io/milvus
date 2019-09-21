@@ -29,7 +29,6 @@
 #include "grpc/gen-status/status.pb.h"
 
 #include "server/DBWrapper.h"
-#include "server/ServerConfig.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/ResourceFactory.h"
 #include "utils/CommonUtil.h"

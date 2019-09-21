@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ServerConfig.h"
+#include "Config.h"
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -35,14 +35,14 @@ namespace server {
 constexpr uint64_t MB = 1024 * 1024;
 constexpr uint64_t GB = MB * 1024;
 
-ServerConfig &
-ServerConfig::GetInstance() {
-    static ServerConfig config;
-    return config;
+Config &
+Config::GetInstance() {
+    static Config config_inst;
+    return config_inst;
 }
 
 Status
-ServerConfig::LoadConfigFile(const std::string &filename) {
+Config::LoadConfigFile(const std::string &filename) {
     if (filename.empty()) {
         std::cerr << "ERROR: need specify config file" << std::endl;
         exit(1);
@@ -71,7 +71,7 @@ ServerConfig::LoadConfigFile(const std::string &filename) {
 }
 
 Status
-ServerConfig::ValidateConfig() {
+Config::ValidateConfig() {
     if (!CheckServerConfig().ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Server config validation check fail");
     }
@@ -94,7 +94,7 @@ ServerConfig::ValidateConfig() {
 }
 
 Status
-ServerConfig::CheckServerConfig() {
+Config::CheckServerConfig() {
 /*
   server_config:
   address: 0.0.0.0            # milvus server ip address (IPv4)
@@ -154,7 +154,7 @@ ServerConfig::CheckServerConfig() {
 }
 
 Status
-ServerConfig::CheckDBConfig() {
+Config::CheckDBConfig() {
 /*
   db_config:
   db_path: @MILVUS_DB_PATH@             # milvus data storage path
@@ -230,7 +230,7 @@ ServerConfig::CheckDBConfig() {
 }
 
 Status
-ServerConfig::CheckMetricConfig() {
+Config::CheckMetricConfig() {
 /*
     metric_config:
     is_startup: off                       # if monitoring start: on, off
@@ -260,7 +260,7 @@ ServerConfig::CheckMetricConfig() {
 }
 
 Status
-ServerConfig::CheckCacheConfig() {
+Config::CheckCacheConfig() {
 /*
   cache_config:
   cpu_cache_capacity: 16            # how many memory are used as cache, unit: GB, range: 0 ~ less than total memory
@@ -361,7 +361,7 @@ ServerConfig::CheckCacheConfig() {
 }
 
 Status
-ServerConfig::CheckEngineConfig() {
+Config::CheckEngineConfig() {
 /*
     engine_config:
     use_blas_threshold: 20
@@ -396,7 +396,7 @@ ServerConfig::CheckEngineConfig() {
 }
 
 Status
-ServerConfig::CheckResourceConfig() {
+Config::CheckResourceConfig() {
     /*
       resource_config:
         mode: simple
@@ -406,7 +406,7 @@ ServerConfig::CheckResourceConfig() {
           - gpu100
      */
     bool okay = true;
-    server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
+    server::ConfigNode &config = GetConfig(server::CONFIG_RESOURCE);
     auto mode = config.GetValue(CONFIG_RESOURCE_MODE, CONFIG_RESOURCE_MODE_DEFAULT);
     if (mode != "simple") {
         std::cerr << "ERROR: invalid resource config: mode is " << mode << std::endl;
@@ -422,7 +422,7 @@ ServerConfig::CheckResourceConfig() {
 }
 
 //Status
-//ServerConfig::CheckResourceConfig() {
+//Config::CheckResourceConfig() {
 /*
   resource_config:
   # resource list, length: 0~N
@@ -604,7 +604,7 @@ ServerConfig::CheckResourceConfig() {
 //}
 
 void
-ServerConfig::PrintAll() const {
+Config::PrintAll() const {
     if (const ConfigMgr *mgr = ConfigMgr::GetInstance()) {
         std::string str = mgr->DumpString();
 //        SERVER_LOG_INFO << "\n" << str;
@@ -613,14 +613,14 @@ ServerConfig::PrintAll() const {
 }
 
 ConfigNode
-ServerConfig::GetConfig(const std::string &name) const {
+Config::GetConfig(const std::string &name) const {
     const ConfigMgr *mgr = ConfigMgr::GetInstance();
     const ConfigNode &root_node = mgr->GetRootNode();
     return root_node.GetChild(name);
 }
 
 ConfigNode &
-ServerConfig::GetConfig(const std::string &name) {
+Config::GetConfig(const std::string &name) {
     ConfigMgr *mgr = ConfigMgr::GetInstance();
     ConfigNode &root_node = mgr->GetRootNode();
     return root_node.GetChild(name);
@@ -628,28 +628,28 @@ ServerConfig::GetConfig(const std::string &name) {
 
 /* server config */
 std::string
-ServerConfig::GetServerConfigAddress() {
+Config::GetServerConfigAddress() {
     ConfigNode server_config = GetConfig(CONFIG_SERVER);
     return server_config.GetValue(CONFIG_SERVER_ADDRESS,
                                   CONFIG_SERVER_ADDRESS_DEFAULT);
 }
 
 std::string
-ServerConfig::GetServerConfigPort() {
+Config::GetServerConfigPort() {
     ConfigNode server_config = GetConfig(CONFIG_SERVER);
     return server_config.GetValue(CONFIG_SERVER_PORT,
                                   CONFIG_SERVER_PORT_DEFAULT);
 }
 
 std::string
-ServerConfig::GetServerConfigMode() {
+Config::GetServerConfigMode() {
     ConfigNode server_config = GetConfig(CONFIG_SERVER);
     return server_config.GetValue(CONFIG_SERVER_MODE,
                                   CONFIG_SERVER_MODE_DEFAULT);
 }
 
 std::string
-ServerConfig::GetServerConfigTimeZone() {
+Config::GetServerConfigTimeZone() {
     ConfigNode server_config = GetConfig(CONFIG_SERVER);
     return server_config.GetValue(CONFIG_SERVER_TIME_ZONE,
                                   CONFIG_SERVER_TIME_ZONE_DEFAULT);
@@ -657,49 +657,49 @@ ServerConfig::GetServerConfigTimeZone() {
 
 /* db config */
 std::string
-ServerConfig::GetDBConfigPath() {
+Config::GetDBConfigPath() {
     ConfigNode db_config = GetConfig(CONFIG_DB);
     return db_config.GetValue(CONFIG_DB_PATH,
                               CONFIG_DB_PATH_DEFAULT);
 }
 
 std::string
-ServerConfig::GetDBConfigSlavePath() {
+Config::GetDBConfigSlavePath() {
     ConfigNode db_config = GetConfig(CONFIG_DB);
     return db_config.GetValue(CONFIG_DB_SLAVE_PATH,
                               CONFIG_DB_SLAVE_PATH_DEFAULT);
 }
 
 std::string
-ServerConfig::GetDBConfigBackendUrl() {
+Config::GetDBConfigBackendUrl() {
     ConfigNode db_config = GetConfig(CONFIG_DB);
     return db_config.GetValue(CONFIG_DB_BACKEND_URL,
                               CONFIG_DB_BACKEND_URL_DEFAULT);
 }
 
 int32_t
-ServerConfig::GetDBConfigArchiveDiskThreshold() {
+Config::GetDBConfigArchiveDiskThreshold() {
     ConfigNode db_config = GetConfig(CONFIG_DB);
     return db_config.GetInt32Value(CONFIG_DB_ARCHIVE_DISK_THRESHOLD,
                                    std::stoi(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
 }
 
 int32_t
-ServerConfig::GetDBConfigArchiveDaysThreshold() {
+Config::GetDBConfigArchiveDaysThreshold() {
     ConfigNode db_config = GetConfig(CONFIG_DB);
     return db_config.GetInt32Value(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD,
                                    std::stoi(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
 }
 
 int32_t
-ServerConfig::GetDBConfigBufferSize() {
+Config::GetDBConfigBufferSize() {
     ConfigNode db_config = GetConfig(CONFIG_DB);
     return db_config.GetInt32Value(CONFIG_DB_BUFFER_SIZE,
                                    std::stoi(CONFIG_DB_BUFFER_SIZE_DEFAULT));
 }
 
 int32_t
-ServerConfig::GetDBConfigBuildIndexGPU() {
+Config::GetDBConfigBuildIndexGPU() {
     ConfigNode db_config = GetConfig(CONFIG_DB);
     return db_config.GetInt32Value(CONFIG_DB_BUILD_INDEX_GPU,
                                    std::stoi(CONFIG_DB_BUILD_INDEX_GPU_DEFAULT));
@@ -707,21 +707,21 @@ ServerConfig::GetDBConfigBuildIndexGPU() {
 
 /* metric config */
 bool
-ServerConfig::GetMetricConfigAutoBootup() {
+Config::GetMetricConfigAutoBootup() {
     ConfigNode metric_config = GetConfig(CONFIG_METRIC);
     return metric_config.GetBoolValue(CONFIG_METRIC_AUTO_BOOTUP,
                                       std::stoi(CONFIG_METRIC_AUTO_BOOTUP_DEFAULT));
 }
 
 std::string
-ServerConfig::GetMetricConfigCollector() {
+Config::GetMetricConfigCollector() {
     ConfigNode metric_config = GetConfig(CONFIG_METRIC);
     return metric_config.GetValue(CONFIG_METRIC_COLLECTOR,
                                   CONFIG_METRIC_COLLECTOR_DEFAULT);
 }
 
 std::string
-ServerConfig::GetMetricConfigPrometheusPort() {
+Config::GetMetricConfigPrometheusPort() {
     ConfigNode metric_config = GetConfig(CONFIG_METRIC);
     return metric_config.GetValue(CONFIG_METRIC_PROMETHEUS_PORT,
                                   CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT);
@@ -729,35 +729,35 @@ ServerConfig::GetMetricConfigPrometheusPort() {
 
 /* cache config */
 int32_t
-ServerConfig::GetCacheConfigCpuMemCapacity() {
+Config::GetCacheConfigCpuMemCapacity() {
     ConfigNode cache_config = GetConfig(CONFIG_CACHE);
     return cache_config.GetInt32Value(CONFIG_CACHE_CPU_MEM_CAPACITY,
                                       std::stoi(CONFIG_CACHE_CPU_MEM_CAPACITY_DEFAULT));
 }
 
 float
-ServerConfig::GetCacheConfigCpuMemThreshold() {
+Config::GetCacheConfigCpuMemThreshold() {
     ConfigNode cache_config = GetConfig(CONFIG_CACHE);
     return cache_config.GetFloatValue(CONFIG_CACHE_CPU_MEM_THRESHOLD,
                                       std::stof(CONFIG_CACHE_CPU_MEM_THRESHOLD_DEFAULT));
 }
 
 int32_t
-ServerConfig::GetCacheConfigGpuMemCapacity() {
+Config::GetCacheConfigGpuMemCapacity() {
     ConfigNode cache_config = GetConfig(CONFIG_CACHE);
     return cache_config.GetInt32Value(CONFIG_CACHE_GPU_MEM_CAPACITY,
                                       std::stoi(CONFIG_CACHE_GPU_MEM_CAPACITY_DEFAULT));
 }
 
 float
-ServerConfig::GetCacheConfigGpuMemThreshold() {
+Config::GetCacheConfigGpuMemThreshold() {
     ConfigNode cache_config = GetConfig(CONFIG_CACHE);
     return cache_config.GetFloatValue(CONFIG_CACHE_GPU_MEM_THRESHOLD,
                                       std::stof(CONFIG_CACHE_GPU_MEM_THRESHOLD_DEFAULT));
 }
 
 bool
-ServerConfig::GetCacheConfigCacheInsertData() {
+Config::GetCacheConfigCacheInsertData() {
     ConfigNode cache_config = GetConfig(CONFIG_CACHE);
     return cache_config.GetBoolValue(CONFIG_CACHE_CACHE_INSERT_DATA,
                                      std::stoi(CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT));
@@ -765,14 +765,14 @@ ServerConfig::GetCacheConfigCacheInsertData() {
 
 /* engine config */
 int32_t
-ServerConfig::GetEngineConfigBlasThreshold() {
+Config::GetEngineConfigBlasThreshold() {
     ConfigNode engine_config = GetConfig(CONFIG_ENGINE);
     return engine_config.GetInt32Value(CONFIG_ENGINE_BLAS_THRESHOLD,
                                        std::stoi(CONFIG_ENGINE_BLAS_THRESHOLD_DEFAULT));
 }
 
 int32_t
-ServerConfig::GetEngineConfigOmpThreadNum() {
+Config::GetEngineConfigOmpThreadNum() {
     ConfigNode engine_config = GetConfig(CONFIG_ENGINE);
     return engine_config.GetInt32Value(CONFIG_ENGINE_OMP_THREAD_NUM,
                                        std::stoi(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
@@ -780,14 +780,14 @@ ServerConfig::GetEngineConfigOmpThreadNum() {
 
 /* resource config */
 std::string
-ServerConfig::GetResourceConfigMode() {
+Config::GetResourceConfigMode() {
     ConfigNode resource_config = GetConfig(CONFIG_RESOURCE);
     return resource_config.GetValue(CONFIG_RESOURCE_MODE,
                                     CONFIG_RESOURCE_MODE_DEFAULT);
 }
 
 std::vector<std::string>
-ServerConfig::GetResourceConfigPool() {
+Config::GetResourceConfigPool() {
     ConfigNode resource_config = GetConfig(CONFIG_RESOURCE);
     return resource_config.GetSequence(CONFIG_RESOURCE_POOL);
 }

@@ -16,14 +16,6 @@
 // under the License.
 
 #include <thread>
-#include "Server.h"
-#include "server/grpc_impl/GrpcServer.h"
-#include "utils/Log.h"
-#include "utils/LogUtil.h"
-#include "utils/SignalUtil.h"
-#include "utils/TimeRecorder.h"
-#include "metrics/Metrics.h"
-
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -31,10 +23,17 @@
 //#include <numaif.h>
 #include <unistd.h>
 #include <string.h>
-#include <src/scheduler/SchedInst.h>
-#include "src/wrapper/KnowhereResource.h"
 
+#include "Server.h"
+#include "server/grpc_impl/GrpcServer.h"
+#include "server/Config.h"
+#include "utils/Log.h"
+#include "utils/LogUtil.h"
+#include "utils/SignalUtil.h"
+#include "utils/TimeRecorder.h"
 #include "metrics/Metrics.h"
+#include "scheduler/SchedInst.h"
+#include "wrapper/KnowhereResource.h"
 #include "DBWrapper.h"
 
 
@@ -161,7 +160,7 @@ Server::Start() {
         }
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
-        ServerConfig &config = ServerConfig::GetInstance();
+        Config &config = Config::GetInstance();
         std::string time_zone = config.GetServerConfigTimeZone();
         if (time_zone.length() == 3) {
             time_zone = "CUT";
@@ -230,7 +229,7 @@ Server::Stop() {
 
 ErrorCode
 Server::LoadConfig() {
-    ServerConfig& server_config = ServerConfig::GetInstance();
+    Config& server_config = Config::GetInstance();
     server_config.LoadConfigFile(config_filename_);
     auto status = server_config.ValidateConfig();
     if (!status.ok()) {
