@@ -39,11 +39,11 @@ static const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
 
 /* db config */
 static const char* CONFIG_DB = "db_config";
-static const char* CONFIG_DB_PATH = "db_path";
+static const char* CONFIG_DB_PATH = "path";
 static const char* CONFIG_DB_PATH_DEFAULT = "/tmp/milvus";
-static const char* CONFIG_DB_SLAVE_PATH = "db_slave_path";
+static const char* CONFIG_DB_SLAVE_PATH = "slave_path";
 static const char* CONFIG_DB_SLAVE_PATH_DEFAULT = "";
-static const char* CONFIG_DB_BACKEND_URL = "db_backend_url";
+static const char* CONFIG_DB_BACKEND_URL = "backend_url";
 static const char* CONFIG_DB_BACKEND_URL_DEFAULT = "sqlite://:@:/";
 static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD = "archive_disk_threshold";
 static const char* CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT = "0";
@@ -64,8 +64,8 @@ static const char* CONFIG_CACHE_CPU_MEM_THRESHOLD = "cpu_mem_threshold";
 static const char* CONFIG_CACHE_CPU_MEM_THRESHOLD_DEFAULT = "0.85";
 static const char* CONFIG_CACHE_GPU_MEM_THRESHOLD = "gpu_mem_threshold";
 static const char* CONFIG_CACHE_GPU_MEM_THRESHOLD_DEFAULT = "0.85";
-static const char* CONFIG_CACHE_INSERT_IMMEDIATELY = "insert_immediately";
-static const char* CONFIG_CACHE_INSERT_IMMEDIATELY_DEFAULT = "0";
+static const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
+static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "0";
 
 /* metric config */
 static const char* CONFIG_METRIC = "metric_config";
@@ -95,20 +95,51 @@ class ServerConfig {
  public:
     static ServerConfig &GetInstance();
 
-    Status LoadConfigFile(const std::string& config_filename);
+    Status LoadConfigFile(const std::string& filename);
     Status ValidateConfig();
     void PrintAll() const;
 
+ private:
     ConfigNode GetConfig(const std::string& name) const;
     ConfigNode& GetConfig(const std::string& name);
 
- private:
     Status CheckServerConfig();
     Status CheckDBConfig();
     Status CheckMetricConfig();
     Status CheckCacheConfig();
     Status CheckEngineConfig();
     Status CheckResourceConfig();
+
+ public:
+    std::string GetServerConfigAddress();
+    std::string GetServerConfigPort();
+    std::string GetServerConfigMode();
+    std::string GetServerConfigTimeZone();
+
+    std::string GetDBConfigPath();
+    std::string GetDBConfigSlavePath();
+    std::string GetDBConfigBackendUrl();
+    int32_t     GetDBConfigArchiveDiskThreshold();
+    int32_t     GetDBConfigArchiveDaysThreshold();
+    int32_t     GetDBConfigBufferSize();
+    int32_t     GetDBConfigBuildIndexGPU();
+
+    bool        GetMetricConfigAutoBootup();
+    std::string GetMetricConfigCollector();
+    std::string GetMetricConfigPrometheusPort();
+
+    int32_t     GetCacheConfigCpuMemCapacity();
+    float       GetCacheConfigCpuMemThreshold();
+    int32_t     GetCacheConfigGpuMemCapacity();
+    float       GetCacheConfigGpuMemThreshold();
+    bool        GetCacheConfigCacheInsertData();
+
+    int32_t     GetEngineConfigBlasThreshold();
+    int32_t     GetEngineConfigOmpThreadNum();
+
+    std::string GetResourceConfigMode();
+    std::vector<std::string>
+                GetResourceConfigPool();
 };
 
 }

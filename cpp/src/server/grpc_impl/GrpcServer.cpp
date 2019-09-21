@@ -74,12 +74,10 @@ GrpcServer::Stop() {
 Status
 GrpcServer::StartService() {
     ServerConfig &config = ServerConfig::GetInstance();
-    ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-    ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
-    std::string address = server_config.GetValue(CONFIG_SERVER_ADDRESS, CONFIG_SERVER_ADDRESS_DEFAULT);
-    int32_t port = server_config.GetInt32Value(CONFIG_SERVER_PORT, std::stoi(CONFIG_SERVER_PORT_DEFAULT));
+    std::string address = config.GetServerConfigAddress();
+    std::string port = config.GetServerConfigPort();
 
-    std::string server_address(address + ":" + std::to_string(port));
+    std::string server_address(address + ":" + port);
 
     ::grpc::ServerBuilder builder;
     builder.SetOption(std::unique_ptr<::grpc::ServerBuilderOption>(new NoReusePortOption));

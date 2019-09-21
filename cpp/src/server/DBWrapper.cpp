@@ -35,23 +35,20 @@ DBWrapper::DBWrapper() {
 }
 
 Status DBWrapper::StartService() {
+    ServerConfig& config = ServerConfig::GetInstance();
+
     //db config
     engine::DBOptions opt;
-    ConfigNode& db_config = ServerConfig::GetInstance().GetConfig(CONFIG_DB);
-    opt.meta.backend_uri = db_config.GetValue(CONFIG_DB_BACKEND_URL);
-    std::string db_path = db_config.GetValue(CONFIG_DB_PATH);
-    opt.meta.path = db_path + "/db";
+    opt.meta.backend_uri = config.GetDBConfigBackendUrl();
+    opt.meta.path = config.GetDBConfigPath() + "/db";
 
-    std::string db_slave_path = db_config.GetValue(CONFIG_DB_SLAVE_PATH);
+    std::string db_slave_path = config.GetDBConfigSlavePath();
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta.slave_paths);
 
     // cache config
-    ConfigNode& cache_config = ServerConfig::GetInstance().GetConfig(CONFIG_CACHE);
-    opt.insert_cache_immediately_ =
-        cache_config.GetBoolValue(CONFIG_CACHE_INSERT_IMMEDIATELY, std::stoi(CONFIG_CACHE_INSERT_IMMEDIATELY_DEFAULT));
+    opt.insert_cache_immediately_ = config.GetCacheConfigCacheInsertData();
 
-    ConfigNode& serverConfig = ServerConfig::GetInstance().GetConfig(CONFIG_SERVER);
-    std::string mode = serverConfig.GetValue(CONFIG_SERVER_MODE, CONFIG_SERVER_MODE_DEFAULT);
+    std::string mode = config.GetServerConfigMode();
     if (mode == "single") {
         opt.mode = engine::DBOptions::MODE::SINGLE;
     }
@@ -67,9 +64,7 @@ Status DBWrapper::StartService() {
     }
 
     // engine config
-    ConfigNode& engine_config = ServerConfig::GetInstance().GetConfig(CONFIG_ENGINE);
-    int32_t omp_thread =
-        engine_config.GetInt32Value(CONFIG_ENGINE_OMP_THREAD_NUM, std::stoi(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT));
+    int32_t omp_thread = config.GetEngineConfigOmpThreadNum();
     if(omp_thread > 0) {
         omp_set_num_threads(omp_thread);
         SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
@@ -82,19 +77,16 @@ Status DBWrapper::StartService() {
     }
 
     //init faiss global variable
-    faiss::distance_compute_blas_threshold =
-        engine_config.GetInt32Value(CONFIG_ENGINE_BLAS_THRESHOLD, std::stoi(CONFIG_ENGINE_BLAS_THRESHOLD_DEFAULT));
+    faiss::distance_compute_blas_threshold = config.GetEngineConfigBlasThreshold();
 
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
-    int64_t disk =
-        db_config.GetInt64Value(CONFIG_DB_ARCHIVE_DISK_THRESHOLD, std::stoi(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT));
-    int64_t days =
-        db_config.GetInt64Value(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD, std::stoi(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT));
-    if(disk > 0) {
+    int32_t disk = config.GetDBConfigArchiveDiskThreshold();
+    int32_t days = config.GetDBConfigArchiveDaysThreshold();
+    if (disk > 0) {
         criterial[engine::ARCHIVE_CONF_DISK] = disk;
     }
-    if(days > 0) {
+    if (days > 0) {
         criterial[engine::ARCHIVE_CONF_DAYS] = days;
     }
     opt.meta.archive_conf.SetCriterias(criterial);
