@@ -7,13 +7,10 @@ db.init_db(uri=settings.SQLALCHEMY_DATABASE_URI, echo=settings.SQL_ECHO)
 from mishards.connections import ConnectionMgr
 connect_mgr = ConnectionMgr()
 
-from sd.service_founder import ServiceFounder
-discover = ServiceFounder(namespace=settings.SD_NAMESPACE,
-        conn_mgr=connect_mgr,
-        pod_patt=settings.SD_ROSERVER_POD_PATT,
-        label_selector=settings.SD_LABEL_SELECTOR,
-        in_cluster=settings.SD_IN_CLUSTER,
-        poll_interval=settings.SD_POLL_INTERVAL)
+from sd import ProviderManager
+
+sd_proiver_class = ProviderManager.get_provider(settings.SD_PROVIDER)
+discover = sd_proiver_class(settings=settings.SD_PROVIDER_SETTINGS, conn_mgr=connect_mgr)
 
 from mishards.server import Server
 grpc_server = Server(conn_mgr=connect_mgr)

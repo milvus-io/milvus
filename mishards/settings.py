@@ -26,11 +26,17 @@ SEARCH_WORKER_SIZE = env.int('SEARCH_WORKER_SIZE', 10)
 SERVER_PORT = env.int('SERVER_PORT', 19530)
 WOSERVER = env.str('WOSERVER')
 
-SD_NAMESPACE = env.str('SD_NAMESPACE', '')
-SD_IN_CLUSTER = env.bool('SD_IN_CLUSTER', False)
-SD_POLL_INTERVAL = env.int('SD_POLL_INTERVAL', 5)
-SD_ROSERVER_POD_PATT = env.str('SD_ROSERVER_POD_PATT', '')
-SD_LABEL_SELECTOR = env.str('SD_LABEL_SELECTOR', '')
+SD_PROVIDER_SETTINGS = None
+SD_PROVIDER = env.str('SD_PROVIDER', 'Kubernetes')
+if SD_PROVIDER == 'Kubernetes':
+    from sd.kubernetes_provider import KubernetesProviderSettings
+    SD_PROVIDER_SETTINGS = KubernetesProviderSettings(
+        namespace=env.str('SD_NAMESPACE', ''),
+        in_cluster=env.bool('SD_IN_CLUSTER', False),
+        poll_interval=env.int('SD_POLL_INTERVAL', 5),
+        pod_patt=env.str('SD_ROSERVER_POD_PATT', ''),
+        label_selector=env.str('SD_LABEL_SELECTOR', '')
+    )
 
 TESTING = env.bool('TESTING', False)
 TESTING_WOSERVER = env.str('TESTING_WOSERVER', 'tcp://127.0.0.1:19530')

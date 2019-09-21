@@ -12,6 +12,7 @@ from functools import wraps
 from kubernetes import client, config, watch
 
 from utils import singleton
+from sd import ProviderManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class K8SMixin:
             self.v1 = client.CoreV1Api()
 
 
-class K8SServiceDiscover(threading.Thread, K8SMixin):
+class K8SHeartbeatHandler(threading.Thread, K8SMixin):
     def __init__(self, message_queue, namespace, label_selector, in_cluster=False, **kwargs):
         K8SMixin.__init__(self, namespace=namespace, in_cluster=in_cluster, **kwargs)
         threading.Thread.__init__(self)
@@ -202,13 +203,26 @@ class EventHandler(threading.Thread):
             except queue.Empty:
                 continue
 
-@singleton
-class ServiceFounder(object):
-    def __init__(self, conn_mgr, namespace, pod_patt, label_selector, in_cluster=False, **kwargs):
+class KubernetesProviderSettings:
+    def __init__(self, namespace, pod_patt, label_selector, in_cluster, poll_interval, **kwargs):
         self.namespace = namespace
+        self.pod_patt = pod_patt
+        self.label_selector = label_selector
+        self.in_cluster = in_cluster
+        self.poll_interval = poll_interval
+
+@singleton
+@ProviderManager.register_service_provider
+class KubernetesProvider(object):
+    NAME = 'Kubernetes'
+    def __init__(self, settings, conn_mgr, **kwargs):
+        self.namespace = settings.namespace
+        self.pod_patt = settings.pod_patt
+        self.label_selector = settings.label_selector
+        self.in_cluster = settings.in_cluster
+        self.poll_interval = settings.poll_interval
         self.kwargs = kwargs
         self.queue = queue.Queue()
-        self.in_cluster = in_cluster
 
         self.conn_mgr = conn_mgr
 
@@ -226,19 +240,20 @@ class ServiceFounder(object):
                 **kwargs
                 )
 
-        self.pod_heartbeater = K8SServiceDiscover(
+        self.pod_heartbeater = K8SHeartbeatHandler(
                 message_queue=self.queue,
-                namespace=namespace,
-                label_selector=label_selector,
+                namespace=self.namespace,
+                label_selector=self.label_selector,
                 in_cluster=self.in_cluster,
                 v1=self.v1,
+                poll_interval=self.poll_interval,
                 **kwargs
                 )
 
         self.event_handler = EventHandler(mgr=self,
                 message_queue=self.queue,
                 namespace=self.namespace,
-                pod_patt=pod_patt, **kwargs)
+                pod_patt=self.pod_patt, **kwargs)
 
     def add_pod(self, name, ip):
         self.conn_mgr.register(name, 'tcp://{}:19530'.format(ip))
@@ -250,8 +265,6 @@ class ServiceFounder(object):
         self.listener.daemon = True
         self.listener.start()
         self.event_handler.start()
-        # while self.listener.at_start_up:
-        #     time.sleep(1)
 
         self.pod_heartbeater.start()
 
@@ -262,11 +275,32 @@ class ServiceFounder(object):
 
 
 if __name__ == '__main__':
-    from mishards import connect_mgr
     logging.basicConfig(level=logging.INFO)
-    t = ServiceFounder(namespace='xp', conn_mgr=connect_mgr, pod_patt=".*-ro-servers-.*", label_selector='tier=ro-servers', in_cluster=False)
+    class Connect:
+        def register(self, name, value):
+            logger.error('Register: {} - {}'.format(name, value))
+        def unregister(self, name):
+            logger.error('Unregister: {}'.format(name))
+
+        @property
+        def conn_names(self):
+            return set()
+
+    connect_mgr = Connect()
+
+    settings = KubernetesProviderSettings(
+            namespace='xp',
+            pod_patt=".*-ro-servers-.*",
+            label_selector='tier=ro-servers',
+            poll_interval=5,
+            in_cluster=False)
+
+    provider_class = ProviderManager.get_provider('Kubernetes')
+    t = provider_class(conn_mgr=connect_mgr,
+            settings=settings
+            )
     t.start()
-    cnt = 2
+    cnt = 100
     while cnt > 0:
         time.sleep(2)
         cnt -= 1
