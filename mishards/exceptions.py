@@ -15,3 +15,6 @@ class ConnectionNotFoundError(BaseException):
 
 class TableNotFoundError(BaseException):
     code = codes.TABLE_NOT_FOUND_CODE
+
+class InvalidArgumentError(BaseException):
+    code = codes.INVALID_ARGUMENT

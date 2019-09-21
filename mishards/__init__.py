@@ -17,3 +17,5 @@ discover = ServiceFounder(namespace=settings.SD_NAMESPACE,
 
 from mishards.server import Server
 grpc_server = Server(conn_mgr=connect_mgr)
+
+from mishards import exception_handlers

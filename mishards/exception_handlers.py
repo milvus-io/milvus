@@ -1,6 +1,6 @@
 import logging
 from milvus.grpc_gen import milvus_pb2, milvus_pb2_grpc, status_pb2
-from mishards import server, exceptions
+from mishards import grpc_server as server, exceptions
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +26,18 @@ def resp_handler(err, error_code):
     if resp_class == milvus_pb2.TopKQueryResultList:
         return resp_class(status=status, topk_query_result=[])
 
+    if resp_class == milvus_pb2.TableRowCount:
+        return resp_class(status=status, table_row_count=-1)
+
     status.error_code = status_pb2.UNEXPECTED_ERROR
     return status
 
-@server.error_handler(exceptions.TableNotFoundError)
+@server.errorhandler(exceptions.TableNotFoundError)
 def TableNotFoundErrorHandler(err):
     logger.error(err)
     return resp_handler(err, status_pb2.TABLE_NOT_EXISTS)
+
+@server.errorhandler(exceptions.InvalidArgumentError)
+def InvalidArgumentErrorHandler(err):
+    logger.error(err)
+    return resp_handler(err, status_pb2.ILLEGAL_ARGUMENT)
