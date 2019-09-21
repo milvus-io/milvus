@@ -15,22 +15,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "scheduler/Scheduler.h"
 #include <gtest/gtest.h>
-#include "src/scheduler/tasklabel/DefaultLabel.h"
-#include "cache/DataObj.h"
-#include "cache/GpuCacheMgr.h"
+
+#include "scheduler/Scheduler.h"
+#include "scheduler/tasklabel/DefaultLabel.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 #include "scheduler/task/TestTask.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/resource/Resource.h"
+#include "cache/DataObj.h"
+#include "cache/GpuCacheMgr.h"
 #include "utils/Error.h"
-#include "src/wrapper/vec_index.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
+#include "wrapper/vec_index.h"
 
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 class MockVecIndex : public engine::VecIndex {
 public:
@@ -155,7 +156,7 @@ insert_dummy_index_into_gpu_cache(uint64_t device_id) {
 TEST_F(SchedulerTest, ON_LOAD_COMPLETED) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    meta::TableFileSchemaPtr dummy = std::make_shared<meta::TableFileSchema>();
+    TableFileSchemaPtr dummy = std::make_shared<TableFileSchema>();
     dummy->location_ = "location";
 
     insert_dummy_index_into_gpu_cache(1);
@@ -175,7 +176,7 @@ TEST_F(SchedulerTest, ON_LOAD_COMPLETED) {
 TEST_F(SchedulerTest, PUSH_TASK_TO_NEIGHBOUR_RANDOMLY_TEST) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    meta::TableFileSchemaPtr dummy1 = std::make_shared<meta::TableFileSchema>();
+    TableFileSchemaPtr dummy1 = std::make_shared<TableFileSchema>();
     dummy1->location_ = "location";
 
     tasks.clear();
@@ -246,7 +247,7 @@ protected:
 TEST_F(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    meta::TableFileSchemaPtr dummy = std::make_shared<meta::TableFileSchema>();
+    TableFileSchemaPtr dummy = std::make_shared<TableFileSchema>();
     dummy->location_ = "location";
 
     for (uint64_t i = 0; i < NUM; ++i) {

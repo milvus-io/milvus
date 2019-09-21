@@ -25,7 +25,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 std::vector<ResourcePtr>
 get_neighbours(const ResourcePtr &self) {

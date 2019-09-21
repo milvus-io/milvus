@@ -26,7 +26,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 class AlgorithmTest : public testing::Test {
  protected:
