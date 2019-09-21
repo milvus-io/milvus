@@ -24,4 +24,4 @@ class ProviderManager:
     def get_provider(cls, name):
         return cls.PROVIDERS.get(name, None)
 
-from sd import kubernetes_provider
+from sd import kubernetes_provider, static_provider
