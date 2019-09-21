@@ -38,16 +38,13 @@ ErrorCode KnowhereResource::Initialize() {
     GpuResourcesArray gpu_resources;
 
     //get build index gpu resource
-    server::ServerConfig& root_config = server::ServerConfig::GetInstance();
-    server::ConfigNode& db_config = root_config.GetConfig(server::CONFIG_DB);
+    server::ServerConfig& config = server::ServerConfig::GetInstance();
 
-    int32_t build_index_gpu =
-        db_config.GetInt32Value(server::CONFIG_DB_BUILD_INDEX_GPU, std::stoi(server::CONFIG_DB_BUILD_INDEX_GPU_DEFAULT));
+    int32_t build_index_gpu = config.GetDBConfigBuildIndexGPU();
     gpu_resources.insert(std::make_pair(build_index_gpu, GpuResourceSetting()));
 
     //get search gpu resource
-    server::ConfigNode& res_config = root_config.GetConfig(server::CONFIG_RESOURCE);
-    auto pool = res_config.GetSequence(server::CONFIG_RESOURCE_POOL);
+    auto pool = config.GetResourceConfigPool();
     std::set<uint64_t> gpu_ids;
     for (auto &resource : pool) {
         if (resource.length() < 4 || resource.substr(0, 3) != "gpu") {

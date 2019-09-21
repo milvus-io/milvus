@@ -162,9 +162,7 @@ Server::Start() {
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         ServerConfig &config = ServerConfig::GetInstance();
-        ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-
-        std::string time_zone = server_config.GetValue(CONFIG_SERVER_TIME_ZONE, CONFIG_SERVER_TIME_ZONE_DEFAULT);
+        std::string time_zone = config.GetServerConfigTimeZone();
         if (time_zone.length() == 3) {
             time_zone = "CUT";
         } else {
@@ -232,8 +230,9 @@ Server::Stop() {
 
 ErrorCode
 Server::LoadConfig() {
-    ServerConfig::GetInstance().LoadConfigFile(config_filename_);
-    auto status = ServerConfig::GetInstance().ValidateConfig();
+    ServerConfig& server_config = ServerConfig::GetInstance();
+    server_config.LoadConfigFile(config_filename_);
+    auto status = server_config.ValidateConfig();
     if (!status.ok()) {
         std::cerr << "Failed to load config file: " << config_filename_ << std::endl;
         exit(0);
