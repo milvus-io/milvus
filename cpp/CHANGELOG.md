@@ -62,6 +62,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-510 - unittest out of memory and crashed
 - MS-507 - Dataset 10m-512, index type sq8，performance in-normal when set CPU_CACHE to 16 or 64
 - MS-543 - SearchTask fail without exception
+- MS-582 - grafana displays changes frequently
 
 ## Improvement
 - MS-327 - Clean code for milvus
