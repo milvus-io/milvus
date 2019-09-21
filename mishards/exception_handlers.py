@@ -32,6 +32,24 @@ def resp_handler(err, error_code):
     if resp_class == milvus_pb2.TableName:
         return resp_class(status=status, table_name=[])
 
+    if resp_class == milvus_pb2.StringReply:
+        return resp_class(status=status, string_reply='')
+
+    if resp_class == milvus_pb2.TableSchema:
+        table_name = milvus_pb2.TableName(
+            status=status
+        )
+        return milvus_pb2.TableSchema(
+            table_name=table_name
+        )
+
+    if resp_class == milvus_pb2.IndexParam:
+        return milvus_pb2.IndexParam(
+            table_name=milvus_pb2.TableName(
+                status=status
+            )
+        )
+
     status.error_code = status_pb2.UNEXPECTED_ERROR
     return status
 

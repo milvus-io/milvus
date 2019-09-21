@@ -50,7 +50,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         try:
             start = datetime.datetime.strptime(range_obj.start_date, '%Y-%m-%d')
             end = datetime.datetime.strptime(range_obj.end_date, '%Y-%m-%d')
-            assert start >= end
+            assert start < end
         except (ValueError, AssertionError):
             raise exceptions.InvalidRangeError('Invalid time range: {} {}'.format(
                     range_obj.start_date, range_obj.end_date
@@ -301,8 +301,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 table_name=table_name
             )
 
+        metadata = {
+            'resp_class': milvus_pb2.TableSchema
+        }
+
         logger.info('DescribeTable {}'.format(_table_name))
-        _status, _table = self.connection.describe_table(_table_name)
+        _status, _table = self.connection(metadata=metadata).describe_table(_table_name)
 
         if _status.OK():
             _grpc_table_name = milvus_pb2.TableName(
@@ -355,10 +359,14 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 status_pb2.Status(error_code=_status.code, reason=_status.message)
             )
 
+        metadata = {
+            'resp_class': milvus_pb2.StringReply
+        }
+
         if _cmd == 'version':
-            _status, _reply = self.connection.server_version()
+            _status, _reply = self.connection(metadata=metadata).server_version()
         else:
-            _status, _reply = self.connection.server_status()
+            _status, _reply = self.connection(metadata=metadata).server_status()
 
         return milvus_pb2.StringReply(
             status=status_pb2.Status(error_code=_status.code, reason=_status.message),
@@ -393,7 +401,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _table_name, _start_date, _end_date = unpacks
 
         logger.info('DeleteByRange {}: {} {}'.format(_table_name, _start_date, _end_date))
-        _status = self.connection.delete_vectors_by_range(_table_name, _start_date, _end_date)
+        _status = self.connection().delete_vectors_by_range(_table_name, _start_date, _end_date)
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
 
     @mark_grpc_method
@@ -404,7 +412,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             return status_pb2.Status(error_code=_status.code, reason=_status.message)
 
         logger.info('PreloadTable {}'.format(_table_name))
-        _status = self.connection.preload_table(_table_name)
+        _status = self.connection().preload_table(_table_name)
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
 
     @mark_grpc_method
@@ -418,8 +426,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 )
             )
 
+        metadata = {
+            'resp_class': milvus_pb2.IndexParam
+        }
+
         logger.info('DescribeIndex {}'.format(_table_name))
-        _status, _index_param = self.connection.describe_index(_table_name)
+        _status, _index_param = self.connection(metadata=metadata).describe_index(_table_name)
 
         _index = milvus_pb2.Index(index_type=_index_param._index_type, nlist=_index_param._nlist)
         _tablename = milvus_pb2.TableName(
@@ -436,5 +448,5 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             return status_pb2.Status(error_code=_status.code, reason=_status.message)
 
         logger.info('DropIndex {}'.format(_table_name))
-        _status = self.connection.drop_index(_table_name)
+        _status = self.connection().drop_index(_table_name)
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
