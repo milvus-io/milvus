@@ -139,6 +139,7 @@ class ConnectionMgr:
         logger.warn('Non-existed meta: {}'.format(name))
 
     def register(self, name, url):
+        logger.info('Register Connection: name={};url={}'.format(name, url))
         meta = self.metas.get(name)
         if not meta:
             return self.on_new_meta(name, url)
@@ -146,6 +147,7 @@ class ConnectionMgr:
             return self.on_duplicate_meta(name, url)
 
     def unregister(self, name):
+        logger.info('Unregister Connection: name={}'.format(name))
         url = self.metas.pop(name, None)
         if url is None:
             return self.on_nonexisted_meta(name)
