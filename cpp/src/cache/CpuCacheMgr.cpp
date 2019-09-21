@@ -17,7 +17,7 @@
 
 
 #include "CpuCacheMgr.h"
-#include "server/ServerConfig.h"
+#include "server/Config.h"
 #include "utils/Log.h"
 
 namespace zilliz {
@@ -29,7 +29,7 @@ namespace {
 }
 
 CpuCacheMgr::CpuCacheMgr() {
-    server::ServerConfig& config = server::ServerConfig::GetInstance();
+    server::Config& config = server::Config::GetInstance();
     int64_t cap = config.GetCacheConfigCpuMemCapacity() * unit;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
 

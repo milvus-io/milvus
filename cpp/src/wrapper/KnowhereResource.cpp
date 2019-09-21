@@ -18,7 +18,7 @@
 
 #include "KnowhereResource.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
-#include "server/ServerConfig.h"
+#include "server/Config.h"
 
 #include <map>
 
@@ -38,7 +38,7 @@ ErrorCode KnowhereResource::Initialize() {
     GpuResourcesArray gpu_resources;
 
     //get build index gpu resource
-    server::ServerConfig& config = server::ServerConfig::GetInstance();
+    server::Config& config = server::Config::GetInstance();
 
     int32_t build_index_gpu = config.GetDBConfigBuildIndexGPU();
     gpu_resources.insert(std::make_pair(build_index_gpu, GpuResourceSetting()));

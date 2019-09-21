@@ -15,12 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "scheduler/SchedInst.h"
-#include "server/ServerConfig.h"
 #include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
 
+#include "scheduler/SchedInst.h"
 
 namespace zilliz {
 namespace milvus {

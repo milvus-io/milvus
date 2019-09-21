@@ -19,7 +19,7 @@
 #include <sstream>
 #include "utils/Log.h"
 #include "GpuCacheMgr.h"
-#include "server/ServerConfig.h"
+#include "server/Config.h"
 
 namespace zilliz {
 namespace milvus {
@@ -33,7 +33,7 @@ namespace {
 }
 
 GpuCacheMgr::GpuCacheMgr() {
-    server::ServerConfig& config = server::ServerConfig::GetInstance();
+    server::Config& config = server::Config::GetInstance();
 
     int32_t cap = config.GetCacheConfigGpuMemCapacity() * G_BYTE;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
