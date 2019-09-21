@@ -80,20 +80,20 @@ engine::DBOptions BaseTest::GetOptions() {
 void DBTest::SetUp() {
     BaseTest::SetUp();
 
-    auto res_mgr = engine::ResMgrInst::GetInstance();
+    auto res_mgr = scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();
-    res_mgr->Add(engine::ResourceFactory::Create("disk", "DISK", 0, true, false));
-    res_mgr->Add(engine::ResourceFactory::Create("cpu", "CPU", 0, true, false));
-    res_mgr->Add(engine::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
+    res_mgr->Add(scheduler::ResourceFactory::Create("disk", "DISK", 0, true, false));
+    res_mgr->Add(scheduler::ResourceFactory::Create("cpu", "CPU", 0, true, false));
+    res_mgr->Add(scheduler::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
 
-    auto default_conn = engine::Connection("IO", 500.0);
-    auto PCIE = engine::Connection("IO", 11000.0);
+    auto default_conn = scheduler::Connection("IO", 500.0);
+    auto PCIE = scheduler::Connection("IO", 11000.0);
     res_mgr->Connect("disk", "cpu", default_conn);
     res_mgr->Connect("cpu", "gtx1660", PCIE);
     res_mgr->Start();
-    engine::SchedInst::GetInstance()->Start();
+    scheduler::SchedInst::GetInstance()->Start();
 
-    engine::JobMgrInst::GetInstance()->Start();
+    scheduler::JobMgrInst::GetInstance()->Start();
 
     auto options = GetOptions();
     db_ = engine::DBFactory::Build(options);
@@ -103,9 +103,9 @@ void DBTest::TearDown() {
     db_->Stop();
     db_->DropAll();
 
-    engine::JobMgrInst::GetInstance()->Stop();
-    engine::SchedInst::GetInstance()->Stop();
-    engine::ResMgrInst::GetInstance()->Stop();
+    scheduler::JobMgrInst::GetInstance()->Stop();
+    scheduler::SchedInst::GetInstance()->Stop();
+    scheduler::ResMgrInst::GetInstance()->Stop();
 
     BaseTest::TearDown();
 

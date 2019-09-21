@@ -252,7 +252,7 @@ Server::LoadConfig() {
 void
 Server::StartService() {
     engine::KnowhereResource::Initialize();
-    engine::StartSchedulerService();
+    scheduler::StartSchedulerService();
     DBWrapper::GetInstance().StartService();
     grpc::GrpcServer::GetInstance().Start();
 }
@@ -261,7 +261,7 @@ void
 Server::StopService() {
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
-    engine::StopSchedulerService();
+    scheduler::StopSchedulerService();
     engine::KnowhereResource::Finalize();
 }
 
