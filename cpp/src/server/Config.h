@@ -17,10 +17,12 @@
 
 #pragma once
 
+#include <mutex>
+#include <unordered_map>
+#include "yaml-cpp/yaml.h"
 #include "utils/Status.h"
 #include "config/ConfigNode.h"
 
-#include "yaml-cpp/yaml.h"
 
 namespace zilliz {
 namespace milvus {
@@ -65,12 +67,12 @@ static const char* CONFIG_CACHE_CPU_MEM_THRESHOLD_DEFAULT = "0.85";
 static const char* CONFIG_CACHE_GPU_MEM_THRESHOLD = "gpu_mem_threshold";
 static const char* CONFIG_CACHE_GPU_MEM_THRESHOLD_DEFAULT = "0.85";
 static const char* CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
-static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "0";
+static const char* CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 
 /* metric config */
 static const char* CONFIG_METRIC = "metric_config";
 static const char* CONFIG_METRIC_AUTO_BOOTUP = "auto_bootup";
-static const char* CONFIG_METRIC_AUTO_BOOTUP_DEFAULT = "0";
+static const char* CONFIG_METRIC_AUTO_BOOTUP_DEFAULT = "false";
 static const char* CONFIG_METRIC_COLLECTOR = "collector";
 static const char* CONFIG_METRIC_COLLECTOR_DEFAULT = "prometheus";
 static const char* CONFIG_METRIC_PROMETHEUS = "prometheus_config";
@@ -110,6 +112,14 @@ class Config {
     Status CheckEngineConfig();
     Status CheckResourceConfig();
 
+    Status GetConfigValueInMem(const std::string& parent_key,
+                               const std::string& child_key,
+                               std::string& value);
+
+    void   SetConfigValueInMem(const std::string& parent_key,
+                               const std::string& child_key,
+                               std::string& value);
+
  public:
     std::string GetServerConfigAddress();
     std::string GetServerConfigPort();
@@ -140,6 +150,10 @@ class Config {
     std::string GetResourceConfigMode();
     std::vector<std::string>
                 GetResourceConfigPool();
+
+ private:
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
+    std::mutex mutex_;
 };
 
 }
