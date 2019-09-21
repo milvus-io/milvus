@@ -21,7 +21,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 enum class TaskLabelType {
     DEFAULT, // means can be executed in any resource

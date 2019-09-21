@@ -15,30 +15,33 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <string>
+#include <vector>
+#include <list>
+#include <queue>
+#include <deque>
+#include <unordered_map>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <memory>
 
-#include "ResourceFactory.h"
+#include "db/meta/MetaTypes.h"
+#include "db/engine/EngineFactory.h"
+#include "db/engine/ExecutionEngine.h"
 
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-std::shared_ptr<Resource>
-ResourceFactory::Create(const std::string &name,
-                        const std::string &type,
-                        uint64_t device_id,
-                        bool enable_loader,
-                        bool enable_executor) {
-    if (type == "DISK") {
-        return std::make_shared<DiskResource>(name, device_id, enable_loader, enable_executor);
-    } else if (type == "CPU") {
-        return std::make_shared<CpuResource>(name, device_id, enable_loader, enable_executor);
-    } else if (type == "GPU") {
-        return std::make_shared<GpuResource>(name, device_id, enable_loader, enable_executor);
-    } else {
-        return nullptr;
-    }
-}
+using TableFileSchemaPtr = engine::meta::TableFileSchemaPtr;
+using TableFileSchema = engine::meta::TableFileSchema;
+
+using ExecutionEnginePtr = engine::ExecutionEnginePtr;
+using EngineFactory = engine::EngineFactory;
+using EngineType = engine::EngineType;
+using MetricType = engine::MetricType;
 
 }
 }
