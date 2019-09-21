@@ -133,9 +133,9 @@ Status DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& date
         meta_ptr_->DeleteTable(table_id); //soft delete table
 
         //scheduler will determine when to delete table files
-        auto nres = ResMgrInst::GetInstance()->GetNumOfComputeResource();
+        auto nres = scheduler::ResMgrInst::GetInstance()->GetNumOfComputeResource();
         scheduler::DeleteJobPtr job = std::make_shared<scheduler::DeleteJob>(0, table_id, meta_ptr_, nres);
-        JobMgrInst::GetInstance()->Put(job);
+        scheduler::JobMgrInst::GetInstance()->Put(job);
         job->WaitAndDelete();
     } else {
         meta_ptr_->DropPartitionsByDates(table_id, dates);
