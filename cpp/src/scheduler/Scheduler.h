@@ -30,7 +30,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 
 // TODO: refactor, not friendly to unittest, logical in framework code

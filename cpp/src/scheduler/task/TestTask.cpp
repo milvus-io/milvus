@@ -22,10 +22,9 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
-
-TestTask::TestTask(meta::TableFileSchemaPtr &file) : XSearchTask(file) {}
+TestTask::TestTask(TableFileSchemaPtr &file) : XSearchTask(file) {}
 
 void
 TestTask::Load(LoadType type, uint8_t device_id) {

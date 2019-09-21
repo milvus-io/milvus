@@ -18,19 +18,19 @@
 #pragma once
 
 #include "Task.h"
-#include "db/meta/MetaTypes.h"
 #include "scheduler/job/SearchJob.h"
+#include "scheduler/Definition.h"
 
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 // TODO: rewrite
 class XSearchTask : public Task {
 public:
     explicit
-    XSearchTask(meta::TableFileSchemaPtr file);
+    XSearchTask(TableFileSchemaPtr file);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -56,7 +56,7 @@ public:
                              scheduler::ResultSet &result_target);
 
 public:
-    meta::TableFileSchemaPtr file_;
+    TableFileSchemaPtr file_;
 
     size_t index_id_ = 0;
     int index_type_ = 0;

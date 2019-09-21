@@ -27,7 +27,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 std::string
 ToString(TaskTableItemState state) {
