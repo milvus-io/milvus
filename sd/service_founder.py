@@ -11,7 +11,7 @@ import queue
 from functools import wraps
 from kubernetes import client, config, watch
 
-from mishards.utils import singleton
+from utils import singleton
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from milvus import Milvus
 
 from mishards import (settings, exceptions)
-from mishards.utils import singleton
+from utils import singleton
 
 logger = logging.getLogger(__name__)
 
