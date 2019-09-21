@@ -27,7 +27,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 
 /************ ResourceMgrBaseTest ************/
@@ -187,7 +187,7 @@ TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
         flag = true;
     };
     mgr1_->RegisterSubscriber(callback);
-    meta::TableFileSchemaPtr dummy = nullptr;
+    TableFileSchemaPtr dummy = nullptr;
     disk_res->task_table().Put(std::make_shared<TestTask>(dummy));
     sleep(1);
     ASSERT_TRUE(flag);

@@ -20,7 +20,7 @@
 #include <gtest/gtest.h>
 
 
-using namespace zilliz::milvus::engine;
+using namespace zilliz::milvus::scheduler;
 
 class NodeTest : public ::testing::Test {
 protected:

@@ -24,7 +24,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 class DefaultLabel : public TaskLabel {
 public:

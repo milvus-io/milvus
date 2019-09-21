@@ -37,7 +37,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 // TODO(wxyu): Storage, Route, Executor
 enum class ResourceType {

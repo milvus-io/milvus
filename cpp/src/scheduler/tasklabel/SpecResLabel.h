@@ -29,7 +29,7 @@ using ResourceWPtr = std::weak_ptr<Resource>;
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 class SpecResLabel : public TaskLabel {
 public:
