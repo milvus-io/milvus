@@ -33,20 +33,17 @@ namespace {
 }
 
 GpuCacheMgr::GpuCacheMgr() {
-    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+    server::ServerConfig& config = server::ServerConfig::GetInstance();
 
-    int64_t cap =
-        config.GetInt64Value(server::CONFIG_CACHE_GPU_MEM_CAPACITY, std::stoi(server::CONFIG_CACHE_GPU_MEM_CAPACITY_DEFAULT));
-    cap *= G_BYTE;
+    int32_t cap = config.GetCacheConfigGpuMemCapacity() * G_BYTE;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
 
-    double free_percent =
-        config.GetDoubleValue(server::CONFIG_CACHE_GPU_MEM_THRESHOLD, std::stof(server::CONFIG_CACHE_GPU_MEM_THRESHOLD_DEFAULT));
-    if (free_percent > 0.0 && free_percent <= 1.0) {
-        cache_->set_freemem_percent(free_percent);
+    float gpu_mem_threshold = config.GetCacheConfigGpuMemThreshold();
+    if (gpu_mem_threshold > 0.0 && gpu_mem_threshold <= 1.0) {
+        cache_->set_freemem_percent(gpu_mem_threshold);
     } else {
-        SERVER_LOG_ERROR << "Invalid gpu_cache_free_percent: " << free_percent <<
-                         ", defaultly set to " << cache_->freemem_percent();
+        SERVER_LOG_ERROR << "Invalid gpu_mem_threshold: " << gpu_mem_threshold
+                         << ", by default set to " << cache_->freemem_percent();
     }
 }
 

@@ -29,15 +29,12 @@ namespace server {
 ErrorCode
 PrometheusMetrics::Init() {
     try {
-        ConfigNode &metric_config = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);
-        startup_ =
-            metric_config.GetBoolValue(CONFIG_METRIC_AUTO_BOOTUP, std::stoi(CONFIG_METRIC_AUTO_BOOTUP_DEFAULT));
+        ServerConfig &config = ServerConfig::GetInstance();
+        startup_ = config.GetMetricConfigAutoBootup();
         if (!startup_) return SERVER_SUCCESS;
 
         // Following should be read from config file.
-        ConfigNode &prometheus_config = metric_config.GetChild(CONFIG_METRIC_PROMETHEUS);
-        const std::string bind_address =
-            prometheus_config.GetValue(CONFIG_METRIC_PROMETHEUS_PORT, CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT);
+        const std::string bind_address = config.GetMetricConfigPrometheusPort();
         const std::string uri = std::string("/tmp/metrics");
         const std::size_t num_threads = 2;
 

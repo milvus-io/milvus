@@ -5,13 +5,13 @@ server_config:
   time_zone: UTC+8
 
 db_config:
-  db_path: @MILVUS_DB_PATH@     # milvus database path
-  db_slave_path:                # secondary database path, split by semicolon
+  path: @MILVUS_DB_PATH@        # milvus database path
+  slave_path:                   # secondary database path, split by semicolon
 
   # URI format: dialect://username:password@host:port/database
   # All parts except dialect are optional, but you MUST include the delimiters
   # Currently dialect supports mysql or sqlite
-  db_backend_url: sqlite://:@:/
+  backend_url: sqlite://:@:/
 
   archive_disk_threshold: 0     # GB, file will be archived when disk usage exceed, 0 for no limit
   archive_days_threshold: 0     # DAYS, older files will be archived, 0 for no limit
@@ -27,7 +27,7 @@ metric_config:
 cache_config:
   cpu_mem_capacity: 16          # GB, CPU memory size used for cache
   cpu_mem_threshold: 0.85       # percent of data kept when cache cleanup triggered
-  insert_immediately: false     # whether load data into cache when insert
+  cache_insert_data: false      # whether load data into cache when insert
 
 engine_config:
   blas_threshold: 20
