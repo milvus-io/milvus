@@ -24,7 +24,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 uint64_t
 ShortestPath(const ResourcePtr &src,

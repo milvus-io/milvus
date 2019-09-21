@@ -22,7 +22,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 class StartUpEvent : public Event {
 public:
