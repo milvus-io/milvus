@@ -44,13 +44,7 @@ set(MILVUS_VERSION "${GIT_BRANCH_NAME}")
 string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]" MILVUS_VERSION "${MILVUS_VERSION}")
 
 find_package(ClangTools)
-if("$ENV{CMAKE_EXPORT_COMPILE_COMMANDS}" STREQUAL "1" OR CLANG_TIDY_FOUND)
-  # Generate a Clang compile_commands.json "compilation database" file for use
-  # with various development tools, such as Vim's YouCompleteMe plugin.
-  # See http://clang.llvm.org/docs/JSONCompilationDatabase.html
-  set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
-endif()
-
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(BUILD_SUPPORT_DIR "${CMAKE_SOURCE_DIR}/build-support")
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -71,7 +65,7 @@ if(MILVUS_VERSION_MAJOR STREQUAL ""
         OR MILVUS_VERSION_MINOR STREQUAL ""
         OR MILVUS_VERSION_PATCH STREQUAL "")
     message(WARNING "Failed to determine Milvus version from git branch name")
-    set(MILVUS_VERSION "0.4.0")
+    set(MILVUS_VERSION "0.5.0")
 endif()
 
 message(STATUS "Build version = ${MILVUS_VERSION}")
@@ -182,6 +176,9 @@ endif()
 find_program(CPPLINT_BIN NAMES cpplint cpplint.py HINTS ${BUILD_SUPPORT_DIR})
 message(STATUS "Found cpplint executable at ${CPPLINT_BIN}")
 
+#
+# "make lint" targets
+#
 add_custom_target(lint
                   ${PYTHON_EXECUTABLE}
                   ${BUILD_SUPPORT_DIR}/run_cpplint.py
@@ -194,11 +191,11 @@ add_custom_target(lint
                   ${MILVUS_LINT_QUIET})
 
 #
-# "make format" and "make check-format" targets
+# "make clang-format" and "make check-clang-format" targets
 #
 if(${CLANG_FORMAT_FOUND})
   # runs clang format and updates files in place.
-  add_custom_target(format
+  add_custom_target(clang-format
                     ${PYTHON_EXECUTABLE}
                     ${BUILD_SUPPORT_DIR}/run_clang_format.py
                     --clang_format_binary
@@ -211,7 +208,7 @@ if(${CLANG_FORMAT_FOUND})
                     ${MILVUS_LINT_QUIET})
 
   # runs clang format and exits with a non-zero exit code if any files need to be reformatted
-  add_custom_target(check-format
+  add_custom_target(check-clang-format
                     ${PYTHON_EXECUTABLE}
                     ${BUILD_SUPPORT_DIR}/run_clang_format.py
                     --clang_format_binary
