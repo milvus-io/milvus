@@ -24,23 +24,15 @@ scrape_configs:
     # scheme defaults to 'http'.
 
     static_configs:
-    - targets: ['localhost:9090']
+    - targets: ['prometheus:9090']
 
    # scrape metrics of server
   - job_name: 'milvus_server'
     scrape_interval: 1s
     static_configs:
-    - targets: ['localhost:8080']
-
-   # scrape metrics of server
-  - job_name: 'milvus_server_1'
-    scrape_interval: 1s
-    static_configs:
-    - targets: ['localhost:8080']
-
-
+    - targets: ['milvus_server:8080']
 
    # under development
   - job_name: 'pushgateway'
     static_configs:
-    - targets: ['localhost:9091']
+    - targets: ['pushgateway:9091']
