@@ -102,8 +102,7 @@ class Config {
     void PrintAll() const;
 
  private:
-    ConfigNode GetConfig(const std::string& name) const;
-    ConfigNode& GetConfig(const std::string& name);
+    ConfigNode& GetConfigNode(const std::string& name);
 
     Status CheckServerConfig();
     Status CheckDBConfig();
@@ -116,40 +115,80 @@ class Config {
                                const std::string& child_key,
                                std::string& value);
 
-    void   SetConfigValueInMem(const std::string& parent_key,
+    Status SetConfigValueInMem(const std::string& parent_key,
                                const std::string& child_key,
                                std::string& value);
 
+ private:
+    /* server config */
+    Status GetServerConfigStrAddress(std::string& value);
+    Status GetServerConfigStrPort(std::string& value);
+    Status GetServerConfigStrMode(std::string& value);
+    Status GetServerConfigStrTimeZone(std::string& value);
+
+    /* db config */
+    Status GetDBConfigStrPath(std::string& value);
+    Status GetDBConfigStrSlavePath(std::string& value);
+    Status GetDBConfigStrBackendUrl(std::string& value);
+    Status GetDBConfigStrArchiveDiskThreshold(std::string& value);
+    Status GetDBConfigStrArchiveDaysThreshold(std::string& value);
+    Status GetDBConfigStrBufferSize(std::string& value);
+    Status GetDBConfigStrBuildIndexGPU(std::string& value);
+
+    /* metric config */
+    Status GetMetricConfigStrAutoBootup(std::string& value);
+    Status GetMetricConfigStrCollector(std::string& value);
+    Status GetMetricConfigStrPrometheusPort(std::string& value);
+
+    /* cache config */
+    Status GetCacheConfigStrCpuMemCapacity(std::string& value);
+    Status GetCacheConfigStrCpuMemThreshold(std::string& value);
+    Status GetCacheConfigStrGpuMemCapacity(std::string& value);
+    Status GetCacheConfigStrGpuMemThreshold(std::string& value);
+    Status GetCacheConfigStrCacheInsertData(std::string& value);
+
+    /* engine config */
+    Status GetEngineConfigStrBlasThreshold(std::string& value);
+    Status GetEngineConfigStrOmpThreadNum(std::string& value);
+
+    /* resource config */
+    Status GetResourceConfigStrMode(std::string& value);
+
  public:
-    std::string GetServerConfigAddress();
-    std::string GetServerConfigPort();
-    std::string GetServerConfigMode();
-    std::string GetServerConfigTimeZone();
+    /* server config */
+    Status GetServerConfigAddress(std::string& value);
+    Status GetServerConfigPort(std::string& value);
+    Status GetServerConfigMode(std::string& value);
+    Status GetServerConfigTimeZone(std::string& value);
 
-    std::string GetDBConfigPath();
-    std::string GetDBConfigSlavePath();
-    std::string GetDBConfigBackendUrl();
-    int32_t     GetDBConfigArchiveDiskThreshold();
-    int32_t     GetDBConfigArchiveDaysThreshold();
-    int32_t     GetDBConfigBufferSize();
-    int32_t     GetDBConfigBuildIndexGPU();
+    /* db config */
+    Status GetDBConfigPath(std::string& value);
+    Status GetDBConfigSlavePath(std::string& value);
+    Status GetDBConfigBackendUrl(std::string& value);
+    Status GetDBConfigArchiveDiskThreshold(int32_t& value);
+    Status GetDBConfigArchiveDaysThreshold(int32_t& value);
+    Status GetDBConfigBufferSize(int32_t& value);
+    Status GetDBConfigBuildIndexGPU(int32_t& value);
 
-    bool        GetMetricConfigAutoBootup();
-    std::string GetMetricConfigCollector();
-    std::string GetMetricConfigPrometheusPort();
+    /* metric config */
+    Status GetMetricConfigAutoBootup(bool& value);
+    Status GetMetricConfigCollector(std::string& value);
+    Status GetMetricConfigPrometheusPort(std::string& value);
 
-    int32_t     GetCacheConfigCpuMemCapacity();
-    float       GetCacheConfigCpuMemThreshold();
-    int32_t     GetCacheConfigGpuMemCapacity();
-    float       GetCacheConfigGpuMemThreshold();
-    bool        GetCacheConfigCacheInsertData();
+    /* cache config */
+    Status GetCacheConfigCpuMemCapacity(int32_t& value);
+    Status GetCacheConfigCpuMemThreshold(float& value);
+    Status GetCacheConfigGpuMemCapacity(int32_t& value);
+    Status GetCacheConfigGpuMemThreshold(float& value);
+    Status GetCacheConfigCacheInsertData(bool& value);
 
-    int32_t     GetEngineConfigBlasThreshold();
-    int32_t     GetEngineConfigOmpThreadNum();
+    /* engine config */
+    Status GetEngineConfigBlasThreshold(int32_t& value);
+    Status GetEngineConfigOmpThreadNum(int32_t& value);
 
-    std::string GetResourceConfigMode();
-    std::vector<std::string>
-                GetResourceConfigPool();
+    /* resource config */
+    Status GetResourceConfigMode(std::string& value);
+    Status GetResourceConfigPool(std::vector<std::string>& value);
 
  private:
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;

@@ -36,15 +36,22 @@ ErrorCode KnowhereResource::Initialize() {
     };
     using GpuResourcesArray = std::map<int64_t , GpuResourceSetting>;
     GpuResourcesArray gpu_resources;
+    Status s;
 
     //get build index gpu resource
     server::Config& config = server::Config::GetInstance();
 
-    int32_t build_index_gpu = config.GetDBConfigBuildIndexGPU();
+    int32_t build_index_gpu;
+    s = config.GetDBConfigBuildIndexGPU(build_index_gpu);
+    if (!s.ok())  return s.code();
+
     gpu_resources.insert(std::make_pair(build_index_gpu, GpuResourceSetting()));
 
     //get search gpu resource
-    auto pool = config.GetResourceConfigPool();
+    std::vector<std::string> pool;
+    s = config.GetResourceConfigPool(pool);
+    if (!s.ok()) return s.code();
+
     std::set<uint64_t> gpu_ids;
     for (auto &resource : pool) {
         if (resource.length() < 4 || resource.substr(0, 3) != "gpu") {

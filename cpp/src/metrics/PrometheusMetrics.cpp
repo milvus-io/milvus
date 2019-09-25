@@ -31,11 +31,14 @@ ErrorCode
 PrometheusMetrics::Init() {
     try {
         Config &config = Config::GetInstance();
-        startup_ = config.GetMetricConfigAutoBootup();
+        Status s = config.GetMetricConfigAutoBootup(startup_);
+        if (!s.ok()) return s.code();
         if (!startup_) return SERVER_SUCCESS;
 
         // Following should be read from config file.
-        const std::string bind_address = config.GetMetricConfigPrometheusPort();
+        std::string bind_address;
+        s = config.GetMetricConfigPrometheusPort(bind_address);
+        if (!s.ok()) return s.code();
         const std::string uri = std::string("/tmp/metrics");
         const std::size_t num_threads = 2;
 
