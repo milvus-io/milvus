@@ -1,7 +1,7 @@
 ---
 name: Bug report
 about: Create a bug report to help us improve Milvus
-title: "[BUG]"
+title: ":bug:[BUG]"
 labels: ''
 assignees: ''
 
