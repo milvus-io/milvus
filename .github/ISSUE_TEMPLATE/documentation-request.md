@@ -1,5 +1,5 @@
 ---
-name: Documentation request
+name: "\U0001F4DD Documentation request"
 about: Report incorrect or needed documentation
 title: "[DOC]"
 labels: ''
