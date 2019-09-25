@@ -1,5 +1,4 @@
 
-
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 - [Blog](https://www.milvus.io/blog/)
 
@@ -38,7 +37,7 @@ Keep up-to-date with newest releases and latest updates by reading [Releases](ht
 
 #### Use Docker
 
-Use Docker to install Milvus is a breeze. See the [Milvus install guide](https://www.milvus-io/docs/master/userguide/install_milvus.md) for details.
+Use Docker to install Milvus is a breeze. See the [Milvus install guide](https://milvus.io/docs/en/userguide/install_milvus/) for details.
 
 #### Use source code
 
