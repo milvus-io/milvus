@@ -161,7 +161,13 @@ Server::Start() {
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         Config &config = Config::GetInstance();
-        std::string time_zone = config.GetServerConfigTimeZone();
+        std::string time_zone;
+        Status s = config.GetServerConfigTimeZone(time_zone);
+        if (!s.ok()) {
+            std::cerr << "Fail to get server config timezone" << std::endl;
+            return;
+        }
+
         if (time_zone.length() == 3) {
             time_zone = "CUT";
         } else {

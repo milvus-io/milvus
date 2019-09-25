@@ -336,7 +336,8 @@ Status ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 Status ExecutionEngineImpl::Init() {
     using namespace zilliz::milvus::server;
     server::Config &config = server::Config::GetInstance();
-    gpu_num_ = config.GetDBConfigBuildIndexGPU();
+    Status s = config.GetDBConfigBuildIndexGPU(gpu_num_);
+    if (!s.ok()) return s;
 
     return Status::OK();
 }

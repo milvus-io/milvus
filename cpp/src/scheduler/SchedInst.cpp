@@ -39,8 +39,11 @@ std::mutex JobMgrInst::mutex_;
 void
 load_simple_config() {
     server::Config &config = server::Config::GetInstance();
-    auto mode = config.GetResourceConfigMode();
-    auto pool = config.GetResourceConfigPool();
+    std::string mode;
+    config.GetResourceConfigMode(mode);
+    std::vector<std::string> pool;
+    config.GetResourceConfigPool(pool);
+
     bool cpu = false;
     std::set<uint64_t> gpu_ids;
     for (auto &resource : pool) {
