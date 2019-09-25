@@ -44,6 +44,17 @@ meta::DateT GetDate(const std::time_t &t, int day_delta = 0);
 meta::DateT GetDate();
 meta::DateT GetDateWithDelta(int day_delta);
 
+struct MetaUriInfo {
+    std::string dialect_;
+    std::string username_;
+    std::string password_;
+    std::string host_;
+    std::string port_;
+    std::string db_name_;
+};
+
+Status ParseMetaUri(const std::string& uri, MetaUriInfo& info);
+
 } // namespace utils
 } // namespace engine
 } // namespace milvus

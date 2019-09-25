@@ -28,7 +28,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 enum class LoadType {
     DISK2CPU,

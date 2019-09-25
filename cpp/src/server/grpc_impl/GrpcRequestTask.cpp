@@ -772,7 +772,7 @@ CmdTask::OnExecute() {
     if (cmd_ == "version") {
         result_ = MILVUS_VERSION;
     } else if (cmd_ == "tasktable") {
-        result_ = engine::ResMgrInst::GetInstance()->DumpTaskTables();
+        result_ = scheduler::ResMgrInst::GetInstance()->DumpTaskTables();
     }
     else {
         result_ = "OK";

@@ -22,7 +22,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 
 TEST(TaskTest, INVALID_INDEX) {

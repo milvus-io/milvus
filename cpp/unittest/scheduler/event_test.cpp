@@ -25,7 +25,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 TEST(EventTest, START_UP_EVENT) {
     ResourceWPtr res(ResourcePtr(nullptr));
