@@ -7,10 +7,9 @@ MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
 DB_PATH="/opt/milvus"
 PROFILING="OFF"
-BUILD_FAISS_WITH_MKL="OFF"
 USE_JFROG_CACHE="OFF"
 
-while getopts "p:d:t:uhrcgmj" arg
+while getopts "p:d:t:uhrcgj" arg
 do
         case $arg in
              t)
@@ -38,9 +37,6 @@ do
              g)
                 PROFILING="ON"
                 ;;
-             m)
-                BUILD_FAISS_WITH_MKL="ON"
-                ;;
              j)
                 USE_JFROG_CACHE="ON"
                 ;;
@@ -55,11 +51,10 @@ parameter:
 -r: remove previous build directory(default: OFF)
 -c: code coverage(default: OFF)
 -g: profiling(default: OFF)
--m: build faiss with MKL(default: OFF)
 -j: use jfrog cache build directory
 
 usage:
-./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c] [-k] [-m] [-j]
+./build.sh -t \${BUILD_TYPE} [-u] [-h] [-g] [-r] [-c] [-k] [-j]
                 "
                 exit 0
                 ;;
@@ -87,7 +82,6 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
     -DBUILD_COVERAGE=${BUILD_COVERAGE} \
     -DMILVUS_DB_PATH=${DB_PATH} \
     -DMILVUS_ENABLE_PROFILING=${PROFILING} \
-    -DBUILD_FAISS_WITH_MKL=${BUILD_FAISS_WITH_MKL} \
     -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
     ../"
