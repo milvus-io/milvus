@@ -36,8 +36,8 @@ The Milvus team members will review your pull requests, and once it is accepted,
 
 Before sending your pull requests for review, make sure your changes are consistent with the guidelines and follow the Milvus coding style.
 
-- Include unit tests when you contribute new features, as they help to a) prove that your code works correctly, and b) guard against future breaking changes to lower the maintenance cost.
-- Bug fixes also generally require unit tests, because the presence of bugs usually indicates insufficient test coverage.
+- Include unit tests when you contribute new features, as they help to prove that your code works correctly, and also guard against future breaking changes to lower the maintenance cost.
+- Bug fixes also require unit tests, because the presence of bugs usually indicates insufficient test coverage.
 - Keep API compatibility in mind when you change code in Milvus. Reviewers of your pull request will comment on any API compatibility issues.
 - When you contribute a new feature to Milvus, the maintenance burden is (by default) transferred to the Milvus team. This means that the benefit of the contribution must be compared against the cost of maintaining the feature.
 
@@ -49,8 +49,6 @@ Before sending your pull requests for review, make sure your changes are consist
 
 ```shell
 $ ./build.sh -u
-or
-$ ./build.sh --unittest
 ```
 
 
