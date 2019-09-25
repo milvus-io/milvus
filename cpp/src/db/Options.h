@@ -52,10 +52,10 @@ private:
 };
 
 struct DBMetaOptions {
-    std::string path;
-    std::vector<std::string> slave_paths;
-    std::string backend_uri;
-    ArchiveConf archive_conf = ArchiveConf("delete");
+    std::string path_;
+    std::vector<std::string> slave_paths_;
+    std::string backend_uri_;
+    ArchiveConf archive_conf_ = ArchiveConf("delete");
 }; // DBMetaOptions
 
 struct DBOptions {
@@ -65,11 +65,11 @@ struct DBOptions {
         READ_ONLY
     } MODE;
 
-    uint16_t  merge_trigger_number = 2;
-    DBMetaOptions meta;
-    int mode = MODE::SINGLE;
+    uint16_t  merge_trigger_number_ = 2;
+    DBMetaOptions meta_;
+    int mode_ = MODE::SINGLE;
 
-    size_t insert_buffer_size = 4 * ONE_GB;
+    size_t insert_buffer_size_ = 4 * ONE_GB;
     bool insert_cache_immediately_ = false;
 }; // Options
 

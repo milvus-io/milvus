@@ -52,7 +52,7 @@ class Server {
 
  private:
     int64_t daemonized_ = 0;
-    int pid_fd = -1;
+    int pid_fd_ = -1;
     std::string pid_filename_;
     std::string config_filename_;
     std::string log_config_file_;

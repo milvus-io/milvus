@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "utils/Error.h"
+#include "utils/Status.h"
 
 namespace zilliz {
 namespace milvus {
@@ -26,8 +26,11 @@ namespace engine {
 
 class KnowhereResource {
 public:
-    static ErrorCode Initialize();
-    static ErrorCode Finalize();
+    static Status
+    Initialize();
+
+    static Status
+    Finalize();
 };
 
 

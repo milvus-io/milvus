@@ -128,18 +128,18 @@ Server::Daemonize() {
     stderr = fopen("/dev/null", "w+");
     // Try to write PID of daemon to lockfile
     if (!pid_filename_.empty()) {
-        pid_fd = open(pid_filename_.c_str(), O_RDWR | O_CREAT, 0640);
-        if (pid_fd < 0) {
+        pid_fd_ = open(pid_filename_.c_str(), O_RDWR | O_CREAT, 0640);
+        if (pid_fd_ < 0) {
             std::cerr << "Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
-        if (lockf(pid_fd, F_TLOCK, 0) < 0) {
+        if (lockf(pid_fd_, F_TLOCK, 0) < 0) {
             std::cerr << "Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
 
         std::string pid_file_context = std::to_string(getpid());
-        ssize_t res = write(pid_fd, pid_file_context.c_str(), pid_file_context.size());
+        ssize_t res = write(pid_fd_, pid_file_context.c_str(), pid_file_context.size());
         if (res != 0) {
             return;
         }
@@ -205,13 +205,13 @@ Server::Stop() {
     std::cerr << "Milvus server is going to shutdown ..." << std::endl;
 
     /* Unlock and close lockfile */
-    if (pid_fd != -1) {
-        int ret = lockf(pid_fd, F_ULOCK, 0);
+    if (pid_fd_ != -1) {
+        int ret = lockf(pid_fd_, F_ULOCK, 0);
         if (ret != 0) {
             std::cerr << "Can't lock file: " << strerror(errno) << std::endl;
             exit(0);
         }
-        ret = close(pid_fd);
+        ret = close(pid_fd_);
         if (ret != 0) {
             std::cerr << "Can't close file: " << strerror(errno) << std::endl;
             exit(0);
@@ -247,7 +247,7 @@ Server::LoadConfig() {
 void
 Server::StartService() {
     engine::KnowhereResource::Initialize();
-    engine::StartSchedulerService();
+    scheduler::StartSchedulerService();
     DBWrapper::GetInstance().StartService();
     grpc::GrpcServer::GetInstance().Start();
 }
@@ -256,7 +256,7 @@ void
 Server::StopService() {
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
-    engine::StopSchedulerService();
+    scheduler::StopSchedulerService();
     engine::KnowhereResource::Finalize();
 }
 

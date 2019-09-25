@@ -45,7 +45,7 @@ TaskCreator::Create(const SearchJobPtr &job) {
     std::vector<TaskPtr> tasks;
     for (auto &index_file : job->index_files()) {
         auto task = std::make_shared<XSearchTask>(index_file.second);
-        task->label() = std::make_shared<engine::DefaultLabel>();
+        task->label() = std::make_shared<DefaultLabel>();
         task->job_ = job;
         tasks.emplace_back(task);
     }
@@ -57,7 +57,7 @@ std::vector<TaskPtr>
 TaskCreator::Create(const DeleteJobPtr &job) {
     std::vector<TaskPtr> tasks;
     auto task = std::make_shared<XDeleteTask>(job);
-    task->label() = std::make_shared<engine::BroadcastLabel>();
+    task->label() = std::make_shared<BroadcastLabel>();
     task->job_ = job;
     tasks.emplace_back(task);
 

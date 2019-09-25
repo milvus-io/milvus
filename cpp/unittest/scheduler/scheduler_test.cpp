@@ -16,31 +16,31 @@
 // under the License.
 
 #include <gtest/gtest.h>
-#include "scheduler/tasklabel/DefaultLabel.h"
-#include "cache/DataObj.h"
-#include "cache/GpuCacheMgr.h"
+
 #include "scheduler/Scheduler.h"
+#include "scheduler/tasklabel/DefaultLabel.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 #include "scheduler/task/TestTask.h"
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/resource/Resource.h"
+#include "cache/DataObj.h"
+#include "cache/GpuCacheMgr.h"
 #include "utils/Error.h"
 #include "wrapper/vec_index.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
 
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 class MockVecIndex : public engine::VecIndex {
 public:
-    virtual ErrorCode BuildAll(const long &nb,
+    virtual Status BuildAll(const long &nb,
                                const float *xb,
                                const long *ids,
                                const engine::Config &cfg,
                                const long &nt = 0,
                                const float *xt = nullptr) {
-
     }
 
     engine::VecIndexPtr Clone() override {
@@ -55,14 +55,14 @@ public:
         return engine::IndexType::INVALID;
     }
 
-    virtual ErrorCode Add(const long &nb,
+    virtual Status Add(const long &nb,
                           const float *xb,
                           const long *ids,
                           const engine::Config &cfg = engine::Config()) {
 
     }
 
-    virtual ErrorCode Search(const long &nq,
+    virtual Status Search(const long &nq,
                              const float *xq,
                              float *dist,
                              long *ids,
@@ -91,7 +91,7 @@ public:
         return binset;
     }
 
-    virtual ErrorCode Load(const zilliz::knowhere::BinarySet &index_binary) {
+    virtual Status Load(const zilliz::knowhere::BinarySet &index_binary) {
 
     }
 
@@ -156,7 +156,7 @@ insert_dummy_index_into_gpu_cache(uint64_t device_id) {
 TEST_F(SchedulerTest, ON_LOAD_COMPLETED) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    meta::TableFileSchemaPtr dummy = std::make_shared<meta::TableFileSchema>();
+    TableFileSchemaPtr dummy = std::make_shared<TableFileSchema>();
     dummy->location_ = "location";
 
     insert_dummy_index_into_gpu_cache(1);
@@ -176,7 +176,7 @@ TEST_F(SchedulerTest, ON_LOAD_COMPLETED) {
 TEST_F(SchedulerTest, PUSH_TASK_TO_NEIGHBOUR_RANDOMLY_TEST) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    meta::TableFileSchemaPtr dummy1 = std::make_shared<meta::TableFileSchema>();
+    TableFileSchemaPtr dummy1 = std::make_shared<TableFileSchema>();
     dummy1->location_ = "location";
 
     tasks.clear();
@@ -247,7 +247,7 @@ protected:
 TEST_F(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
-    meta::TableFileSchemaPtr dummy = std::make_shared<meta::TableFileSchema>();
+    TableFileSchemaPtr dummy = std::make_shared<TableFileSchema>();
     dummy->location_ = "location";
 
     for (uint64_t i = 0; i < NUM; ++i) {

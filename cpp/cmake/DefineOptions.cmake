@@ -110,6 +110,7 @@ endif()
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")
 
+unset(MILVUS_BUILD_TESTS CACHE)
 if (BUILD_UNIT_TEST)
     define_option(MILVUS_BUILD_TESTS "Build the MILVUS googletest unit tests" ON)
 else()

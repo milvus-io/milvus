@@ -21,6 +21,7 @@
 
 #include <mutex>
 #include <chrono>
+#include <regex>
 #include <boost/filesystem.hpp>
 
 namespace zilliz {
@@ -42,8 +43,8 @@ std::string ConstructParentFolder(const std::string& db_path, const meta::TableF
 }
 
 std::string GetTableFileParentFolder(const DBMetaOptions& options, const meta::TableFileSchema& table_file) {
-    uint64_t path_count = options.slave_paths.size() + 1;
-    std::string target_path = options.path;
+    uint64_t path_count = options.slave_paths_.size() + 1;
+    std::string target_path = options.path_;
     uint64_t index = 0;
 
     if(meta::TableFileSchema::NEW_INDEX == table_file.file_type_) {
@@ -60,7 +61,7 @@ std::string GetTableFileParentFolder(const DBMetaOptions& options, const meta::T
     }
 
     if (index > 0) {
-        target_path = options.slave_paths[index - 1];
+        target_path = options.slave_paths_[index - 1];
     }
 
     return ConstructParentFolder(target_path, table_file);
@@ -77,7 +78,7 @@ long GetMicroSecTimeStamp() {
 }
 
 Status CreateTablePath(const DBMetaOptions& options, const std::string& table_id) {
-    std::string db_path = options.path;
+    std::string db_path = options.path_;
     std::string table_path = db_path + TABLES_FOLDER + table_id;
     auto status = server::CommonUtil::CreateDirectory(table_path);
     if (!status.ok()) {
@@ -85,7 +86,7 @@ Status CreateTablePath(const DBMetaOptions& options, const std::string& table_id
         return status;
     }
 
-    for(auto& path : options.slave_paths) {
+    for(auto& path : options.slave_paths_) {
         table_path = path + TABLES_FOLDER + table_id;
         status = server::CommonUtil::CreateDirectory(table_path);
         if (!status.ok()) {
@@ -98,8 +99,8 @@ Status CreateTablePath(const DBMetaOptions& options, const std::string& table_id
 }
 
 Status DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool force) {
-    std::vector<std::string> paths = options.slave_paths;
-    paths.push_back(options.path);
+    std::vector<std::string> paths = options.slave_paths_;
+    paths.push_back(options.path_);
 
     for(auto& path : paths) {
         std::string table_path = path + TABLES_FOLDER + table_id;
@@ -131,13 +132,13 @@ Status CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& 
 }
 
 Status GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file) {
-    std::string parent_path = ConstructParentFolder(options.path, table_file);
+    std::string parent_path = ConstructParentFolder(options.path_, table_file);
     std::string file_path = parent_path + "/" + table_file.file_id_;
     if(boost::filesystem::exists(file_path)) {
         table_file.location_ = file_path;
         return Status::OK();
     } else {
-        for(auto& path : options.slave_paths) {
+        for(auto& path : options.slave_paths_) {
             parent_path = ConstructParentFolder(path, table_file);
             file_path = parent_path + "/" + table_file.file_id_;
             if(boost::filesystem::exists(file_path)) {
@@ -148,7 +149,7 @@ Status GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& tab
     }
 
     std::string msg = "Table file doesn't exist: " + file_path;
-    ENGINE_LOG_ERROR << msg << " in path: " << options.path
+    ENGINE_LOG_ERROR << msg << " in path: " << options.path_
                      << " for table: " << table_file.table_id_;
 
     return Status(DB_ERROR, msg);
@@ -193,6 +194,41 @@ meta::DateT GetDateWithDelta(int day_delta) {
 
 meta::DateT GetDate() {
     return GetDate(std::time(nullptr), 0);
+}
+
+// URI format: dialect://username:password@host:port/database
+Status ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
+    std::string dialect_regex = "(.*)";
+    std::string username_tegex = "(.*)";
+    std::string password_regex = "(.*)";
+    std::string host_regex = "(.*)";
+    std::string port_regex = "(.*)";
+    std::string db_name_regex = "(.*)";
+    std::string uri_regex_str =
+            dialect_regex + "\\:\\/\\/" +
+            username_tegex + "\\:" +
+            password_regex + "\\@" +
+            host_regex + "\\:" +
+            port_regex + "\\/" +
+            db_name_regex;
+
+    std::regex uri_regex(uri_regex_str);
+    std::smatch pieces_match;
+
+    if (std::regex_match(uri, pieces_match, uri_regex)) {
+        info.dialect_ = pieces_match[1].str();
+        info.username_ = pieces_match[2].str();
+        info.password_ = pieces_match[3].str();
+        info.host_ = pieces_match[4].str();
+        info.port_ = pieces_match[5].str();
+        info.db_name_ = pieces_match[6].str();
+
+        //TODO: verify host, port...
+    } else {
+        return Status(DB_INVALID_META_URI, "Invalid meta uri: " + uri);
+    }
+
+    return Status::OK();
 }
 
 } // namespace utils
