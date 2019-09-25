@@ -9,7 +9,7 @@ container('milvus-build-env') {
                         sh "git config --global user.email \"test@zilliz.com\""
                         sh "git config --global user.name \"test\""
                         withCredentials([usernamePassword(credentialsId: "${params.JFROG_USER}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-                            sh "export JFROG_ARTFACTORY_URL='http://192.168.1.201:80/artifactory' && export JFROG_USER_NAME='${USERNAME}' && export JFROG_PASSWORD='${PASSWORD}' && ./build.sh -t ${params.BUILD_TYPE} -j -u -c"
+                            sh "export JFROG_ARTFACTORY_URL='${params.JFROG_ARTFACTORY_URL}' && export JFROG_USER_NAME='${USERNAME}' && export JFROG_PASSWORD='${PASSWORD}' && ./build.sh -t ${params.BUILD_TYPE} -j -u -c"
                         }
                     }
                 } catch (exc) {
