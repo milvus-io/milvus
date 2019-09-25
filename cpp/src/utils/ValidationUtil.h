@@ -67,10 +67,10 @@ public:
     ValidateStringIsNumber(const std::string &str);
 
     static Status
-    ValidateStringIsBool(std::string &str);
+    ValidateStringIsBool(const std::string &str);
 
     static Status
-    ValidateStringIsDouble(const std::string &str, double &val);
+    ValidateStringIsFloat(const std::string &str);
 
     static Status
     ValidateDbURI(const std::string &uri);
