@@ -25,7 +25,7 @@ Keep up-to-date with newest releases and latest updates by reading [Releases](ht
   The data is stored and computed on a distributed architecture. This lets you scale data sizes up and down without redesigning the system.
 
 ## Architecture
-![Milvus_arch](https://www.milvus-io/docs/master/assets/milvus_arch.png)
+![Milvus_arch](https://milvus.io/docs/assets/milvus_arch.png)
 
 ## Get started
 
@@ -44,10 +44,12 @@ Use Docker to install Milvus is a breeze. See the [Milvus install guide](https:/
 ```shell
 # Install tools
 Centos7 : 
-$ yum install gfortran qt4 flex bison mysql-devel mysql
+$ yum install gfortran qt4 flex bison 
+$ yum install mysql-devel mysql
     
 Ubuntu16.04 : 
-$ sudo apt-get install gfortran qt4-qmake flex bison libmysqlclient-dev mysql-client
+$ sudo apt-get install gfortran qt4-qmake flex bison 
+$ sudo apt-get install libmysqlclient-dev mysql-client
        
 ```
 
@@ -96,12 +98,21 @@ please reinstall CMake with curl:
    $ sudo make install
    ```
 
+##### code format and linting
+
+```shell
+CentOS 7:   
+$ yum install clang
+Ubuntu 16.04: 
+$ sudo apt-get install clang-format clang-tidy
+    
+$ ./build.sh -l
+```
+
 ##### Run unit test
 
 ```shell
 $ ./build.sh -u
-or
-$ ./build.sh --unittest
 ```
 
 ##### Run code coverage
