@@ -84,7 +84,7 @@ if __name__ == "__main__":
     cmd = [
         arguments.cpplint_binary,
         '--verbose=2',
-        '--linelength=90',
+        '--linelength=120',
         '--filter=' + ','.join(_filters)
     ]
     if (arguments.cpplint_binary.endswith('.py') and
