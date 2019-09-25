@@ -28,7 +28,8 @@ namespace engine {
 
 constexpr int64_t M_BYTE = 1024 * 1024;
 
-ErrorCode KnowhereResource::Initialize() {
+Status
+KnowhereResource::Initialize() {
     struct GpuResourceSetting {
         int64_t pinned_memory = 300*M_BYTE;
         int64_t temp_memory = 300*M_BYTE;
@@ -43,14 +44,14 @@ ErrorCode KnowhereResource::Initialize() {
 
     int32_t build_index_gpu;
     s = config.GetDBConfigBuildIndexGPU(build_index_gpu);
-    if (!s.ok())  return s.code();
+    if (!s.ok())  return s;
 
     gpu_resources.insert(std::make_pair(build_index_gpu, GpuResourceSetting()));
 
     //get search gpu resource
     std::vector<std::string> pool;
     s = config.GetResourceConfigPool(pool);
-    if (!s.ok()) return s.code();
+    if (!s.ok()) return s;
 
     std::set<uint64_t> gpu_ids;
     for (auto &resource : pool) {
@@ -70,12 +71,13 @@ ErrorCode KnowhereResource::Initialize() {
                                                                 iter->second.resource_num);
     }
 
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
-ErrorCode KnowhereResource::Finalize() {
+Status
+KnowhereResource::Finalize() {
     knowhere::FaissGpuResourceMgr::GetInstance().Free(); // free gpu resource.
-    return KNOWHERE_SUCCESS;
+    return Status::OK();
 }
 
 }

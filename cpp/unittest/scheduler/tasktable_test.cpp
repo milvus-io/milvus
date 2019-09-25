@@ -21,7 +21,7 @@
 #include <gtest/gtest.h>
 
 
-using namespace zilliz::milvus::engine;
+using namespace zilliz::milvus::scheduler;
 
 
 /************ TaskTableBaseTest ************/
@@ -169,7 +169,7 @@ class TaskTableBaseTest : public ::testing::Test {
 protected:
     void
     SetUp() override {
-        meta::TableFileSchemaPtr dummy = nullptr;
+        TableFileSchemaPtr dummy = nullptr;
         invalid_task_ = nullptr;
         task1_ = std::make_shared<TestTask>(dummy);
         task2_ = std::make_shared<TestTask>(dummy);
@@ -339,7 +339,7 @@ class TaskTableAdvanceTest : public ::testing::Test {
 protected:
     void
     SetUp() override {
-        meta::TableFileSchemaPtr dummy = nullptr;
+        TableFileSchemaPtr dummy = nullptr;
         for (uint64_t i = 0; i < 8; ++i) {
             auto task = std::make_shared<TestTask>(dummy);
             table1_.Put(task);

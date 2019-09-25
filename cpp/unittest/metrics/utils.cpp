@@ -54,8 +54,8 @@ void MetricTest::InitLog() {
 
 engine::DBOptions MetricTest::GetOptions() {
     auto options = engine::DBFactory::BuildOption();
-    options.meta.path = "/tmp/milvus_test";
-    options.meta.backend_uri = "sqlite://:@:/";
+    options.meta_.path_ = "/tmp/milvus_test";
+    options.meta_.backend_uri_ = "sqlite://:@:/";
     return options;
 }
 

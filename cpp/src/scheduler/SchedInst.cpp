@@ -25,7 +25,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 ResourceMgrPtr ResMgrInst::instance = nullptr;
 std::mutex ResMgrInst::mutex_;

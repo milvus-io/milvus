@@ -20,7 +20,7 @@
 #include <gtest/gtest.h>
 
 
-using namespace zilliz::milvus::engine;
+using namespace zilliz::milvus::scheduler;
 
 TEST(ResourceFactoryTest, CREATE) {
     auto disk = ResourceFactory::Create("ssd", "DISK", 0);
