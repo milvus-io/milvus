@@ -1,0 +1,28 @@
+version: "2.3"
+services:
+    milvus:
+        runtime: nvidia
+        restart: always
+        image: registry.zilliz.com/milvus/engine:branch-0.4.0-release-c58ca6
+        # ports:
+        #     - "0.0.0.0:19530:19530"
+        volumes:
+            - /tmp/milvus/db:/opt/milvus/db
+
+    mishards:
+        restart: always
+        image: registry.zilliz.com/milvus/mishards:v0.0.2
+        ports:
+            - "0.0.0.0:19530:19531"
+            - "0.0.0.0:19532:19532"
+        volumes:
+            - /tmp/milvus/db:/tmp/milvus/db
+            - /tmp/mishards_env:/source/mishards/.env
+        command: ["python", "mishards/main.py"]
+        environment:
+            DEBUG: 'true'
+            SERVER_PORT: 19531
+            WOSERVER: tcp://milvus:19530
+            SD_STATIC_HOSTS: milvus
+        depends_on:
+            - milvus

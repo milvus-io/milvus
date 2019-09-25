@@ -43,7 +43,7 @@ class Server:
         ip = socket.gethostbyname(url.hostname)
         socket.inet_pton(socket.AF_INET, ip)
         self.conn_mgr.register('WOSERVER',
-                '{}://{}:{}'.format(url.scheme, ip, url.port))
+                '{}://{}:{}'.format(url.scheme, ip, url.port or 80))
 
     def register_pre_run_handler(self, func):
         logger.info('Regiterring {} into server pre_run_handlers'.format(func))
