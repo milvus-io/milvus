@@ -95,64 +95,92 @@ static const char* CONFIG_RESOURCE_POOL = "pool";
 
 class Config {
  public:
-    static Config &GetInstance();
-
+    static Config& GetInstance();
     Status LoadConfigFile(const std::string& filename);
-    Status ValidateConfig();
-    void PrintAll() const;
+    void PrintAll();
 
  private:
     ConfigNode& GetConfigNode(const std::string& name);
-
-    Status CheckServerConfig();
-    Status CheckDBConfig();
-    Status CheckMetricConfig();
-    Status CheckCacheConfig();
-    Status CheckEngineConfig();
-    Status CheckResourceConfig();
 
     Status GetConfigValueInMem(const std::string& parent_key,
                                const std::string& child_key,
                                std::string& value);
 
-    Status SetConfigValueInMem(const std::string& parent_key,
+    void   SetConfigValueInMem(const std::string& parent_key,
                                const std::string& child_key,
                                std::string& value);
 
- private:
+    void   PrintConfigSection(const std::string& config_node_name);
+
+    ///////////////////////////////////////////////////////////////////////////
     /* server config */
-    Status GetServerConfigStrAddress(std::string& value);
-    Status GetServerConfigStrPort(std::string& value);
-    Status GetServerConfigStrMode(std::string& value);
-    Status GetServerConfigStrTimeZone(std::string& value);
+    Status CheckServerConfigAddress(std::string& value);
+    Status CheckServerConfigPort(std::string& value);
+    Status CheckServerConfigMode(std::string& value);
+    Status CheckServerConfigTimeZone(std::string& value);
 
     /* db config */
-    Status GetDBConfigStrPath(std::string& value);
-    Status GetDBConfigStrSlavePath(std::string& value);
-    Status GetDBConfigStrBackendUrl(std::string& value);
-    Status GetDBConfigStrArchiveDiskThreshold(std::string& value);
-    Status GetDBConfigStrArchiveDaysThreshold(std::string& value);
-    Status GetDBConfigStrBufferSize(std::string& value);
-    Status GetDBConfigStrBuildIndexGPU(std::string& value);
+    Status CheckDBConfigPath(const std::string& value);
+    Status CheckDBConfigSlavePath(const std::string& value);
+    Status CheckDBConfigBackendUrl(const std::string& value);
+    Status CheckDBConfigArchiveDiskThreshold(const std::string& value);
+    Status CheckDBConfigArchiveDaysThreshold(const std::string& value);
+    Status CheckDBConfigBufferSize(const std::string& value);
+    Status CheckDBConfigBuildIndexGPU(const std::string& value);
 
     /* metric config */
-    Status GetMetricConfigStrAutoBootup(std::string& value);
-    Status GetMetricConfigStrCollector(std::string& value);
-    Status GetMetricConfigStrPrometheusPort(std::string& value);
+    Status CheckMetricConfigAutoBootup(const std::string& value);
+    Status CheckMetricConfigPrometheusPort(const std::string& value);
 
     /* cache config */
-    Status GetCacheConfigStrCpuMemCapacity(std::string& value);
-    Status GetCacheConfigStrCpuMemThreshold(std::string& value);
-    Status GetCacheConfigStrGpuMemCapacity(std::string& value);
-    Status GetCacheConfigStrGpuMemThreshold(std::string& value);
-    Status GetCacheConfigStrCacheInsertData(std::string& value);
+    Status CheckCacheConfigCpuMemCapacity(const std::string& value);
+    Status CheckCacheConfigCpuMemThreshold(const std::string& value);
+    Status CheckCacheConfigGpuMemCapacity(const std::string& value);
+    Status CheckCacheConfigGpuMemThreshold(const std::string& value);
+    Status CheckCacheConfigCacheInsertData(const std::string& value);
 
     /* engine config */
-    Status GetEngineConfigStrBlasThreshold(std::string& value);
-    Status GetEngineConfigStrOmpThreadNum(std::string& value);
+    Status CheckEngineConfigBlasThreshold(const std::string& value);
+    Status CheckEngineConfigOmpThreadNum(const std::string& value);
 
     /* resource config */
-    Status GetResourceConfigStrMode(std::string& value);
+    Status CheckResourceConfigMode(const std::string& value);
+    Status CheckResourceConfigPool(const std::vector<std::string>& value);
+
+    ///////////////////////////////////////////////////////////////////////////
+    /* server config */
+    std::string GetServerConfigStrAddress();
+    std::string GetServerConfigStrPort();
+    std::string GetServerConfigStrMode();
+    std::string GetServerConfigStrTimeZone();
+
+    /* db config */
+    std::string GetDBConfigStrPath();
+    std::string GetDBConfigStrSlavePath();
+    std::string GetDBConfigStrBackendUrl();
+    std::string GetDBConfigStrArchiveDiskThreshold();
+    std::string GetDBConfigStrArchiveDaysThreshold();
+    std::string GetDBConfigStrBufferSize();
+    std::string GetDBConfigStrBuildIndexGPU();
+
+    /* metric config */
+    std::string GetMetricConfigStrAutoBootup();
+    std::string GetMetricConfigStrCollector();
+    std::string GetMetricConfigStrPrometheusPort();
+
+    /* cache config */
+    std::string GetCacheConfigStrCpuMemCapacity();
+    std::string GetCacheConfigStrCpuMemThreshold();
+    std::string GetCacheConfigStrGpuMemCapacity();
+    std::string GetCacheConfigStrGpuMemThreshold();
+    std::string GetCacheConfigStrCacheInsertData();
+
+    /* engine config */
+    std::string GetEngineConfigStrBlasThreshold();
+    std::string GetEngineConfigStrOmpThreadNum();
+
+    /* resource config */
+    std::string GetResourceConfigStrMode();
 
  public:
     /* server config */

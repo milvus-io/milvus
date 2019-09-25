@@ -235,14 +235,12 @@ Server::Stop() {
 
 ErrorCode
 Server::LoadConfig() {
-    Config& server_config = Config::GetInstance();
-    server_config.LoadConfigFile(config_filename_);
-    auto status = server_config.ValidateConfig();
-    if (!status.ok()) {
+    Config& config = Config::GetInstance();
+    Status s = config.LoadConfigFile(config_filename_);
+    if (!s.ok()) {
         std::cerr << "Failed to load config file: " << config_filename_ << std::endl;
         exit(0);
     }
-
     return SERVER_SUCCESS;
 }
 
