@@ -36,19 +36,33 @@ DBWrapper::DBWrapper() {
 
 Status DBWrapper::StartService() {
     Config& config = Config::GetInstance();
-
+    Status s;
     //db config
     engine::DBOptions opt;
-    opt.meta.backend_uri = config.GetDBConfigBackendUrl();
-    opt.meta.path = config.GetDBConfigPath() + "/db";
 
-    std::string db_slave_path = config.GetDBConfigSlavePath();
+    s = config.GetDBConfigBackendUrl(opt.meta.backend_uri);
+    if (!s.ok()) return s;
+
+    std::string path;
+    s = config.GetDBConfigPath(path);
+    if (!s.ok()) return s;
+
+    opt.meta.path = path + "/db";
+
+    std::string db_slave_path;
+    s = config.GetDBConfigSlavePath(db_slave_path);
+    if (!s.ok()) return s;
+
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta.slave_paths);
 
     // cache config
-    opt.insert_cache_immediately_ = config.GetCacheConfigCacheInsertData();
+    s = config.GetCacheConfigCacheInsertData(opt.insert_cache_immediately_);
+    if (!s.ok()) return s;
 
-    std::string mode = config.GetServerConfigMode();
+    std::string mode;
+    s = config.GetServerConfigMode(mode);
+    if (!s.ok()) return s;
+
     if (mode == "single") {
         opt.mode = engine::DBOptions::MODE::SINGLE;
     }
@@ -64,8 +78,10 @@ Status DBWrapper::StartService() {
     }
 
     // engine config
-    int32_t omp_thread = config.GetEngineConfigOmpThreadNum();
-    if(omp_thread > 0) {
+    int32_t omp_thread;
+    s = config.GetEngineConfigOmpThreadNum(omp_thread);
+    if (!s.ok()) return s;
+    if (omp_thread > 0) {
         omp_set_num_threads(omp_thread);
         SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
     } else {
@@ -77,15 +93,22 @@ Status DBWrapper::StartService() {
     }
 
     //init faiss global variable
-    faiss::distance_compute_blas_threshold = config.GetEngineConfigBlasThreshold();
+    int32_t blas_threshold;
+    s = config.GetEngineConfigBlasThreshold(blas_threshold);
+    if (!s.ok()) return s;
+    faiss::distance_compute_blas_threshold = blas_threshold;
 
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
-    int32_t disk = config.GetDBConfigArchiveDiskThreshold();
-    int32_t days = config.GetDBConfigArchiveDaysThreshold();
+    int32_t disk, days;
+    s = config.GetDBConfigArchiveDiskThreshold(disk);
+    if (!s.ok()) return s;
     if (disk > 0) {
         criterial[engine::ARCHIVE_CONF_DISK] = disk;
     }
+
+    s = config.GetDBConfigArchiveDaysThreshold(days);
+    if (!s.ok()) return s;
     if (days > 0) {
         criterial[engine::ARCHIVE_CONF_DAYS] = days;
     }

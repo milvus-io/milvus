@@ -34,11 +34,21 @@ namespace {
 
 GpuCacheMgr::GpuCacheMgr() {
     server::Config& config = server::Config::GetInstance();
+    Status s;
 
-    int32_t cap = config.GetCacheConfigGpuMemCapacity() * G_BYTE;
+    int32_t gpu_mem_cap;
+    s = config.GetCacheConfigGpuMemCapacity(gpu_mem_cap);
+    if (!s.ok()) {
+        SERVER_LOG_ERROR << s.message();
+    }
+    int32_t cap = gpu_mem_cap * G_BYTE;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
 
-    float gpu_mem_threshold = config.GetCacheConfigGpuMemThreshold();
+    float gpu_mem_threshold;
+    s = config.GetCacheConfigGpuMemThreshold(gpu_mem_threshold);
+    if (!s.ok()) {
+        SERVER_LOG_ERROR << s.message();
+    }
     if (gpu_mem_threshold > 0.0 && gpu_mem_threshold <= 1.0) {
         cache_->set_freemem_percent(gpu_mem_threshold);
     } else {
