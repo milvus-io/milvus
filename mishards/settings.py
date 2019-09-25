@@ -46,6 +46,15 @@ elif SD_PROVIDER == 'Static':
 TESTING = env.bool('TESTING', False)
 TESTING_WOSERVER = env.str('TESTING_WOSERVER', 'tcp://127.0.0.1:19530')
 
+TRACING_ENABLED = env.bool('TRACING_ENABLED', False)
+class TracingConfig:
+    TRACING_LOGGING = env.bool('TRACING_LOGGING', True),
+    TRACING_SERVICE_NAME = env.str('TRACING_SERVICE_NAME', 'mishards')
+    TRACING_VALIDATE = env.bool('TRACING_VALIDATE', True)
+    TRACING_LOG_PAYLOAD = env.bool('TRACING_LOG_PAYLOAD', DEBUG)
+    TRACING_REPORTING_HOST = env.str('TRACING_REPORTING_HOST', '127.0.0.1')
+    TRACING_REPORTING_PORT = env.str('TRACING_REPORTING_PORT', '5775')
+
 
 if __name__ == '__main__':
     import logging

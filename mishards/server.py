@@ -8,12 +8,17 @@ from functools import wraps
 from concurrent import futures
 from grpc._cython import cygrpc
 from grpc._channel import _Rendezvous, _UnaryUnaryMultiCallable
+from jaeger_client import Config
+from grpc_opentracing import open_tracing_server_interceptor
+from grpc_opentracing.grpcext import intercept_server
 from milvus.grpc_gen.milvus_pb2_grpc import add_MilvusServiceServicer_to_server
 from mishards.service_handler import ServiceHandler
 from mishards import settings, discover
 
 logger = logging.getLogger(__name__)
 
+def empty_server_interceptor_decorator(target_server, interceptor):
+    return target_server
 
 class Server:
     def __init__(self, conn_mgr, port=19530, max_workers=10, **kwargs):
@@ -23,11 +28,39 @@ class Server:
         self.exit_flag = False
         self.port = int(port)
         self.conn_mgr = conn_mgr
+        tracer_interceptor = None
+        self.tracer = None
+        interceptor_decorator = empty_server_interceptor_decorator
+
+        if settings.TRACING_ENABLED:
+            tracer_config = Config(config={
+                    'sampler': {
+                        'type': 'const',
+                        'param': 1,
+                        },
+                    'local_agent': {
+                        'reporting_host': settings.TracingConfig.TRACING_REPORTING_HOST,
+                        'reporting_port': settings.TracingConfig.TRACING_REPORTING_PORT
+                    },
+                    'logging': settings.TracingConfig.TRACING_LOGGING,
+                    },
+                    service_name=settings.TracingConfig.TRACING_SERVICE_NAME,
+                    validate=settings.TracingConfig.TRACING_VALIDATE
+            )
+
+            self.tracer = tracer_config.initialize_tracer()
+            tracer_interceptor = open_tracing_server_interceptor(self.tracer,
+                    log_payloads=settings.TracingConfig.TRACING_LOG_PAYLOAD)
+
+            interceptor_decorator = intercept_server
+
         self.server_impl = grpc.server(
             thread_pool=futures.ThreadPoolExecutor(max_workers=max_workers),
             options=[(cygrpc.ChannelArgKey.max_send_message_length, -1),
                 (cygrpc.ChannelArgKey.max_receive_message_length, -1)]
         )
+
+        self.server_impl = interceptor_decorator(self.server_impl, tracer_interceptor)
 
         self.register_pre_run_handler(self.pre_run_handler)
 
@@ -94,6 +127,7 @@ class Server:
         logger.info('Server is shuting down ......')
         self.exit_flag = True
         self.server_impl.stop(0)
+        self.tracer and self.tracer.close()
         logger.info('Server is closed')
 
     def add_error_handlers(self, target):
