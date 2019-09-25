@@ -4,7 +4,7 @@ First of all, thanks for taking the time to contribute to Milvus! It's people li
 
 The following are a set of guidelines for contributing to Milvus. Following these guidelines helps contributing to this project easy and transparent. These are mostly guideline, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
-As for everything else in the project, the contributions to Milvus are governed by our [Code of Conduct](http://hood.ie/code-of-conduct/).
+As for everything else in the project, the contributions to Milvus are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 TOC
 
