@@ -1,5 +1,5 @@
 ---
-name: Bug report
+name: :bug:Bug report
 about: Create a bug report to help us improve Milvus
 title: "[BUG]"
 labels: ''
