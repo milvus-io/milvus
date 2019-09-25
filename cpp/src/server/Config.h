@@ -108,16 +108,16 @@ class Config {
 
     void   SetConfigValueInMem(const std::string& parent_key,
                                const std::string& child_key,
-                               std::string& value);
+                               const std::string& value);
 
     void   PrintConfigSection(const std::string& config_node_name);
 
     ///////////////////////////////////////////////////////////////////////////
     /* server config */
-    Status CheckServerConfigAddress(std::string& value);
-    Status CheckServerConfigPort(std::string& value);
-    Status CheckServerConfigMode(std::string& value);
-    Status CheckServerConfigTimeZone(std::string& value);
+    Status CheckServerConfigAddress(const std::string& value);
+    Status CheckServerConfigPort(const std::string& value);
+    Status CheckServerConfigMode(const std::string& value);
+    Status CheckServerConfigTimeZone(const std::string& value);
 
     /* db config */
     Status CheckDBConfigPath(const std::string& value);
@@ -130,6 +130,7 @@ class Config {
 
     /* metric config */
     Status CheckMetricConfigAutoBootup(const std::string& value);
+    Status CheckMetricConfigCollector(const std::string& value);
     Status CheckMetricConfigPrometheusPort(const std::string& value);
 
     /* cache config */
@@ -217,6 +218,41 @@ class Config {
     /* resource config */
     Status GetResourceConfigMode(std::string& value);
     Status GetResourceConfigPool(std::vector<std::string>& value);
+
+ public:
+    /* server config */
+    Status SetServerConfigAddress(const std::string& value);
+    Status SetServerConfigPort(const std::string& value);
+    Status SetServerConfigMode(const std::string& value);
+    Status SetServerConfigTimeZone(const std::string& value);
+
+    /* db config */
+    Status SetDBConfigPath(const std::string& value);
+    Status SetDBConfigSlavePath(const std::string& value);
+    Status SetDBConfigBackendUrl(const std::string& value);
+    Status SetDBConfigArchiveDiskThreshold(const std::string& value);
+    Status SetDBConfigArchiveDaysThreshold(const std::string& value);
+    Status SetDBConfigBufferSize(const std::string& value);
+    Status SetDBConfigBuildIndexGPU(const std::string& value);
+
+    /* metric config */
+    Status SetMetricConfigAutoBootup(const std::string& value);
+    Status SetMetricConfigCollector(const std::string& value);
+    Status SetMetricConfigPrometheusPort(const std::string& value);
+
+    /* cache config */
+    Status SetCacheConfigCpuMemCapacity(const std::string& value);
+    Status SetCacheConfigCpuMemThreshold(const std::string& value);
+    Status SetCacheConfigGpuMemCapacity(const std::string& value);
+    Status SetCacheConfigGpuMemThreshold(const std::string& value);
+    Status SetCacheConfigCacheInsertData(const std::string& value);
+
+    /* engine config */
+    Status SetEngineConfigBlasThreshold(const std::string& value);
+    Status SetEngineConfigOmpThreadNum(const std::string& value);
+
+    /* resource config */
+    Status SetResourceConfigMode(const std::string& value);
 
  private:
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> config_map_;
