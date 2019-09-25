@@ -43,11 +43,22 @@ Before sending your pull requests for review, make sure your changes are consist
 
 
 ## Coding Style
+The coding style used in Milvus generally follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
+And we made the following changes based on the guide:
+
+- 4 spaces for indentation
+- Adopt .cpp file extension instead of .cc extension
+- 120-character line length
+- The file name starts with the upper case
 
 
 ## Run unit test
 
+We use Google Test framework for test running.
+To run unit test for Milvus under C++, please use the following command:
+
 ```shell
+# Run unit test for Milvus
 $ ./build.sh -u
 ```
 
