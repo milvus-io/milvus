@@ -16,7 +16,7 @@
 // under the License.
 
 #include "utils/easylogging++.h"
-#include "src/wrapper/vec_index.h"
+#include "src/wrapper/VecIndex.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "utils.h"
 
