@@ -26,6 +26,7 @@
 #include "src/wrapper/vec_index.h"
 #include "src/wrapper/vec_impl.h"
 #include "knowhere/common/Exception.h"
+#include "server/Config.h"
 
 #include <stdexcept>
 
@@ -326,9 +327,9 @@ Status ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 // TODO(linxj): remove.
 Status ExecutionEngineImpl::Init() {
     using namespace zilliz::milvus::server;
-    ServerConfig &config = ServerConfig::GetInstance();
-    ConfigNode server_config = config.GetConfig(CONFIG_DB);
-    gpu_num_ = server_config.GetInt32Value(CONFIG_DB_BUILD_INDEX_GPU, 0);
+    server::Config &config = server::Config::GetInstance();
+    Status s = config.GetDBConfigBuildIndexGPU(gpu_num_);
+    if (!s.ok()) return s;
 
     return Status::OK();
 }
