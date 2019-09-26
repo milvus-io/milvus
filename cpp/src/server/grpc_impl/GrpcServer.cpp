@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "milvus.grpc.pb.h"
-#include "GrpcServer.h"
+#include "grpc/gen-milvus/milvus.grpc.pb.h"
+#include "server/grpc_impl/GrpcServer.h"
 #include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
@@ -28,6 +28,7 @@
 #include <random>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <grpc/grpc.h>
 #include <grpcpp/channel.h>
@@ -35,14 +36,12 @@
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
 
-
 namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
 
-
-constexpr long MESSAGE_SIZE = -1;
+constexpr int64_t MESSAGE_SIZE = -1;
 
 //this class is to check port occupation during server start
 class NoReusePortOption : public ::grpc::ServerBuilderOption {
@@ -52,10 +51,8 @@ class NoReusePortOption : public ::grpc::ServerBuilderOption {
     }
 
     void UpdatePlugins(std::vector<std::unique_ptr<::grpc::ServerBuilderPlugin>> *plugins) override {
-
     }
 };
-
 
 void
 GrpcServer::Start() {
@@ -117,7 +114,7 @@ GrpcServer::StopService() {
     return Status::OK();
 }
 
-}
-}
-}
-}
+} // namespace grpc
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

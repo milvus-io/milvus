@@ -20,15 +20,15 @@
 #include <cstdint>
 #include <string>
 
-#include "milvus.grpc.pb.h"
-#include "status.pb.h"
+#include "grpc/gen-milvus/milvus.grpc.pb.h"
+#include "grpc/gen-status/status.pb.h"
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
 class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
-public:
+ public:
     /**
      * @brief Create table method
      *
@@ -103,8 +103,7 @@ public:
      */
     ::grpc::Status
     CreateIndex(::grpc::ServerContext *context,
-               const ::milvus::grpc::IndexParam *request, ::milvus::grpc::Status *response) override;
-
+                const ::milvus::grpc::IndexParam *request, ::milvus::grpc::Status *response) override;
 
     /**
      * @brief Insert vector array to table
@@ -123,8 +122,8 @@ public:
      */
     ::grpc::Status
     Insert(::grpc::ServerContext *context,
-                 const ::milvus::grpc::InsertParam *request,
-                 ::milvus::grpc::VectorIds *response) override;
+           const ::milvus::grpc::InsertParam *request,
+           ::milvus::grpc::VectorIds *response) override;
 
     /**
      * @brief Query vector
@@ -213,8 +212,8 @@ public:
      */
     ::grpc::Status
     CountTable(::grpc::ServerContext *context,
-                     const ::milvus::grpc::TableName *request,
-                     ::milvus::grpc::TableRowCount *response) override;
+               const ::milvus::grpc::TableName *request,
+               ::milvus::grpc::TableRowCount *response) override;
 
     /**
      * @brief List all tables in database
@@ -253,8 +252,8 @@ public:
      */
     ::grpc::Status
     Cmd(::grpc::ServerContext *context,
-         const ::milvus::grpc::Command *request,
-         ::milvus::grpc::StringReply *response) override;
+        const ::milvus::grpc::Command *request,
+        ::milvus::grpc::StringReply *response) override;
 
     /**
      * @brief delete table by range
@@ -291,8 +290,8 @@ public:
      */
     ::grpc::Status
     PreloadTable(::grpc::ServerContext *context,
-                  const ::milvus::grpc::TableName *request,
-                  ::milvus::grpc::Status *response) override;
+                 const ::milvus::grpc::TableName *request,
+                 ::milvus::grpc::Status *response) override;
 
     /**
      * @brief Describe index
@@ -310,8 +309,8 @@ public:
      */
     ::grpc::Status
     DescribeIndex(::grpc::ServerContext *context,
-                 const ::milvus::grpc::TableName *request,
-                 ::milvus::grpc::IndexParam *response) override;
+                  const ::milvus::grpc::TableName *request,
+                  ::milvus::grpc::IndexParam *response) override;
 
     /**
      * @brief Drop index
@@ -329,12 +328,12 @@ public:
      */
     ::grpc::Status
     DropIndex(::grpc::ServerContext *context,
-                 const ::milvus::grpc::TableName *request,
-                 ::milvus::grpc::Status *response) override;
-
+              const ::milvus::grpc::TableName *request,
+              ::milvus::grpc::Status *response) override;
 };
-}
-}
-}
-}
+
+} // namespace grpc
+} // namespace server
+} // namespace milvus
+} // namespace zilliz
 
