@@ -92,13 +92,17 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         return routing
 
     def _do_merge(self, files_n_topk_results, topk, reverse=False, **kwargs):
+        status=status_pb2.Status(error_code=status_pb2.SUCCESS, reason="Success")
         if not files_n_topk_results:
-            return []
+            return status, []
 
         request_results = defaultdict(list)
 
         calc_time = time.time()
         for files_collection in files_n_topk_results:
+            if isinstance(files_collection, tuple):
+                status, _ = files_collection
+                return status, []
             for request_pos, each_request_results in enumerate(files_collection.topk_query_result):
                 request_results[request_pos].extend(each_request_results.query_result_arrays)
                 request_results[request_pos] = sorted(request_results[request_pos], key=lambda x: x.distance,
@@ -114,7 +118,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             query_result = TopKQueryResult(query_result_arrays=result[1])
             topk_query_result.append(query_result)
 
-        return topk_query_result
+        return status, topk_query_result
 
     def _do_query(self, table_id, table_meta, vectors, topk, nprobe, range_array=None, **kwargs):
         metadata = kwargs.get('metadata', None)
@@ -273,14 +277,14 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             query_range_array.append(
                 Range(query_range.start_value, query_range.end_value))
 
-        results = self._do_query(table_name, table_meta, query_record_array, topk,
+        status, results = self._do_query(table_name, table_meta, query_record_array, topk,
                                          nprobe, query_range_array, metadata=metadata)
 
         now = time.time()
         logger.info('SearchVector takes: {}'.format(now - start))
 
         topk_result_list = milvus_pb2.TopKQueryResultList(
-            status=status_pb2.Status(error_code=status_pb2.SUCCESS, reason="Success"),
+            status=status,
             topk_query_result=results
         )
         return topk_result_list
