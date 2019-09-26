@@ -17,4 +17,4 @@
 ---
 BasedOnStyle:  Google
 DerivePointerAlignment: false
-ColumnLimit: 90
+ColumnLimit: 120
