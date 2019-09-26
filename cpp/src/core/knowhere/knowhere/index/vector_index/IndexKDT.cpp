@@ -118,8 +118,8 @@ CPUKDTRNG::Add(const DatasetPtr &origin, const Config &add_config) {
 void
 CPUKDTRNG::SetParameters(const Config &config) {
     for (auto &para : KDTParameterMgr::GetInstance().GetKDTParameters()) {
-        auto value = config.get_with_default(para.first, para.second);
-        index_ptr_->SetParameter(para.first, value);
+//        auto value = config.get_with_default(para.first, para.second);
+        index_ptr_->SetParameter(para.first, para.second);
     }
 }
 
