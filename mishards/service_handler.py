@@ -124,7 +124,11 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     def _do_query(self, context, table_id, table_meta, vectors, topk, nprobe, range_array=None, **kwargs):
         metadata = kwargs.get('metadata', None)
         range_array = [self._range_to_date(r, metadata=metadata) for r in range_array] if range_array else None
-        routing = self._get_routing_file_ids(table_id, range_array, metadata=metadata)
+
+        routing = {}
+        with self.tracer.start_span('get_routing',
+                child_of=context.get_active_span().context):
+            routing = self._get_routing_file_ids(table_id, range_array, metadata=metadata)
         logger.info('Routing: {}'.format(routing))
 
         metadata = kwargs.get('metadata', None)
