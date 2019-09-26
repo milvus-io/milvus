@@ -29,7 +29,6 @@
 #include "grpc/gen-status/status.pb.h"
 
 #include "server/DBWrapper.h"
-#include "server/ServerConfig.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/ResourceFactory.h"
 #include "utils/CommonUtil.h"
@@ -67,7 +66,7 @@ class RpcHandlerTest : public testing::Test {
         engine::DBOptions opt;
 
         server::ConfigNode &db_config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_DB);
-        db_config.SetValue(server::CONFIG_DB_URL, "sqlite://:@:/");
+        db_config.SetValue(server::CONFIG_DB_BACKEND_URL, "sqlite://:@:/");
         db_config.SetValue(server::CONFIG_DB_PATH, "/tmp/milvus_test");
         db_config.SetValue(server::CONFIG_DB_SLAVE_PATH, "");
         db_config.SetValue(server::CONFIG_DB_ARCHIVE_DISK, "");
@@ -77,7 +76,7 @@ class RpcHandlerTest : public testing::Test {
         cache_config.SetValue(server::CONFIG_INSERT_CACHE_IMMEDIATELY, "");
 
         server::ConfigNode &engine_config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_ENGINE);
-        engine_config.SetValue(server::CONFIG_OMP_THREAD_NUM, "");
+        engine_config.SetValue(server::CONFIG_ENGINE_OMP_THREAD_NUM, "");
 
         server::ConfigNode &serverConfig = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_SERVER);
 //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");

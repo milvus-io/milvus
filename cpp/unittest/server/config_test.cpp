@@ -19,7 +19,6 @@
 #include <gtest/gtest-death-test.h>
 
 #include "config/ConfigMgr.h"
-#include "server/ServerConfig.h"
 #include "utils/CommonUtil.h"
 #include "utils/ValidationUtil.h"
 
