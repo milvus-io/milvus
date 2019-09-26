@@ -34,8 +34,8 @@ static const char* CONFIG_SERVER_ADDRESS = "address";
 static const char* CONFIG_SERVER_ADDRESS_DEFAULT = "127.0.0.1";
 static const char* CONFIG_SERVER_PORT = "port";
 static const char* CONFIG_SERVER_PORT_DEFAULT = "19530";
-static const char* CONFIG_SERVER_MODE = "mode";
-static const char* CONFIG_SERVER_MODE_DEFAULT = "single";
+static const char* CONFIG_SERVER_DEPLOY_MODE = "deploy_mode";
+static const char* CONFIG_SERVER_DEPLOY_MODE_DEFAULT = "single";
 static const char* CONFIG_SERVER_TIME_ZONE = "time_zone";
 static const char* CONFIG_SERVER_TIME_ZONE_DEFAULT = "UTC+8";
 
@@ -117,7 +117,7 @@ class Config {
     /* server config */
     Status CheckServerConfigAddress(const std::string& value);
     Status CheckServerConfigPort(const std::string& value);
-    Status CheckServerConfigMode(const std::string& value);
+    Status CheckServerConfigDeployMode(const std::string& value);
     Status CheckServerConfigTimeZone(const std::string& value);
 
     /* db config */
@@ -153,7 +153,7 @@ class Config {
     /* server config */
     std::string GetServerConfigStrAddress();
     std::string GetServerConfigStrPort();
-    std::string GetServerConfigStrMode();
+    std::string GetServerConfigStrDeployMode();
     std::string GetServerConfigStrTimeZone();
 
     /* db config */
@@ -188,7 +188,7 @@ class Config {
     /* server config */
     Status GetServerConfigAddress(std::string& value);
     Status GetServerConfigPort(std::string& value);
-    Status GetServerConfigMode(std::string& value);
+    Status GetServerConfigDeployMode(std::string& value);
     Status GetServerConfigTimeZone(std::string& value);
 
     /* db config */
@@ -224,7 +224,7 @@ class Config {
     /* server config */
     Status SetServerConfigAddress(const std::string& value);
     Status SetServerConfigPort(const std::string& value);
-    Status SetServerConfigMode(const std::string& value);
+    Status SetServerConfigDeployMode(const std::string& value);
     Status SetServerConfigTimeZone(const std::string& value);
 
     /* db config */

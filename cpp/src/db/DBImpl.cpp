@@ -77,7 +77,7 @@ Status DBImpl::Start() {
     shutting_down_.store(false, std::memory_order_release);
 
     //for distribute version, some nodes are read only
-    if (options_.mode_ != DBOptions::MODE::READ_ONLY) {
+    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         ENGINE_LOG_TRACE << "StartTimerTasks";
         bg_timer_thread_ = std::thread(&DBImpl::BackgroundTimerTask, this);
     }
@@ -98,7 +98,7 @@ Status DBImpl::Stop() {
     //wait compaction/buildindex finish
     bg_timer_thread_.join();
 
-    if (options_.mode_ != DBOptions::MODE::READ_ONLY) {
+    if (options_.mode_ != DBOptions::MODE::CLUSTER_READONLY) {
         meta_ptr_->CleanUp();
     }
 
@@ -684,7 +684,7 @@ void DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     meta_ptr_->Archive();
 
     int ttl = 5*meta::M_SEC;//default: file will be deleted after 5 minutes
-    if (options_.mode_ == DBOptions::MODE::CLUSTER) {
+    if (options_.mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
         ttl = meta::D_SEC;
     }
     meta_ptr_->CleanUpFilesWithTTL(ttl);
