@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     MAX_NPROBE = 2048
-    def __init__(self, conn_mgr, *args, **kwargs):
+    def __init__(self, conn_mgr, tracer, *args, **kwargs):
         self.conn_mgr = conn_mgr
         self.table_meta = {}
         self.error_handlers = {}
+        self.tracer = tracer
 
     def connection(self, metadata=None):
         conn = self.conn_mgr.conn('WOSERVER', metadata=metadata)
@@ -120,7 +121,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         return status, topk_query_result
 
-    def _do_query(self, table_id, table_meta, vectors, topk, nprobe, range_array=None, **kwargs):
+    def _do_query(self, context, table_id, table_meta, vectors, topk, nprobe, range_array=None, **kwargs):
         metadata = kwargs.get('metadata', None)
         range_array = [self._range_to_date(r, metadata=metadata) for r in range_array] if range_array else None
         routing = self._get_routing_file_ids(table_id, range_array, metadata=metadata)
@@ -140,16 +141,18 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
             conn = self.query_conn(addr, metadata=metadata)
             start = time.time()
-            ret = conn.search_vectors_in_files(table_name=query_params['table_id'],
-                    file_ids=query_params['file_ids'],
-                    query_records=vectors,
-                    top_k=topk,
-                    nprobe=nprobe,
-                    lazy=True)
-            end = time.time()
-            logger.info('search_vectors_in_files takes: {}'.format(end - start))
+            with self.tracer.start_span('search_{}_span'.format(addr),
+                    child_of=context.get_active_span().context):
+                ret = conn.search_vectors_in_files(table_name=query_params['table_id'],
+                        file_ids=query_params['file_ids'],
+                        query_records=vectors,
+                        top_k=topk,
+                        nprobe=nprobe,
+                        lazy=True)
+                end = time.time()
+                logger.info('search_vectors_in_files takes: {}'.format(end - start))
 
-            all_topk_results.append(ret)
+                all_topk_results.append(ret)
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             for addr, params in routing.items():
@@ -160,7 +163,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 res.result()
 
         reverse = table_meta.metric_type == types.MetricType.IP
-        return self._do_merge(all_topk_results, topk, reverse=reverse, metadata=metadata)
+        with self.tracer.start_span('do_merge',
+                child_of=context.get_active_span().context):
+            return self._do_merge(all_topk_results, topk, reverse=reverse, metadata=metadata)
 
     @mark_grpc_method
     def CreateTable(self, request, context):
@@ -277,7 +282,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             query_range_array.append(
                 Range(query_range.start_value, query_range.end_value))
 
-        status, results = self._do_query(table_name, table_meta, query_record_array, topk,
+        status, results = self._do_query(context, table_name, table_meta, query_record_array, topk,
                                          nprobe, query_range_array, metadata=metadata)
 
         now = time.time()

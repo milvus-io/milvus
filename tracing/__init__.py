@@ -14,3 +14,9 @@ class Tracer:
 
     def close(self):
         self.tracer and self.tracer.close()
+
+    def start_span(self, operation_name=None,
+            child_of=None, references=None, tags=None,
+            start_time=None, ignore_active_span=False):
+        return self.tracer.start_span(operation_name, child_of,
+                references, tags, start_time, ignore_active_span)

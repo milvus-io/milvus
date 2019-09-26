@@ -76,7 +76,7 @@ class Server:
 
     def start(self, port=None):
         handler_class = self.add_error_handlers(ServiceHandler)
-        add_MilvusServiceServicer_to_server(handler_class(conn_mgr=self.conn_mgr), self.server_impl)
+        add_MilvusServiceServicer_to_server(handler_class(conn_mgr=self.conn_mgr, tracer=self.tracer), self.server_impl)
         self.server_impl.add_insecure_port("[::]:{}".format(str(port or self._port)))
         self.server_impl.start()
 
