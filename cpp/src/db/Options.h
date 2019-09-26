@@ -60,9 +60,9 @@ struct DBMetaOptions {
 
 struct DBOptions {
     typedef enum {
-        SINGLE,
-        CLUSTER,
-        READ_ONLY
+        SINGLE = 0,
+        CLUSTER_READONLY,
+        CLUSTER_WRITABLE
     } MODE;
 
     uint16_t  merge_trigger_number_ = 2;

@@ -84,7 +84,7 @@ Config::ValidateConfig() {
     if (!s.ok()) return s;
 
     std::string server_mode;
-    s = GetServerConfigMode(server_mode);
+    s = GetServerConfigDeployMode(server_mode);
     if (!s.ok()) return s;
 
     std::string server_time_zone;
@@ -219,7 +219,7 @@ Config::CheckServerConfigPort(const std::string &value) {
 }
 
 Status
-Config::CheckServerConfigMode(const std::string &value) {
+Config::CheckServerConfigDeployMode(const std::string &value) {
     if (value != "single" &&
         value != "cluster_readonly" &&
         value != "cluster_writable") {
@@ -511,12 +511,12 @@ Config::GetServerConfigStrPort() {
 }
 
 std::string
-Config::GetServerConfigStrMode() {
+Config::GetServerConfigStrDeployMode() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_MODE, value).ok()) {
-        value = GetConfigNode(CONFIG_SERVER).GetValue(CONFIG_SERVER_MODE,
-                                                      CONFIG_SERVER_MODE_DEFAULT);
-        SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_MODE, value);
+    if (!GetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value).ok()) {
+        value = GetConfigNode(CONFIG_SERVER).GetValue(CONFIG_SERVER_DEPLOY_MODE,
+                                                      CONFIG_SERVER_DEPLOY_MODE_DEFAULT);
+        SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value);
     }
     return value;
 }
@@ -755,9 +755,9 @@ Config::GetServerConfigPort(std::string& value) {
 }
 
 Status
-Config::GetServerConfigMode(std::string& value) {
-    value = GetServerConfigStrMode();
-    return CheckServerConfigMode(value);
+Config::GetServerConfigDeployMode(std::string& value) {
+    value = GetServerConfigStrDeployMode();
+    return CheckServerConfigDeployMode(value);
 }
 
 Status
@@ -938,10 +938,10 @@ Config::SetServerConfigPort(const std::string& value) {
 }
 
 Status
-Config::SetServerConfigMode(const std::string& value) {
-    Status s = CheckServerConfigMode(value);
+Config::SetServerConfigDeployMode(const std::string& value) {
+    Status s = CheckServerConfigDeployMode(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_MODE, value);
+    SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value);
     return Status::OK();
 }
 
