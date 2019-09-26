@@ -18,7 +18,7 @@
 #pragma once
 
 #include "ExecutionEngine.h"
-#include "src/wrapper/vec_index.h"
+#include "src/wrapper/VecIndex.h"
 
 #include <memory>
 #include <string>

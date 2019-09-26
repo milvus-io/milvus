@@ -25,8 +25,8 @@
 #include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/common/Exception.h"
-#include "vec_index.h"
-#include "vec_impl.h"
+#include "VecIndex.h"
+#include "VecImpl.h"
 #include "utils/Log.h"
 
 #include <cuda.h>
