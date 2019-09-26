@@ -93,7 +93,7 @@ Status
 ClientProxy::CreateTable(const TableSchema &param) {
     try {
         ::milvus::grpc::TableSchema schema;
-        schema.mutable_table_name()->set_table_name(param.table_name);
+        schema.set_table_name(param.table_name);
         schema.set_dimension(param.dimension);
         schema.set_index_file_size(param.index_file_size);
         schema.set_metric_type((int32_t)param.metric_type);
@@ -129,7 +129,7 @@ ClientProxy::CreateIndex(const IndexParam &index_param) {
     try {
         //TODO:add index params
         ::milvus::grpc::IndexParam grpc_index_param;
-        grpc_index_param.mutable_table_name()->set_table_name(index_param.table_name);
+        grpc_index_param.set_table_name(index_param.table_name);
         grpc_index_param.mutable_index()->set_index_type((int32_t)index_param.index_type);
         grpc_index_param.mutable_index()->set_nlist(index_param.nlist);
         return client_ptr_->CreateIndex(grpc_index_param);
@@ -281,7 +281,7 @@ ClientProxy::DescribeTable(const std::string &table_name, TableSchema &table_sch
 
         Status status = client_ptr_->DescribeTable(grpc_schema, table_name);
 
-        table_schema.table_name = grpc_schema.table_name().table_name();
+        table_schema.table_name = grpc_schema.table_name();
         table_schema.dimension = grpc_schema.dimension();
         table_schema.index_file_size = grpc_schema.index_file_size();
         table_schema.metric_type = (MetricType)grpc_schema.metric_type();
@@ -307,7 +307,15 @@ ClientProxy::CountTable(const std::string &table_name, int64_t &row_count) {
 Status
 ClientProxy::ShowTables(std::vector<std::string> &table_array) {
     try {
-        return client_ptr_->ShowTables(table_array);
+        Status status;
+        milvus::grpc::TableNameList table_name_list;
+        status = client_ptr_->ShowTables(table_name_list);
+
+        table_array.resize(table_name_list.table_names_size());
+        for (uint64_t i = 0; i < table_name_list.table_names_size(); ++i) {
+            table_array[i] = table_name_list.table_names(i);
+        }
+        return status;
 
     } catch (std::exception &ex) {
         return Status(StatusCode::UnknownError, "fail to show tables: " + std::string(ex.what()));

@@ -103,13 +103,16 @@ class MySQLMetaImpl : public Meta {
     Status NextFileId(std::string &file_id);
     Status NextTableId(std::string &table_id);
     Status DiscardFiles(long long to_discard_size);
+
+    void ValidateMetaSchema();
     Status Initialize();
 
+private:
     const DBMetaOptions options_;
     const int mode_;
 
     std::shared_ptr<MySQLConnectionPool> mysql_connection_pool_;
-    bool safe_grab = false;
+    bool safe_grab_ = false;
 
 //        std::mutex connectionMutex_;
 }; // DBMetaImpl

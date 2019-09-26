@@ -22,7 +22,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 Node::Node() {
     static std::atomic_uint_fast8_t counter(0);

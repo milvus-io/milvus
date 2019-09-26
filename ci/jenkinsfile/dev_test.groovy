@@ -3,7 +3,7 @@ timeout(time: 30, unit: 'MINUTES') {
         dir ("${PROJECT_NAME}_test") {
             checkout([$class: 'GitSCM', branches: [[name: "${SEMVER}"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: "${params.GIT_USER}", url: "git@192.168.1.105:Test/milvus_test.git", name: 'origin', refspec: "+refs/heads/${SEMVER}:refs/remotes/origin/${SEMVER}"]]])
             sh 'python3 -m pip install -r requirements.txt'
-            sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.milvus-1.svc.cluster.local"
+            sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --level=1 --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.milvus-1.svc.cluster.local"
         }
 
         // mysql database backend test
@@ -16,7 +16,7 @@ timeout(time: 30, unit: 'MINUTES') {
         }
         dir ("milvus-helm") {
             dir ("milvus/milvus-gpu") {
-                sh "helm install --wait --timeout 300 --set engine.image.tag=${DOCKER_VERSION} --set expose.type=clusterIP --name ${env.JOB_NAME}-${env.BUILD_NUMBER} -f ci/db_backend/mysql_values.yaml --namespace milvus-2 --version 0.4.0 ."
+                sh "helm install --wait --timeout 300 --set engine.image.tag=${DOCKER_VERSION} --set expose.type=clusterIP --name ${env.JOB_NAME}-${env.BUILD_NUMBER} -f ci/db_backend/mysql_values.yaml --namespace milvus-2 --version 0.5.0 ."
             }
         }
         dir ("${PROJECT_NAME}_test") {

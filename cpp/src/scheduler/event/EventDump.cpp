@@ -25,7 +25,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 std::ostream &operator<<(std::ostream &out, const Event &event) {
     out << event.Dump();

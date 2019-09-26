@@ -29,7 +29,7 @@ namespace server {
 
 class Server {
  public:
-    static Server &Instance();
+    static Server &GetInstance();
 
     void Init(int64_t daemonized,
               const std::string &pid_filename,
@@ -40,8 +40,8 @@ class Server {
     void Stop();
 
  private:
-    Server();
-    ~Server();
+    Server() = default;
+    ~Server() = default;
 
     void Daemonize();
 
@@ -52,7 +52,7 @@ class Server {
 
  private:
     int64_t daemonized_ = 0;
-    int pid_fd = -1;
+    int pid_fd_ = -1;
     std::string pid_filename_;
     std::string config_filename_;
     std::string log_config_file_;
