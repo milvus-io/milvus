@@ -15,20 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "SignalUtil.h"
+#include "utils/SignalUtil.h"
 #include "src/server/Server.h"
 #include "utils/Log.h"
 
+#include <string>
 #include <signal.h>
 #include <execinfo.h>
-
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 
-void SignalUtil::HandleSignal(int signum) {
-
+void
+SignalUtil::HandleSignal(int signum) {
     switch (signum) {
         case SIGINT:
         case SIGUSR2: {
@@ -51,7 +51,8 @@ void SignalUtil::HandleSignal(int signum) {
     }
 }
 
-void SignalUtil::PrintStacktrace() {
+void
+SignalUtil::PrintStacktrace() {
     SERVER_LOG_INFO << "Call stack:";
 
     const int size = 32;
@@ -65,6 +66,6 @@ void SignalUtil::PrintStacktrace() {
     free(stacktrace);
 }
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz
