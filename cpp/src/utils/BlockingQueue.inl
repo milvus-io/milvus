@@ -18,7 +18,6 @@
 
 #pragma once
 
-
 namespace zilliz {
 namespace milvus {
 namespace server {
@@ -26,8 +25,10 @@ namespace server {
 template<typename T>
 void
 BlockingQueue<T>::Put(const T &task) {
-    std::unique_lock <std::mutex> lock(mtx);
-    full_.wait(lock, [this] { return (queue_.size() < capacity_); });
+    std::unique_lock<std::mutex> lock(mtx);
+    full_.wait(lock, [this] {
+        return (queue_.size() < capacity_);
+    });
 
     queue_.push(task);
     empty_.notify_all();
@@ -36,8 +37,10 @@ BlockingQueue<T>::Put(const T &task) {
 template<typename T>
 T
 BlockingQueue<T>::Take() {
-    std::unique_lock <std::mutex> lock(mtx);
-    empty_.wait(lock, [this] { return !queue_.empty(); });
+    std::unique_lock<std::mutex> lock(mtx);
+    empty_.wait(lock, [this] {
+        return !queue_.empty();
+    });
 
     T front(queue_.front());
     queue_.pop();
@@ -48,15 +51,17 @@ BlockingQueue<T>::Take() {
 template<typename T>
 size_t
 BlockingQueue<T>::Size() {
-    std::lock_guard <std::mutex> lock(mtx);
+    std::lock_guard<std::mutex> lock(mtx);
     return queue_.size();
 }
 
 template<typename T>
 T
 BlockingQueue<T>::Front() {
-    std::unique_lock <std::mutex> lock(mtx);
-    empty_.wait(lock, [this] { return !queue_.empty(); });
+    std::unique_lock<std::mutex> lock(mtx);
+    empty_.wait(lock, [this] {
+        return !queue_.empty();
+    });
 
     T front(queue_.front());
     return front;
@@ -65,8 +70,10 @@ BlockingQueue<T>::Front() {
 template<typename T>
 T
 BlockingQueue<T>::Back() {
-    std::unique_lock <std::mutex> lock(mtx);
-    empty_.wait(lock, [this] { return !queue_.empty(); });
+    std::unique_lock<std::mutex> lock(mtx);
+    empty_.wait(lock, [this] {
+        return !queue_.empty();
+    });
 
     T back(queue_.back());
     return back;
@@ -75,7 +82,7 @@ BlockingQueue<T>::Back() {
 template<typename T>
 bool
 BlockingQueue<T>::Empty() {
-    std::unique_lock <std::mutex> lock(mtx);
+    std::unique_lock<std::mutex> lock(mtx);
     return queue_.empty();
 }
 
@@ -85,7 +92,7 @@ BlockingQueue<T>::SetCapacity(const size_t capacity) {
     capacity_ = (capacity > 0 ? capacity : capacity_);
 }
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz
 

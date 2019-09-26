@@ -67,8 +67,8 @@ class RpcHandlerTest : public testing::Test {
         engine::DBOptions opt;
 
         server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
-        server::Config::GetInstance().SetDBConfigPath("/tmp/milvus_test");
-        server::Config::GetInstance().SetDBConfigSlavePath("");
+        server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_test");
+        server::Config::GetInstance().SetDBConfigSecondaryPath("");
         server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
         server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
         server::Config::GetInstance().SetCacheConfigCacheInsertData("");
