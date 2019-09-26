@@ -1,39 +1,37 @@
+# All the following configurations are default values.
+
 server_config:
-  address: 0.0.0.0              # milvus server ip address (IPv4)
-  port: 19530                   # port range: 1025 ~ 65534
-  mode: single                  # deployment type: single, cluster, read_only
+  address: 0.0.0.0                  # milvus server ip address (IPv4)
+  port: 19530                       # port range: 1025 ~ 65534
+  deploy_mode: single               # deployment type: single, cluster_readonly, cluster_writable
   time_zone: UTC+8
 
 db_config:
-  path: @MILVUS_DB_PATH@        # milvus database path
-  slave_path:                   # secondary database path, split by semicolon
+  primary_path: @MILVUS_DB_PATH@    # path used to store data and meta
+  secondary_path:                   # path used to store data only, split by semicolon
 
-  # URI format: dialect://username:password@host:port/database
-  # All parts except dialect are optional, but you MUST include the delimiters
-  # Currently dialect supports mysql or sqlite
-  backend_url: sqlite://:@:/
+  backend_url: sqlite://:@:/        # URI format: dialect://username:password@host:port/database
+                                    # Keep 'dialect://:@:/', and replace other texts with real values.
+                                    # Replace 'dialect' with 'mysql' or 'sqlite'
 
-  archive_disk_threshold: 0     # GB, file will be archived when disk usage exceed, 0 for no limit
-  archive_days_threshold: 0     # DAYS, older files will be archived, 0 for no limit
-  buffer_size: 4                # GB, maximum insert buffer size allowed
-  build_index_gpu: 0            # gpu id used for building index
+  insert_buffer_size: 4             # GB, maximum insert buffer size allowed
+  build_index_gpu: 0                # gpu id used for building index
 
 metric_config:
-  auto_bootup: off              # whether enable monitoring when bootup
-  collector: prometheus         # prometheus
+  enable_monitor: false             # enable monitoring or not
+  collector: prometheus             # prometheus
   prometheus_config:
-    port: 8080                  # port prometheus used to fetch metrics
+    port: 8080                      # port prometheus used to fetch metrics
 
 cache_config:
-  cpu_mem_capacity: 16          # GB, CPU memory size used for cache
-  cpu_mem_threshold: 0.85       # percent of data kept when cache cleanup triggered
-  cache_insert_data: false      # whether load data into cache when insert
+  cpu_mem_capacity: 16              # GB, CPU memory used for cache
+  cpu_mem_threshold: 0.85           # percentage of data kept when cache cleanup triggered
+  cache_insert_data: false          # whether load inserted data into cache
 
 engine_config:
   blas_threshold: 20
 
 resource_config:
-  mode: simple
-  pool:
+  resource_pool:
     - cpu
     - gpu0

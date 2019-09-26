@@ -44,13 +44,13 @@ Status DBWrapper::StartService() {
     if (!s.ok()) return s;
 
     std::string path;
-    s = config.GetDBConfigPath(path);
+    s = config.GetDBConfigPrimaryPath(path);
     if (!s.ok()) return s;
 
     opt.meta_.path_ = path + "/db";
 
     std::string db_slave_path;
-    s = config.GetDBConfigSlavePath(db_slave_path);
+    s = config.GetDBConfigSecondaryPath(db_slave_path);
     if (!s.ok()) return s;
 
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta_.slave_paths_);
@@ -60,20 +60,20 @@ Status DBWrapper::StartService() {
     if (!s.ok()) return s;
 
     std::string mode;
-    s = config.GetServerConfigMode(mode);
+    s = config.GetServerConfigDeployMode(mode);
     if (!s.ok()) return s;
 
     if (mode == "single") {
         opt.mode_ = engine::DBOptions::MODE::SINGLE;
     }
-    else if (mode == "cluster") {
-        opt.mode_ = engine::DBOptions::MODE::CLUSTER;
+    else if (mode == "cluster_readonly") {
+        opt.mode_ = engine::DBOptions::MODE::CLUSTER_READONLY;
     }
-    else if (mode == "read_only") {
-        opt.mode_ = engine::DBOptions::MODE::READ_ONLY;
+    else if (mode == "cluster_writable") {
+        opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
     }
     else {
-        std::cerr << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
+        std::cerr << "ERROR: mode specified in server_config must be ['single', 'cluster_readonly', 'cluster_writable']" << std::endl;
         kill(0, SIGUSR1);
     }
 
