@@ -8,7 +8,6 @@ link_directories(${CUDA_TOOLKIT_ROOT_DIR}/lib64)
 include_directories(${CORE_SOURCE_DIR}/knowhere)
 include_directories(${CORE_SOURCE_DIR}/thirdparty)
 include_directories(${CORE_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
-include_directories(${CORE_SOURCE_DIR}/thirdparty/jsoncons-0.126.0/include)
 
 set(SPTAG_SOURCE_DIR ${CORE_SOURCE_DIR}/thirdparty/SPTAG)
 file(GLOB HDR_FILES
@@ -55,6 +54,7 @@ set(index_srcs
         knowhere/index/vector_index/IndexGPUIVFPQ.cpp
         knowhere/index/vector_index/FaissBaseIndex.cpp
         knowhere/index/vector_index/helpers/FaissIO.cpp
+        knowhere/index/vector_index/helpers/IndexParameter.cpp
         )
 
 set(depend_libs
