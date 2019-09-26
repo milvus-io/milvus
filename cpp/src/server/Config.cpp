@@ -70,6 +70,111 @@ Config::LoadConfigFile(const std::string &filename) {
     return Status::OK();
 }
 
+Status
+Config::ValidateConfig() {
+    Status s;
+
+    /* server config */
+    std::string server_addr;
+    s = GetServerConfigAddress(server_addr);
+    if (!s.ok()) return s;
+
+    std::string server_port;
+    s = GetServerConfigPort(server_port);
+    if (!s.ok()) return s;
+
+    std::string server_mode;
+    s = GetServerConfigDeployMode(server_mode);
+    if (!s.ok()) return s;
+
+    std::string server_time_zone;
+    s = GetServerConfigTimeZone(server_time_zone);
+    if (!s.ok()) return s;
+
+    /* db config */
+    std::string db_primary_path;
+    s = GetDBConfigPrimaryPath(db_primary_path);
+    if (!s.ok()) return s;
+
+    std::string db_secondary_path;
+    s = GetDBConfigSecondaryPath(db_secondary_path);
+    if (!s.ok()) return s;
+
+    std::string db_backend_url;
+    s = GetDBConfigBackendUrl(db_backend_url);
+    if (!s.ok()) return s;
+
+    int32_t db_archive_disk_threshold;
+    s = GetDBConfigArchiveDiskThreshold(db_archive_disk_threshold);
+    if (!s.ok()) return s;
+
+    int32_t db_archive_days_threshold;
+    s = GetDBConfigArchiveDaysThreshold(db_archive_days_threshold);
+    if (!s.ok()) return s;
+
+    int32_t db_insert_buffer_size;
+    s = GetDBConfigInsertBufferSize(db_insert_buffer_size);
+    if (!s.ok()) return s;
+
+    int32_t db_build_index_gpu;
+    s = GetDBConfigBuildIndexGPU(db_build_index_gpu);
+    if (!s.ok()) return s;
+
+    /* metric config */
+    bool metric_enable_monitor;
+    s = GetMetricConfigEnableMonitor(metric_enable_monitor);
+    if (!s.ok()) return s;
+
+    std::string metric_collector;
+    s = GetMetricConfigCollector(metric_collector);
+    if (!s.ok()) return s;
+
+    std::string metric_prometheus_port;
+    s = GetMetricConfigPrometheusPort(metric_prometheus_port);
+    if (!s.ok()) return s;
+
+    /* cache config */
+    int32_t cache_cpu_mem_capacity;
+    s = GetCacheConfigCpuMemCapacity(cache_cpu_mem_capacity);
+    if (!s.ok()) return s;
+
+    float cache_cpu_mem_threshold;
+    s = GetCacheConfigCpuMemThreshold(cache_cpu_mem_threshold);
+    if (!s.ok()) return s;
+
+    int32_t cache_gpu_mem_capacity;
+    s = GetCacheConfigGpuMemCapacity(cache_gpu_mem_capacity);
+    if (!s.ok()) return s;
+
+    float cache_gpu_mem_threshold;
+    s = GetCacheConfigGpuMemThreshold(cache_gpu_mem_threshold);
+    if (!s.ok()) return s;
+
+    bool cache_insert_data;
+    s = GetCacheConfigCacheInsertData(cache_insert_data);
+    if (!s.ok()) return s;
+
+    /* engine config */
+    int32_t engine_blas_threshold;
+    s = GetEngineConfigBlasThreshold(engine_blas_threshold);
+    if (!s.ok()) return s;
+
+    int32_t engine_omp_thread_num;
+    s = GetEngineConfigOmpThreadNum(engine_omp_thread_num);
+    if (!s.ok()) return s;
+
+    /* resource config */
+    std::string resource_mode;
+    s = GetResourceConfigMode(resource_mode);
+    if (!s.ok()) return s;
+
+    std::vector<std::string> resource_pool;
+    s = GetResourceConfigPool(resource_pool);
+    if (!s.ok()) return s;
+
+    return Status::OK();
+}
+
 void
 Config::PrintConfigSection(const std::string& config_node_name) {
     std::cout << std::endl;
@@ -114,9 +219,12 @@ Config::CheckServerConfigPort(const std::string &value) {
 }
 
 Status
-Config::CheckServerConfigMode(const std::string &value) {
-    if (value != "single" && value != "cluster" && value != "read_only") {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid server config mode [single, cluster, read_only]: " + value);
+Config::CheckServerConfigDeployMode(const std::string &value) {
+    if (value != "single" &&
+        value != "cluster_readonly" &&
+        value != "cluster_writable") {
+        return Status(SERVER_INVALID_ARGUMENT,
+                      "Invalid server config mode [single, cluster_readonly, cluster_writable]: " + value);
     }
     return Status::OK();
 }
@@ -140,15 +248,15 @@ Config::CheckServerConfigTimeZone(const std::string &value) {
 }
 
 Status
-Config::CheckDBConfigPath(const std::string &value) {
+Config::CheckDBConfigPrimaryPath(const std::string &value) {
     if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "DB config path empty");
+        return Status(SERVER_INVALID_ARGUMENT, "DB config primary_path empty");
     }
     return Status::OK();
 }
 
 Status
-Config::CheckDBConfigSlavePath(const std::string &value) {
+Config::CheckDBConfigSecondaryPath(const std::string &value) {
     return Status::OK();
 }
 
@@ -177,15 +285,15 @@ Config::CheckDBConfigArchiveDaysThreshold(const std::string &value) {
 }
 
 Status
-Config::CheckDBConfigBufferSize(const std::string &value) {
+Config::CheckDBConfigInsertBufferSize(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid DB config buffer_size: " + value);
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid DB config insert_buffer_size: " + value);
     } else {
         int64_t buffer_size = std::stoi(value) * GB;
         unsigned long total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (buffer_size >= total_mem) {
-            return Status(SERVER_INVALID_ARGUMENT, "DB config buffer_size exceed system memory: " + value);
+            return Status(SERVER_INVALID_ARGUMENT, "DB config insert_buffer_size exceed system memory: " + value);
         }
     }
     return Status::OK();
@@ -205,7 +313,7 @@ Config::CheckDBConfigBuildIndexGPU(const std::string &value) {
 }
 
 Status
-Config::CheckMetricConfigAutoBootup(const std::string& value) {
+Config::CheckMetricConfigEnableMonitor(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid metric config auto_bootup: " + value);
     }
@@ -242,10 +350,10 @@ Config::CheckCacheConfigCpuMemCapacity(const std::string& value) {
             std::cerr << "Warning: cpu_mem_capacity value is too big" << std::endl;
         }
 
-        int32_t buffer_size;
-        Status s = GetDBConfigBufferSize(buffer_size);
+        int32_t buffer_value;
+        Status s = GetDBConfigInsertBufferSize(buffer_value);
         if (!s.ok()) return s;
-        int64_t insert_buffer_size = buffer_size * GB;
+        int64_t insert_buffer_size = buffer_value * GB;
         if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
             return Status(SERVER_INVALID_ARGUMENT, "Sum of cpu_mem_capacity and buffer_size exceed system memory");
         }
@@ -403,12 +511,12 @@ Config::GetServerConfigStrPort() {
 }
 
 std::string
-Config::GetServerConfigStrMode() {
+Config::GetServerConfigStrDeployMode() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_MODE, value).ok()) {
-        value = GetConfigNode(CONFIG_SERVER).GetValue(CONFIG_SERVER_MODE,
-                                                      CONFIG_SERVER_MODE_DEFAULT);
-        SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_MODE, value);
+    if (!GetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value).ok()) {
+        value = GetConfigNode(CONFIG_SERVER).GetValue(CONFIG_SERVER_DEPLOY_MODE,
+                                                      CONFIG_SERVER_DEPLOY_MODE_DEFAULT);
+        SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value);
     }
     return value;
 }
@@ -427,23 +535,23 @@ Config::GetServerConfigStrTimeZone() {
 ////////////////////////////////////////////////////////////////////////////////
 /* db config */
 std::string
-Config::GetDBConfigStrPath() {
+Config::GetDBConfigStrPrimaryPath() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_DB, CONFIG_DB_PATH, value).ok()) {
-        value = GetConfigNode(CONFIG_DB).GetValue(CONFIG_DB_PATH,
-                                                  CONFIG_DB_PATH_DEFAULT);
-        SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PATH, value);
+    if (!GetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRIMARY_PATH, value).ok()) {
+        value = GetConfigNode(CONFIG_DB).GetValue(CONFIG_DB_PRIMARY_PATH,
+                                                  CONFIG_DB_PRIMARY_PATH_DEFAULT);
+        SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRIMARY_PATH, value);
     }
     return value;
 }
 
 std::string
-Config::GetDBConfigStrSlavePath() {
+Config::GetDBConfigStrSecondaryPath() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_DB, CONFIG_DB_SLAVE_PATH, value).ok()) {
-        value = GetConfigNode(CONFIG_DB).GetValue(CONFIG_DB_SLAVE_PATH,
-                                                  CONFIG_DB_SLAVE_PATH_DEFAULT);
-        SetConfigValueInMem(CONFIG_DB, CONFIG_DB_SLAVE_PATH, value);
+    if (!GetConfigValueInMem(CONFIG_DB, CONFIG_DB_SECONDARY_PATH, value).ok()) {
+        value = GetConfigNode(CONFIG_DB).GetValue(CONFIG_DB_SECONDARY_PATH,
+                                                  CONFIG_DB_SECONDARY_PATH_DEFAULT);
+        SetConfigValueInMem(CONFIG_DB, CONFIG_DB_SECONDARY_PATH, value);
     }
     return value;
 }
@@ -482,12 +590,12 @@ Config::GetDBConfigStrArchiveDaysThreshold() {
 }
 
 std::string
-Config::GetDBConfigStrBufferSize() {
+Config::GetDBConfigStrInsertBufferSize() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_DB, CONFIG_DB_BUFFER_SIZE, value).ok()) {
-        value = GetConfigNode(CONFIG_DB).GetValue(CONFIG_DB_BUFFER_SIZE,
-                                                  CONFIG_DB_BUFFER_SIZE_DEFAULT);
-        SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BUFFER_SIZE, value);
+    if (!GetConfigValueInMem(CONFIG_DB, CONFIG_DB_INSERT_BUFFER_SIZE, value).ok()) {
+        value = GetConfigNode(CONFIG_DB).GetValue(CONFIG_DB_INSERT_BUFFER_SIZE,
+                                                  CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT);
+        SetConfigValueInMem(CONFIG_DB, CONFIG_DB_INSERT_BUFFER_SIZE, value);
     }
     return value;
 }
@@ -506,12 +614,12 @@ Config::GetDBConfigStrBuildIndexGPU() {
 ////////////////////////////////////////////////////////////////////////////////
 /* metric config */
 std::string
-Config::GetMetricConfigStrAutoBootup() {
+Config::GetMetricConfigStrEnableMonitor() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_AUTO_BOOTUP, value).ok()) {
-        value = GetConfigNode(CONFIG_METRIC).GetValue(CONFIG_METRIC_AUTO_BOOTUP,
-                                                      CONFIG_METRIC_AUTO_BOOTUP_DEFAULT);
-        SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_AUTO_BOOTUP, value);
+    if (!GetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_ENABLE_MONITOR, value).ok()) {
+        value = GetConfigNode(CONFIG_METRIC).GetValue(CONFIG_METRIC_ENABLE_MONITOR,
+                                                      CONFIG_METRIC_ENABLE_MONITOR_DEFAULT);
+        SetConfigValueInMem(CONFIG_METRIC, CONFIG_METRIC_ENABLE_MONITOR, value);
     }
     return value;
 }
@@ -647,9 +755,9 @@ Config::GetServerConfigPort(std::string& value) {
 }
 
 Status
-Config::GetServerConfigMode(std::string& value) {
-    value = GetServerConfigStrMode();
-    return CheckServerConfigMode(value);
+Config::GetServerConfigDeployMode(std::string& value) {
+    value = GetServerConfigStrDeployMode();
+    return CheckServerConfigDeployMode(value);
 }
 
 Status
@@ -659,14 +767,14 @@ Config::GetServerConfigTimeZone(std::string& value) {
 }
 
 Status
-Config::GetDBConfigPath(std::string& value) {
-    value = GetDBConfigStrPath();
-    return CheckDBConfigPath(value);
+Config::GetDBConfigPrimaryPath(std::string& value) {
+    value = GetDBConfigStrPrimaryPath();
+    return CheckDBConfigPrimaryPath(value);
 }
 
 Status
-Config::GetDBConfigSlavePath(std::string& value) {
-    value = GetDBConfigStrSlavePath();
+Config::GetDBConfigSecondaryPath(std::string& value) {
+    value = GetDBConfigStrSecondaryPath();
     return Status::OK();
 }
 
@@ -695,9 +803,9 @@ Config::GetDBConfigArchiveDaysThreshold(int32_t& value) {
 }
 
 Status
-Config::GetDBConfigBufferSize(int32_t& value) {
-    std::string str = GetDBConfigStrBufferSize();
-    Status s = CheckDBConfigBufferSize(str);
+Config::GetDBConfigInsertBufferSize(int32_t& value) {
+    std::string str = GetDBConfigStrInsertBufferSize();
+    Status s = CheckDBConfigInsertBufferSize(str);
     if (!s.ok()) return s;
     value = std::stoi(str);
     return Status::OK();
@@ -713,9 +821,9 @@ Config::GetDBConfigBuildIndexGPU(int32_t& value) {
 }
 
 Status
-Config::GetMetricConfigAutoBootup(bool& value) {
-    std::string str = GetMetricConfigStrAutoBootup();
-    Status s = CheckMetricConfigPrometheusPort(str);
+Config::GetMetricConfigEnableMonitor(bool& value) {
+    std::string str = GetMetricConfigStrEnableMonitor();
+    Status s = CheckMetricConfigEnableMonitor(str);
     if (!s.ok()) return s;
     std::transform(str.begin(), str.end(), str.begin(), ::tolower);
     value = (str == "true" || str == "on" || str == "yes" || str == "1");
@@ -830,10 +938,10 @@ Config::SetServerConfigPort(const std::string& value) {
 }
 
 Status
-Config::SetServerConfigMode(const std::string& value) {
-    Status s = CheckServerConfigMode(value);
+Config::SetServerConfigDeployMode(const std::string& value) {
+    Status s = CheckServerConfigDeployMode(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_MODE, value);
+    SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_DEPLOY_MODE, value);
     return Status::OK();
 }
 
@@ -847,18 +955,18 @@ Config::SetServerConfigTimeZone(const std::string& value) {
 
 /* db config */
 Status
-Config::SetDBConfigPath(const std::string& value) {
-    Status s = CheckDBConfigPath(value);
+Config::SetDBConfigPrimaryPath(const std::string& value) {
+    Status s = CheckDBConfigPrimaryPath(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PATH, value);
+    SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRIMARY_PATH, value);
     return Status::OK();
 }
 
 Status
-Config::SetDBConfigSlavePath(const std::string& value) {
-    Status s = CheckDBConfigSlavePath(value);
+Config::SetDBConfigSecondaryPath(const std::string& value) {
+    Status s = CheckDBConfigSecondaryPath(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_DB, CONFIG_DB_SLAVE_PATH, value);
+    SetConfigValueInMem(CONFIG_DB, CONFIG_DB_SECONDARY_PATH, value);
     return Status::OK();
 }
 
@@ -887,10 +995,10 @@ Config::SetDBConfigArchiveDaysThreshold(const std::string& value) {
 }
 
 Status
-Config::SetDBConfigBufferSize(const std::string& value) {
-    Status s = CheckDBConfigBufferSize(value);
+Config::SetDBConfigInsertBufferSize(const std::string& value) {
+    Status s = CheckDBConfigInsertBufferSize(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BUFFER_SIZE, value);
+    SetConfigValueInMem(CONFIG_DB, CONFIG_DB_INSERT_BUFFER_SIZE, value);
     return Status::OK();
 }
 
@@ -904,10 +1012,10 @@ Config::SetDBConfigBuildIndexGPU(const std::string& value) {
 
 /* metric config */
 Status
-Config::SetMetricConfigAutoBootup(const std::string& value) {
-    Status s = CheckMetricConfigAutoBootup(value);
+Config::SetMetricConfigEnableMonitor(const std::string& value) {
+    Status s = CheckMetricConfigEnableMonitor(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_AUTO_BOOTUP, value);
+    SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_ENABLE_MONITOR, value);
     return Status::OK();
 }
 
