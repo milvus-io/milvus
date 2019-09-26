@@ -48,13 +48,20 @@ TESTING_WOSERVER = env.str('TESTING_WOSERVER', 'tcp://127.0.0.1:19530')
 
 TRACING_TYPE = env.str('TRACING_TYPE', '')
 class TracingConfig:
-    TRACING_LOGGING = env.bool('TRACING_LOGGING', True)
     TRACING_SERVICE_NAME = env.str('TRACING_SERVICE_NAME', 'mishards')
     TRACING_VALIDATE = env.bool('TRACING_VALIDATE', True)
-    TRACING_LOG_PAYLOAD = env.bool('TRACING_LOG_PAYLOAD', DEBUG)
-    TRACING_REPORTING_HOST = env.str('TRACING_REPORTING_HOST', '127.0.0.1')
-    TRACING_REPORTING_PORT = env.str('TRACING_REPORTING_PORT', '5775')
-
+    TRACING_LOG_PAYLOAD = env.bool('TRACING_LOG_PAYLOAD', False)
+    TRACING_CONFIG = {
+        'sampler': {
+            'type': env.str('TRACING_SAMPLER_TYPE', 'const'),
+            'param': env.str('TRACING_SAMPLER_PARAM', "1"),
+            },
+        'local_agent': {
+            'reporting_host': env.str('TRACING_REPORTING_HOST', '127.0.0.1'),
+            'reporting_port': env.str('TRACING_REPORTING_PORT', '5775')
+        },
+        'logging': env.bool('TRACING_LOGGING', True)
+    }
 
 if __name__ == '__main__':
     import logging
