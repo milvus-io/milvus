@@ -25,6 +25,7 @@
 //#include "prometheus/registry.h"
 //#include "prometheus/exposer.h"
 #include <cache/CpuCacheMgr.h>
+#include <src/server/Config.h>
 
 #include "metrics/Metrics.h"
 #include "utils.h"
@@ -36,10 +37,9 @@ using namespace zilliz::milvus;
 
 
 TEST_F(MetricTest, METRIC_TEST) {
-    server::ConfigNode &configNode = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_METRIC);
-    configNode.SetValue(server::CONFIG_METRIC_COLLECTOR, "zabbix");
+    server::Config::GetInstance().SetMetricConfigCollector("zabbix");
     server::Metrics::GetInstance();
-    configNode.SetValue(server::CONFIG_METRIC_COLLECTOR, "prometheus");
+    server::Config::GetInstance().SetMetricConfigCollector("prometheus");
     server::Metrics::GetInstance();
 
     server::SystemInfo::GetInstance().Init();

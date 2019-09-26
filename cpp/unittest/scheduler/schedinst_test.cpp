@@ -18,6 +18,7 @@
 #include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
 
+#include "server/Config.h"
 #include "scheduler/SchedInst.h"
 
 namespace zilliz {
@@ -65,7 +66,7 @@ protected:
         fstream << ss.str();
         fstream.close();
 
-        server::ServerConfig::GetInstance().LoadConfigFile(CONFIG_FILE);
+        server::Config::GetInstance().LoadConfigFile(CONFIG_FILE);
     }
 
     void
