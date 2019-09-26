@@ -4,3 +4,4 @@
 *src/thirdparty*
 *src/core/thirdparty*
 *src/grpc*
+*easylogging++*
