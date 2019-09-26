@@ -111,6 +111,8 @@ class DBImpl : public DB {
                       QueryResults &results);
 
     void BackgroundTimerTask();
+    void WaitMergeFileFinish();
+    void WaitBuildIndexFinish();
 
     void StartMetricTask();
 
@@ -140,10 +142,12 @@ class DBImpl : public DB {
     std::mutex mem_serialize_mutex_;
 
     ThreadPool compact_thread_pool_;
+    std::mutex compact_result_mutex_;
     std::list<std::future<void>> compact_thread_results_;
     std::set<std::string> compact_table_ids_;
 
     ThreadPool index_thread_pool_;
+    std::mutex index_result_mutex_;
     std::list<std::future<void>> index_thread_results_;
 
     std::mutex build_index_mutex_;

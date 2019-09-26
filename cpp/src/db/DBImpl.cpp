@@ -275,7 +275,11 @@ Status DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index)
         }
     }
 
-    //step 3: wait and build index
+    //step 3: let merge file thread finish
+    //to avoid duplicate data bug
+    WaitMergeFileFinish();
+
+    //step 4: wait and build index
     //for IDMAP type, only wait all NEW file converted to RAW file
     //for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
@@ -470,12 +474,8 @@ void DBImpl::BackgroundTimerTask() {
     server::SystemInfo::GetInstance().Init();
     while (true) {
         if (shutting_down_.load(std::memory_order_acquire)){
-            for(auto& iter : compact_thread_results_) {
-                iter.wait();
-            }
-            for(auto& iter : index_thread_results_) {
-                iter.wait();
-            }
+            WaitMergeFileFinish();
+            WaitBuildIndexFinish();
 
             ENGINE_LOG_DEBUG << "DB background thread exit";
             break;
@@ -486,6 +486,20 @@ void DBImpl::BackgroundTimerTask() {
         StartMetricTask();
         StartCompactionTask();
         StartBuildIndexTask();
+    }
+}
+
+void DBImpl::WaitMergeFileFinish() {
+    std::lock_guard<std::mutex> lck(compact_result_mutex_);
+    for(auto& iter : compact_thread_results_) {
+        iter.wait();
+    }
+}
+
+void DBImpl::WaitBuildIndexFinish() {
+    std::lock_guard<std::mutex> lck(index_result_mutex_);
+    for(auto& iter : index_thread_results_) {
+        iter.wait();
     }
 }
 
@@ -545,18 +559,24 @@ void DBImpl::StartCompactionTask() {
     MemSerialize();
 
     //compactiong has been finished?
-    if(!compact_thread_results_.empty()) {
-        std::chrono::milliseconds span(10);
-        if (compact_thread_results_.back().wait_for(span) == std::future_status::ready) {
-            compact_thread_results_.pop_back();
+    {
+        std::lock_guard<std::mutex> lck(compact_result_mutex_);
+        if (!compact_thread_results_.empty()) {
+            std::chrono::milliseconds span(10);
+            if (compact_thread_results_.back().wait_for(span) == std::future_status::ready) {
+                compact_thread_results_.pop_back();
+            }
         }
     }
 
     //add new compaction task
-    if(compact_thread_results_.empty()) {
-        compact_thread_results_.push_back(
+    {
+        std::lock_guard<std::mutex> lck(compact_result_mutex_);
+        if (compact_thread_results_.empty()) {
+            compact_thread_results_.push_back(
                 compact_thread_pool_.enqueue(&DBImpl::BackgroundCompaction, this, compact_table_ids_));
-        compact_table_ids_.clear();
+            compact_table_ids_.clear();
+        }
     }
 }
 
@@ -700,17 +720,23 @@ void DBImpl::StartBuildIndexTask(bool force) {
     }
 
     //build index has been finished?
-    if(!index_thread_results_.empty()) {
-        std::chrono::milliseconds span(10);
-        if (index_thread_results_.back().wait_for(span) == std::future_status::ready) {
-            index_thread_results_.pop_back();
+    {
+        std::lock_guard<std::mutex> lck(index_result_mutex_);
+        if (!index_thread_results_.empty()) {
+            std::chrono::milliseconds span(10);
+            if (index_thread_results_.back().wait_for(span) == std::future_status::ready) {
+                index_thread_results_.pop_back();
+            }
         }
     }
 
     //add new build index task
-    if(index_thread_results_.empty()) {
-        index_thread_results_.push_back(
+    {
+        std::lock_guard<std::mutex> lck(index_result_mutex_);
+        if (index_thread_results_.empty()) {
+            index_thread_results_.push_back(
                 index_thread_pool_.enqueue(&DBImpl::BackgroundBuildIndex, this));
+        }
     }
 }
 
