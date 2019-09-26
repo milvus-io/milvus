@@ -21,9 +21,9 @@ include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 set(wrapper_files
-        ${MILVUS_ENGINE_SRC}/wrapper/data_transfer.cpp
-        ${MILVUS_ENGINE_SRC}/wrapper/vec_impl.cpp
-        ${MILVUS_ENGINE_SRC}/wrapper/vec_index.cpp)
+        ${MILVUS_ENGINE_SRC}/wrapper/DataTransfer.cpp
+        ${MILVUS_ENGINE_SRC}/wrapper/VecImpl.cpp
+        ${MILVUS_ENGINE_SRC}/wrapper/VecIndex.cpp)
 
 set(util_files
         utils.cpp
