@@ -36,9 +36,6 @@ namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-using engine::TaskPtr;
-using engine::ResourceMgrPtr;
-
 class JobMgr {
 public:
     explicit

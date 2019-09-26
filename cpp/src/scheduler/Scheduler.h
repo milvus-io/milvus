@@ -30,7 +30,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 
 // TODO: refactor, not friendly to unittest, logical in framework code
@@ -121,6 +121,8 @@ private:
 
 private:
     bool running_;
+
+    std::unordered_map<uint64_t, std::function<void(EventPtr)>> event_register_;
 
     ResourceMgrWPtr res_mgr_;
     std::queue<EventPtr> event_queue_;

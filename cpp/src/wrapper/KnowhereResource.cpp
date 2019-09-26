@@ -18,7 +18,7 @@
 
 #include "KnowhereResource.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
-#include "server/ServerConfig.h"
+#include "server/Config.h"
 
 #include <map>
 
@@ -37,19 +37,24 @@ KnowhereResource::Initialize() {
     };
     using GpuResourcesArray = std::map<int64_t , GpuResourceSetting>;
     GpuResourcesArray gpu_resources;
+    Status s;
 
     //get build index gpu resource
-    server::ServerConfig& root_config = server::ServerConfig::GetInstance();
-    server::ConfigNode& db_config = root_config.GetConfig(server::CONFIG_DB);
+    server::Config& config = server::Config::GetInstance();
 
-    int32_t build_index_gpu = db_config.GetInt32Value(server::CONFIG_DB_BUILD_INDEX_GPU, 0);
+    int32_t build_index_gpu;
+    s = config.GetDBConfigBuildIndexGPU(build_index_gpu);
+    if (!s.ok())  return s;
+
     gpu_resources.insert(std::make_pair(build_index_gpu, GpuResourceSetting()));
 
     //get search gpu resource
-    server::ConfigNode& res_config = root_config.GetConfig(server::CONFIG_RESOURCE);
-    auto resources = res_config.GetSequence("resources");
+    std::vector<std::string> pool;
+    s = config.GetResourceConfigPool(pool);
+    if (!s.ok()) return s;
+
     std::set<uint64_t> gpu_ids;
-    for (auto &resource : resources) {
+    for (auto &resource : pool) {
         if (resource.length() < 4 || resource.substr(0, 3) != "gpu") {
             // invalid
             continue;

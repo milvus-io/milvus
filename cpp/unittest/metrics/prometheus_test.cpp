@@ -17,6 +17,7 @@
 
 
 #include "metrics/PrometheusMetrics.h"
+#include "server/Config.h"
 
 #include <gtest/gtest.h>
 #include <iostream>
@@ -24,8 +25,7 @@
 using namespace zilliz::milvus;
 
 TEST(PrometheusTest, PROMETHEUS_TEST){
-    server::ConfigNode &configNode = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_METRIC);
-    configNode.SetValue(server::CONFIG_METRIC_IS_STARTUP, "on");
+    server::Config::GetInstance().SetMetricConfigAutoBootup("on");
 
     server::PrometheusMetrics instance = server::PrometheusMetrics::GetInstance();
     instance.Init();
@@ -76,7 +76,7 @@ TEST(PrometheusTest, PROMETHEUS_TEST){
     instance.GPUTemperature();
     instance.CPUTemperature();
 
-    configNode.SetValue(server::CONFIG_METRIC_IS_STARTUP, "off");
+    server::Config::GetInstance().SetMetricConfigAutoBootup("off");
     instance.Init();
     instance.CPUCoreUsagePercentSet();
     instance.GPUTemperature();

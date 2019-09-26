@@ -18,7 +18,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-562 - Add JobMgr and TaskCreator in Scheduler
 - MS-566 - Refactor cmake
 - MS-555 - Remove old scheduler
-- MS-578 - Makesure milvus5.0 don't crack 0.3.1 data
+- MS-574 - Milvus configuration refactor
+- MS-578 - Make sure milvus5.0 don't crack 0.3.1 data
+- MS-585 - Update namespace in scheduler
 
 ## New Feature
 
@@ -28,6 +30,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-567 - Add NOTICE.md
 - MS-569 - Complete the NOTICE.md
 - MS-575 - Add Clang-format & Clang-tidy & Cpplint
+- MS-586 - Remove BUILD_FAISS_WITH_MKL option
+- MS-590 - Refine cmake code to support cpplint
 
 # Milvus 0.4.0 (2019-09-12)
 
@@ -62,6 +66,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-510 - unittest out of memory and crashed
 - MS-507 - Dataset 10m-512, index type sq8，performance in-normal when set CPU_CACHE to 16 or 64
 - MS-543 - SearchTask fail without exception
+- MS-582 - grafana displays changes frequently
 
 ## Improvement
 - MS-327 - Clean code for milvus
@@ -147,6 +152,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-539 - Remove old task code
 - MS-546 - Add simple mode resource_config
 - MS-570 - Add prometheus docker-compose file
+- MS-576 - Scheduler refactor
+- MS-592 - Change showtables stream transport to unary
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

@@ -17,7 +17,7 @@
 
 
 #include "CpuCacheMgr.h"
-#include "server/ServerConfig.h"
+#include "server/Config.h"
 #include "utils/Log.h"
 
 namespace zilliz {
@@ -29,17 +29,27 @@ namespace {
 }
 
 CpuCacheMgr::CpuCacheMgr() {
-    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
-    int64_t cap = config.GetInt64Value(server::CONFIG_CPU_CACHE_CAPACITY, 16);
-    cap *= unit;
+    server::Config& config = server::Config::GetInstance();
+    Status s;
+
+    int32_t cpu_mem_cap;
+    s = config.GetCacheConfigCpuMemCapacity(cpu_mem_cap);
+    if (!s.ok()) {
+        SERVER_LOG_ERROR << s.message();
+    }
+    int64_t cap = cpu_mem_cap * unit;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
 
-    double free_percent = config.GetDoubleValue(server::CACHE_FREE_PERCENT, 0.85);
-    if(free_percent > 0.0 && free_percent <= 1.0) {
-        cache_->set_freemem_percent(free_percent);
+    float cpu_mem_threshold;
+    s = config.GetCacheConfigCpuMemThreshold(cpu_mem_threshold);
+    if (!s.ok()) {
+        SERVER_LOG_ERROR << s.message();
+    }
+    if (cpu_mem_threshold > 0.0 && cpu_mem_threshold <= 1.0) {
+        cache_->set_freemem_percent(cpu_mem_threshold);
     } else {
-        SERVER_LOG_ERROR << "Invalid cache_free_percent: " << free_percent <<
-         ", defaultly set to " << cache_->freemem_percent();
+        SERVER_LOG_ERROR << "Invalid cpu_mem_threshold: " << cpu_mem_threshold
+                         << ", by default set to " << cache_->freemem_percent();
     }
 }
 

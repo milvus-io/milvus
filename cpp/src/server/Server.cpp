@@ -16,14 +16,6 @@
 // under the License.
 
 #include <thread>
-#include "Server.h"
-#include "server/grpc_impl/GrpcServer.h"
-#include "utils/Log.h"
-#include "utils/LogUtil.h"
-#include "utils/SignalUtil.h"
-#include "utils/TimeRecorder.h"
-#include "metrics/Metrics.h"
-
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -31,10 +23,17 @@
 //#include <numaif.h>
 #include <unistd.h>
 #include <string.h>
-#include <src/scheduler/SchedInst.h>
-#include "src/wrapper/KnowhereResource.h"
 
+#include "Server.h"
+#include "server/grpc_impl/GrpcServer.h"
+#include "server/Config.h"
+#include "utils/Log.h"
+#include "utils/LogUtil.h"
+#include "utils/SignalUtil.h"
+#include "utils/TimeRecorder.h"
 #include "metrics/Metrics.h"
+#include "scheduler/SchedInst.h"
+#include "wrapper/KnowhereResource.h"
 #include "DBWrapper.h"
 
 
@@ -43,16 +42,9 @@ namespace milvus {
 namespace server {
 
 Server &
-Server::Instance() {
+Server::GetInstance() {
     static Server server;
     return server;
-}
-
-Server::Server() {
-
-}
-Server::~Server() {
-
 }
 
 void
@@ -136,18 +128,18 @@ Server::Daemonize() {
     stderr = fopen("/dev/null", "w+");
     // Try to write PID of daemon to lockfile
     if (!pid_filename_.empty()) {
-        pid_fd = open(pid_filename_.c_str(), O_RDWR | O_CREAT, 0640);
-        if (pid_fd < 0) {
+        pid_fd_ = open(pid_filename_.c_str(), O_RDWR | O_CREAT, 0640);
+        if (pid_fd_ < 0) {
             std::cerr << "Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
-        if (lockf(pid_fd, F_TLOCK, 0) < 0) {
+        if (lockf(pid_fd_, F_TLOCK, 0) < 0) {
             std::cerr << "Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
 
         std::string pid_file_context = std::to_string(getpid());
-        ssize_t res = write(pid_fd, pid_file_context.c_str(), pid_file_context.size());
+        ssize_t res = write(pid_fd_, pid_file_context.c_str(), pid_file_context.size());
         if (res != 0) {
             return;
         }
@@ -168,10 +160,14 @@ Server::Start() {
         }
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
-        ServerConfig &config = ServerConfig::GetInstance();
-        ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
+        Config &config = Config::GetInstance();
+        std::string time_zone;
+        Status s = config.GetServerConfigTimeZone(time_zone);
+        if (!s.ok()) {
+            std::cerr << "Fail to get server config timezone" << std::endl;
+            return;
+        }
 
-        std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
         if (time_zone.length() == 3) {
             time_zone = "CUT";
         } else {
@@ -209,13 +205,13 @@ Server::Stop() {
     std::cerr << "Milvus server is going to shutdown ..." << std::endl;
 
     /* Unlock and close lockfile */
-    if (pid_fd != -1) {
-        int ret = lockf(pid_fd, F_ULOCK, 0);
+    if (pid_fd_ != -1) {
+        int ret = lockf(pid_fd_, F_ULOCK, 0);
         if (ret != 0) {
             std::cerr << "Can't lock file: " << strerror(errno) << std::endl;
             exit(0);
         }
-        ret = close(pid_fd);
+        ret = close(pid_fd_);
         if (ret != 0) {
             std::cerr << "Can't close file: " << strerror(errno) << std::endl;
             exit(0);
@@ -239,20 +235,19 @@ Server::Stop() {
 
 ErrorCode
 Server::LoadConfig() {
-    ServerConfig::GetInstance().LoadConfigFile(config_filename_);
-    auto status = ServerConfig::GetInstance().ValidateConfig();
-    if (!status.ok()) {
+    Config& config = Config::GetInstance();
+    Status s = config.LoadConfigFile(config_filename_);
+    if (!s.ok()) {
         std::cerr << "Failed to load config file: " << config_filename_ << std::endl;
         exit(0);
     }
-
     return SERVER_SUCCESS;
 }
 
 void
 Server::StartService() {
     engine::KnowhereResource::Initialize();
-    engine::StartSchedulerService();
+    scheduler::StartSchedulerService();
     DBWrapper::GetInstance().StartService();
     grpc::GrpcServer::GetInstance().Start();
 }
@@ -261,7 +256,7 @@ void
 Server::StopService() {
     grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
-    engine::StopSchedulerService();
+    scheduler::StopSchedulerService();
     engine::KnowhereResource::Finalize();
 }
 

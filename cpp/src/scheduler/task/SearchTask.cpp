@@ -27,7 +27,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 static constexpr size_t PARALLEL_REDUCE_THRESHOLD = 10000;
 static constexpr size_t PARALLEL_REDUCE_BATCH = 1000;
@@ -79,8 +79,8 @@ std::mutex XSearchTask::merge_mutex_;
 void
 CollectFileMetrics(int file_type, size_t file_size) {
     switch (file_type) {
-        case meta::TableFileSchema::RAW:
-        case meta::TableFileSchema::TO_INDEX: {
+        case TableFileSchema::RAW:
+        case TableFileSchema::TO_INDEX: {
             server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size);
             server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size);
             server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size);
@@ -95,7 +95,7 @@ CollectFileMetrics(int file_type, size_t file_size) {
     }
 }
 
-XSearchTask::XSearchTask(meta::TableFileSchemaPtr file)
+XSearchTask::XSearchTask(TableFileSchemaPtr file)
     : Task(TaskType::SearchTask), file_(file) {
     if (file_) {
         index_engine_ = EngineFactory::Build(file_->dimension_,

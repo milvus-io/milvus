@@ -77,7 +77,7 @@ TEST(DBMiscTest, OPTIONS_TEST) {
 
 TEST(DBMiscTest, META_TEST) {
     engine::DBMetaOptions options;
-    options.path = "/tmp/milvus_test";
+    options.path_ = "/tmp/milvus_test";
     engine::meta::SqliteMetaImpl impl(options);
 
     time_t tt;
@@ -89,15 +89,15 @@ TEST(DBMiscTest, META_TEST) {
 
 TEST(DBMiscTest, UTILS_TEST) {
     engine::DBMetaOptions options;
-    options.path = "/tmp/milvus_test/main";
-    options.slave_paths.push_back("/tmp/milvus_test/slave_1");
-    options.slave_paths.push_back("/tmp/milvus_test/slave_2");
+    options.path_ = "/tmp/milvus_test/main";
+    options.slave_paths_.push_back("/tmp/milvus_test/slave_1");
+    options.slave_paths_.push_back("/tmp/milvus_test/slave_2");
 
     const std::string TABLE_NAME = "test_tbl";
     auto status =  engine::utils::CreateTablePath(options, TABLE_NAME);
     ASSERT_TRUE(status.ok());
-    ASSERT_TRUE(boost::filesystem::exists(options.path));
-    for(auto& path : options.slave_paths) {
+    ASSERT_TRUE(boost::filesystem::exists(options.path_));
+    for(auto& path : options.slave_paths_) {
        ASSERT_TRUE(boost::filesystem::exists(path));
     }
 
