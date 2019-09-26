@@ -44,13 +44,13 @@ Status DBWrapper::StartService() {
     if (!s.ok()) return s;
 
     std::string path;
-    s = config.GetDBConfigPath(path);
+    s = config.GetDBConfigPrimaryPath(path);
     if (!s.ok()) return s;
 
     opt.meta_.path_ = path + "/db";
 
     std::string db_slave_path;
-    s = config.GetDBConfigSlavePath(db_slave_path);
+    s = config.GetDBConfigSecondaryPath(db_slave_path);
     if (!s.ok()) return s;
 
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta_.slave_paths_);
