@@ -16,14 +16,6 @@
 // under the License.
 
 #include <thread>
-#include "Server.h"
-#include "server/grpc_impl/GrpcServer.h"
-#include "utils/Log.h"
-#include "utils/LogUtil.h"
-#include "utils/SignalUtil.h"
-#include "utils/TimeRecorder.h"
-#include "metrics/Metrics.h"
-
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -31,10 +23,17 @@
 //#include <numaif.h>
 #include <unistd.h>
 #include <string.h>
-#include <src/scheduler/SchedInst.h>
-#include "src/wrapper/KnowhereResource.h"
 
+#include "Server.h"
+#include "server/grpc_impl/GrpcServer.h"
+#include "server/Config.h"
+#include "utils/Log.h"
+#include "utils/LogUtil.h"
+#include "utils/SignalUtil.h"
+#include "utils/TimeRecorder.h"
 #include "metrics/Metrics.h"
+#include "scheduler/SchedInst.h"
+#include "wrapper/KnowhereResource.h"
 #include "DBWrapper.h"
 
 
@@ -43,16 +42,9 @@ namespace milvus {
 namespace server {
 
 Server &
-Server::Instance() {
+Server::GetInstance() {
     static Server server;
     return server;
-}
-
-Server::Server() {
-
-}
-Server::~Server() {
-
 }
 
 void
@@ -168,10 +160,14 @@ Server::Start() {
         }
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
-        ServerConfig &config = ServerConfig::GetInstance();
-        ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
+        Config &config = Config::GetInstance();
+        std::string time_zone;
+        Status s = config.GetServerConfigTimeZone(time_zone);
+        if (!s.ok()) {
+            std::cerr << "Fail to get server config timezone" << std::endl;
+            return;
+        }
 
-        std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
         if (time_zone.length() == 3) {
             time_zone = "CUT";
         } else {
@@ -239,13 +235,12 @@ Server::Stop() {
 
 ErrorCode
 Server::LoadConfig() {
-    ServerConfig::GetInstance().LoadConfigFile(config_filename_);
-    auto status = ServerConfig::GetInstance().ValidateConfig();
-    if (!status.ok()) {
+    Config& config = Config::GetInstance();
+    Status s = config.LoadConfigFile(config_filename_);
+    if (!s.ok()) {
         std::cerr << "Failed to load config file: " << config_filename_ << std::endl;
         exit(0);
     }
-
     return SERVER_SUCCESS;
 }
 

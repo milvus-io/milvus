@@ -17,15 +17,13 @@
 
 #pragma once
 
-#include "utils/Error.h"
 #include <memory>
 #include <vector>
-
-
 #include <prometheus/registry.h>
 #include <prometheus/exposer.h>
 #include <iostream>
-#include "server/ServerConfig.h"
+
+#include "utils/Error.h"
 #include "MetricBase.h"
 
 
@@ -37,10 +35,6 @@
 namespace zilliz {
 namespace milvus {
 namespace server {
-
-
-
-
 
 class PrometheusMetrics: public MetricsBase {
 
@@ -107,11 +101,6 @@ class PrometheusMetrics: public MetricsBase {
     void GPUTemperature() override;
     void CPUTemperature() override;
 
-
-
-
-
-
     std::shared_ptr<prometheus::Exposer> &exposer_ptr() {return exposer_ptr_; }
 //    prometheus::Exposer& exposer() { return exposer_;}
     std::shared_ptr<prometheus::Registry> &registry_ptr() {return registry_; }
@@ -124,8 +113,6 @@ class PrometheusMetrics: public MetricsBase {
 //        .Help("total number of connection has been made")
 //        .Register(*registry_);
 //    prometheus::Counter &connection_total_ = connect_request_.Add({});
-
-
 
     ////all from DBImpl.cpp
     using BucketBoundaries = std::vector<double>;
@@ -472,9 +459,7 @@ class PrometheusMetrics: public MetricsBase {
         .Name("CPU_temperature")
         .Help("CPU temperature")
         .Register(*registry_);
-
 };
-
 
 }
 }
