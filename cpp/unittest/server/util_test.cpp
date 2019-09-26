@@ -331,9 +331,8 @@ TEST(ValidationUtilTest, VALIDATE_BOOL_TEST) {
 }
 
 TEST(ValidationUtilTest, VALIDATE_DOUBLE_TEST) {
-    double ret = 0.0;
-    ASSERT_EQ(server::ValidationUtil::ValidateStringIsDouble("2.5", ret).code(), SERVER_SUCCESS);
-    ASSERT_NE(server::ValidationUtil::ValidateStringIsDouble("not double", ret).code(), SERVER_SUCCESS);
+    ASSERT_EQ(server::ValidationUtil::ValidateStringIsFloat("2.5").code(), SERVER_SUCCESS);
+    ASSERT_NE(server::ValidationUtil::ValidateStringIsFloat("not double").code(), SERVER_SUCCESS);
 }
 
 TEST(ValidationUtilTest, VALIDATE_DBURI_TEST) {
