@@ -101,15 +101,14 @@ main(int argc, char *argv[]) {
     }
 
     /* Handle Signal */
-    using ::zilliz::milvus;
-    signal(SIGHUP, server::SignalUtil::HandleSignal);
-    signal(SIGINT, server::SignalUtil::HandleSignal);
-    signal(SIGUSR1, server::SignalUtil::HandleSignal);
-    signal(SIGSEGV, server::SignalUtil::HandleSignal);
-    signal(SIGUSR2, server::SignalUtil::HandleSignal);
-    signal(SIGTERM, server::SignalUtil::HandleSignal);
+    signal(SIGHUP, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGINT, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGUSR1, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGSEGV, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGUSR2, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGTERM, zilliz::milvus::server::SignalUtil::HandleSignal);
 
-    server::Server &server = server::Server::GetInstance();
+    zilliz::milvus::server::Server &server = zilliz::milvus::server::Server::GetInstance();
     server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
     server.Start();
 
