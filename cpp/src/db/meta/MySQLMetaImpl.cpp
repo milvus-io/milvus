@@ -284,7 +284,7 @@ Status MySQLMetaImpl::Initialize() {
     //step 5: create meta tables
     try {
 
-        if (mode_ != DBOptions::MODE::READ_ONLY) {
+        if (mode_ != DBOptions::MODE::CLUSTER_READONLY) {
             CleanUp();
         }
 
@@ -768,7 +768,7 @@ Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
 
         } //Scoped Connection
 
-        if (mode_ == DBOptions::MODE::CLUSTER) {
+        if (mode_ == DBOptions::MODE::CLUSTER_WRITABLE) {
             DeleteTableFiles(table_id);
         }
 
