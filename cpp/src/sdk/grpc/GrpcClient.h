@@ -73,7 +73,7 @@ public:
     CountTable(const std::string& table_name, Status& status);
 
     Status
-    ShowTables(std::vector<std::string> &table_array);
+    ShowTables(milvus::grpc::TableNameList &table_name_list);
 
     Status
     Cmd(std::string &result, const std::string& cmd);

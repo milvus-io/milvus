@@ -124,17 +124,17 @@ private:
 class ShowTablesTask : public GrpcBaseTask {
 public:
     static BaseTaskPtr
-    Create(::grpc::ServerWriter<::milvus::grpc::TableName> *writer);
+    Create(::milvus::grpc::TableNameList *table_name_list);
 
 protected:
     explicit
-    ShowTablesTask(::grpc::ServerWriter<::milvus::grpc::TableName> *writer);
+    ShowTablesTask(::milvus::grpc::TableNameList *table_name_list);
 
     Status
     OnExecute() override;
 
 private:
-    ::grpc::ServerWriter<::milvus::grpc::TableName> *writer_;
+    ::milvus::grpc::TableNameList *table_name_list_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
