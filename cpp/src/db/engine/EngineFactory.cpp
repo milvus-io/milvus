@@ -35,7 +35,7 @@ EngineFactory::Build(uint16_t dimension,
         return nullptr;
     }
 
-    ENGINE_LOG_DEBUG << "EngineFactory EngineTypee: " << (int)index_type;
+    ENGINE_LOG_DEBUG << "EngineFactory index type: " << (int)index_type;
     ExecutionEnginePtr execution_engine_ptr =
             std::make_shared<ExecutionEngineImpl>(dimension, location, index_type, metric_type, nlist);
 

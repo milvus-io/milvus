@@ -8,6 +8,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-568 - Fix gpuresource free error
 - MS-572 - Milvus crash when get SIGINT
 - MS-577 - Unittest Query randomly hung
+- MS-587 - Count get wrong result after adding vectors and index built immediately
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
