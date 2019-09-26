@@ -49,7 +49,7 @@ And we made the following changes based on the guide:
 - 4 spaces for indentation
 - Adopt .cpp file extension instead of .cc extension
 - 120-character line length
-- The file name starts with the upper case
+- Camel-Cased file names
 
 
 ## Run unit test
