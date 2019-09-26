@@ -21,8 +21,8 @@
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
-#include "vec_impl.h"
-#include "data_transfer.h"
+#include "VecImpl.h"
+#include "DataTransfer.h"
 
 
 namespace zilliz {
