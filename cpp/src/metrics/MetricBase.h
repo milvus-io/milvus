@@ -19,7 +19,6 @@
 #pragma once
 
 #include "utils/Error.h"
-#include "server/ServerConfig.h"
 #include "SystemInfo.h"
 
 namespace zilliz {
@@ -82,11 +81,6 @@ class MetricsBase{
     virtual void GPUTemperature() {};
     virtual void CPUTemperature() {};
 };
-
-
-
-
-
 
 }
 }

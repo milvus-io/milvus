@@ -110,7 +110,7 @@ main(int argc, char *argv[]) {
     signal(SIGUSR2, server::SignalUtil::HandleSignal);
     signal(SIGTERM, server::SignalUtil::HandleSignal);
 
-    server::Server &server = server::Server::Instance();
+    server::Server &server = server::Server::GetInstance();
     server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
     server.Start();
 

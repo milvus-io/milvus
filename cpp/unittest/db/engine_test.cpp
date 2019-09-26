@@ -21,7 +21,6 @@
 
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngineImpl.h"
-#include "server/ServerConfig.h"
 #include "utils.h"
 
 using namespace zilliz::milvus;
