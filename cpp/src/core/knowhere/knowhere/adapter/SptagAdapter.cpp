@@ -69,8 +69,7 @@ ConvertToQueryResult(const DatasetPtr &dataset, const Config &config) {
     auto dimension = tensor->shape()[1];
     auto rows = tensor->shape()[0];
 
-    auto k = config[META_K].as<int64_t>();
-    std::vector<SPTAG::QueryResult> query_results(rows, SPTAG::QueryResult(nullptr, k, true));
+    std::vector<SPTAG::QueryResult> query_results(rows, SPTAG::QueryResult(nullptr, config->k, true));
     for (auto i = 0; i < rows; ++i) {
         query_results[i].SetTarget(&p_data[i * dimension]);
     }

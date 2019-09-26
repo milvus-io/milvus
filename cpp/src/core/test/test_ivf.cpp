@@ -25,23 +25,32 @@
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/adapter/Structure.h"
-#include "knowhere/index/vector_index/utils/Cloner.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
+#include "knowhere/adapter/Structure.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
+#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 
 #include "utils.h"
 
-
 using namespace zilliz::knowhere;
+using namespace zilliz::knowhere::cloner;
 
 using ::testing::TestWithParam;
 using ::testing::Values;
 using ::testing::Combine;
 
-static int device_id = 0;
+constexpr int device_id = 0;
+constexpr int64_t DIM = 128;
+constexpr int64_t NB = 1000000/100;
+constexpr int64_t NQ = 10;
+constexpr int64_t K = 10;
+
 IVFIndexPtr IndexFactory(const std::string &type) {
     if (type == "IVF") {
         return std::make_shared<IVF>();
@@ -58,14 +67,67 @@ IVFIndexPtr IndexFactory(const std::string &type) {
     }
 }
 
+enum class ParameterType {
+    ivf,
+    ivfpq,
+    ivfsq,
+    nsg,
+};
+
+class ParamGenerator {
+ public:
+    static ParamGenerator& GetInstance(){
+        static ParamGenerator instance;
+        return instance;
+    }
+
+    Config Gen(const ParameterType& type){
+        if (type == ParameterType::ivf) {
+            auto tempconf = std::make_shared<IVFCfg>();
+            tempconf->d = DIM;
+            tempconf->gpu_id = device_id;
+            tempconf->nlist = 100;
+            tempconf->nprobe = 16;
+            tempconf->k = K;
+            tempconf->metric_type = METRICTYPE::L2;
+            return tempconf;
+        }
+        else if (type == ParameterType::ivfpq) {
+            auto tempconf = std::make_shared<IVFPQCfg>();
+            tempconf->d = DIM;
+            tempconf->gpu_id = device_id;
+            tempconf->nlist = 100;
+            tempconf->nprobe = 16;
+            tempconf->k = K;
+            tempconf->m = 8;
+            tempconf->nbits = 8;
+            tempconf->metric_type = METRICTYPE::L2;
+            return tempconf;
+        }
+        else if (type == ParameterType::ivfsq) {
+            auto tempconf = std::make_shared<IVFSQCfg>();
+            tempconf->d = DIM;
+            tempconf->gpu_id = device_id;
+            tempconf->nlist = 100;
+            tempconf->nprobe = 16;
+            tempconf->k = K;
+            tempconf->nbits = 8;
+            tempconf->metric_type = METRICTYPE::L2;
+            return tempconf;
+        }
+    }
+};
+
 class IVFTest
-    : public DataGen, public TestWithParam<::std::tuple<std::string, Config, Config, Config, Config>> {
+    : public DataGen, public TestWithParam<::std::tuple<std::string, ParameterType>> {
  protected:
     void SetUp() override {
-        std::tie(index_type, preprocess_cfg, train_cfg, add_cfg, search_cfg) = GetParam();
+        ParameterType parameter_type;
+        std::tie(index_type, parameter_type) = GetParam();
         //Init_with_default();
-        Generate(128, 1000000/100, 10);
+        Generate(DIM, NB, NQ);
         index_ = IndexFactory(index_type);
+        conf = ParamGenerator::GetInstance().Gen(parameter_type);
         FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*600, 2);
     }
     void TearDown() override {
@@ -74,46 +136,20 @@ class IVFTest
 
  protected:
     std::string index_type;
-    Config preprocess_cfg;
-    Config train_cfg;
-    Config add_cfg;
-    Config search_cfg;
+    Config conf;
     IVFIndexPtr index_ = nullptr;
 };
 
 
+
 INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                         Values(
-                            std::make_tuple("IVF",
-                                            Config(),
-                                            Config::object{{"nlist", 100}, {"metric_type", "L2"}},
-                                            Config(),
-                                            Config::object{{"k", 10}}),
-                            //std::make_tuple("IVFPQ",
-                            //                Config(),
-                            //                Config::object{{"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
-                            //                Config(),
-                            //                Config::object{{"k", 10}}),
-                            std::make_tuple("GPUIVF",
-                                            Config(),
-                                            Config::object{{"nlist", 100}, {"gpu_id", device_id}, {"metric_type", "L2"}},
-                                            Config(),
-                                            Config::object{{"k", 10}}),
-                            //std::make_tuple("GPUIVFPQ",
-                            //                Config(),
-                            //                Config::object{{"gpu_id", device_id}, {"nlist", 100}, {"M", 8}, {"nbits", 8}, {"metric_type", "L2"}},
-                            //                Config(),
-                            //                Config::object{{"k", 10}}),
-                            std::make_tuple("IVFSQ",
-                                            Config(),
-                                            Config::object{{"nlist", 100}, {"nbits", 8}, {"metric_type", "L2"}},
-                                            Config(),
-                                            Config::object{{"k", 10}}),
-                            std::make_tuple("GPUIVFSQ",
-                                            Config(),
-                                            Config::object{{"gpu_id", device_id}, {"nlist", 100}, {"nbits", 8}, {"metric_type", "L2"}},
-                                            Config(),
-                                            Config::object{{"k", 10}})
+                            std::make_tuple("IVF", ParameterType::ivf),
+                            std::make_tuple("GPUIVF", ParameterType::ivf),
+                            std::make_tuple("IVFPQ", ParameterType::ivfpq),
+                            std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
+                            std::make_tuple("IVFSQ", ParameterType::ivfsq),
+                            std::make_tuple("GPUIVFSQ", ParameterType::ivfsq)
                         )
 );
 
@@ -149,16 +185,16 @@ void PrintResult(const DatasetPtr &result,
 TEST_P(IVFTest, ivf_basic) {
     assert(!xb.empty());
 
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
     index_->set_preprocessor(preprocessor);
 
-    auto model = index_->Train(base_dataset, train_cfg);
+    auto model = index_->Train(base_dataset, conf);
     index_->set_index_model(model);
-    index_->Add(base_dataset, add_cfg);
+    index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    auto result = index_->Search(query_dataset, search_cfg);
-    AssertAnns(result, nq, k);
+    auto result = index_->Search(query_dataset, conf);
+    AssertAnns(result, nq, conf->k);
     //PrintResult(result, nq, k);
 }
 
@@ -168,20 +204,20 @@ TEST_P(IVFTest, ivf_basic) {
 //    // else
 //    assert(!xb.empty());
 //
-//    auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+//    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
 //    index_->set_preprocessor(preprocessor);
 //
-//    auto model = index_->Train(base_dataset, train_cfg);
+//    auto model = index_->Train(base_dataset, conf);
 //    index_->set_index_model(model);
-//    index_->Add(base_dataset, add_cfg);
+//    index_->Add(base_dataset, conf);
 //    EXPECT_EQ(index_->Count(), nb);
 //    EXPECT_EQ(index_->Dimension(), dim);
-//    auto result = index_->Search(query_dataset, search_cfg);
+//    auto result = index_->Search(query_dataset, conf);
 //    AssertAnns(result, nq, k);
 //
 //    if (auto device_index = std::dynamic_pointer_cast<GPUIVF>(index_)) {
 //        auto host_index = device_index->Copy_index_gpu_to_cpu();
-//        auto result = host_index->Search(query_dataset, search_cfg);
+//        auto result = host_index->Search(query_dataset, conf);
 //        AssertAnns(result, nq, k);
 //    }
 //}
@@ -197,7 +233,7 @@ TEST_P(IVFTest, ivf_serialize) {
 
     {
         // serialize index-model
-        auto model = index_->Train(base_dataset, train_cfg);
+        auto model = index_->Train(base_dataset, conf);
         auto binaryset = model->Serialize();
         auto bin = binaryset.GetByName("IVF");
 
@@ -213,16 +249,16 @@ TEST_P(IVFTest, ivf_serialize) {
         model->Load(binaryset);
 
         index_->set_index_model(model);
-        index_->Add(base_dataset, add_cfg);
-        auto result = index_->Search(query_dataset, search_cfg);
-        AssertAnns(result, nq, k);
+        index_->Add(base_dataset, conf);
+        auto result = index_->Search(query_dataset, conf);
+        AssertAnns(result, nq, conf->k);
     }
 
     {
         // serialize index
-        auto model = index_->Train(base_dataset, train_cfg);
+        auto model = index_->Train(base_dataset, conf);
         index_->set_index_model(model);
-        index_->Add(base_dataset, add_cfg);
+        index_->Add(base_dataset, conf);
         auto binaryset = index_->Serialize();
         auto bin = binaryset.GetByName("IVF");
 
@@ -238,24 +274,24 @@ TEST_P(IVFTest, ivf_serialize) {
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
-        auto result = index_->Search(query_dataset, search_cfg);
-        AssertAnns(result, nq, k);
+        auto result = index_->Search(query_dataset, conf);
+        AssertAnns(result, nq, conf->k);
     }
 }
 
 TEST_P(IVFTest, clone_test) {
     assert(!xb.empty());
 
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
     index_->set_preprocessor(preprocessor);
 
-    auto model = index_->Train(base_dataset, train_cfg);
+    auto model = index_->Train(base_dataset, conf);
     index_->set_index_model(model);
-    index_->Add(base_dataset, add_cfg);
+    index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    auto result = index_->Search(query_dataset, search_cfg);
-    AssertAnns(result, nq, k);
+    auto result = index_->Search(query_dataset, conf);
+    AssertAnns(result, nq, conf->k);
     //PrintResult(result, nq, k);
 
     auto AssertEqual = [&] (DatasetPtr p1, DatasetPtr p2) {
@@ -275,8 +311,8 @@ TEST_P(IVFTest, clone_test) {
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
                                 auto clone_index = index_->Clone();
-                                auto clone_result = clone_index->Search(query_dataset, search_cfg);
-                                //AssertAnns(result, nq, k);
+                                auto clone_result = clone_index->Search(query_dataset, conf);
+                                //AssertAnns(result, nq, conf->k);
                                 AssertEqual(result, clone_result);
                                 std::cout << "inplace clone [" << index_type << "] success" << std::endl;
                             });
@@ -295,7 +331,7 @@ TEST_P(IVFTest, clone_test) {
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
                                 auto clone_index = CopyGpuToCpu(index_, Config());
-                                auto clone_result = clone_index->Search(query_dataset, search_cfg);
+                                auto clone_result = clone_index->Search(query_dataset, conf);
                                 AssertEqual(result, clone_result);
                                 std::cout << "clone G <=> C [" << index_type << "] success" << std::endl;
                             });
@@ -314,7 +350,7 @@ TEST_P(IVFTest, clone_test) {
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
                                 auto clone_index = CopyCpuToGpu(index_, device_id, Config());
-                                auto clone_result = clone_index->Search(query_dataset, search_cfg);
+                                auto clone_result = clone_index->Search(query_dataset, conf);
                                 AssertEqual(result, clone_result);
                                 std::cout << "clone C <=> G [" << index_type << "] success" << std::endl;
                             });
@@ -338,17 +374,16 @@ TEST_P(IVFTest, seal_test) {
 
     assert(!xb.empty());
 
-    //index_ = std::make_shared<GPUIVF>(0);
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
     index_->set_preprocessor(preprocessor);
 
-    auto model = index_->Train(base_dataset, train_cfg);
+    auto model = index_->Train(base_dataset, conf);
     index_->set_index_model(model);
-    index_->Add(base_dataset, add_cfg);
+    index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    auto result = index_->Search(query_dataset, search_cfg);
-    AssertAnns(result, nq, k);
+    auto result = index_->Search(query_dataset, conf);
+    AssertAnns(result, nq, conf->k);
 
     auto cpu_idx = CopyGpuToCpu(index_, Config());
 
@@ -367,13 +402,10 @@ class GPURESTEST
     : public DataGen, public ::testing::Test {
  protected:
     void SetUp() override {
-        //std::tie(index_type, preprocess_cfg, train_cfg, add_cfg, search_cfg) = GetParam();
-        //Init_with_default();
         Generate(128, 1000000, 1000);
-        k = 100;
-        //index_ = IndexFactory(index_type);
         FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*300, 2);
 
+        k = 100;
         elems = nq * k;
         ids = (int64_t *) malloc(sizeof(int64_t) * elems);
         dis = (float *) malloc(sizeof(float) * elems);
@@ -387,10 +419,6 @@ class GPURESTEST
 
  protected:
     std::string index_type;
-    Config preprocess_cfg;
-    Config train_cfg;
-    Config add_cfg;
-    Config search_cfg;
     IVFIndexPtr index_ = nullptr;
 
     int64_t *ids = nullptr;
@@ -404,26 +432,31 @@ const int load_count = 3;
 TEST_F(GPURESTEST, gpu_ivf_resource_test) {
     assert(!xb.empty());
 
-
     {
         index_ =  std::make_shared<GPUIVF>(-1);
         ASSERT_EQ(std::dynamic_pointer_cast<GPUIVF>(index_)->GetGpuDevice(), -1);
         std::dynamic_pointer_cast<GPUIVF>(index_)->SetGpuDevice(device_id);
         ASSERT_EQ(std::dynamic_pointer_cast<GPUIVF>(index_)->GetGpuDevice(), device_id);
 
-        auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+        auto conf = std::make_shared<IVFCfg>();
+        conf->nlist = 1638;
+        conf->d = dim;
+        conf->gpu_id = device_id;
+        conf->metric_type = METRICTYPE::L2;
+        conf->k = k;
+        conf->nprobe = 1;
+
+        auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
         index_->set_preprocessor(preprocessor);
-        train_cfg = Config::object{{"nlist", 1638}, {"gpu_id", device_id}, {"metric_type", "L2"}};
-        auto model = index_->Train(base_dataset, train_cfg);
+        auto model = index_->Train(base_dataset, conf);
         index_->set_index_model(model);
-        index_->Add(base_dataset, add_cfg);
+        index_->Add(base_dataset, conf);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
 
-        search_cfg  = Config::object{{"k", k}};
         TimeRecorder tc("knowere GPUIVF");
         for (int i = 0; i < search_count; ++i) {
-            index_->Search(query_dataset, search_cfg);
+            index_->Search(query_dataset, conf);
             if (i > search_count - 6 || i < 5)
                 tc.RecordSection("search once");
         }
@@ -456,14 +489,22 @@ TEST_F(GPURESTEST, gpuivfsq) {
         // knowhere gpu ivfsq
         index_type = "GPUIVFSQ";
         index_ = IndexFactory(index_type);
-        auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+
+        auto conf = std::make_shared<IVFSQCfg>();
+        conf->nlist = 1638;
+        conf->d = dim;
+        conf->gpu_id = device_id;
+        conf->metric_type = METRICTYPE::L2;
+        conf->k = k;
+        conf->nbits = 8;
+        conf->nprobe = 1;
+
+        auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
         index_->set_preprocessor(preprocessor);
-        train_cfg = Config::object{{"gpu_id", device_id}, {"nlist", 1638}, {"nbits", 8}, {"metric_type", "L2"}};
-        auto model = index_->Train(base_dataset, train_cfg);
+        auto model = index_->Train(base_dataset, conf);
         index_->set_index_model(model);
-        index_->Add(base_dataset, add_cfg);
-        search_cfg  = Config::object{{"k", k}};
-        auto result = index_->Search(query_dataset, search_cfg);
+        index_->Add(base_dataset, conf);
+        auto result = index_->Search(query_dataset, conf);
         AssertAnns(result, nq, k);
 
         auto cpu_idx = CopyGpuToCpu(index_, Config());
@@ -473,7 +514,7 @@ TEST_F(GPURESTEST, gpuivfsq) {
         auto search_idx = CopyCpuToGpu(cpu_idx, device_id, Config());
         tc.RecordSection("Copy to gpu");
         for (int i = 0; i < search_count; ++i) {
-            search_idx->Search(query_dataset, search_cfg);
+            search_idx->Search(query_dataset, conf);
             if (i > search_count - 6 || i < 5)
                 tc.RecordSection("search once");
         }
@@ -517,20 +558,27 @@ TEST_F(GPURESTEST, gpuivfsq) {
 }
 
 TEST_F(GPURESTEST, copyandsearch) {
+    // search and copy at the same time
     printf("==================\n");
 
-    // search and copy at the same time
     index_type = "GPUIVFSQ";
-    //index_type = "GPUIVF";
     index_ = IndexFactory(index_type);
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+
+    auto conf = std::make_shared<IVFSQCfg>();
+    conf->nlist = 1638;
+    conf->d = dim;
+    conf->gpu_id = device_id;
+    conf->metric_type = METRICTYPE::L2;
+    conf->k = k;
+    conf->nbits = 8;
+    conf->nprobe = 1;
+
+    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
     index_->set_preprocessor(preprocessor);
-    train_cfg = Config::object{{"gpu_id", device_id}, {"nlist", 1638}, {"nbits", 8}, {"metric_type", "L2"}};
-    auto model = index_->Train(base_dataset, train_cfg);
+    auto model = index_->Train(base_dataset, conf);
     index_->set_index_model(model);
-    index_->Add(base_dataset, add_cfg);
-    search_cfg = Config::object{{"k", k}};
-    auto result = index_->Search(query_dataset, search_cfg);
+    index_->Add(base_dataset, conf);
+    auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
 
     auto cpu_idx = CopyGpuToCpu(index_, Config());
@@ -541,7 +589,7 @@ TEST_F(GPURESTEST, copyandsearch) {
     auto search_func = [&] {
         //TimeRecorder tc("search&load");
         for (int i = 0; i < search_count; ++i) {
-            search_idx->Search(query_dataset, search_cfg);
+            search_idx->Search(query_dataset, conf);
             //if (i > search_count - 6 || i == 0)
             //    tc.RecordSection("search once");
         }
@@ -560,7 +608,7 @@ TEST_F(GPURESTEST, copyandsearch) {
     TimeRecorder tc("basic");
     CopyCpuToGpu(cpu_idx, device_id, Config());
     tc.RecordSection("Copy to gpu once");
-    search_idx->Search(query_dataset, search_cfg);
+    search_idx->Search(query_dataset, conf);
     tc.RecordSection("search once");
     search_func();
     tc.RecordSection("only search total");
@@ -576,35 +624,40 @@ TEST_F(GPURESTEST, copyandsearch) {
 
 TEST_F(GPURESTEST, TrainAndSearch) {
     index_type = "GPUIVFSQ";
-    //index_type = "GPUIVF";
-    const int train_count = 1;
-    const int search_count = 5000;
-
     index_ = IndexFactory(index_type);
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+
+    auto conf = std::make_shared<IVFSQCfg>();
+    conf->nlist = 1638;
+    conf->d = dim;
+    conf->gpu_id = device_id;
+    conf->metric_type = METRICTYPE::L2;
+    conf->k = k;
+    conf->nbits = 8;
+    conf->nprobe = 1;
+
+    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
     index_->set_preprocessor(preprocessor);
-    train_cfg = Config::object{{"gpu_id", device_id}, {"nlist", 1638}, {"nbits", 8}, {"metric_type", "L2"}};
-    auto model = index_->Train(base_dataset, train_cfg);
+    auto model = index_->Train(base_dataset, conf);
     auto new_index = IndexFactory(index_type);
     new_index->set_index_model(model);
-    new_index->Add(base_dataset, add_cfg);
+    new_index->Add(base_dataset, conf);
     auto cpu_idx = CopyGpuToCpu(new_index, Config());
     cpu_idx->Seal();
     auto search_idx = CopyCpuToGpu(cpu_idx, device_id, Config());
 
+    constexpr int train_count = 1;
+    constexpr int search_count = 5000;
     auto train_stage = [&] {
-        train_cfg = Config::object{{"gpu_id", device_id}, {"nlist", 1638}, {"nbits", 8}, {"metric_type", "L2"}};
         for (int i = 0; i < train_count; ++i) {
-            auto model = index_->Train(base_dataset, train_cfg);
+            auto model = index_->Train(base_dataset, conf);
             auto test_idx = IndexFactory(index_type);
             test_idx->set_index_model(model);
-            test_idx->Add(base_dataset, add_cfg);
+            test_idx->Add(base_dataset, conf);
         }
     };
     auto search_stage = [&](VectorIndexPtr& search_idx) {
-        search_cfg = Config::object{{"k", k}};
         for (int i = 0; i < search_count; ++i) {
-            auto result = search_idx->Search(query_dataset, search_cfg);
+            auto result = search_idx->Search(query_dataset, conf);
             AssertAnns(result, nq, k);
         }
     };

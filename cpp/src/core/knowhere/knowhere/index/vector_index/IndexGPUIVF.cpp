@@ -36,10 +36,11 @@ namespace zilliz {
 namespace knowhere {
 
 IndexModelPtr GPUIVF::Train(const DatasetPtr &dataset, const Config &config) {
-    auto nlist = config["nlist"].as<size_t>();
-    gpu_id_ = config.get_with_default("gpu_id", gpu_id_);
-    auto metric_type = config["metric_type"].as_string() == "L2" ?
-                       faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+    auto build_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    if (build_cfg != nullptr) {
+        build_cfg->CheckValid(); // throw exception
+    }
+    gpu_id_ = build_cfg->gpu_id;
 
     GETTENSOR(dataset)
 
@@ -48,7 +49,9 @@ IndexModelPtr GPUIVF::Train(const DatasetPtr &dataset, const Config &config) {
         ResScope rs(temp_resource, gpu_id_, true);
         faiss::gpu::GpuIndexIVFFlatConfig idx_config;
         idx_config.device = gpu_id_;
-        faiss::gpu::GpuIndexIVFFlat device_index(temp_resource->faiss_res.get(), dim, nlist, metric_type, idx_config);
+        faiss::gpu::GpuIndexIVFFlat device_index(temp_resource->faiss_res.get(), dim,
+                                                 build_cfg->nlist, GetMetricType(build_cfg->metric_type),
+                                                 idx_config);
         device_index.train(rows, (float *) p_data);
 
         std::shared_ptr<faiss::Index> host_index = nullptr;
@@ -143,9 +146,10 @@ void GPUIVF::search_impl(int64_t n,
                          const Config &cfg) {
     std::lock_guard<std::mutex> lk(mutex_);
 
+    // TODO(linxj): gpu index support GenParams
     if (auto device_index = std::static_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
-        auto nprobe = cfg.get_with_default("nprobe", size_t(1));
-        device_index->setNumProbes(nprobe);
+        auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(cfg);
+        device_index->setNumProbes(search_cfg->nprobe);
 
         {
             // TODO(linxj): allocate mem
