@@ -90,7 +90,7 @@ class RpcHandlerTest : public testing::Test {
         ::grpc::ServerContext context;
         ::milvus::grpc::TableSchema request;
         ::milvus::grpc::Status status;
-        request.mutable_table_name()->set_table_name(TABLE_NAME);
+        request.set_table_name(TABLE_NAME);
         request.set_dimension(TABLE_DIM);
         request.set_index_file_size(INDEX_FILE_SIZE);
         request.set_metric_type(1);
@@ -159,10 +159,10 @@ TEST_F(RpcHandlerTest, INDEX_TEST) {
     ::milvus::grpc::IndexParam request;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = handler->CreateIndex(&context, &request, &response);
-    request.mutable_table_name()->set_table_name("test1");
+    request.set_table_name("test1");
     handler->CreateIndex(&context, &request, &response);
 
-    request.mutable_table_name()->set_table_name(TABLE_NAME);
+    request.set_table_name(TABLE_NAME);
     handler->CreateIndex(&context, &request, &response);
 
     request.mutable_index()->set_index_type(1);
@@ -289,7 +289,7 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     //test invalid table name
     handler->CreateTable(&context, &tableschema, &response);
     //test invalid table dimension
-    tableschema.mutable_table_name()->set_table_name(tablename);
+    tableschema.set_table_name(tablename);
     handler->CreateTable(&context, &tableschema, &response);
     //test invalid index file size
     tableschema.set_dimension(TABLE_DIM);
