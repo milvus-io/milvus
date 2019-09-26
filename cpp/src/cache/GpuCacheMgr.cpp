@@ -19,7 +19,7 @@
 #include <sstream>
 #include "utils/Log.h"
 #include "GpuCacheMgr.h"
-#include "server/ServerConfig.h"
+#include "server/Config.h"
 
 namespace zilliz {
 namespace milvus {
@@ -33,18 +33,27 @@ namespace {
 }
 
 GpuCacheMgr::GpuCacheMgr() {
-    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+    server::Config& config = server::Config::GetInstance();
+    Status s;
 
-    int64_t cap = config.GetInt64Value(server::CONFIG_GPU_CACHE_CAPACITY, 0);
-    cap *= G_BYTE;
+    int32_t gpu_mem_cap;
+    s = config.GetCacheConfigGpuMemCapacity(gpu_mem_cap);
+    if (!s.ok()) {
+        SERVER_LOG_ERROR << s.message();
+    }
+    int32_t cap = gpu_mem_cap * G_BYTE;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
 
-    double free_percent = config.GetDoubleValue(server::GPU_CACHE_FREE_PERCENT, 0.85);
-    if (free_percent > 0.0 && free_percent <= 1.0) {
-        cache_->set_freemem_percent(free_percent);
+    float gpu_mem_threshold;
+    s = config.GetCacheConfigGpuMemThreshold(gpu_mem_threshold);
+    if (!s.ok()) {
+        SERVER_LOG_ERROR << s.message();
+    }
+    if (gpu_mem_threshold > 0.0 && gpu_mem_threshold <= 1.0) {
+        cache_->set_freemem_percent(gpu_mem_threshold);
     } else {
-        SERVER_LOG_ERROR << "Invalid gpu_cache_free_percent: " << free_percent <<
-                         ", defaultly set to " << cache_->freemem_percent();
+        SERVER_LOG_ERROR << "Invalid gpu_mem_threshold: " << gpu_mem_threshold
+                         << ", by default set to " << cache_->freemem_percent();
     }
 }
 

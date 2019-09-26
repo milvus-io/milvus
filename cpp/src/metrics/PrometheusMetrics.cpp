@@ -16,8 +16,9 @@
 // under the License.
 
 
-#include <cache/GpuCacheMgr.h>
+#include "cache/GpuCacheMgr.h"
 #include "PrometheusMetrics.h"
+#include "server/Config.h"
 #include "utils/Log.h"
 #include "SystemInfo.h"
 
@@ -26,15 +27,19 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-    ErrorCode
+ErrorCode
 PrometheusMetrics::Init() {
     try {
-        ConfigNode &configNode = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);
-        startup_ = configNode.GetValue(CONFIG_METRIC_IS_STARTUP) == "on";
-        if(!startup_) return SERVER_SUCCESS;
+        Config &config = Config::GetInstance();
+        Status s = config.GetMetricConfigAutoBootup(startup_);
+        if (!s.ok()) return s.code();
+        if (!startup_) return SERVER_SUCCESS;
+
         // Following should be read from config file.
-        const std::string bind_address = configNode.GetChild(CONFIG_PROMETHEUS).GetValue(CONFIG_METRIC_PROMETHEUS_PORT);
-        const std::string uri = std::string("/metrics");
+        std::string bind_address;
+        s = config.GetMetricConfigPrometheusPort(bind_address);
+        if (!s.ok()) return s.code();
+        const std::string uri = std::string("/tmp/metrics");
         const std::size_t num_threads = 2;
 
         // Init Exposer
