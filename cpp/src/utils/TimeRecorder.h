@@ -20,14 +20,13 @@
 #include <string>
 #include <chrono>
 
-
 namespace zilliz {
 namespace milvus {
 
 class TimeRecorder {
     using stdclock = std::chrono::high_resolution_clock;
 
-public:
+ public:
     TimeRecorder(const std::string &header,
                  int64_t log_level = 1);
 
@@ -39,15 +38,15 @@ public:
 
     static std::string GetTimeSpanStr(double span);
 
-private:
+ private:
     void PrintTimeRecord(const std::string &msg, double span);
 
-private:
+ private:
     std::string header_;
     stdclock::time_point start_;
     stdclock::time_point last_;
     int64_t log_level_;
 };
 
-}
-}
+} // namespace milvus
+} // namespace zilliz

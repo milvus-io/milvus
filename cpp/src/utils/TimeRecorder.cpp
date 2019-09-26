@@ -15,9 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "TimeRecorder.h"
+#include "utils/TimeRecorder.h"
 #include "utils/Log.h"
-
 
 namespace zilliz {
 namespace milvus {
@@ -100,5 +99,5 @@ TimeRecorder::ElapseFromBegin(const std::string &msg) {
     return span;
 }
 
-}
-}
+} // namespace milvus
+} // namespace zilliz
