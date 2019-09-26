@@ -26,7 +26,7 @@
 #include "cache/DataObj.h"
 #include "cache/GpuCacheMgr.h"
 #include "utils/Error.h"
-#include "wrapper/vec_index.h"
+#include "wrapper/VecIndex.h"
 
 
 namespace zilliz {
