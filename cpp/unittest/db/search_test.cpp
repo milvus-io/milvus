@@ -22,7 +22,6 @@
 #include "scheduler/task/SearchTask.h"
 #include "utils/TimeRecorder.h"
 
-
 using namespace zilliz::milvus;
 
 namespace {
@@ -226,10 +225,6 @@ TEST(DBSearchTest, MERGE_TEST) {
 }
 
 TEST(DBSearchTest, PARALLEL_CLUSTER_TEST) {
-    server::ServerConfig &config = server::ServerConfig::GetInstance();
-    server::ConfigNode& db_config = config.GetConfig(server::CONFIG_DB);
-    db_config.SetValue(server::CONFIG_DB_PARALLEL_REDUCE, "false");//lvoc cannot work for std::function, set to false
-
     bool ascending = true;
     std::vector<long> target_ids;
     std::vector<float> target_distence;
@@ -262,10 +257,6 @@ TEST(DBSearchTest, PARALLEL_CLUSTER_TEST) {
 }
 
 TEST(DBSearchTest, PARALLEL_TOPK_TEST) {
-    server::ServerConfig &config = server::ServerConfig::GetInstance();
-    server::ConfigNode& db_config = config.GetConfig(server::CONFIG_DB);
-    db_config.SetValue(server::CONFIG_DB_PARALLEL_REDUCE, "false");//lvoc cannot work for std::function, set to false
-
     std::vector<long> target_ids;
     std::vector<float> target_distence;
     scheduler::ResultSet src_result;

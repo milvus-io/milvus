@@ -18,7 +18,6 @@
 #include <gtest/gtest.h>
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
-#include "server/ServerConfig.h"
 #include "utils/Error.h"
 #include "wrapper/VecIndex.h"
 
