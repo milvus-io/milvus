@@ -33,7 +33,7 @@ patterns = [
     'cpp/cmake/ThirdPartyPackages.cmake',
     'cpp/src/core/cmake/BuildUtilsCore.cmake',
     'cpp/src/core/cmake/DefineOptionsCore.cmake',
-    'cpp/src/core/cmake/ThirdPartyPackagesCore.cmake
+    'cpp/src/core/cmake/ThirdPartyPackagesCore.cmake',
     'cpp/src/**/CMakeLists.txt',
     'cpp/unittest/**/CMakeLists.txt'
 ]
@@ -51,7 +51,9 @@ def run_cmake_format(paths):
     # necessary
     # autosort is off because it breaks in cmake_format 5.1
     #   See: https://github.com/cheshirekow/cmake_format/issues/111
-    cmd = ['cmake-format', '--in-place', '--autosort=false'] + paths
+    _paths = [str(path) for path in paths]
+
+    cmd = ['cmake-format', '--in-place', '--autosort=false'] + _paths
     try:
         subprocess.run(cmd, check=True)
     except FileNotFoundError:
