@@ -3,7 +3,9 @@ from jaeger_client import Config
 from grpc_opentracing.grpcext import intercept_server
 from grpc_opentracing import open_tracing_server_interceptor
 
-from tracing import Tracer, empty_server_interceptor_decorator
+from tracing import (Tracer,
+        GrpcSpanDecorator,
+        empty_server_interceptor_decorator)
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,8 @@ class TracerFactory:
 
             tracer = config.initialize_tracer()
             tracer_interceptor = open_tracing_server_interceptor(tracer,
-                    log_payloads=tracer_config.TRACING_LOG_PAYLOAD)
+                    log_payloads=tracer_config.TRACING_LOG_PAYLOAD,
+                    span_decorator=GrpcSpanDecorator())
 
             return Tracer(tracer, tracer_interceptor, intercept_server)
 

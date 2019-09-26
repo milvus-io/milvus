@@ -1,3 +1,15 @@
+from grpc_opentracing import SpanDecorator
+
+class GrpcSpanDecorator(SpanDecorator):
+    def __call__(self, span, rpc_info):
+        if rpc_info.response.status.error_code == 0:
+            return
+        span.set_tag('error', True)
+        error_log = {'event': 'error',
+                'error.kind': str(rpc_info.response.status.error_code),
+                'message': rpc_info.response.status.reason
+        }
+        span.log_kv(error_log)
 
 def empty_server_interceptor_decorator(target_server, interceptor):
     return target_server

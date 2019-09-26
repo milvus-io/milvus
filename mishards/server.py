@@ -24,7 +24,6 @@ class Server:
         self.exit_flag = False
         self.port = int(port)
         self.conn_mgr = conn_mgr
-        tracer_interceptor = None
         self.tracer = tracer
 
         self.server_impl = grpc.server(
