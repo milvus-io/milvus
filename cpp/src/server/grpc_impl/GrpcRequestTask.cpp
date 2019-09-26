@@ -137,7 +137,7 @@ CreateTableTask::OnExecute() {
 
     try {
         //step 1: check arguments
-        auto status = ValidationUtil::ValidateTableName(schema_->table_name().table_name());
+        auto status = ValidationUtil::ValidateTableName(schema_->table_name());
         if (!status.ok()) {
             return status;
         }
@@ -159,7 +159,7 @@ CreateTableTask::OnExecute() {
 
         //step 2: construct table schema
         engine::meta::TableSchema table_info;
-        table_info.table_id_ = schema_->table_name().table_name();
+        table_info.table_id_ = schema_->table_name();
         table_info.dimension_ = (uint16_t) schema_->dimension();
         table_info.index_file_size_ = schema_->index_file_size();
         table_info.metric_type_ = schema_->metric_type();
@@ -214,7 +214,7 @@ DescribeTableTask::OnExecute() {
             return status;
         }
 
-        schema_->mutable_table_name()->set_table_name(table_info.table_id_);
+        schema_->set_table_name(table_info.table_id_);
         schema_->set_dimension(table_info.dimension_);
         schema_->set_index_file_size(table_info.index_file_size_);
         schema_->set_metric_type(table_info.metric_type_);
@@ -249,7 +249,7 @@ CreateIndexTask::OnExecute() {
         TimeRecorder rc("CreateIndexTask");
 
         //step 1: check arguments
-        std::string table_name_ = index_param_->table_name().table_name();
+        std::string table_name_ = index_param_->table_name();
         auto status = ValidationUtil::ValidateTableName(table_name_);
         if (!status.ok()) {
             return status;
@@ -384,15 +384,15 @@ DropTableTask::OnExecute() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-ShowTablesTask::ShowTablesTask(::grpc::ServerWriter<::milvus::grpc::TableName> *writer)
+ShowTablesTask::ShowTablesTask(::milvus::grpc::TableNameList *table_name_list)
         : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          writer_(writer) {
+          table_name_list_(table_name_list) {
 
 }
 
 BaseTaskPtr
-ShowTablesTask::Create(::grpc::ServerWriter<::milvus::grpc::TableName> *writer) {
-    return std::shared_ptr<GrpcBaseTask>(new ShowTablesTask(writer));
+ShowTablesTask::Create(::milvus::grpc::TableNameList *table_name_list) {
+    return std::shared_ptr<GrpcBaseTask>(new ShowTablesTask(table_name_list));
 }
 
 Status
@@ -404,11 +404,7 @@ ShowTablesTask::OnExecute() {
     }
 
     for (auto &schema : schema_array) {
-        ::milvus::grpc::TableName tableName;
-        tableName.set_table_name(schema.table_id_);
-        if (!writer_->Write(tableName)) {
-            return Status(SERVER_WRITE_ERROR, "Write table name failed!");
-        }
+        table_name_list_->add_table_names(schema.table_id_);
     }
     return Status::OK();
 }
@@ -920,7 +916,7 @@ DescribeIndexTask::OnExecute() {
             return status;
         }
 
-        index_param_->mutable_table_name()->set_table_name(table_name_);
+        index_param_->set_table_name(table_name_);
         index_param_->mutable_index()->set_index_type(index.engine_type_);
         index_param_->mutable_index()->set_nlist(index.nlist_);
 

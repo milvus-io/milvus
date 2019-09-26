@@ -153,6 +153,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-546 - Add simple mode resource_config
 - MS-570 - Add prometheus docker-compose file
 - MS-576 - Scheduler refactor
+- MS-592 - Change showtables stream transport to unary
 
 ## New Feature
 - MS-343 - Implement ResourceMgr
