@@ -227,9 +227,9 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "All tables: " << std::endl;
         for(auto& table : tables) {
             int64_t row_count = 0;
-            conn->DropTable(table);
-//            stat = conn->CountTable(table, row_count);
-//            std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
+//            conn->DropTable(table);
+            stat = conn->CountTable(table, row_count);
+            std::cout << "\t" << table << "(" << row_count << " rows)" << std::endl;
         }
     }
 
@@ -343,8 +343,8 @@ ClientTest::Test(const std::string& address, const std::string& port) {
     }
 
     {//delete table
-        Status stat = conn->DropTable(TABLE_NAME);
-        std::cout << "DeleteTable function call status: " << stat.message() << std::endl;
+//        Status stat = conn->DropTable(TABLE_NAME);
+//        std::cout << "DeleteTable function call status: " << stat.message() << std::endl;
     }
 
     {//server status

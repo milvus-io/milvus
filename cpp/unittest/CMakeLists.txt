@@ -72,7 +72,7 @@ set(unittest_files
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
 set(helper_files
-        ${MILVUS_ENGINE_SRC}/server/ServerConfig.cpp
+#        ${MILVUS_ENGINE_SRC}/server/ServerConfig.cpp
         ${MILVUS_ENGINE_SRC}/utils/CommonUtil.cpp
         ${MILVUS_ENGINE_SRC}/utils/TimeRecorder.cpp
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
