@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "Config.h"
+#include "server/Config.h"
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -23,11 +23,12 @@
 #include <stdlib.h>
 #include <iostream>
 #include <algorithm>
+#include <vector>
+#include <string>
 
 #include "config/ConfigMgr.h"
 #include "utils/CommonUtil.h"
 #include "utils/ValidationUtil.h"
-
 
 namespace zilliz {
 namespace milvus {
@@ -71,11 +72,11 @@ Config::LoadConfigFile(const std::string &filename) {
 }
 
 void
-Config::PrintConfigSection(const std::string& config_node_name) {
+Config::PrintConfigSection(const std::string &config_node_name) {
     std::cout << std::endl;
     std::cout << config_node_name << ":" << std::endl;
     if (config_map_.find(config_node_name) != config_map_.end()) {
-        for (auto item: config_map_[config_node_name]) {
+        for (auto item : config_map_[config_node_name]) {
             std::cout << item.first << ": " << item.second << std::endl;
         }
     }
@@ -182,7 +183,7 @@ Config::CheckDBConfigBufferSize(const std::string &value) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid DB config buffer_size: " + value);
     } else {
         int64_t buffer_size = std::stoi(value) * GB;
-        unsigned long total_mem = 0, free_mem = 0;
+        uint64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (buffer_size >= total_mem) {
             return Status(SERVER_INVALID_ARGUMENT, "DB config buffer_size exceed system memory: " + value);
@@ -205,7 +206,7 @@ Config::CheckDBConfigBuildIndexGPU(const std::string &value) {
 }
 
 Status
-Config::CheckMetricConfigAutoBootup(const std::string& value) {
+Config::CheckMetricConfigAutoBootup(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid metric config auto_bootup: " + value);
     }
@@ -213,7 +214,7 @@ Config::CheckMetricConfigAutoBootup(const std::string& value) {
 }
 
 Status
-Config::CheckMetricConfigCollector(const std::string& value) {
+Config::CheckMetricConfigCollector(const std::string &value) {
     if (value != "prometheus") {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid metric config collector: " + value);
     }
@@ -221,7 +222,7 @@ Config::CheckMetricConfigCollector(const std::string& value) {
 }
 
 Status
-Config::CheckMetricConfigPrometheusPort(const std::string& value) {
+Config::CheckMetricConfigPrometheusPort(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid metric config prometheus_port: " + value);
     }
@@ -229,12 +230,12 @@ Config::CheckMetricConfigPrometheusPort(const std::string& value) {
 }
 
 Status
-Config::CheckCacheConfigCpuMemCapacity(const std::string& value) {
+Config::CheckCacheConfigCpuMemCapacity(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config cpu_mem_capacity: " + value);
     } else {
         uint64_t cpu_cache_capacity = std::stoi(value) * GB;
-        unsigned long total_mem = 0, free_mem = 0;
+        uint64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (cpu_cache_capacity >= total_mem) {
             return Status(SERVER_INVALID_ARGUMENT, "Cache config cpu_mem_capacity exceed system memory: " + value);
@@ -254,7 +255,7 @@ Config::CheckCacheConfigCpuMemCapacity(const std::string& value) {
 }
 
 Status
-Config::CheckCacheConfigCpuMemThreshold(const std::string& value) {
+Config::CheckCacheConfigCpuMemThreshold(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsFloat(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config cpu_mem_threshold: " + value);
     } else {
@@ -267,7 +268,7 @@ Config::CheckCacheConfigCpuMemThreshold(const std::string& value) {
 }
 
 Status
-Config::CheckCacheConfigGpuMemCapacity(const std::string& value) {
+Config::CheckCacheConfigGpuMemCapacity(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         std::cerr << "ERROR: gpu_cache_capacity " << value << " is not a number" << std::endl;
     } else {
@@ -290,7 +291,7 @@ Config::CheckCacheConfigGpuMemCapacity(const std::string& value) {
 }
 
 Status
-Config::CheckCacheConfigGpuMemThreshold(const std::string& value) {
+Config::CheckCacheConfigGpuMemThreshold(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsFloat(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config gpu_mem_threshold: " + value);
     } else {
@@ -303,7 +304,7 @@ Config::CheckCacheConfigGpuMemThreshold(const std::string& value) {
 }
 
 Status
-Config::CheckCacheConfigCacheInsertData(const std::string& value) {
+Config::CheckCacheConfigCacheInsertData(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config cache_insert_data: " + value);
     }
@@ -311,7 +312,7 @@ Config::CheckCacheConfigCacheInsertData(const std::string& value) {
 }
 
 Status
-Config::CheckEngineConfigBlasThreshold(const std::string& value) {
+Config::CheckEngineConfigBlasThreshold(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid engine config blas threshold: " + value);
     }
@@ -319,7 +320,7 @@ Config::CheckEngineConfigBlasThreshold(const std::string& value) {
 }
 
 Status
-Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
+Config::CheckEngineConfigOmpThreadNum(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid engine config omp_thread_num: " + value);
     } else {
@@ -333,7 +334,7 @@ Config::CheckEngineConfigOmpThreadNum(const std::string& value) {
 }
 
 Status
-Config::CheckResourceConfigMode(const std::string& value) {
+Config::CheckResourceConfigMode(const std::string &value) {
     if (value != "simple") {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid resource config mode: " + value);
     }
@@ -341,7 +342,7 @@ Config::CheckResourceConfigMode(const std::string& value) {
 }
 
 Status
-Config::CheckResourceConfigPool(const std::vector<std::string>& value) {
+Config::CheckResourceConfigPool(const std::vector<std::string> &value) {
     if (value.empty()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid resource config pool");
     }
@@ -632,52 +633,51 @@ Config::GetResourceConfigStrMode() {
     return value;
 }
 
-
 ////////////////////////////////////////////////////////////////////////////////
 Status
-Config::GetServerConfigAddress(std::string& value) {
+Config::GetServerConfigAddress(std::string &value) {
     value = GetServerConfigStrAddress();
     return CheckServerConfigAddress(value);
 }
 
 Status
-Config::GetServerConfigPort(std::string& value) {
+Config::GetServerConfigPort(std::string &value) {
     value = GetServerConfigStrPort();
     return CheckServerConfigPort(value);
 }
 
 Status
-Config::GetServerConfigMode(std::string& value) {
+Config::GetServerConfigMode(std::string &value) {
     value = GetServerConfigStrMode();
     return CheckServerConfigMode(value);
 }
 
 Status
-Config::GetServerConfigTimeZone(std::string& value) {
+Config::GetServerConfigTimeZone(std::string &value) {
     value = GetServerConfigStrTimeZone();
     return CheckServerConfigTimeZone(value);
 }
 
 Status
-Config::GetDBConfigPath(std::string& value) {
+Config::GetDBConfigPath(std::string &value) {
     value = GetDBConfigStrPath();
     return CheckDBConfigPath(value);
 }
 
 Status
-Config::GetDBConfigSlavePath(std::string& value) {
+Config::GetDBConfigSlavePath(std::string &value) {
     value = GetDBConfigStrSlavePath();
     return Status::OK();
 }
 
 Status
-Config::GetDBConfigBackendUrl(std::string& value) {
+Config::GetDBConfigBackendUrl(std::string &value) {
     value = GetDBConfigStrBackendUrl();
     return CheckDBConfigBackendUrl(value);
 }
 
 Status
-Config::GetDBConfigArchiveDiskThreshold(int32_t& value) {
+Config::GetDBConfigArchiveDiskThreshold(int32_t &value) {
     std::string str = GetDBConfigStrArchiveDiskThreshold();
     Status s = CheckDBConfigArchiveDiskThreshold(str);
     if (!s.ok()) return s;
@@ -686,7 +686,7 @@ Config::GetDBConfigArchiveDiskThreshold(int32_t& value) {
 }
 
 Status
-Config::GetDBConfigArchiveDaysThreshold(int32_t& value) {
+Config::GetDBConfigArchiveDaysThreshold(int32_t &value) {
     std::string str = GetDBConfigStrArchiveDaysThreshold();
     Status s = CheckDBConfigArchiveDaysThreshold(str);
     if (!s.ok()) return s;
@@ -695,7 +695,7 @@ Config::GetDBConfigArchiveDaysThreshold(int32_t& value) {
 }
 
 Status
-Config::GetDBConfigBufferSize(int32_t& value) {
+Config::GetDBConfigBufferSize(int32_t &value) {
     std::string str = GetDBConfigStrBufferSize();
     Status s = CheckDBConfigBufferSize(str);
     if (!s.ok()) return s;
@@ -704,7 +704,7 @@ Config::GetDBConfigBufferSize(int32_t& value) {
 }
 
 Status
-Config::GetDBConfigBuildIndexGPU(int32_t& value) {
+Config::GetDBConfigBuildIndexGPU(int32_t &value) {
     std::string str = GetDBConfigStrBuildIndexGPU();
     Status s = CheckDBConfigBuildIndexGPU(str);
     if (!s.ok()) return s;
@@ -713,7 +713,7 @@ Config::GetDBConfigBuildIndexGPU(int32_t& value) {
 }
 
 Status
-Config::GetMetricConfigAutoBootup(bool& value) {
+Config::GetMetricConfigAutoBootup(bool &value) {
     std::string str = GetMetricConfigStrAutoBootup();
     Status s = CheckMetricConfigPrometheusPort(str);
     if (!s.ok()) return s;
@@ -723,19 +723,19 @@ Config::GetMetricConfigAutoBootup(bool& value) {
 }
 
 Status
-Config::GetMetricConfigCollector(std::string& value) {
+Config::GetMetricConfigCollector(std::string &value) {
     value = GetMetricConfigStrCollector();
     return Status::OK();
 }
 
 Status
-Config::GetMetricConfigPrometheusPort(std::string& value) {
+Config::GetMetricConfigPrometheusPort(std::string &value) {
     value = GetMetricConfigStrPrometheusPort();
     return CheckMetricConfigPrometheusPort(value);
 }
 
 Status
-Config::GetCacheConfigCpuMemCapacity(int32_t& value) {
+Config::GetCacheConfigCpuMemCapacity(int32_t &value) {
     std::string str = GetCacheConfigStrCpuMemCapacity();
     Status s = CheckCacheConfigCpuMemCapacity(str);
     if (!s.ok()) return s;
@@ -744,7 +744,7 @@ Config::GetCacheConfigCpuMemCapacity(int32_t& value) {
 }
 
 Status
-Config::GetCacheConfigCpuMemThreshold(float& value) {
+Config::GetCacheConfigCpuMemThreshold(float &value) {
     std::string str = GetCacheConfigStrCpuMemThreshold();
     Status s = CheckCacheConfigCpuMemThreshold(str);
     if (!s.ok()) return s;
@@ -753,7 +753,7 @@ Config::GetCacheConfigCpuMemThreshold(float& value) {
 }
 
 Status
-Config::GetCacheConfigGpuMemCapacity(int32_t& value) {
+Config::GetCacheConfigGpuMemCapacity(int32_t &value) {
     std::string str = GetCacheConfigStrGpuMemCapacity();
     Status s = CheckCacheConfigGpuMemCapacity(str);
     if (!s.ok()) return s;
@@ -762,7 +762,7 @@ Config::GetCacheConfigGpuMemCapacity(int32_t& value) {
 }
 
 Status
-Config::GetCacheConfigGpuMemThreshold(float& value) {
+Config::GetCacheConfigGpuMemThreshold(float &value) {
     std::string str = GetCacheConfigStrGpuMemThreshold();
     Status s = CheckCacheConfigGpuMemThreshold(str);
     if (!s.ok()) return s;
@@ -771,7 +771,7 @@ Config::GetCacheConfigGpuMemThreshold(float& value) {
 }
 
 Status
-Config::GetCacheConfigCacheInsertData(bool& value) {
+Config::GetCacheConfigCacheInsertData(bool &value) {
     std::string str = GetCacheConfigStrCacheInsertData();
     Status s = CheckCacheConfigCacheInsertData(str);
     if (!s.ok()) return s;
@@ -781,7 +781,7 @@ Config::GetCacheConfigCacheInsertData(bool& value) {
 }
 
 Status
-Config::GetEngineConfigBlasThreshold(int32_t& value) {
+Config::GetEngineConfigBlasThreshold(int32_t &value) {
     std::string str = GetEngineConfigStrBlasThreshold();
     Status s = CheckEngineConfigBlasThreshold(str);
     if (!s.ok()) return s;
@@ -790,7 +790,7 @@ Config::GetEngineConfigBlasThreshold(int32_t& value) {
 }
 
 Status
-Config::GetEngineConfigOmpThreadNum(int32_t& value) {
+Config::GetEngineConfigOmpThreadNum(int32_t &value) {
     std::string str = GetEngineConfigStrOmpThreadNum();
     Status s = CheckEngineConfigOmpThreadNum(str);
     if (!s.ok()) return s;
@@ -799,13 +799,13 @@ Config::GetEngineConfigOmpThreadNum(int32_t& value) {
 }
 
 Status
-Config::GetResourceConfigMode(std::string& value) {
+Config::GetResourceConfigMode(std::string &value) {
     value = GetResourceConfigStrMode();
     return CheckResourceConfigMode(value);
 }
 
 Status
-Config::GetResourceConfigPool(std::vector<std::string>& value) {
+Config::GetResourceConfigPool(std::vector<std::string> &value) {
     ConfigNode resource_config = GetConfigNode(CONFIG_RESOURCE);
     value = resource_config.GetSequence(CONFIG_RESOURCE_POOL);
     return CheckResourceConfigPool(value);
@@ -814,7 +814,7 @@ Config::GetResourceConfigPool(std::vector<std::string>& value) {
 ///////////////////////////////////////////////////////////////////////////////
 /* server config */
 Status
-Config::SetServerConfigAddress(const std::string& value) {
+Config::SetServerConfigAddress(const std::string &value) {
     Status s = CheckServerConfigAddress(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_ADDRESS, value);
@@ -822,7 +822,7 @@ Config::SetServerConfigAddress(const std::string& value) {
 }
 
 Status
-Config::SetServerConfigPort(const std::string& value) {
+Config::SetServerConfigPort(const std::string &value) {
     Status s = CheckServerConfigPort(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_PORT, value);
@@ -830,7 +830,7 @@ Config::SetServerConfigPort(const std::string& value) {
 }
 
 Status
-Config::SetServerConfigMode(const std::string& value) {
+Config::SetServerConfigMode(const std::string &value) {
     Status s = CheckServerConfigMode(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_MODE, value);
@@ -838,7 +838,7 @@ Config::SetServerConfigMode(const std::string& value) {
 }
 
 Status
-Config::SetServerConfigTimeZone(const std::string& value) {
+Config::SetServerConfigTimeZone(const std::string &value) {
     Status s = CheckServerConfigTimeZone(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_SERVER, CONFIG_SERVER_TIME_ZONE, value);
@@ -847,7 +847,7 @@ Config::SetServerConfigTimeZone(const std::string& value) {
 
 /* db config */
 Status
-Config::SetDBConfigPath(const std::string& value) {
+Config::SetDBConfigPath(const std::string &value) {
     Status s = CheckDBConfigPath(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PATH, value);
@@ -855,7 +855,7 @@ Config::SetDBConfigPath(const std::string& value) {
 }
 
 Status
-Config::SetDBConfigSlavePath(const std::string& value) {
+Config::SetDBConfigSlavePath(const std::string &value) {
     Status s = CheckDBConfigSlavePath(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_DB_SLAVE_PATH, value);
@@ -863,7 +863,7 @@ Config::SetDBConfigSlavePath(const std::string& value) {
 }
 
 Status
-Config::SetDBConfigBackendUrl(const std::string& value) {
+Config::SetDBConfigBackendUrl(const std::string &value) {
     Status s = CheckDBConfigBackendUrl(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BACKEND_URL, value);
@@ -871,7 +871,7 @@ Config::SetDBConfigBackendUrl(const std::string& value) {
 }
 
 Status
-Config::SetDBConfigArchiveDiskThreshold(const std::string& value) {
+Config::SetDBConfigArchiveDiskThreshold(const std::string &value) {
     Status s = CheckDBConfigArchiveDiskThreshold(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_DB_ARCHIVE_DISK_THRESHOLD, value);
@@ -879,7 +879,7 @@ Config::SetDBConfigArchiveDiskThreshold(const std::string& value) {
 }
 
 Status
-Config::SetDBConfigArchiveDaysThreshold(const std::string& value) {
+Config::SetDBConfigArchiveDaysThreshold(const std::string &value) {
     Status s = CheckDBConfigArchiveDaysThreshold(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_DB_ARCHIVE_DAYS_THRESHOLD, value);
@@ -887,7 +887,7 @@ Config::SetDBConfigArchiveDaysThreshold(const std::string& value) {
 }
 
 Status
-Config::SetDBConfigBufferSize(const std::string& value) {
+Config::SetDBConfigBufferSize(const std::string &value) {
     Status s = CheckDBConfigBufferSize(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BUFFER_SIZE, value);
@@ -895,7 +895,7 @@ Config::SetDBConfigBufferSize(const std::string& value) {
 }
 
 Status
-Config::SetDBConfigBuildIndexGPU(const std::string& value) {
+Config::SetDBConfigBuildIndexGPU(const std::string &value) {
     Status s = CheckDBConfigBuildIndexGPU(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BUILD_INDEX_GPU, value);
@@ -904,7 +904,7 @@ Config::SetDBConfigBuildIndexGPU(const std::string& value) {
 
 /* metric config */
 Status
-Config::SetMetricConfigAutoBootup(const std::string& value) {
+Config::SetMetricConfigAutoBootup(const std::string &value) {
     Status s = CheckMetricConfigAutoBootup(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_AUTO_BOOTUP, value);
@@ -912,7 +912,7 @@ Config::SetMetricConfigAutoBootup(const std::string& value) {
 }
 
 Status
-Config::SetMetricConfigCollector(const std::string& value) {
+Config::SetMetricConfigCollector(const std::string &value) {
     Status s = CheckMetricConfigCollector(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_COLLECTOR, value);
@@ -920,7 +920,7 @@ Config::SetMetricConfigCollector(const std::string& value) {
 }
 
 Status
-Config::SetMetricConfigPrometheusPort(const std::string& value) {
+Config::SetMetricConfigPrometheusPort(const std::string &value) {
     Status s = CheckMetricConfigPrometheusPort(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_METRIC_PROMETHEUS_PORT, value);
@@ -929,7 +929,7 @@ Config::SetMetricConfigPrometheusPort(const std::string& value) {
 
 /* cache config */
 Status
-Config::SetCacheConfigCpuMemCapacity(const std::string& value) {
+Config::SetCacheConfigCpuMemCapacity(const std::string &value) {
     Status s = CheckCacheConfigCpuMemCapacity(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CPU_MEM_CAPACITY, value);
@@ -937,7 +937,7 @@ Config::SetCacheConfigCpuMemCapacity(const std::string& value) {
 }
 
 Status
-Config::SetCacheConfigCpuMemThreshold(const std::string& value) {
+Config::SetCacheConfigCpuMemThreshold(const std::string &value) {
     Status s = CheckCacheConfigCpuMemThreshold(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CPU_MEM_THRESHOLD, value);
@@ -945,7 +945,7 @@ Config::SetCacheConfigCpuMemThreshold(const std::string& value) {
 }
 
 Status
-Config::SetCacheConfigGpuMemCapacity(const std::string& value) {
+Config::SetCacheConfigGpuMemCapacity(const std::string &value) {
     Status s = CheckCacheConfigGpuMemCapacity(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_GPU_MEM_CAPACITY, value);
@@ -953,7 +953,7 @@ Config::SetCacheConfigGpuMemCapacity(const std::string& value) {
 }
 
 Status
-Config::SetCacheConfigGpuMemThreshold(const std::string& value) {
+Config::SetCacheConfigGpuMemThreshold(const std::string &value) {
     Status s = CheckCacheConfigGpuMemThreshold(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_GPU_MEM_THRESHOLD, value);
@@ -961,7 +961,7 @@ Config::SetCacheConfigGpuMemThreshold(const std::string& value) {
 }
 
 Status
-Config::SetCacheConfigCacheInsertData(const std::string& value) {
+Config::SetCacheConfigCacheInsertData(const std::string &value) {
     Status s = CheckCacheConfigCacheInsertData(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CACHE_INSERT_DATA, value);
@@ -970,7 +970,7 @@ Config::SetCacheConfigCacheInsertData(const std::string& value) {
 
 /* engine config */
 Status
-Config::SetEngineConfigBlasThreshold(const std::string& value) {
+Config::SetEngineConfigBlasThreshold(const std::string &value) {
     Status s = CheckEngineConfigBlasThreshold(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_BLAS_THRESHOLD, value);
@@ -978,7 +978,7 @@ Config::SetEngineConfigBlasThreshold(const std::string& value) {
 }
 
 Status
-Config::SetEngineConfigOmpThreadNum(const std::string& value) {
+Config::SetEngineConfigOmpThreadNum(const std::string &value) {
     Status s = CheckEngineConfigOmpThreadNum(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_OMP_THREAD_NUM, value);
@@ -987,13 +987,13 @@ Config::SetEngineConfigOmpThreadNum(const std::string& value) {
 
 /* resource config */
 Status
-Config::SetResourceConfigMode(const std::string& value) {
+Config::SetResourceConfigMode(const std::string &value) {
     Status s = CheckResourceConfigMode(value);
     if (!s.ok()) return s;
     SetConfigValueInMem(CONFIG_DB, CONFIG_RESOURCE_MODE, value);
     return Status::OK();
 }
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

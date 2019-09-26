@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "server/Server.h"
+
 #include <thread>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -24,7 +26,6 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "Server.h"
 #include "server/grpc_impl/GrpcServer.h"
 #include "server/Config.h"
 #include "utils/Log.h"
@@ -35,7 +36,6 @@
 #include "scheduler/SchedInst.h"
 #include "wrapper/KnowhereResource.h"
 #include "DBWrapper.h"
-
 
 namespace zilliz {
 namespace milvus {
@@ -116,7 +116,7 @@ Server::Daemonize() {
     }
 
     // Close all open fd
-    for (long fd = sysconf(_SC_OPEN_MAX); fd > 0; fd--) {
+    for (int64_t fd = sysconf(_SC_OPEN_MAX); fd > 0; fd--) {
         close(fd);
     }
 
@@ -172,9 +172,9 @@ Server::Start() {
             time_zone = "CUT";
         } else {
             int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
-            if (time_bias == 0)
+            if (time_bias == 0) {
                 time_zone = "CUT";
-            else if (time_bias > 0) {
+            } else if (time_bias > 0) {
                 time_zone = "CUT" + std::to_string(-time_bias);
             } else {
                 time_zone = "CUT+" + std::to_string(-time_bias);
@@ -194,7 +194,6 @@ Server::Start() {
 
         StartService();
         std::cout << "Milvus server start successfully." << std::endl;
-
     } catch (std::exception &ex) {
         std::cerr << "Milvus server encounter exception: " << ex.what();
     }
@@ -232,10 +231,9 @@ Server::Stop() {
     std::cerr << "Milvus server is closed!" << std::endl;
 }
 
-
 ErrorCode
 Server::LoadConfig() {
-    Config& config = Config::GetInstance();
+    Config &config = Config::GetInstance();
     Status s = config.LoadConfigFile(config_filename_);
     if (!s.ok()) {
         std::cerr << "Failed to load config file: " << config_filename_ << std::endl;
@@ -260,6 +258,6 @@ Server::StopService() {
     engine::KnowhereResource::Finalize();
 }
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

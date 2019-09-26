@@ -15,22 +15,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <string.h>
+#include "server/grpc_impl/GrpcRequestTask.h"
 
-#include "GrpcRequestTask.h"
+#include <string.h>
+#include <map>
+#include <vector>
+#include <string>
+//#include <gperftools/profiler.h>
+
+#include "server/Server.h"
+#include "server/DBWrapper.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
-#include "../DBWrapper.h"
-#include "version.h"
 #include "GrpcServer.h"
 #include "db/Utils.h"
 #include "scheduler/SchedInst.h"
-//#include <gperftools/profiler.h>
-
-#include "server/Server.h"
-
+#include "../../../version.h"
 
 namespace zilliz {
 namespace milvus {
@@ -45,86 +47,87 @@ using DB_META = zilliz::milvus::engine::meta::Meta;
 using DB_DATE = zilliz::milvus::engine::meta::DateT;
 
 namespace {
-    engine::EngineType EngineType(int type) {
-        static std::map<int, engine::EngineType> map_type = {
-                {0, engine::EngineType::INVALID},
-                {1, engine::EngineType::FAISS_IDMAP},
-                {2, engine::EngineType::FAISS_IVFFLAT},
-                {3, engine::EngineType::FAISS_IVFSQ8},
-        };
+engine::EngineType
+EngineType(int type) {
+    static std::map<int, engine::EngineType> map_type = {
+        {0, engine::EngineType::INVALID},
+        {1, engine::EngineType::FAISS_IDMAP},
+        {2, engine::EngineType::FAISS_IVFFLAT},
+        {3, engine::EngineType::FAISS_IVFSQ8},
+    };
 
-        if (map_type.find(type) == map_type.end()) {
-            return engine::EngineType::INVALID;
-        }
-
-        return map_type[type];
+    if (map_type.find(type) == map_type.end()) {
+        return engine::EngineType::INVALID;
     }
 
-    int IndexType(engine::EngineType type) {
-        static std::map<engine::EngineType, int> map_type = {
-                {engine::EngineType::INVALID,       0},
-                {engine::EngineType::FAISS_IDMAP,   1},
-                {engine::EngineType::FAISS_IVFFLAT, 2},
-                {engine::EngineType::FAISS_IVFSQ8,  3},
-        };
-
-        if (map_type.find(type) == map_type.end()) {
-            return 0;
-        }
-
-        return map_type[type];
-    }
-
-    constexpr long DAY_SECONDS = 24 * 60 * 60;
-
-    Status
-    ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range> &range_array,
-                              std::vector<DB_DATE> &dates) {
-        dates.clear();
-        for (auto &range : range_array) {
-            time_t tt_start, tt_end;
-            tm tm_start, tm_end;
-            if (!CommonUtil::TimeStrToTime(range.start_value(), tt_start, tm_start)) {
-                return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.start_value());
-            }
-
-            if (!CommonUtil::TimeStrToTime(range.end_value(), tt_end, tm_end)) {
-                return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.start_value());
-            }
-
-            long days = (tt_end > tt_start) ? (tt_end - tt_start) / DAY_SECONDS : (tt_start - tt_end) /
-                                                                                  DAY_SECONDS;
-            if (days == 0) {
-                return Status(SERVER_INVALID_TIME_RANGE,
-                              "Invalid time range: " + range.start_value() + " to " + range.end_value());
-            }
-
-            //range: [start_day, end_day)
-            for (long i = 0; i < days; i++) {
-                time_t tt_day = tt_start + DAY_SECONDS * i;
-                tm tm_day;
-                CommonUtil::ConvertTime(tt_day, tm_day);
-
-                long date = tm_day.tm_year * 10000 + tm_day.tm_mon * 100 +
-                            tm_day.tm_mday;//according to db logic
-                dates.push_back(date);
-            }
-        }
-
-        return Status::OK();
-    }
+    return map_type[type];
 }
+
+int
+IndexType(engine::EngineType type) {
+    static std::map<engine::EngineType, int> map_type = {
+        {engine::EngineType::INVALID, 0},
+        {engine::EngineType::FAISS_IDMAP, 1},
+        {engine::EngineType::FAISS_IVFFLAT, 2},
+        {engine::EngineType::FAISS_IVFSQ8, 3},
+    };
+
+    if (map_type.find(type) == map_type.end()) {
+        return 0;
+    }
+
+    return map_type[type];
+}
+
+constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
+
+Status
+ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range> &range_array,
+                          std::vector<DB_DATE> &dates) {
+    dates.clear();
+    for (auto &range : range_array) {
+        time_t tt_start, tt_end;
+        tm tm_start, tm_end;
+        if (!CommonUtil::TimeStrToTime(range.start_value(), tt_start, tm_start)) {
+            return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.start_value());
+        }
+
+        if (!CommonUtil::TimeStrToTime(range.end_value(), tt_end, tm_end)) {
+            return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.start_value());
+        }
+
+        int64_t days = (tt_end > tt_start) ? (tt_end - tt_start) / DAY_SECONDS : (tt_start - tt_end) /
+            DAY_SECONDS;
+        if (days == 0) {
+            return Status(SERVER_INVALID_TIME_RANGE,
+                          "Invalid time range: " + range.start_value() + " to " + range.end_value());
+        }
+
+        //range: [start_day, end_day)
+        for (int64_t i = 0; i < days; i++) {
+            time_t tt_day = tt_start + DAY_SECONDS * i;
+            tm tm_day;
+            CommonUtil::ConvertTime(tt_day, tm_day);
+
+            int64_t date = tm_day.tm_year * 10000 + tm_day.tm_mon * 100 +
+                tm_day.tm_mday;//according to db logic
+            dates.push_back(date);
+        }
+    }
+
+    return Status::OK();
+}
+} // namespace
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 CreateTableTask::CreateTableTask(const ::milvus::grpc::TableSchema *schema)
-        : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          schema_(schema) {
-
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      schema_(schema) {
 }
 
 BaseTaskPtr
 CreateTableTask::Create(const ::milvus::grpc::TableSchema *schema) {
-    if(schema == nullptr) {
+    if (schema == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
@@ -168,12 +171,11 @@ CreateTableTask::OnExecute() {
         status = DBWrapper::DB()->CreateTable(table_info);
         if (!status.ok()) {
             //table could exist
-            if(status.code() == DB_ALREADY_EXIST) {
+            if (status.code() == DB_ALREADY_EXIST) {
                 return Status(SERVER_INVALID_TABLE_NAME, status.message());
             }
             return status;
         }
-
     } catch (std::exception &ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -185,9 +187,9 @@ CreateTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DescribeTableTask::DescribeTableTask(const std::string &table_name, ::milvus::grpc::TableSchema *schema)
-        : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          table_name_(table_name),
-          schema_(schema) {
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      table_name_(table_name),
+      schema_(schema) {
 }
 
 BaseTaskPtr
@@ -218,7 +220,6 @@ DescribeTableTask::OnExecute() {
         schema_->set_dimension(table_info.dimension_);
         schema_->set_index_file_size(table_info.index_file_size_);
         schema_->set_metric_type(table_info.metric_type_);
-
     } catch (std::exception &ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -230,13 +231,13 @@ DescribeTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 CreateIndexTask::CreateIndexTask(const ::milvus::grpc::IndexParam *index_param)
-        : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          index_param_(index_param) {
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      index_param_(index_param) {
 }
 
 BaseTaskPtr
 CreateIndexTask::Create(const ::milvus::grpc::IndexParam *index_param) {
-    if(index_param == nullptr) {
+    if (index_param == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
@@ -295,10 +296,9 @@ CreateIndexTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 HasTableTask::HasTableTask(const std::string &table_name, bool &has_table)
-        : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          table_name_(table_name),
-          has_table_(has_table) {
-
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      table_name_(table_name),
+      has_table_(has_table) {
 }
 
 BaseTaskPtr
@@ -333,9 +333,8 @@ HasTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DropTableTask::DropTableTask(const std::string &table_name)
-        : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          table_name_(table_name) {
-
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      table_name_(table_name) {
 }
 
 BaseTaskPtr
@@ -385,9 +384,8 @@ DropTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ShowTablesTask::ShowTablesTask(::milvus::grpc::TableNameList *table_name_list)
-        : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          table_name_list_(table_name_list) {
-
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      table_name_list_(table_name_list) {
 }
 
 BaseTaskPtr
@@ -419,8 +417,8 @@ InsertTask::InsertTask(const ::milvus::grpc::InsertParam *insert_param,
 
 BaseTaskPtr
 InsertTask::Create(const ::milvus::grpc::InsertParam *insert_param,
-                         ::milvus::grpc::VectorIds *record_ids) {
-    if(insert_param == nullptr) {
+                   ::milvus::grpc::VectorIds *record_ids) {
+    if (insert_param == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
@@ -444,7 +442,7 @@ InsertTask::OnExecute() {
         if (!record_ids_->vector_id_array().empty()) {
             if (record_ids_->vector_id_array().size() != insert_param_->row_record_array_size()) {
                 return Status(SERVER_ILLEGAL_VECTOR_ID,
-                        "Size of vector ids is not equal to row record array size");
+                              "Size of vector ids is not equal to row record array size");
             }
         }
 
@@ -455,7 +453,7 @@ InsertTask::OnExecute() {
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
                 return Status(SERVER_TABLE_NOT_EXIST,
-                                "Table " + insert_param_->table_name() + " not exists");
+                              "Table " + insert_param_->table_name() + " not exists");
             } else {
                 return status;
             }
@@ -465,19 +463,22 @@ InsertTask::OnExecute() {
         //all user provide id, or all internal id
         bool user_provide_ids = !insert_param_->row_id_array().empty();
         //user already provided id before, all insert action require user id
-        if((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) && !user_provide_ids) {
-            return Status(SERVER_ILLEGAL_VECTOR_ID, "Table vector ids are user defined, please provide id for this batch");
+        if ((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) && !user_provide_ids) {
+            return Status(SERVER_ILLEGAL_VECTOR_ID,
+                          "Table vector ids are user defined, please provide id for this batch");
         }
 
         //user didn't provided id before, no need to provide user id
-        if((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) && user_provide_ids) {
-            return Status(SERVER_ILLEGAL_VECTOR_ID, "Table vector ids are auto generated, no need to provide id for this batch");
+        if ((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) && user_provide_ids) {
+            return Status(SERVER_ILLEGAL_VECTOR_ID,
+                          "Table vector ids are auto generated, no need to provide id for this batch");
         }
 
         rc.RecordSection("check validation");
 
 #ifdef MILVUS_ENABLE_PROFILING
-        std::string fname = "/tmp/insert_" + std::to_string(this->insert_param_->row_record_array_size()) + ".profiling";
+        std::string fname = "/tmp/insert_" + std::to_string(this->insert_param_->row_record_array_size())
+            + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
 
@@ -493,8 +494,8 @@ InsertTask::OnExecute() {
             if (vec_dim != table_info.dimension_) {
                 ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
                 std::string error_msg = "Invalid row record dimension: " + std::to_string(vec_dim)
-                                        + " vs. table dimension:" +
-                                        std::to_string(table_info.dimension_);
+                    + " vs. table dimension:" +
+                    std::to_string(table_info.dimension_);
                 return Status(error_code, error_msg);
             }
             memcpy(&vec_f[i * table_info.dimension_],
@@ -507,10 +508,10 @@ InsertTask::OnExecute() {
         //step 5: insert vectors
         auto vec_count = (uint64_t) insert_param_->row_record_array_size();
         std::vector<int64_t> vec_ids(insert_param_->row_id_array_size(), 0);
-        if(!insert_param_->row_id_array().empty()) {
-            const int64_t* src_data = insert_param_->row_id_array().data();
-            int64_t* target_data = vec_ids.data();
-            memcpy(target_data, src_data, (size_t)(sizeof(int64_t)*insert_param_->row_id_array_size()));
+        if (!insert_param_->row_id_array().empty()) {
+            const int64_t *src_data = insert_param_->row_id_array().data();
+            int64_t *target_data = vec_ids.data();
+            memcpy(target_data, src_data, (size_t) (sizeof(int64_t) * insert_param_->row_id_array_size()));
         }
 
         status = DBWrapper::DB()->InsertVectors(insert_param_->table_name(), vec_count, vec_f.data(), vec_ids);
@@ -525,13 +526,13 @@ InsertTask::OnExecute() {
         auto ids_size = record_ids_->vector_id_array_size();
         if (ids_size != vec_count) {
             std::string msg = "Add " + std::to_string(vec_count) + " vectors but only return "
-                              + std::to_string(ids_size) + " id";
+                + std::to_string(ids_size) + " id";
             return Status(SERVER_ILLEGAL_VECTOR_ID, msg);
         }
 
         //step 6: update table flag
         user_provide_ids ? table_info.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
-                : table_info.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
+                         : table_info.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
         status = DBWrapper::DB()->UpdateTableFlag(insert_param_->table_name(), table_info.flag_);
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -540,7 +541,6 @@ InsertTask::OnExecute() {
 
         rc.RecordSection("add vectors to engine");
         rc.ElapseFromBegin("total cost");
-
     } catch (std::exception &ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -556,19 +556,17 @@ SearchTask::SearchTask(const ::milvus::grpc::SearchParam *search_vector_infos,
       search_param_(search_vector_infos),
       file_id_array_(file_id_array),
       topk_result_list(response) {
-
 }
 
 BaseTaskPtr
 SearchTask::Create(const ::milvus::grpc::SearchParam *search_vector_infos,
                    const std::vector<std::string> &file_id_array,
                    ::milvus::grpc::TopKQueryResultList *response) {
-    if(search_vector_infos == nullptr) {
+    if (search_vector_infos == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
-    return std::shared_ptr<GrpcBaseTask>(new SearchTask(search_vector_infos, file_id_array,
-                                                        response));
+    return std::shared_ptr<GrpcBaseTask>(new SearchTask(search_vector_infos, file_id_array, response));
 }
 
 Status
@@ -640,7 +638,7 @@ SearchTask::OnExecute() {
             if (query_vec_dim != table_info.dimension_) {
                 ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
                 std::string error_msg = "Invalid row record dimension: " + std::to_string(query_vec_dim)
-                                        + " vs. table dimension:" + std::to_string(table_info.dimension_);
+                    + " vs. table dimension:" + std::to_string(table_info.dimension_);
                 return Status(error_code, error_msg);
             }
 
@@ -655,16 +653,17 @@ SearchTask::OnExecute() {
         auto record_count = (uint64_t) search_param_->query_record_array().size();
 
 #ifdef MILVUS_ENABLE_PROFILING
-        std::string fname = "/tmp/search_nq_" + std::to_string(this->search_param_->query_record_array_size()) + ".profiling";
+        std::string fname = "/tmp/search_nq_" + std::to_string(this->search_param_->query_record_array_size())
+            + ".profiling";
         ProfilerStart(fname.c_str());
 #endif
 
         if (file_id_array_.empty()) {
             status = DBWrapper::DB()->Query(table_name_, (size_t) top_k, record_count, nprobe,
-                    vec_f.data(), dates, results);
+                                            vec_f.data(), dates, results);
         } else {
             status = DBWrapper::DB()->Query(table_name_, file_id_array_, (size_t) top_k,
-                    record_count, nprobe, vec_f.data(), dates, results);
+                                            record_count, nprobe, vec_f.data(), dates, results);
         }
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -682,7 +681,7 @@ SearchTask::OnExecute() {
 
         if (results.size() != record_count) {
             std::string msg = "Search " + std::to_string(record_count) + " vectors but only return "
-                              + std::to_string(results.size()) + " results";
+                + std::to_string(results.size()) + " results";
             return Status(SERVER_ILLEGAL_SEARCH_RESULT, msg);
         }
 
@@ -699,8 +698,6 @@ SearchTask::OnExecute() {
         //step 8: print time cost percent
         rc.RecordSection("construct result and send");
         rc.ElapseFromBegin("totally cost");
-
-
     } catch (std::exception &ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -710,10 +707,9 @@ SearchTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 CountTableTask::CountTableTask(const std::string &table_name, int64_t &row_count)
-        : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          table_name_(table_name),
-          row_count_(row_count) {
-
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      table_name_(table_name),
+      row_count_(row_count) {
 }
 
 BaseTaskPtr
@@ -742,7 +738,6 @@ CountTableTask::OnExecute() {
         row_count_ = (int64_t) row_count;
 
         rc.ElapseFromBegin("total cost");
-
     } catch (std::exception &ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
@@ -752,10 +747,9 @@ CountTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 CmdTask::CmdTask(const std::string &cmd, std::string &result)
-        : GrpcBaseTask(PING_TASK_GROUP),
-          cmd_(cmd),
-          result_(result) {
-
+    : GrpcBaseTask(PING_TASK_GROUP),
+      cmd_(cmd),
+      result_(result) {
 }
 
 BaseTaskPtr
@@ -769,8 +763,7 @@ CmdTask::OnExecute() {
         result_ = MILVUS_VERSION;
     } else if (cmd_ == "tasktable") {
         result_ = scheduler::ResMgrInst::GetInstance()->DumpTaskTables();
-    }
-    else {
+    } else {
         result_ = "OK";
     }
 
@@ -779,16 +772,17 @@ CmdTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DeleteByRangeTask::DeleteByRangeTask(const ::milvus::grpc::DeleteByRangeParam *delete_by_range_param)
-        : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          delete_by_range_param_(delete_by_range_param){
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      delete_by_range_param_(delete_by_range_param) {
 }
 
 BaseTaskPtr
 DeleteByRangeTask::Create(const ::milvus::grpc::DeleteByRangeParam *delete_by_range_param) {
-    if(delete_by_range_param == nullptr) {
+    if (delete_by_range_param == nullptr) {
         SERVER_LOG_ERROR << "grpc input is null!";
         return nullptr;
     }
+
     return std::shared_ptr<GrpcBaseTask>(new DeleteByRangeTask(delete_by_range_param));
 }
 
@@ -838,23 +832,21 @@ DeleteByRangeTask::OnExecute() {
         if (!status.ok()) {
             return status;
         }
-
     } catch (std::exception &ex) {
         return Status(SERVER_UNEXPECTED_ERROR, ex.what());
     }
-    
+
     return Status::OK();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 PreloadTableTask::PreloadTableTask(const std::string &table_name)
-        : GrpcBaseTask(DDL_DML_TASK_GROUP),
-          table_name_(table_name) {
-
+    : GrpcBaseTask(DDL_DML_TASK_GROUP),
+      table_name_(table_name) {
 }
 
 BaseTaskPtr
-PreloadTableTask::Create(const std::string &table_name){
+PreloadTableTask::Create(const std::string &table_name) {
     return std::shared_ptr<GrpcBaseTask>(new PreloadTableTask(table_name));
 }
 
@@ -889,12 +881,11 @@ DescribeIndexTask::DescribeIndexTask(const std::string &table_name,
     : GrpcBaseTask(DDL_DML_TASK_GROUP),
       table_name_(table_name),
       index_param_(index_param) {
-
 }
 
 BaseTaskPtr
 DescribeIndexTask::Create(const std::string &table_name,
-                          ::milvus::grpc::IndexParam *index_param){
+                          ::milvus::grpc::IndexParam *index_param) {
     return std::shared_ptr<GrpcBaseTask>(new DescribeIndexTask(table_name, index_param));
 }
 
@@ -932,11 +923,10 @@ DescribeIndexTask::OnExecute() {
 DropIndexTask::DropIndexTask(const std::string &table_name)
     : GrpcBaseTask(DDL_DML_TASK_GROUP),
       table_name_(table_name) {
-
 }
 
 BaseTaskPtr
-DropIndexTask::Create(const std::string &table_name){
+DropIndexTask::Create(const std::string &table_name) {
     return std::shared_ptr<GrpcBaseTask>(new DropIndexTask(table_name));
 }
 
@@ -975,7 +965,7 @@ DropIndexTask::OnExecute() {
     return Status::OK();
 }
 
-}
-}
-}
-}
+} // namespace grpc
+} // namespace server
+} // namespace milvus
+} // namespace zilliz
