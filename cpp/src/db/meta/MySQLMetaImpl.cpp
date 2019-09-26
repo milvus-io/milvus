@@ -373,6 +373,9 @@ Status MySQLMetaImpl::DropPartitionsByDates(const std::string &table_id,
                 return HandleException("QUERY ERROR WHEN DROPPING PARTITIONS BY DATES", dropPartitionsByDatesQuery.error());
             }
         } //Scoped Connection
+
+        ENGINE_LOG_DEBUG << "Successfully drop partitions, table id = " << table_schema.table_id_;
+
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DROPPING PARTITIONS BY DATES", e.what());
     }
@@ -443,6 +446,7 @@ Status MySQLMetaImpl::CreateTable(TableSchema &table_schema) {
             }
         } //Scoped Connection
 
+        ENGINE_LOG_DEBUG << "Successfully create table: " << table_schema.table_id_;
         return utils::CreateTablePath(options_, table_schema.table_id_);
 
     } catch (std::exception &e) {
@@ -589,6 +593,8 @@ Status MySQLMetaImpl::UpdateTableIndex(const std::string &table_id, const TableI
 
         } //Scoped Connection
 
+        ENGINE_LOG_DEBUG << "Successfully update table index, table id = " << table_id;
+
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE INDEX PARAM", e.what());
     }
@@ -620,6 +626,8 @@ Status MySQLMetaImpl::UpdateTableFlag(const std::string &table_id, int64_t flag)
             }
 
         } //Scoped Connection
+
+        ENGINE_LOG_DEBUG << "Successfully update table flag, table id = " << table_id;
 
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FLAG", e.what());
@@ -725,6 +733,8 @@ Status MySQLMetaImpl::DropTableIndex(const std::string &table_id) {
 
         } //Scoped Connection
 
+        ENGINE_LOG_DEBUG << "Successfully drop table index, table id = " << table_id;
+
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DROPPING TABLE INDEX", e.what());
     }
@@ -762,6 +772,8 @@ Status MySQLMetaImpl::DeleteTable(const std::string &table_id) {
             DeleteTableFiles(table_id);
         }
 
+        ENGINE_LOG_DEBUG << "Successfully delete table, table id = " << table_id;
+
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DELETING TABLE", e.what());
     }
@@ -795,6 +807,9 @@ Status MySQLMetaImpl::DeleteTableFiles(const std::string &table_id) {
                 return HandleException("QUERY ERROR WHEN DELETING TABLE FILES", deleteTableFilesQuery.error());
             }
         } //Scoped Connection
+
+        ENGINE_LOG_DEBUG << "Successfully delete table files, table id = " << table_id;
+
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN DELETING TABLE FILES", e.what());
     }
@@ -1001,6 +1016,7 @@ Status MySQLMetaImpl::CreateTableFile(TableFileSchema &file_schema) {
             }
         } // Scoped Connection
 
+        ENGINE_LOG_DEBUG << "Successfully create table file, file id = " << file_schema.file_id_;
         return utils::CreateTableFilePath(options_, file_schema);
 
     } catch (std::exception &e) {
@@ -1082,6 +1098,9 @@ Status MySQLMetaImpl::FilesToIndex(TableFilesSchema &files) {
             files.push_back(table_file);
         }
 
+        if(res.size() > 0) {
+            ENGINE_LOG_DEBUG << "Collect " << res.size() << " to-index files";
+        }
         return ret;
 
     } catch (std::exception &e) {
@@ -1195,6 +1214,9 @@ Status MySQLMetaImpl::FilesToSearch(const std::string &table_id,
             files[table_file.date_].push_back(table_file);
         }
 
+        if(res.size() > 0) {
+            ENGINE_LOG_DEBUG << "Collect " << res.size() << " to-search files";
+        }
         return ret;
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN FINDING TABLE FILES TO SEARCH", e.what());
@@ -1285,6 +1307,9 @@ Status MySQLMetaImpl::FilesToMerge(const std::string &table_id,
             files[table_file.date_].push_back(table_file);
         }
 
+        if(res.size() > 0) {
+            ENGINE_LOG_DEBUG << "Collect " << res.size() << " to-merge files";
+        }
         return ret;
 
     } catch (std::exception &e) {
@@ -1369,6 +1394,7 @@ Status MySQLMetaImpl::GetTableFiles(const std::string &table_id,
             table_files.emplace_back(file_schema);
         }
 
+        ENGINE_LOG_DEBUG << "Get table files by id";
         return ret;
 
     } catch (std::exception &e) {
@@ -1386,7 +1412,7 @@ Status MySQLMetaImpl::Archive() {
     for (auto &kv : criterias) {
         auto &criteria = kv.first;
         auto &limit = kv.second;
-        if (criteria == "days") {
+        if (criteria == engine::ARCHIVE_CONF_DAYS) {
             size_t usecs = limit * D_SEC * US_PS;
             long now = utils::GetMicroSecTimeStamp();
 
@@ -1410,16 +1436,20 @@ Status MySQLMetaImpl::Archive() {
                     return HandleException("QUERY ERROR DURING ARCHIVE", archiveQuery.error());
                 }
 
+                ENGINE_LOG_DEBUG << "Archive old files";
+
             } catch (std::exception &e) {
                 return HandleException("GENERAL ERROR WHEN DURING ARCHIVE", e.what());
             }
         }
-        if (criteria == "disk") {
+        if (criteria == engine::ARCHIVE_CONF_DISK) {
             uint64_t sum = 0;
             Size(sum);
 
             auto to_delete = (sum - limit * G);
             DiscardFiles(to_delete);
+
+            ENGINE_LOG_DEBUG << "Archive files to free disk";
         }
     }
 
@@ -1596,6 +1626,8 @@ Status MySQLMetaImpl::UpdateTableFile(TableFileSchema &file_schema) {
             }
         } //Scoped Connection
 
+        ENGINE_LOG_DEBUG << "Update single table file, file id = " << file_schema.file_id_;
+
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILE", e.what());
     }
@@ -1624,6 +1656,8 @@ Status MySQLMetaImpl::UpdateTableFilesToIndex(const std::string &table_id) {
         if (!updateTableFilesToIndexQuery.exec()) {
             return HandleException("QUERY ERROR WHEN UPDATING TABLE FILE TO INDEX", updateTableFilesToIndexQuery.error());
         }
+
+        ENGINE_LOG_DEBUG << "Update files to to_index, table id = " << table_id;
 
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES TO INDEX", e.what());
@@ -1705,6 +1739,8 @@ Status MySQLMetaImpl::UpdateTableFiles(TableFilesSchema &files) {
             }
         } //Scoped Connection
 
+        ENGINE_LOG_DEBUG << "Update " << files.size() << " table files";
+
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN UPDATING TABLE FILES", e.what());
     }
@@ -1782,6 +1818,11 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                     return HandleException("QUERY ERROR WHEN CLEANING UP FILES WITH TTL", cleanUpFilesWithTTLQuery.error());
                 }
             }
+
+            if(res.size() > 0) {
+                ENGINE_LOG_DEBUG << "Clean " << res.size() << " files deleted in " << seconds << " seconds";
+            }
+
         } //Scoped Connection
 
     } catch (std::exception &e) {
@@ -1832,6 +1873,10 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                     return HandleException("QUERY ERROR WHEN CLEANING UP TABLES WITH TTL", cleanUpFilesWithTTLQuery.error());
                 }
             }
+
+            if(res.size() > 0) {
+                ENGINE_LOG_DEBUG << "Remove " << res.size() << " tables from meta";
+            }
         } //Scoped Connection
 
     } catch (std::exception &e) {
@@ -1863,6 +1908,10 @@ Status MySQLMetaImpl::CleanUpFilesWithTTL(uint16_t seconds) {
                 if (res.empty()) {
                     utils::DeleteTablePath(options_, table_id);
                 }
+            }
+
+            if(table_ids.size() > 0) {
+                ENGINE_LOG_DEBUG << "Remove " << table_ids.size() << " tables folder";
             }
         }
     } catch (std::exception &e) {
@@ -1904,6 +1953,9 @@ Status MySQLMetaImpl::CleanUp() {
             }
         }
 
+        if(res.size() > 0) {
+            ENGINE_LOG_DEBUG << "Clean " << res.size() << " files";
+        }
     } catch (std::exception &e) {
         return HandleException("GENERAL ERROR WHEN CLEANING UP FILES", e.what());
     }
