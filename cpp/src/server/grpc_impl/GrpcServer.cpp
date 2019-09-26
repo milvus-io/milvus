@@ -17,7 +17,7 @@
 
 #include "milvus.grpc.pb.h"
 #include "GrpcServer.h"
-#include "server/ServerConfig.h"
+#include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
 #include "GrpcRequestHandler.h"
@@ -73,13 +73,20 @@ GrpcServer::Stop() {
 
 Status
 GrpcServer::StartService() {
-    ServerConfig &config = ServerConfig::GetInstance();
-    ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-    ConfigNode engine_config = config.GetConfig(CONFIG_ENGINE);
-    std::string address = server_config.GetValue(CONFIG_SERVER_ADDRESS, "127.0.0.1");
-    int32_t port = server_config.GetInt32Value(CONFIG_SERVER_PORT, 19530);
+    Config &config = Config::GetInstance();
+    std::string address, port;
+    Status s;
 
-    std::string server_address(address + ":" + std::to_string(port));
+    s = config.GetServerConfigAddress(address);
+    if (!s.ok()) {
+        return s;
+    }
+    s = config.GetServerConfigPort(port);
+    if (!s.ok()) {
+        return s;
+    }
+
+    std::string server_address(address + ":" + port);
 
     ::grpc::ServerBuilder builder;
     builder.SetOption(std::unique_ptr<::grpc::ServerBuilderOption>(new NoReusePortOption));

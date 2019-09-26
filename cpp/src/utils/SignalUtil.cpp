@@ -34,7 +34,7 @@ void SignalUtil::HandleSignal(int signum) {
         case SIGUSR2: {
             SERVER_LOG_INFO << "Server received signal: " << signum;
 
-            server::Server &server = server::Server::Instance();
+            server::Server &server = server::Server::GetInstance();
             server.Stop();
 
             exit(0);
@@ -43,7 +43,7 @@ void SignalUtil::HandleSignal(int signum) {
             SERVER_LOG_INFO << "Server received critical signal: " << signum;
             SignalUtil::PrintStacktrace();
 
-            server::Server &server = server::Server::Instance();
+            server::Server &server = server::Server::GetInstance();
             server.Stop();
 
             exit(1);

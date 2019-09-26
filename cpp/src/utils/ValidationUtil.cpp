@@ -206,38 +206,40 @@ ValidationUtil::ValidateIpAddress(const std::string &ip_address) {
 }
 
 Status
-ValidationUtil::ValidateStringIsNumber(const std::string &string) {
-    if (!string.empty() && std::all_of(string.begin(), string.end(), ::isdigit)) {
+ValidationUtil::ValidateStringIsNumber(const std::string &str) {
+    if (str.empty() || !std::all_of(str.begin(), str.end(), ::isdigit)) {
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
+    }
+    try {
+        int32_t value = std::stoi(str);
+    } catch(...) {
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
+    }
+    return Status::OK();
+}
+
+Status
+ValidationUtil::ValidateStringIsBool(const std::string &str) {
+    std::string s = str;
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    if (s == "true" || s == "on" || s == "yes" || s == "1" ||
+        s == "false" || s == "off" || s == "no" || s == "0" ||
+        s.empty()) {
         return Status::OK();
     }
     else {
-        return Status(SERVER_INVALID_ARGUMENT, "Not a number");
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str);
     }
 }
 
 Status
-ValidationUtil::ValidateStringIsBool(std::string &str) {
-    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
-    if (str == "true" || str == "on" || str == "yes" || str == "1" ||
-        str == "false" || str == "off" || str == "no" || str == "0" ||
-        str.empty()) {
-        return Status::OK();
+ValidationUtil::ValidateStringIsFloat(const std::string &str) {
+    try {
+        float val = std::stof(str);
+    } catch(...) {
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid float: " + str);
     }
-    else {
-        return Status(SERVER_INVALID_ARGUMENT, "Not a boolean: " + str);
-    }
-}
-
-Status
-ValidationUtil::ValidateStringIsDouble(const std::string &str, double &val) {
-    char *end = nullptr;
-    val = std::strtod(str.c_str(), &end);
-    if (end != str.c_str() && *end == '\0' && val != HUGE_VAL) {
-        return Status::OK();
-    }
-    else {
-        return Status(SERVER_INVALID_ARGUMENT, "Not a double value: " + str);
-    }
+    return Status::OK();
 }
 
 Status
