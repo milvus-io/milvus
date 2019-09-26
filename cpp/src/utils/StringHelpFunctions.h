@@ -20,16 +20,17 @@
 #include "utils/Status.h"
 
 #include <vector>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 
 class StringHelpFunctions {
-private:
+ private:
     StringHelpFunctions() = default;
 
-public:
+ public:
     static void TrimStringBlank(std::string &string);
 
     static void TrimStringQuote(std::string &string, const std::string &qoute);
@@ -56,9 +57,8 @@ public:
                                      const std::string &delimeter,
                                      const std::string &quote,
                                      std::vector<std::string> &result);
-
 };
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

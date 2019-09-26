@@ -28,6 +28,7 @@ using ErrorCode = int32_t;
 
 constexpr ErrorCode SERVER_SUCCESS = 0;
 constexpr ErrorCode SERVER_ERROR_CODE_BASE = 0x30000;
+
 constexpr ErrorCode
 ToServerErrorCode(const ErrorCode error_code) {
     return SERVER_ERROR_CODE_BASE + error_code;
@@ -35,6 +36,7 @@ ToServerErrorCode(const ErrorCode error_code) {
 
 constexpr ErrorCode DB_SUCCESS = 0;
 constexpr ErrorCode DB_ERROR_CODE_BASE = 0x40000;
+
 constexpr ErrorCode
 ToDbErrorCode(const ErrorCode error_code) {
     return DB_ERROR_CODE_BASE + error_code;
@@ -42,6 +44,7 @@ ToDbErrorCode(const ErrorCode error_code) {
 
 constexpr ErrorCode KNOWHERE_SUCCESS = 0;
 constexpr ErrorCode KNOWHERE_ERROR_CODE_BASE = 0x50000;
+
 constexpr ErrorCode
 ToKnowhereErrorCode(const ErrorCode error_code) {
     return KNOWHERE_ERROR_CODE_BASE + error_code;
@@ -96,26 +99,27 @@ constexpr ErrorCode KNOWHERE_UNEXPECTED_ERROR = ToKnowhereErrorCode(3);
 constexpr ErrorCode KNOWHERE_NO_SPACE = ToKnowhereErrorCode(4);
 
 namespace server {
-    class ServerException : public std::exception {
-    public:
-        ServerException(ErrorCode error_code,
-                        const std::string &message = std::string())
-            : error_code_(error_code), message_(message) {}
+class ServerException : public std::exception {
+ public:
+    ServerException(ErrorCode error_code,
+                    const std::string &message = std::string())
+        : error_code_(error_code), message_(message) {
+    }
 
-    public:
-        ErrorCode error_code() const {
-            return error_code_;
-        }
+ public:
+    ErrorCode error_code() const {
+        return error_code_;
+    }
 
-        virtual const char *what() const noexcept {
-            return message_.c_str();
-        }
+    virtual const char *what() const noexcept {
+        return message_.c_str();
+    }
 
-    private:
-        ErrorCode error_code_;
-        std::string message_;
-    };
-}
+ private:
+    ErrorCode error_code_;
+    std::string message_;
+};
+} // namespace server
 
 }  // namespace milvus
 }  // namespace zilliz

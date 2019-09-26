@@ -44,14 +44,18 @@ class Status {
     operator=(Status &&s);
 
     static Status
-    OK() { return Status(); }
+    OK() {
+        return Status();
+    }
 
     bool
-    ok() const { return state_ == nullptr || code() == 0; }
+    ok() const {
+        return state_ == nullptr || code() == 0;
+    }
 
     StatusCode
     code() const {
-        return (state_ == nullptr) ? 0 : *(StatusCode*)(state_);
+        return (state_ == nullptr) ? 0 : *(StatusCode *) (state_);
     }
 
     std::string
@@ -60,14 +64,14 @@ class Status {
     std::string
     ToString() const;
 
-private:
+ private:
     inline void
     CopyFrom(const Status &s);
 
     inline void
     MoveFrom(Status &s);
 
-private:
+ private:
     const char *state_ = nullptr;
 }; // Status
 
