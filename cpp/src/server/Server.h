@@ -22,7 +22,6 @@
 #include <cstdint>
 #include <string>
 
-
 namespace zilliz {
 namespace milvus {
 namespace server {
@@ -58,6 +57,6 @@ class Server {
     std::string log_config_file_;
 };  // Server
 
-}   // server
-}   // sql
-}   // zilliz
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

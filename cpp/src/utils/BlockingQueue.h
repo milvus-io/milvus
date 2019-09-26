@@ -29,8 +29,9 @@ namespace server {
 
 template<typename T>
 class BlockingQueue {
-public:
-    BlockingQueue() : mtx(), full_(), empty_() {}
+ public:
+    BlockingQueue() : mtx(), full_(), empty_() {
+    }
 
     BlockingQueue(const BlockingQueue &rhs) = delete;
 
@@ -50,7 +51,7 @@ public:
 
     void SetCapacity(const size_t capacity);
 
-private:
+ private:
     mutable std::mutex mtx;
     std::condition_variable full_;
     std::condition_variable empty_;
@@ -58,9 +59,8 @@ private:
     size_t capacity_ = 32;
 };
 
-}
-}
-}
-
+} // namespace server
+} // namespace milvus
+} // namespace zilliz
 
 #include "./BlockingQueue.inl"
