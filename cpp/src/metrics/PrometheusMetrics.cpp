@@ -31,7 +31,7 @@ ErrorCode
 PrometheusMetrics::Init() {
     try {
         Config &config = Config::GetInstance();
-        Status s = config.GetMetricConfigAutoBootup(startup_);
+        Status s = config.GetMetricConfigEnableMonitor(startup_);
         if (!s.ok()) return s.code();
         if (!startup_) return SERVER_SUCCESS;
 

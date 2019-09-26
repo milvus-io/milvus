@@ -34,9 +34,8 @@ namespace server {
 DBWrapper::DBWrapper() {
 }
 
-Status
-DBWrapper::StartService() {
-    Config &config = Config::GetInstance();
+Status DBWrapper::StartService() {
+    Config& config = Config::GetInstance();
     Status s;
     //db config
     engine::DBOptions opt;
@@ -45,13 +44,13 @@ DBWrapper::StartService() {
     if (!s.ok()) return s;
 
     std::string path;
-    s = config.GetDBConfigPath(path);
+    s = config.GetDBConfigPrimaryPath(path);
     if (!s.ok()) return s;
 
     opt.meta_.path_ = path + "/db";
 
     std::string db_slave_path;
-    s = config.GetDBConfigSlavePath(db_slave_path);
+    s = config.GetDBConfigSecondaryPath(db_slave_path);
     if (!s.ok()) return s;
 
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta_.slave_paths_);
@@ -61,18 +60,19 @@ DBWrapper::StartService() {
     if (!s.ok()) return s;
 
     std::string mode;
-    s = config.GetServerConfigMode(mode);
+    s = config.GetServerConfigDeployMode(mode);
     if (!s.ok()) return s;
 
     if (mode == "single") {
         opt.mode_ = engine::DBOptions::MODE::SINGLE;
-    } else if (mode == "cluster") {
-        opt.mode_ = engine::DBOptions::MODE::CLUSTER;
-    } else if (mode == "read_only") {
-        opt.mode_ = engine::DBOptions::MODE::READ_ONLY;
+    } else if (mode == "cluster_readonly") {
+        opt.mode_ = engine::DBOptions::MODE::CLUSTER_READONLY;
+    } else if (mode == "cluster_writable") {
+        opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
     } else {
-        std::cerr << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']"
-                  << std::endl;
+        std::cerr <<
+        "ERROR: mode specified in server_config must be ['single', 'cluster_readonly', 'cluster_writable']"
+        << std::endl;
         kill(0, SIGUSR1);
     }
 
@@ -86,7 +86,7 @@ DBWrapper::StartService() {
     } else {
         uint32_t sys_thread_cnt = 8;
         if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
-            omp_thread = (int32_t) ceil(sys_thread_cnt * 0.5);
+            omp_thread = (int32_t)ceil(sys_thread_cnt*0.5);
             omp_set_num_threads(omp_thread);
         }
     }
@@ -120,7 +120,7 @@ DBWrapper::StartService() {
         kill(0, SIGUSR1);
     }
 
-    for (auto &path : opt.meta_.slave_paths_) {
+    for (auto& path : opt.meta_.slave_paths_) {
         status = CommonUtil::CreateDirectory(path);
         if (!status.ok()) {
             std::cerr << "ERROR! Failed to create database slave path: " << path << std::endl;
@@ -131,7 +131,7 @@ DBWrapper::StartService() {
     //create db instance
     try {
         db_ = engine::DBFactory::Build(opt);
-    } catch (std::exception &ex) {
+    } catch(std::exception& ex) {
         std::cerr << "ERROR! Failed to open database: " << ex.what() << std::endl;
         kill(0, SIGUSR1);
     }
@@ -141,8 +141,7 @@ DBWrapper::StartService() {
     return Status::OK();
 }
 
-Status
-DBWrapper::StopService() {
+Status DBWrapper::StopService() {
     if (db_) {
         db_->Stop();
     }
