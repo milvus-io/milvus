@@ -15,16 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "scheduler/SchedInst.h"
-#include "server/ServerConfig.h"
 #include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
 
+#include "server/Config.h"
+#include "scheduler/SchedInst.h"
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 
 class SchedInstTest : public testing::Test {
@@ -67,7 +66,7 @@ protected:
         fstream << ss.str();
         fstream.close();
 
-        server::ServerConfig::GetInstance().LoadConfigFile(CONFIG_FILE);
+        server::Config::GetInstance().LoadConfigFile(CONFIG_FILE);
     }
 
     void

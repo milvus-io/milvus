@@ -15,14 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/ServerConfig.h"
-#include "utils/TimeRecorder.h"
-
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>
-#include <src/scheduler/task/SearchTask.h>
 
+#include "scheduler/task/SearchTask.h"
+#include "utils/TimeRecorder.h"
 
 using namespace zilliz::milvus;
 
@@ -127,23 +125,23 @@ TEST(DBSearchTest, TOPK_TEST) {
     std::vector<long> target_ids;
     std::vector<float> target_distence;
     scheduler::ResultSet src_result;
-    auto status = engine::XSearchTask::ClusterResult(target_ids, target_distence, NQ, TOP_K, src_result);
+    auto status = scheduler::XSearchTask::ClusterResult(target_ids, target_distence, NQ, TOP_K, src_result);
     ASSERT_FALSE(status.ok());
     ASSERT_TRUE(src_result.empty());
 
     BuildResult(NQ, TOP_K, ascending, target_ids, target_distence);
-    status = engine::XSearchTask::ClusterResult(target_ids, target_distence, NQ, TOP_K, src_result);
+    status = scheduler::XSearchTask::ClusterResult(target_ids, target_distence, NQ, TOP_K, src_result);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(src_result.size(), NQ);
 
     scheduler::ResultSet target_result;
-    status = engine::XSearchTask::TopkResult(target_result, TOP_K, ascending, target_result);
+    status = scheduler::XSearchTask::TopkResult(target_result, TOP_K, ascending, target_result);
     ASSERT_TRUE(status.ok());
 
-    status = engine::XSearchTask::TopkResult(target_result, TOP_K, ascending, src_result);
+    status = scheduler::XSearchTask::TopkResult(target_result, TOP_K, ascending, src_result);
     ASSERT_FALSE(status.ok());
 
-    status = engine::XSearchTask::TopkResult(src_result, TOP_K, ascending, target_result);
+    status = scheduler::XSearchTask::TopkResult(src_result, TOP_K, ascending, target_result);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(src_result.empty());
     ASSERT_EQ(target_result.size(), NQ);
@@ -153,10 +151,10 @@ TEST(DBSearchTest, TOPK_TEST) {
     uint64_t wrong_topk = TOP_K - 10;
     BuildResult(NQ, wrong_topk, ascending, src_ids, src_distence);
 
-    status = engine::XSearchTask::ClusterResult(src_ids, src_distence, NQ, wrong_topk, src_result);
+    status = scheduler::XSearchTask::ClusterResult(src_ids, src_distence, NQ, wrong_topk, src_result);
     ASSERT_TRUE(status.ok());
 
-    status = engine::XSearchTask::TopkResult(src_result, TOP_K, ascending, target_result);
+    status = scheduler::XSearchTask::TopkResult(src_result, TOP_K, ascending, target_result);
     ASSERT_TRUE(status.ok());
     for(uint64_t i = 0; i < NQ; i++) {
         ASSERT_EQ(target_result[i].size(), TOP_K);
@@ -165,7 +163,7 @@ TEST(DBSearchTest, TOPK_TEST) {
     wrong_topk = TOP_K + 10;
     BuildResult(NQ, wrong_topk, ascending, src_ids, src_distence);
 
-    status = engine::XSearchTask::TopkResult(src_result, TOP_K, ascending, target_result);
+    status = scheduler::XSearchTask::TopkResult(src_result, TOP_K, ascending, target_result);
     ASSERT_TRUE(status.ok());
     for(uint64_t i = 0; i < NQ; i++) {
         ASSERT_EQ(target_result[i].size(), TOP_K);
@@ -183,15 +181,15 @@ TEST(DBSearchTest, MERGE_TEST) {
     uint64_t src_count = 5, target_count = 8;
     BuildResult(1, src_count, ascending, src_ids, src_distence);
     BuildResult(1, target_count, ascending, target_ids, target_distence);
-    auto status = engine::XSearchTask::ClusterResult(src_ids, src_distence, 1, src_count, src_result);
+    auto status = scheduler::XSearchTask::ClusterResult(src_ids, src_distence, 1, src_count, src_result);
     ASSERT_TRUE(status.ok());
-    status = engine::XSearchTask::ClusterResult(target_ids, target_distence, 1, target_count, target_result);
+    status = scheduler::XSearchTask::ClusterResult(target_ids, target_distence, 1, target_count, target_result);
     ASSERT_TRUE(status.ok());
 
     {
         scheduler::Id2DistanceMap src = src_result[0];
         scheduler::Id2DistanceMap target = target_result[0];
-        status = engine::XSearchTask::MergeResult(src, target, 10, ascending);
+        status = scheduler::XSearchTask::MergeResult(src, target, 10, ascending);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), 10);
         CheckResult(src_result[0], target_result[0], target, ascending);
@@ -200,7 +198,7 @@ TEST(DBSearchTest, MERGE_TEST) {
     {
         scheduler::Id2DistanceMap src = src_result[0];
         scheduler::Id2DistanceMap target;
-        status = engine::XSearchTask::MergeResult(src, target, 10, ascending);
+        status = scheduler::XSearchTask::MergeResult(src, target, 10, ascending);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), src_count);
         ASSERT_TRUE(src.empty());
@@ -210,7 +208,7 @@ TEST(DBSearchTest, MERGE_TEST) {
     {
         scheduler::Id2DistanceMap src = src_result[0];
         scheduler::Id2DistanceMap target = target_result[0];
-        status = engine::XSearchTask::MergeResult(src, target, 30, ascending);
+        status = scheduler::XSearchTask::MergeResult(src, target, 30, ascending);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), src_count + target_count);
         CheckResult(src_result[0], target_result[0], target, ascending);
@@ -219,7 +217,7 @@ TEST(DBSearchTest, MERGE_TEST) {
     {
         scheduler::Id2DistanceMap target = src_result[0];
         scheduler::Id2DistanceMap src = target_result[0];
-        status = engine::XSearchTask::MergeResult(src, target, 30, ascending);
+        status = scheduler::XSearchTask::MergeResult(src, target, 30, ascending);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(target.size(), src_count + target_count);
         CheckResult(src_result[0], target_result[0], target, ascending);
@@ -227,10 +225,6 @@ TEST(DBSearchTest, MERGE_TEST) {
 }
 
 TEST(DBSearchTest, PARALLEL_CLUSTER_TEST) {
-    server::ServerConfig &config = server::ServerConfig::GetInstance();
-    server::ConfigNode& db_config = config.GetConfig(server::CONFIG_DB);
-    db_config.SetValue(server::CONFIG_DB_PARALLEL_REDUCE, "false");//lvoc cannot work for std::function, set to false
-
     bool ascending = true;
     std::vector<long> target_ids;
     std::vector<float> target_distence;
@@ -242,7 +236,7 @@ TEST(DBSearchTest, PARALLEL_CLUSTER_TEST) {
         BuildResult(nq, topk, ascending, target_ids, target_distence);
         rc.RecordSection("build id/dietance map");
 
-        auto status = engine::XSearchTask::ClusterResult(target_ids, target_distence, nq, topk, src_result);
+        auto status = scheduler::XSearchTask::ClusterResult(target_ids, target_distence, nq, topk, src_result);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(src_result.size(), nq);
 
@@ -263,10 +257,6 @@ TEST(DBSearchTest, PARALLEL_CLUSTER_TEST) {
 }
 
 TEST(DBSearchTest, PARALLEL_TOPK_TEST) {
-    server::ServerConfig &config = server::ServerConfig::GetInstance();
-    server::ConfigNode& db_config = config.GetConfig(server::CONFIG_DB);
-    db_config.SetValue(server::CONFIG_DB_PARALLEL_REDUCE, "false");//lvoc cannot work for std::function, set to false
-
     std::vector<long> target_ids;
     std::vector<float> target_distence;
     scheduler::ResultSet src_result;
@@ -282,14 +272,14 @@ TEST(DBSearchTest, PARALLEL_TOPK_TEST) {
         TimeRecorder rc("DoCluster");
 
         BuildResult(nq, topk, ascending, target_ids, target_distence);
-        auto status = engine::XSearchTask::ClusterResult(target_ids, target_distence, nq, topk, src_result);
+        auto status = scheduler::XSearchTask::ClusterResult(target_ids, target_distence, nq, topk, src_result);
         rc.RecordSection("cluster result");
 
         BuildResult(nq, insufficient_topk, ascending, insufficient_ids, insufficient_distence);
-        status = engine::XSearchTask::ClusterResult(target_ids, target_distence, nq, insufficient_topk, insufficient_result);
+        status = scheduler::XSearchTask::ClusterResult(target_ids, target_distence, nq, insufficient_topk, insufficient_result);
         rc.RecordSection("cluster result");
 
-        engine::XSearchTask::TopkResult(insufficient_result, topk, ascending, src_result);
+        scheduler::XSearchTask::TopkResult(insufficient_result, topk, ascending, src_result);
         ASSERT_TRUE(status.ok());
         rc.RecordSection("topk");
 

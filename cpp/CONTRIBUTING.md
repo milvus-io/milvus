@@ -4,7 +4,7 @@ First of all, thanks for taking the time to contribute to Milvus! It's people li
 
 The following are a set of guidelines for contributing to Milvus. Following these guidelines helps contributing to this project easy and transparent. These are mostly guideline, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
-As for everything else in the project, the contributions to Milvus are governed by our [Code of Conduct](http://hood.ie/code-of-conduct/).
+As for everything else in the project, the contributions to Milvus are governed by our [Code of Conduct](CODE OF CONDUCT.md).
 
 TOC
 
@@ -36,21 +36,30 @@ The Milvus team members will review your pull requests, and once it is accepted,
 
 Before sending your pull requests for review, make sure your changes are consistent with the guidelines and follow the Milvus coding style.
 
-- Include unit tests when you contribute new features, as they help to a) prove that your code works correctly, and b) guard against future breaking changes to lower the maintenance cost.
-- Bug fixes also generally require unit tests, because the presence of bugs usually indicates insufficient test coverage.
+- Include unit tests when you contribute new features, as they help to prove that your code works correctly, and also guard against future breaking changes to lower the maintenance cost.
+- Bug fixes also require unit tests, because the presence of bugs usually indicates insufficient test coverage.
 - Keep API compatibility in mind when you change code in Milvus. Reviewers of your pull request will comment on any API compatibility issues.
 - When you contribute a new feature to Milvus, the maintenance burden is (by default) transferred to the Milvus team. This means that the benefit of the contribution must be compared against the cost of maintaining the feature.
 
 
 ## Coding Style
+The coding style used in Milvus generally follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
+And we made the following changes based on the guide:
+
+- 4 spaces for indentation
+- Adopt .cpp file extension instead of .cc extension
+- 120-character line length
+- Camel-Cased file names
 
 
 ## Run unit test
 
+We use Google Test framework for test running.
+To run unit test for Milvus under C++, please use the following command:
+
 ```shell
+# Run unit test for Milvus
 $ ./build.sh -u
-or
-$ ./build.sh --unittest
 ```
 
 

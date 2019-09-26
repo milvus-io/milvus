@@ -20,7 +20,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 constexpr uint64_t MAXINT = std::numeric_limits<uint32_t >::max();
 

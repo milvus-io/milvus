@@ -1,0 +1,7 @@
+*cmake-build-debug*
+*cmake-build-release*
+*cmake_build*
+*src/thirdparty*
+*src/core/thirdparty*
+*src/grpc*
+*easylogging++*

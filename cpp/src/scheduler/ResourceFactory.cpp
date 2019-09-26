@@ -21,7 +21,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 std::shared_ptr<Resource>
 ResourceFactory::Create(const std::string &name,

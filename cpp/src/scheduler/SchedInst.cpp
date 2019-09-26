@@ -17,7 +17,7 @@
 
 
 #include "SchedInst.h"
-#include "server/ServerConfig.h"
+#include "server/Config.h"
 #include "ResourceFactory.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "Utils.h"
@@ -25,7 +25,7 @@
 
 namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 ResourceMgrPtr ResMgrInst::instance = nullptr;
 std::mutex ResMgrInst::mutex_;
@@ -38,13 +38,15 @@ std::mutex JobMgrInst::mutex_;
 
 void
 load_simple_config() {
-    server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
-    auto mode = config.GetValue("mode", "simple");
+    server::Config &config = server::Config::GetInstance();
+    std::string mode;
+    config.GetResourceConfigMode(mode);
+    std::vector<std::string> pool;
+    config.GetResourceConfigPool(pool);
 
-    auto resources = config.GetSequence("resources");
     bool cpu = false;
     std::set<uint64_t> gpu_ids;
-    for (auto &resource : resources) {
+    for (auto &resource : pool) {
         if (resource == "cpu") {
             cpu = true;
             break;
@@ -82,7 +84,7 @@ load_simple_config() {
 void
 load_advance_config() {
 //    try {
-//        server::ConfigNode &config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_RESOURCE);
+//        server::ConfigNode &config = server::Config::GetInstance().GetConfig(server::CONFIG_RESOURCE);
 //
 //        if (config.GetChildren().empty()) throw "resource_config null exception";
 //

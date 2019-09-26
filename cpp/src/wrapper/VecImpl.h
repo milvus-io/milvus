@@ -19,7 +19,7 @@
 #pragma once
 
 #include "knowhere/index/vector_index/VectorIndex.h"
-#include "vec_index.h"
+#include "VecIndex.h"
 
 
 namespace zilliz {

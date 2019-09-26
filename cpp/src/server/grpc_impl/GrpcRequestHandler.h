@@ -234,7 +234,7 @@ public:
     ::grpc::Status
     ShowTables(::grpc::ServerContext *context,
                const ::milvus::grpc::Command *request,
-               ::grpc::ServerWriter<::milvus::grpc::TableName> *writer) override;
+               ::milvus::grpc::TableNameList *table_name_list) override;
 
     /**
      * @brief Give the server status
