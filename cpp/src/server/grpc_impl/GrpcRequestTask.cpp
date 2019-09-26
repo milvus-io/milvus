@@ -15,8 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <string.h>
+
 #include "GrpcRequestTask.h"
-#include "../ServerConfig.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
@@ -28,9 +29,8 @@
 #include "scheduler/SchedInst.h"
 //#include <gperftools/profiler.h>
 
-#include "src/server/Server.h"
+#include "server/Server.h"
 
-#include <string.h>
 
 namespace zilliz {
 namespace milvus {

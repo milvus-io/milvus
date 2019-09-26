@@ -16,6 +16,7 @@
 // under the License.
 
 #include "Metrics.h"
+#include "server/Config.h"
 #include "PrometheusMetrics.h"
 
 
@@ -31,8 +32,10 @@ Metrics::GetInstance() {
 
 MetricsBase &
 Metrics::CreateMetricsCollector() {
-    ConfigNode &config = ServerConfig::GetInstance().GetConfig(CONFIG_METRIC);
-    std::string collector_type_str = config.GetValue(CONFIG_METRIC_COLLECTOR);
+    Config &config = Config::GetInstance();
+    std::string collector_type_str;
+
+    config.GetMetricConfigCollector(collector_type_str);
 
     if (collector_type_str == "prometheus") {
         return PrometheusMetrics::GetInstance();
