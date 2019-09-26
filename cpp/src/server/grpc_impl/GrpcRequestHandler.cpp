@@ -122,8 +122,8 @@ GrpcRequestHandler::DescribeTable(::grpc::ServerContext *context,
     BaseTaskPtr task_ptr = DescribeTableTask::Create(request->table_name(), response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
-    response->mutable_table_name()->mutable_status()->set_error_code(grpc_status.error_code());
-    response->mutable_table_name()->mutable_status()->set_reason(grpc_status.reason());
+    response->mutable_status()->set_error_code(grpc_status.error_code());
+    response->mutable_status()->set_reason(grpc_status.reason());
     return ::grpc::Status::OK;
 }
 
@@ -145,17 +145,14 @@ GrpcRequestHandler::CountTable(::grpc::ServerContext *context,
 ::grpc::Status
 GrpcRequestHandler::ShowTables(::grpc::ServerContext *context,
                                const ::milvus::grpc::Command *request,
-                               ::grpc::ServerWriter<::milvus::grpc::TableName> *writer) {
+                               ::milvus::grpc::TableNameList *response) {
 
-    BaseTaskPtr task_ptr = ShowTablesTask::Create(writer);
+    BaseTaskPtr task_ptr = ShowTablesTask::Create(response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
-    if (grpc_status.error_code() != SERVER_SUCCESS) {
-        ::grpc::Status status(::grpc::UNKNOWN, grpc_status.reason());
-        return status;
-    } else {
-        return ::grpc::Status::OK;
-    }
+    response->mutable_status()->set_error_code(grpc_status.error_code());
+    response->mutable_status()->set_reason(grpc_status.reason());
+    return ::grpc::Status::OK;
 }
 
 ::grpc::Status
@@ -204,8 +201,8 @@ GrpcRequestHandler::DescribeIndex(::grpc::ServerContext *context,
     BaseTaskPtr task_ptr = DescribeIndexTask::Create(request->table_name(), response);
     ::milvus::grpc::Status grpc_status;
     GrpcRequestScheduler::ExecTask(task_ptr, &grpc_status);
-    response->mutable_table_name()->mutable_status()->set_reason(grpc_status.reason());
-    response->mutable_table_name()->mutable_status()->set_error_code(grpc_status.error_code());
+    response->mutable_status()->set_reason(grpc_status.reason());
+    response->mutable_status()->set_error_code(grpc_status.error_code());
     return ::grpc::Status::OK;
 }
 

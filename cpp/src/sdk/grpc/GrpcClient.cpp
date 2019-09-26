@@ -167,10 +167,10 @@ GrpcClient::DescribeTable(::milvus::grpc::TableSchema& grpc_schema,
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
 
-    if (grpc_schema.table_name().status().error_code() != grpc::SUCCESS) {
-        std::cerr << grpc_schema.table_name().status().reason() << std::endl;
+    if (grpc_schema.status().error_code() != grpc::SUCCESS) {
+        std::cerr << grpc_schema.status().reason() << std::endl;
         return Status(StatusCode::ServerFailed,
-            grpc_schema.table_name().status().reason());
+            grpc_schema.status().reason());
     }
 
     return Status::OK();
@@ -201,17 +201,10 @@ GrpcClient::CountTable(const std::string& table_name, Status& status) {
 }
 
 Status
-GrpcClient::ShowTables(std::vector<std::string> &table_array) {
+GrpcClient::ShowTables(milvus::grpc::TableNameList &table_name_list) {
     ClientContext context;
     ::milvus::grpc::Command command;
-    std::unique_ptr<ClientReader<::milvus::grpc::TableName> > reader(
-            stub_->ShowTables(&context, command));
-
-    ::milvus::grpc::TableName table_name;
-    while (reader->Read(&table_name)) {
-        table_array.emplace_back(table_name.table_name());
-    }
-    ::grpc::Status grpc_status = reader->Finish();
+    ::grpc::Status grpc_status = stub_->ShowTables(&context, command, &table_name_list);
 
     if (!grpc_status.ok()) {
         std::cerr << "ShowTables gRPC failed!" << std::endl;
@@ -219,10 +212,10 @@ GrpcClient::ShowTables(std::vector<std::string> &table_array) {
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
 
-    if (table_name.status().error_code() != grpc::SUCCESS) {
-        std::cerr << table_name.status().reason() << std::endl;
+    if (table_name_list.status().error_code() != grpc::SUCCESS) {
+        std::cerr << table_name_list.status().reason() << std::endl;
         return Status(StatusCode::ServerFailed,
-            table_name.status().reason());
+                      table_name_list.status().reason());
     }
 
     return Status::OK();
@@ -302,9 +295,9 @@ GrpcClient::DescribeIndex(grpc::TableName &table_name, grpc::IndexParam &index_p
         std::cerr << "DescribeIndex rpc failed!" << std::endl;
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
-    if (index_param.mutable_table_name()->status().error_code() != grpc::SUCCESS) {
-        std::cerr << index_param.mutable_table_name()->status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed, index_param.mutable_table_name()->status().reason());
+    if (index_param.status().error_code() != grpc::SUCCESS) {
+        std::cerr << index_param.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, index_param.status().reason());
     }
 
     return Status::OK();
