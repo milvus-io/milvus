@@ -8,18 +8,26 @@ package milvus.grpc;
  * @brief Table Name
  */
 message TableName {
+    string table_name = 1;
+}
+
+/**
+ * @brief Table Name List
+ */
+message TableNameList {
     Status status = 1;
-    string table_name = 2;
+    repeated string table_names = 2;
 }
 
 /**
  * @brief Table Schema
  */
 message TableSchema {
-    TableName table_name = 1;
-    int64 dimension = 2;
-    int64 index_file_size = 3;
-    int32 metric_type = 4;
+    Status status = 1;
+    string table_name = 2;
+    int64 dimension = 3;
+    int64 index_file_size = 4;
+    int32 metric_type = 5;
 }
 
 /**
@@ -141,8 +149,9 @@ message Index {
  * @brief Index params
  */
 message IndexParam {
-    TableName table_name = 1;
-    Index index = 2;
+    Status status = 1;
+    string table_name = 2;
+    Index index = 3;
 }
 
 /**
@@ -264,7 +273,7 @@ service MilvusService {
      *
      * @return table names.
      */
-    rpc ShowTables(Command) returns (stream TableName) {}
+    rpc ShowTables(Command) returns (TableNameList) {}
 
     /**
      * @brief Give the server status
