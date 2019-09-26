@@ -16,13 +16,14 @@
 // under the License.
 
 
-#include "DBWrapper.h"
+#include "server/DBWrapper.h"
 #include "Config.h"
 #include "db/DBFactory.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
+#include <string>
 #include <omp.h>
 #include <faiss/utils.h>
 
@@ -31,11 +32,11 @@ namespace milvus {
 namespace server {
 
 DBWrapper::DBWrapper() {
-
 }
 
-Status DBWrapper::StartService() {
-    Config& config = Config::GetInstance();
+Status
+DBWrapper::StartService() {
+    Config &config = Config::GetInstance();
     Status s;
     //db config
     engine::DBOptions opt;
@@ -65,15 +66,13 @@ Status DBWrapper::StartService() {
 
     if (mode == "single") {
         opt.mode_ = engine::DBOptions::MODE::SINGLE;
-    }
-    else if (mode == "cluster") {
+    } else if (mode == "cluster") {
         opt.mode_ = engine::DBOptions::MODE::CLUSTER;
-    }
-    else if (mode == "read_only") {
+    } else if (mode == "read_only") {
         opt.mode_ = engine::DBOptions::MODE::READ_ONLY;
-    }
-    else {
-        std::cerr << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']" << std::endl;
+    } else {
+        std::cerr << "ERROR: mode specified in server_config is not one of ['single', 'cluster', 'read_only']"
+                  << std::endl;
         kill(0, SIGUSR1);
     }
 
@@ -86,8 +85,8 @@ Status DBWrapper::StartService() {
         SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
     } else {
         uint32_t sys_thread_cnt = 8;
-        if(CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
-            omp_thread = (int32_t)ceil(sys_thread_cnt*0.5);
+        if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
+            omp_thread = (int32_t) ceil(sys_thread_cnt * 0.5);
             omp_set_num_threads(omp_thread);
         }
     }
@@ -116,14 +115,14 @@ Status DBWrapper::StartService() {
 
     //create db root folder
     Status status = CommonUtil::CreateDirectory(opt.meta_.path_);
-    if(!status.ok()) {
+    if (!status.ok()) {
         std::cerr << "ERROR! Failed to create database root path: " << opt.meta_.path_ << std::endl;
         kill(0, SIGUSR1);
     }
 
-    for(auto& path : opt.meta_.slave_paths_) {
+    for (auto &path : opt.meta_.slave_paths_) {
         status = CommonUtil::CreateDirectory(path);
-        if(!status.ok()) {
+        if (!status.ok()) {
             std::cerr << "ERROR! Failed to create database slave path: " << path << std::endl;
             kill(0, SIGUSR1);
         }
@@ -132,7 +131,7 @@ Status DBWrapper::StartService() {
     //create db instance
     try {
         db_ = engine::DBFactory::Build(opt);
-    } catch(std::exception& ex) {
+    } catch (std::exception &ex) {
         std::cerr << "ERROR! Failed to open database: " << ex.what() << std::endl;
         kill(0, SIGUSR1);
     }
@@ -142,14 +141,15 @@ Status DBWrapper::StartService() {
     return Status::OK();
 }
 
-Status DBWrapper::StopService() {
-    if(db_) {
+Status
+DBWrapper::StopService() {
+    if (db_) {
         db_->Stop();
     }
 
     return Status::OK();
 }
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz
