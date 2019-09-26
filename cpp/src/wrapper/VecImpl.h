@@ -21,6 +21,8 @@
 #include "knowhere/index/vector_index/VectorIndex.h"
 #include "VecIndex.h"
 
+#include <utility>
+#include <memory>
 
 namespace zilliz {
 namespace milvus {
@@ -29,14 +31,15 @@ namespace engine {
 class VecIndexImpl : public VecIndex {
  public:
     explicit VecIndexImpl(std::shared_ptr<zilliz::knowhere::VectorIndex> index, const IndexType &type)
-        : index_(std::move(index)), type(type) {};
+        : index_(std::move(index)), type(type) {
+    }
 
     Status
-    BuildAll(const long &nb,
+    BuildAll(const int64_t &nb,
              const float *xb,
-             const long *ids,
+             const int64_t *ids,
              const Config &cfg,
-             const long &nt,
+             const int64_t &nt,
              const float *xt) override;
 
     VecIndexPtr
@@ -55,7 +58,7 @@ class VecIndexImpl : public VecIndex {
     Count() override;
 
     Status
-    Add(const long &nb, const float *xb, const long *ids, const Config &cfg) override;
+    Add(const int64_t &nb, const float *xb, const int64_t *ids, const Config &cfg) override;
 
     zilliz::knowhere::BinarySet
     Serialize() override;
@@ -70,7 +73,7 @@ class VecIndexImpl : public VecIndex {
     GetDeviceId() override;
 
     Status
-    Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) override;
+    Search(const int64_t &nq, const float *xq, float *dist, int64_t *ids, const Config &cfg) override;
 
  protected:
     int64_t dim = 0;
@@ -83,14 +86,15 @@ class VecIndexImpl : public VecIndex {
 class IVFMixIndex : public VecIndexImpl {
  public:
     explicit IVFMixIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index, const IndexType &type)
-        : VecIndexImpl(std::move(index), type) {};
+        : VecIndexImpl(std::move(index), type) {
+    }
 
     Status
-    BuildAll(const long &nb,
+    BuildAll(const int64_t &nb,
              const float *xb,
-             const long *ids,
+             const int64_t *ids,
              const Config &cfg,
-             const long &nt,
+             const int64_t &nt,
              const float *xt) override;
 
     Status
@@ -100,7 +104,8 @@ class IVFMixIndex : public VecIndexImpl {
 class BFIndex : public VecIndexImpl {
  public:
     explicit BFIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : VecIndexImpl(std::move(index),
-                                                                                          IndexType::FAISS_IDMAP) {};
+                                                                                          IndexType::FAISS_IDMAP) {
+    }
 
     ErrorCode
     Build(const Config &cfg);
@@ -109,17 +114,17 @@ class BFIndex : public VecIndexImpl {
     GetRawVectors();
 
     Status
-    BuildAll(const long &nb,
+    BuildAll(const int64_t &nb,
              const float *xb,
-             const long *ids,
+             const int64_t *ids,
              const Config &cfg,
-             const long &nt,
+             const int64_t &nt,
              const float *xt) override;
 
     int64_t *
     GetRawIds();
 };
 
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz

@@ -27,14 +27,12 @@
 #include "utils/CommonUtil.h"
 #include "metrics/Metrics.h"
 #include "server/Server.h"
-#include "version.h"
+#include "../version.h"
 
 
 INITIALIZE_EASYLOGGINGPP
 
 void print_help(const std::string &app_name);
-
-using namespace zilliz::milvus;
 
 int
 main(int argc, char *argv[]) {
@@ -103,6 +101,7 @@ main(int argc, char *argv[]) {
     }
 
     /* Handle Signal */
+    using ::zilliz::milvus;
     signal(SIGHUP, server::SignalUtil::HandleSignal);
     signal(SIGINT, server::SignalUtil::HandleSignal);
     signal(SIGUSR1, server::SignalUtil::HandleSignal);
