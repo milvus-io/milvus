@@ -241,6 +241,12 @@ Server::LoadConfig() {
         std::cerr << "Failed to load config file: " << config_filename_ << std::endl;
         exit(0);
     }
+
+    s = config.ValidateConfig();
+    if (!s.ok()) {
+        std::cerr << "Config check fail: " << s.message() << std::endl;
+        exit(0);
+    }
     return SERVER_SUCCESS;
 }
 
