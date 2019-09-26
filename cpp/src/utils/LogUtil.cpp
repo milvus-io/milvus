@@ -15,13 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "LogUtil.h"
-#include "server/ServerConfig.h"
-
 #include <ctype.h>
 #include <string>
 #include <libgen.h>
 
+#include "LogUtil.h"
 
 namespace zilliz {
 namespace milvus {
