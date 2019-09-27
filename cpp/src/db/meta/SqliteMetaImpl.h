@@ -21,22 +21,25 @@
 #include "db/Options.h"
 
 #include <mutex>
+#include <vector>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
 
-auto StoragePrototype(const std::string &path);
+auto
+StoragePrototype(const std::string &path);
 
 class SqliteMetaImpl : public Meta {
  public:
-    explicit SqliteMetaImpl(const DBMetaOptions &options_);
+    explicit SqliteMetaImpl(const DBMetaOptions &options);
     ~SqliteMetaImpl();
 
     Status CreateTable(TableSchema &table_schema) override;
 
-    Status DescribeTable(TableSchema &group_info_) override;
+    Status DescribeTable(TableSchema &table_schema) override;
 
     Status HasTable(const std::string &table_id, bool &has_or_not) override;
 
@@ -58,11 +61,11 @@ class SqliteMetaImpl : public Meta {
                        const std::vector<int> &file_types,
                        std::vector<std::string> &file_ids) override;
 
-    Status UpdateTableIndex(const std::string &table_id, const TableIndex& index) override;
+    Status UpdateTableIndex(const std::string &table_id, const TableIndex &index) override;
 
     Status UpdateTableFlag(const std::string &table_id, int64_t flag) override;
 
-    Status DescribeTableIndex(const std::string &table_id, TableIndex& index) override;
+    Status DescribeTableIndex(const std::string &table_id, TableIndex &index) override;
 
     Status DropTableIndex(const std::string &table_id) override;
 
@@ -96,12 +99,12 @@ class SqliteMetaImpl : public Meta {
  private:
     Status NextFileId(std::string &file_id);
     Status NextTableId(std::string &table_id);
-    Status DiscardFiles(long to_discard_size);
+    Status DiscardFiles(int64_t to_discard_size);
 
     void ValidateMetaSchema();
     Status Initialize();
 
-private:
+ private:
     const DBMetaOptions options_;
     std::mutex meta_mutex_;
 }; // DBMetaImpl

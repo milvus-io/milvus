@@ -30,26 +30,25 @@
 #include "Job.h"
 #include "db/meta/Meta.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class DeleteJob : public Job {
-public:
+ public:
     DeleteJob(JobId id,
               std::string table_id,
               engine::meta::MetaPtr meta_ptr,
               uint64_t num_resource);
 
-public:
+ public:
     void
     WaitAndDelete();
 
     void
     ResourceDone();
 
-public:
+ public:
     std::string
     table_id() const {
         return table_id_;
@@ -60,7 +59,7 @@ public:
         return meta_ptr_;
     }
 
-private:
+ private:
     std::string table_id_;
     engine::meta::MetaPtr meta_ptr_;
 
@@ -72,7 +71,6 @@ private:
 
 using DeleteJobPtr = std::shared_ptr<DeleteJob>;
 
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

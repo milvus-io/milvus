@@ -25,13 +25,12 @@
 #include "resource/GpuResource.h"
 #include "resource/DiskResource.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class ResourceFactory {
-public:
+ public:
     static std::shared_ptr<Resource>
     Create(const std::string &name,
            const std::string &type,
@@ -40,8 +39,6 @@ public:
            bool enable_executor = true);
 };
 
-
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

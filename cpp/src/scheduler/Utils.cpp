@@ -16,11 +16,10 @@
 // under the License.
 
 
-#include "Utils.h"
+#include "scheduler/Utils.h"
 
 #include <chrono>
 #include <cuda_runtime.h>
-
 
 namespace zilliz {
 namespace milvus {
@@ -41,6 +40,6 @@ get_num_gpu() {
     return n_devices;
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

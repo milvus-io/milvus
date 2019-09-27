@@ -25,14 +25,16 @@
 
 #include <cstddef>
 #include <memory>
+#include <vector>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
 
-static const char* META_TABLES = "Tables";
-static const char* META_TABLEFILES = "TableFiles";
+static const char *META_TABLES = "Tables";
+static const char *META_TABLEFILES = "TableFiles";
 
 class Meta {
  public:
@@ -46,7 +48,7 @@ class Meta {
 
     virtual Status AllTables(std::vector<TableSchema> &table_schema_array) = 0;
 
-    virtual Status UpdateTableIndex(const std::string &table_id, const TableIndex& index) = 0;
+    virtual Status UpdateTableIndex(const std::string &table_id, const TableIndex &index) = 0;
 
     virtual Status UpdateTableFlag(const std::string &table_id, int64_t flag) = 0;
 
@@ -83,9 +85,9 @@ class Meta {
 
     virtual Status FilesByType(const std::string &table_id,
                                const std::vector<int> &file_types,
-                               std::vector<std::string>& file_ids) = 0;
+                               std::vector<std::string> &file_ids) = 0;
 
-    virtual Status DescribeTableIndex(const std::string &table_id, TableIndex& index) = 0;
+    virtual Status DescribeTableIndex(const std::string &table_id, TableIndex &index) = 0;
 
     virtual Status DropTableIndex(const std::string &table_id) = 0;
 
@@ -96,7 +98,6 @@ class Meta {
     virtual Status DropAll() = 0;
 
     virtual Status Count(const std::string &table_id, uint64_t &result) = 0;
-
 }; // MetaData
 
 using MetaPtr = std::shared_ptr<Meta>;

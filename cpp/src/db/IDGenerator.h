@@ -22,7 +22,6 @@
 #include <cstddef>
 #include <vector>
 
-
 namespace zilliz {
 namespace milvus {
 namespace engine {
@@ -55,7 +54,6 @@ class SimpleIDGenerator : public IDGenerator {
     NextIDNumbers(size_t n, IDNumbers &ids);
 
     static constexpr size_t MAX_IDS_PER_MICRO = 1000;
-
 }; // SimpleIDGenerator
 
 

@@ -21,6 +21,7 @@
 
 #include <vector>
 #include <memory>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -41,9 +42,8 @@ enum class MetricType {
 };
 
 class ExecutionEngine {
-public:
-
-    virtual Status AddWithIds(long n, const float *xdata, const long *xids) = 0;
+ public:
+    virtual Status AddWithIds(int64_t n, const float *xdata, const int64_t *xids) = 0;
 
     virtual size_t Count() const = 0;
 
@@ -63,16 +63,16 @@ public:
 
     virtual std::shared_ptr<ExecutionEngine> Clone() = 0;
 
-    virtual Status Merge(const std::string& location) = 0;
+    virtual Status Merge(const std::string &location) = 0;
 
-    virtual Status Search(long n,
-                  const float *data,
-                  long k,
-                  long nprobe,
-                  float *distances,
-                  long *labels) const = 0;
+    virtual Status Search(int64_t n,
+                          const float *data,
+                          int64_t k,
+                          int64_t nprobe,
+                          float *distances,
+                          int64_t *labels) const = 0;
 
-    virtual std::shared_ptr<ExecutionEngine> BuildIndex(const std::string& location, EngineType engine_type) = 0;
+    virtual std::shared_ptr<ExecutionEngine> BuildIndex(const std::string &location, EngineType engine_type) = 0;
 
     virtual Status Cache() = 0;
 
@@ -88,7 +88,6 @@ public:
 };
 
 using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
-
 
 } // namespace engine
 } // namespace milvus

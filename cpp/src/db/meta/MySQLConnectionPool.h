@@ -30,8 +30,7 @@ namespace engine {
 namespace meta {
 
 class MySQLConnectionPool : public mysqlpp::ConnectionPool {
-
-public:
+ public:
     // The object's only constructor
     MySQLConnectionPool(std::string dbName,
                         std::string userName,
@@ -39,15 +38,13 @@ public:
                         std::string serverIp,
                         int port = 0,
                         int maxPoolSize = 8) :
-                        db_(dbName),
-                        user_(userName),
-                        password_(passWord),
-                        server_(serverIp),
-                        port_(port),
-                        max_pool_size_(maxPoolSize) {
-
+        db_(dbName),
+        user_(userName),
+        password_(passWord),
+        server_(serverIp),
+        port_(port),
+        max_pool_size_(maxPoolSize) {
         conns_in_use_ = 0;
-
         max_idle_time_ = 10; //10 seconds
     }
 
@@ -68,8 +65,7 @@ public:
 
     std::string getDB();
 
-protected:
-
+ protected:
     // Superclass overrides
     mysqlpp::Connection *create() override;
 
@@ -77,7 +73,7 @@ protected:
 
     unsigned int max_idle_time() override;
 
-private:
+ private:
     // Number of connections currently in use
     std::atomic<int> conns_in_use_;
 
