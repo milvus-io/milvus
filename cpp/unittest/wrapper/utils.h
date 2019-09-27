@@ -30,17 +30,17 @@ using DataGenPtr = std::shared_ptr<DataGenBase>;
 
 class DataGenBase {
  public:
-    virtual void GenData(const int &dim, const int &nb, const int &nq, float *xb, float *xq, long *ids,
-                         const int &k, long *gt_ids, float *gt_dis);
+    virtual void GenData(const int &dim, const int &nb, const int &nq, float *xb, float *xq, int64_t *ids,
+                         const int &k, int64_t *gt_ids, float *gt_dis);
 
     virtual void GenData(const int &dim,
                          const int &nb,
                          const int &nq,
                          std::vector<float> &xb,
                          std::vector<float> &xq,
-                         std::vector<long> &ids,
+                         std::vector<int64_t> &ids,
                          const int &k,
-                         std::vector<long> &gt_ids,
+                         std::vector<int64_t> &gt_ids,
                          std::vector<float> &gt_dis);
 };
 
