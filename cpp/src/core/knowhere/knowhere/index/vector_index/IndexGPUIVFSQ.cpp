@@ -28,17 +28,17 @@ namespace zilliz {
 namespace knowhere {
 
     IndexModelPtr GPUIVFSQ::Train(const DatasetPtr &dataset, const Config &config) {
-        auto nlist = config["nlist"].as<size_t>();
-        auto nbits = config["nbits"].as<size_t>(); // TODO(linxj):  gpu only support SQ4 SQ8 SQ16
-        gpu_id_ = config.get_with_default("gpu_id", gpu_id_);
-        auto metric_type = config["metric_type"].as_string() == "L2" ?
-                           faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+        auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
+        if (build_cfg != nullptr) {
+            build_cfg->CheckValid(); // throw exception
+        }
+        gpu_id_ = build_cfg->gpu_id;
 
         GETTENSOR(dataset)
 
         std::stringstream index_type;
-        index_type << "IVF" << nlist << "," << "SQ" << nbits;
-        auto build_index = faiss::index_factory(dim, index_type.str().c_str(), metric_type);
+        index_type << "IVF" << build_cfg->nlist << "," << "SQ" << build_cfg->nbits;
+        auto build_index = faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(build_cfg->metric_type));
 
         auto temp_resource = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
         if (temp_resource != nullptr) {

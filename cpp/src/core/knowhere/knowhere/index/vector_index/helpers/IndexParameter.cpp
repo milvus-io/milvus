@@ -15,36 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "metrics/Metrics.h"
-#include "server/Config.h"
-#include "PrometheusMetrics.h"
 
-#include <string>
+#include "IndexParameter.h"
+#include "knowhere/common/Exception.h"
+
+#include <faiss/Index.h>
 
 namespace zilliz {
-namespace milvus {
-namespace server {
+namespace knowhere {
 
-MetricsBase &
-Metrics::GetInstance() {
-    static MetricsBase &instance = CreateMetricsCollector();
-    return instance;
+faiss::MetricType GetMetricType(METRICTYPE &type) {
+    if (type == METRICTYPE::L2) return faiss::METRIC_L2;
+    if (type == METRICTYPE::IP) return faiss::METRIC_INNER_PRODUCT;
+    if (type == METRICTYPE::INVALID) KNOWHERE_THROW_MSG("Metric type is invalid");
 }
 
-MetricsBase &
-Metrics::CreateMetricsCollector() {
-    Config &config = Config::GetInstance();
-    std::string collector_type_str;
 
-    config.GetMetricConfigCollector(collector_type_str);
-
-    if (collector_type_str == "prometheus") {
-        return PrometheusMetrics::GetInstance();
-    } else {
-        return MetricsBase::GetInstance();
-    }
 }
-
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}

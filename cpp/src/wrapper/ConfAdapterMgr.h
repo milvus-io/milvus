@@ -15,36 +15,49 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "metrics/Metrics.h"
-#include "server/Config.h"
-#include "PrometheusMetrics.h"
 
-#include <string>
+#pragma once
+
+#include "VecIndex.h"
+#include "ConfAdapter.h"
+
 
 namespace zilliz {
 namespace milvus {
-namespace server {
+namespace engine {
 
-MetricsBase &
-Metrics::GetInstance() {
-    static MetricsBase &instance = CreateMetricsCollector();
-    return instance;
-}
+class AdapterMgr {
+ public:
+    template<typename T>
+    struct register_t {
+        explicit register_t(const IndexType &key) {
+            AdapterMgr::GetInstance().table_.emplace(key, [] {
+                return std::make_shared<T>();
+            });
+        }
+    };
 
-MetricsBase &
-Metrics::CreateMetricsCollector() {
-    Config &config = Config::GetInstance();
-    std::string collector_type_str;
-
-    config.GetMetricConfigCollector(collector_type_str);
-
-    if (collector_type_str == "prometheus") {
-        return PrometheusMetrics::GetInstance();
-    } else {
-        return MetricsBase::GetInstance();
+    static AdapterMgr &
+    GetInstance() {
+        static AdapterMgr instance;
+        return instance;
     }
-}
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+    ConfAdapterPtr
+    GetAdapter(const IndexType &indexType);
+
+    void
+    RegisterAdapter();
+
+ protected:
+    bool init_ = false;
+    std::map<IndexType, std::function<ConfAdapterPtr()> > table_;
+};
+
+
+} // engine
+} // milvus
+} // zilliz
+
+
+

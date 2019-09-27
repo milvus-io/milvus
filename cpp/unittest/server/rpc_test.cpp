@@ -23,7 +23,7 @@
 #include "server/grpc_impl/GrpcRequestHandler.h"
 #include "server/grpc_impl/GrpcRequestScheduler.h"
 #include "server/grpc_impl/GrpcRequestTask.h"
-#include "version.h"
+#include "../version.h"
 
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
@@ -34,9 +34,9 @@
 #include "scheduler/ResourceFactory.h"
 #include "utils/CommonUtil.h"
 
-using namespace zilliz::milvus;
-
 namespace {
+
+namespace ms = zilliz::milvus;
 
 static const char *TABLE_NAME = "test_grpc";
 static constexpr int64_t TABLE_DIM = 256;
@@ -49,30 +49,29 @@ class RpcHandlerTest : public testing::Test {
  protected:
     void
     SetUp() override {
-
-        auto res_mgr = scheduler::ResMgrInst::GetInstance();
+        auto res_mgr = ms::scheduler::ResMgrInst::GetInstance();
         res_mgr->Clear();
-        res_mgr->Add(scheduler::ResourceFactory::Create("disk", "DISK", 0, true, false));
-        res_mgr->Add(scheduler::ResourceFactory::Create("cpu", "CPU", 0, true, true));
-        res_mgr->Add(scheduler::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
+        res_mgr->Add(ms::scheduler::ResourceFactory::Create("disk", "DISK", 0, true, false));
+        res_mgr->Add(ms::scheduler::ResourceFactory::Create("cpu", "CPU", 0, true, true));
+        res_mgr->Add(ms::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
 
-        auto default_conn = scheduler::Connection("IO", 500.0);
-        auto PCIE = scheduler::Connection("IO", 11000.0);
+        auto default_conn = ms::scheduler::Connection("IO", 500.0);
+        auto PCIE = ms::scheduler::Connection("IO", 11000.0);
         res_mgr->Connect("disk", "cpu", default_conn);
         res_mgr->Connect("cpu", "gtx1660", PCIE);
         res_mgr->Start();
-        scheduler::SchedInst::GetInstance()->Start();
-        scheduler::JobMgrInst::GetInstance()->Start();
+        ms::scheduler::SchedInst::GetInstance()->Start();
+        ms::scheduler::JobMgrInst::GetInstance()->Start();
 
-        engine::DBOptions opt;
+        ms::engine::DBOptions opt;
 
-        server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
-        server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_test");
-        server::Config::GetInstance().SetDBConfigSecondaryPath("");
-        server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
-        server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
-        server::Config::GetInstance().SetCacheConfigCacheInsertData("");
-        server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
+        ms::server::Config::GetInstance().SetDBConfigBackendUrl("sqlite://:@:/");
+        ms::server::Config::GetInstance().SetDBConfigPrimaryPath("/tmp/milvus_test");
+        ms::server::Config::GetInstance().SetDBConfigSecondaryPath("");
+        ms::server::Config::GetInstance().SetDBConfigArchiveDiskThreshold("");
+        ms::server::Config::GetInstance().SetDBConfigArchiveDaysThreshold("");
+        ms::server::Config::GetInstance().SetCacheConfigCacheInsertData("");
+        ms::server::Config::GetInstance().SetEngineConfigOmpThreadNum("");
 
 //        serverConfig.SetValue(server::CONFIG_CLUSTER_MODE, "cluster");
 //        DBWrapper::GetInstance().GetInstance().StartService();
@@ -82,11 +81,11 @@ class RpcHandlerTest : public testing::Test {
 //        DBWrapper::GetInstance().GetInstance().StartService();
 //        DBWrapper::GetInstance().GetInstance().StopService();
 
-        server::Config::GetInstance().SetResourceConfigMode("single");
-        server::DBWrapper::GetInstance().StartService();
+        ms::server::Config::GetInstance().SetResourceConfigMode("single");
+        ms::server::DBWrapper::GetInstance().StartService();
 
         //initialize handler, create table
-        handler = std::make_shared<server::grpc::GrpcRequestHandler>();
+        handler = std::make_shared<ms::server::grpc::GrpcRequestHandler>();
         ::grpc::ServerContext context;
         ::milvus::grpc::TableSchema request;
         ::milvus::grpc::Status status;
@@ -99,18 +98,20 @@ class RpcHandlerTest : public testing::Test {
 
     void
     TearDown() override {
-        server::DBWrapper::GetInstance().StopService();
-        scheduler::JobMgrInst::GetInstance()->Stop();
-        scheduler::ResMgrInst::GetInstance()->Stop();
-        scheduler::SchedInst::GetInstance()->Stop();
+        ms::server::DBWrapper::GetInstance().StopService();
+        ms::scheduler::JobMgrInst::GetInstance()->Stop();
+        ms::scheduler::ResMgrInst::GetInstance()->Stop();
+        ms::scheduler::SchedInst::GetInstance()->Stop();
         boost::filesystem::remove_all("/tmp/milvus_test");
     }
+
  protected:
-    std::shared_ptr<server::grpc::GrpcRequestHandler> handler;
+    std::shared_ptr<ms::server::grpc::GrpcRequestHandler> handler;
 };
 
-void BuildVectors(int64_t from, int64_t to,
-                  std::vector<std::vector<float >> &vector_record_array) {
+void
+BuildVectors(int64_t from, int64_t to,
+             std::vector<std::vector<float >> &vector_record_array) {
     if (to <= from) {
         return;
     }
@@ -127,20 +128,22 @@ void BuildVectors(int64_t from, int64_t to,
     }
 }
 
-std::string CurrentTmDate(int64_t offset_day = 0) {
+std::string
+CurrentTmDate(int64_t offset_day = 0) {
     time_t tt;
     time(&tt);
     tt = tt + 8 * SECONDS_EACH_HOUR;
     tt = tt + 24 * SECONDS_EACH_HOUR * offset_day;
-    tm *t = gmtime(&tt);
+    tm t;
+    gmtime_r(&tt, &t);
 
-    std::string str = std::to_string(t->tm_year + 1900) + "-" + std::to_string(t->tm_mon + 1)
-        + "-" + std::to_string(t->tm_mday);
+    std::string str = std::to_string(t.tm_year + 1900) + "-" + std::to_string(t.tm_mon + 1)
+        + "-" + std::to_string(t.tm_mday);
 
     return str;
 }
 
-}
+} // namespace
 
 TEST_F(RpcHandlerTest, HAS_TABLE_TEST) {
     ::grpc::ServerContext context;
@@ -311,7 +314,6 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     ::grpc::Status status = handler->DescribeTable(&context, &table_name, &table_schema);
     ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
-
     ::milvus::grpc::InsertParam request;
     std::vector<std::vector<float>> record_array;
     BuildVectors(0, VECTOR_COUNT, record_array);
@@ -419,31 +421,29 @@ TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
     grpc_status = handler->DeleteByRange(&context, &request, &status);
     request.mutable_range()->set_end_value(CurrentTmDate(-2));
     grpc_status = handler->DeleteByRange(&context, &request, &status);
-
 }
 
 //////////////////////////////////////////////////////////////////////
 namespace {
-class DummyTask : public server::grpc::GrpcBaseTask {
-public:
-    Status
+class DummyTask : public ms::server::grpc::GrpcBaseTask {
+ public:
+    ms::Status
     OnExecute() override {
-        return Status::OK();
+        return ms::Status::OK();
     }
 
-    static server::grpc::BaseTaskPtr
+    static ms::server::grpc::BaseTaskPtr
     Create(std::string &dummy) {
-        return std::shared_ptr<server::grpc::GrpcBaseTask>(new DummyTask(dummy));
+        return std::shared_ptr<ms::server::grpc::GrpcBaseTask>(new DummyTask(dummy));
     }
 
-public:
+ public:
     explicit DummyTask(std::string &dummy) : GrpcBaseTask(dummy) {
-
     }
 };
 
 class RpcSchedulerTest : public testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
         std::string dummy = "dql";
@@ -453,22 +453,22 @@ protected:
     std::shared_ptr<DummyTask> task_ptr;
 };
 
-}
+} // namespace
 
-TEST_F(RpcSchedulerTest, BASE_TASK_TEST){
+TEST_F(RpcSchedulerTest, BASE_TASK_TEST) {
     auto status = task_ptr->Execute();
     ASSERT_TRUE(status.ok());
 
-    server::grpc::GrpcRequestScheduler::GetInstance().Start();
+    ms::server::grpc::GrpcRequestScheduler::GetInstance().Start();
     ::milvus::grpc::Status grpc_status;
     std::string dummy = "dql";
-    server::grpc::BaseTaskPtr base_task_ptr = DummyTask::Create(dummy);
-    server::grpc::GrpcRequestScheduler::GetInstance().ExecTask(base_task_ptr, &grpc_status);
+    ms::server::grpc::BaseTaskPtr base_task_ptr = DummyTask::Create(dummy);
+    ms::server::grpc::GrpcRequestScheduler::GetInstance().ExecTask(base_task_ptr, &grpc_status);
 
-    server::grpc::GrpcRequestScheduler::GetInstance().ExecuteTask(task_ptr);
+    ms::server::grpc::GrpcRequestScheduler::GetInstance().ExecuteTask(task_ptr);
     task_ptr = nullptr;
-    server::grpc::GrpcRequestScheduler::GetInstance().ExecuteTask(task_ptr);
+    ms::server::grpc::GrpcRequestScheduler::GetInstance().ExecuteTask(task_ptr);
 
-    server::grpc::GrpcRequestScheduler::GetInstance().Stop();
+    ms::server::grpc::GrpcRequestScheduler::GetInstance().Stop();
 }
 
