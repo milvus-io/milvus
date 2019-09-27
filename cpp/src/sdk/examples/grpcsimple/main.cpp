@@ -23,8 +23,8 @@
 
 #include "src/ClientTest.h"
 
-void print_help(const std::string &app_name);
-
+void
+print_help(const std::string &app_name);
 
 int
 main(int argc, char *argv[]) {
@@ -56,8 +56,7 @@ main(int argc, char *argv[]) {
                 break;
             }
             case 'h':
-            default:
-                print_help(app_name);
+            default:print_help(app_name);
                 return EXIT_SUCCESS;
         }
     }

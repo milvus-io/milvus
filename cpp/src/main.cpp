@@ -76,7 +76,6 @@ main(int argc, char *argv[]) {
                 std::cout << "Initial log config from: " << log_config_file << std::endl;
                 break;
             }
-
             case 'p': {
                 char *pid_filename_ptr = strdup(optarg);
                 pid_filename = pid_filename_ptr;
@@ -84,7 +83,6 @@ main(int argc, char *argv[]) {
                 std::cout << pid_filename << std::endl;
                 break;
             }
-
             case 'd':
                 start_daemonized = 1;
                 break;
