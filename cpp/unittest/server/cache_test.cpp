@@ -21,41 +21,40 @@
 #include "utils/Error.h"
 #include "wrapper/VecIndex.h"
 
-using namespace zilliz::milvus;
-
 namespace {
 
-class InvalidCacheMgr : public cache::CacheMgr<cache::DataObjPtr> {
-public:
+namespace ms = zilliz::milvus;
+
+class InvalidCacheMgr : public ms::cache::CacheMgr<ms::cache::DataObjPtr> {
+ public:
     InvalidCacheMgr() {
     }
 };
 
-class LessItemCacheMgr : public cache::CacheMgr<cache::DataObjPtr> {
-public:
+class LessItemCacheMgr : public ms::cache::CacheMgr<ms::cache::DataObjPtr> {
+ public:
     LessItemCacheMgr() {
-        cache_ = std::make_shared<cache::Cache<cache::DataObjPtr>>(1UL << 12, 10);
+        cache_ = std::make_shared<ms::cache::Cache<ms::cache::DataObjPtr>>(1UL << 12, 10);
     }
 };
 
-class MockVecIndex : public engine::VecIndex {
-public:
+class MockVecIndex : public ms::engine::VecIndex {
+ public:
     MockVecIndex(int64_t dim, int64_t total)
         : dimension_(dim),
-          ntotal_(total){
-
+          ntotal_(total) {
     }
 
-    virtual Status BuildAll(const long &nb,
-                               const float *xb,
-                               const long *ids,
-                               const engine::Config &cfg,
-                               const long &nt = 0,
-                               const float *xt = nullptr) {
-        return Status();
+    virtual ms::Status BuildAll(const int64_t &nb,
+                                const float *xb,
+                                const int64_t *ids,
+                                const ms::engine::Config &cfg,
+                                const int64_t &nt = 0,
+                                const float *xt = nullptr) {
+        return ms::Status();
     }
 
-    engine::VecIndexPtr Clone() override {
+    ms::engine::VecIndexPtr Clone() override {
         return zilliz::milvus::engine::VecIndexPtr();
     }
 
@@ -63,31 +62,31 @@ public:
         return 0;
     }
 
-    engine::IndexType GetType() override {
-        return engine::IndexType::INVALID;
+    ms::engine::IndexType GetType() override {
+        return ms::engine::IndexType::INVALID;
     }
 
-    virtual Status Add(const long &nb,
-                          const float *xb,
-                          const long *ids,
-                          const engine::Config &cfg = engine::Config()) {
-        return Status();
+    virtual ms::Status Add(const int64_t &nb,
+                           const float *xb,
+                           const int64_t *ids,
+                           const ms::engine::Config &cfg = ms::engine::Config()) {
+        return ms::Status();
     }
 
-    virtual Status Search(const long &nq,
-                             const float *xq,
-                             float *dist,
-                             long *ids,
-                             const engine::Config &cfg = engine::Config()) {
-        return Status();
+    virtual ms::Status Search(const int64_t &nq,
+                              const float *xq,
+                              float *dist,
+                              int64_t *ids,
+                              const ms::engine::Config &cfg = ms::engine::Config()) {
+        return ms::Status();
     }
 
-    engine::VecIndexPtr CopyToGpu(const int64_t &device_id,
-                                  const engine::Config &cfg) override {
+    ms::engine::VecIndexPtr CopyToGpu(const int64_t &device_id,
+                                      const ms::engine::Config &cfg) override {
         return nullptr;
     }
 
-    engine::VecIndexPtr CopyToCpu(const engine::Config &cfg) override {
+    ms::engine::VecIndexPtr CopyToCpu(const ms::engine::Config &cfg) override {
         return nullptr;
     }
 
@@ -104,19 +103,19 @@ public:
         return binset;
     }
 
-    virtual Status Load(const zilliz::knowhere::BinarySet &index_binary) {
-        return Status();
+    virtual ms::Status Load(const zilliz::knowhere::BinarySet &index_binary) {
+        return ms::Status();
     }
 
-public:
+ public:
     int64_t dimension_ = 256;
     int64_t ntotal_ = 0;
 };
 
-}
+} // namespace
 
 TEST(CacheTest, DUMMY_TEST) {
-    engine::Config cfg;
+    ms::engine::Config cfg;
     MockVecIndex mock_index(256, 1000);
     mock_index.Dimension();
     mock_index.Count();
@@ -134,9 +133,9 @@ TEST(CacheTest, DUMMY_TEST) {
 }
 
 TEST(CacheTest, CPU_CACHE_TEST) {
-    auto cpu_mgr = cache::CpuCacheMgr::GetInstance();
+    auto cpu_mgr = ms::cache::CpuCacheMgr::GetInstance();
 
-    const int64_t gbyte = 1024*1024*1024;
+    const int64_t gbyte = 1024 * 1024 * 1024;
     int64_t g_num = 16;
     int64_t cap = g_num * gbyte;
     cpu_mgr->SetCapacity(cap);
@@ -145,8 +144,8 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     uint64_t item_count = 20;
     for (uint64_t i = 0; i < item_count; i++) {
         //each vector is 1k byte, total size less than 1G
-        engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000000);
-        cache::DataObjPtr data_obj = std::make_shared<cache::DataObj>(mock_index);
+        ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000000);
+        ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
     ASSERT_LT(cpu_mgr->ItemCount(), g_num);
@@ -169,8 +168,8 @@ TEST(CacheTest, CPU_CACHE_TEST) {
         cpu_mgr->SetCapacity(g_num * gbyte);
 
         //each vector is 1k byte, total size less than 6G
-        engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 6000000);
-        cache::DataObjPtr data_obj = std::make_shared<cache::DataObj>(mock_index);
+        ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 6000000);
+        ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_6g", data_obj);
         ASSERT_TRUE(cpu_mgr->ItemExists("index_6g"));
     }
@@ -179,12 +178,12 @@ TEST(CacheTest, CPU_CACHE_TEST) {
 }
 
 TEST(CacheTest, GPU_CACHE_TEST) {
-    auto gpu_mgr = cache::GpuCacheMgr::GetInstance(0);
+    auto gpu_mgr = ms::cache::GpuCacheMgr::GetInstance(0);
 
-    for(int i = 0; i < 20; i++) {
+    for (int i = 0; i < 20; i++) {
         //each vector is 1k byte
-        engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000);
-        cache::DataObjPtr data_obj = std::make_shared<cache::DataObj>(mock_index);
+        ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000);
+        ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
         gpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
 
@@ -196,15 +195,14 @@ TEST(CacheTest, GPU_CACHE_TEST) {
     for (auto i = 0; i < 3; i++) {
         // TODO: use gpu index to mock
         //each vector is 1k byte, total size less than 2G
-        engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2000000);
-        cache::DataObjPtr data_obj = std::make_shared<cache::DataObj>(mock_index);
-        std::cout << data_obj->size() <<std::endl;
+        ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2000000);
+        ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
+        std::cout << data_obj->size() << std::endl;
         gpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
 
     gpu_mgr->ClearCache();
     ASSERT_EQ(gpu_mgr->ItemCount(), 0);
-
 }
 
 TEST(CacheTest, INVALID_TEST) {
@@ -214,7 +212,7 @@ TEST(CacheTest, INVALID_TEST) {
         ASSERT_FALSE(mgr.ItemExists("test"));
         ASSERT_EQ(mgr.GetItem("test"), nullptr);
 
-        mgr.InsertItem("test", cache::DataObjPtr());
+        mgr.InsertItem("test", ms::cache::DataObjPtr());
         mgr.InsertItem("test", nullptr);
         mgr.EraseItem("test");
         mgr.PrintInfo();
@@ -226,10 +224,10 @@ TEST(CacheTest, INVALID_TEST) {
 
     {
         LessItemCacheMgr mgr;
-        for(int i = 0; i < 20; i++) {
+        for (int i = 0; i < 20; i++) {
             //each vector is 1k byte
-            engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2);
-            cache::DataObjPtr data_obj = std::make_shared<cache::DataObj>(mock_index);
+            ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2);
+            ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
             mgr.InsertItem("index_" + std::to_string(i), data_obj);
         }
         ASSERT_EQ(mgr.GetItem("index_0"), nullptr);

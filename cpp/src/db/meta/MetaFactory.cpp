@@ -40,9 +40,8 @@ MetaFactory::BuildOption(const std::string &path) {
     if (p == "") {
         srand(time(nullptr));
         std::stringstream ss;
-        uint32_t rd = 0;
-        rand_r(&rd);
-        ss << "/tmp/" << rd;
+        uint32_t seed = 1;
+        ss << "/tmp/" << rand_r(&seed);
         p = ss.str();
     }
 

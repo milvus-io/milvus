@@ -18,12 +18,12 @@
 
 #include <faiss/IndexFlat.h>
 
-#include "utils.h"
+#include "wrapper/utils.h"
 
-
-void DataGenBase::GenData(const int &dim, const int &nb, const int &nq,
-                          float *xb, float *xq, long *ids,
-                          const int &k, long *gt_ids, float *gt_dis) {
+void
+DataGenBase::GenData(const int &dim, const int &nb, const int &nq,
+                     float *xb, float *xq, int64_t *ids,
+                     const int &k, int64_t *gt_ids, float *gt_dis) {
     for (auto i = 0; i < nb; ++i) {
         for (auto j = 0; j < dim; ++j) {
             //p_data[i * d + j] = float(base + i);
@@ -42,15 +42,16 @@ void DataGenBase::GenData(const int &dim, const int &nb, const int &nq,
     index.search(nq, xq, k, gt_dis, gt_ids);
 }
 
-void DataGenBase::GenData(const int &dim,
-                          const int &nb,
-                          const int &nq,
-                          std::vector<float> &xb,
-                          std::vector<float> &xq,
-                          std::vector<long> &ids,
-                          const int &k,
-                          std::vector<long> &gt_ids,
-                          std::vector<float> &gt_dis) {
+void
+DataGenBase::GenData(const int &dim,
+                     const int &nb,
+                     const int &nq,
+                     std::vector<float> &xb,
+                     std::vector<float> &xq,
+                     std::vector<int64_t> &ids,
+                     const int &k,
+                     std::vector<int64_t> &gt_ids,
+                     std::vector<float> &gt_dis) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
