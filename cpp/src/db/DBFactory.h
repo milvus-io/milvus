@@ -28,13 +28,12 @@ namespace milvus {
 namespace engine {
 
 class DBFactory {
-public:
+ public:
     static DBOptions BuildOption();
 
-    static DBPtr Build(const DBOptions& options);
+    static DBPtr Build(const DBOptions &options);
 };
 
-
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz

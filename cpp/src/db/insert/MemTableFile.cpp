@@ -16,14 +16,14 @@
 // under the License.
 
 
-#include "MemTableFile.h"
+#include "db/insert/MemTableFile.h"
 #include "db/Constants.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "utils/Log.h"
 
 #include <cmath>
-
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -35,20 +35,19 @@ MemTableFile::MemTableFile(const std::string &table_id,
     table_id_(table_id),
     meta_(meta),
     options_(options) {
-
     current_mem_ = 0;
     auto status = CreateTableFile();
     if (status.ok()) {
         execution_engine_ = EngineFactory::Build(table_file_schema_.dimension_,
                                                  table_file_schema_.location_,
                                                  (EngineType) table_file_schema_.engine_type_,
-                                                 (MetricType)table_file_schema_.metric_type_,
+                                                 (MetricType) table_file_schema_.metric_type_,
                                                  table_file_schema_.nlist_);
     }
 }
 
-Status MemTableFile::CreateTableFile() {
-
+Status
+MemTableFile::CreateTableFile() {
     meta::TableFileSchema table_file_schema;
     table_file_schema.table_id_ = table_id_;
     auto status = meta_->CreateTableFile(table_file_schema);
@@ -61,8 +60,8 @@ Status MemTableFile::CreateTableFile() {
     return status;
 }
 
-Status MemTableFile::Add(const VectorSourcePtr &source, IDNumbers& vector_ids) {
-
+Status
+MemTableFile::Add(const VectorSourcePtr &source, IDNumbers &vector_ids) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg = "MemTableFile::Add: table_file_schema dimension = " +
             std::to_string(table_file_schema_.dimension_) + ", table_id = " + table_file_schema_.table_id_;
@@ -75,7 +74,8 @@ Status MemTableFile::Add(const VectorSourcePtr &source, IDNumbers& vector_ids) {
     if (mem_left >= single_vector_mem_size) {
         size_t num_vectors_to_add = std::ceil(mem_left / single_vector_mem_size);
         size_t num_vectors_added;
-        auto status = source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added, vector_ids);
+        auto status =
+            source->Add(execution_engine_, table_file_schema_, num_vectors_to_add, num_vectors_added, vector_ids);
         if (status.ok()) {
             current_mem_ += (num_vectors_added * single_vector_mem_size);
         }
@@ -84,20 +84,24 @@ Status MemTableFile::Add(const VectorSourcePtr &source, IDNumbers& vector_ids) {
     return Status::OK();
 }
 
-size_t MemTableFile::GetCurrentMem() {
+size_t
+MemTableFile::GetCurrentMem() {
     return current_mem_;
 }
 
-size_t MemTableFile::GetMemLeft() {
+size_t
+MemTableFile::GetMemLeft() {
     return (MAX_TABLE_FILE_MEM - current_mem_);
 }
 
-bool MemTableFile::IsFull() {
+bool
+MemTableFile::IsFull() {
     size_t single_vector_mem_size = table_file_schema_.dimension_ * VECTOR_TYPE_SIZE;
     return (GetMemLeft() < single_vector_mem_size);
 }
 
-Status MemTableFile::Serialize() {
+Status
+MemTableFile::Serialize() {
     size_t size = GetCurrentMem();
     server::CollectSerializeMetrics metrics(size);
 
@@ -107,7 +111,7 @@ Status MemTableFile::Serialize() {
 
     //if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
     //else set file type to RAW, no need to build index
-    if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+    if (table_file_schema_.engine_type_ != (int) EngineType::FAISS_IDMAP) {
         table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ?
                                         meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
     } else {
@@ -117,9 +121,9 @@ Status MemTableFile::Serialize() {
     auto status = meta_->UpdateTableFile(table_file_schema_);
 
     ENGINE_LOG_DEBUG << "New " << ((table_file_schema_.file_type_ == meta::TableFileSchema::RAW) ? "raw" : "to_index")
-               << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes";
+                     << " file " << table_file_schema_.file_id_ << " of size " << size << " bytes";
 
-    if(options_.insert_cache_immediately_) {
+    if (options_.insert_cache_immediately_) {
         execution_engine_->Cache();
     }
 

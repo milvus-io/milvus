@@ -15,10 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "scheduler/job/SearchJob.h"
 #include "utils/Log.h"
-
-#include "SearchJob.h"
-
 
 namespace zilliz {
 namespace milvus {
@@ -33,7 +31,8 @@ SearchJob::SearchJob(zilliz::milvus::scheduler::JobId id,
       topk_(topk),
       nq_(nq),
       nprobe_(nprobe),
-      vectors_(vectors) {}
+      vectors_(vectors) {
+}
 
 bool
 SearchJob::AddIndexFile(const TableFileSchemaPtr &index_file) {
@@ -48,11 +47,12 @@ SearchJob::AddIndexFile(const TableFileSchemaPtr &index_file) {
     return true;
 }
 
-
 void
 SearchJob::WaitResult() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return index_files_.empty(); });
+    cv_.wait(lock, [this] {
+        return index_files_.empty();
+    });
     SERVER_LOG_DEBUG << "SearchJob " << id() << " all done";
 }
 
@@ -69,14 +69,11 @@ SearchJob::GetResult() {
     return result_;
 }
 
-Status&
+Status &
 SearchJob::GetStatus() {
     return status_;
 }
 
-
-}
-}
-}
-
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

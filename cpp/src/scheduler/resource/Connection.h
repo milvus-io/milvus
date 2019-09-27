@@ -19,17 +19,18 @@
 
 #include <string>
 #include <sstream>
-
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class Connection {
-public:
+ public:
     // TODO: update construct function, speed: double->uint64_t
     Connection(std::string name, double speed)
-        : name_(std::move(name)), speed_(speed) {}
+        : name_(std::move(name)), speed_(speed) {
+    }
 
     const std::string &
     name() const {
@@ -46,7 +47,7 @@ public:
         return 1024 / speed_;
     }
 
-public:
+ public:
     std::string
     Dump() const {
         std::stringstream ss;
@@ -54,12 +55,11 @@ public:
         return ss.str();
     }
 
-private:
+ private:
     std::string name_;
     uint64_t speed_;
 };
 
-
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

@@ -25,7 +25,6 @@
 #include <string>
 #include <memory>
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
@@ -49,20 +48,22 @@ using TaskPtr = std::shared_ptr<Task>;
 
 // TODO: re-design
 class Task {
-public:
-    explicit
-    Task(TaskType type) : type_(type) {}
+ public:
+    explicit Task(TaskType type) : type_(type) {
+    }
 
     /*
      * Just Getter;
      */
     inline TaskType
-    Type() const { return type_; }
+    Type() const {
+        return type_;
+    }
 
     /*
      * Transport path;
      */
-    inline Path&
+    inline Path &
     path() {
         return task_path_;
     }
@@ -75,14 +76,14 @@ public:
         return label_;
     }
 
-public:
+ public:
     virtual void
     Load(LoadType type, uint8_t device_id) = 0;
 
     virtual void
     Execute() = 0;
 
-public:
+ public:
     Path task_path_;
 //    std::vector<SearchContextPtr> search_contexts_;
     scheduler::JobWPtr job_;
@@ -90,7 +91,6 @@ public:
     TaskLabelPtr label_ = nullptr;
 };
 
-
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

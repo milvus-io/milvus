@@ -22,7 +22,6 @@
 #include "src/cache/GpuCacheMgr.h"
 #include "Action.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
@@ -57,13 +56,12 @@ get_neighbours_with_connetion(const ResourcePtr &self) {
     return neighbours;
 }
 
-
 void
 Action::PushTaskToNeighbourRandomly(const TaskPtr &task,
                                     const ResourcePtr &self) {
     auto neighbours = get_neighbours_with_connetion(self);
     if (not neighbours.empty()) {
-        std::vector<uint64_t > speeds;
+        std::vector<uint64_t> speeds;
         uint64_t total_speed = 0;
         for (auto &neighbour : neighbours) {
             uint64_t speed = neighbour.second.speed();
@@ -87,7 +85,6 @@ Action::PushTaskToNeighbourRandomly(const TaskPtr &task,
     } else {
         //TODO: process
     }
-
 }
 
 void
@@ -99,14 +96,14 @@ Action::PushTaskToAllNeighbour(const TaskPtr &task, const ResourcePtr &self) {
 }
 
 void
-Action::PushTaskToResource(const TaskPtr& task, const ResourcePtr& dest) {
+Action::PushTaskToResource(const TaskPtr &task, const ResourcePtr &dest) {
     dest->task_table().Put(task);
 }
 
 void
 Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr,
-                          ResourcePtr resource,
-                          std::shared_ptr<LoadCompletedEvent> event) {
+                                  ResourcePtr resource,
+                                  std::shared_ptr<LoadCompletedEvent> event) {
     if (not resource->HasExecutor() && event->task_table_item_->Move()) {
         auto task = event->task_table_item_->task;
         auto search_task = std::static_pointer_cast<XSearchTask>(task);
@@ -135,8 +132,8 @@ Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr,
 
 void
 Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr,
-                                    ResourcePtr resource,
-                                    std::shared_ptr<LoadCompletedEvent> event) {
+                                            ResourcePtr resource,
+                                            std::shared_ptr<LoadCompletedEvent> event) {
     auto task = event->task_table_item_->task;
     if (resource->type() == ResourceType::DISK) {
         // step 1: calculate shortest path per resource, from disk to compute resource
@@ -181,7 +178,6 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr,
     }
 }
 
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
