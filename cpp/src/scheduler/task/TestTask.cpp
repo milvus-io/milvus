@@ -15,16 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include <src/cache/GpuCacheMgr.h>
-#include "TestTask.h"
-
+#include "scheduler/task/TestTask.h"
+#include "cache/GpuCacheMgr.h"
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-TestTask::TestTask(TableFileSchemaPtr &file) : XSearchTask(file) {}
+TestTask::TestTask(TableFileSchemaPtr &file) : XSearchTask(file) {
+}
 
 void
 TestTask::Load(LoadType type, uint8_t device_id) {
@@ -44,10 +43,11 @@ TestTask::Execute() {
 void
 TestTask::Wait() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [&] { return done_; });
+    cv_.wait(lock, [&] {
+        return done_;
+    });
 }
 
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

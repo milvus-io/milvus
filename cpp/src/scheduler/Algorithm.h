@@ -30,8 +30,8 @@ uint64_t
 ShortestPath(const ResourcePtr &src,
              const ResourcePtr &dest,
              const ResourceMgrPtr &res_mgr,
-             std::vector<std::string>& path);
+             std::vector<std::string> &path);
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

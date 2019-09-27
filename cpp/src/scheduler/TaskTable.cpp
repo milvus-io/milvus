@@ -16,14 +16,13 @@
 // under the License.
 
 
-#include "TaskTable.h"
+#include "scheduler/TaskTable.h"
 #include "event/TaskTableUpdatedEvent.h"
 #include "Utils.h"
 
 #include <vector>
 #include <sstream>
 #include <ctime>
-
 
 namespace zilliz {
 namespace milvus {
@@ -75,6 +74,7 @@ TaskTableItem::Load() {
     }
     return false;
 }
+
 bool
 TaskTableItem::Loaded() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -86,6 +86,7 @@ TaskTableItem::Loaded() {
     }
     return false;
 }
+
 bool
 TaskTableItem::Execute() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -97,6 +98,7 @@ TaskTableItem::Execute() {
     }
     return false;
 }
+
 bool
 TaskTableItem::Executed() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -109,6 +111,7 @@ TaskTableItem::Executed() {
     }
     return false;
 }
+
 bool
 TaskTableItem::Move() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -120,6 +123,7 @@ TaskTableItem::Move() {
     }
     return false;
 }
+
 bool
 TaskTableItem::Moved() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -206,7 +210,6 @@ TaskTable::Put(std::vector<TaskPtr> &tasks) {
     }
 }
 
-
 TaskTableItemPtr
 TaskTable::Get(uint64_t index) {
     return table_[index];
@@ -232,6 +235,6 @@ TaskTable::Dump() {
     return ss.str();
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

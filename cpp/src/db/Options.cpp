@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "Options.h"
+#include "db/Options.h"
 #include "utils/Exception.h"
 #include "utils/Log.h"
 
@@ -27,18 +27,20 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-ArchiveConf::ArchiveConf(const std::string& type, const std::string& criterias) {
+ArchiveConf::ArchiveConf(const std::string &type, const std::string &criterias) {
     ParseType(type);
     ParseCritirias(criterias);
 }
 
-void ArchiveConf::SetCriterias(const ArchiveConf::CriteriaT& criterial) {
-    for(auto& pair : criterial) {
+void
+ArchiveConf::SetCriterias(const ArchiveConf::CriteriaT &criterial) {
+    for (auto &pair : criterial) {
         criterias_[pair.first] = pair.second;
     }
 }
 
-void ArchiveConf::ParseCritirias(const std::string& criterias) {
+void
+ArchiveConf::ParseCritirias(const std::string &criterias) {
     std::stringstream ss(criterias);
     std::vector<std::string> tokens;
 
@@ -48,8 +50,8 @@ void ArchiveConf::ParseCritirias(const std::string& criterias) {
         return;
     }
 
-    for (auto& token : tokens) {
-        if(token.empty()) {
+    for (auto &token : tokens) {
+        if (token.empty()) {
             continue;
         }
 
@@ -67,12 +69,12 @@ void ArchiveConf::ParseCritirias(const std::string& criterias) {
             auto value = std::stoi(kv[1]);
             criterias_[kv[0]] = value;
         }
-        catch (std::out_of_range&){
+        catch (std::out_of_range &) {
             std::string msg = "Out of range: '" + kv[1] + "'";
             ENGINE_LOG_ERROR << msg;
             throw InvalidArgumentException(msg);
         }
-        catch (...){
+        catch (...) {
             std::string msg = "Invalid argument: '" + kv[1] + "'";
             ENGINE_LOG_ERROR << msg;
             throw InvalidArgumentException(msg);
@@ -80,7 +82,8 @@ void ArchiveConf::ParseCritirias(const std::string& criterias) {
     }
 }
 
-void ArchiveConf::ParseType(const std::string& type) {
+void
+ArchiveConf::ParseType(const std::string &type) {
     if (type != "delete" && type != "swap") {
         std::string msg = "Invalid argument: type='" + type + "'";
         throw InvalidArgumentException(msg);

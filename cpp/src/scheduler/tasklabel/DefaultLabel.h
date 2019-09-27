@@ -21,20 +21,18 @@
 
 #include <memory>
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class DefaultLabel : public TaskLabel {
-public:
-    DefaultLabel() : TaskLabel(TaskLabelType::DEFAULT) {}
+ public:
+    DefaultLabel() : TaskLabel(TaskLabelType::DEFAULT) {
+    }
 };
 
 using DefaultLabelPtr = std::shared_ptr<DefaultLabel>;
 
-}
-}
-}
-
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

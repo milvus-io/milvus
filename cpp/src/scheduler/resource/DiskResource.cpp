@@ -15,14 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "DiskResource.h"
+#include "scheduler/resource/DiskResource.h"
 
+#include <string>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-std::ostream &operator<<(std::ostream &out, const DiskResource &resource) {
+std::ostream &
+operator<<(std::ostream &out, const DiskResource &resource) {
     out << resource.Dump();
     return out;
 }
@@ -31,15 +34,14 @@ DiskResource::DiskResource(std::string name, uint64_t device_id, bool enable_loa
     : Resource(std::move(name), ResourceType::DISK, device_id, enable_loader, enable_executor) {
 }
 
-void DiskResource::LoadFile(TaskPtr task) {
-
+void
+DiskResource::LoadFile(TaskPtr task) {
 }
 
-void DiskResource::Process(TaskPtr task) {
-
+void
+DiskResource::Process(TaskPtr task) {
 }
 
-}
-}
-}
- 
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
