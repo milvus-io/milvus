@@ -16,20 +16,22 @@
 // under the License.
 
 
-#include "CpuCacheMgr.h"
+#include "cache/CpuCacheMgr.h"
 #include "server/Config.h"
 #include "utils/Log.h"
+
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
 namespace cache {
 
 namespace {
-    constexpr int64_t unit = 1024 * 1024 * 1024;
+constexpr int64_t unit = 1024 * 1024 * 1024;
 }
 
 CpuCacheMgr::CpuCacheMgr() {
-    server::Config& config = server::Config::GetInstance();
+    server::Config &config = server::Config::GetInstance();
     Status s;
 
     int32_t cpu_mem_cap;
@@ -38,7 +40,7 @@ CpuCacheMgr::CpuCacheMgr() {
         SERVER_LOG_ERROR << s.message();
     }
     int64_t cap = cpu_mem_cap * unit;
-    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
+    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
 
     float cpu_mem_threshold;
     s = config.GetCacheConfigCpuMemThreshold(cpu_mem_threshold);
@@ -53,20 +55,22 @@ CpuCacheMgr::CpuCacheMgr() {
     }
 }
 
-CpuCacheMgr* CpuCacheMgr::GetInstance() {
+CpuCacheMgr *
+CpuCacheMgr::GetInstance() {
     static CpuCacheMgr s_mgr;
     return &s_mgr;
 }
 
-engine::VecIndexPtr CpuCacheMgr::GetIndex(const std::string& key) {
+engine::VecIndexPtr
+CpuCacheMgr::GetIndex(const std::string &key) {
     DataObjPtr obj = GetItem(key);
-    if(obj != nullptr) {
+    if (obj != nullptr) {
         return obj->data();
     }
 
     return nullptr;
 }
 
-}
-}
-}
+} // namespace cache
+} // namespace milvus
+} // namespace zilliz

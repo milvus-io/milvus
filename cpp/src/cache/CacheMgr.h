@@ -22,22 +22,25 @@
 #include "utils/Log.h"
 #include "metrics/Metrics.h"
 
+#include <string>
+#include <memory>
+
 namespace zilliz {
 namespace milvus {
 namespace cache {
 
 template<typename ItemObj>
 class CacheMgr {
-public:
+ public:
     virtual uint64_t ItemCount() const;
 
-    virtual bool ItemExists(const std::string& key);
+    virtual bool ItemExists(const std::string &key);
 
-    virtual ItemObj GetItem(const std::string& key);
+    virtual ItemObj GetItem(const std::string &key);
 
-    virtual void InsertItem(const std::string& key, const ItemObj& data);
+    virtual void InsertItem(const std::string &key, const ItemObj &data);
 
-    virtual void EraseItem(const std::string& key);
+    virtual void EraseItem(const std::string &key);
 
     virtual void PrintInfo();
 
@@ -47,18 +50,17 @@ public:
     int64_t CacheCapacity() const;
     void SetCapacity(int64_t capacity);
 
-protected:
+ protected:
     CacheMgr();
     virtual ~CacheMgr();
 
-protected:
+ protected:
     using CachePtr = std::shared_ptr<Cache<ItemObj>>;
     CachePtr cache_;
 };
 
-
-}
-}
-}
+} // namespace cache
+} // namespace milvus
+} // namespace zilliz
 
 #include "cache/CacheMgr.inl"
