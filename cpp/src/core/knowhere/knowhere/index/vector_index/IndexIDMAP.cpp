@@ -51,24 +51,22 @@ DatasetPtr IDMAP::Search(const DatasetPtr &dataset, const Config &config) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
 
-    auto k = config["k"].as<size_t>();
+    config->CheckValid();
     //auto metric_type = config["metric_type"].as_string() == "L2" ?
     //                   faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
     //index_->metric_type = metric_type;
 
     GETTENSOR(dataset)
 
-    // TODO(linxj): handle malloc exception
-    auto elems = rows * k;
+    auto elems = rows * config->k;
     auto res_ids = (int64_t *) malloc(sizeof(int64_t) * elems);
     auto res_dis = (float *) malloc(sizeof(float) * elems);
 
-    search_impl(rows, (float *) p_data, k, res_dis, res_ids, Config());
+    search_impl(rows, (float *) p_data, config->k, res_dis, res_ids, Config());
 
     auto id_buf = MakeMutableBufferSmart((uint8_t *) res_ids, sizeof(int64_t) * elems);
     auto dist_buf = MakeMutableBufferSmart((uint8_t *) res_dis, sizeof(float) * elems);
 
-    // TODO: magic
     std::vector<BufferPtr> id_bufs{nullptr, id_buf};
     std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
 
@@ -136,11 +134,9 @@ int64_t *IDMAP::GetRawIds() {
 
 const char* type = "IDMap,Flat";
 void IDMAP::Train(const Config &config) {
-    auto metric_type = config["metric_type"].as_string() == "L2" ?
-                       faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
-    auto dim = config["dim"].as<size_t>();
+    config->CheckValid();
 
-    auto index = faiss::index_factory(dim, type, metric_type);
+    auto index = faiss::index_factory(config->d, type, GetMetricType(config->metric_type));
     index_.reset(index);
 }
 

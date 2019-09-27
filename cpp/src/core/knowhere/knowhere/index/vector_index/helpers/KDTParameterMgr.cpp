@@ -35,7 +35,7 @@ KDTParameterMgr::KDTParameterMgr() {
         {"NumTopDimensionKDTSplit", "5"},
         {"NumSamplesKDTSplitConsideration", "100"},
 
-        {"TPTNumber", "32"},
+        {"TPTNumber", "1"},
         {"TPTLeafSize", "2000"},
         {"NumTopDimensionTPTSplit", "5"},
 

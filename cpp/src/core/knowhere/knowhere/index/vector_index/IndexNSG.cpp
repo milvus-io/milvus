@@ -67,30 +67,29 @@ void NSG::Load(const BinarySet &index_binary) {
 }
 
 DatasetPtr NSG::Search(const DatasetPtr &dataset, const Config &config) {
+    auto build_cfg = std::dynamic_pointer_cast<NSGCfg>(config);
+    if (build_cfg != nullptr) {
+        build_cfg->CheckValid(); // throw exception
+    }
+
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    // Required
-    // if not found throw exception here.
-    auto k = config["k"].as<size_t>();
-    auto search_length = config.get_with_default("search_length", 30);
-
     GETTENSOR(dataset)
 
-    auto elems = rows * k;
+    auto elems = rows * build_cfg->k;
     auto res_ids = (int64_t *) malloc(sizeof(int64_t) * elems);
     auto res_dis = (float *) malloc(sizeof(float) * elems);
 
-    // TODO(linxj): get from config
     algo::SearchParams s_params;
-    s_params.search_length = search_length;
-    index_->Search((float *) p_data, rows, dim, k, res_dis, res_ids, s_params);
+    s_params.search_length = build_cfg->search_length;
+    index_->Search((float *) p_data, rows, dim,
+                   build_cfg->k, res_dis, res_ids, s_params);
 
     auto id_buf = MakeMutableBufferSmart((uint8_t *) res_ids, sizeof(int64_t) * elems);
     auto dist_buf = MakeMutableBufferSmart((uint8_t *) res_dis, sizeof(float) * elems);
 
-    // TODO: magic
     std::vector<BufferPtr> id_bufs{nullptr, id_buf};
     std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
 
@@ -108,45 +107,41 @@ DatasetPtr NSG::Search(const DatasetPtr &dataset, const Config &config) {
 }
 
 IndexModelPtr NSG::Train(const DatasetPtr &dataset, const Config &config) {
-    TimeRecorder rc("Interface");
+    auto build_cfg = std::dynamic_pointer_cast<NSGCfg>(config);
+    if (build_cfg != nullptr) {
+        build_cfg->CheckValid(); // throw exception
+    }
 
-    auto metric_type = config["metric_type"].as_string();
-    if (metric_type != "L2") { KNOWHERE_THROW_MSG("NSG not support this kind of metric type");}
+    if (build_cfg->metric_type != METRICTYPE::L2) {
+        KNOWHERE_THROW_MSG("NSG not support this kind of metric type");
+    }
 
     // TODO(linxj): dev IndexFactory, support more IndexType
-    auto preprocess_index = std::make_shared<GPUIVF>(0);
-    //auto preprocess_index = std::make_shared<IVF>();
+    auto preprocess_index = std::make_shared<GPUIVF>(build_cfg->gpu_id);
     auto model = preprocess_index->Train(dataset, config);
     preprocess_index->set_index_model(model);
     preprocess_index->AddWithoutIds(dataset, config);
-    rc.RecordSection("build ivf");
 
-    auto k = config["knng"].as<int64_t>();
     Graph knng;
-    preprocess_index->GenGraph(k, knng, dataset, config);
-    rc.RecordSection("build knng");
+    preprocess_index->GenGraph(build_cfg->knng, knng, dataset, config);
+
+    algo::BuildParams b_params;
+    b_params.candidate_pool_size = build_cfg->candidate_pool_size;
+    b_params.out_degree = build_cfg->out_degree;
+    b_params.search_length = build_cfg->search_length;
 
     GETTENSOR(dataset)
     auto array = dataset->array()[0];
     auto p_ids = array->data()->GetValues<long>(1, 0);
 
-    algo::BuildParams b_params;
-    b_params.candidate_pool_size = config["candidate_pool_size"].as<size_t>();
-    b_params.out_degree = config["out_degree"].as<size_t>();
-    b_params.search_length = config["search_length"].as<size_t>();
-
     index_ = std::make_shared<algo::NsgIndex>(dim, rows);
     index_->SetKnnGraph(knng);
     index_->Build_with_ids(rows, (float *) p_data, (long *) p_ids, b_params);
-    rc.RecordSection("build nsg");
-    rc.ElapseFromBegin("total cost");
     return nullptr; // TODO(linxj): support serialize
 }
 
 void NSG::Add(const DatasetPtr &dataset, const Config &config) {
-    // TODO(linxj): support incremental index.
-
-    //KNOWHERE_THROW_MSG("Not support yet");
+    // do nothing
 }
 
 int64_t NSG::Count() {
@@ -156,6 +151,7 @@ int64_t NSG::Count() {
 int64_t NSG::Dimension() {
     return index_->dimension;
 }
+
 VectorIndexPtr NSG::Clone() {
     KNOWHERE_THROW_MSG("not support");
 }

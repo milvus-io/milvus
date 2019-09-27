@@ -18,42 +18,46 @@
 
 #pragma once
 
-#include <memory>
+#include "VecIndex.h"
+#include "ConfAdapter.h"
+
 
 namespace zilliz {
-namespace knowhere {
+namespace milvus {
+namespace engine {
 
-enum class METRICTYPE {
-    INVALID = 0,
-    L2 = 1,
-    IP = 2,
+class AdapterMgr {
+ public:
+    template<typename T>
+    struct register_t {
+        explicit register_t(const IndexType &key) {
+            AdapterMgr::GetInstance().table_.emplace(key, [] {
+                return std::make_shared<T>();
+            });
+        }
+    };
+
+    static AdapterMgr &
+    GetInstance() {
+        static AdapterMgr instance;
+        return instance;
+    }
+
+    ConfAdapterPtr
+    GetAdapter(const IndexType &indexType);
+
+    void
+    RegisterAdapter();
+
+ protected:
+    bool init_ = false;
+    std::map<IndexType, std::function<ConfAdapterPtr()> > table_;
 };
 
-// General Config
-constexpr int64_t INVALID_VALUE = -1;
-constexpr int64_t DEFAULT_K = INVALID_VALUE;
-constexpr int64_t DEFAULT_DIM = INVALID_VALUE;
-constexpr int64_t DEFAULT_GPUID = INVALID_VALUE;
-constexpr METRICTYPE DEFAULT_TYPE = METRICTYPE::INVALID;
 
-struct Cfg {
-    METRICTYPE metric_type = DEFAULT_TYPE;
-    int64_t k = DEFAULT_K;
-    int64_t gpu_id = DEFAULT_GPUID;
-    int64_t d = DEFAULT_DIM;
+} // engine
+} // milvus
+} // zilliz
 
-    Cfg(const int64_t &dim,
-        const int64_t &k,
-        const int64_t &gpu_id,
-        METRICTYPE type)
-        : d(dim), k(k), gpu_id(gpu_id), metric_type(type) {}
 
-    Cfg() = default;
 
-    virtual bool
-    CheckValid(){};
-};
-using Config = std::shared_ptr<Cfg>;
-
-} // namespace knowhere
-} // namespace zilliz
