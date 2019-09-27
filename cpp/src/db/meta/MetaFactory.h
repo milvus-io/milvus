@@ -20,18 +20,19 @@
 #include "Meta.h"
 #include "db/Options.h"
 
+#include <string>
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class MetaFactory {
-public:
+ public:
     static DBMetaOptions BuildOption(const std::string &path = "");
 
     static meta::MetaPtr Build(const DBMetaOptions &metaOptions, const int &mode);
 };
 
-
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz

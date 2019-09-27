@@ -23,7 +23,9 @@
 #include "utils/Status.h"
 
 #include <mutex>
-
+#include <vector>
+#include <memory>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -59,7 +61,6 @@ class MemTable {
     DBOptions options_;
 
     std::mutex mutex_;
-
 }; //MemTable
 
 using MemTablePtr = std::shared_ptr<MemTable>;

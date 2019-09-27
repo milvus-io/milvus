@@ -20,17 +20,16 @@
 
 #include "knowhere/adapter/Structure.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids);
+GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const int64_t *ids);
 
 extern zilliz::knowhere::DatasetPtr
 GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
 
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz

@@ -16,8 +16,7 @@
 // under the License.
 
 
-#include "ResourceFactory.h"
-
+#include "scheduler/ResourceFactory.h"
 
 namespace zilliz {
 namespace milvus {
@@ -40,6 +39,6 @@ ResourceFactory::Create(const std::string &name,
     }
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

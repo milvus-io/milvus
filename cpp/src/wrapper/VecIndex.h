@@ -25,7 +25,6 @@
 #include "knowhere/common/Config.h"
 #include "knowhere/common/BinarySet.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace engine {
@@ -54,24 +53,24 @@ using VecIndexPtr = std::shared_ptr<VecIndex>;
 class VecIndex {
  public:
     virtual Status
-    BuildAll(const long &nb,
+    BuildAll(const int64_t &nb,
              const float *xb,
-             const long *ids,
+             const int64_t *ids,
              const Config &cfg,
-             const long &nt = 0,
+             const int64_t &nt = 0,
              const float *xt = nullptr) = 0;
 
     virtual Status
-    Add(const long &nb,
+    Add(const int64_t &nb,
         const float *xb,
-        const long *ids,
+        const int64_t *ids,
         const Config &cfg = Config()) = 0;
 
     virtual Status
-    Search(const long &nq,
+    Search(const int64_t &nq,
            const float *xq,
            float *dist,
-           long *ids,
+           int64_t *ids,
            const Config &cfg = Config()) = 0;
 
     virtual VecIndexPtr
@@ -121,6 +120,6 @@ ConvertToCpuIndexType(const IndexType &type);
 extern IndexType
 ConvertToGpuIndexType(const IndexType &type);
 
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz

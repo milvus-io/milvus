@@ -15,18 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ConfigMgr.h"
+#include "config/ConfigMgr.h"
 #include "YamlConfigMgr.h"
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 
-ConfigMgr * ConfigMgr::GetInstance() {
+ConfigMgr *
+ConfigMgr::GetInstance() {
     static YamlConfigMgr mgr;
     return &mgr;
 }
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

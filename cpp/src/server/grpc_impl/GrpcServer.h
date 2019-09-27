@@ -19,11 +19,11 @@
 
 #include "utils/Status.h"
 
+#include <memory>
 #include <cstdint>
 #include <string>
 #include <thread>
 #include <grpcpp/grpcpp.h>
-
 
 namespace zilliz {
 namespace milvus {
@@ -52,7 +52,7 @@ class GrpcServer {
     std::shared_ptr<std::thread> thread_ptr_;
 };
 
-}
-}
-}
-}
+} // namespace grpc
+} // namespace server
+} // namespace milvus
+} // namespace zilliz
