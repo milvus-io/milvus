@@ -20,10 +20,10 @@
 
 #include <iostream>
 #include <sstream>
-#include "knowhere/common/Exception.h"
 
+#include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexKDT.h"
-#include "knowhere/index/vector_index/utils/Definitions.h"
+#include "knowhere/index/vector_index/helpers/Definitions.h"
 #include "knowhere/adapter/SptagAdapter.h"
 #include "knowhere/adapter/Structure.h"
 
@@ -38,30 +38,23 @@ using ::testing::Combine;
 
 
 class KDTTest
-    : public DataGen, public TestWithParam<::std::tuple<Config, Config, Config, Config>> {
+     : public DataGen, public ::testing::Test {
  protected:
     void SetUp() override {
-        std::tie(preprocess_cfg, train_cfg, add_cfg, search_cfg) = GetParam();
         index_ = std::make_shared<CPUKDTRNG>();
+
+        auto tempconf = std::make_shared<KDTCfg>();
+        tempconf->tptnubmber = 1;
+        tempconf->k = 10;
+        conf = tempconf;
+
         Init_with_default();
     }
 
  protected:
-    Config preprocess_cfg;
-    Config train_cfg;
-    Config add_cfg;
-    Config search_cfg;
+    Config conf;
     std::shared_ptr<CPUKDTRNG> index_ = nullptr;
 };
-
-INSTANTIATE_TEST_CASE_P(KDTParameters, KDTTest,
-                        Values(
-                            std::make_tuple(Config(),
-                                            Config::object{{"TPTNumber", 1}},
-                                            Config(),
-                                            Config::object{{"k", 10}})
-                        )
-);
 
 void AssertAnns(const DatasetPtr &result,
                 const int &nq,
@@ -93,16 +86,16 @@ void PrintResult(const DatasetPtr &result,
 }
 
 // TODO(linxj): add test about count() and dimension()
-TEST_P(KDTTest, kdt_basic) {
+TEST_F(KDTTest, kdt_basic) {
     assert(!xb.empty());
 
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
     index_->set_preprocessor(preprocessor);
 
-    auto model = index_->Train(base_dataset, train_cfg);
+    auto model = index_->Train(base_dataset, conf);
     index_->set_index_model(model);
-    index_->Add(base_dataset, add_cfg);
-    auto result = index_->Search(query_dataset, search_cfg);
+    index_->Add(base_dataset, conf);
+    auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
 
     {
@@ -124,18 +117,18 @@ TEST_P(KDTTest, kdt_basic) {
     }
 }
 
-TEST_P(KDTTest, kdt_serialize) {
+TEST_F(KDTTest, kdt_serialize) {
     assert(!xb.empty());
 
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, preprocess_cfg);
+    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
     index_->set_preprocessor(preprocessor);
 
-    auto model = index_->Train(base_dataset, train_cfg);
-    //index_->Add(base_dataset, add_cfg);
+    auto model = index_->Train(base_dataset, conf);
+    //index_->Add(base_dataset, conf);
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<CPUKDTRNG>();
     new_index->Load(binaryset);
-    auto result = new_index->Search(query_dataset, search_cfg);
+    auto result = new_index->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
     PrintResult(result, nq, k);
     ASSERT_EQ(new_index->Count(), nb);
@@ -172,7 +165,7 @@ TEST_P(KDTTest, kdt_serialize) {
 
         auto new_index = std::make_shared<CPUKDTRNG>();
         new_index->Load(load_data_list);
-        auto result = new_index->Search(query_dataset, search_cfg);
+        auto result = new_index->Search(query_dataset, conf);
         AssertAnns(result, nq, k);
         PrintResult(result, nq, k);
     }

@@ -92,10 +92,10 @@ Status DBWrapper::StartService() {
     }
 
     //init faiss global variable
-    int32_t blas_threshold;
-    s = config.GetEngineConfigBlasThreshold(blas_threshold);
+    int32_t use_blas_threshold;
+    s = config.GetEngineConfigUseBlasThreshold(use_blas_threshold);
     if (!s.ok()) return s;
-    faiss::distance_compute_blas_threshold = blas_threshold;
+    faiss::distance_compute_blas_threshold = use_blas_threshold;
 
     //set archive config
     engine::ArchiveConf::CriteriaT criterial;
