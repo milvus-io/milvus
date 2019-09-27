@@ -26,7 +26,6 @@
 #include "db/meta/SqliteMetaImpl.h"
 #include "db/meta/MySQLMetaImpl.h"
 
-
 #define TIMING
 
 #ifdef TIMING
@@ -34,15 +33,15 @@
 #define START_TIMER  start = std::chrono::high_resolution_clock::now();
 #define STOP_TIMER(name)  LOG(DEBUG) << "RUNTIME of " << name << ": " << \
     std::chrono::duration_cast<std::chrono::milliseconds>( \
-            std::chrono::high_resolution_clock::now()-start \
-    ).count() << " ms ";
+            std::chrono::high_resolution_clock::now()-start).count() << " ms ";
 #else
 #define INIT_TIMER
 #define START_TIMER
 #define STOP_TIMER(name)
 #endif
 
-void ASSERT_STATS(zilliz::milvus::Status& stat);
+void
+ASSERT_STATS(zilliz::milvus::Status &stat);
 
 //class TestEnv : public ::testing::Environment {
 //public:
@@ -66,11 +65,11 @@ void ASSERT_STATS(zilliz::milvus::Status& stat);
 //        ::testing::AddGlobalTestEnvironment(new TestEnv);
 
 class MetricTest : public ::testing::Test {
-protected:
+ protected:
     zilliz::milvus::engine::DBPtr db_;
 
     void InitLog();
-    virtual void SetUp() override;
-    virtual void TearDown() override;
+    void SetUp() override;
+    void TearDown() override;
     virtual zilliz::milvus::engine::DBOptions GetOptions();
 };

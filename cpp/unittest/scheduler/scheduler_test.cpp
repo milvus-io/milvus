@@ -28,19 +28,18 @@
 #include "utils/Error.h"
 #include "wrapper/VecIndex.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class MockVecIndex : public engine::VecIndex {
-public:
-    virtual Status BuildAll(const long &nb,
-                               const float *xb,
-                               const long *ids,
-                               const engine::Config &cfg,
-                               const long &nt = 0,
-                               const float *xt = nullptr) {
+ public:
+    virtual Status BuildAll(const int64_t &nb,
+                            const float *xb,
+                            const int64_t *ids,
+                            const engine::Config &cfg,
+                            const int64_t &nt = 0,
+                            const float *xt = nullptr) {
     }
 
     engine::VecIndexPtr Clone() override {
@@ -55,27 +54,23 @@ public:
         return engine::IndexType::INVALID;
     }
 
-    virtual Status Add(const long &nb,
-                          const float *xb,
-                          const long *ids,
-                          const engine::Config &cfg = engine::Config()) {
-
+    virtual Status Add(const int64_t &nb,
+                       const float *xb,
+                       const int64_t *ids,
+                       const engine::Config &cfg = engine::Config()) {
     }
 
-    virtual Status Search(const long &nq,
-                             const float *xq,
-                             float *dist,
-                             long *ids,
-                             const engine::Config &cfg = engine::Config()) {
-
+    virtual Status Search(const int64_t &nq,
+                          const float *xq,
+                          float *dist,
+                          int64_t *ids,
+                          const engine::Config &cfg = engine::Config()) {
     }
 
     engine::VecIndexPtr CopyToGpu(const int64_t &device_id, const engine::Config &cfg) override {
-
     }
 
     engine::VecIndexPtr CopyToCpu(const engine::Config &cfg) override {
-
     }
 
     virtual int64_t Dimension() {
@@ -92,20 +87,18 @@ public:
     }
 
     virtual Status Load(const zilliz::knowhere::BinarySet &index_binary) {
-
     }
 
-public:
+ public:
     int64_t dimension_ = 512;
     int64_t ntotal_ = 0;
 };
 
-
 class SchedulerTest : public testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
-        constexpr int64_t cache_cap = 1024*1024*1024;
+        constexpr int64_t cache_cap = 1024 * 1024 * 1024;
         cache::GpuCacheMgr::GetInstance(0)->SetCapacity(cache_cap);
         cache::GpuCacheMgr::GetInstance(1)->SetCapacity(cache_cap);
 
@@ -170,7 +163,6 @@ TEST_F(SchedulerTest, ON_LOAD_COMPLETED) {
 
     sleep(3);
     ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
-
 }
 
 TEST_F(SchedulerTest, PUSH_TASK_TO_NEIGHBOUR_RANDOMLY_TEST) {
@@ -193,7 +185,7 @@ TEST_F(SchedulerTest, PUSH_TASK_TO_NEIGHBOUR_RANDOMLY_TEST) {
 }
 
 class SchedulerTest2 : public testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
         ResourcePtr disk = ResourceFactory::Create("disk", "DISK", 0, true, false);
@@ -243,7 +235,6 @@ protected:
     std::shared_ptr<Scheduler> scheduler_;
 };
 
-
 TEST_F(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
     const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
@@ -260,6 +251,6 @@ TEST_F(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
 //    ASSERT_EQ(res_mgr_->GetResource(ResourceType::GPU, 1)->task_table().Size(), NUM);
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
