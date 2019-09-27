@@ -22,6 +22,7 @@
 #include <list>
 #include <cstddef>
 #include <stdexcept>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
@@ -29,14 +30,15 @@ namespace cache {
 
 template<typename key_t, typename value_t>
 class LRU {
-public:
+ public:
     typedef typename std::pair<key_t, value_t> key_value_pair_t;
     typedef typename std::list<key_value_pair_t>::iterator list_iterator_t;
     typedef typename std::list<key_value_pair_t>::reverse_iterator reverse_list_iterator_t;
 
-    LRU(size_t max_size) : max_size_(max_size) {}
+    explicit LRU(size_t max_size) : max_size_(max_size) {
+    }
 
-    void put(const key_t& key, const value_t& value) {
+    void put(const key_t &key, const value_t &value) {
         auto it = cache_items_map_.find(key);
         cache_items_list_.push_front(key_value_pair_t(key, value));
         if (it != cache_items_map_.end()) {
@@ -53,7 +55,7 @@ public:
         }
     }
 
-    const value_t& get(const key_t& key) {
+    const value_t &get(const key_t &key) {
         auto it = cache_items_map_.find(key);
         if (it == cache_items_map_.end()) {
             throw std::range_error("There is no such key in cache");
@@ -63,7 +65,7 @@ public:
         }
     }
 
-    void erase(const key_t& key) {
+    void erase(const key_t &key) {
         auto it = cache_items_map_.find(key);
         if (it != cache_items_map_.end()) {
             cache_items_list_.erase(it->second);
@@ -71,7 +73,7 @@ public:
         }
     }
 
-    bool exists(const key_t& key) const {
+    bool exists(const key_t &key) const {
         return cache_items_map_.find(key) != cache_items_map_.end();
     }
 
@@ -101,14 +103,14 @@ public:
         cache_items_map_.clear();
     }
 
-private:
+ private:
     std::list<key_value_pair_t> cache_items_list_;
     std::unordered_map<key_t, list_iterator_t> cache_items_map_;
     size_t max_size_;
     list_iterator_t iter_;
 };
 
-}   // cache
-}   // milvus
-}   // zilliz
+} // namespace cache
+} // namespace milvus
+} // namespace zilliz
 

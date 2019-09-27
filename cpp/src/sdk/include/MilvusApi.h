@@ -28,7 +28,6 @@
  */
 namespace milvus {
 
-
 /**
  * @brief Index Type
  */
@@ -108,7 +107,6 @@ struct IndexParam {
  */
 class Connection {
  public:
-
     /**
      * @brief CreateConnection
      *
@@ -131,7 +129,7 @@ class Connection {
      */
 
     static Status
-    Destroy(std::shared_ptr<Connection>& connection_ptr);
+    Destroy(std::shared_ptr<Connection> &connection_ptr);
 
     /**
      * @brief Connect
@@ -180,7 +178,6 @@ class Connection {
     virtual Status
     Disconnect() = 0;
 
-
     /**
      * @brief Create table method
      *
@@ -193,7 +190,6 @@ class Connection {
     virtual Status
     CreateTable(const TableSchema &param) = 0;
 
-
     /**
      * @brief Test table existence method
      *
@@ -205,7 +201,6 @@ class Connection {
      */
     virtual bool
     HasTable(const std::string &table_name) = 0;
-
 
     /**
      * @brief Delete table method
@@ -248,8 +243,8 @@ class Connection {
      */
     virtual Status
     Insert(const std::string &table_name,
-                 const std::vector<RowRecord> &record_array,
-                 std::vector<int64_t> &id_array) = 0;
+           const std::vector<RowRecord> &record_array,
+           std::vector<int64_t> &id_array) = 0;
 
     /**
      * @brief Search vector
@@ -266,11 +261,11 @@ class Connection {
      */
     virtual Status
     Search(const std::string &table_name,
-                 const std::vector<RowRecord> &query_record_array,
-                 const std::vector<Range> &query_range_array,
-                 int64_t topk,
-                 int64_t nprobe,
-                 std::vector<TopKQueryResult> &topk_query_result_array) = 0;
+           const std::vector<RowRecord> &query_record_array,
+           const std::vector<Range> &query_range_array,
+           int64_t topk,
+           int64_t nprobe,
+           std::vector<TopKQueryResult> &topk_query_result_array) = 0;
 
     /**
      * @brief Show table description
@@ -297,7 +292,7 @@ class Connection {
      */
     virtual Status
     CountTable(const std::string &table_name,
-            int64_t &row_count) = 0;
+               int64_t &row_count) = 0;
 
     /**
      * @brief Show all tables in database
@@ -395,4 +390,4 @@ class Connection {
     DropIndex(const std::string &table_name) const = 0;
 };
 
-}
+} // namespace milvus

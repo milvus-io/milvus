@@ -21,26 +21,25 @@
 #include "db/Options.h"
 #include "MySQLConnectionPool.h"
 
-#include "mysql++/mysql++.h"
+#include <mysql++/mysql++.h>
 #include <mutex>
-
+#include <vector>
+#include <string>
+#include <memory>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
 
-//    auto StoragePrototype(const std::string& path);
-using namespace mysqlpp;
-
 class MySQLMetaImpl : public Meta {
  public:
-    MySQLMetaImpl(const DBMetaOptions &options_, const int &mode);
+    MySQLMetaImpl(const DBMetaOptions &options, const int &mode);
     ~MySQLMetaImpl();
 
     Status CreateTable(TableSchema &table_schema) override;
 
-    Status DescribeTable(TableSchema &group_info_) override;
+    Status DescribeTable(TableSchema &table_schema) override;
 
     Status HasTable(const std::string &table_id, bool &has_or_not) override;
 
@@ -63,11 +62,11 @@ class MySQLMetaImpl : public Meta {
                        const std::vector<int> &file_types,
                        std::vector<std::string> &file_ids) override;
 
-    Status UpdateTableIndex(const std::string &table_id, const TableIndex& index) override;
+    Status UpdateTableIndex(const std::string &table_id, const TableIndex &index) override;
 
     Status UpdateTableFlag(const std::string &table_id, int64_t flag) override;
 
-    Status DescribeTableIndex(const std::string &table_id, TableIndex& index) override;
+    Status DescribeTableIndex(const std::string &table_id, TableIndex &index) override;
 
     Status DropTableIndex(const std::string &table_id) override;
 
@@ -102,12 +101,12 @@ class MySQLMetaImpl : public Meta {
  private:
     Status NextFileId(std::string &file_id);
     Status NextTableId(std::string &table_id);
-    Status DiscardFiles(long long to_discard_size);
+    Status DiscardFiles(int64_t to_discard_size);
 
     void ValidateMetaSchema();
     Status Initialize();
 
-private:
+ private:
     const DBMetaOptions options_;
     const int mode_;
 

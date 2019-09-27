@@ -16,15 +16,15 @@
 // under the License.
 
 
+#include "utils/ValidationUtil.h"
 #include "db/engine/ExecutionEngine.h"
-#include "ValidationUtil.h"
 #include "Log.h"
 
+#include <string>
 #include <cuda_runtime.h>
 #include <arpa/inet.h>
 #include <regex>
 #include <algorithm>
-
 
 namespace zilliz {
 namespace milvus {
@@ -36,7 +36,6 @@ constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096; //index trigger size max = 4096 
 
 Status
 ValidationUtil::ValidateTableName(const std::string &table_name) {
-
     // Table name shouldn't be empty.
     if (table_name.empty()) {
         std::string msg = "Empty table name";
@@ -78,8 +77,7 @@ ValidationUtil::ValidateTableDimension(int64_t dimension) {
         std::string msg = "Table dimension excceed the limitation: " + std::to_string(TABLE_DIMENSION_LIMIT);
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
-    }
-    else {
+    } else {
         return Status::OK();
     }
 }
@@ -185,7 +183,6 @@ ValidationUtil::GetGpuMemory(uint32_t gpu_index, size_t &memory) {
 
 Status
 ValidationUtil::ValidateIpAddress(const std::string &ip_address) {
-
     struct in_addr address;
 
     int result = inet_pton(AF_INET, ip_address.c_str(), &address);
@@ -212,7 +209,7 @@ ValidationUtil::ValidateStringIsNumber(const std::string &str) {
     }
     try {
         int32_t value = std::stoi(str);
-    } catch(...) {
+    } catch (...) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid number");
     }
     return Status::OK();
@@ -226,8 +223,7 @@ ValidationUtil::ValidateStringIsBool(const std::string &str) {
         s == "false" || s == "off" || s == "no" || s == "0" ||
         s.empty()) {
         return Status::OK();
-    }
-    else {
+    } else {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str);
     }
 }
@@ -236,7 +232,7 @@ Status
 ValidationUtil::ValidateStringIsFloat(const std::string &str) {
     try {
         float val = std::stof(str);
-    } catch(...) {
+    } catch (...) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid float: " + str);
     }
     return Status::OK();
@@ -289,8 +285,7 @@ ValidationUtil::ValidateDbURI(const std::string &uri) {
                 okay = false;
             }
         }
-    }
-    else {
+    } else {
         SERVER_LOG_ERROR << "Wrong URI format: URI = " << uri;
         okay = false;
     }
@@ -298,6 +293,6 @@ ValidationUtil::ValidateDbURI(const std::string &uri) {
     return (okay ? Status::OK() : Status(SERVER_INVALID_ARGUMENT, "Invalid db backend uri"));
 }
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

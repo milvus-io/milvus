@@ -29,20 +29,30 @@ namespace milvus {
 namespace engine {
 namespace utils {
 
-long GetMicroSecTimeStamp();
+int64_t
+GetMicroSecTimeStamp();
 
-Status CreateTablePath(const DBMetaOptions& options, const std::string& table_id);
-Status DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool force = true);
+Status
+CreateTablePath(const DBMetaOptions &options, const std::string &table_id);
+Status
+DeleteTablePath(const DBMetaOptions &options, const std::string &table_id, bool force = true);
 
-Status CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
-Status GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
-Status DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
+Status
+CreateTableFilePath(const DBMetaOptions &options, meta::TableFileSchema &table_file);
+Status
+GetTableFilePath(const DBMetaOptions &options, meta::TableFileSchema &table_file);
+Status
+DeleteTableFilePath(const DBMetaOptions &options, meta::TableFileSchema &table_file);
 
-bool IsSameIndex(const TableIndex& index1, const TableIndex& index2);
+bool
+IsSameIndex(const TableIndex &index1, const TableIndex &index2);
 
-meta::DateT GetDate(const std::time_t &t, int day_delta = 0);
-meta::DateT GetDate();
-meta::DateT GetDateWithDelta(int day_delta);
+meta::DateT
+GetDate(const std::time_t &t, int day_delta = 0);
+meta::DateT
+GetDate();
+meta::DateT
+GetDateWithDelta(int day_delta);
 
 struct MetaUriInfo {
     std::string dialect_;
@@ -53,7 +63,8 @@ struct MetaUriInfo {
     std::string db_name_;
 };
 
-Status ParseMetaUri(const std::string& uri, MetaUriInfo& info);
+Status
+ParseMetaUri(const std::string &uri, MetaUriInfo &info);
 
 } // namespace utils
 } // namespace engine

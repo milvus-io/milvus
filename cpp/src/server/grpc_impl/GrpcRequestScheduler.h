@@ -19,12 +19,14 @@
 
 #include "utils/Status.h"
 #include "utils/BlockingQueue.h"
-#include "status.grpc.pb.h"
-#include "status.pb.h"
+#include "grpc/gen-status/status.grpc.pb.h"
+#include "grpc/gen-status/status.pb.h"
 
 #include <map>
 #include <vector>
 #include <thread>
+#include <memory>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -32,30 +34,36 @@ namespace server {
 namespace grpc {
 
 class GrpcBaseTask {
-protected:
-    GrpcBaseTask(const std::string &task_group, bool async = false);
+ protected:
+    explicit GrpcBaseTask(const std::string &task_group, bool async = false);
 
     virtual ~GrpcBaseTask();
 
-public:
+ public:
     Status Execute();
 
     void Done();
 
     Status WaitToFinish();
 
-    std::string TaskGroup() const { return task_group_; }
+    std::string TaskGroup() const {
+        return task_group_;
+    }
 
-    const Status& status() const { return status_; }
+    const Status &status() const {
+        return status_;
+    }
 
-    bool IsAsync() const { return async_; }
+    bool IsAsync() const {
+        return async_;
+    }
 
-protected:
+ protected:
     virtual Status OnExecute() = 0;
 
     Status SetStatus(ErrorCode error_code, const std::string &msg);
 
-protected:
+ protected:
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
 
@@ -71,7 +79,7 @@ using TaskQueuePtr = std::shared_ptr<TaskQueue>;
 using ThreadPtr = std::shared_ptr<std::thread>;
 
 class GrpcRequestScheduler {
-public:
+ public:
     static GrpcRequestScheduler &GetInstance() {
         static GrpcRequestScheduler scheduler;
         return scheduler;
@@ -85,7 +93,7 @@ public:
 
     static void ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Status *grpc_status);
 
-protected:
+ protected:
     GrpcRequestScheduler();
 
     virtual ~GrpcRequestScheduler();
@@ -94,7 +102,7 @@ protected:
 
     Status PutTaskToQueue(const BaseTaskPtr &task_ptr);
 
-private:
+ private:
     mutable std::mutex queue_mtx_;
 
     std::map<std::string, TaskQueuePtr> task_groups_;
@@ -104,7 +112,7 @@ private:
     bool stopped_;
 };
 
-}
-}
-}
-}
+} // namespace grpc
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

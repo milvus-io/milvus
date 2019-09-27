@@ -29,6 +29,7 @@ namespace milvus {
 */
 enum class StatusCode {
     OK = 0,
+
     // system error section
     UnknownError = 1,
     NotSupported,
@@ -44,7 +45,7 @@ enum class StatusCode {
 * @brief Status for SDK interface return
 */
 class Status {
-public:
+ public:
     Status(StatusCode code, const std::string &msg);
     Status();
     ~Status();
@@ -60,28 +61,32 @@ public:
     operator=(Status &&s);
 
     static Status
-    OK() { return Status(); }
+    OK() {
+        return Status();
+    }
 
     bool
-    ok() const { return state_ == nullptr || code() == StatusCode::OK; }
+    ok() const {
+        return state_ == nullptr || code() == StatusCode::OK;
+    }
 
     StatusCode
     code() const {
-        return (state_ == nullptr) ? StatusCode::OK : *(StatusCode*)(state_);
+        return (state_ == nullptr) ? StatusCode::OK : *(StatusCode *) (state_);
     }
 
     std::string
     message() const;
 
-private:
+ private:
     inline void
     CopyFrom(const Status &s);
 
     inline void
     MoveFrom(Status &s);
 
-private:
+ private:
     const char *state_ = nullptr;
 }; // Status
 
-} //Milvus
+} // namespace milvus

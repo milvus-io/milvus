@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "wrapper/VecIndex.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
@@ -25,12 +26,10 @@
 #include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/common/Exception.h"
-#include "VecIndex.h"
 #include "VecImpl.h"
 #include "utils/Log.h"
 
 #include <cuda.h>
-
 
 namespace zilliz {
 namespace milvus {
@@ -40,7 +39,7 @@ struct FileIOReader {
     std::fstream fs;
     std::string name;
 
-    FileIOReader(const std::string &fname);
+    explicit FileIOReader(const std::string &fname);
 
     ~FileIOReader();
 
@@ -70,13 +69,11 @@ FileIOReader::operator()(void *ptr, size_t size, size_t pos) {
     return 0;
 }
 
-
-
 struct FileIOWriter {
     std::fstream fs;
     std::string name;
 
-    FileIOWriter(const std::string &fname);
+    explicit FileIOWriter(const std::string &fname);
     ~FileIOWriter();
     size_t operator()(void *ptr, size_t size);
 };
@@ -94,7 +91,6 @@ size_t
 FileIOWriter::operator()(void *ptr, size_t size) {
     fs.write(reinterpret_cast<char *>(ptr), size);
 }
-
 
 VecIndexPtr
 GetVecIndexFactory(const IndexType &type, const Config &cfg) {
@@ -212,7 +208,7 @@ write_index(VecIndexPtr index, const std::string &location) {
 
         FileIOWriter writer(location);
         writer(&index_type, sizeof(IndexType));
-        for (auto &iter: binaryset.binary_map_) {
+        for (auto &iter : binaryset.binary_map_) {
             auto meta = iter.first.c_str();
             size_t meta_length = iter.first.length();
             writer(&meta_length, sizeof(meta_length));
@@ -274,7 +270,6 @@ ConvertToGpuIndexType(const IndexType &type) {
     }
 }
 
-
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz
