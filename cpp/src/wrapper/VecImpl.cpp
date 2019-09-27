@@ -24,6 +24,10 @@
 #include "VecImpl.h"
 #include "DataTransfer.h"
 
+/*
+ * no parameter check in this layer.
+ * only responible for index combination
+ */
 
 namespace zilliz {
 namespace milvus {
@@ -39,7 +43,7 @@ VecIndexImpl::BuildAll(const long &nb,
                        const long &nt,
                        const float *xt) {
     try {
-        dim = cfg["dim"].as<int>();
+        dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
@@ -50,9 +54,6 @@ VecIndexImpl::BuildAll(const long &nb,
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
@@ -69,9 +70,6 @@ VecIndexImpl::Add(const long &nb, const float *xb, const long *ids, const Config
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
@@ -82,12 +80,10 @@ VecIndexImpl::Add(const long &nb, const float *xb, const long *ids, const Config
 Status
 VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) {
     try {
-        auto k = cfg["k"].as<int>();
+        auto k = cfg->k;
         auto dataset = GenDataset(nq, dim, xq);
 
         Config search_cfg = cfg;
-
-        ParameterValidation(type, search_cfg);
 
         auto res = index_->Search(dataset, search_cfg);
         auto ids_array = res->array()[0];
@@ -120,9 +116,6 @@ VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *ids, co
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
@@ -208,14 +201,11 @@ BFIndex::GetRawIds() {
 ErrorCode
 BFIndex::Build(const Config &cfg) {
     try {
-        dim = cfg["dim"].as<int>();
+        dim = cfg->d;
         std::static_pointer_cast<IDMAP>(index_)->Train(cfg);
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return KNOWHERE_UNEXPECTED_ERROR;
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_INVALID_ARGUMENT;
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
         return KNOWHERE_ERROR;
@@ -231,7 +221,7 @@ BFIndex::BuildAll(const long &nb,
                   const long &nt,
                   const float *xt) {
     try {
-        dim = cfg["dim"].as<int>();
+        dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         std::static_pointer_cast<IDMAP>(index_)->Train(cfg);
@@ -239,9 +229,6 @@ BFIndex::BuildAll(const long &nb,
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
@@ -258,7 +245,7 @@ IVFMixIndex::BuildAll(const long &nb,
                       const long &nt,
                       const float *xt) {
     try {
-        dim = cfg["dim"].as<int>();
+        dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
@@ -278,9 +265,6 @@ IVFMixIndex::BuildAll(const long &nb,
     } catch (KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
     } catch (std::exception &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
@@ -290,7 +274,6 @@ IVFMixIndex::BuildAll(const long &nb,
 
 Status
 IVFMixIndex::Load(const zilliz::knowhere::BinarySet &index_binary) {
-    //index_ = std::make_shared<IVF>();
     index_->Load(index_binary);
     dim = Dimension();
     return Status::OK();
