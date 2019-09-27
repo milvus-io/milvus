@@ -22,6 +22,7 @@
 #include <memory>
 
 #include "knowhere/common/Config.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/common/Dataset.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/preprocessor/Preprocessor.h"

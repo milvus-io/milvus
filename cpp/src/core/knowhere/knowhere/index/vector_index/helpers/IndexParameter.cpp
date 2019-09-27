@@ -16,44 +16,20 @@
 // under the License.
 
 
-#pragma once
+#include "IndexParameter.h"
+#include "knowhere/common/Exception.h"
 
-#include <memory>
+#include <faiss/Index.h>
 
 namespace zilliz {
 namespace knowhere {
 
-enum class METRICTYPE {
-    INVALID = 0,
-    L2 = 1,
-    IP = 2,
-};
+faiss::MetricType GetMetricType(METRICTYPE &type) {
+    if (type == METRICTYPE::L2) return faiss::METRIC_L2;
+    if (type == METRICTYPE::IP) return faiss::METRIC_INNER_PRODUCT;
+    if (type == METRICTYPE::INVALID) KNOWHERE_THROW_MSG("Metric type is invalid");
+}
 
-// General Config
-constexpr int64_t INVALID_VALUE = -1;
-constexpr int64_t DEFAULT_K = INVALID_VALUE;
-constexpr int64_t DEFAULT_DIM = INVALID_VALUE;
-constexpr int64_t DEFAULT_GPUID = INVALID_VALUE;
-constexpr METRICTYPE DEFAULT_TYPE = METRICTYPE::INVALID;
 
-struct Cfg {
-    METRICTYPE metric_type = DEFAULT_TYPE;
-    int64_t k = DEFAULT_K;
-    int64_t gpu_id = DEFAULT_GPUID;
-    int64_t d = DEFAULT_DIM;
-
-    Cfg(const int64_t &dim,
-        const int64_t &k,
-        const int64_t &gpu_id,
-        METRICTYPE type)
-        : d(dim), k(k), gpu_id(gpu_id), metric_type(type) {}
-
-    Cfg() = default;
-
-    virtual bool
-    CheckValid(){};
-};
-using Config = std::shared_ptr<Cfg>;
-
-} // namespace knowhere
-} // namespace zilliz
+}
+}

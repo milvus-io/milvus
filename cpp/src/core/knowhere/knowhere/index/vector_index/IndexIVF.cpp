@@ -37,17 +37,20 @@ namespace knowhere {
 
 
 IndexModelPtr IVF::Train(const DatasetPtr &dataset, const Config &config) {
-    auto nlist = config["nlist"].as<size_t>();
-    auto metric_type = config["metric_type"].as_string() == "L2" ?
-                       faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+    auto build_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    if (build_cfg != nullptr) {
+        build_cfg->CheckValid(); // throw exception
+    }
 
     GETTENSOR(dataset)
 
     faiss::Index *coarse_quantizer = new faiss::IndexFlatL2(dim);
-    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, nlist, metric_type);
+    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim,
+                                                       build_cfg->nlist,
+                                                       GetMetricType(build_cfg->metric_type));
     index->train(rows, (float *) p_data);
 
-    // TODO: override here. train return model or not.
+    // TODO(linxj): override here. train return model or not.
     return std::make_shared<IVFIndexModel>(index);
 }
 
@@ -60,7 +63,6 @@ void IVF::Add(const DatasetPtr &dataset, const Config &config) {
     std::lock_guard<std::mutex> lk(mutex_);
     GETTENSOR(dataset)
 
-    // TODO: magic here.
     auto array = dataset->array()[0];
     auto p_ids = array->data()->GetValues<long>(1, 0);
     index_->add_with_ids(rows, (float *) p_data, p_ids);
@@ -97,28 +99,22 @@ DatasetPtr IVF::Search(const DatasetPtr &dataset, const Config &config) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    auto k = config["k"].as<size_t>();
+    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    if (search_cfg != nullptr) {
+        search_cfg->CheckValid(); // throw exception
+    }
 
     GETTENSOR(dataset)
 
-    // TODO(linxj): handle malloc exception
-    auto elems = rows * k;
+    auto elems = rows * search_cfg->k;
     auto res_ids = (int64_t *) malloc(sizeof(int64_t) * elems);
     auto res_dis = (float *) malloc(sizeof(float) * elems);
 
-    search_impl(rows, (float*) p_data, k, res_dis, res_ids, config);
-    //faiss::ivflib::search_with_parameters(index_.get(),
-    //                                      rows,
-    //                                      (float *) p_data,
-    //                                      k,
-    //                                      res_dis,
-    //                                      res_ids,
-    //                                      params.get());
+    search_impl(rows, (float*) p_data, search_cfg->k, res_dis, res_ids, config);
 
     auto id_buf = MakeMutableBufferSmart((uint8_t *) res_ids, sizeof(int64_t) * elems);
     auto dist_buf = MakeMutableBufferSmart((uint8_t *) res_dis, sizeof(float) * elems);
 
-    // TODO: magic
     std::vector<BufferPtr> id_bufs{nullptr, id_buf};
     std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
 
@@ -146,7 +142,9 @@ void IVF::set_index_model(IndexModelPtr model) {
 
 std::shared_ptr<faiss::IVFSearchParameters> IVF::GenParams(const Config &config) {
     auto params = std::make_shared<faiss::IVFPQSearchParameters>();
-    params->nprobe = config.get_with_default("nprobe", size_t(1));
+
+    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    params->nprobe = search_cfg->nprobe;
     //params->max_codes = config.get_with_default("max_codes", size_t(0));
 
     return params;
