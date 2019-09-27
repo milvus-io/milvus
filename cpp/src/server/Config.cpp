@@ -135,20 +135,20 @@ Config::ValidateConfig() {
     if (!s.ok()) return s;
 
     /* cache config */
-    int32_t cache_cpu_mem_capacity;
-    s = GetCacheConfigCpuMemCapacity(cache_cpu_mem_capacity);
+    int32_t cache_cpu_cache_capacity;
+    s = GetCacheConfigCpuCacheCapacity(cache_cpu_cache_capacity);
     if (!s.ok()) return s;
 
-    float cache_cpu_mem_threshold;
-    s = GetCacheConfigCpuMemThreshold(cache_cpu_mem_threshold);
+    float cache_cpu_cache_threshold;
+    s = GetCacheConfigCpuCacheThreshold(cache_cpu_cache_threshold);
     if (!s.ok()) return s;
 
-    int32_t cache_gpu_mem_capacity;
-    s = GetCacheConfigGpuMemCapacity(cache_gpu_mem_capacity);
+    int32_t cache_gpu_cache_capacity;
+    s = GetCacheConfigGpuCacheCapacity(cache_gpu_cache_capacity);
     if (!s.ok()) return s;
 
-    float cache_gpu_mem_threshold;
-    s = GetCacheConfigGpuMemThreshold(cache_gpu_mem_threshold);
+    float cache_gpu_cache_threshold;
+    s = GetCacheConfigGpuCacheThreshold(cache_gpu_cache_threshold);
     if (!s.ok()) return s;
 
     bool cache_insert_data;
@@ -156,8 +156,8 @@ Config::ValidateConfig() {
     if (!s.ok()) return s;
 
     /* engine config */
-    int32_t engine_blas_threshold;
-    s = GetEngineConfigBlasThreshold(engine_blas_threshold);
+    int32_t engine_use_blas_threshold;
+    s = GetEngineConfigUseBlasThreshold(engine_use_blas_threshold);
     if (!s.ok()) return s;
 
     int32_t engine_omp_thread_num;
@@ -226,23 +226,23 @@ Config::ResetDefaultConfig() {
     if (!s.ok()) return s;
 
     /* cache config */
-    s = SetCacheConfigCpuMemCapacity(CONFIG_CACHE_CPU_MEM_CAPACITY_DEFAULT);
+    s = SetCacheConfigCpuCacheCapacity(CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT);
     if (!s.ok()) return s;
 
-    s = SetCacheConfigCpuMemThreshold(CONFIG_CACHE_CPU_MEM_THRESHOLD_DEFAULT);
+    s = SetCacheConfigCpuCacheThreshold(CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT);
     if (!s.ok()) return s;
 
-    s = SetCacheConfigGpuMemCapacity(CONFIG_CACHE_GPU_MEM_CAPACITY_DEFAULT);
+    s = SetCacheConfigGpuCacheCapacity(CONFIG_CACHE_GPU_CACHE_CAPACITY_DEFAULT);
     if (!s.ok()) return s;
 
-    s = SetCacheConfigGpuMemThreshold(CONFIG_CACHE_GPU_MEM_THRESHOLD_DEFAULT);
+    s = SetCacheConfigGpuCacheThreshold(CONFIG_CACHE_GPU_CACHE_THRESHOLD_DEFAULT);
     if (!s.ok()) return s;
 
     s = SetCacheConfigCacheInsertData(CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT);
     if (!s.ok()) return s;
 
     /* engine config */
-    s = SetEngineConfigBlasThreshold(CONFIG_ENGINE_BLAS_THRESHOLD_DEFAULT);
+    s = SetEngineConfigUseBlasThreshold(CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT);
     if (!s.ok()) return s;
 
     s = SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT);
@@ -417,17 +417,17 @@ Config::CheckMetricConfigPrometheusPort(const std::string &value) {
 }
 
 Status
-Config::CheckCacheConfigCpuMemCapacity(const std::string &value) {
+Config::CheckCacheConfigCpuCacheCapacity(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config cpu_mem_capacity: " + value);
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config cpu_cache_capacity: " + value);
     } else {
         uint64_t cpu_cache_capacity = std::stoi(value) * GB;
         uint64_t total_mem = 0, free_mem = 0;
         CommonUtil::GetSystemMemInfo(total_mem, free_mem);
         if (cpu_cache_capacity >= total_mem) {
-            return Status(SERVER_INVALID_ARGUMENT, "Cache config cpu_mem_capacity exceed system memory: " + value);
+            return Status(SERVER_INVALID_ARGUMENT, "Cache config cpu_cache_capacity exceed system memory: " + value);
         } else if (cpu_cache_capacity > (double) total_mem * 0.9) {
-            std::cerr << "Warning: cpu_mem_capacity value is too big" << std::endl;
+            std::cerr << "Warning: cpu_cache_capacity value is too big" << std::endl;
         }
 
         int32_t buffer_value;
@@ -435,29 +435,29 @@ Config::CheckCacheConfigCpuMemCapacity(const std::string &value) {
         if (!s.ok()) return s;
         int64_t insert_buffer_size = buffer_value * GB;
         if (insert_buffer_size + cpu_cache_capacity >= total_mem) {
-            return Status(SERVER_INVALID_ARGUMENT, "Sum of cpu_mem_capacity and buffer_size exceed system memory");
+            return Status(SERVER_INVALID_ARGUMENT, "Sum of cpu_cache_capacity and buffer_size exceed system memory");
         }
     }
     return Status::OK();
 }
 
 Status
-Config::CheckCacheConfigCpuMemThreshold(const std::string &value) {
+Config::CheckCacheConfigCpuCacheThreshold(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsFloat(value).ok()) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config cpu_mem_threshold: " + value);
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config cpu_cache_threshold: " + value);
     } else {
-        float cpu_mem_threshold = std::stof(value);
-        if (cpu_mem_threshold <= 0.0 || cpu_mem_threshold >= 1.0) {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config cpu_mem_threshold: " + value);
+        float cpu_cache_threshold = std::stof(value);
+        if (cpu_cache_threshold <= 0.0 || cpu_cache_threshold >= 1.0) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config cpu_cache_threshold: " + value);
         }
     }
     return Status::OK();
 }
 
 Status
-Config::CheckCacheConfigGpuMemCapacity(const std::string &value) {
+Config::CheckCacheConfigGpuCacheCapacity(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        std::cerr << "ERROR: gpu_cache_capacity " << value << " is not a number" << std::endl;
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config gpu_cache_capacity: " + value);
     } else {
         uint64_t gpu_cache_capacity = std::stoi(value) * GB;
         int gpu_index;
@@ -469,22 +469,22 @@ Config::CheckCacheConfigGpuMemCapacity(const std::string &value) {
                           "Fail to get GPU memory for GPU device: " + std::to_string(gpu_index));
         } else if (gpu_cache_capacity >= gpu_memory) {
             return Status(SERVER_INVALID_ARGUMENT,
-                          "Cache config gpu_mem_capacity exceed GPU memory: " + std::to_string(gpu_memory));
+                          "Cache config gpu_cache_capacity exceed GPU memory: " + std::to_string(gpu_memory));
         } else if (gpu_cache_capacity > (double) gpu_memory * 0.9) {
-            std::cerr << "Warning: gpu_mem_capacity value is too big" << std::endl;
+            std::cerr << "Warning: gpu_cache_capacity value is too big" << std::endl;
         }
     }
     return Status::OK();
 }
 
 Status
-Config::CheckCacheConfigGpuMemThreshold(const std::string &value) {
+Config::CheckCacheConfigGpuCacheThreshold(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsFloat(value).ok()) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config gpu_mem_threshold: " + value);
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config gpu_cache_threshold: " + value);
     } else {
-        float gpu_mem_threshold = std::stof(value);
-        if (gpu_mem_threshold <= 0.0 || gpu_mem_threshold >= 1.0) {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config gpu_mem_threshold: " + value);
+        float gpu_cache_threshold = std::stof(value);
+        if (gpu_cache_threshold <= 0.0 || gpu_cache_threshold >= 1.0) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid cache config gpu_cache_threshold: " + value);
         }
     }
     return Status::OK();
@@ -499,9 +499,9 @@ Config::CheckCacheConfigCacheInsertData(const std::string &value) {
 }
 
 Status
-Config::CheckEngineConfigBlasThreshold(const std::string &value) {
+Config::CheckEngineConfigUseBlasThreshold(const std::string &value) {
     if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid engine config blas threshold: " + value);
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid engine config use_blas_threshold: " + value);
     }
     return Status::OK();
 }
@@ -729,45 +729,45 @@ Config::GetMetricConfigStrPrometheusPort() {
 ////////////////////////////////////////////////////////////////////////////////
 /* cache config */
 std::string
-Config::GetCacheConfigStrCpuMemCapacity() {
+Config::GetCacheConfigStrCpuCacheCapacity() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_MEM_CAPACITY, value).ok()) {
-        value = GetConfigNode(CONFIG_CACHE).GetValue(CONFIG_CACHE_CPU_MEM_CAPACITY,
-                                                     CONFIG_CACHE_CPU_MEM_CAPACITY_DEFAULT);
-        SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_MEM_CAPACITY, value);
+    if (!GetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value).ok()) {
+        value = GetConfigNode(CONFIG_CACHE).GetValue(CONFIG_CACHE_CPU_CACHE_CAPACITY,
+                                                     CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT);
+        SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
     }
     return value;
 }
 
 std::string
-Config::GetCacheConfigStrCpuMemThreshold() {
+Config::GetCacheConfigStrCpuCacheThreshold() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_MEM_THRESHOLD, value).ok()) {
-        value = GetConfigNode(CONFIG_CACHE).GetValue(CONFIG_CACHE_CPU_MEM_THRESHOLD,
-                                                     CONFIG_CACHE_CPU_MEM_THRESHOLD_DEFAULT);
-        SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_MEM_THRESHOLD, value);
+    if (!GetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_THRESHOLD, value).ok()) {
+        value = GetConfigNode(CONFIG_CACHE).GetValue(CONFIG_CACHE_CPU_CACHE_THRESHOLD,
+                                                     CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT);
+        SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_THRESHOLD, value);
     }
     return value;
 }
 
 std::string
-Config::GetCacheConfigStrGpuMemCapacity() {
+Config::GetCacheConfigStrGpuCacheCapacity() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_MEM_CAPACITY, value).ok()) {
-        value = GetConfigNode(CONFIG_CACHE).GetValue(CONFIG_CACHE_GPU_MEM_CAPACITY,
-                                                     CONFIG_CACHE_GPU_MEM_CAPACITY_DEFAULT);
-        SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_MEM_CAPACITY, value);
+    if (!GetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_CACHE_CAPACITY, value).ok()) {
+        value = GetConfigNode(CONFIG_CACHE).GetValue(CONFIG_CACHE_GPU_CACHE_CAPACITY,
+                                                     CONFIG_CACHE_GPU_CACHE_CAPACITY_DEFAULT);
+        SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_CACHE_CAPACITY, value);
     }
     return value;
 }
 
 std::string
-Config::GetCacheConfigStrGpuMemThreshold() {
+Config::GetCacheConfigStrGpuCacheThreshold() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_MEM_THRESHOLD, value).ok()) {
-        value = GetConfigNode(CONFIG_CACHE).GetValue(CONFIG_CACHE_GPU_MEM_THRESHOLD,
-                                                     CONFIG_CACHE_GPU_MEM_THRESHOLD_DEFAULT);
-        SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_MEM_THRESHOLD, value);
+    if (!GetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_CACHE_THRESHOLD, value).ok()) {
+        value = GetConfigNode(CONFIG_CACHE).GetValue(CONFIG_CACHE_GPU_CACHE_THRESHOLD,
+                                                     CONFIG_CACHE_GPU_CACHE_THRESHOLD_DEFAULT);
+        SetConfigValueInMem(CONFIG_CACHE, CONFIG_CACHE_GPU_CACHE_THRESHOLD, value);
     }
     return value;
 }
@@ -786,12 +786,12 @@ Config::GetCacheConfigStrCacheInsertData() {
 ////////////////////////////////////////////////////////////////////////////////
 /* engine config */
 std::string
-Config::GetEngineConfigStrBlasThreshold() {
+Config::GetEngineConfigStrUseBlasThreshold() {
     std::string value;
-    if (!GetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_BLAS_THRESHOLD, value).ok()) {
-        value = GetConfigNode(CONFIG_ENGINE).GetValue(CONFIG_ENGINE_BLAS_THRESHOLD,
-                                                      CONFIG_ENGINE_BLAS_THRESHOLD_DEFAULT);
-        SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_BLAS_THRESHOLD, value);
+    if (!GetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value).ok()) {
+        value = GetConfigNode(CONFIG_ENGINE).GetValue(CONFIG_ENGINE_USE_BLAS_THRESHOLD,
+                                                      CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT);
+        SetConfigValueInMem(CONFIG_ENGINE, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
     }
     return value;
 }
@@ -922,36 +922,36 @@ Config::GetMetricConfigPrometheusPort(std::string &value) {
 }
 
 Status
-Config::GetCacheConfigCpuMemCapacity(int32_t &value) {
-    std::string str = GetCacheConfigStrCpuMemCapacity();
-    Status s = CheckCacheConfigCpuMemCapacity(str);
+Config::GetCacheConfigCpuCacheCapacity(int32_t &value) {
+    std::string str = GetCacheConfigStrCpuCacheCapacity();
+    Status s = CheckCacheConfigCpuCacheCapacity(str);
     if (!s.ok()) return s;
     value = std::stoi(str);
     return Status::OK();
 }
 
 Status
-Config::GetCacheConfigCpuMemThreshold(float &value) {
-    std::string str = GetCacheConfigStrCpuMemThreshold();
-    Status s = CheckCacheConfigCpuMemThreshold(str);
+Config::GetCacheConfigCpuCacheThreshold(float &value) {
+    std::string str = GetCacheConfigStrCpuCacheThreshold();
+    Status s = CheckCacheConfigCpuCacheThreshold(str);
     if (!s.ok()) return s;
     value = std::stof(str);
     return Status::OK();
 }
 
 Status
-Config::GetCacheConfigGpuMemCapacity(int32_t &value) {
-    std::string str = GetCacheConfigStrGpuMemCapacity();
-    Status s = CheckCacheConfigGpuMemCapacity(str);
+Config::GetCacheConfigGpuCacheCapacity(int32_t &value) {
+    std::string str = GetCacheConfigStrGpuCacheCapacity();
+    Status s = CheckCacheConfigGpuCacheCapacity(str);
     if (!s.ok()) return s;
     value = std::stoi(str);
     return Status::OK();
 }
 
 Status
-Config::GetCacheConfigGpuMemThreshold(float &value) {
-    std::string str = GetCacheConfigStrGpuMemThreshold();
-    Status s = CheckCacheConfigGpuMemThreshold(str);
+Config::GetCacheConfigGpuCacheThreshold(float &value) {
+    std::string str = GetCacheConfigStrGpuCacheThreshold();
+    Status s = CheckCacheConfigGpuCacheThreshold(str);
     if (!s.ok()) return s;
     value = std::stof(str);
     return Status::OK();
@@ -968,9 +968,9 @@ Config::GetCacheConfigCacheInsertData(bool &value) {
 }
 
 Status
-Config::GetEngineConfigBlasThreshold(int32_t &value) {
-    std::string str = GetEngineConfigStrBlasThreshold();
-    Status s = CheckEngineConfigBlasThreshold(str);
+Config::GetEngineConfigUseBlasThreshold(int32_t &value) {
+    std::string str = GetEngineConfigStrUseBlasThreshold();
+    Status s = CheckEngineConfigUseBlasThreshold(str);
     if (!s.ok()) return s;
     value = std::stoi(str);
     return Status::OK();
@@ -1116,34 +1116,34 @@ Config::SetMetricConfigPrometheusPort(const std::string &value) {
 
 /* cache config */
 Status
-Config::SetCacheConfigCpuMemCapacity(const std::string &value) {
-    Status s = CheckCacheConfigCpuMemCapacity(value);
+Config::SetCacheConfigCpuCacheCapacity(const std::string &value) {
+    Status s = CheckCacheConfigCpuCacheCapacity(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CPU_MEM_CAPACITY, value);
+    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CPU_CACHE_CAPACITY, value);
     return Status::OK();
 }
 
 Status
-Config::SetCacheConfigCpuMemThreshold(const std::string &value) {
-    Status s = CheckCacheConfigCpuMemThreshold(value);
+Config::SetCacheConfigCpuCacheThreshold(const std::string &value) {
+    Status s = CheckCacheConfigCpuCacheThreshold(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CPU_MEM_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_CPU_CACHE_THRESHOLD, value);
     return Status::OK();
 }
 
 Status
-Config::SetCacheConfigGpuMemCapacity(const std::string &value) {
-    Status s = CheckCacheConfigGpuMemCapacity(value);
+Config::SetCacheConfigGpuCacheCapacity(const std::string &value) {
+    Status s = CheckCacheConfigGpuCacheCapacity(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_GPU_MEM_CAPACITY, value);
+    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_GPU_CACHE_CAPACITY, value);
     return Status::OK();
 }
 
 Status
-Config::SetCacheConfigGpuMemThreshold(const std::string &value) {
-    Status s = CheckCacheConfigGpuMemThreshold(value);
+Config::SetCacheConfigGpuCacheThreshold(const std::string &value) {
+    Status s = CheckCacheConfigGpuCacheThreshold(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_GPU_MEM_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_DB, CONFIG_CACHE_GPU_CACHE_THRESHOLD, value);
     return Status::OK();
 }
 
@@ -1157,10 +1157,10 @@ Config::SetCacheConfigCacheInsertData(const std::string &value) {
 
 /* engine config */
 Status
-Config::SetEngineConfigBlasThreshold(const std::string &value) {
-    Status s = CheckEngineConfigBlasThreshold(value);
+Config::SetEngineConfigUseBlasThreshold(const std::string &value) {
+    Status s = CheckEngineConfigUseBlasThreshold(value);
     if (!s.ok()) return s;
-    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_BLAS_THRESHOLD, value);
+    SetConfigValueInMem(CONFIG_DB, CONFIG_ENGINE_USE_BLAS_THRESHOLD, value);
     return Status::OK();
 }
 
