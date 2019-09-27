@@ -34,17 +34,16 @@
 #include "task/SearchTask.h"
 #include "task/DeleteTask.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class TaskCreator {
-public:
+ public:
     static std::vector<TaskPtr>
     Create(const JobPtr &job);
 
-public:
+ public:
     static std::vector<TaskPtr>
     Create(const SearchJobPtr &job);
 
@@ -52,6 +51,6 @@ public:
     Create(const DeleteJobPtr &job);
 };
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
