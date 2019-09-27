@@ -21,12 +21,16 @@
 #include <gtest/gtest.h>
 #include <iostream>
 
-using namespace zilliz::milvus;
+namespace {
 
-TEST(MetricbaseTest, METRICBASE_TEST){
-    server::MetricsBase instance = server::MetricsBase::GetInstance();
+namespace ms = zilliz::milvus;
+
+} // namespace
+
+TEST(MetricbaseTest, METRICBASE_TEST) {
+    ms::server::MetricsBase instance = ms::server::MetricsBase::GetInstance();
     instance.Init();
-    server::SystemInfo::GetInstance().Init();
+    ms::server::SystemInfo::GetInstance().Init();
     instance.AddVectorsSuccessTotalIncrement();
     instance.AddVectorsFailTotalIncrement();
     instance.AddVectorsDurationHistogramOberve(1.0);
@@ -60,7 +64,7 @@ TEST(MetricbaseTest, METRICBASE_TEST){
     instance.QueryResponsePerSecondGaugeSet(1.0);
     instance.GPUPercentGaugeSet();
     instance.GPUMemoryUsageGaugeSet();
-    instance.AddVectorsPerSecondGaugeSet(1,1,1);
+    instance.AddVectorsPerSecondGaugeSet(1, 1, 1);
     instance.QueryIndexTypePerSecondSet("IVF", 1.0);
     instance.ConnectionGaugeIncrement();
     instance.ConnectionGaugeDecrement();

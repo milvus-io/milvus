@@ -19,15 +19,18 @@
 #include "scheduler/ResourceFactory.h"
 #include <gtest/gtest.h>
 
+namespace {
 
-using namespace zilliz::milvus::scheduler;
+namespace ms = zilliz::milvus::scheduler;
+
+} // namespace
 
 TEST(ResourceFactoryTest, CREATE) {
-    auto disk = ResourceFactory::Create("ssd", "DISK", 0);
-    auto cpu = ResourceFactory::Create("cpu", "CPU", 0);
-    auto gpu = ResourceFactory::Create("gpu", "GPU", 0);
+    auto disk = ms::ResourceFactory::Create("ssd", "DISK", 0);
+    auto cpu = ms::ResourceFactory::Create("cpu", "CPU", 0);
+    auto gpu = ms::ResourceFactory::Create("gpu", "GPU", 0);
 
-    ASSERT_TRUE(std::dynamic_pointer_cast<DiskResource>(disk));
-    ASSERT_TRUE(std::dynamic_pointer_cast<CpuResource>(cpu));
-    ASSERT_TRUE(std::dynamic_pointer_cast<GpuResource>(gpu));
+    ASSERT_TRUE(std::dynamic_pointer_cast<ms::DiskResource>(disk));
+    ASSERT_TRUE(std::dynamic_pointer_cast<ms::CpuResource>(cpu));
+    ASSERT_TRUE(std::dynamic_pointer_cast<ms::GpuResource>(gpu));
 }
