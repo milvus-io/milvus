@@ -16,12 +16,16 @@
 // under the License.
 
 
-#include "SchedInst.h"
+#include "scheduler/SchedInst.h"
 #include "server/Config.h"
 #include "ResourceFactory.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "Utils.h"
 
+#include <vector>
+#include <set>
+#include <utility>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -165,6 +169,7 @@ StopSchedulerService() {
     SchedInst::GetInstance()->Stop();
     ResMgrInst::GetInstance()->Stop();
 }
-}
-}
-}
+
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

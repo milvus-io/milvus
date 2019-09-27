@@ -16,14 +16,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ResourceMgr.h"
+#include "scheduler/ResourceMgr.h"
 #include "utils/Log.h"
-
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
-
 
 void
 ResourceMgr::Start() {
@@ -186,7 +184,9 @@ void
 ResourceMgr::event_process() {
     while (running_) {
         std::unique_lock<std::mutex> lock(event_mutex_);
-        event_cv_.wait(lock, [this] { return !queue_.empty(); });
+        event_cv_.wait(lock, [this] {
+            return !queue_.empty();
+        });
 
         auto event = queue_.front();
         queue_.pop();
@@ -201,6 +201,6 @@ ResourceMgr::event_process() {
     }
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

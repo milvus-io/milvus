@@ -22,22 +22,20 @@
 #include <mutex>
 #include <thread>
 #include <queue>
+#include <unordered_map>
 
 #include "resource/Resource.h"
 #include "ResourceMgr.h"
 #include "utils/Log.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-
 // TODO: refactor, not friendly to unittest, logical in framework code
 class Scheduler {
-public:
-    explicit
-    Scheduler(ResourceMgrWPtr res_mgr);
+ public:
+    explicit Scheduler(ResourceMgrWPtr res_mgr);
 
     Scheduler(const Scheduler &) = delete;
     Scheduler(Scheduler &&) = delete;
@@ -66,7 +64,7 @@ public:
     std::string
     Dump();
 
-private:
+ private:
     /******** Events ********/
 
     /*
@@ -106,7 +104,7 @@ private:
     void
     OnTaskTableUpdated(const EventPtr &event);
 
-private:
+ private:
     /*
      * Dispatch event to event handler;
      */
@@ -119,7 +117,7 @@ private:
     void
     worker_function();
 
-private:
+ private:
     bool running_;
 
     std::unordered_map<uint64_t, std::function<void(EventPtr)>> event_register_;
@@ -133,7 +131,6 @@ private:
 
 using SchedulerPtr = std::shared_ptr<Scheduler>;
 
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

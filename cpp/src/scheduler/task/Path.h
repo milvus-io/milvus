@@ -20,7 +20,6 @@
 #include <vector>
 #include <string>
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
@@ -29,7 +28,8 @@ class Path {
  public:
     Path() = default;
 
-    Path(std::vector<std::string>& path, uint64_t index) : path_(path), index_(index) {}
+    Path(std::vector<std::string> &path, uint64_t index) : path_(path), index_(index) {
+    }
 
     void
     push_back(const std::string &str) {
@@ -49,7 +49,6 @@ class Path {
         } else {
             return nullptr;
         }
-
     }
 
     std::string
@@ -67,14 +66,19 @@ class Path {
         return path_[index];
     }
 
-    std::vector<std::string>::iterator begin() { return path_.begin(); }
-    std::vector<std::string>::iterator end() { return path_.end(); }
+    std::vector<std::string>::iterator begin() {
+        return path_.begin();
+    }
+
+    std::vector<std::string>::iterator end() {
+        return path_.end();
+    }
 
  public:
     std::vector<std::string> path_;
     uint64_t index_ = 0;
 };
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
