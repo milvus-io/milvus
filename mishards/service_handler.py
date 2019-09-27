@@ -145,7 +145,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
             conn = self.query_conn(addr, metadata=metadata)
             start = time.time()
-            with self.tracer.start_span('search_{}_span'.format(addr),
+            span = kwargs.get('span', None)
+            span = span if span else context.get_active_span().context
+            with self.tracer.start_span('search_{}'.format(addr),
                     child_of=context.get_active_span().context):
                 ret = conn.search_vectors_in_files(table_name=query_params['table_id'],
                         file_ids=query_params['file_ids'],
@@ -158,13 +160,15 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
                 all_topk_results.append(ret)
 
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            for addr, params in routing.items():
-                res = pool.submit(search, addr, params, vectors, topk, nprobe)
-                rs.append(res)
+        with self.tracer.start_span('do_search',
+                    child_of=context.get_active_span().context) as span:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for addr, params in routing.items():
+                    res = pool.submit(search, addr, params, vectors, topk, nprobe, span=span)
+                    rs.append(res)
 
-            for res in rs:
-                res.result()
+                for res in rs:
+                    res.result()
 
         reverse = table_meta.metric_type == types.MetricType.IP
         with self.tracer.start_span('do_merge',
