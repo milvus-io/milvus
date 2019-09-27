@@ -10,6 +10,7 @@ from grpc._cython import cygrpc
 from grpc._channel import _Rendezvous, _UnaryUnaryMultiCallable
 from jaeger_client import Config
 from milvus.grpc_gen.milvus_pb2_grpc import add_MilvusServiceServicer_to_server
+from mishards.grpc_utils import is_grpc_method
 from mishards.service_handler import ServiceHandler
 from mishards import settings, discover
 
@@ -75,7 +76,7 @@ class Server:
         discover.start()
 
     def start(self, port=None):
-        handler_class = self.add_error_handlers(ServiceHandler)
+        handler_class = self.decorate_handler(ServiceHandler)
         add_MilvusServiceServicer_to_server(handler_class(conn_mgr=self.conn_mgr, tracer=self.tracer), self.server_impl)
         self.server_impl.add_insecure_port("[::]:{}".format(str(port or self._port)))
         self.server_impl.start()
@@ -102,9 +103,8 @@ class Server:
         self.tracer.close()
         logger.info('Server is closed')
 
-    def add_error_handlers(self, target):
-        for key, attr in target.__dict__.items():
-            is_grpc_method = getattr(attr, 'grpc_method', False)
-            if is_grpc_method:
-                setattr(target, key, self.wrap_method_with_errorhandler(attr))
-        return target
+    def decorate_handler(self, handler):
+        for key, attr in handler.__dict__.items():
+            if is_grpc_method(attr):
+                setattr(handler, key, self.wrap_method_with_errorhandler(attr))
+        return handler

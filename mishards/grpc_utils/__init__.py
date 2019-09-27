@@ -28,3 +28,8 @@ class GrpcSpanDecorator(SpanDecorator):
 def mark_grpc_method(func):
     setattr(func, 'grpc_method', True)
     return func
+
+def is_grpc_method(func):
+    if not func:
+        return False
+    return getattr(func, 'grpc_method', False)
