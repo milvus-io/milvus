@@ -60,7 +60,7 @@ TEST(EventTest, TASKTABLE_UPDATED_EVENT) {
     std::cout << *EventPtr(event);
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
 

@@ -18,15 +18,42 @@
 
 #pragma once
 
-#include <jsoncons/json.hpp>
-
+#include <memory>
 
 namespace zilliz {
 namespace knowhere {
 
+enum class METRICTYPE {
+    INVALID = 0,
+    L2 = 1,
+    IP = 2,
+};
 
-using Config = jsoncons::json;
+// General Config
+constexpr int64_t INVALID_VALUE = -1;
+constexpr int64_t DEFAULT_K = INVALID_VALUE;
+constexpr int64_t DEFAULT_DIM = INVALID_VALUE;
+constexpr int64_t DEFAULT_GPUID = INVALID_VALUE;
+constexpr METRICTYPE DEFAULT_TYPE = METRICTYPE::INVALID;
 
+struct Cfg {
+    METRICTYPE metric_type = DEFAULT_TYPE;
+    int64_t k = DEFAULT_K;
+    int64_t gpu_id = DEFAULT_GPUID;
+    int64_t d = DEFAULT_DIM;
+
+    Cfg(const int64_t &dim,
+        const int64_t &k,
+        const int64_t &gpu_id,
+        METRICTYPE type)
+        : d(dim), k(k), gpu_id(gpu_id), metric_type(type) {}
+
+    Cfg() = default;
+
+    virtual bool
+    CheckValid(){};
+};
+using Config = std::shared_ptr<Cfg>;
 
 } // namespace knowhere
 } // namespace zilliz

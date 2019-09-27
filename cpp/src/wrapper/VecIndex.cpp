@@ -35,8 +35,6 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-static constexpr float TYPICAL_COUNT = 1000000.0;
-
 struct FileIOReader {
     std::fstream fs;
     std::string name;
@@ -97,7 +95,7 @@ FileIOWriter::operator()(void *ptr, size_t size) {
 VecIndexPtr
 GetVecIndexFactory(const IndexType &type, const Config &cfg) {
     std::shared_ptr<zilliz::knowhere::VectorIndex> index;
-    auto gpu_device = cfg.get_with_default("gpu_id", 0);
+    auto gpu_device = -1; // TODO(linxj): remove hardcode here
     switch (type) {
         case IndexType::FAISS_IDMAP: {
             index = std::make_shared<zilliz::knowhere::IDMAP>();
@@ -108,12 +106,11 @@ GetVecIndexFactory(const IndexType &type, const Config &cfg) {
             break;
         }
         case IndexType::FAISS_IVFFLAT_GPU: {
-            // TODO(linxj): 规范化参数
             index = std::make_shared<zilliz::knowhere::GPUIVF>(gpu_device);
             break;
         }
         case IndexType::FAISS_IVFFLAT_MIX: {
-            index = std::make_shared<zilliz::knowhere::GPUIVF>(0);
+            index = std::make_shared<zilliz::knowhere::GPUIVF>(gpu_device);
             return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFFLAT_MIX);
         }
         case IndexType::FAISS_IVFPQ_CPU: {
@@ -236,69 +233,6 @@ write_index(VecIndexPtr index, const std::string &location) {
         }
     }
     return Status::OK();
-}
-
-// TODO(linxj): redo here.
-void
-AutoGenParams(const IndexType &type, const int64_t &size, zilliz::knowhere::Config &cfg) {
-    auto nlist = cfg.get_with_default("nlist", 0);
-    if (size <= TYPICAL_COUNT / 16384 + 1) {
-        //handle less row count, avoid nlist set to 0
-        cfg["nlist"] = 1;
-    } else if (int(size / TYPICAL_COUNT) *nlist == 0) {
-        //calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
-        cfg["nlist"] = int(size / TYPICAL_COUNT * 16384);
-    }
-
-    if (!cfg.contains("gpu_id")) { cfg["gpu_id"] = int(0); }
-    if (!cfg.contains("metric_type")) { cfg["metric_type"] = "L2"; }
-
-    switch (type) {
-        case IndexType::FAISS_IVFSQ8_MIX: {
-            if (!cfg.contains("nbits")) { cfg["nbits"] = int(8); }
-            break;
-        }
-        case IndexType::NSG_MIX: {
-            auto scale_factor = round(cfg["dim"].as<int>() / 128.0);
-            scale_factor = scale_factor >= 4 ? 4 : scale_factor;
-            cfg["nlist"] = int(size / 1000000.0 * 8192);
-            if (!cfg.contains("nprobe")) { cfg["nprobe"] = 6 + 10 * scale_factor; }
-            if (!cfg.contains("knng")) { cfg["knng"] = 100 + 100 * scale_factor; }
-            if (!cfg.contains("search_length")) { cfg["search_length"] = 40 + 5 * scale_factor; }
-            if (!cfg.contains("out_degree")) { cfg["out_degree"] = 50 + 5 * scale_factor; }
-            if (!cfg.contains("candidate_pool_size")) { cfg["candidate_pool_size"] = 200 + 100 * scale_factor; }
-            WRAPPER_LOG_DEBUG << pretty_print(cfg);
-            break;
-        }
-    }
-}
-
-#if CUDA_VERSION > 9000
-#define GPU_MAX_NRPOBE 2048
-#else
-#define GPU_MAX_NRPOBE 1024
-#endif
-
-void
-ParameterValidation(const IndexType &type, Config &cfg) {
-    switch (type) {
-        case IndexType::FAISS_IVFSQ8_GPU:
-        case IndexType::FAISS_IVFFLAT_GPU:
-        case IndexType::FAISS_IVFPQ_GPU: {
-            //search on GPU
-            if (cfg.get_with_default("nprobe", 0) != 0) {
-                auto nprobe = cfg["nprobe"].as<int>();
-                if (nprobe > GPU_MAX_NRPOBE) {
-                    WRAPPER_LOG_WARNING << "When search with GPU, nprobe shoud be no more than " << GPU_MAX_NRPOBE
-                                        << ", but you passed " << nprobe
-                                        << ". Search with " << GPU_MAX_NRPOBE << " instead";
-                    cfg.insert_or_assign("nprobe", GPU_MAX_NRPOBE);
-                }
-            }
-            break;
-        }
-        default:break;
-    }
 }
 
 IndexType

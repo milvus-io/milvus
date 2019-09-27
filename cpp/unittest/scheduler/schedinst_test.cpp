@@ -25,10 +25,8 @@ namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-
 class SchedInstTest : public testing::Test {
-
-protected:
+ protected:
     void
     SetUp() override {
         boost::filesystem::create_directory(TMP_DIR);
@@ -83,6 +81,8 @@ TEST_F(SchedInstTest, SIMPLE_GPU) {
     StartSchedulerService();
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
+
+

@@ -118,6 +118,8 @@ set(unittest_libs
         cublas
         )
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+message(STATUS "CMAKE_CURRENT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}")
 foreach(dir ${CORE_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach()

@@ -19,17 +19,17 @@
 #include <gtest/gtest.h>
 
 #include <iostream>
-#include <sstream>
 
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/adapter/Structure.h"
-#include "knowhere/index/vector_index/utils/Cloner.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/common/Exception.h"
 
 #include "utils.h"
 
 
 using namespace zilliz::knowhere;
+using namespace zilliz::knowhere::cloner;
 
 static int device_id = 0;
 class IDMAPTest : public DataGen, public ::testing::Test {
@@ -79,15 +79,19 @@ void PrintResult(const DatasetPtr &result,
 
 TEST_F(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(!xb.empty());
-    Config Default_cfg;
 
-    index_->Train(Config::object{{"dim", dim}, {"metric_type", "L2"}});
-    index_->Add(base_dataset, Default_cfg);
+    auto conf = std::make_shared<Cfg>();
+    conf->d = dim;
+    conf->k = k;
+    conf->metric_type = METRICTYPE::L2;
+
+    index_->Train(conf);
+    index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
     ASSERT_TRUE(index_->GetRawVectors() != nullptr);
     ASSERT_TRUE(index_->GetRawIds() != nullptr);
-    auto result = index_->Search(query_dataset, Config::object{{"k", k}});
+    auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
     PrintResult(result, nq, k);
 
@@ -95,7 +99,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<IDMAP>();
     new_index->Load(binaryset);
-    auto re_result = index_->Search(query_dataset, Config::object{{"k", k}});
+    auto re_result = index_->Search(query_dataset, conf);
     AssertAnns(re_result, nq, k);
     PrintResult(re_result, nq, k);
 }
@@ -109,11 +113,16 @@ TEST_F(IDMAPTest, idmap_serialize) {
         reader(ret, bin->size);
     };
 
+    auto conf = std::make_shared<Cfg>();
+    conf->d = dim;
+    conf->k = k;
+    conf->metric_type = METRICTYPE::L2;
+
     {
         // serialize index
-        index_->Train(Config::object{{"dim", dim}, {"metric_type", "L2"}});
+        index_->Train(conf);
         index_->Add(base_dataset, Config());
-        auto re_result = index_->Search(query_dataset, Config::object{{"k", k}});
+        auto re_result = index_->Search(query_dataset, conf);
         AssertAnns(re_result, nq, k);
         PrintResult(re_result, nq, k);
         EXPECT_EQ(index_->Count(), nb);
@@ -133,7 +142,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
-        auto result = index_->Search(query_dataset, Config::object{{"k", k}});
+        auto result = index_->Search(query_dataset, conf);
         AssertAnns(result, nq, k);
         PrintResult(result, nq, k);
     }
@@ -141,29 +150,33 @@ TEST_F(IDMAPTest, idmap_serialize) {
 
 TEST_F(IDMAPTest, copy_test) {
     ASSERT_TRUE(!xb.empty());
-    Config Default_cfg;
 
-    index_->Train(Config::object{{"dim", dim}, {"metric_type", "L2"}});
-    index_->Add(base_dataset, Default_cfg);
+    auto conf = std::make_shared<Cfg>();
+    conf->d = dim;
+    conf->k = k;
+    conf->metric_type = METRICTYPE::L2;
+
+    index_->Train(conf);
+    index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
     ASSERT_TRUE(index_->GetRawVectors() != nullptr);
     ASSERT_TRUE(index_->GetRawIds() != nullptr);
-    auto result = index_->Search(query_dataset, Config::object{{"k", k}});
+    auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
     //PrintResult(result, nq, k);
 
     {
         // clone
         auto clone_index = index_->Clone();
-        auto clone_result = clone_index->Search(query_dataset, Config::object{{"k", k}});
+        auto clone_result = clone_index->Search(query_dataset, conf);
         AssertAnns(clone_result, nq, k);
     }
 
     {
         // cpu to gpu
-        auto clone_index = CopyCpuToGpu(index_, device_id, Config());
-        auto clone_result = clone_index->Search(query_dataset, Config::object{{"k", k}});
+        auto clone_index = CopyCpuToGpu(index_, device_id, conf);
+        auto clone_result = clone_index->Search(query_dataset, conf);
         AssertAnns(clone_result, nq, k);
         ASSERT_THROW({ std::static_pointer_cast<GPUIDMAP>(clone_index)->GetRawVectors(); },
                      zilliz::knowhere::KnowhereException);
@@ -172,24 +185,24 @@ TEST_F(IDMAPTest, copy_test) {
 
         auto binary = clone_index->Serialize();
         clone_index->Load(binary);
-        auto new_result = clone_index->Search(query_dataset, Config::object{{"k", k}});
+        auto new_result = clone_index->Search(query_dataset, conf);
         AssertAnns(new_result, nq, k);
 
         auto clone_gpu_idx = clone_index->Clone();
-        auto clone_gpu_res = clone_gpu_idx->Search(query_dataset, Config::object{{"k", k}});
+        auto clone_gpu_res = clone_gpu_idx->Search(query_dataset, conf);
         AssertAnns(clone_gpu_res, nq, k);
 
         // gpu to cpu
-        auto host_index = CopyGpuToCpu(clone_index, Config());
-        auto host_result = host_index->Search(query_dataset, Config::object{{"k", k}});
+        auto host_index = CopyGpuToCpu(clone_index, conf);
+        auto host_result = host_index->Search(query_dataset, conf);
         AssertAnns(host_result, nq, k);
         ASSERT_TRUE(std::static_pointer_cast<IDMAP>(host_index)->GetRawVectors() != nullptr);
         ASSERT_TRUE(std::static_pointer_cast<IDMAP>(host_index)->GetRawIds() != nullptr);
 
         // gpu to gpu
-        auto device_index = CopyCpuToGpu(index_, device_id, Config());
-        auto new_device_index = std::static_pointer_cast<GPUIDMAP>(device_index)->CopyGpuToGpu(device_id, Config());
-        auto device_result = new_device_index->Search(query_dataset, Config::object{{"k", k}});
+        auto device_index = CopyCpuToGpu(index_, device_id, conf);
+        auto new_device_index = std::static_pointer_cast<GPUIDMAP>(device_index)->CopyGpuToGpu(device_id, conf);
+        auto device_result = new_device_index->Search(query_dataset, conf);
         AssertAnns(device_result, nq, k);
     }
 }
