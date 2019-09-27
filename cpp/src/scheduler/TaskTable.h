@@ -23,6 +23,7 @@
 #include <memory>
 #include <utility>
 #include <string>
+#include <functional>
 
 #include "task/SearchTask.h"
 #include "event/Event.h"
