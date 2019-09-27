@@ -22,15 +22,19 @@
 #include <gtest/gtest.h>
 #include <iostream>
 
-using namespace zilliz::milvus;
+namespace {
 
-TEST(PrometheusTest, PROMETHEUS_TEST){
-    server::Config::GetInstance().SetMetricConfigEnableMonitor("on");
+namespace ms = zilliz::milvus;
 
-    server::PrometheusMetrics instance = server::PrometheusMetrics::GetInstance();
+} // namespace
+
+TEST(PrometheusTest, PROMETHEUS_TEST) {
+    ms::server::Config::GetInstance().SetMetricConfigEnableMonitor("on");
+
+    ms::server::PrometheusMetrics instance = ms::server::PrometheusMetrics::GetInstance();
     instance.Init();
     instance.SetStartup(true);
-    server::SystemInfo::GetInstance().Init();
+    ms::server::SystemInfo::GetInstance().Init();
     instance.AddVectorsSuccessTotalIncrement();
     instance.AddVectorsFailTotalIncrement();
     instance.AddVectorsDurationHistogramOberve(1.0);
@@ -64,7 +68,7 @@ TEST(PrometheusTest, PROMETHEUS_TEST){
     instance.QueryResponsePerSecondGaugeSet(1.0);
     instance.GPUPercentGaugeSet();
     instance.GPUMemoryUsageGaugeSet();
-    instance.AddVectorsPerSecondGaugeSet(1,1,1);
+    instance.AddVectorsPerSecondGaugeSet(1, 1, 1);
     instance.QueryIndexTypePerSecondSet("IVF", 1.0);
     instance.QueryIndexTypePerSecondSet("IDMap", 1.0);
     instance.ConnectionGaugeIncrement();
@@ -76,10 +80,9 @@ TEST(PrometheusTest, PROMETHEUS_TEST){
     instance.GPUTemperature();
     instance.CPUTemperature();
 
-    server::Config::GetInstance().SetMetricConfigEnableMonitor("off");
+    ms::server::Config::GetInstance().SetMetricConfigEnableMonitor("off");
     instance.Init();
     instance.CPUCoreUsagePercentSet();
     instance.GPUTemperature();
     instance.CPUTemperature();
-
 }
