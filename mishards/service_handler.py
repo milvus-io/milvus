@@ -426,9 +426,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         if not _status.OK():
             return milvus_pb2.IndexParam(
-                table_name=milvus_pb2.TableName(
                     status=status_pb2.Status(error_code=_status.code, reason=_status.message)
-                )
             )
 
         metadata = {
@@ -439,11 +437,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _status, _index_param = self.connection(metadata=metadata).describe_index(_table_name)
 
         _index = milvus_pb2.Index(index_type=_index_param._index_type, nlist=_index_param._nlist)
-        _tablename = milvus_pb2.TableName(
-            status=status_pb2.Status(error_code=_status.code, reason=_status.message),
-            table_name=_table_name)
 
-        return milvus_pb2.IndexParam(table_name=_tablename, index=_index)
+        return milvus_pb2.IndexParam(status=status_pb2.Status(error_code=_status.code, reason=_status.message),
+                table_name=_table_name, index=_index)
 
     @mark_grpc_method
     def DropIndex(self, request, context):
