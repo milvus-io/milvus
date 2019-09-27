@@ -145,6 +145,10 @@ NSGConfAdapter::Match(const TempMetaConf &metaconf) {
     conf->out_degree = 50 + 5 * scale_factor;
     conf->candidate_pool_size = 200 + 100 * scale_factor;
     MatchBase(conf);
+
+//    WRAPPER_LOG_DEBUG << "nlist: " << conf->nlist
+//    << ", gpu_id: " << conf->gpu_id << ", d: " << conf->d
+//    << ", nprobe: " << conf->nprobe << ", knng: " << conf->knng;
     return conf;
 }
 
