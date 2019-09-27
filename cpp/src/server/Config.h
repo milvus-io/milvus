@@ -99,6 +99,7 @@ class Config {
     static Config &GetInstance();
     Status LoadConfigFile(const std::string &filename);
     Status ValidateConfig();
+    Status ResetDefaultConfig();
     void PrintAll();
 
  private:
