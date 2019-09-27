@@ -60,14 +60,14 @@ static const char *CONFIG_DB_BUILD_INDEX_GPU_DEFAULT = "0";
 
 /* cache config */
 static const char *CONFIG_CACHE = "cache_config";
-static const char *CONFIG_CACHE_CPU_MEM_CAPACITY = "cpu_mem_capacity";
-static const char *CONFIG_CACHE_CPU_MEM_CAPACITY_DEFAULT = "16";
-static const char *CONFIG_CACHE_GPU_MEM_CAPACITY = "gpu_mem_capacity";
-static const char *CONFIG_CACHE_GPU_MEM_CAPACITY_DEFAULT = "0";
-static const char *CONFIG_CACHE_CPU_MEM_THRESHOLD = "cpu_mem_threshold";
-static const char *CONFIG_CACHE_CPU_MEM_THRESHOLD_DEFAULT = "0.85";
-static const char *CONFIG_CACHE_GPU_MEM_THRESHOLD = "gpu_mem_threshold";
-static const char *CONFIG_CACHE_GPU_MEM_THRESHOLD_DEFAULT = "0.85";
+static const char *CONFIG_CACHE_CPU_CACHE_CAPACITY = "cpu_cache_capacity";
+static const char *CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT = "16";
+static const char *CONFIG_CACHE_GPU_CACHE_CAPACITY = "gpu_cache_capacity";
+static const char *CONFIG_CACHE_GPU_CACHE_CAPACITY_DEFAULT = "0";
+static const char *CONFIG_CACHE_CPU_CACHE_THRESHOLD = "cpu_mem_threshold";
+static const char *CONFIG_CACHE_CPU_CACHE_THRESHOLD_DEFAULT = "0.85";
+static const char *CONFIG_CACHE_GPU_CACHE_THRESHOLD = "gpu_mem_threshold";
+static const char *CONFIG_CACHE_GPU_CACHE_THRESHOLD_DEFAULT = "0.85";
 static const char *CONFIG_CACHE_CACHE_INSERT_DATA = "cache_insert_data";
 static const char *CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT = "false";
 
@@ -83,8 +83,8 @@ static const char *CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT = "8080";
 
 /* engine config */
 static const char *CONFIG_ENGINE = "engine_config";
-static const char *CONFIG_ENGINE_BLAS_THRESHOLD = "blas_threshold";
-static const char *CONFIG_ENGINE_BLAS_THRESHOLD_DEFAULT = "20";
+static const char *CONFIG_ENGINE_USE_BLAS_THRESHOLD = "use_blas_threshold";
+static const char *CONFIG_ENGINE_USE_BLAS_THRESHOLD_DEFAULT = "20";
 static const char *CONFIG_ENGINE_OMP_THREAD_NUM = "omp_thread_num";
 static const char *CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT = "0";
 
@@ -137,14 +137,14 @@ class Config {
     Status CheckMetricConfigPrometheusPort(const std::string &value);
 
     /* cache config */
-    Status CheckCacheConfigCpuMemCapacity(const std::string &value);
-    Status CheckCacheConfigCpuMemThreshold(const std::string &value);
-    Status CheckCacheConfigGpuMemCapacity(const std::string &value);
-    Status CheckCacheConfigGpuMemThreshold(const std::string &value);
+    Status CheckCacheConfigCpuCacheCapacity(const std::string &value);
+    Status CheckCacheConfigCpuCacheThreshold(const std::string &value);
+    Status CheckCacheConfigGpuCacheCapacity(const std::string &value);
+    Status CheckCacheConfigGpuCacheThreshold(const std::string &value);
     Status CheckCacheConfigCacheInsertData(const std::string &value);
 
     /* engine config */
-    Status CheckEngineConfigBlasThreshold(const std::string &value);
+    Status CheckEngineConfigUseBlasThreshold(const std::string &value);
     Status CheckEngineConfigOmpThreadNum(const std::string &value);
 
     /* resource config */
@@ -173,14 +173,14 @@ class Config {
     std::string GetMetricConfigStrPrometheusPort();
 
     /* cache config */
-    std::string GetCacheConfigStrCpuMemCapacity();
-    std::string GetCacheConfigStrCpuMemThreshold();
-    std::string GetCacheConfigStrGpuMemCapacity();
-    std::string GetCacheConfigStrGpuMemThreshold();
+    std::string GetCacheConfigStrCpuCacheCapacity();
+    std::string GetCacheConfigStrCpuCacheThreshold();
+    std::string GetCacheConfigStrGpuCacheCapacity();
+    std::string GetCacheConfigStrGpuCacheThreshold();
     std::string GetCacheConfigStrCacheInsertData();
 
     /* engine config */
-    std::string GetEngineConfigStrBlasThreshold();
+    std::string GetEngineConfigStrUseBlasThreshold();
     std::string GetEngineConfigStrOmpThreadNum();
 
     /* resource config */
@@ -208,14 +208,14 @@ class Config {
     Status GetMetricConfigPrometheusPort(std::string &value);
 
     /* cache config */
-    Status GetCacheConfigCpuMemCapacity(int32_t &value);
-    Status GetCacheConfigCpuMemThreshold(float &value);
-    Status GetCacheConfigGpuMemCapacity(int32_t &value);
-    Status GetCacheConfigGpuMemThreshold(float &value);
+    Status GetCacheConfigCpuCacheCapacity(int32_t &value);
+    Status GetCacheConfigCpuCacheThreshold(float &value);
+    Status GetCacheConfigGpuCacheCapacity(int32_t &value);
+    Status GetCacheConfigGpuCacheThreshold(float &value);
     Status GetCacheConfigCacheInsertData(bool &value);
 
     /* engine config */
-    Status GetEngineConfigBlasThreshold(int32_t &value);
+    Status GetEngineConfigUseBlasThreshold(int32_t &value);
     Status GetEngineConfigOmpThreadNum(int32_t &value);
 
     /* resource config */
@@ -244,14 +244,14 @@ class Config {
     Status SetMetricConfigPrometheusPort(const std::string &value);
 
     /* cache config */
-    Status SetCacheConfigCpuMemCapacity(const std::string &value);
-    Status SetCacheConfigCpuMemThreshold(const std::string &value);
-    Status SetCacheConfigGpuMemCapacity(const std::string &value);
-    Status SetCacheConfigGpuMemThreshold(const std::string &value);
+    Status SetCacheConfigCpuCacheCapacity(const std::string &value);
+    Status SetCacheConfigCpuCacheThreshold(const std::string &value);
+    Status SetCacheConfigGpuCacheCapacity(const std::string &value);
+    Status SetCacheConfigGpuCacheThreshold(const std::string &value);
     Status SetCacheConfigCacheInsertData(const std::string &value);
 
     /* engine config */
-    Status SetEngineConfigBlasThreshold(const std::string &value);
+    Status SetEngineConfigUseBlasThreshold(const std::string &value);
     Status SetEngineConfigOmpThreadNum(const std::string &value);
 
     /* resource config */
