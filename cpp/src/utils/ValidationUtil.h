@@ -21,15 +21,17 @@
 #include "db/meta/MetaTypes.h"
 #include "utils/Status.h"
 
+#include <string>
+
 namespace zilliz {
 namespace milvus {
 namespace server {
 
 class ValidationUtil {
-private:
+ private:
     ValidationUtil() = default;
 
-public:
+ public:
     static Status
     ValidateTableName(const std::string &table_name);
 
@@ -49,10 +51,10 @@ public:
     ValidateTableIndexMetricType(int32_t metric_type);
 
     static Status
-    ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema);
+    ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema &table_schema);
 
     static Status
-    ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema);
+    ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema &table_schema);
 
     static Status
     ValidateGpuIndex(uint32_t gpu_index);
@@ -76,6 +78,6 @@ public:
     ValidateDbURI(const std::string &uri);
 };
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

@@ -27,12 +27,12 @@ namespace milvus {
 namespace server {
 
 class DBWrapper {
-private:
+ private:
     DBWrapper();
     ~DBWrapper() = default;
 
-public:
-    static DBWrapper& GetInstance() {
+ public:
+    static DBWrapper &GetInstance() {
         static DBWrapper wrapper;
         return wrapper;
     }
@@ -48,10 +48,10 @@ public:
         return db_;
     }
 
-private:
+ private:
     engine::DBPtr db_;
 };
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

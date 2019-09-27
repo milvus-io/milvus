@@ -20,10 +20,10 @@
 #include <vector>
 #include <memory>
 #include <map>
+#include <string>
 
-#include "../TaskTable.h"
+#include "scheduler/TaskTable.h"
 #include "Connection.h"
-
 
 namespace zilliz {
 namespace milvus {
@@ -34,8 +34,9 @@ class Node;
 using NeighbourNodePtr = std::weak_ptr<Node>;
 
 struct Neighbour {
-    Neighbour(NeighbourNodePtr nei, Connection conn) 
-    : neighbour_node(nei), connection(conn) {}
+    Neighbour(NeighbourNodePtr nei, Connection conn)
+        : neighbour_node(nei), connection(conn) {
+    }
 
     NeighbourNodePtr neighbour_node;
     Connection connection;
@@ -43,7 +44,7 @@ struct Neighbour {
 
 // TODO(linxj): return type void -> Status
 class Node {
-public:
+ public:
     Node();
 
     void
@@ -52,11 +53,11 @@ public:
     std::vector<Neighbour>
     GetNeighbours();
 
-public:
+ public:
     std::string
     Dump();
 
-private:
+ private:
     std::mutex mutex_;
     uint8_t id_;
     std::map<uint8_t, Neighbour> neighbours_;
@@ -65,6 +66,6 @@ private:
 using NodePtr = std::shared_ptr<Node>;
 using NodeWPtr = std::weak_ptr<Node>;
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

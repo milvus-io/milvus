@@ -15,19 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "JobMgr.h"
+#include "scheduler/JobMgr.h"
 #include "task/Task.h"
 #include "TaskCreator.h"
 
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-using namespace engine;
-
 JobMgr::JobMgr(ResourceMgrPtr res_mgr)
-    : res_mgr_(std::move(res_mgr)) {}
+    : res_mgr_(std::move(res_mgr)) {
+}
 
 void
 JobMgr::Start() {
@@ -59,7 +59,9 @@ void
 JobMgr::worker_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [this] { return !queue_.empty(); });
+        cv_.wait(lock, [this] {
+            return !queue_.empty();
+        });
         auto job = queue_.front();
         queue_.pop();
         lock.unlock();
@@ -84,6 +86,6 @@ JobMgr::build_task(const JobPtr &job) {
     return TaskCreator::Create(job);
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

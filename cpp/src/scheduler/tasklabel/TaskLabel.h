@@ -30,23 +30,22 @@ enum class TaskLabelType {
 };
 
 class TaskLabel {
-public:
+ public:
     inline TaskLabelType
     Type() const {
         return type_;
     }
 
-protected:
-    explicit
-    TaskLabel(TaskLabelType type) : type_(type) {}
+ protected:
+    explicit TaskLabel(TaskLabelType type) : type_(type) {
+    }
 
-private:
+ private:
     TaskLabelType type_;
 };
 
 using TaskLabelPtr = std::shared_ptr<TaskLabel>;
 
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

@@ -21,6 +21,7 @@
 #include "scheduler/job/SearchJob.h"
 #include "scheduler/Definition.h"
 
+#include <vector>
 
 namespace zilliz {
 namespace milvus {
@@ -28,9 +29,8 @@ namespace scheduler {
 
 // TODO: rewrite
 class XSearchTask : public Task {
-public:
-    explicit
-    XSearchTask(TableFileSchemaPtr file);
+ public:
+    explicit XSearchTask(TableFileSchemaPtr file);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -38,8 +38,8 @@ public:
     void
     Execute() override;
 
-public:
-    static Status ClusterResult(const std::vector<long> &output_ids,
+ public:
+    static Status ClusterResult(const std::vector<int64_t> &output_ids,
                                 const std::vector<float> &output_distence,
                                 uint64_t nq,
                                 uint64_t topk,
@@ -55,7 +55,7 @@ public:
                              bool ascending,
                              scheduler::ResultSet &result_target);
 
-public:
+ public:
     TableFileSchemaPtr file_;
 
     size_t index_id_ = 0;
@@ -66,6 +66,6 @@ public:
     static std::mutex merge_mutex_;
 };
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

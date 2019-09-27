@@ -15,13 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "src/cache/GpuCacheMgr.h"
+#include "scheduler/Scheduler.h"
+#include "cache/GpuCacheMgr.h"
 #include "event/LoadCompletedEvent.h"
-#include "Scheduler.h"
 #include "action/Action.h"
 #include "Algorithm.h"
 
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
@@ -42,7 +42,6 @@ Scheduler::Scheduler(ResourceMgrWPtr res_mgr)
     event_register_.insert(std::make_pair(static_cast<uint64_t>(EventType::FINISH_TASK),
                                           std::bind(&Scheduler::OnFinishTask, this, std::placeholders::_1)));
 }
-
 
 void
 Scheduler::Start() {
@@ -79,7 +78,9 @@ void
 Scheduler::worker_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(event_mutex_);
-        event_cv_.wait(lock, [this] { return !event_queue_.empty(); });
+        event_cv_.wait(lock, [this] {
+            return !event_queue_.empty();
+        });
         auto event = event_queue_.front();
         event_queue_.pop();
         if (event == nullptr) {
@@ -142,6 +143,6 @@ Scheduler::OnTaskTableUpdated(const EventPtr &event) {
     }
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

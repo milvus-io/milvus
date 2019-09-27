@@ -26,15 +26,14 @@
 #include <mutex>
 #include <condition_variable>
 #include <memory>
+#include <utility>
 
 #include "Job.h"
 #include "db/meta/MetaTypes.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
-
 
 using engine::meta::TableFileSchemaPtr;
 
@@ -43,10 +42,10 @@ using Id2DistanceMap = std::vector<std::pair<int64_t, double>>;
 using ResultSet = std::vector<Id2DistanceMap>;
 
 class SearchJob : public Job {
-public:
+ public:
     SearchJob(JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe, const float *vectors);
 
-public:
+ public:
     bool
     AddIndexFile(const TableFileSchemaPtr &index_file);
 
@@ -62,7 +61,7 @@ public:
     Status &
     GetStatus();
 
-public:
+ public:
     uint64_t
     topk() const {
         return topk_;
@@ -77,6 +76,7 @@ public:
     nprobe() const {
         return nprobe_;
     }
+
     const float *
     vectors() const {
         return vectors_;
@@ -87,7 +87,7 @@ public:
         return index_files_;
     }
 
-private:
+ private:
     uint64_t topk_ = 0;
     uint64_t nq_ = 0;
     uint64_t nprobe_ = 0;
@@ -105,7 +105,6 @@ private:
 
 using SearchJobPtr = std::shared_ptr<SearchJob>;
 
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

@@ -25,7 +25,7 @@
 using namespace zilliz::milvus;
 
 TEST(PrometheusTest, PROMETHEUS_TEST){
-    server::Config::GetInstance().SetMetricConfigAutoBootup("on");
+    server::Config::GetInstance().SetMetricConfigEnableMonitor("on");
 
     server::PrometheusMetrics instance = server::PrometheusMetrics::GetInstance();
     instance.Init();
@@ -76,7 +76,7 @@ TEST(PrometheusTest, PROMETHEUS_TEST){
     instance.GPUTemperature();
     instance.CPUTemperature();
 
-    server::Config::GetInstance().SetMetricConfigAutoBootup("off");
+    server::Config::GetInstance().SetMetricConfigEnableMonitor("off");
     instance.Init();
     instance.CPUCoreUsagePercentSet();
     instance.GPUTemperature();
