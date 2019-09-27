@@ -20,51 +20,53 @@
 #include "scheduler/task/TestTask.h"
 #include <gtest/gtest.h>
 
+namespace {
 
-using namespace zilliz::milvus::scheduler;
+namespace ms = zilliz::milvus::scheduler;
 
+} // namespace
 
 /************ TaskTableBaseTest ************/
 
 class TaskTableItemTest : public ::testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
-        std::vector<TaskTableItemState> states{
-            TaskTableItemState::INVALID,
-            TaskTableItemState::START,
-            TaskTableItemState::LOADING,
-            TaskTableItemState::LOADED,
-            TaskTableItemState::EXECUTING,
-            TaskTableItemState::EXECUTED,
-            TaskTableItemState::MOVING,
-            TaskTableItemState::MOVED};
+        std::vector<ms::TaskTableItemState> states{
+            ms::TaskTableItemState::INVALID,
+            ms::TaskTableItemState::START,
+            ms::TaskTableItemState::LOADING,
+            ms::TaskTableItemState::LOADED,
+            ms::TaskTableItemState::EXECUTING,
+            ms::TaskTableItemState::EXECUTED,
+            ms::TaskTableItemState::MOVING,
+            ms::TaskTableItemState::MOVED};
         for (auto &state : states) {
-            auto item = std::make_shared<TaskTableItem>();
+            auto item = std::make_shared<ms::TaskTableItem>();
             item->state = state;
             items_.emplace_back(item);
         }
     }
 
-    TaskTableItem default_;
-    std::vector<TaskTableItemPtr> items_;
+    ms::TaskTableItem default_;
+    std::vector<ms::TaskTableItemPtr> items_;
 };
 
 TEST_F(TaskTableItemTest, CONSTRUCT) {
     ASSERT_EQ(default_.id, 0);
     ASSERT_EQ(default_.task, nullptr);
-    ASSERT_EQ(default_.state, TaskTableItemState::INVALID);
+    ASSERT_EQ(default_.state, ms::TaskTableItemState::INVALID);
 }
 
 TEST_F(TaskTableItemTest, DESTRUCT) {
-    auto p_item = new TaskTableItem();
+    auto p_item = new ms::TaskTableItem();
     delete p_item;
 }
 
 TEST_F(TaskTableItemTest, IS_FINISH) {
     for (auto &item : items_) {
-        if (item->state == TaskTableItemState::EXECUTED
-            || item->state == TaskTableItemState::MOVED) {
+        if (item->state == ms::TaskTableItemState::EXECUTED
+            || item->state == ms::TaskTableItemState::MOVED) {
             ASSERT_TRUE(item->IsFinish());
         } else {
             ASSERT_FALSE(item->IsFinish());
@@ -82,9 +84,9 @@ TEST_F(TaskTableItemTest, LOAD) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Load();
-        if (before_state == TaskTableItemState::START) {
+        if (before_state == ms::TaskTableItemState::START) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, TaskTableItemState::LOADING);
+            ASSERT_EQ(item->state, ms::TaskTableItemState::LOADING);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -96,9 +98,9 @@ TEST_F(TaskTableItemTest, LOADED) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Loaded();
-        if (before_state == TaskTableItemState::LOADING) {
+        if (before_state == ms::TaskTableItemState::LOADING) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, TaskTableItemState::LOADED);
+            ASSERT_EQ(item->state, ms::TaskTableItemState::LOADED);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -110,9 +112,9 @@ TEST_F(TaskTableItemTest, EXECUTE) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Execute();
-        if (before_state == TaskTableItemState::LOADED) {
+        if (before_state == ms::TaskTableItemState::LOADED) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, TaskTableItemState::EXECUTING);
+            ASSERT_EQ(item->state, ms::TaskTableItemState::EXECUTING);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -120,14 +122,13 @@ TEST_F(TaskTableItemTest, EXECUTE) {
     }
 }
 
-
 TEST_F(TaskTableItemTest, EXECUTED) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Executed();
-        if (before_state == TaskTableItemState::EXECUTING) {
+        if (before_state == ms::TaskTableItemState::EXECUTING) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, TaskTableItemState::EXECUTED);
+            ASSERT_EQ(item->state, ms::TaskTableItemState::EXECUTED);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -139,9 +140,9 @@ TEST_F(TaskTableItemTest, MOVE) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Move();
-        if (before_state == TaskTableItemState::LOADED) {
+        if (before_state == ms::TaskTableItemState::LOADED) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, TaskTableItemState::MOVING);
+            ASSERT_EQ(item->state, ms::TaskTableItemState::MOVING);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -153,9 +154,9 @@ TEST_F(TaskTableItemTest, MOVED) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Moved();
-        if (before_state == TaskTableItemState::MOVING) {
+        if (before_state == ms::TaskTableItemState::MOVING) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, TaskTableItemState::MOVED);
+            ASSERT_EQ(item->state, ms::TaskTableItemState::MOVED);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -166,19 +167,19 @@ TEST_F(TaskTableItemTest, MOVED) {
 /************ TaskTableBaseTest ************/
 
 class TaskTableBaseTest : public ::testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
-        TableFileSchemaPtr dummy = nullptr;
+        ms::TableFileSchemaPtr dummy = nullptr;
         invalid_task_ = nullptr;
-        task1_ = std::make_shared<TestTask>(dummy);
-        task2_ = std::make_shared<TestTask>(dummy);
+        task1_ = std::make_shared<ms::TestTask>(dummy);
+        task2_ = std::make_shared<ms::TestTask>(dummy);
     }
 
-    TaskPtr invalid_task_;
-    TaskPtr task1_;
-    TaskPtr task2_;
-    TaskTable empty_table_;
+    ms::TaskPtr invalid_task_;
+    ms::TaskPtr task1_;
+    ms::TaskPtr task2_;
+    ms::TaskTable empty_table_;
 };
 
 TEST_F(TaskTableBaseTest, SUBSCRIBER) {
@@ -191,7 +192,6 @@ TEST_F(TaskTableBaseTest, SUBSCRIBER) {
     ASSERT_TRUE(flag);
 }
 
-
 TEST_F(TaskTableBaseTest, PUT_TASK) {
     empty_table_.Put(task1_);
     ASSERT_EQ(empty_table_.Get(0)->task, task1_);
@@ -203,14 +203,14 @@ TEST_F(TaskTableBaseTest, PUT_INVALID_TEST) {
 }
 
 TEST_F(TaskTableBaseTest, PUT_BATCH) {
-    std::vector<TaskPtr> tasks{task1_, task2_};
+    std::vector<ms::TaskPtr> tasks{task1_, task2_};
     empty_table_.Put(tasks);
     ASSERT_EQ(empty_table_.Get(0)->task, task1_);
     ASSERT_EQ(empty_table_.Get(1)->task, task2_);
 }
 
 TEST_F(TaskTableBaseTest, PUT_EMPTY_BATCH) {
-    std::vector<TaskPtr> tasks{};
+    std::vector<ms::TaskPtr> tasks{};
     empty_table_.Put(tasks);
 }
 
@@ -236,8 +236,8 @@ TEST_F(TaskTableBaseTest, PICK_TO_LOAD) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = TaskTableItemState::MOVED;
-    empty_table_[1]->state = TaskTableItemState::EXECUTED;
+    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
+    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
 
     auto indexes = empty_table_.PickToLoad(1);
     ASSERT_EQ(indexes.size(), 1);
@@ -249,8 +249,8 @@ TEST_F(TaskTableBaseTest, PICK_TO_LOAD_LIMIT) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = TaskTableItemState::MOVED;
-    empty_table_[1]->state = TaskTableItemState::EXECUTED;
+    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
+    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
 
     auto indexes = empty_table_.PickToLoad(3);
     ASSERT_EQ(indexes.size(), 3);
@@ -264,8 +264,8 @@ TEST_F(TaskTableBaseTest, PICK_TO_LOAD_CACHE) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = TaskTableItemState::MOVED;
-    empty_table_[1]->state = TaskTableItemState::EXECUTED;
+    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
+    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
 
     // first pick, non-cache
     auto indexes = empty_table_.PickToLoad(1);
@@ -274,7 +274,7 @@ TEST_F(TaskTableBaseTest, PICK_TO_LOAD_CACHE) {
 
     // second pick, iterate from 2
     // invalid state change
-    empty_table_[1]->state = TaskTableItemState::START;
+    empty_table_[1]->state = ms::TaskTableItemState::START;
     indexes = empty_table_.PickToLoad(1);
     ASSERT_EQ(indexes.size(), 1);
     ASSERT_EQ(indexes[0], 2);
@@ -285,9 +285,9 @@ TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = TaskTableItemState::MOVED;
-    empty_table_[1]->state = TaskTableItemState::EXECUTED;
-    empty_table_[2]->state = TaskTableItemState::LOADED;
+    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
+    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
+    empty_table_[2]->state = ms::TaskTableItemState::LOADED;
 
     auto indexes = empty_table_.PickToExecute(1);
     ASSERT_EQ(indexes.size(), 1);
@@ -299,10 +299,10 @@ TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE_LIMIT) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = TaskTableItemState::MOVED;
-    empty_table_[1]->state = TaskTableItemState::EXECUTED;
-    empty_table_[2]->state = TaskTableItemState::LOADED;
-    empty_table_[3]->state = TaskTableItemState::LOADED;
+    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
+    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
+    empty_table_[2]->state = ms::TaskTableItemState::LOADED;
+    empty_table_[3]->state = ms::TaskTableItemState::LOADED;
 
     auto indexes = empty_table_.PickToExecute(3);
     ASSERT_EQ(indexes.size(), 2);
@@ -315,9 +315,9 @@ TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE_CACHE) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = TaskTableItemState::MOVED;
-    empty_table_[1]->state = TaskTableItemState::EXECUTED;
-    empty_table_[2]->state = TaskTableItemState::LOADED;
+    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
+    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
+    empty_table_[2]->state = ms::TaskTableItemState::LOADED;
 
     // first pick, non-cache
     auto indexes = empty_table_.PickToExecute(1);
@@ -326,40 +326,39 @@ TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE_CACHE) {
 
     // second pick, iterate from 2
     // invalid state change
-    empty_table_[1]->state = TaskTableItemState::START;
+    empty_table_[1]->state = ms::TaskTableItemState::START;
     indexes = empty_table_.PickToExecute(1);
     ASSERT_EQ(indexes.size(), 1);
     ASSERT_EQ(indexes[0], 2);
 }
 
-
 /************ TaskTableAdvanceTest ************/
 
 class TaskTableAdvanceTest : public ::testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
-        TableFileSchemaPtr dummy = nullptr;
+        ms::TableFileSchemaPtr dummy = nullptr;
         for (uint64_t i = 0; i < 8; ++i) {
-            auto task = std::make_shared<TestTask>(dummy);
+            auto task = std::make_shared<ms::TestTask>(dummy);
             table1_.Put(task);
         }
 
-        table1_.Get(0)->state = TaskTableItemState::INVALID;
-        table1_.Get(1)->state = TaskTableItemState::START;
-        table1_.Get(2)->state = TaskTableItemState::LOADING;
-        table1_.Get(3)->state = TaskTableItemState::LOADED;
-        table1_.Get(4)->state = TaskTableItemState::EXECUTING;
-        table1_.Get(5)->state = TaskTableItemState::EXECUTED;
-        table1_.Get(6)->state = TaskTableItemState::MOVING;
-        table1_.Get(7)->state = TaskTableItemState::MOVED;
+        table1_.Get(0)->state = ms::TaskTableItemState::INVALID;
+        table1_.Get(1)->state = ms::TaskTableItemState::START;
+        table1_.Get(2)->state = ms::TaskTableItemState::LOADING;
+        table1_.Get(3)->state = ms::TaskTableItemState::LOADED;
+        table1_.Get(4)->state = ms::TaskTableItemState::EXECUTING;
+        table1_.Get(5)->state = ms::TaskTableItemState::EXECUTED;
+        table1_.Get(6)->state = ms::TaskTableItemState::MOVING;
+        table1_.Get(7)->state = ms::TaskTableItemState::MOVED;
     }
 
-    TaskTable table1_;
+    ms::TaskTable table1_;
 };
 
 TEST_F(TaskTableAdvanceTest, LOAD) {
-    std::vector<TaskTableItemState> before_state;
+    std::vector<ms::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -369,8 +368,8 @@ TEST_F(TaskTableAdvanceTest, LOAD) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == TaskTableItemState::START) {
-            ASSERT_EQ(table1_.Get(i)->state, TaskTableItemState::LOADING);
+        if (before_state[i] == ms::TaskTableItemState::START) {
+            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::LOADING);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
@@ -378,7 +377,7 @@ TEST_F(TaskTableAdvanceTest, LOAD) {
 }
 
 TEST_F(TaskTableAdvanceTest, LOADED) {
-    std::vector<TaskTableItemState> before_state;
+    std::vector<ms::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -388,8 +387,8 @@ TEST_F(TaskTableAdvanceTest, LOADED) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == TaskTableItemState::LOADING) {
-            ASSERT_EQ(table1_.Get(i)->state, TaskTableItemState::LOADED);
+        if (before_state[i] == ms::TaskTableItemState::LOADING) {
+            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::LOADED);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
@@ -397,7 +396,7 @@ TEST_F(TaskTableAdvanceTest, LOADED) {
 }
 
 TEST_F(TaskTableAdvanceTest, EXECUTE) {
-    std::vector<TaskTableItemState> before_state;
+    std::vector<ms::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -407,8 +406,8 @@ TEST_F(TaskTableAdvanceTest, EXECUTE) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == TaskTableItemState::LOADED) {
-            ASSERT_EQ(table1_.Get(i)->state, TaskTableItemState::EXECUTING);
+        if (before_state[i] == ms::TaskTableItemState::LOADED) {
+            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::EXECUTING);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
@@ -416,7 +415,7 @@ TEST_F(TaskTableAdvanceTest, EXECUTE) {
 }
 
 TEST_F(TaskTableAdvanceTest, EXECUTED) {
-    std::vector<TaskTableItemState> before_state;
+    std::vector<ms::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -426,8 +425,8 @@ TEST_F(TaskTableAdvanceTest, EXECUTED) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == TaskTableItemState::EXECUTING) {
-            ASSERT_EQ(table1_.Get(i)->state, TaskTableItemState::EXECUTED);
+        if (before_state[i] == ms::TaskTableItemState::EXECUTING) {
+            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::EXECUTED);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
@@ -435,7 +434,7 @@ TEST_F(TaskTableAdvanceTest, EXECUTED) {
 }
 
 TEST_F(TaskTableAdvanceTest, MOVE) {
-    std::vector<TaskTableItemState> before_state;
+    std::vector<ms::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -445,8 +444,8 @@ TEST_F(TaskTableAdvanceTest, MOVE) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == TaskTableItemState::LOADED) {
-            ASSERT_EQ(table1_.Get(i)->state, TaskTableItemState::MOVING);
+        if (before_state[i] == ms::TaskTableItemState::LOADED) {
+            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::MOVING);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
@@ -454,7 +453,7 @@ TEST_F(TaskTableAdvanceTest, MOVE) {
 }
 
 TEST_F(TaskTableAdvanceTest, MOVED) {
-    std::vector<TaskTableItemState> before_state;
+    std::vector<ms::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -464,8 +463,8 @@ TEST_F(TaskTableAdvanceTest, MOVED) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == TaskTableItemState::MOVING) {
-            ASSERT_EQ(table1_.Get(i)->state, TaskTableItemState::MOVED);
+        if (before_state[i] == ms::TaskTableItemState::MOVING) {
+            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::MOVED);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }

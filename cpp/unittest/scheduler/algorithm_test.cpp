@@ -101,11 +101,8 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
         std::cout << sp[sp.size() - 1] << std::endl;
         sp.pop_back();
     }
-
-
 }
 
-
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
