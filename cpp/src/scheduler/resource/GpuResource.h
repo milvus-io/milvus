@@ -17,16 +17,17 @@
 
 #pragma once
 
-
 #include "Resource.h"
 
+#include <string>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class GpuResource : public Resource {
-public:
+ public:
     explicit
     GpuResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
 
@@ -37,7 +38,7 @@ public:
 
     friend std::ostream &operator<<(std::ostream &out, const GpuResource &resource);
 
-protected:
+ protected:
     void
     LoadFile(TaskPtr task) override;
 
@@ -45,6 +46,6 @@ protected:
     Process(TaskPtr task) override;
 };
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

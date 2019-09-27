@@ -23,6 +23,7 @@
 #include "db/engine/ExecutionEngine.h"
 #include "utils/Status.h"
 
+#include <memory>
 
 namespace zilliz {
 namespace milvus {
@@ -45,7 +46,6 @@ class VectorSource {
     IDNumbers GetVectorIds();
 
  private:
-
     const size_t n_;
     const float *vectors_;
     IDNumbers vector_ids_;
@@ -53,7 +53,6 @@ class VectorSource {
     size_t current_num_vectors_added;
 
     std::shared_ptr<IDGenerator> id_generator_;
-
 }; //VectorSource
 
 using VectorSourcePtr = std::shared_ptr<VectorSource>;

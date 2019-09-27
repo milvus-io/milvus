@@ -21,6 +21,7 @@
 #include "ConfigNode.h"
 #include "utils/Error.h"
 
+#include <string>
 #include <yaml-cpp/yaml.h>
 
 namespace zilliz {
@@ -33,15 +34,15 @@ class YamlConfigMgr : public ConfigMgr {
     virtual void Print() const;
     virtual std::string DumpString() const;
 
-    virtual const ConfigNode& GetRootNode() const;
-    virtual ConfigNode& GetRootNode();
+    virtual const ConfigNode &GetRootNode() const;
+    virtual ConfigNode &GetRootNode();
 
  private:
-    bool SetConfigValue(const YAML::Node& node,
-                        const std::string& key,
-                        ConfigNode& config);
+    bool SetConfigValue(const YAML::Node &node,
+                        const std::string &key,
+                        ConfigNode &config);
 
-    bool SetChildConfig(const YAML::Node& node,
+    bool SetChildConfig(const YAML::Node &node,
                         const std::string &name,
                         ConfigNode &config);
 
@@ -50,15 +51,13 @@ class YamlConfigMgr : public ConfigMgr {
                 const std::string &child_name,
                 ConfigNode &config);
 
-    void LoadConfigNode(const YAML::Node& node, ConfigNode& config);
+    void LoadConfigNode(const YAML::Node &node, ConfigNode &config);
 
  private:
     YAML::Node node_;
     ConfigNode config_;
 };
 
-}
-}
-}
-
-
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

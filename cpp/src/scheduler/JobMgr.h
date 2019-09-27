@@ -31,15 +31,13 @@
 #include "task/Task.h"
 #include "ResourceMgr.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class JobMgr {
-public:
-    explicit
-    JobMgr(ResourceMgrPtr res_mgr);
+ public:
+    explicit JobMgr(ResourceMgrPtr res_mgr);
 
     void
     Start();
@@ -47,18 +45,18 @@ public:
     void
     Stop();
 
-public:
+ public:
     void
     Put(const JobPtr &job);
 
-private:
+ private:
     void
     worker_function();
 
     std::vector<TaskPtr>
     build_task(const JobPtr &job);
 
-private:
+ private:
     bool running_ = false;
     std::queue<JobPtr> queue_;
 
@@ -72,6 +70,6 @@ private:
 
 using JobMgrPtr = std::shared_ptr<JobMgr>;
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

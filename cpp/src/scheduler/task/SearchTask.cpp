@@ -15,15 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "SearchTask.h"
+#include "scheduler/task/SearchTask.h"
+#include "scheduler/job/SearchJob.h"
 #include "metrics/Metrics.h"
 #include "db/engine/EngineFactory.h"
 #include "utils/TimeRecorder.h"
 #include "utils/Log.h"
 
 #include <thread>
-#include "scheduler/job/SearchJob.h"
-
+#include <utility>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -104,7 +105,6 @@ XSearchTask::XSearchTask(TableFileSchemaPtr file)
                                              (MetricType) file_->metric_type_,
                                              file_->nlist_);
     }
-
 }
 
 void
@@ -144,7 +144,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
             s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
 
-        if (auto job = job_.lock()){
+        if (auto job = job_.lock()) {
             auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
             search_job->SearchDone(file_->id_);
             search_job->GetStatus() = s;
@@ -183,7 +183,7 @@ XSearchTask::Execute() {
 
     server::CollectDurationMetrics metrics(index_type_);
 
-    std::vector<long> output_ids;
+    std::vector<int64_t> output_ids;
     std::vector<float> output_distance;
 
     if (auto job = job_.lock()) {
@@ -192,7 +192,7 @@ XSearchTask::Execute() {
         uint64_t nq = search_job->nq();
         uint64_t topk = search_job->topk();
         uint64_t nprobe = search_job->nprobe();
-        const float* vectors = search_job->vectors();
+        const float *vectors = search_job->vectors();
 
         output_ids.resize(topk * nq);
         output_distance.resize(topk * nq);
@@ -236,11 +236,12 @@ XSearchTask::Execute() {
     index_engine_ = nullptr;
 }
 
-Status XSearchTask::ClusterResult(const std::vector<long> &output_ids,
-                                  const std::vector<float> &output_distance,
-                                  uint64_t nq,
-                                  uint64_t topk,
-                                  scheduler::ResultSet &result_set) {
+Status
+XSearchTask::ClusterResult(const std::vector<int64_t> &output_ids,
+                           const std::vector<float> &output_distance,
+                           uint64_t nq,
+                           uint64_t topk,
+                           scheduler::ResultSet &result_set) {
     if (output_ids.size() < nq * topk || output_distance.size() < nq * topk) {
         std::string msg = "Invalid id array size: " + std::to_string(output_ids.size()) +
             " distance array size: " + std::to_string(output_distance.size());
@@ -275,10 +276,11 @@ Status XSearchTask::ClusterResult(const std::vector<long> &output_ids,
     return Status::OK();
 }
 
-Status XSearchTask::MergeResult(scheduler::Id2DistanceMap &distance_src,
-                                scheduler::Id2DistanceMap &distance_target,
-                                uint64_t topk,
-                                bool ascending) {
+Status
+XSearchTask::MergeResult(scheduler::Id2DistanceMap &distance_src,
+                         scheduler::Id2DistanceMap &distance_target,
+                         uint64_t topk,
+                         bool ascending) {
     //Note: the score_src and score_target are already arranged by score in ascending order
     if (distance_src.empty()) {
         ENGINE_LOG_WARNING << "Empty distance source array";
@@ -349,10 +351,11 @@ Status XSearchTask::MergeResult(scheduler::Id2DistanceMap &distance_src,
     return Status::OK();
 }
 
-Status XSearchTask::TopkResult(scheduler::ResultSet &result_src,
-                               uint64_t topk,
-                               bool ascending,
-                               scheduler::ResultSet &result_target) {
+Status
+XSearchTask::TopkResult(scheduler::ResultSet &result_src,
+                        uint64_t topk,
+                        bool ascending,
+                        scheduler::ResultSet &result_target) {
     if (result_target.empty()) {
         result_target.swap(result_src);
         return Status::OK();
@@ -381,7 +384,6 @@ Status XSearchTask::TopkResult(scheduler::ResultSet &result_src,
     return Status::OK();
 }
 
-
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

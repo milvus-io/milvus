@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ExecutionEngineImpl.h"
+#include "db/engine/ExecutionEngineImpl.h"
 #include "cache/GpuCacheMgr.h"
 #include "cache/CpuCacheMgr.h"
 #include "metrics/Metrics.h"
@@ -29,6 +29,7 @@
 #include "server/Config.h"
 
 #include <stdexcept>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
@@ -72,7 +73,8 @@ ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index,
       nlist_(nlist) {
 }
 
-VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
+VecIndexPtr
+ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     std::shared_ptr<VecIndex> index;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
@@ -99,41 +101,48 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     return index;
 }
 
-Status ExecutionEngineImpl::AddWithIds(long n, const float *xdata, const long *xids) {
+Status
+ExecutionEngineImpl::AddWithIds(int64_t n, const float *xdata, const int64_t *xids) {
     auto status = index_->Add(n, xdata, xids);
     return status;
 }
 
-size_t ExecutionEngineImpl::Count() const {
-    if(index_ == nullptr) {
+size_t
+ExecutionEngineImpl::Count() const {
+    if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return count 0";
         return 0;
     }
     return index_->Count();
 }
 
-size_t ExecutionEngineImpl::Size() const {
+size_t
+ExecutionEngineImpl::Size() const {
     return (size_t) (Count() * Dimension()) * sizeof(float);
 }
 
-size_t ExecutionEngineImpl::Dimension() const {
-    if(index_ == nullptr) {
+size_t
+ExecutionEngineImpl::Dimension() const {
+    if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return dimension " << dim_;
         return dim_;
     }
     return index_->Dimension();
 }
 
-size_t ExecutionEngineImpl::PhysicalSize() const {
+size_t
+ExecutionEngineImpl::PhysicalSize() const {
     return server::CommonUtil::GetFileSize(location_);
 }
 
-Status ExecutionEngineImpl::Serialize() {
+Status
+ExecutionEngineImpl::Serialize() {
     auto status = write_index(index_, location_);
     return status;
 }
 
-Status ExecutionEngineImpl::Load(bool to_cache) {
+Status
+ExecutionEngineImpl::Load(bool to_cache) {
     index_ = cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
@@ -141,7 +150,7 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
             double physical_size = PhysicalSize();
             server::CollectExecutionEngineMetrics metrics(physical_size);
             index_ = read_index(location_);
-            if(index_ == nullptr) {
+            if (index_ == nullptr) {
                 std::string msg = "Failed to load index from " + location_;
                 ENGINE_LOG_ERROR << msg;
                 return Status(DB_ERROR, msg);
@@ -160,13 +169,14 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
     return Status::OK();
 }
 
-Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
+Status
+ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
     auto index = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
     } else {
-        if(index_ == nullptr) {
+        if (index_ == nullptr) {
             ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to gpu";
             return Status(DB_ERROR, "index is null");
         }
@@ -187,13 +197,14 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
     return Status::OK();
 }
 
-Status ExecutionEngineImpl::CopyToCpu() {
+Status
+ExecutionEngineImpl::CopyToCpu() {
     auto index = cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
     } else {
-        if(index_ == nullptr) {
+        if (index_ == nullptr) {
             ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to cpu";
             return Status(DB_ERROR, "index is null");
         }
@@ -213,8 +224,9 @@ Status ExecutionEngineImpl::CopyToCpu() {
     return Status::OK();
 }
 
-ExecutionEnginePtr ExecutionEngineImpl::Clone() {
-    if(index_ == nullptr) {
+ExecutionEnginePtr
+ExecutionEngineImpl::Clone() {
+    if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
         return nullptr;
     }
@@ -225,7 +237,8 @@ ExecutionEnginePtr ExecutionEngineImpl::Clone() {
     return ret;
 }
 
-Status ExecutionEngineImpl::Merge(const std::string &location) {
+Status
+ExecutionEngineImpl::Merge(const std::string &location) {
     if (location == location_) {
         return Status(DB_ERROR, "Cannot Merge Self");
     }
@@ -243,7 +256,7 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
         }
     }
 
-    if(index_ == nullptr) {
+    if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to merge";
         return Status(DB_ERROR, "index is null");
     }
@@ -264,7 +277,7 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
-    if(from_index == nullptr) {
+    if (from_index == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: from_index is null, failed to build index";
         return nullptr;
     }
@@ -282,21 +295,22 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
     AutoGenParams(to_index->GetType(), Count(), build_cfg);
 
     auto status = to_index->BuildAll(Count(),
-                                 from_index->GetRawVectors(),
-                                 from_index->GetRawIds(),
-                                 build_cfg);
+                                     from_index->GetRawVectors(),
+                                     from_index->GetRawIds(),
+                                     build_cfg);
     if (!status.ok()) { throw Exception(DB_ERROR, status.message()); }
 
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
 
-Status ExecutionEngineImpl::Search(long n,
-                                   const float *data,
-                                   long k,
-                                   long nprobe,
-                                   float *distances,
-                                   long *labels) const {
-    if(index_ == nullptr) {
+Status
+ExecutionEngineImpl::Search(int64_t n,
+                            const float *data,
+                            int64_t k,
+                            int64_t nprobe,
+                            float *distances,
+                            int64_t *labels) const {
+    if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
     }
@@ -310,14 +324,16 @@ Status ExecutionEngineImpl::Search(long n,
     return status;
 }
 
-Status ExecutionEngineImpl::Cache() {
+Status
+ExecutionEngineImpl::Cache() {
     cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index_, PhysicalSize());
     zilliz::milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, obj);
 
     return Status::OK();
 }
 
-Status ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
+Status
+ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
     cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index_, PhysicalSize());
     zilliz::milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, obj);
 
@@ -325,15 +341,14 @@ Status ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 }
 
 // TODO(linxj): remove.
-Status ExecutionEngineImpl::Init() {
-    using namespace zilliz::milvus::server;
+Status
+ExecutionEngineImpl::Init() {
     server::Config &config = server::Config::GetInstance();
     Status s = config.GetDBConfigBuildIndexGPU(gpu_num_);
     if (!s.ok()) return s;
 
     return Status::OK();
 }
-
 
 } // namespace engine
 } // namespace milvus

@@ -24,11 +24,12 @@
 #include "utils/Status.h"
 
 #include <map>
+#include <set>
+#include <vector>
 #include <string>
 #include <ctime>
 #include <memory>
 #include <mutex>
-
 
 namespace zilliz {
 namespace milvus {
@@ -39,7 +40,8 @@ class MemManagerImpl : public MemManager {
     using Ptr = std::shared_ptr<MemManagerImpl>;
 
     MemManagerImpl(const meta::MetaPtr &meta, const DBOptions &options)
-        : meta_(meta), options_(options) {}
+        : meta_(meta), options_(options) {
+    }
 
     Status InsertVectors(const std::string &table_id,
                          size_t n, const float *vectors, IDNumbers &vector_ids) override;
@@ -70,7 +72,6 @@ class MemManagerImpl : public MemManager {
     std::mutex mutex_;
     std::mutex serialization_mtx_;
 }; // NewMemManager
-
 
 } // namespace engine
 } // namespace milvus

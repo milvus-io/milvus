@@ -16,45 +16,46 @@
 // under the License.
 
 
-#include "DataTransfer.h"
+#include "wrapper/DataTransfer.h"
 
+#include <vector>
+#include <memory>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-using namespace zilliz::knowhere;
-
-DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const long *ids) {
+knowhere::DatasetPtr
+GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const int64_t *ids) {
     std::vector<int64_t> shape{nb, dim};
-    auto tensor = ConstructFloatTensor((uint8_t *) xb, nb * dim * sizeof(float), shape);
-    std::vector<TensorPtr> tensors{tensor};
-    std::vector<FieldPtr> tensor_fields{ConstructFloatField("data")};
-    auto tensor_schema = std::make_shared<Schema>(tensor_fields);
+    auto tensor = knowhere::ConstructFloatTensor((uint8_t *) xb, nb * dim * sizeof(float), shape);
+    std::vector<knowhere::TensorPtr> tensors{tensor};
+    std::vector<knowhere::FieldPtr> tensor_fields{knowhere::ConstructFloatField("data")};
+    auto tensor_schema = std::make_shared<knowhere::Schema>(tensor_fields);
 
-    auto id_array = ConstructInt64Array((uint8_t *) ids, nb * sizeof(int64_t));
-    std::vector<ArrayPtr> arrays{id_array};
-    std::vector<FieldPtr> array_fields{ConstructInt64Field("id")};
-    auto array_schema = std::make_shared<Schema>(tensor_fields);
+    auto id_array = knowhere::ConstructInt64Array((uint8_t *) ids, nb * sizeof(int64_t));
+    std::vector<knowhere::ArrayPtr> arrays{id_array};
+    std::vector<knowhere::FieldPtr> array_fields{knowhere::ConstructInt64Field("id")};
+    auto array_schema = std::make_shared<knowhere::Schema>(tensor_fields);
 
-    auto dataset = std::make_shared<Dataset>(std::move(arrays), array_schema,
+    auto dataset = std::make_shared<knowhere::Dataset>(std::move(arrays), array_schema,
                                              std::move(tensors), tensor_schema);
     return dataset;
 }
 
-DatasetPtr
+knowhere::DatasetPtr
 GenDataset(const int64_t &nb, const int64_t &dim, const float *xb) {
     std::vector<int64_t> shape{nb, dim};
-    auto tensor = ConstructFloatTensor((uint8_t *) xb, nb * dim * sizeof(float), shape);
-    std::vector<TensorPtr> tensors{tensor};
-    std::vector<FieldPtr> tensor_fields{ConstructFloatField("data")};
-    auto tensor_schema = std::make_shared<Schema>(tensor_fields);
+    auto tensor = knowhere::ConstructFloatTensor((uint8_t *) xb, nb * dim * sizeof(float), shape);
+    std::vector<knowhere::TensorPtr> tensors{tensor};
+    std::vector<knowhere::FieldPtr> tensor_fields{knowhere::ConstructFloatField("data")};
+    auto tensor_schema = std::make_shared<knowhere::Schema>(tensor_fields);
 
-    auto dataset = std::make_shared<Dataset>(std::move(tensors), tensor_schema);
+    auto dataset = std::make_shared<knowhere::Dataset>(std::move(tensors), tensor_schema);
     return dataset;
 }
 
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz

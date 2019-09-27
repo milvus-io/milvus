@@ -17,18 +17,21 @@
 
 #pragma once
 
-#include "Event.h"
+#include "scheduler/event/Event.h"
 
+#include <memory>
+#include <utility>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class StartUpEvent : public Event {
-public:
-    explicit
-    StartUpEvent(std::weak_ptr<Resource> resource)
-        : Event(EventType::START_UP, std::move(resource)) {}
+ public:
+    explicit StartUpEvent(std::weak_ptr<Resource> resource)
+        : Event(EventType::START_UP, std::move(resource)) {
+    }
 
     inline std::string
     Dump() const override {
@@ -38,6 +41,6 @@ public:
     friend std::ostream &operator<<(std::ostream &out, const StartUpEvent &event);
 };
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

@@ -16,7 +16,7 @@
 // under the License.
 
 
-#include "DBFactory.h"
+#include "db/DBFactory.h"
 #include "DBImpl.h"
 #include "utils/Exception.h"
 #include "meta/MetaFactory.h"
@@ -33,14 +33,16 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-DBOptions DBFactory::BuildOption() {
+DBOptions
+DBFactory::BuildOption() {
     auto meta = MetaFactory::BuildOption();
-        DBOptions options;
+    DBOptions options;
     options.meta_ = meta;
     return options;
 }
 
-DBPtr DBFactory::Build(const DBOptions& options) {
+DBPtr
+DBFactory::Build(const DBOptions &options) {
     return std::make_shared<DBImpl>(options);
 }
 

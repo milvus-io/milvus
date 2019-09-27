@@ -19,17 +19,15 @@
 
 #include "SearchTask.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class TestTask : public XSearchTask {
-public:
-    explicit
-    TestTask(TableFileSchemaPtr& file);
+ public:
+    explicit TestTask(TableFileSchemaPtr &file);
 
-public:
+ public:
     void
     Load(LoadType type, uint8_t device_id) override;
 
@@ -39,7 +37,7 @@ public:
     void
     Wait();
 
-public:
+ public:
     uint64_t load_count_ = 0;
     uint64_t exec_count_ = 0;
 
@@ -48,7 +46,6 @@ public:
     std::condition_variable cv_;
 };
 
-
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
