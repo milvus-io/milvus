@@ -26,6 +26,9 @@
 #include "src/wrapper/VecIndex.h"
 #include "src/wrapper/VecImpl.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/common/Config.h"
+#include "wrapper/ConfAdapterMgr.h"
+#include "wrapper/ConfAdapter.h"
 #include "server/Config.h"
 
 #include <stdexcept>
@@ -50,11 +53,15 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
         throw Exception(DB_ERROR, "Could not create VecIndex");
     }
 
-    Config build_cfg;
-    build_cfg["dim"] = dimension;
-    build_cfg["metric_type"] = (metric_type_ == MetricType::IP) ? "IP" : "L2";
-    AutoGenParams(index_->GetType(), 0, build_cfg);
-    auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(build_cfg);
+    TempMetaConf temp_conf;
+    temp_conf.gpu_id = gpu_num_;
+    temp_conf.dim = dimension;
+    temp_conf.metric_type = (metric_type_ == MetricType::IP) ?
+                            knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto conf = adapter->Match(temp_conf);
+
+    auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(conf);
     if (ec != KNOWHERE_SUCCESS) {
         throw Exception(DB_ERROR, "Build index error");
     }
@@ -274,17 +281,21 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
         throw Exception(DB_ERROR, "Could not create VecIndex");
     }
 
-    Config build_cfg;
-    build_cfg["dim"] = Dimension();
-    build_cfg["metric_type"] = (metric_type_ == MetricType::IP) ? "IP" : "L2";
-    build_cfg["gpu_id"] = gpu_num_;
-    build_cfg["nlist"] = nlist_;
-    AutoGenParams(to_index->GetType(), Count(), build_cfg);
+    TempMetaConf temp_conf;
+    temp_conf.gpu_id = gpu_num_;
+    temp_conf.dim = Dimension();
+    temp_conf.nlist = nlist_;
+    temp_conf.metric_type = (metric_type_ == MetricType::IP) ?
+        knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
+    temp_conf.size = Count();
+
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
+    auto conf = adapter->Match(temp_conf);
 
     auto status = to_index->BuildAll(Count(),
-                                 from_index->GetRawVectors(),
-                                 from_index->GetRawIds(),
-                                 build_cfg);
+                                     from_index->GetRawVectors(),
+                                     from_index->GetRawIds(),
+                                     conf);
     if (!status.ok()) { throw Exception(DB_ERROR, status.message()); }
 
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
@@ -302,8 +313,16 @@ Status ExecutionEngineImpl::Search(long n,
     }
 
     ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
-    auto cfg = Config::object{{"k", k}, {"nprobe", nprobe}};
-    auto status = index_->Search(n, data, distances, labels, cfg);
+
+    // TODO(linxj): remove here. Get conf from function
+    TempMetaConf temp_conf;
+    temp_conf.k = k;
+    temp_conf.nprobe = nprobe;
+
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+
+    auto status = index_->Search(n, data, distances, labels, conf);
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Search error";
     }

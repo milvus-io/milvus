@@ -30,7 +30,6 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-// TODO(linxj): jsoncons => rapidjson or other.
 using Config = zilliz::knowhere::Config;
 
 enum class IndexType {
@@ -115,12 +114,6 @@ GetVecIndexFactory(const IndexType &type, const Config &cfg = Config());
 
 extern VecIndexPtr
 LoadVecIndex(const IndexType &index_type, const zilliz::knowhere::BinarySet &index_binary);
-
-extern void
-AutoGenParams(const IndexType &type, const long &size, Config &cfg);
-
-extern void
-ParameterValidation(const IndexType &type, Config &cfg);
 
 extern IndexType
 ConvertToCpuIndexType(const IndexType &type);
