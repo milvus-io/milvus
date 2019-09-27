@@ -24,11 +24,9 @@
 #include <cstdio>
 #include <fstream>
 
-
 class DataGenBase;
 
 using DataGenPtr = std::shared_ptr<DataGenBase>;
-
 
 class DataGenBase {
  public:

@@ -26,20 +26,19 @@
 #include "scheduler/ResourceFactory.h"
 #include <gtest/gtest.h>
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 /************ ResourceBaseTest ************/
 class ResourceBaseTest : public testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
-        only_loader_  = std::make_shared<DiskResource>(name1, id1, true, false);
-        only_executor_  = std::make_shared<CpuResource>(name2, id2, false, true);
-        both_enable_  = std::make_shared<GpuResource>(name3, id3, true, true);
-        both_disable_  = std::make_shared<TestResource>(name4, id4, false, false);
+        only_loader_ = std::make_shared<DiskResource>(name1, id1, true, false);
+        only_executor_ = std::make_shared<CpuResource>(name2, id2, false, true);
+        both_enable_ = std::make_shared<GpuResource>(name3, id3, true, true);
+        both_disable_ = std::make_shared<TestResource>(name4, id4, false, false);
     }
 
     const std::string name1 = "only_loader_";
@@ -104,7 +103,7 @@ TEST_F(ResourceBaseTest, DUMP) {
 /************ ResourceAdvanceTest ************/
 
 class ResourceAdvanceTest : public testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
         disk_resource_ = ResourceFactory::Create("ssd", "DISK", 0);
@@ -156,13 +155,17 @@ protected:
     void
     WaitLoader(uint64_t count) {
         std::unique_lock<std::mutex> lock(load_mutex_);
-        cv_.wait(lock, [&] { return load_count_ == count; });
+        cv_.wait(lock, [&] {
+            return load_count_ == count;
+        });
     }
 
     void
     WaitExecutor(uint64_t count) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
-        cv_.wait(lock, [&] { return exec_count_ == count; });
+        cv_.wait(lock, [&] {
+            return exec_count_ == count;
+        });
     }
 
     ResourcePtr disk_resource_;
@@ -277,6 +280,6 @@ TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     }
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

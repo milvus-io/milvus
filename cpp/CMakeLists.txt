@@ -189,7 +189,7 @@ add_custom_target(lint
                   --exclude_globs
                   ${LINT_EXCLUSIONS_FILE}
                   --source_dir
-                  ${CMAKE_CURRENT_SOURCE_DIR}/src
+                  ${CMAKE_CURRENT_SOURCE_DIR}
                   ${MILVUS_LINT_QUIET})
 
 #

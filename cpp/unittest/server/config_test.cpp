@@ -23,39 +23,39 @@
 #include "utils/ValidationUtil.h"
 #include "server/Config.h"
 
-using namespace zilliz::milvus;
-
 namespace {
 
-static const char* CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
-static const char* LOG_FILE_PATH = "./milvus/conf/log_config.conf";
+namespace ms = zilliz::milvus;
+
+static const char *CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
+static const char *LOG_FILE_PATH = "./milvus/conf/log_config.conf";
 
 static constexpr uint64_t KB = 1024;
-static constexpr uint64_t MB = KB*1024;
-static constexpr uint64_t GB = MB*1024;
+static constexpr uint64_t MB = KB * 1024;
+static constexpr uint64_t GB = MB * 1024;
 
-}
+} // namespace
 
 TEST(ConfigTest, CONFIG_TEST) {
-    server::ConfigMgr* config_mgr = server::ConfigMgr::GetInstance();
+    ms::server::ConfigMgr *config_mgr = ms::server::ConfigMgr::GetInstance();
 
-    ErrorCode err = config_mgr->LoadConfigFile("");
-    ASSERT_EQ(err, SERVER_UNEXPECTED_ERROR);
+    ms::ErrorCode err = config_mgr->LoadConfigFile("");
+    ASSERT_EQ(err, ms::SERVER_UNEXPECTED_ERROR);
 
     err = config_mgr->LoadConfigFile(LOG_FILE_PATH);
-    ASSERT_EQ(err, SERVER_UNEXPECTED_ERROR);
+    ASSERT_EQ(err, ms::SERVER_UNEXPECTED_ERROR);
 
     err = config_mgr->LoadConfigFile(CONFIG_FILE_PATH);
-    ASSERT_EQ(err, SERVER_SUCCESS);
+    ASSERT_EQ(err, ms::SERVER_SUCCESS);
 
     config_mgr->Print();
 
-    server::ConfigNode& root_config = config_mgr->GetRootNode();
-    server::ConfigNode& server_config = root_config.GetChild("server_config");
-    server::ConfigNode& db_config = root_config.GetChild("db_config");
-    server::ConfigNode& metric_config = root_config.GetChild("metric_config");
-    server::ConfigNode& cache_config = root_config.GetChild("cache_config");
-    server::ConfigNode invalid_config = root_config.GetChild("invalid_config");
+    ms::server::ConfigNode &root_config = config_mgr->GetRootNode();
+    ms::server::ConfigNode &server_config = root_config.GetChild("server_config");
+    ms::server::ConfigNode &db_config = root_config.GetChild("db_config");
+    ms::server::ConfigNode &metric_config = root_config.GetChild("metric_config");
+    ms::server::ConfigNode &cache_config = root_config.GetChild("cache_config");
+    ms::server::ConfigNode invalid_config = root_config.GetChild("invalid_config");
     auto valus = invalid_config.GetSequence("not_exist");
     float ff = invalid_config.GetFloatValue("not_exist", 3.0);
     ASSERT_EQ(ff, 3.0);
@@ -63,16 +63,16 @@ TEST(ConfigTest, CONFIG_TEST) {
     std::string address = server_config.GetValue("address");
     ASSERT_TRUE(!address.empty());
     int64_t port = server_config.GetInt64Value("port");
-    ASSERT_TRUE(port != 0);
+    ASSERT_NE(port, 0);
 
     server_config.SetValue("test", "2.5");
     double test = server_config.GetDoubleValue("test");
     ASSERT_EQ(test, 2.5);
 
-    server::ConfigNode fake;
+    ms::server::ConfigNode fake;
     server_config.AddChild("fake", fake);
     fake = server_config.GetChild("fake");
-    server::ConfigNodeArr arr;
+    ms::server::ConfigNodeArr arr;
     server_config.GetChildren(arr);
     ASSERT_EQ(arr.size(), 1UL);
 
@@ -89,7 +89,7 @@ TEST(ConfigTest, CONFIG_TEST) {
     auto seq = server_config.GetSequence("seq");
     ASSERT_EQ(seq.size(), 2UL);
 
-    server::ConfigNode combine;
+    ms::server::ConfigNode combine;
     combine.Combine(server_config);
 
     combine.PrintAll();
@@ -102,8 +102,8 @@ TEST(ConfigTest, CONFIG_TEST) {
 }
 
 TEST(ConfigTest, SERVER_CONFIG_TEST) {
-    server::Config& config = server::Config::GetInstance();
-    Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
+    ms::server::Config &config = ms::server::Config::GetInstance();
+    ms::Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
     ASSERT_TRUE(s.ok());
 
     s = config.ValidateConfig();

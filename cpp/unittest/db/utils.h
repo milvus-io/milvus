@@ -20,14 +20,13 @@
 
 #include <gtest/gtest.h>
 #include <chrono>
-//#include <src/db/MySQLMetaImpl.h>
+#include <memory>
 
 #include "db/DB.h"
 #include "db/meta/SqliteMetaImpl.h"
 #include "db/meta/MySQLMetaImpl.h"
 #include "scheduler/SchedInst.h"
 #include "scheduler/ResourceFactory.h"
-
 
 #define TIMING
 
@@ -36,8 +35,7 @@
 #define START_TIMER  start = std::chrono::high_resolution_clock::now();
 #define STOP_TIMER(name)  LOG(DEBUG) << "RUNTIME of " << name << ": " << \
     std::chrono::duration_cast<std::chrono::milliseconds>( \
-            std::chrono::high_resolution_clock::now()-start \
-    ).count() << " ms ";
+            std::chrono::high_resolution_clock::now()-start).count() << " ms ";
 #else
 #define INIT_TIMER
 #define START_TIMER
@@ -45,11 +43,11 @@
 #endif
 
 class BaseTest : public ::testing::Test {
-protected:
+ protected:
     void InitLog();
 
-    virtual void SetUp() override;
-    virtual void TearDown() override;
+    void SetUp() override;
+    void TearDown() override;
     virtual zilliz::milvus::engine::DBOptions GetOptions();
 };
 
@@ -58,14 +56,14 @@ class DBTest : public BaseTest {
  protected:
     zilliz::milvus::engine::DBPtr db_;
 
-    virtual void SetUp() override;
-    virtual void TearDown() override;
+    void SetUp() override;
+    void TearDown() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class DBTest2 : public DBTest {
  protected:
-    virtual zilliz::milvus::engine::DBOptions GetOptions() override;
+    zilliz::milvus::engine::DBOptions GetOptions() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -77,14 +75,14 @@ class MetaTest : public BaseTest {
  protected:
     std::shared_ptr<zilliz::milvus::engine::meta::SqliteMetaImpl> impl_;
 
-    virtual void SetUp() override;
-    virtual void TearDown() override;
+    void SetUp() override;
+    void TearDown() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class MySqlDBTest : public DBTest {
-protected:
-    zilliz::milvus::engine::DBOptions GetOptions();
+ protected:
+    zilliz::milvus::engine::DBOptions GetOptions() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -92,11 +90,10 @@ class MySqlMetaTest : public BaseTest {
  protected:
     std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
 
-    virtual void SetUp() override;
-    virtual void TearDown() override;
-    zilliz::milvus::engine::DBOptions GetOptions();
+    void SetUp() override;
+    void TearDown() override;
+    zilliz::milvus::engine::DBOptions GetOptions() override;
 };
-
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class MemManagerTest : public MetaTest {
