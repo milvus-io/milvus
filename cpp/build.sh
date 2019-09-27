@@ -102,7 +102,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
         echo "ERROR! cpplint check failed"
         exit 1
     fi
-    echo "cpplint check pass!"
+    echo "cpplint check passed!"
 
 #    # clang-format check
 #    make check-clang-format
@@ -110,7 +110,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 #        echo "ERROR! clang-format check failed"
 #        exit 1
 #    fi
-#    echo "clang-format check pass!"
+#    echo "clang-format check passed!"
 #
 #    # clang-tidy check
 #    make check-clang-tidy
@@ -118,7 +118,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 #        echo "ERROR! clang-tidy check failed"
 #        exit 1
 #    fi
-#    echo "clang-tidy check pass!"
+#    echo "clang-tidy check passed!"
 else
     # compile and build
     make -j 4 || exit 1
