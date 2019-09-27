@@ -21,7 +21,8 @@ class GrpcArgsParser(object):
     @error_status
     def parse_proto_TableSchema(cls, param):
         _table_schema = {
-            'table_name': param.table_name.table_name,
+            'status': param.status,
+            'table_name': param.table_name,
             'dimension': param.dimension,
             'index_file_size': param.index_file_size,
             'metric_type': param.metric_type
@@ -47,7 +48,7 @@ class GrpcArgsParser(object):
     @classmethod
     @error_status
     def parse_proto_IndexParam(cls, param):
-        _table_name = param.table_name.table_name
+        _table_name = param.table_name
         _status, _index = cls.parse_proto_Index(param.index)
 
         if not _status.OK():

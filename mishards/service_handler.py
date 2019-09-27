@@ -311,11 +311,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _status, _table_name = Parser.parse_proto_TableName(request)
 
         if not _status.OK():
-            table_name = milvus_pb2.TableName(
-                status=status_pb2.Status(error_code=_status.code, reason=_status.message)
-            )
             return milvus_pb2.TableSchema(
-                table_name=table_name
+                status=status_pb2.Status(error_code=_status.code, reason=_status.message),
             )
 
         metadata = {
@@ -326,22 +323,17 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _status, _table = self.connection(metadata=metadata).describe_table(_table_name)
 
         if _status.OK():
-            _grpc_table_name = milvus_pb2.TableName(
-                status=status_pb2.Status(error_code=_status.code, reason=_status.message),
-                table_name=_table.table_name
-            )
-
             return milvus_pb2.TableSchema(
-                table_name=_grpc_table_name,
+                table_name=_table_name,
                 index_file_size=_table.index_file_size,
                 dimension=_table.dimension,
-                metric_type=_table.metric_type
+                metric_type=_table.metric_type,
+                status=status_pb2.Status(error_code=_status.code, reason=_status.message),
             )
 
         return milvus_pb2.TableSchema(
-            table_name=milvus_pb2.TableName(
-                status=status_pb2.Status(error_code=_status.code, reason=_status.message)
-            )
+                table_name=_table_name,
+                status=status_pb2.Status(error_code=_status.code, reason=_status.message),
         )
 
     @mark_grpc_method
@@ -398,14 +390,10 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         }
         _status, _results = self.connection(metadata=metadata).show_tables()
 
-        if not _status.OK():
-            _results = []
-
-        for _result in _results:
-            yield milvus_pb2.TableName(
+        return milvus_pb2.TableNameList(
                 status=status_pb2.Status(error_code=_status.code, reason=_status.message),
-                table_name=_result
-            )
+                table_names=_results
+        )
 
     @mark_grpc_method
     def DeleteByRange(self, request, context):
