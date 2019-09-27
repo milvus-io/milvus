@@ -15,10 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "Metrics.h"
+#include "metrics/Metrics.h"
 #include "server/Config.h"
 #include "PrometheusMetrics.h"
 
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -44,6 +45,6 @@ Metrics::CreateMetricsCollector() {
     }
 }
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz
