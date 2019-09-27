@@ -24,15 +24,13 @@
 #include "scheduler/ResourceMgr.h"
 #include <gtest/gtest.h>
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-
 /************ ResourceMgrBaseTest ************/
 class ResourceMgrBaseTest : public testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
         empty_mgr_ = std::make_shared<ResourceMgr>();
@@ -77,7 +75,6 @@ TEST_F(ResourceMgrBaseTest, CONNECT) {
     ASSERT_TRUE(empty_mgr_->Connect("resource1", "resource2", io));
 }
 
-
 TEST_F(ResourceMgrBaseTest, INVALID_CONNECT) {
     auto resource1 = std::make_shared<TestResource>("resource1", 0, true, true);
     auto resource2 = std::make_shared<TestResource>("resource2", 2, true, true);
@@ -86,7 +83,6 @@ TEST_F(ResourceMgrBaseTest, INVALID_CONNECT) {
     Connection io("io", 500.0);
     ASSERT_FALSE(empty_mgr_->Connect("xx", "yy", io));
 }
-
 
 TEST_F(ResourceMgrBaseTest, CLEAR) {
     ASSERT_EQ(mgr1_->GetNumOfResource(), 3);
@@ -163,7 +159,7 @@ TEST_F(ResourceMgrBaseTest, DUMP_TASKTABLES) {
 /************ ResourceMgrAdvanceTest ************/
 
 class ResourceMgrAdvanceTest : public testing::Test {
-    protected:
+ protected:
     void
     SetUp() override {
         mgr1_ = std::make_shared<ResourceMgr>();
@@ -193,7 +189,6 @@ TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
     ASSERT_TRUE(flag);
 }
 
-
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

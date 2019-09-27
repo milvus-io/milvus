@@ -25,35 +25,37 @@
 #include "utils/Log.h"
 #include <gtest/gtest.h>
 
+namespace {
 
-using namespace zilliz::milvus::scheduler;
+namespace ms = zilliz::milvus::scheduler;
 
+} // namespace
 
 TEST(NormalTest, INST_TEST) {
     // ResourceMgr only compose resources, provide unified event
-    auto res_mgr = ResMgrInst::GetInstance();
+    auto res_mgr = ms::ResMgrInst::GetInstance();
 
-    res_mgr->Add(ResourceFactory::Create("disk", "DISK", 0, true, false));
-    res_mgr->Add(ResourceFactory::Create("cpu", "CPU", 0, true, true));
+    res_mgr->Add(ms::ResourceFactory::Create("disk", "DISK", 0, true, false));
+    res_mgr->Add(ms::ResourceFactory::Create("cpu", "CPU", 0, true, true));
 
-    auto IO = Connection("IO", 500.0);
+    auto IO = ms::Connection("IO", 500.0);
     res_mgr->Connect("disk", "cpu", IO);
 
-    auto scheduler = SchedInst::GetInstance();
+    auto scheduler = ms::SchedInst::GetInstance();
 
     res_mgr->Start();
     scheduler->Start();
 
     const uint64_t NUM_TASK = 1000;
-    std::vector<std::shared_ptr<TestTask>> tasks;
-    TableFileSchemaPtr dummy = nullptr;
+    std::vector<std::shared_ptr<ms::TestTask>> tasks;
+    ms::TableFileSchemaPtr dummy = nullptr;
 
     auto disks = res_mgr->GetDiskResources();
     ASSERT_FALSE(disks.empty());
     if (auto observe = disks[0].lock()) {
         for (uint64_t i = 0; i < NUM_TASK; ++i) {
-            auto task = std::make_shared<TestTask>(dummy);
-            task->label() = std::make_shared<DefaultLabel>();
+            auto task = std::make_shared<ms::TestTask>(dummy);
+            task->label() = std::make_shared<ms::DefaultLabel>();
             tasks.push_back(task);
             observe->task_table().Put(task);
         }
@@ -67,5 +69,4 @@ TEST(NormalTest, INST_TEST) {
 
     scheduler->Stop();
     res_mgr->Stop();
-
 }

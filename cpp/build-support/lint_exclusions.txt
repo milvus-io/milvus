@@ -3,6 +3,10 @@
 *cmake_build*
 *src/thirdparty*
 *src/core/thirdparty*
+*thirdparty*
 *src/grpc*
 *easylogging++*
 *SqliteMetaImpl.cpp
+*src/core*
+*src/wrapper*
+*unittest/wrapper*
