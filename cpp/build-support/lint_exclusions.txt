@@ -5,3 +5,4 @@
 *src/core/thirdparty*
 *src/grpc*
 *easylogging++*
+*SqliteMetaImpl.cpp
