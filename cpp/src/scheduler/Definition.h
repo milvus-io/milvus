@@ -30,7 +30,6 @@
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngine.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
@@ -43,6 +42,6 @@ using EngineFactory = engine::EngineFactory;
 using EngineType = engine::EngineType;
 using MetricType = engine::MetricType;
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

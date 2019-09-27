@@ -15,11 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "utils/LogUtil.h"
+
 #include <ctype.h>
 #include <string>
 #include <libgen.h>
-
-#include "LogUtil.h"
 
 namespace zilliz {
 namespace milvus {
@@ -35,7 +35,8 @@ static int fatal_idx = 0;
 }
 
 // TODO(yzb) : change the easylogging library to get the log level from parameter rather than filename
-void RolloutHandler(const char *filename, std::size_t size, el::Level level) {
+void
+RolloutHandler(const char *filename, std::size_t size, el::Level level) {
     char *dirc = strdup(filename);
     char *basec = strdup(filename);
     char *dir = dirname(dirc);
@@ -80,7 +81,8 @@ void RolloutHandler(const char *filename, std::size_t size, el::Level level) {
     }
 }
 
-Status InitLog(const std::string &log_config_file) {
+Status
+InitLog(const std::string &log_config_file) {
     el::Configurations conf(log_config_file);
     el::Loggers::reconfigureAllLoggers(conf);
 
@@ -91,7 +93,6 @@ Status InitLog(const std::string &log_config_file) {
     return Status::OK();
 }
 
-
-}   // server
-}   // milvus
-}   // zilliz
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

@@ -27,14 +27,12 @@
 #include "utils/CommonUtil.h"
 #include "metrics/Metrics.h"
 #include "server/Server.h"
-#include "version.h"
+#include "../version.h"
 
 
 INITIALIZE_EASYLOGGINGPP
 
 void print_help(const std::string &app_name);
-
-using namespace zilliz::milvus;
 
 int
 main(int argc, char *argv[]) {
@@ -78,7 +76,6 @@ main(int argc, char *argv[]) {
                 std::cout << "Initial log config from: " << log_config_file << std::endl;
                 break;
             }
-
             case 'p': {
                 char *pid_filename_ptr = strdup(optarg);
                 pid_filename = pid_filename_ptr;
@@ -86,7 +83,6 @@ main(int argc, char *argv[]) {
                 std::cout << pid_filename << std::endl;
                 break;
             }
-
             case 'd':
                 start_daemonized = 1;
                 break;
@@ -103,14 +99,14 @@ main(int argc, char *argv[]) {
     }
 
     /* Handle Signal */
-    signal(SIGHUP, server::SignalUtil::HandleSignal);
-    signal(SIGINT, server::SignalUtil::HandleSignal);
-    signal(SIGUSR1, server::SignalUtil::HandleSignal);
-    signal(SIGSEGV, server::SignalUtil::HandleSignal);
-    signal(SIGUSR2, server::SignalUtil::HandleSignal);
-    signal(SIGTERM, server::SignalUtil::HandleSignal);
+    signal(SIGHUP, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGINT, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGUSR1, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGSEGV, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGUSR2, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGTERM, zilliz::milvus::server::SignalUtil::HandleSignal);
 
-    server::Server &server = server::Server::GetInstance();
+    zilliz::milvus::server::Server &server = zilliz::milvus::server::Server::GetInstance();
     server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
     server.Start();
 

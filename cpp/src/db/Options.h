@@ -30,22 +30,27 @@ namespace engine {
 
 class Env;
 
-static const char* ARCHIVE_CONF_DISK = "disk";
-static const char* ARCHIVE_CONF_DAYS = "days";
+static const char *ARCHIVE_CONF_DISK = "disk";
+static const char *ARCHIVE_CONF_DAYS = "days";
 
 struct ArchiveConf {
     using CriteriaT = std::map<std::string, int>;
 
-    ArchiveConf(const std::string& type, const std::string& criterias = std::string());
+    explicit ArchiveConf(const std::string &type, const std::string &criterias = std::string());
 
-    const std::string& GetType() const { return type_; }
-    const CriteriaT GetCriterias() const { return criterias_; }
+    const std::string &GetType() const {
+        return type_;
+    }
 
-    void SetCriterias(const ArchiveConf::CriteriaT& criterial);
+    const CriteriaT GetCriterias() const {
+        return criterias_;
+    }
 
-private:
-    void ParseCritirias(const std::string& type);
-    void ParseType(const std::string& criterias);
+    void SetCriterias(const ArchiveConf::CriteriaT &criterial);
+
+ private:
+    void ParseCritirias(const std::string &type);
+    void ParseType(const std::string &criterias);
 
     std::string type_;
     CriteriaT criterias_;
@@ -60,12 +65,12 @@ struct DBMetaOptions {
 
 struct DBOptions {
     typedef enum {
-        SINGLE,
-        CLUSTER,
-        READ_ONLY
+        SINGLE = 0,
+        CLUSTER_READONLY,
+        CLUSTER_WRITABLE
     } MODE;
 
-    uint16_t  merge_trigger_number_ = 2;
+    uint16_t merge_trigger_number_ = 2;
     DBMetaOptions meta_;
     int mode_ = MODE::SINGLE;
 

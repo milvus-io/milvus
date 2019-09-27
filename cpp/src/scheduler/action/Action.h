@@ -17,16 +17,17 @@
 
 #pragma once
 
-#include "../resource/Resource.h"
-#include "../ResourceMgr.h"
+#include "scheduler/resource/Resource.h"
+#include "scheduler/ResourceMgr.h"
 
+#include <memory>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class Action {
-public:
+ public:
     static void
     PushTaskToNeighbourRandomly(const TaskPtr &task, const ResourcePtr &self);
 
@@ -43,10 +44,8 @@ public:
     SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr,
                                         ResourcePtr resource,
                                         std::shared_ptr<LoadCompletedEvent> event);
-
 };
 
-
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

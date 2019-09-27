@@ -99,60 +99,18 @@ TEST(ConfigTest, CONFIG_TEST) {
     server_config.ClearSequences();
     auto seqs = server_config.GetSequences();
     ASSERT_TRUE(seqs.empty());
-
-    const server::ConfigNode const_node = root_config.GetChild("cache_config");
-    float flt = const_node.GetFloatValue("cpu_cache_capacity");
-    ASSERT_GT(flt, 0.0);
 }
 
 TEST(ConfigTest, SERVER_CONFIG_TEST) {
-    auto status = server::Config::GetInstance().LoadConfigFile(CONFIG_FILE_PATH);
-    ASSERT_TRUE(status.ok());
+    server::Config& config = server::Config::GetInstance();
+    Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
+    ASSERT_TRUE(s.ok());
 
-//    status = server::Config::GetInstance().ValidateConfig();
-//    ASSERT_TRUE(status.ok());
-//
-//    const server::ServerConfig& config_const = config;
-//    server::ConfigNode node1 = config_const.GetConfig("server_config");
-//    server::ConfigNode& node2 = config.GetConfig("cache_config");
-//    node1.Combine(node2);
-//
-//    int32_t cap = node1.GetInt32Value("cpu_cache_capacity");
-//    ASSERT_GT(cap, 0);
-//
-//    node1.SetValue("bool", "true");
-//    bool bt = node1.GetBoolValue("bool");
-//    ASSERT_TRUE(bt);
+    s = config.ValidateConfig();
+    ASSERT_TRUE(s.ok());
 
-//    server::Config::GetInstance().PrintAll();
-//
-//    unsigned long total_mem = 0, free_mem = 0;
-//    server::CommonUtil::GetSystemMemInfo(total_mem, free_mem);
-//
-//    size_t gpu_mem = 0;
-//    server::ValidationUtil::GetGpuMemory(0, gpu_mem);
-//
-//    server::ConfigNode& server_config = config.GetConfig("server_config");
-//    server::ConfigNode& db_config = config.GetConfig("db_config");
-//    server::ConfigNode& cache_config = config.GetConfig(server::CONFIG_CACHE);
-//    cache_config.SetValue(server::CACHE_FREE_PERCENT, "2.0");
-//    status = config.ValidateConfig();
-//    ASSERT_FALSE(status.ok());
-//
-//    size_t cache_cap = 16;
-//    size_t insert_buffer_size = (total_mem - cache_cap*GB + 1*GB)/GB;
-//    db_config.SetValue(server::CONFIG_DB_INSERT_BUFFER_SIZE, std::to_string(insert_buffer_size));
-//    cache_config.SetValue(server::CONFIG_CPU_CACHE_CAPACITY, std::to_string(cache_cap));
-//    status = config.ValidateConfig();
-//    ASSERT_FALSE(status.ok());
-//
-//    cache_cap = total_mem/GB + 2;
-//    cache_config.SetValue(server::CONFIG_CPU_CACHE_CAPACITY, std::to_string(cache_cap));
-//    status = config.ValidateConfig();
-//    ASSERT_FALSE(status.ok());
-//
-//    insert_buffer_size = total_mem/GB + 2;
-//    db_config.SetValue(server::CONFIG_DB_INSERT_BUFFER_SIZE, std::to_string(insert_buffer_size));
-//    status = config.ValidateConfig();
-//    ASSERT_FALSE(status.ok());
+    config.PrintAll();
+
+    s = config.ResetDefaultConfig();
+    ASSERT_TRUE(s.ok());
 }

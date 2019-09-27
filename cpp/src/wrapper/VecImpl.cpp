@@ -16,12 +16,12 @@
 // under the License.
 
 
+#include "wrapper/VecImpl.h"
 #include "utils/Log.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
-#include "VecImpl.h"
 #include "DataTransfer.h"
 
 /*
@@ -33,14 +33,12 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-using namespace zilliz::knowhere;
-
 Status
-VecIndexImpl::BuildAll(const long &nb,
+VecIndexImpl::BuildAll(const int64_t &nb,
                        const float *xb,
-                       const long *ids,
+                       const int64_t *ids,
                        const Config &cfg,
-                       const long &nt,
+                       const int64_t &nt,
                        const float *xt) {
     try {
         dim = cfg->d;
@@ -51,7 +49,7 @@ VecIndexImpl::BuildAll(const long &nb,
         auto model = index_->Train(dataset, cfg);
         index_->set_index_model(model);
         index_->Add(dataset, cfg);
-    } catch (KnowhereException &e) {
+    } catch (knowhere::KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (std::exception &e) {
@@ -62,12 +60,12 @@ VecIndexImpl::BuildAll(const long &nb,
 }
 
 Status
-VecIndexImpl::Add(const long &nb, const float *xb, const long *ids, const Config &cfg) {
+VecIndexImpl::Add(const int64_t &nb, const float *xb, const int64_t *ids, const Config &cfg) {
     try {
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         index_->Add(dataset, cfg);
-    } catch (KnowhereException &e) {
+    } catch (knowhere::KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (std::exception &e) {
@@ -78,7 +76,7 @@ VecIndexImpl::Add(const long &nb, const float *xb, const long *ids, const Config
 }
 
 Status
-VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *ids, const Config &cfg) {
+VecIndexImpl::Search(const int64_t &nq, const float *xq, float *dist, int64_t *ids, const Config &cfg) {
     try {
         auto k = cfg->k;
         auto dataset = GenDataset(nq, dim, xq);
@@ -112,8 +110,7 @@ VecIndexImpl::Search(const long &nq, const float *xq, float *dist, long *ids, co
         // TODO(linxj): avoid copy here.
         memcpy(ids, p_ids, sizeof(int64_t) * nq * k);
         memcpy(dist, p_dist, sizeof(float) * nq * k);
-
-    } catch (KnowhereException &e) {
+    } catch (knowhere::KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (std::exception &e) {
@@ -179,7 +176,7 @@ VecIndexImpl::Clone() {
 
 int64_t
 VecIndexImpl::GetDeviceId() {
-    if (auto device_idx = std::dynamic_pointer_cast<GPUIndex>(index_)) {
+    if (auto device_idx = std::dynamic_pointer_cast<knowhere::GPUIndex>(index_)) {
         return device_idx->GetGpuDevice();
     }
     // else
@@ -188,22 +185,22 @@ VecIndexImpl::GetDeviceId() {
 
 float *
 BFIndex::GetRawVectors() {
-    auto raw_index = std::dynamic_pointer_cast<IDMAP>(index_);
+    auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_);
     if (raw_index) { return raw_index->GetRawVectors(); }
     return nullptr;
 }
 
 int64_t *
 BFIndex::GetRawIds() {
-    return std::static_pointer_cast<IDMAP>(index_)->GetRawIds();
+    return std::static_pointer_cast<knowhere::IDMAP>(index_)->GetRawIds();
 }
 
 ErrorCode
 BFIndex::Build(const Config &cfg) {
     try {
         dim = cfg->d;
-        std::static_pointer_cast<IDMAP>(index_)->Train(cfg);
-    } catch (KnowhereException &e) {
+        std::static_pointer_cast<knowhere::IDMAP>(index_)->Train(cfg);
+    } catch (knowhere::KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return KNOWHERE_UNEXPECTED_ERROR;
     } catch (std::exception &e) {
@@ -214,19 +211,19 @@ BFIndex::Build(const Config &cfg) {
 }
 
 Status
-BFIndex::BuildAll(const long &nb,
+BFIndex::BuildAll(const int64_t &nb,
                   const float *xb,
-                  const long *ids,
+                  const int64_t *ids,
                   const Config &cfg,
-                  const long &nt,
+                  const int64_t &nt,
                   const float *xt) {
     try {
         dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
-        std::static_pointer_cast<IDMAP>(index_)->Train(cfg);
+        std::static_pointer_cast<knowhere::IDMAP>(index_)->Train(cfg);
         index_->Add(dataset, cfg);
-    } catch (KnowhereException &e) {
+    } catch (knowhere::KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (std::exception &e) {
@@ -238,11 +235,11 @@ BFIndex::BuildAll(const long &nb,
 
 // TODO(linxj): add lock here.
 Status
-IVFMixIndex::BuildAll(const long &nb,
+IVFMixIndex::BuildAll(const int64_t &nb,
                       const float *xb,
-                      const long *ids,
+                      const int64_t *ids,
                       const Config &cfg,
-                      const long &nt,
+                      const int64_t &nt,
                       const float *xt) {
     try {
         dim = cfg->d;
@@ -254,7 +251,7 @@ IVFMixIndex::BuildAll(const long &nb,
         index_->set_index_model(model);
         index_->Add(dataset, cfg);
 
-        if (auto device_index = std::dynamic_pointer_cast<GPUIVF>(index_)) {
+        if (auto device_index = std::dynamic_pointer_cast<knowhere::GPUIVF>(index_)) {
             auto host_index = device_index->CopyGpuToCpu(Config());
             index_ = host_index;
             type = ConvertToCpuIndexType(type);
@@ -262,7 +259,7 @@ IVFMixIndex::BuildAll(const long &nb,
             WRAPPER_LOG_ERROR << "Build IVFMIXIndex Failed";
             return Status(KNOWHERE_ERROR, "Build IVFMIXIndex Failed");
         }
-    } catch (KnowhereException &e) {
+    } catch (knowhere::KnowhereException &e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (std::exception &e) {
@@ -279,6 +276,6 @@ IVFMixIndex::Load(const zilliz::knowhere::BinarySet &index_binary) {
     return Status::OK();
 }
 
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz

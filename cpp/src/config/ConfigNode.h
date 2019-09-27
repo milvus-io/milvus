@@ -30,7 +30,7 @@ typedef std::vector<ConfigNode> ConfigNodeArr;
 
 class ConfigNode {
  public:
-    void Combine(const ConfigNode& target);
+    void Combine(const ConfigNode &target);
 
     //key/value pair config
     void SetValue(const std::string &key, const std::string &value);
@@ -42,23 +42,23 @@ class ConfigNode {
     float GetFloatValue(const std::string &param_key, float default_val = 0.0) const;
     double GetDoubleValue(const std::string &param_key, double default_val = 0.0) const;
 
-    const std::map<std::string, std::string>& GetConfig() const;
+    const std::map<std::string, std::string> &GetConfig() const;
     void ClearConfig();
 
     //key/object config
     void AddChild(const std::string &type_name, const ConfigNode &config);
     ConfigNode GetChild(const std::string &type_name) const;
-    ConfigNode& GetChild(const std::string &type_name);
+    ConfigNode &GetChild(const std::string &type_name);
     void GetChildren(ConfigNodeArr &arr) const;
 
-    const std::map<std::string, ConfigNode>& GetChildren() const;
+    const std::map<std::string, ConfigNode> &GetChildren() const;
     void ClearChildren();
 
     //key/sequence config
     void AddSequenceItem(const std::string &key, const std::string &item);
     std::vector<std::string> GetSequence(const std::string &key) const;
 
-    const std::map<std::string, std::vector<std::string> >& GetSequences() const;
+    const std::map<std::string, std::vector<std::string> > &GetSequences() const;
     void ClearSequences();
 
     void PrintAll(const std::string &prefix = "") const;
@@ -70,6 +70,6 @@ class ConfigNode {
     std::map<std::string, std::vector<std::string> > sequences_;
 };
 
-}
-}
-}
+} // namespace server
+} // namespace milvus
+} // namespace zilliz

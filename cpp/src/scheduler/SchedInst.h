@@ -24,13 +24,12 @@
 #include <mutex>
 #include <memory>
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class ResMgrInst {
-public:
+ public:
     static ResourceMgrPtr
     GetInstance() {
         if (instance == nullptr) {
@@ -42,13 +41,13 @@ public:
         return instance;
     }
 
-private:
+ private:
     static ResourceMgrPtr instance;
     static std::mutex mutex_;
 };
 
 class SchedInst {
-public:
+ public:
     static SchedulerPtr
     GetInstance() {
         if (instance == nullptr) {
@@ -60,13 +59,13 @@ public:
         return instance;
     }
 
-private:
+ private:
     static SchedulerPtr instance;
     static std::mutex mutex_;
 };
 
 class JobMgrInst {
-public:
+ public:
     static scheduler::JobMgrPtr
     GetInstance() {
         if (instance == nullptr) {
@@ -78,7 +77,7 @@ public:
         return instance;
     }
 
-private:
+ private:
     static scheduler::JobMgrPtr instance;
     static std::mutex mutex_;
 };
@@ -89,6 +88,6 @@ StartSchedulerService();
 void
 StopSchedulerService();
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

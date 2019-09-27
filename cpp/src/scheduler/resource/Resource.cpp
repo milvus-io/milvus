@@ -15,10 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <iostream>
-#include "../Utils.h"
-#include "Resource.h"
+#include "scheduler/resource/Resource.h"
+#include "scheduler/Utils.h"
 
+#include <iostream>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
@@ -100,7 +101,8 @@ Resource::NumOfTaskToExec() {
     return count;
 }
 
-TaskTableItemPtr Resource::pick_task_load() {
+TaskTableItemPtr
+Resource::pick_task_load() {
     auto indexes = task_table_.PickToLoad(10);
     for (auto index : indexes) {
         // try to set one task loading, then return
@@ -111,7 +113,8 @@ TaskTableItemPtr Resource::pick_task_load() {
     return nullptr;
 }
 
-TaskTableItemPtr Resource::pick_task_execute() {
+TaskTableItemPtr
+Resource::pick_task_execute() {
     auto indexes = task_table_.PickToExecute(3);
     for (auto index : indexes) {
         // try to set one task executing, then return
@@ -122,10 +125,13 @@ TaskTableItemPtr Resource::pick_task_execute() {
     return nullptr;
 }
 
-void Resource::loader_function() {
+void
+Resource::loader_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(load_mutex_);
-        load_cv_.wait(lock, [&] { return load_flag_; });
+        load_cv_.wait(lock, [&] {
+            return load_flag_;
+        });
         load_flag_ = false;
         lock.unlock();
         while (true) {
@@ -140,18 +146,20 @@ void Resource::loader_function() {
                 subscriber_(std::static_pointer_cast<Event>(event));
             }
         }
-
     }
 }
 
-void Resource::executor_function() {
+void
+Resource::executor_function() {
     if (subscriber_) {
         auto event = std::make_shared<StartUpEvent>(shared_from_this());
         subscriber_(std::static_pointer_cast<Event>(event));
     }
     while (running_) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
-        exec_cv_.wait(lock, [&] { return exec_flag_; });
+        exec_cv_.wait(lock, [&] {
+            return exec_flag_;
+        });
         exec_flag_ = false;
         lock.unlock();
         while (true) {
@@ -172,10 +180,9 @@ void Resource::executor_function() {
                 subscriber_(std::static_pointer_cast<Event>(event));
             }
         }
-
     }
 }
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
