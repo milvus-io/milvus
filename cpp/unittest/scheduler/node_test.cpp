@@ -19,37 +19,40 @@
 #include "scheduler/resource/Node.h"
 #include <gtest/gtest.h>
 
+namespace {
 
-using namespace zilliz::milvus::scheduler;
+namespace ms = zilliz::milvus::scheduler;
+
+} // namespace
 
 class NodeTest : public ::testing::Test {
-protected:
+ protected:
     void
     SetUp() override {
-        node1_ = std::make_shared<Node>();
-        node2_ = std::make_shared<Node>();
-        node3_ = std::make_shared<Node>();
-        isolated_node1_ = std::make_shared<Node>();
-        isolated_node2_ = std::make_shared<Node>();
+        node1_ = std::make_shared<ms::Node>();
+        node2_ = std::make_shared<ms::Node>();
+        node3_ = std::make_shared<ms::Node>();
+        isolated_node1_ = std::make_shared<ms::Node>();
+        isolated_node2_ = std::make_shared<ms::Node>();
 
-        auto pcie = Connection("PCIe", 11.0);
+        auto pcie = ms::Connection("PCIe", 11.0);
 
         node1_->AddNeighbour(node2_, pcie);
         node1_->AddNeighbour(node3_, pcie);
         node2_->AddNeighbour(node1_, pcie);
     }
 
-    NodePtr node1_;
-    NodePtr node2_;
-    NodePtr node3_;
-    NodePtr isolated_node1_;
-    NodePtr isolated_node2_;
+    ms::NodePtr node1_;
+    ms::NodePtr node2_;
+    ms::NodePtr node3_;
+    ms::NodePtr isolated_node1_;
+    ms::NodePtr isolated_node2_;
 };
 
 TEST_F(NodeTest, ADD_NEIGHBOUR) {
     ASSERT_EQ(isolated_node1_->GetNeighbours().size(), 0);
     ASSERT_EQ(isolated_node2_->GetNeighbours().size(), 0);
-    auto pcie = Connection("PCIe", 11.0);
+    auto pcie = ms::Connection("PCIe", 11.0);
     isolated_node1_->AddNeighbour(isolated_node2_, pcie);
     ASSERT_EQ(isolated_node1_->GetNeighbours().size(), 1);
     ASSERT_EQ(isolated_node2_->GetNeighbours().size(), 0);
@@ -58,7 +61,7 @@ TEST_F(NodeTest, ADD_NEIGHBOUR) {
 TEST_F(NodeTest, REPEAT_ADD_NEIGHBOUR) {
     ASSERT_EQ(isolated_node1_->GetNeighbours().size(), 0);
     ASSERT_EQ(isolated_node2_->GetNeighbours().size(), 0);
-    auto pcie = Connection("PCIe", 11.0);
+    auto pcie = ms::Connection("PCIe", 11.0);
     isolated_node1_->AddNeighbour(isolated_node2_, pcie);
     isolated_node1_->AddNeighbour(isolated_node2_, pcie);
     ASSERT_EQ(isolated_node1_->GetNeighbours().size(), 1);
@@ -97,3 +100,4 @@ TEST_F(NodeTest, DUMP) {
     std::cout << node2_->Dump();
     ASSERT_FALSE(node2_->Dump().empty());
 }
+
