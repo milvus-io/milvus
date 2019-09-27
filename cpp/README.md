@@ -50,10 +50,9 @@ Centos7 :
 $ yum install gfortran qt4 flex bison 
 $ yum install mysql-devel mysql
     
-Ubuntu16.04 : 
+Ubuntu 16.04 or 18.04: 
 $ sudo apt-get install gfortran qt4-qmake flex bison 
 $ sudo apt-get install libmysqlclient-dev mysql-client
-       
 ```
 
 Verify the existence of `libmysqlclient_r.so`:
@@ -66,6 +65,10 @@ $ locate libmysqlclient_r.so
 If not, you need to create a symbolic link:
 
 ```shell
+# Locate libmysqlclient.so
+$ sudo updatedb
+$ locate libmysqlclient.so 
+
 # Create symbolic link
 $ sudo ln -s /path/to/libmysqlclient.so /path/to/libmysqlclient_r.so
 ```
@@ -90,7 +93,7 @@ please reinstall CMake with curl:
    ```shell
    CentOS 7:   
    $ yum install curl-devel
-   Ubuntu 16.04: 
+   Ubuntu 16.04 or 18.04: 
    $ sudo apt-get install libcurl4-openssl-dev
    ```
 
@@ -106,7 +109,7 @@ please reinstall CMake with curl:
 ```shell
 CentOS 7:   
 $ yum install clang
-Ubuntu 16.04: 
+Ubuntu 16.04 or 18.04: 
 $ sudo apt-get install clang-format clang-tidy
     
 $ ./build.sh -l
@@ -123,7 +126,7 @@ $ ./build.sh -u
 ```shell
 CentOS 7:   
 $ yum install lcov
-Ubuntu 16.04: 
+Ubuntu 16.04 or 18.04: 
 $ sudo apt-get install lcov
     
 $ ./build.sh -u -c
