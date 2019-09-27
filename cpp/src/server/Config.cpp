@@ -176,6 +176,85 @@ Config::ValidateConfig() {
     return Status::OK();
 }
 
+Status
+Config::ResetDefaultConfig() {
+    Status s;
+
+    /* server config */
+    s = SetServerConfigAddress(CONFIG_SERVER_ADDRESS_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetServerConfigPort(CONFIG_SERVER_PORT_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetServerConfigDeployMode(CONFIG_SERVER_DEPLOY_MODE_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetServerConfigTimeZone(CONFIG_SERVER_TIME_ZONE_DEFAULT);
+    if (!s.ok()) return s;
+
+    /* db config */
+    s = SetDBConfigPrimaryPath(CONFIG_DB_PRIMARY_PATH_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetDBConfigSecondaryPath(CONFIG_DB_SECONDARY_PATH_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetDBConfigBackendUrl(CONFIG_DB_BACKEND_URL_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetDBConfigArchiveDiskThreshold(CONFIG_DB_ARCHIVE_DISK_THRESHOLD_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetDBConfigArchiveDaysThreshold(CONFIG_DB_ARCHIVE_DAYS_THRESHOLD_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetDBConfigInsertBufferSize(CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetDBConfigBuildIndexGPU(CONFIG_DB_BUILD_INDEX_GPU_DEFAULT);
+    if (!s.ok()) return s;
+
+    /* metric config */
+    s = SetMetricConfigEnableMonitor(CONFIG_METRIC_ENABLE_MONITOR_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetMetricConfigCollector(CONFIG_METRIC_COLLECTOR_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetMetricConfigPrometheusPort(CONFIG_METRIC_PROMETHEUS_PORT_DEFAULT);
+    if (!s.ok()) return s;
+
+    /* cache config */
+    s = SetCacheConfigCpuMemCapacity(CONFIG_CACHE_CPU_MEM_CAPACITY_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetCacheConfigCpuMemThreshold(CONFIG_CACHE_CPU_MEM_THRESHOLD_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetCacheConfigGpuMemCapacity(CONFIG_CACHE_GPU_MEM_CAPACITY_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetCacheConfigGpuMemThreshold(CONFIG_CACHE_GPU_MEM_THRESHOLD_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetCacheConfigCacheInsertData(CONFIG_CACHE_CACHE_INSERT_DATA_DEFAULT);
+    if (!s.ok()) return s;
+
+    /* engine config */
+    s = SetEngineConfigBlasThreshold(CONFIG_ENGINE_BLAS_THRESHOLD_DEFAULT);
+    if (!s.ok()) return s;
+
+    s = SetEngineConfigOmpThreadNum(CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT);
+    if (!s.ok()) return s;
+
+    /* resource config */
+    s = SetResourceConfigMode(CONFIG_RESOURCE_MODE_DEFAULT);
+    if (!s.ok()) return s;
+
+    return Status::OK();
+}
+
 void
 Config::PrintConfigSection(const std::string &config_node_name) {
     std::cout << std::endl;
