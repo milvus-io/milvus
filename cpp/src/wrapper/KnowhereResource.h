@@ -25,7 +25,7 @@ namespace milvus {
 namespace engine {
 
 class KnowhereResource {
-public:
+ public:
     static Status
     Initialize();
 
@@ -33,7 +33,6 @@ public:
     Finalize();
 };
 
-
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz

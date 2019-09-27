@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ConnectionImpl.h"
+#include "sdk/interface/ConnectionImpl.h"
 
 namespace milvus {
 
@@ -25,7 +25,7 @@ Connection::Create() {
 }
 
 Status
-Connection::Destroy(std::shared_ptr<milvus::Connection>& connection_ptr) {
+Connection::Destroy(std::shared_ptr<milvus::Connection> &connection_ptr) {
     if (connection_ptr != nullptr) {
         return connection_ptr->Disconnect();
     }
@@ -84,19 +84,18 @@ ConnectionImpl::CreateIndex(const IndexParam &index_param) {
 
 Status
 ConnectionImpl::Insert(const std::string &table_name,
-                          const std::vector<RowRecord> &record_array,
-                          std::vector<int64_t> &id_array) {
+                       const std::vector<RowRecord> &record_array,
+                       std::vector<int64_t> &id_array) {
     return client_proxy_->Insert(table_name, record_array, id_array);
 }
 
-
 Status
 ConnectionImpl::Search(const std::string &table_name,
-                             const std::vector<RowRecord> &query_record_array,
-                             const std::vector<Range> &query_range_array,
-                             int64_t topk,
-                             int64_t nprobe,
-                             std::vector<TopKQueryResult> &topk_query_result_array) {
+                       const std::vector<RowRecord> &query_record_array,
+                       const std::vector<Range> &query_range_array,
+                       int64_t topk,
+                       int64_t nprobe,
+                       std::vector<TopKQueryResult> &topk_query_result_array) {
     return client_proxy_->Search(table_name, query_record_array, query_range_array, topk,
                                  nprobe, topk_query_result_array);
 }
@@ -133,7 +132,7 @@ ConnectionImpl::DumpTaskTables() const {
 
 Status
 ConnectionImpl::DeleteByRange(Range &range,
-              const std::string &table_name) {
+                              const std::string &table_name) {
     return client_proxy_->DeleteByRange(range, table_name);
 }
 
@@ -143,7 +142,7 @@ ConnectionImpl::PreloadTable(const std::string &table_name) const {
 }
 
 Status
-ConnectionImpl::DescribeIndex(const std::string &table_name, IndexParam& index_param) const {
+ConnectionImpl::DescribeIndex(const std::string &table_name, IndexParam &index_param) const {
     return client_proxy_->DescribeIndex(table_name, index_param);
 }
 
@@ -152,4 +151,4 @@ ConnectionImpl::DropIndex(const std::string &table_name) const {
     return client_proxy_->DropIndex(table_name);
 }
 
-}
+} // namespace milvus

@@ -29,7 +29,8 @@
 #include <thread>
 #include <list>
 #include <set>
-
+#include <vector>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -68,11 +69,11 @@ class DBImpl : public DB {
 
     Status InsertVectors(const std::string &table_id, uint64_t n, const float *vectors, IDNumbers &vector_ids) override;
 
-    Status CreateIndex(const std::string& table_id, const TableIndex& index) override;
+    Status CreateIndex(const std::string &table_id, const TableIndex &index) override;
 
-    Status DescribeIndex(const std::string& table_id, TableIndex& index) override;
+    Status DescribeIndex(const std::string &table_id, TableIndex &index) override;
 
-    Status DropIndex(const std::string& table_id) override;
+    Status DropIndex(const std::string &table_id) override;
 
     Status Query(const std::string &table_id,
                  uint64_t k,
@@ -123,7 +124,7 @@ class DBImpl : public DB {
     Status BackgroundMergeFiles(const std::string &table_id);
     void BackgroundCompaction(std::set<std::string> table_ids);
 
-    void StartBuildIndexTask(bool force=false);
+    void StartBuildIndexTask(bool force = false);
     void BackgroundBuildIndex();
 
     Status BuildIndex(const meta::TableFileSchema &);
@@ -151,7 +152,6 @@ class DBImpl : public DB {
     std::list<std::future<void>> index_thread_results_;
 
     std::mutex build_index_mutex_;
-
 }; // DBImpl
 
 

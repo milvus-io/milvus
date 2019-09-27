@@ -16,11 +16,15 @@
 // under the License.
 
 
-#include "KnowhereResource.h"
+#include "wrapper/KnowhereResource.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "server/Config.h"
 
 #include <map>
+#include <set>
+#include <vector>
+#include <string>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
@@ -31,20 +35,20 @@ constexpr int64_t M_BYTE = 1024 * 1024;
 Status
 KnowhereResource::Initialize() {
     struct GpuResourceSetting {
-        int64_t pinned_memory = 300*M_BYTE;
-        int64_t temp_memory = 300*M_BYTE;
+        int64_t pinned_memory = 300 * M_BYTE;
+        int64_t temp_memory = 300 * M_BYTE;
         int64_t resource_num = 2;
     };
-    using GpuResourcesArray = std::map<int64_t , GpuResourceSetting>;
+    using GpuResourcesArray = std::map<int64_t, GpuResourceSetting>;
     GpuResourcesArray gpu_resources;
     Status s;
 
     //get build index gpu resource
-    server::Config& config = server::Config::GetInstance();
+    server::Config &config = server::Config::GetInstance();
 
     int32_t build_index_gpu;
     s = config.GetDBConfigBuildIndexGPU(build_index_gpu);
-    if (!s.ok())  return s;
+    if (!s.ok()) return s;
 
     gpu_resources.insert(std::make_pair(build_index_gpu, GpuResourceSetting()));
 
@@ -64,7 +68,7 @@ KnowhereResource::Initialize() {
     }
 
     //init gpu resources
-    for(auto iter = gpu_resources.begin(); iter != gpu_resources.end(); ++iter) {
+    for (auto iter = gpu_resources.begin(); iter != gpu_resources.end(); ++iter) {
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(iter->first,
                                                                 iter->second.pinned_memory,
                                                                 iter->second.temp_memory,
@@ -80,6 +84,6 @@ KnowhereResource::Finalize() {
     return Status::OK();
 }
 
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz

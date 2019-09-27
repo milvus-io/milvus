@@ -20,15 +20,13 @@
 #include "scheduler/job/DeleteJob.h"
 #include "Task.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class XDeleteTask : public Task {
-public:
-    explicit
-    XDeleteTask(const scheduler::DeleteJobPtr &job);
+ public:
+    explicit XDeleteTask(const scheduler::DeleteJobPtr &job);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -36,10 +34,10 @@ public:
     void
     Execute() override;
 
-public:
+ public:
     scheduler::DeleteJobPtr delete_job_;
 };
 
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

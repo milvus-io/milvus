@@ -22,21 +22,21 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <utility>
 #include <condition_variable>
 
 #include "resource/Resource.h"
 #include "utils/Log.h"
-
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class ResourceMgr {
-public:
+ public:
     ResourceMgr() = default;
 
-public:
+ public:
     /******** Management Interface ********/
     void
     Start();
@@ -58,7 +58,7 @@ public:
         subscriber_ = std::move(subscriber);
     }
 
-public:
+ public:
     /******** Management Interface ********/
     inline std::vector<ResourceWPtr> &
     GetDiskResources() {
@@ -89,10 +89,10 @@ public:
     uint64_t
     GetNumGpuResource() const;
 
-public:
+ public:
     // TODO: add stats interface(low)
 
-public:
+ public:
     /******** Utility Functions ********/
     std::string
     Dump();
@@ -100,14 +100,14 @@ public:
     std::string
     DumpTaskTables();
 
-private:
+ private:
     void
     post_event(const EventPtr &event);
 
     void
     event_process();
 
-private:
+ private:
     bool running_ = false;
 
     std::vector<ResourceWPtr> disk_resources_;
@@ -120,13 +120,11 @@ private:
     std::condition_variable event_cv_;
 
     std::thread worker_thread_;
-
 };
 
 using ResourceMgrPtr = std::shared_ptr<ResourceMgr>;
 using ResourceMgrWPtr = std::weak_ptr<ResourceMgr>;
 
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

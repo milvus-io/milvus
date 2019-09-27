@@ -23,15 +23,12 @@
 #include <memory>
 #include <string>
 
-
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-
 class ExecutionEngineImpl : public ExecutionEngine {
-public:
-
+ public:
     ExecutionEngineImpl(uint16_t dimension,
                         const std::string &location,
                         EngineType index_type,
@@ -44,7 +41,7 @@ public:
                         MetricType metric_type,
                         int32_t nlist);
 
-    Status AddWithIds(long n, const float *xdata, const long *xids) override;
+    Status AddWithIds(int64_t n, const float *xdata, const int64_t *xids) override;
 
     size_t Count() const override;
 
@@ -66,12 +63,12 @@ public:
 
     Status Merge(const std::string &location) override;
 
-    Status Search(long n,
+    Status Search(int64_t n,
                   const float *data,
-                  long k,
-                  long nprobe,
+                  int64_t k,
+                  int64_t nprobe,
                   float *distances,
-                  long *labels) const override;
+                  int64_t *labels) const override;
 
     ExecutionEnginePtr BuildIndex(const std::string &location, EngineType engine_type) override;
 
@@ -81,18 +78,24 @@ public:
 
     Status Init() override;
 
-    EngineType IndexEngineType() const override { return index_type_; }
+    EngineType IndexEngineType() const override {
+        return index_type_;
+    }
 
-    MetricType IndexMetricType() const override { return metric_type_; }
+    MetricType IndexMetricType() const override {
+        return metric_type_;
+    }
 
-    std::string GetLocation() const override { return location_; }
+    std::string GetLocation() const override {
+        return location_;
+    }
 
-private:
+ private:
     VecIndexPtr CreatetVecIndex(EngineType type);
 
     VecIndexPtr Load(const std::string &location);
 
-protected:
+ protected:
     VecIndexPtr index_ = nullptr;
     EngineType index_type_;
     MetricType metric_type_;
@@ -103,7 +106,6 @@ protected:
     int32_t nlist_ = 0;
     int32_t gpu_num_ = 0;
 };
-
 
 } // namespace engine
 } // namespace milvus

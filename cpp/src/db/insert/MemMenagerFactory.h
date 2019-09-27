@@ -20,15 +20,17 @@
 #include "MemManager.h"
 #include "db/meta/Meta.h"
 
+#include <memory>
+
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class MemManagerFactory {
-public:
+ public:
     static MemManagerPtr Build(const std::shared_ptr<meta::Meta> &meta, const DBOptions &options);
 };
 
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz

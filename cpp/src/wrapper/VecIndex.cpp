@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "wrapper/VecIndex.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
@@ -25,12 +26,10 @@
 #include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "knowhere/common/Exception.h"
-#include "VecIndex.h"
 #include "VecImpl.h"
 #include "utils/Log.h"
 
 #include <cuda.h>
-
 
 namespace zilliz {
 namespace milvus {
@@ -42,7 +41,7 @@ struct FileIOReader {
     std::fstream fs;
     std::string name;
 
-    FileIOReader(const std::string &fname);
+    explicit FileIOReader(const std::string &fname);
 
     ~FileIOReader();
 
@@ -72,13 +71,11 @@ FileIOReader::operator()(void *ptr, size_t size, size_t pos) {
     return 0;
 }
 
-
-
 struct FileIOWriter {
     std::fstream fs;
     std::string name;
 
-    FileIOWriter(const std::string &fname);
+    explicit FileIOWriter(const std::string &fname);
     ~FileIOWriter();
     size_t operator()(void *ptr, size_t size);
 };
@@ -96,7 +93,6 @@ size_t
 FileIOWriter::operator()(void *ptr, size_t size) {
     fs.write(reinterpret_cast<char *>(ptr), size);
 }
-
 
 VecIndexPtr
 GetVecIndexFactory(const IndexType &type, const Config &cfg) {
@@ -215,7 +211,7 @@ write_index(VecIndexPtr index, const std::string &location) {
 
         FileIOWriter writer(location);
         writer(&index_type, sizeof(IndexType));
-        for (auto &iter: binaryset.binary_map_) {
+        for (auto &iter : binaryset.binary_map_) {
             auto meta = iter.first.c_str();
             size_t meta_length = iter.first.length();
             writer(&meta_length, sizeof(meta_length));
@@ -242,15 +238,14 @@ write_index(VecIndexPtr index, const std::string &location) {
     return Status::OK();
 }
 
-
 // TODO(linxj): redo here.
 void
-AutoGenParams(const IndexType &type, const long &size, zilliz::knowhere::Config &cfg) {
+AutoGenParams(const IndexType &type, const int64_t &size, zilliz::knowhere::Config &cfg) {
     auto nlist = cfg.get_with_default("nlist", 0);
     if (size <= TYPICAL_COUNT / 16384 + 1) {
         //handle less row count, avoid nlist set to 0
         cfg["nlist"] = 1;
-    } else if (int(size / TYPICAL_COUNT) * nlist == 0) {
+    } else if (int(size / TYPICAL_COUNT) *nlist == 0) {
         //calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
         cfg["nlist"] = int(size / TYPICAL_COUNT * 16384);
     }
@@ -341,7 +336,6 @@ ConvertToGpuIndexType(const IndexType &type) {
     }
 }
 
-
-}
-}
-}
+} // namespace engine
+} // namespace milvus
+} // namespace zilliz
