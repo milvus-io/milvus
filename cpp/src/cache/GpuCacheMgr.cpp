@@ -16,10 +16,12 @@
 // under the License.
 
 
-#include <sstream>
+#include "cache/GpuCacheMgr.h"
 #include "utils/Log.h"
-#include "GpuCacheMgr.h"
 #include "server/Config.h"
+
+#include <sstream>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
@@ -29,11 +31,11 @@ std::mutex GpuCacheMgr::mutex_;
 std::unordered_map<uint64_t, GpuCacheMgrPtr> GpuCacheMgr::instance_;
 
 namespace {
-    constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
+constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
 }
 
 GpuCacheMgr::GpuCacheMgr() {
-    server::Config& config = server::Config::GetInstance();
+    server::Config &config = server::Config::GetInstance();
     Status s;
 
     int32_t gpu_mem_cap;
@@ -42,7 +44,7 @@ GpuCacheMgr::GpuCacheMgr() {
         SERVER_LOG_ERROR << s.message();
     }
     int32_t cap = gpu_mem_cap * G_BYTE;
-    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
+    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
 
     float gpu_mem_threshold;
     s = config.GetCacheConfigGpuMemThreshold(gpu_mem_threshold);
@@ -57,7 +59,8 @@ GpuCacheMgr::GpuCacheMgr() {
     }
 }
 
-GpuCacheMgr* GpuCacheMgr::GetInstance(uint64_t gpu_id) {
+GpuCacheMgr *
+GpuCacheMgr::GetInstance(uint64_t gpu_id) {
     if (instance_.find(gpu_id) == instance_.end()) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (instance_.find(gpu_id) == instance_.end()) {
@@ -70,15 +73,16 @@ GpuCacheMgr* GpuCacheMgr::GetInstance(uint64_t gpu_id) {
     }
 }
 
-engine::VecIndexPtr GpuCacheMgr::GetIndex(const std::string& key) {
+engine::VecIndexPtr
+GpuCacheMgr::GetIndex(const std::string &key) {
     DataObjPtr obj = GetItem(key);
-    if(obj != nullptr) {
+    if (obj != nullptr) {
         return obj->data();
     }
 
     return nullptr;
 }
 
-}
-}
-}
+} // namespace cache
+} // namespace milvus
+} // namespace zilliz
