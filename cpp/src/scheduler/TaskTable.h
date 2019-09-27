@@ -20,10 +20,12 @@
 #include <vector>
 #include <deque>
 #include <mutex>
+#include <memory>
+#include <utility>
+#include <string>
 
 #include "task/SearchTask.h"
 #include "event/Event.h"
-
 
 namespace zilliz {
 namespace milvus {
@@ -52,7 +54,8 @@ struct TaskTimestamp {
 };
 
 struct TaskTableItem {
-    TaskTableItem() : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex() {}
+    TaskTableItem() : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex() {
+    }
 
     TaskTableItem(const TaskTableItem &src) = delete;
     TaskTableItem(TaskTableItem &&) = delete;
@@ -91,7 +94,7 @@ struct TaskTableItem {
 using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
 
 class TaskTable {
-public:
+ public:
     TaskTable() = default;
 
     TaskTable(const TaskTable &) = delete;
@@ -145,24 +148,28 @@ public:
         return table_.size();
     }
 
-public:
+ public:
     TaskTableItemPtr &
     operator[](uint64_t index) {
         return table_[index];
     }
 
-    std::deque<TaskTableItemPtr>::iterator begin() { return table_.begin(); }
-    std::deque<TaskTableItemPtr>::iterator end() { return table_.end(); }
+    std::deque<TaskTableItemPtr>::iterator begin() {
+        return table_.begin();
+    }
 
-public:
+    std::deque<TaskTableItemPtr>::iterator end() {
+        return table_.end();
+    }
+
+ public:
     std::vector<uint64_t>
     PickToLoad(uint64_t limit);
 
     std::vector<uint64_t>
     PickToExecute(uint64_t limit);
 
-public:
-
+ public:
     /******** Action ********/
 
     // TODO: bool to Status
@@ -227,14 +234,14 @@ public:
         return table_[index]->Moved();
     }
 
-public:
+ public:
     /*
      * Dump;
      */
     std::string
     Dump();
 
-private:
+ private:
     std::uint64_t id_ = 0;
     mutable std::mutex id_mutex_;
     std::deque<TaskTableItemPtr> table_;
@@ -246,7 +253,6 @@ private:
     uint64_t last_finish_ = -1;
 };
 
-
-}
-}
-}
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

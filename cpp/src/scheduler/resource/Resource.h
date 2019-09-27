@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <utility>
 #include <thread>
 #include <functional>
 #include <condition_variable>
@@ -33,7 +34,6 @@
 #include "../task/Task.h"
 #include "Connection.h"
 #include "Node.h"
-
 
 namespace zilliz {
 namespace milvus {
@@ -104,7 +104,7 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
         return task_table_;
     }
 
-public:
+ public:
     inline bool
     HasLoader() const {
         return enable_loader_;
@@ -212,7 +212,6 @@ public:
 using ResourcePtr = std::shared_ptr<Resource>;
 using ResourceWPtr = std::weak_ptr<Resource>;
 
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

@@ -22,7 +22,6 @@
 #include <string>
 #include <memory>
 
-
 class Resource;
 
 using ResourceWPtr = std::weak_ptr<Resource>;
@@ -32,9 +31,10 @@ namespace milvus {
 namespace scheduler {
 
 class SpecResLabel : public TaskLabel {
-public:
-    SpecResLabel(const ResourceWPtr &resource)
-        : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource) {}
+ public:
+    explicit SpecResLabel(const ResourceWPtr &resource)
+        : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource) {
+    }
 
     inline ResourceWPtr &
     resource() {
@@ -46,14 +46,13 @@ public:
         return resource_name_;
     }
 
-private:
+ private:
     ResourceWPtr resource_;
     std::string resource_name_;
 };
 
 using SpecResLabelPtr = std::shared_ptr<SpecResLabel>();
 
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

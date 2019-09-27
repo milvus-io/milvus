@@ -15,10 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <src/scheduler/tasklabel/BroadcastLabel.h>
-#include "TaskCreator.h"
+#include "scheduler/TaskCreator.h"
+#include "scheduler/tasklabel/BroadcastLabel.h"
 #include "tasklabel/DefaultLabel.h"
-
 
 namespace zilliz {
 namespace milvus {
@@ -64,8 +63,6 @@ TaskCreator::Create(const DeleteJobPtr &job) {
     return tasks;
 }
 
-
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz

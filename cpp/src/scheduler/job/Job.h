@@ -27,7 +27,6 @@
 #include <condition_variable>
 #include <memory>
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
@@ -42,7 +41,7 @@ enum class JobType {
 using JobId = std::uint64_t;
 
 class Job {
-public:
+ public:
     inline JobId
     id() const {
         return id_;
@@ -53,10 +52,11 @@ public:
         return type_;
     }
 
-protected:
-    Job(JobId id, JobType type) : id_(id), type_(type) {}
+ protected:
+    Job(JobId id, JobType type) : id_(id), type_(type) {
+    }
 
-private:
+ private:
     JobId id_;
     JobType type_;
 };
@@ -64,7 +64,6 @@ private:
 using JobPtr = std::shared_ptr<Job>;
 using JobWPtr = std::weak_ptr<Job>;
 
-}
-}
-}
-
+} // namespace scheduler
+} // namespace milvus
+} // namespace zilliz
