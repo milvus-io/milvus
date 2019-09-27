@@ -21,22 +21,23 @@
 
 #include <vector>
 #include <stdint.h>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-typedef long IDNumber;
-typedef IDNumber* IDNumberPtr;
+typedef int64_t IDNumber;
+typedef IDNumber *IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 
 typedef std::vector<std::pair<IDNumber, double>> QueryResult;
 typedef std::vector<QueryResult> QueryResults;
 
 struct TableIndex {
-    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
+    int32_t engine_type_ = (int) EngineType::FAISS_IDMAP;
     int32_t nlist_ = 16384;
-    int32_t metric_type_ = (int)MetricType::L2;
+    int32_t metric_type_ = (int) MetricType::L2;
 };
 
 } // namespace engine

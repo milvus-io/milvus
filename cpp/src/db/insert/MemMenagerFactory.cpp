@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "MemMenagerFactory.h"
+#include "db/insert/MemMenagerFactory.h"
 #include "MemManagerImpl.h"
 #include "utils/Log.h"
 #include "utils/Exception.h"
@@ -26,12 +26,14 @@
 #include <cstdlib>
 #include <string>
 #include <regex>
+#include <memory>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-MemManagerPtr MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options) {
+MemManagerPtr
+MemManagerFactory::Build(const std::shared_ptr<meta::Meta> &meta, const DBOptions &options) {
     return std::make_shared<MemManagerImpl>(meta, options);
 }
 

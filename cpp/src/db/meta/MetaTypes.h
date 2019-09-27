@@ -23,21 +23,22 @@
 #include <vector>
 #include <map>
 #include <string>
+#include <memory>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
 
-constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
+constexpr int32_t DEFAULT_ENGINE_TYPE = (int) EngineType::FAISS_IDMAP;
 constexpr int32_t DEFAULT_NLIST = 16384;
-constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
+constexpr int32_t DEFAULT_METRIC_TYPE = (int) MetricType::L2;
 constexpr int32_t DEFAULT_INDEX_FILE_SIZE = ONE_GB;
 
 constexpr int64_t FLAG_MASK_NO_USERID = 0x1;
-constexpr int64_t FLAG_MASK_HAS_USERID = 0x1<<1;
+constexpr int64_t FLAG_MASK_HAS_USERID = 0x1 << 1;
 
-using DateT = int ;
+using DateT = int;
 const DateT EmptyDate = -1;
 using DatesT = std::vector<DateT>;
 
@@ -49,7 +50,7 @@ struct TableSchema {
 
     size_t id_ = 0;
     std::string table_id_;
-    int32_t state_ = (int)NORMAL;
+    int32_t state_ = (int) NORMAL;
     uint16_t dimension_ = 0;
     int64_t created_on_ = 0;
     int64_t flag_ = 0;
