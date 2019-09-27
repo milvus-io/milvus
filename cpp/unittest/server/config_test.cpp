@@ -110,4 +110,7 @@ TEST(ConfigTest, SERVER_CONFIG_TEST) {
     ASSERT_TRUE(s.ok());
 
     config.PrintAll();
+
+    s = config.ResetDefaultConfig();
+    ASSERT_TRUE(s.ok());
 }
