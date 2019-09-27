@@ -29,16 +29,17 @@ namespace zilliz {
 namespace knowhere {
 
 IndexModelPtr IVFSQ::Train(const DatasetPtr &dataset, const Config &config) {
-    auto nlist = config["nlist"].as<size_t>();
-    auto nbits = config["nbits"].as<size_t>(); // TODO(linxj): only support SQ4 SQ6 SQ8 SQ16
-    auto metric_type = config["metric_type"].as_string() == "L2" ?
-                       faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+    auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
+    if (build_cfg != nullptr) {
+        build_cfg->CheckValid(); // throw exception
+    }
 
     GETTENSOR(dataset)
 
     std::stringstream index_type;
-    index_type << "IVF" << nlist << "," << "SQ" << nbits;
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), metric_type);
+    index_type << "IVF" << build_cfg->nlist << "," << "SQ" << build_cfg->nbits;
+    auto build_index = faiss::index_factory(dim, index_type.str().c_str(),
+                                            GetMetricType(build_cfg->metric_type));
     build_index->train(rows, (float *) p_data);
 
     std::shared_ptr<faiss::Index> ret_index;
