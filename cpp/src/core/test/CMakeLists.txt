@@ -29,7 +29,7 @@ set(util_srcs
         ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/ArrowAdapter.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/Exception.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/Timer.cpp
-        utils.cpp
+        ${CORE_SOURCE_DIR}/test/utils.cpp
         )
 
 #<IVF-TEST>
@@ -52,18 +52,10 @@ target_link_libraries(test_ivf ${depend_libs} ${unittest_libs} ${basic_libs})
 
 #<IDMAP-TEST>
 set(idmap_srcs
-        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/helpers/Cloner.cpp
-        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissBaseIndex.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIDMAP.cpp
-        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexGPUIVF.cpp
-        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVF.cpp
-        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFPQ.cpp
-        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexGPUIVFPQ.cpp
-        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFSQ.cpp
-        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexGPUIVFSQ.cpp
         )
 if(NOT TARGET test_idmap)
-    add_executable(test_idmap test_idmap.cpp ${idmap_srcs} ${util_srcs})
+    add_executable(test_idmap test_idmap.cpp ${idmap_srcs} ${ivf_srcs} ${util_srcs})
 endif()
 target_link_libraries(test_idmap ${depend_libs} ${unittest_libs} ${basic_libs})
 
@@ -86,5 +78,5 @@ install(TARGETS test_idmap DESTINATION unittest)
 install(TARGETS test_kdt DESTINATION unittest)
 
 #add_subdirectory(faiss_ori)
-#add_subdirectory(test_nsg)
+add_subdirectory(test_nsg)
 

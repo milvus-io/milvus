@@ -137,7 +137,7 @@ GetVecIndexFactory(const IndexType &type, const Config &cfg) {
             index = std::make_shared<zilliz::knowhere::GPUIVFSQ>(gpu_device);
             break;
         }
-        case IndexType::NSG_MIX: { // TODO(linxj): bug.
+        case IndexType::NSG_MIX: {
             index = std::make_shared<zilliz::knowhere::NSG>(gpu_device);
             break;
         }
