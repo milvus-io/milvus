@@ -16,9 +16,6 @@ TIMEZONE = env.str('TIMEZONE', 'UTC')
 from utils.logger_helper import config
 config(LOG_LEVEL, LOG_PATH, LOG_NAME, TIMEZONE)
 
-SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
-SQL_ECHO = env.bool('SQL_ECHO', False)
-
 TIMEOUT = env.int('TIMEOUT', 60)
 MAX_RETRY = env.int('MAX_RETRY', 3)
 SEARCH_WORKER_SIZE = env.int('SEARCH_WORKER_SIZE', 10)
@@ -62,6 +59,15 @@ class TracingConfig:
         },
         'logging': env.bool('TRACING_LOGGING', True)
     }
+
+class DefaultConfig:
+    SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
+    SQL_ECHO = env.bool('SQL_ECHO', False)
+
+# class TestingConfig(DefaultConfig):
+#     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_TEST_URI')
+#     SQL_ECHO = env.bool('SQL_TEST_ECHO', False)
+
 
 if __name__ == '__main__':
     import logging

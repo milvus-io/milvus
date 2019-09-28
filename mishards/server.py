@@ -12,20 +12,23 @@ from jaeger_client import Config
 from milvus.grpc_gen.milvus_pb2_grpc import add_MilvusServiceServicer_to_server
 from mishards.grpc_utils import is_grpc_method
 from mishards.service_handler import ServiceHandler
-from mishards import settings, discover
+from mishards import settings
 
 logger = logging.getLogger(__name__)
 
 
 class Server:
-    def __init__(self, conn_mgr, tracer, port=19530, max_workers=10, **kwargs):
+    def __init__(self):
         self.pre_run_handlers = set()
         self.grpc_methods = set()
         self.error_handlers = {}
         self.exit_flag = False
+
+    def init_app(self, conn_mgr, tracer, discover, port=19530, max_workers=10, **kwargs):
         self.port = int(port)
         self.conn_mgr = conn_mgr
         self.tracer = tracer
+        self.discover = discover
 
         self.server_impl = grpc.server(
             thread_pool=futures.ThreadPoolExecutor(max_workers=max_workers),
@@ -73,7 +76,7 @@ class Server:
     def on_pre_run(self):
         for handler in self.pre_run_handlers:
             handler()
-        discover.start()
+        self.discover.start()
 
     def start(self, port=None):
         handler_class = self.decorate_handler(ServiceHandler)
