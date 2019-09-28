@@ -31,7 +31,8 @@ namespace server {
 
 void
 SystemInfo::Init() {
-    if (initialized_) return;
+    if (initialized_)
+        return;
 
     initialized_ = true;
 
@@ -45,7 +46,8 @@ SystemInfo::Init() {
     file = fopen("/proc/cpuinfo", "r");
     num_processors_ = 0;
     while (fgets(line, 128, file) != NULL) {
-        if (strncmp(line, "processor", 9) == 0) num_processors_++;
+        if (strncmp(line, "processor", 9) == 0)
+            num_processors_++;
         if (strncmp(line, "physical", 8) == 0) {
             num_physical_processors_ = ParseLine(line);
         }
@@ -116,7 +118,8 @@ SystemInfo::GetProcessUsedMemory() {
 
 double
 SystemInfo::MemoryPercent() {
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
     return (double)(GetProcessUsedMemory() * 100) / (double)total_ram_;
 }
 
@@ -171,7 +174,8 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
 
 double
 SystemInfo::CPUPercent() {
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
     struct tms time_sample;
     clock_t now;
     double percent;
@@ -195,7 +199,8 @@ SystemInfo::CPUPercent() {
 std::vector<uint64_t>
 SystemInfo::GPUMemoryTotal() {
     // get GPU usage percent
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
     std::vector<uint64_t> result;
     nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
@@ -209,7 +214,8 @@ SystemInfo::GPUMemoryTotal() {
 
 std::vector<uint64_t>
 SystemInfo::GPUTemperature() {
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
     std::vector<uint64_t> result;
     for (int i = 0; i < num_device_; i++) {
         nvmlDevice_t device;
@@ -241,7 +247,8 @@ SystemInfo::CPUTemperature() {
 std::vector<uint64_t>
 SystemInfo::GPUMemoryUsed() {
     // get GPU memory used
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
 
     std::vector<uint64_t> result;
     nvmlMemory_t nvmlMemory;

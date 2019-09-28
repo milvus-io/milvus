@@ -83,8 +83,8 @@ ValidationUtil::ValidateTableDimension(int64_t dimension) {
 
 Status
 ValidationUtil::ValidateTableIndexType(int32_t index_type) {
-    int engine_type = (int)engine::EngineType(index_type);
-    if (engine_type <= 0 || engine_type > (int)engine::EngineType::MAX_VALUE) {
+    int engine_type = static_cast<int>(engine::EngineType(index_type));
+    if (engine_type <= 0 || engine_type > static_cast<int>(engine::EngineType::MAX_VALUE)) {
         std::string msg = "Invalid index type: " + std::to_string(index_type);
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
@@ -117,7 +117,8 @@ ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
 
 Status
 ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
-    if (metric_type != (int32_t)engine::MetricType::L2 && metric_type != (int32_t)engine::MetricType::IP) {
+    if (metric_type != static_cast<int32_t>(engine::MetricType::L2) &&
+        metric_type != static_cast<int32_t>(engine::MetricType::IP)) {
         std::string msg = "Invalid metric type: " + std::to_string(metric_type);
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
@@ -151,7 +152,7 @@ Status
 ValidationUtil::ValidateGpuIndex(uint32_t gpu_index) {
     int num_devices = 0;
     auto cuda_err = cudaGetDeviceCount(&num_devices);
-    if (cuda_err) {
+    if (cuda_err != cudaSuccess) {
         std::string msg = "Failed to get gpu card number, cuda error:" + std::to_string(cuda_err);
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_UNEXPECTED_ERROR, msg);
@@ -222,9 +223,8 @@ ValidationUtil::ValidateStringIsBool(const std::string& str) {
     if (s == "true" || s == "on" || s == "yes" || s == "1" || s == "false" || s == "off" || s == "no" || s == "0" ||
         s.empty()) {
         return Status::OK();
-    } else {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str);
     }
+    return Status(SERVER_INVALID_ARGUMENT, "Invalid boolean: " + str);
 }
 
 Status

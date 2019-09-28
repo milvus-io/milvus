@@ -163,7 +163,8 @@ GrpcRequestScheduler::Stop() {
     }
 
     for (auto iter : execute_threads_) {
-        if (iter == nullptr) continue;
+        if (iter == nullptr)
+            continue;
 
         iter->join();
     }

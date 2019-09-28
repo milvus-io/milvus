@@ -92,7 +92,8 @@ uint64_t
 Resource::NumOfTaskToExec() {
     uint64_t count = 0;
     for (auto& task : task_table_) {
-        if (task->state == TaskTableItemState::LOADED) ++count;
+        if (task->state == TaskTableItemState::LOADED)
+            ++count;
     }
     return count;
 }
@@ -102,7 +103,8 @@ Resource::pick_task_load() {
     auto indexes = task_table_.PickToLoad(10);
     for (auto index : indexes) {
         // try to set one task loading, then return
-        if (task_table_.Load(index)) return task_table_.Get(index);
+        if (task_table_.Load(index))
+            return task_table_.Get(index);
         // else try next
     }
     return nullptr;
@@ -113,7 +115,8 @@ Resource::pick_task_execute() {
     auto indexes = task_table_.PickToExecute(3);
     for (auto index : indexes) {
         // try to set one task executing, then return
-        if (task_table_.Execute(index)) return task_table_.Get(index);
+        if (task_table_.Execute(index))
+            return task_table_.Get(index);
         // else try next
     }
     return nullptr;
