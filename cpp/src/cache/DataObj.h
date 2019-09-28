@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "src/wrapper/VecIndex.h"
@@ -28,24 +27,24 @@ namespace cache {
 
 class DataObj {
  public:
-    explicit DataObj(const engine::VecIndexPtr &index)
-        : index_(index) {
+    explicit DataObj(const engine::VecIndexPtr& index) : index_(index) {
     }
 
-    DataObj(const engine::VecIndexPtr &index, int64_t size)
-        : index_(index),
-          size_(size) {
+    DataObj(const engine::VecIndexPtr& index, int64_t size) : index_(index), size_(size) {
     }
 
-    engine::VecIndexPtr data() {
+    engine::VecIndexPtr
+    data() {
         return index_;
     }
 
-    const engine::VecIndexPtr &data() const {
+    const engine::VecIndexPtr&
+    data() const {
         return index_;
     }
 
-    int64_t size() const {
+    int64_t
+    size() const {
         if (index_ == nullptr) {
             return 0;
         }
@@ -64,6 +63,6 @@ class DataObj {
 
 using DataObjPtr = std::shared_ptr<DataObj>;
 
-} // namespace cache
-} // namespace milvus
-} // namespace zilliz
+}  // namespace cache
+}  // namespace milvus
+}  // namespace zilliz
