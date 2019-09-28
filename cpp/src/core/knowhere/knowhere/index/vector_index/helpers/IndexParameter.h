@@ -15,17 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-#include "knowhere/common/Config.h"
 #include <faiss/Index.h>
+#include <memory>
 
+#include "knowhere/common/Config.h"
 
 namespace zilliz {
 namespace knowhere {
 
-extern faiss::MetricType GetMetricType(METRICTYPE &type);
+extern faiss::MetricType
+GetMetricType(METRICTYPE& type);
 
 // IVF Config
 constexpr int64_t DEFAULT_NLIST = INVALID_VALUE;
@@ -46,11 +47,7 @@ struct IVFCfg : public Cfg {
     int64_t nlist = DEFAULT_NLIST;
     int64_t nprobe = DEFAULT_NPROBE;
 
-    IVFCfg(const int64_t &dim,
-           const int64_t &k,
-           const int64_t &gpu_id,
-           const int64_t &nlist,
-           const int64_t &nprobe,
+    IVFCfg(const int64_t& dim, const int64_t& k, const int64_t& gpu_id, const int64_t& nlist, const int64_t& nprobe,
            METRICTYPE type)
         : Cfg(dim, k, gpu_id, type), nlist(nlist), nprobe(nprobe) {
     }
@@ -68,13 +65,8 @@ struct IVFSQCfg : public IVFCfg {
     // TODO(linxj): cpu only support SQ4 SQ6 SQ8 SQ16, gpu only support SQ4, SQ8, SQ16
     int64_t nbits = DEFAULT_NBITS;
 
-    IVFSQCfg(const int64_t &dim,
-             const int64_t &k,
-             const int64_t &gpu_id,
-             const int64_t &nlist,
-             const int64_t &nprobe,
-             const int64_t &nbits,
-             METRICTYPE type)
+    IVFSQCfg(const int64_t& dim, const int64_t& k, const int64_t& gpu_id, const int64_t& nlist, const int64_t& nprobe,
+             const int64_t& nbits, METRICTYPE type)
         : IVFCfg(dim, k, gpu_id, nlist, nprobe, type), nbits(nbits) {
     }
 
@@ -88,22 +80,16 @@ struct IVFSQCfg : public IVFCfg {
 using IVFSQConfig = std::shared_ptr<IVFSQCfg>;
 
 struct IVFPQCfg : public IVFCfg {
-    int64_t m = DEFAULT_NSUBVECTORS; // number of subquantizers(subvector)
-    int64_t nbits = DEFAULT_NBITS;  // number of bit per subvector index
+    int64_t m = DEFAULT_NSUBVECTORS;  // number of subquantizers(subvector)
+    int64_t nbits = DEFAULT_NBITS;    // number of bit per subvector index
 
     // TODO(linxj): not use yet
     int64_t scan_table_threhold = DEFAULT_SCAN_TABLE_THREHOLD;
     int64_t polysemous_ht = DEFAULT_POLYSEMOUS_HT;
     int64_t max_codes = DEFAULT_MAX_CODES;
 
-    IVFPQCfg(const int64_t &dim,
-             const int64_t &k,
-             const int64_t &gpu_id,
-             const int64_t &nlist,
-             const int64_t &nprobe,
-             const int64_t &nbits,
-             const int64_t &m,
-             METRICTYPE type)
+    IVFPQCfg(const int64_t& dim, const int64_t& k, const int64_t& gpu_id, const int64_t& nlist, const int64_t& nprobe,
+             const int64_t& nbits, const int64_t& m, METRICTYPE type)
         : IVFCfg(dim, k, gpu_id, nlist, nprobe, type), m(m), nbits(nbits) {
     }
 
@@ -122,19 +108,14 @@ struct NSGCfg : public IVFCfg {
     int64_t out_degree = DEFAULT_OUT_DEGREE;
     int64_t candidate_pool_size = DEFAULT_CANDIDATE_SISE;
 
-    NSGCfg(const int64_t &dim,
-           const int64_t &k,
-           const int64_t &gpu_id,
-           const int64_t &nlist,
-           const int64_t &nprobe,
-           const int64_t &knng,
-           const int64_t &search_length,
-           const int64_t &out_degree,
-           const int64_t &candidate_size,
+    NSGCfg(const int64_t& dim, const int64_t& k, const int64_t& gpu_id, const int64_t& nlist, const int64_t& nprobe,
+           const int64_t& knng, const int64_t& search_length, const int64_t& out_degree, const int64_t& candidate_size,
            METRICTYPE type)
         : IVFCfg(dim, k, gpu_id, nlist, nprobe, type),
-          knng(knng), search_length(search_length),
-          out_degree(out_degree), candidate_pool_size(candidate_size) {
+          knng(knng),
+          search_length(search_length),
+          out_degree(out_degree),
+          candidate_pool_size(candidate_size) {
     }
 
     NSGCfg() = default;
@@ -150,6 +131,5 @@ struct KDTCfg : public Cfg {
     int64_t tptnubmber = -1;
 };
 
-} // knowhere
-} // zilliz
-
+}  // namespace knowhere
+}  // namespace zilliz

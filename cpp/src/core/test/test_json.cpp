@@ -15,13 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "knowhere/common/config.h"
 
-using namespace zilliz::knowhere;
+namespace {
 
-int main(){
-    Config cfg;
+namespace kn = zilliz::knowhere;
+
+}  // namespace
+
+int
+main() {
+    kn::Config cfg;
 
     cfg["size"] = size_t(199);
     auto size = cfg.get_with_default("size", 123);

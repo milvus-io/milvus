@@ -15,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
-
 
 namespace zilliz {
 namespace knowhere {
@@ -29,18 +29,20 @@ using KDTParameter = std::pair<std::string, std::string>;
 
 class KDTParameterMgr {
  public:
-    const std::vector<KDTParameter> &
+    const std::vector<KDTParameter>&
     GetKDTParameters();
 
  public:
-    static KDTParameterMgr &
+    static KDTParameterMgr&
     GetInstance() {
         static KDTParameterMgr instance;
         return instance;
     }
 
-    KDTParameterMgr(const KDTParameterMgr &) = delete;
-    KDTParameterMgr &operator=(const KDTParameterMgr &) = delete;
+    KDTParameterMgr(const KDTParameterMgr&) = delete;
+    KDTParameterMgr&
+    operator=(const KDTParameterMgr&) = delete;
+
  private:
     KDTParameterMgr();
 
@@ -48,5 +50,5 @@ class KDTParameterMgr {
     std::vector<KDTParameter> kdt_parameters_;
 };
 
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere
+}  // namespace zilliz

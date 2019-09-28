@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "IndexParameter.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/common/Exception.h"
 
 #include <faiss/Index.h>
@@ -24,7 +23,8 @@
 namespace zilliz {
 namespace knowhere {
 
-faiss::MetricType GetMetricType(METRICTYPE &type) {
+faiss::MetricType
+GetMetricType(METRICTYPE& type) {
     if (type == METRICTYPE::L2) {
         return faiss::METRIC_L2;
     }
@@ -35,6 +35,5 @@ faiss::MetricType GetMetricType(METRICTYPE &type) {
     KNOWHERE_THROW_MSG("Metric type is invalid");
 }
 
-
-}
-}
+}  // namespace knowhere
+}  // namespace zilliz

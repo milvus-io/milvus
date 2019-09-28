@@ -15,21 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <memory>
 
+#include "IndexModel.h"
+#include "IndexType.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Dataset.h"
-#include "IndexType.h"
-#include "IndexModel.h"
 #include "knowhere/index/preprocessor/Preprocessor.h"
-
 
 namespace zilliz {
 namespace knowhere {
-
 
 class Index {
  public:
@@ -37,32 +34,36 @@ class Index {
     Serialize() = 0;
 
     virtual void
-    Load(const BinarySet &index_binary) = 0;
+    Load(const BinarySet& index_binary) = 0;
 
     // @throw
     virtual DatasetPtr
-    Search(const DatasetPtr &dataset, const Config &config) = 0;
+    Search(const DatasetPtr& dataset, const Config& config) = 0;
 
  public:
     IndexType
-    idx_type() const { return idx_type_; }
+    idx_type() const {
+        return idx_type_;
+    }
 
     void
-    set_idx_type(IndexType idx_type) { idx_type_ = idx_type; }
+    set_idx_type(IndexType idx_type) {
+        idx_type_ = idx_type;
+    }
 
     virtual void
-    set_preprocessor(PreprocessorPtr preprocessor) {}
+    set_preprocessor(PreprocessorPtr preprocessor) {
+    }
 
     virtual void
-    set_index_model(IndexModelPtr model) {}
+    set_index_model(IndexModelPtr model) {
+    }
 
  private:
     IndexType idx_type_;
 };
 
-
 using IndexPtr = std::shared_ptr<Index>;
 
-
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere
+}  // namespace zilliz

@@ -1,6 +1,7 @@
 include_directories(${CORE_SOURCE_DIR}/thirdparty)
 include_directories(${CORE_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
 include_directories(${CORE_SOURCE_DIR}/knowhere)
+include_directories(${CORE_SOURCE_DIR})
 include_directories(/usr/local/cuda/include)
 link_directories(/usr/local/cuda/lib64)
 link_directories(${CORE_SOURCE_DIR}/thirdparty/tbb)
