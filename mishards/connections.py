@@ -35,7 +35,7 @@ class Connection:
 
     @property
     def can_retry(self):
-        return self.retried <= self.max_retry
+        return self.retried < self.max_retry
 
     @property
     def connected(self):
@@ -45,7 +45,7 @@ class Connection:
         if self.on_retry_func:
             self.on_retry_func(self)
         else:
-            logger.warn('{} is retrying {}'.format(self, self.retried))
+            logger.warning('{} is retrying {}'.format(self, self.retried))
 
     def on_connect(self, metadata=None):
         while not self.connected and self.can_retry:
@@ -123,11 +123,11 @@ class ConnectionMgr:
         return self.on_diff_meta(name, url)
 
     def on_same_meta(self, name, url):
-        # logger.warn('Register same meta: {}:{}'.format(name, url))
+        # logger.warning('Register same meta: {}:{}'.format(name, url))
         pass
 
     def on_diff_meta(self, name, url):
-        logger.warn('Received {} with diff url={}'.format(name, url))
+        logger.warning('Received {} with diff url={}'.format(name, url))
         self.metas[name] = url
         self.conns[name] = {}
 
@@ -136,7 +136,7 @@ class ConnectionMgr:
         self.conns.pop(name, None)
 
     def on_nonexisted_meta(self, name):
-        logger.warn('Non-existed meta: {}'.format(name))
+        logger.warning('Non-existed meta: {}'.format(name))
 
     def register(self, name, url):
         logger.info('Register Connection: name={};url={}'.format(name, url))
