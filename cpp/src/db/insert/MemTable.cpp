@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "db/insert/MemTable.h"
 #include "utils/Log.h"
 
@@ -26,16 +25,12 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-MemTable::MemTable(const std::string &table_id,
-                   const meta::MetaPtr &meta,
-                   const DBOptions &options) :
-    table_id_(table_id),
-    meta_(meta),
-    options_(options) {
+MemTable::MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options)
+    : table_id_(table_id), meta_(meta), options_(options) {
 }
 
 Status
-MemTable::Add(VectorSourcePtr &source, IDNumbers &vector_ids) {
+MemTable::Add(VectorSourcePtr& source, IDNumbers& vector_ids) {
     while (!source->AllAdded()) {
         MemTableFilePtr current_mem_table_file;
         if (!mem_table_file_list_.empty()) {
@@ -63,7 +58,7 @@ MemTable::Add(VectorSourcePtr &source, IDNumbers &vector_ids) {
 }
 
 void
-MemTable::GetCurrentMemTableFile(MemTableFilePtr &mem_table_file) {
+MemTable::GetCurrentMemTableFile(MemTableFilePtr& mem_table_file) {
     mem_table_file = mem_table_file_list_.back();
 }
 
@@ -92,7 +87,7 @@ MemTable::Empty() {
     return mem_table_file_list_.empty();
 }
 
-const std::string &
+const std::string&
 MemTable::GetTableId() const {
     return table_id_;
 }
@@ -101,12 +96,12 @@ size_t
 MemTable::GetCurrentMem() {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t total_mem = 0;
-    for (auto &mem_table_file : mem_table_file_list_) {
+    for (auto& mem_table_file : mem_table_file_list_) {
         total_mem += mem_table_file->GetCurrentMem();
     }
     return total_mem;
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

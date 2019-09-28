@@ -17,13 +17,13 @@
 
 #pragma once
 
-#include <string>
-#include <vector>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <string>
 #include <utility>
-#include <condition_variable>
+#include <vector>
 
 #include "resource/Resource.h"
 #include "utils/Log.h"
@@ -45,10 +45,10 @@ class ResourceMgr {
     Stop();
 
     ResourceWPtr
-    Add(ResourcePtr &&resource);
+    Add(ResourcePtr&& resource);
 
     bool
-    Connect(const std::string &res1, const std::string &res2, Connection &connection);
+    Connect(const std::string& res1, const std::string& res2, Connection& connection);
 
     void
     Clear();
@@ -60,7 +60,7 @@ class ResourceMgr {
 
  public:
     /******** Management Interface ********/
-    inline std::vector<ResourceWPtr> &
+    inline std::vector<ResourceWPtr>&
     GetDiskResources() {
         return disk_resources_;
     }
@@ -78,7 +78,7 @@ class ResourceMgr {
     GetResource(ResourceType type, uint64_t device_id);
 
     ResourcePtr
-    GetResource(const std::string &name);
+    GetResource(const std::string& name);
 
     uint64_t
     GetNumOfResource() const;
@@ -102,7 +102,7 @@ class ResourceMgr {
 
  private:
     void
-    post_event(const EventPtr &event);
+    post_event(const EventPtr& event);
 
     void
     event_process();
@@ -125,6 +125,6 @@ class ResourceMgr {
 using ResourceMgrPtr = std::shared_ptr<ResourceMgr>;
 using ResourceMgrWPtr = std::weak_ptr<ResourceMgr>;
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

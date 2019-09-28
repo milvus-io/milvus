@@ -17,20 +17,20 @@
 
 #pragma once
 
-#include <string>
-#include <vector>
-#include <memory>
-#include <utility>
-#include <thread>
-#include <functional>
 #include <condition_variable>
+#include <functional>
+#include <memory>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
-#include "../event/Event.h"
-#include "../event/StartUpEvent.h"
-#include "../event/LoadCompletedEvent.h"
-#include "../event/FinishTaskEvent.h"
-#include "../event/TaskTableUpdatedEvent.h"
 #include "../TaskTable.h"
+#include "../event/Event.h"
+#include "../event/FinishTaskEvent.h"
+#include "../event/LoadCompletedEvent.h"
+#include "../event/StartUpEvent.h"
+#include "../event/TaskTableUpdatedEvent.h"
 #include "../task/Task.h"
 #include "Connection.h"
 #include "Node.h"
@@ -99,7 +99,7 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
         return device_id_;
     }
 
-    TaskTable &
+    TaskTable&
     task_table() {
         return task_table_;
     }
@@ -130,14 +130,11 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
         return total_task_;
     }
 
-    friend std::ostream &operator<<(std::ostream &out, const Resource &resource);
+    friend std::ostream&
+    operator<<(std::ostream& out, const Resource& resource);
 
  protected:
-    Resource(std::string name,
-             ResourceType type,
-             uint64_t device_id,
-             bool enable_loader,
-             bool enable_executor);
+    Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_loader, bool enable_executor);
 
     /*
      * Implementation by inherit class;
@@ -212,6 +209,6 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
 using ResourcePtr = std::shared_ptr<Resource>;
 using ResourceWPtr = std::weak_ptr<Resource>;
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz
