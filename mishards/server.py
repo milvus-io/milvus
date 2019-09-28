@@ -90,7 +90,6 @@ class Server:
         self.on_pre_run()
 
         self.start(port)
-        logger.info('Successfully')
         logger.info('Listening on port {}'.format(port))
 
         try:

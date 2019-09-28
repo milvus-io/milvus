@@ -64,9 +64,11 @@ class DefaultConfig:
     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
     SQL_ECHO = env.bool('SQL_ECHO', False)
 
-# class TestingConfig(DefaultConfig):
-#     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_TEST_URI')
-#     SQL_ECHO = env.bool('SQL_TEST_ECHO', False)
+TESTING = env.bool('TESTING', False)
+if TESTING:
+    class TestingConfig(DefaultConfig):
+        SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_TEST_URI')
+        SQL_ECHO = env.bool('SQL_TEST_ECHO', False)
 
 
 if __name__ == '__main__':

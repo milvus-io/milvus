@@ -24,6 +24,10 @@ class DB:
         self.uri = uri
         self.session = sessionmaker()
         self.session.configure(bind=self.engine)
+        self.url = url
+
+    def __str__(self):
+        return '<DB: backend={};database={}>'.format(self.url.get_backend_name(), self.url.database)
 
     @property
     def Session(self):

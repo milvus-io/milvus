@@ -5,7 +5,7 @@ from mishards import (
         settings, create_app)
 
 def main():
-    server = create_app()
+    server = create_app(settings.TestingConfig if settings.TESTING else settings.DefaultConfig)
     server.run(port=settings.SERVER_PORT)
     return 0
 
