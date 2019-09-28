@@ -39,7 +39,8 @@ TimeRecorder::GetTimeSpanStr(double span) {
 void
 TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
     std::string str_log;
-    if (!header_.empty()) str_log += header_ + ": ";
+    if (!header_.empty())
+        str_log += header_ + ": ";
     str_log += msg;
     str_log += " (";
     str_log += TimeRecorder::GetTimeSpanStr(span);

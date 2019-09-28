@@ -29,7 +29,7 @@ namespace algo {
 // TODO: impl search && insert && return insert pos. why not just find and swap?
 int InsertIntoPool(Neighbor *addr, unsigned K, Neighbor nn) {
     //>> Fix: Add assert
-    for (int i = 0; i < K; ++i) {
+    for (unsigned int i = 0; i < K; ++i) {
         assert(addr[i].id != nn.id);
     }
 
