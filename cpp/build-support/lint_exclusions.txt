@@ -7,4 +7,3 @@
 *SqliteMetaImpl.cpp
 *src/grpc*
 *src/core*
-*src/wrapper*
