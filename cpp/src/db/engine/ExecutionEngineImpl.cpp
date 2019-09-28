@@ -342,8 +342,9 @@ Status
 ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetDBConfigBuildIndexGPU(gpu_num_);
-    if (!s.ok())
+    if (!s.ok()) {
         return s;
+    }
 
     return Status::OK();
 }

@@ -242,7 +242,7 @@ DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
 }
 
 Status
-DBImpl::InsertVectors(const std::string& table_id_, uint64_t n, const float* vectors, IDNumbers& vector_ids_) {
+DBImpl::InsertVectors(const std::string& table_id, uint64_t n, const float* vectors, IDNumbers& vector_ids) {
     //    ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
@@ -250,7 +250,7 @@ DBImpl::InsertVectors(const std::string& table_id_, uint64_t n, const float* vec
 
     Status status;
     zilliz::milvus::server::CollectInsertMetrics metrics(n, status);
-    status = mem_mgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
+    status = mem_mgr_->InsertVectors(table_id, n, vectors, vector_ids);
     //    std::chrono::microseconds time_span =
     //          std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
     //    double average_time = double(time_span.count()) / n;
@@ -295,15 +295,17 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     // for IDMAP type, only wait all NEW file converted to RAW file
     // for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
-    if (index.engine_type_ == (int)EngineType::FAISS_IDMAP) {
+    if (index.engine_type_ == static_cast<int32_t>(EngineType::FAISS_IDMAP)) {
         file_types = {
-            (int)meta::TableFileSchema::NEW, (int)meta::TableFileSchema::NEW_MERGE,
+            static_cast<int32_t>(meta::TableFileSchema::NEW), static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
         };
     } else {
         file_types = {
-            (int)meta::TableFileSchema::RAW,       (int)meta::TableFileSchema::NEW,
-            (int)meta::TableFileSchema::NEW_MERGE, (int)meta::TableFileSchema::NEW_INDEX,
-            (int)meta::TableFileSchema::TO_INDEX,
+            static_cast<int32_t>(meta::TableFileSchema::RAW),
+            static_cast<int32_t>(meta::TableFileSchema::NEW),
+            static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
+            static_cast<int32_t>(meta::TableFileSchema::NEW_INDEX),
+            static_cast<int32_t>(meta::TableFileSchema::TO_INDEX),
         };
     }
 

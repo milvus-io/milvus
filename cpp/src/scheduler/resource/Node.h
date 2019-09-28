@@ -41,7 +41,7 @@ struct Neighbour {
     Connection connection;
 };
 
-// TODO(linxj): return type void -> Status
+// TODO(lxj): return type void -> Status
 class Node {
  public:
     Node();
