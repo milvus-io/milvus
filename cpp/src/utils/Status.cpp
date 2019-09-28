@@ -29,7 +29,7 @@ Status::Status(StatusCode code, const std::string& msg) {
     // 4 bytes store message length
     // the left bytes store message string
     const uint32_t length = (uint32_t)msg.size();
-    char* result = new char[length + sizeof(length) + CODE_WIDTH];
+    auto result = new char[length + sizeof(length) + CODE_WIDTH];
     std::memcpy(result, &code, CODE_WIDTH);
     std::memcpy(result + CODE_WIDTH, &length, sizeof(length));
     memcpy(result + sizeof(length) + CODE_WIDTH, msg.data(), length);
@@ -76,7 +76,7 @@ Status::CopyFrom(const Status& s) {
     memcpy(&length, s.state_ + CODE_WIDTH, sizeof(length));
     int buff_len = length + sizeof(length) + CODE_WIDTH;
     state_ = new char[buff_len];
-    memcpy((void*)state_, (void*)s.state_, buff_len);
+    memcpy(state_, s.state_, buff_len);
 }
 
 void

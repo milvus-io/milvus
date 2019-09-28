@@ -46,12 +46,14 @@ struct Cfg {
         const int64_t &k,
         const int64_t &gpu_id,
         METRICTYPE type)
-        : d(dim), k(k), gpu_id(gpu_id), metric_type(type) {}
+        : metric_type(type), k(k), gpu_id(gpu_id), d(dim) {}
 
     Cfg() = default;
 
     virtual bool
-    CheckValid(){};
+    CheckValid(){
+        return true;
+    };
 };
 using Config = std::shared_ptr<Cfg>;
 

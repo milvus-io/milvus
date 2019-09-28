@@ -127,10 +127,10 @@ class Dataset {
     //}
 
  private:
-    SchemaPtr array_schema_;
-    SchemaPtr tensor_schema_;
     std::vector<ArrayPtr> array_;
+    SchemaPtr array_schema_;
     std::vector<TensorPtr> tensor_;
+    SchemaPtr tensor_schema_;
     //Config meta_;
 };
 

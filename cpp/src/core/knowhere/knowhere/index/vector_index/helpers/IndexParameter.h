@@ -52,12 +52,15 @@ struct IVFCfg : public Cfg {
            const int64_t &nlist,
            const int64_t &nprobe,
            METRICTYPE type)
-        : nlist(nlist), nprobe(nprobe), Cfg(dim, k, gpu_id, type) {}
+        : Cfg(dim, k, gpu_id, type), nlist(nlist), nprobe(nprobe) {
+    }
 
     IVFCfg() = default;
 
     bool
-    CheckValid() override {};
+    CheckValid() override {
+        return true;
+    };
 };
 using IVFConfig = std::shared_ptr<IVFCfg>;
 
@@ -72,12 +75,15 @@ struct IVFSQCfg : public IVFCfg {
              const int64_t &nprobe,
              const int64_t &nbits,
              METRICTYPE type)
-        : nbits(nbits), IVFCfg(dim, k, gpu_id, nlist, nprobe, type) {}
+        : IVFCfg(dim, k, gpu_id, nlist, nprobe, type), nbits(nbits) {
+    }
 
     IVFSQCfg() = default;
 
     bool
-    CheckValid() override {};
+    CheckValid() override {
+        return true;
+    };
 };
 using IVFSQConfig = std::shared_ptr<IVFSQCfg>;
 
@@ -98,12 +104,15 @@ struct IVFPQCfg : public IVFCfg {
              const int64_t &nbits,
              const int64_t &m,
              METRICTYPE type)
-        : nbits(nbits), m(m), IVFCfg(dim, k, gpu_id, nlist, nprobe, type) {}
+        : IVFCfg(dim, k, gpu_id, nlist, nprobe, type), m(m), nbits(nbits) {
+    }
 
     IVFPQCfg() = default;
 
     bool
-    CheckValid() override {};
+    CheckValid() override {
+        return true;
+    };
 };
 using IVFPQConfig = std::shared_ptr<IVFPQCfg>;
 
@@ -123,13 +132,17 @@ struct NSGCfg : public IVFCfg {
            const int64_t &out_degree,
            const int64_t &candidate_size,
            METRICTYPE type)
-        : knng(knng), search_length(search_length), out_degree(out_degree), candidate_pool_size(candidate_size),
-          IVFCfg(dim, k, gpu_id, nlist, nprobe, type) {}
+        : IVFCfg(dim, k, gpu_id, nlist, nprobe, type),
+          knng(knng), search_length(search_length),
+          out_degree(out_degree), candidate_pool_size(candidate_size) {
+    }
 
     NSGCfg() = default;
 
     bool
-    CheckValid() override {};
+    CheckValid() override {
+        return true;
+    };
 };
 using NSGConfig = std::shared_ptr<NSGCfg>;
 
