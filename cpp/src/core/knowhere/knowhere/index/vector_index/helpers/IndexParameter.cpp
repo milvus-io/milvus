@@ -25,9 +25,14 @@ namespace zilliz {
 namespace knowhere {
 
 faiss::MetricType GetMetricType(METRICTYPE &type) {
-    if (type == METRICTYPE::L2) return faiss::METRIC_L2;
-    if (type == METRICTYPE::IP) return faiss::METRIC_INNER_PRODUCT;
-    if (type == METRICTYPE::INVALID) KNOWHERE_THROW_MSG("Metric type is invalid");
+    if (type == METRICTYPE::L2) {
+        return faiss::METRIC_L2;
+    }
+    if (type == METRICTYPE::IP) {
+        return faiss::METRIC_INNER_PRODUCT;
+    }
+
+    KNOWHERE_THROW_MSG("Metric type is invalid");
 }
 
 

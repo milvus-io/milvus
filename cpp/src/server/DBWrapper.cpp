@@ -30,9 +30,6 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-DBWrapper::DBWrapper() {
-}
-
 Status
 DBWrapper::StartService() {
     Config& config = Config::GetInstance();
@@ -41,27 +38,37 @@ DBWrapper::StartService() {
     engine::DBOptions opt;
 
     s = config.GetDBConfigBackendUrl(opt.meta_.backend_uri_);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     std::string path;
     s = config.GetDBConfigPrimaryPath(path);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     opt.meta_.path_ = path + "/db";
 
     std::string db_slave_path;
     s = config.GetDBConfigSecondaryPath(db_slave_path);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta_.slave_paths_);
 
     // cache config
     s = config.GetCacheConfigCacheInsertData(opt.insert_cache_immediately_);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     std::string mode;
     s = config.GetServerConfigDeployMode(mode);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     if (mode == "single") {
         opt.mode_ = engine::DBOptions::MODE::SINGLE;
@@ -78,14 +85,17 @@ DBWrapper::StartService() {
     // engine config
     int32_t omp_thread;
     s = config.GetEngineConfigOmpThreadNum(omp_thread);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
+
     if (omp_thread > 0) {
         omp_set_num_threads(omp_thread);
         SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
     } else {
         uint32_t sys_thread_cnt = 8;
         if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
-            omp_thread = (int32_t)ceil(sys_thread_cnt * 0.5);
+            omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
             omp_set_num_threads(omp_thread);
         }
     }
@@ -93,20 +103,29 @@ DBWrapper::StartService() {
     // init faiss global variable
     int32_t use_blas_threshold;
     s = config.GetEngineConfigUseBlasThreshold(use_blas_threshold);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
+
     faiss::distance_compute_blas_threshold = use_blas_threshold;
 
     // set archive config
     engine::ArchiveConf::CriteriaT criterial;
     int32_t disk, days;
     s = config.GetDBConfigArchiveDiskThreshold(disk);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
+
     if (disk > 0) {
         criterial[engine::ARCHIVE_CONF_DISK] = disk;
     }
 
     s = config.GetDBConfigArchiveDaysThreshold(days);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
+
     if (days > 0) {
         criterial[engine::ARCHIVE_CONF_DAYS] = days;
     }
