@@ -32,7 +32,7 @@ namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-// TODO: refactor, not friendly to unittest, logical in framework code
+// TODO(wxy): refactor, not friendly to unittest, logical in framework code
 class Scheduler {
  public:
     explicit Scheduler(ResourceMgrWPtr res_mgr);

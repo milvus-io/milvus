@@ -27,7 +27,7 @@ namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-// TODO: rewrite
+// TODO(wxy): rewrite
 class XSearchTask : public Task {
  public:
     explicit XSearchTask(TableFileSchemaPtr file);
