@@ -291,7 +291,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 
-    // TODO(linxj): add groundTruth assert
+    // TODO(lxj): add groundTruth assert
 }
 
 TEST_F(DBTest, PRELOADTABLE_TEST) {

@@ -193,7 +193,7 @@ TEST(CacheTest, GPU_CACHE_TEST) {
     ASSERT_EQ(gpu_mgr->ItemCount(), 0);
 
     for (auto i = 0; i < 3; i++) {
-        // TODO: use gpu index to mock
+        // TODO(myh): use gpu index to mock
         //each vector is 1k byte, total size less than 2G
         ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2000000);
         ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
