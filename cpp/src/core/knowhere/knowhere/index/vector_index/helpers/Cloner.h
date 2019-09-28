@@ -15,11 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "knowhere/index/vector_index/VectorIndex.h"
-
 
 namespace zilliz {
 namespace knowhere {
@@ -27,11 +25,11 @@ namespace cloner {
 
 // TODO(linxj): rename CopyToGpu
 extern VectorIndexPtr
-CopyCpuToGpu(const VectorIndexPtr &index, const int64_t &device_id, const Config &config);
+CopyCpuToGpu(const VectorIndexPtr& index, const int64_t& device_id, const Config& config);
 
 extern VectorIndexPtr
-CopyGpuToCpu(const VectorIndexPtr &index, const Config &config);
+CopyGpuToCpu(const VectorIndexPtr& index, const Config& config);
 
-} // cloner
-} // knowhere
-} // zilliz
+}  // namespace cloner
+}  // namespace knowhere
+}  // namespace zilliz

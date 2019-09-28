@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <faiss/AuxIndexStructures.h>
@@ -24,25 +23,22 @@ namespace zilliz {
 namespace knowhere {
 
 struct MemoryIOWriter : public faiss::IOWriter {
-    uint8_t *data_ = nullptr;
+    uint8_t* data_ = nullptr;
     size_t total = 0;
     size_t rp = 0;
 
     size_t
-    operator()(const void *ptr, size_t size, size_t nitems) override;
+    operator()(const void* ptr, size_t size, size_t nitems) override;
 };
 
 struct MemoryIOReader : public faiss::IOReader {
-    uint8_t *data_;
+    uint8_t* data_;
     size_t rp = 0;
     size_t total = 0;
 
     size_t
-    operator()(void *ptr, size_t size, size_t nitems) override;
+    operator()(void* ptr, size_t size, size_t nitems) override;
 };
 
-} // knowhere
-} // zilliz
-
-
-
+}  // namespace knowhere
+}  // namespace zilliz

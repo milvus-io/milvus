@@ -15,18 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 namespace zilliz {
 namespace knowhere {
 
-#define GETTENSOR(dataset)                  \
-    auto tensor = dataset->tensor()[0];     \
-    auto p_data = tensor->raw_data();       \
-    auto dim = tensor->shape()[1];          \
-    auto rows = tensor->shape()[0];         \
+#define GETTENSOR(dataset)              \
+    auto tensor = dataset->tensor()[0]; \
+    auto p_data = tensor->raw_data();   \
+    auto dim = tensor->shape()[1];      \
+    auto rows = tensor->shape()[0];
 
-
-}
-}
+}  // namespace knowhere
+}  // namespace zilliz

@@ -15,35 +15,39 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <gtest/gtest.h>
 #include <memory>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
-#include "knowhere/index/vector_index/nsg/NSGIO.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#include "knowhere/index/vector_index/nsg/NSGIO.h"
 
-#include "../utils.h"
+#include "test/utils.h"
 
+namespace {
 
-using namespace zilliz::knowhere;
+namespace kn = zilliz::knowhere;
+
+}  // namespace
+
 using ::testing::TestWithParam;
 using ::testing::Values;
 using ::testing::Combine;
 
 constexpr int64_t DEVICE_ID = 1;
 
- class NSGInterfaceTest : public DataGen, public ::testing::Test {
+class NSGInterfaceTest : public DataGen, public ::testing::Test {
  protected:
-    void SetUp() override {
-        //Init_with_default();
-        FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, 1024*1024*200, 1024*1024*600, 2);
+    void
+    SetUp() override {
+        // Init_with_default();
+        kn::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, 1024 * 1024 * 200, 1024 * 1024 * 600, 2);
         Generate(256, 1000000, 1);
-        index_ = std::make_shared<NSG>();
+        index_ = std::make_shared<kn::NSG>();
 
-        auto tmp_conf = std::make_shared<NSGCfg>();
+        auto tmp_conf = std::make_shared<kn::NSGCfg>();
         tmp_conf->gpu_id = DEVICE_ID;
         tmp_conf->knng = 100;
         tmp_conf->nprobe = 32;
@@ -51,28 +55,28 @@ constexpr int64_t DEVICE_ID = 1;
         tmp_conf->search_length = 60;
         tmp_conf->out_degree = 70;
         tmp_conf->candidate_pool_size = 500;
-        tmp_conf->metric_type = METRICTYPE::L2;
+        tmp_conf->metric_type = kn::METRICTYPE::L2;
         train_conf = tmp_conf;
 
-        auto tmp2_conf = std::make_shared<NSGCfg>();
+        auto tmp2_conf = std::make_shared<kn::NSGCfg>();
         tmp2_conf->k = k;
         tmp2_conf->search_length = 30;
         search_conf = tmp2_conf;
     }
 
-    void TearDown() override {
-        FaissGpuResourceMgr::GetInstance().Free();
+    void
+    TearDown() override {
+        kn::FaissGpuResourceMgr::GetInstance().Free();
     }
 
  protected:
-    std::shared_ptr<NSG> index_;
-    Config train_conf;
-    Config search_conf;
+    std::shared_ptr<kn::NSG> index_;
+    kn::Config train_conf;
+    kn::Config search_conf;
 };
 
-void AssertAnns(const DatasetPtr &result,
-                const int &nq,
-                const int &k) {
+void
+AssertAnns(const kn::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     for (auto i = 0; i < nq; i++) {
         EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
@@ -87,33 +91,32 @@ TEST_F(NSGInterfaceTest, basic_test) {
     AssertAnns(result, nq, k);
 
     auto binaryset = index_->Serialize();
-    auto new_index = std::make_shared<NSG>();
+    auto new_index = std::make_shared<kn::NSG>();
     new_index->Load(binaryset);
     auto new_result = new_index->Search(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dimension(), dim);
-    ASSERT_THROW({index_->Clone();}, zilliz::knowhere::KnowhereException);
+    ASSERT_THROW({ index_->Clone(); }, zilliz::knowhere::KnowhereException);
     ASSERT_NO_THROW({
-        index_->Add(base_dataset, Config());
+        index_->Add(base_dataset, kn::Config());
         index_->Seal();
     });
 
     {
-        //std::cout << "k = 1" << std::endl;
-        //new_index->Search(GenQuery(1), Config::object{{"k", 1}});
-        //new_index->Search(GenQuery(10), Config::object{{"k", 1}});
-        //new_index->Search(GenQuery(100), Config::object{{"k", 1}});
-        //new_index->Search(GenQuery(1000), Config::object{{"k", 1}});
-        //new_index->Search(GenQuery(10000), Config::object{{"k", 1}});
+        // std::cout << "k = 1" << std::endl;
+        // new_index->Search(GenQuery(1), Config::object{{"k", 1}});
+        // new_index->Search(GenQuery(10), Config::object{{"k", 1}});
+        // new_index->Search(GenQuery(100), Config::object{{"k", 1}});
+        // new_index->Search(GenQuery(1000), Config::object{{"k", 1}});
+        // new_index->Search(GenQuery(10000), Config::object{{"k", 1}});
 
-        //std::cout << "k = 5" << std::endl;
-        //new_index->Search(GenQuery(1), Config::object{{"k", 5}});
-        //new_index->Search(GenQuery(20), Config::object{{"k", 5}});
-        //new_index->Search(GenQuery(100), Config::object{{"k", 5}});
-        //new_index->Search(GenQuery(300), Config::object{{"k", 5}});
-        //new_index->Search(GenQuery(500), Config::object{{"k", 5}});
+        // std::cout << "k = 5" << std::endl;
+        // new_index->Search(GenQuery(1), Config::object{{"k", 5}});
+        // new_index->Search(GenQuery(20), Config::object{{"k", 5}});
+        // new_index->Search(GenQuery(100), Config::object{{"k", 5}});
+        // new_index->Search(GenQuery(300), Config::object{{"k", 5}});
+        // new_index->Search(GenQuery(500), Config::object{{"k", 5}});
     }
 }
-

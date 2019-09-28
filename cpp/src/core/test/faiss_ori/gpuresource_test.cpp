@@ -17,46 +17,45 @@
 
 #include <gtest/gtest.h>
 
-#include <faiss/gpu/StandardGpuResources.h>
-#include <faiss/gpu/GpuIndexIVFFlat.h>
-#include <faiss/Index.h>
 #include <faiss/AutoTune.h>
+#include <faiss/Index.h>
 #include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/gpu/GpuIndexIVFFlat.h>
+#include <faiss/gpu/StandardGpuResources.h>
 #include <faiss/index_io.h>
 
-#include <thread>
 #include <chrono>
 #include <iostream>
-
-using namespace std::chrono_literals;
+#include <thread>
 
 class TestGpuRes {
  public:
     TestGpuRes() {
         res_ = new faiss::gpu::StandardGpuResources;
     }
+
     ~TestGpuRes() {
         delete res_;
         delete index_;
     }
-    std::shared_ptr<faiss::Index> Do() {
-        int d = 128;                            // dimension
-        int nb = 100000;                       // database size
-        int nq = 100;                        // nb of queries
+
+    std::shared_ptr<faiss::Index>
+    Do() {
+        int d = 128;      // dimension
+        int nb = 100000;  // database size
+        int nq = 100;     // nb of queries
         int nlist = 1638;
 
-        float *xb = new float[d * nb];
-        float *xq = new float[d * nq];
+        float* xb = new float[d * nb];
+        float* xq = new float[d * nq];
 
         for (int i = 0; i < nb; i++) {
-            for (int j = 0; j < d; j++)
-                xb[d * i + j] = drand48();
+            for (int j = 0; j < d; j++) xb[d * i + j] = drand48();
             xb[d * i] += i / 1000.;
         }
 
         for (int i = 0; i < nq; i++) {
-            for (int j = 0; j < d; j++)
-                xq[d * i + j] = drand48();
+            for (int j = 0; j < d; j++) xq[d * i + j] = drand48();
             xq[d * i] += i / 1000.;
         }
 
@@ -68,9 +67,10 @@ class TestGpuRes {
         host_index.reset(faiss::gpu::index_gpu_to_cpu(index_));
         return host_index;
     }
+
  private:
-    faiss::gpu::GpuResources *res_ = nullptr;
-    faiss::Index *index_ = nullptr;
+    faiss::gpu::GpuResources* res_ = nullptr;
+    faiss::Index* index_ = nullptr;
 };
 
 TEST(gpuresource, resource) {
@@ -79,30 +79,28 @@ TEST(gpuresource, resource) {
 }
 
 TEST(test, resource_re) {
-    int d = 128;                            // dimension
-    int nb = 1000000;                        // database size
-    int nq = 100;                           // nb of queries
+    int d = 128;       // dimension
+    int nb = 1000000;  // database size
+    int nq = 100;      // nb of queries
     int nlist = 16384;
     int k = 100;
 
-    float *xb = new float[d * nb];
-    float *xq = new float[d * nq];
+    float* xb = new float[d * nb];
+    float* xq = new float[d * nq];
 
     for (int i = 0; i < nb; i++) {
-        for (int j = 0; j < d; j++)
-            xb[d * i + j] = drand48();
+        for (int j = 0; j < d; j++) xb[d * i + j] = drand48();
         xb[d * i] += i / 1000.;
     }
 
     for (int i = 0; i < nq; i++) {
-        for (int j = 0; j < d; j++)
-            xq[d * i + j] = drand48();
+        for (int j = 0; j < d; j++) xq[d * i + j] = drand48();
         xq[d * i] += i / 1000.;
     }
 
     auto elems = nq * k;
-    auto res_ids = (int64_t *) malloc(sizeof(int64_t) * elems);
-    auto res_dis = (float *) malloc(sizeof(float) * elems);
+    auto res_ids = (int64_t*)malloc(sizeof(int64_t) * elems);
+    auto res_dis = (float*)malloc(sizeof(float) * elems);
 
     faiss::gpu::StandardGpuResources res;
     auto cpu_index = faiss::index_factory(d, "IVF16384, Flat");
@@ -117,7 +115,7 @@ TEST(test, resource_re) {
     auto load = [&] {
         std::cout << "start" << std::endl;
         faiss::gpu::StandardGpuResources res;
-        //res.noTempMemory();
+        // res.noTempMemory();
         for (int l = 0; l < 100; ++l) {
             auto x = faiss::gpu::index_cpu_to_gpu(&res, 1, new_index);
             delete x;
@@ -126,42 +124,42 @@ TEST(test, resource_re) {
     };
 
     auto search = [&] {
-            faiss::gpu::StandardGpuResources res;
-            auto device_index = faiss::gpu::index_cpu_to_gpu(&res, 1, new_index);
-            std::cout << "search start" << std::endl;
-            for (int l = 0; l < 10000; ++l) {
-                device_index->search(nq,xq,10, res_dis, res_ids);
-            }
-            std::cout << "search finish" << std::endl;
-            delete device_index;
-            delete cpu_index;
+        faiss::gpu::StandardGpuResources res;
+        auto device_index = faiss::gpu::index_cpu_to_gpu(&res, 1, new_index);
+        std::cout << "search start" << std::endl;
+        for (int l = 0; l < 10000; ++l) {
+            device_index->search(nq, xq, 10, res_dis, res_ids);
+        }
+        std::cout << "search finish" << std::endl;
+        delete device_index;
+        delete cpu_index;
     };
 
     load();
     search();
     std::thread t1(search);
-    std::this_thread::sleep_for(1s);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     std::thread t2(load);
     t1.join();
     t2.join();
     std::cout << "finish clone" << std::endl;
 
-    //std::this_thread::sleep_for(5s);
+    // std::this_thread::sleep_for(5s);
     //
-    //auto device_index_2 = faiss::gpu::index_cpu_to_gpu(&res, 1, cpu_index);
-    //device_index->train(nb, xb);
-    //device_index->add(nb, xb);
+    // auto device_index_2 = faiss::gpu::index_cpu_to_gpu(&res, 1, cpu_index);
+    // device_index->train(nb, xb);
+    // device_index->add(nb, xb);
 
-    //std::cout << "finish clone" << std::endl;
-    //std::this_thread::sleep_for(5s);
+    // std::cout << "finish clone" << std::endl;
+    // std::this_thread::sleep_for(5s);
 
-    //std::this_thread::sleep_for(2s);
-    //std::cout << "start clone" << std::endl;
-    //auto new_index = faiss::clone_index(device_index);
-    //std::cout << "start search" << std::endl;
-    //new_index->search(nq, xq, k, res_dis, res_ids);
+    // std::this_thread::sleep_for(2s);
+    // std::cout << "start clone" << std::endl;
+    // auto new_index = faiss::clone_index(device_index);
+    // std::cout << "start search" << std::endl;
+    // new_index->search(nq, xq, k, res_dis, res_ids);
 
-    //std::cout << "start clone" << std::endl;
+    // std::cout << "start clone" << std::endl;
     //{
     //    faiss::gpu::StandardGpuResources res;
     //    auto cpu_index = faiss::index_factory(d, "IVF1638, Flat");
@@ -174,5 +172,5 @@ TEST(test, resource_re) {
     //    std::cout << "finish clone" << std::endl;
     //}
     //
-    //std::cout << "finish clone" << std::endl;
+    // std::cout << "finish clone" << std::endl;
 }

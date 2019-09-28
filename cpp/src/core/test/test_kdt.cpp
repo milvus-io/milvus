@@ -15,35 +15,36 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <gtest/gtest.h>
 
 #include <iostream>
 #include <sstream>
 
+#include "knowhere/adapter/SptagAdapter.h"
+#include "knowhere/adapter/Structure.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/helpers/Definitions.h"
-#include "knowhere/adapter/SptagAdapter.h"
-#include "knowhere/adapter/Structure.h"
 
-#include "utils.h"
+#include "test/utils.h"
 
+namespace {
 
-using namespace zilliz::knowhere;
+namespace kn = zilliz::knowhere;
+
+}  // namespace
 
 using ::testing::TestWithParam;
 using ::testing::Values;
 using ::testing::Combine;
 
-
-class KDTTest
-     : public DataGen, public ::testing::Test {
+class KDTTest : public DataGen, public ::testing::Test {
  protected:
-    void SetUp() override {
-        index_ = std::make_shared<CPUKDTRNG>();
+    void
+    SetUp() override {
+        index_ = std::make_shared<kn::CPUKDTRNG>();
 
-        auto tempconf = std::make_shared<KDTCfg>();
+        auto tempconf = std::make_shared<kn::KDTCfg>();
         tempconf->tptnubmber = 1;
         tempconf->k = 10;
         conf = tempconf;
@@ -52,22 +53,20 @@ class KDTTest
     }
 
  protected:
-    Config conf;
-    std::shared_ptr<CPUKDTRNG> index_ = nullptr;
+    kn::Config conf;
+    std::shared_ptr<kn::CPUKDTRNG> index_ = nullptr;
 };
 
-void AssertAnns(const DatasetPtr &result,
-                const int &nq,
-                const int &k) {
+void
+AssertAnns(const kn::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     for (auto i = 0; i < nq; i++) {
         EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
     }
 }
 
-void PrintResult(const DatasetPtr &result,
-                 const int &nq,
-                 const int &k) {
+void
+PrintResult(const kn::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     auto dists = result->array()[1];
 
@@ -124,25 +123,25 @@ TEST_F(KDTTest, kdt_serialize) {
     index_->set_preprocessor(preprocessor);
 
     auto model = index_->Train(base_dataset, conf);
-    //index_->Add(base_dataset, conf);
+    // index_->Add(base_dataset, conf);
     auto binaryset = index_->Serialize();
-    auto new_index = std::make_shared<CPUKDTRNG>();
+    auto new_index = std::make_shared<kn::CPUKDTRNG>();
     new_index->Load(binaryset);
     auto result = new_index->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
     PrintResult(result, nq, k);
     ASSERT_EQ(new_index->Count(), nb);
     ASSERT_EQ(new_index->Dimension(), dim);
-    ASSERT_THROW({new_index->Clone();}, zilliz::knowhere::KnowhereException);
-    ASSERT_NO_THROW({new_index->Seal();});
+    ASSERT_THROW({ new_index->Clone(); }, zilliz::knowhere::KnowhereException);
+    ASSERT_NO_THROW({ new_index->Seal(); });
 
     {
         int fileno = 0;
-        const std::string &base_name = "/tmp/kdt_serialize_test_bin_";
+        const std::string& base_name = "/tmp/kdt_serialize_test_bin_";
         std::vector<std::string> filename_list;
-        std::vector<std::pair<std::string, size_t >> meta_list;
-        for (auto &iter: binaryset.binary_map_) {
-            const std::string &filename = base_name + std::to_string(fileno);
+        std::vector<std::pair<std::string, size_t>> meta_list;
+        for (auto& iter : binaryset.binary_map_) {
+            const std::string& filename = base_name + std::to_string(fileno);
             FileIOWriter writer(filename);
             writer(iter.second->data.get(), iter.second->size);
 
@@ -151,7 +150,7 @@ TEST_F(KDTTest, kdt_serialize) {
             ++fileno;
         }
 
-        BinarySet load_data_list;
+        kn::BinarySet load_data_list;
         for (int i = 0; i < filename_list.size() && i < meta_list.size(); ++i) {
             auto bin_size = meta_list[i].second;
             FileIOReader reader(filename_list[i]);
@@ -163,7 +162,7 @@ TEST_F(KDTTest, kdt_serialize) {
             load_data_list.Append(meta_list[i].first, data, bin_size);
         }
 
-        auto new_index = std::make_shared<CPUKDTRNG>();
+        auto new_index = std::make_shared<kn::CPUKDTRNG>();
         new_index->Load(load_data_list);
         auto result = new_index->Search(query_dataset, conf);
         AssertAnns(result, nq, k);
