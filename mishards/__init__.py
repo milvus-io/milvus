@@ -1,4 +1,6 @@
+import  logging
 from mishards import settings
+logger = logging.getLogger()
 
 from mishards.db_base import DB
 db = DB()
@@ -7,9 +9,6 @@ from mishards.server import Server
 grpc_server = Server()
 
 def create_app(testing_config=None):
-    import  logging
-    logger = logging.getLogger()
-
     config = testing_config if testing_config else settings.DefaultConfig
     db.init_db(uri=config.SQLALCHEMY_DATABASE_URI, echo=config.SQL_ECHO)
     logger.info(db)
@@ -23,7 +22,7 @@ def create_app(testing_config=None):
     discover = sd_proiver_class(settings=settings.SD_PROVIDER_SETTINGS, conn_mgr=connect_mgr)
 
     from tracing.factory import TracerFactory
-    from grpc_utils import GrpcSpanDecorator
+    from mishards.grpc_utils import GrpcSpanDecorator
     tracer = TracerFactory.new_tracer(settings.TRACING_TYPE, settings.TracingConfig,
         span_decorator=GrpcSpanDecorator())
 

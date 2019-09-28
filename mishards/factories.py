@@ -19,7 +19,7 @@ factory.Faker.add_provider(FakerProvider)
 class TablesFactory(SQLAlchemyModelFactory):
     class Meta:
         model = Tables
-        sqlalchemy_session = db.Session
+        sqlalchemy_session = db.session_factory
         sqlalchemy_session_persistence = 'commit'
 
     id = factory.Faker('random_number', digits=16, fix_len=True)
@@ -35,7 +35,7 @@ class TablesFactory(SQLAlchemyModelFactory):
 class TableFilesFactory(SQLAlchemyModelFactory):
     class Meta:
         model = TableFiles
-        sqlalchemy_session = db.Session
+        sqlalchemy_session = db.session_factory
         sqlalchemy_session_persistence = 'commit'
 
     id = factory.Faker('random_number', digits=16, fix_len=True)
