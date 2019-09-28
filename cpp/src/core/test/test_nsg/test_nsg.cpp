@@ -19,10 +19,11 @@
 #include <gtest/gtest.h>
 #include <memory>
 
-#include "knowhere/common/exception.h"
-#include "knowhere/index/vector_index/gpu_ivf.h"
-#include "knowhere/index/vector_index/nsg_index.h"
-#include "knowhere/index/vector_index/nsg/nsg_io.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/FaissBaseIndex.h"
+#include "knowhere/index/vector_index/IndexNSG.h"
+#include "knowhere/index/vector_index/nsg/NSGIO.h"
+#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 
 #include "../utils.h"
 
@@ -32,16 +33,31 @@ using ::testing::TestWithParam;
 using ::testing::Values;
 using ::testing::Combine;
 
-constexpr int64_t DEVICE_ID = 0;
+constexpr int64_t DEVICE_ID = 1;
 
-class NSGInterfaceTest : public DataGen, public TestWithParam<::std::tuple<Config, Config>> {
+ class NSGInterfaceTest : public DataGen, public ::testing::Test {
  protected:
     void SetUp() override {
         //Init_with_default();
         FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, 1024*1024*200, 1024*1024*600, 2);
-        Generate(256, 10000, 1);
+        Generate(256, 1000000, 1);
         index_ = std::make_shared<NSG>();
-        std::tie(train_cfg, search_cfg) = GetParam();
+
+        auto tmp_conf = std::make_shared<NSGCfg>();
+        tmp_conf->gpu_id = DEVICE_ID;
+        tmp_conf->knng = 100;
+        tmp_conf->nprobe = 32;
+        tmp_conf->nlist = 16384;
+        tmp_conf->search_length = 60;
+        tmp_conf->out_degree = 70;
+        tmp_conf->candidate_pool_size = 500;
+        tmp_conf->metric_type = METRICTYPE::L2;
+        train_conf = tmp_conf;
+
+        auto tmp2_conf = std::make_shared<NSGCfg>();
+        tmp2_conf->k = k;
+        tmp2_conf->search_length = 30;
+        search_conf = tmp2_conf;
     }
 
     void TearDown() override {
@@ -50,17 +66,9 @@ class NSGInterfaceTest : public DataGen, public TestWithParam<::std::tuple<Confi
 
  protected:
     std::shared_ptr<NSG> index_;
-    Config train_cfg;
-    Config search_cfg;
+    Config train_conf;
+    Config search_conf;
 };
-
-INSTANTIATE_TEST_CASE_P(NSGparameters, NSGInterfaceTest,
-                        Values(std::make_tuple(
-                            // search length > out_degree
-                            Config::object{{"nlist", 128}, {"nprobe", 50}, {"knng", 100}, {"metric_type", "L2"},
-                                           {"search_length", 60}, {"out_degree", 70}, {"candidate_pool_size", 500}},
-                            Config::object{{"k", 20}, {"search_length", 30}}))
-);
 
 void AssertAnns(const DatasetPtr &result,
                 const int &nq,
@@ -71,17 +79,17 @@ void AssertAnns(const DatasetPtr &result,
     }
 }
 
-TEST_P(NSGInterfaceTest, basic_test) {
+TEST_F(NSGInterfaceTest, basic_test) {
     assert(!xb.empty());
 
-    auto model = index_->Train(base_dataset, train_cfg);
-    auto result = index_->Search(query_dataset, search_cfg);
+    auto model = index_->Train(base_dataset, train_conf);
+    auto result = index_->Search(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<NSG>();
     new_index->Load(binaryset);
-    auto new_result = new_index->Search(query_dataset, Config::object{{"k", k}});
+    auto new_result = new_index->Search(query_dataset, search_conf);
     AssertAnns(result, nq, k);
 
     ASSERT_EQ(index_->Count(), nb);

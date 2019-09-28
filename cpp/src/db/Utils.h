@@ -18,11 +18,11 @@
 #pragma once
 
 #include "Options.h"
-#include "db/meta/MetaTypes.h"
 #include "db/Types.h"
+#include "db/meta/MetaTypes.h"
 
-#include <string>
 #include <ctime>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -33,22 +33,22 @@ int64_t
 GetMicroSecTimeStamp();
 
 Status
-CreateTablePath(const DBMetaOptions &options, const std::string &table_id);
+CreateTablePath(const DBMetaOptions& options, const std::string& table_id);
 Status
-DeleteTablePath(const DBMetaOptions &options, const std::string &table_id, bool force = true);
+DeleteTablePath(const DBMetaOptions& options, const std::string& table_id, bool force = true);
 
 Status
-CreateTableFilePath(const DBMetaOptions &options, meta::TableFileSchema &table_file);
+CreateTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
 Status
-GetTableFilePath(const DBMetaOptions &options, meta::TableFileSchema &table_file);
+GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
 Status
-DeleteTableFilePath(const DBMetaOptions &options, meta::TableFileSchema &table_file);
+DeleteTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file);
 
 bool
-IsSameIndex(const TableIndex &index1, const TableIndex &index2);
+IsSameIndex(const TableIndex& index1, const TableIndex& index2);
 
 meta::DateT
-GetDate(const std::time_t &t, int day_delta = 0);
+GetDate(const std::time_t& t, int day_delta = 0);
 meta::DateT
 GetDate();
 meta::DateT
@@ -64,9 +64,9 @@ struct MetaUriInfo {
 };
 
 Status
-ParseMetaUri(const std::string &uri, MetaUriInfo &info);
+ParseMetaUri(const std::string& uri, MetaUriInfo& info);
 
-} // namespace utils
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace utils
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

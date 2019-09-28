@@ -24,6 +24,7 @@
 
 #include "NSG.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/common/Log.h"
 #include "knowhere/common/Timer.h"
 #include "NSGHelper.h"
 
@@ -83,8 +84,9 @@ void NsgIndex::Build_with_ids(size_t nb, const float *data, const long *ids, con
     for (int i = 0; i < ntotal; ++i) {
         total_degree += nsg[i].size();
     }
-    std::cout << "graph physical size: " << total_degree * sizeof(node_t) / 1024 / 1024;
-    std::cout << "average degree: " << total_degree / ntotal;
+
+    KNOWHERE_LOG_DEBUG << "Graph physical size: " << total_degree * sizeof(node_t) / 1024 / 1024 << "m";
+    KNOWHERE_LOG_DEBUG << "Average degree: " << total_degree / ntotal;
     /////
 
     is_trained = true;

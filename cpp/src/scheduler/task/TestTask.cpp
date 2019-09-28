@@ -22,7 +22,7 @@ namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-TestTask::TestTask(TableFileSchemaPtr &file) : XSearchTask(file) {
+TestTask::TestTask(TableFileSchemaPtr& file) : XSearchTask(file) {
 }
 
 void
@@ -43,11 +43,9 @@ TestTask::Execute() {
 void
 TestTask::Wait() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [&] {
-        return done_;
-    });
+    cv_.wait(lock, [&] { return done_; });
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

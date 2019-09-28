@@ -24,8 +24,8 @@ namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-std::ostream &
-operator<<(std::ostream &out, const DiskResource &resource) {
+std::ostream&
+operator<<(std::ostream& out, const DiskResource& resource) {
     out << resource.Dump();
     return out;
 }
@@ -42,6 +42,6 @@ void
 DiskResource::Process(TaskPtr task) {
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

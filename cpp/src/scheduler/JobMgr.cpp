@@ -16,8 +16,8 @@
 // under the License.
 
 #include "scheduler/JobMgr.h"
-#include "task/Task.h"
 #include "TaskCreator.h"
+#include "task/Task.h"
 
 #include <utility>
 
@@ -25,8 +25,7 @@ namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-JobMgr::JobMgr(ResourceMgrPtr res_mgr)
-    : res_mgr_(std::move(res_mgr)) {
+JobMgr::JobMgr(ResourceMgrPtr res_mgr) : res_mgr_(std::move(res_mgr)) {
 }
 
 void
@@ -47,7 +46,7 @@ JobMgr::Stop() {
 }
 
 void
-JobMgr::Put(const JobPtr &job) {
+JobMgr::Put(const JobPtr& job) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         queue_.push(job);
@@ -59,9 +58,7 @@ void
 JobMgr::worker_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [this] {
-            return !queue_.empty();
-        });
+        cv_.wait(lock, [this] { return !queue_.empty(); });
         auto job = queue_.front();
         queue_.pop();
         lock.unlock();
@@ -73,7 +70,7 @@ JobMgr::worker_function() {
         auto disk_list = res_mgr_->GetDiskResources();
         if (!disk_list.empty()) {
             if (auto disk = disk_list[0].lock()) {
-                for (auto &task : tasks) {
+                for (auto& task : tasks) {
                     disk->task_table().Put(task);
                 }
             }
@@ -82,10 +79,10 @@ JobMgr::worker_function() {
 }
 
 std::vector<TaskPtr>
-JobMgr::build_task(const JobPtr &job) {
+JobMgr::build_task(const JobPtr& job) {
     return TaskCreator::Create(job);
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz
