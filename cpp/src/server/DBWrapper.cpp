@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "server/DBWrapper.h"
 #include "Config.h"
 #include "db/DBFactory.h"
@@ -23,9 +22,9 @@
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
-#include <string>
-#include <omp.h>
 #include <faiss/utils.h>
+#include <omp.h>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -34,10 +33,11 @@ namespace server {
 DBWrapper::DBWrapper() {
 }
 
-Status DBWrapper::StartService() {
+Status
+DBWrapper::StartService() {
     Config& config = Config::GetInstance();
     Status s;
-    //db config
+    // db config
     engine::DBOptions opt;
 
     s = config.GetDBConfigBackendUrl(opt.meta_.backend_uri_);
@@ -70,9 +70,8 @@ Status DBWrapper::StartService() {
     } else if (mode == "cluster_writable") {
         opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
     } else {
-        std::cerr <<
-        "ERROR: mode specified in server_config must be ['single', 'cluster_readonly', 'cluster_writable']"
-        << std::endl;
+        std::cerr << "ERROR: mode specified in server_config must be ['single', 'cluster_readonly', 'cluster_writable']"
+                  << std::endl;
         kill(0, SIGUSR1);
     }
 
@@ -86,18 +85,18 @@ Status DBWrapper::StartService() {
     } else {
         uint32_t sys_thread_cnt = 8;
         if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
-            omp_thread = (int32_t)ceil(sys_thread_cnt*0.5);
+            omp_thread = (int32_t)ceil(sys_thread_cnt * 0.5);
             omp_set_num_threads(omp_thread);
         }
     }
 
-    //init faiss global variable
+    // init faiss global variable
     int32_t use_blas_threshold;
     s = config.GetEngineConfigUseBlasThreshold(use_blas_threshold);
     if (!s.ok()) return s;
     faiss::distance_compute_blas_threshold = use_blas_threshold;
 
-    //set archive config
+    // set archive config
     engine::ArchiveConf::CriteriaT criterial;
     int32_t disk, days;
     s = config.GetDBConfigArchiveDiskThreshold(disk);
@@ -113,7 +112,7 @@ Status DBWrapper::StartService() {
     }
     opt.meta_.archive_conf_.SetCriterias(criterial);
 
-    //create db root folder
+    // create db root folder
     Status status = CommonUtil::CreateDirectory(opt.meta_.path_);
     if (!status.ok()) {
         std::cerr << "ERROR! Failed to create database root path: " << opt.meta_.path_ << std::endl;
@@ -128,10 +127,10 @@ Status DBWrapper::StartService() {
         }
     }
 
-    //create db instance
+    // create db instance
     try {
         db_ = engine::DBFactory::Build(opt);
-    } catch(std::exception& ex) {
+    } catch (std::exception& ex) {
         std::cerr << "ERROR! Failed to open database: " << ex.what() << std::endl;
         kill(0, SIGUSR1);
     }
@@ -141,7 +140,8 @@ Status DBWrapper::StartService() {
     return Status::OK();
 }
 
-Status DBWrapper::StopService() {
+Status
+DBWrapper::StopService() {
     if (db_) {
         db_->Stop();
     }
@@ -149,6 +149,6 @@ Status DBWrapper::StopService() {
     return Status::OK();
 }
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz

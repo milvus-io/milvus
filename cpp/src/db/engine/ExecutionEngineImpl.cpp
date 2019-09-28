@@ -16,20 +16,20 @@
 // under the License.
 
 #include "db/engine/ExecutionEngineImpl.h"
-#include "cache/GpuCacheMgr.h"
 #include "cache/CpuCacheMgr.h"
+#include "cache/GpuCacheMgr.h"
 #include "metrics/Metrics.h"
-#include "utils/Log.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
+#include "utils/Log.h"
 
-#include "src/wrapper/VecIndex.h"
-#include "src/wrapper/VecImpl.h"
-#include "knowhere/common/Exception.h"
 #include "knowhere/common/Config.h"
-#include "wrapper/ConfAdapterMgr.h"
-#include "wrapper/ConfAdapter.h"
+#include "knowhere/common/Exception.h"
 #include "server/Config.h"
+#include "src/wrapper/VecImpl.h"
+#include "src/wrapper/VecIndex.h"
+#include "wrapper/ConfAdapter.h"
+#include "wrapper/ConfAdapterMgr.h"
 
 #include <stdexcept>
 #include <utility>
@@ -38,17 +38,9 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
-                                         const std::string &location,
-                                         EngineType index_type,
-                                         MetricType metric_type,
-                                         int32_t nlist)
-    : location_(location),
-      dim_(dimension),
-      index_type_(index_type),
-      metric_type_(metric_type),
-      nlist_(nlist) {
-
+ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
+                                         MetricType metric_type, int32_t nlist)
+    : location_(location), dim_(dimension), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
     index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
     if (!index_) {
         throw Exception(DB_ERROR, "Could not create VecIndex");
@@ -57,8 +49,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
     TempMetaConf temp_conf;
     temp_conf.gpu_id = gpu_num_;
     temp_conf.dim = dimension;
-    temp_conf.metric_type = (metric_type_ == MetricType::IP) ?
-                            knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
+    temp_conf.metric_type = (metric_type_ == MetricType::IP) ? knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     auto conf = adapter->Match(temp_conf);
 
@@ -68,16 +59,9 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
     }
 }
 
-ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index,
-                                         const std::string &location,
-                                         EngineType index_type,
-                                         MetricType metric_type,
-                                         int32_t nlist)
-    : index_(std::move(index)),
-      location_(location),
-      index_type_(index_type),
-      metric_type_(metric_type),
-      nlist_(nlist) {
+ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type,
+                                         MetricType metric_type, int32_t nlist)
+    : index_(std::move(index)), location_(location), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
 }
 
 VecIndexPtr
@@ -109,7 +93,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 }
 
 Status
-ExecutionEngineImpl::AddWithIds(int64_t n, const float *xdata, const int64_t *xids) {
+ExecutionEngineImpl::AddWithIds(int64_t n, const float* xdata, const int64_t* xids) {
     auto status = index_->Add(n, xdata, xids);
     return status;
 }
@@ -125,7 +109,7 @@ ExecutionEngineImpl::Count() const {
 
 size_t
 ExecutionEngineImpl::Size() const {
-    return (size_t) (Count() * Dimension()) * sizeof(float);
+    return (size_t)(Count() * Dimension()) * sizeof(float);
 }
 
 size_t
@@ -164,7 +148,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
             } else {
                 ENGINE_LOG_DEBUG << "Disk io from: " << location_;
             }
-        } catch (std::exception &e) {
+        } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
@@ -191,7 +175,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
         try {
             index_ = index_->CopyToGpu(device_id);
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
-        } catch (std::exception &e) {
+        } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
@@ -219,7 +203,7 @@ ExecutionEngineImpl::CopyToCpu() {
         try {
             index_ = index_->CopyToCpu();
             ENGINE_LOG_DEBUG << "GPU to CPU";
-        } catch (std::exception &e) {
+        } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
@@ -245,7 +229,7 @@ ExecutionEngineImpl::Clone() {
 }
 
 Status
-ExecutionEngineImpl::Merge(const std::string &location) {
+ExecutionEngineImpl::Merge(const std::string& location) {
     if (location == location_) {
         return Status(DB_ERROR, "Cannot Merge Self");
     }
@@ -257,7 +241,7 @@ ExecutionEngineImpl::Merge(const std::string &location) {
             double physical_size = server::CommonUtil::GetFileSize(location);
             server::CollectExecutionEngineMetrics metrics(physical_size);
             to_merge = read_index(location);
-        } catch (std::exception &e) {
+        } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
@@ -280,7 +264,7 @@ ExecutionEngineImpl::Merge(const std::string &location) {
 }
 
 ExecutionEnginePtr
-ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_type) {
+ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
@@ -298,29 +282,23 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
     temp_conf.gpu_id = gpu_num_;
     temp_conf.dim = Dimension();
     temp_conf.nlist = nlist_;
-    temp_conf.metric_type = (metric_type_ == MetricType::IP) ?
-        knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
+    temp_conf.metric_type = (metric_type_ == MetricType::IP) ? knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
     temp_conf.size = Count();
 
     auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
     auto conf = adapter->Match(temp_conf);
 
-    auto status = to_index->BuildAll(Count(),
-                                     from_index->GetRawVectors(),
-                                     from_index->GetRawIds(),
-                                     conf);
-    if (!status.ok()) { throw Exception(DB_ERROR, status.message()); }
+    auto status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
+    if (!status.ok()) {
+        throw Exception(DB_ERROR, status.message());
+    }
 
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n,
-                            const float *data,
-                            int64_t k,
-                            int64_t nprobe,
-                            float *distances,
-                            int64_t *labels) const {
+ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances,
+                            int64_t* labels) const {
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
@@ -362,13 +340,13 @@ ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 // TODO(linxj): remove.
 Status
 ExecutionEngineImpl::Init() {
-    server::Config &config = server::Config::GetInstance();
+    server::Config& config = server::Config::GetInstance();
     Status s = config.GetDBConfigBuildIndexGPU(gpu_num_);
     if (!s.ok()) return s;
 
     return Status::OK();
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

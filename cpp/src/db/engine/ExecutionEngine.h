@@ -19,9 +19,9 @@
 
 #include "utils/Status.h"
 
-#include <vector>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace zilliz {
 namespace milvus {
@@ -43,52 +43,66 @@ enum class MetricType {
 
 class ExecutionEngine {
  public:
-    virtual Status AddWithIds(int64_t n, const float *xdata, const int64_t *xids) = 0;
+    virtual Status
+    AddWithIds(int64_t n, const float* xdata, const int64_t* xids) = 0;
 
-    virtual size_t Count() const = 0;
+    virtual size_t
+    Count() const = 0;
 
-    virtual size_t Size() const = 0;
+    virtual size_t
+    Size() const = 0;
 
-    virtual size_t Dimension() const = 0;
+    virtual size_t
+    Dimension() const = 0;
 
-    virtual size_t PhysicalSize() const = 0;
+    virtual size_t
+    PhysicalSize() const = 0;
 
-    virtual Status Serialize() = 0;
+    virtual Status
+    Serialize() = 0;
 
-    virtual Status Load(bool to_cache = true) = 0;
+    virtual Status
+    Load(bool to_cache = true) = 0;
 
-    virtual Status CopyToGpu(uint64_t device_id) = 0;
+    virtual Status
+    CopyToGpu(uint64_t device_id) = 0;
 
-    virtual Status CopyToCpu() = 0;
+    virtual Status
+    CopyToCpu() = 0;
 
-    virtual std::shared_ptr<ExecutionEngine> Clone() = 0;
+    virtual std::shared_ptr<ExecutionEngine>
+    Clone() = 0;
 
-    virtual Status Merge(const std::string &location) = 0;
+    virtual Status
+    Merge(const std::string& location) = 0;
 
-    virtual Status Search(int64_t n,
-                          const float *data,
-                          int64_t k,
-                          int64_t nprobe,
-                          float *distances,
-                          int64_t *labels) const = 0;
+    virtual Status
+    Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels) const = 0;
 
-    virtual std::shared_ptr<ExecutionEngine> BuildIndex(const std::string &location, EngineType engine_type) = 0;
+    virtual std::shared_ptr<ExecutionEngine>
+    BuildIndex(const std::string& location, EngineType engine_type) = 0;
 
-    virtual Status Cache() = 0;
+    virtual Status
+    Cache() = 0;
 
-    virtual Status GpuCache(uint64_t gpu_id) = 0;
+    virtual Status
+    GpuCache(uint64_t gpu_id) = 0;
 
-    virtual Status Init() = 0;
+    virtual Status
+    Init() = 0;
 
-    virtual EngineType IndexEngineType() const = 0;
+    virtual EngineType
+    IndexEngineType() const = 0;
 
-    virtual MetricType IndexMetricType() const = 0;
+    virtual MetricType
+    IndexMetricType() const = 0;
 
-    virtual std::string GetLocation() const = 0;
+    virtual std::string
+    GetLocation() const = 0;
 };
 
 using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

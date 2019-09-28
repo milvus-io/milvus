@@ -23,8 +23,8 @@ namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-std::ostream &
-operator<<(std::ostream &out, const TestResource &resource) {
+std::ostream&
+operator<<(std::ostream& out, const TestResource& resource) {
     out << resource.Dump();
     return out;
 }
@@ -43,6 +43,6 @@ TestResource::Process(TaskPtr task) {
     task->Execute();
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

@@ -33,6 +33,6 @@ class DefaultLabel : public TaskLabel {
 
 using DefaultLabelPtr = std::shared_ptr<DefaultLabel>;
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

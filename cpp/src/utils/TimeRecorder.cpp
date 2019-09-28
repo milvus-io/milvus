@@ -21,10 +21,7 @@
 namespace zilliz {
 namespace milvus {
 
-TimeRecorder::TimeRecorder(const std::string &header,
-                           int64_t log_level) :
-    header_(header),
-    log_level_(log_level) {
+TimeRecorder::TimeRecorder(const std::string& header, int64_t log_level) : header_(header), log_level_(log_level) {
     start_ = last_ = stdclock::now();
 }
 
@@ -40,7 +37,7 @@ TimeRecorder::GetTimeSpanStr(double span) {
 }
 
 void
-TimeRecorder::PrintTimeRecord(const std::string &msg, double span) {
+TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
     std::string str_log;
     if (!header_.empty()) str_log += header_ + ": ";
     str_log += msg;
@@ -81,7 +78,7 @@ TimeRecorder::PrintTimeRecord(const std::string &msg, double span) {
 }
 
 double
-TimeRecorder::RecordSection(const std::string &msg) {
+TimeRecorder::RecordSection(const std::string& msg) {
     stdclock::time_point curr = stdclock::now();
     double span = (std::chrono::duration<double, std::micro>(curr - last_)).count();
     last_ = curr;
@@ -91,7 +88,7 @@ TimeRecorder::RecordSection(const std::string &msg) {
 }
 
 double
-TimeRecorder::ElapseFromBegin(const std::string &msg) {
+TimeRecorder::ElapseFromBegin(const std::string& msg) {
     stdclock::time_point curr = stdclock::now();
     double span = (std::chrono::duration<double, std::micro>(curr - start_)).count();
 
@@ -99,5 +96,5 @@ TimeRecorder::ElapseFromBegin(const std::string &msg) {
     return span;
 }
 
-} // namespace milvus
-} // namespace zilliz
+}  // namespace milvus
+}  // namespace zilliz
