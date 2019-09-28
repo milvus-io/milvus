@@ -18,8 +18,8 @@
 #pragma once
 
 #include "Task.h"
-#include "scheduler/job/SearchJob.h"
 #include "scheduler/Definition.h"
+#include "scheduler/job/SearchJob.h"
 
 #include <vector>
 
@@ -39,21 +39,16 @@ class XSearchTask : public Task {
     Execute() override;
 
  public:
-    static Status ClusterResult(const std::vector<int64_t> &output_ids,
-                                const std::vector<float> &output_distence,
-                                uint64_t nq,
-                                uint64_t topk,
-                                scheduler::ResultSet &result_set);
+    static Status
+    ClusterResult(const std::vector<int64_t>& output_ids, const std::vector<float>& output_distence, uint64_t nq,
+                  uint64_t topk, scheduler::ResultSet& result_set);
 
-    static Status MergeResult(scheduler::Id2DistanceMap &distance_src,
-                              scheduler::Id2DistanceMap &distance_target,
-                              uint64_t topk,
-                              bool ascending);
+    static Status
+    MergeResult(scheduler::Id2DistanceMap& distance_src, scheduler::Id2DistanceMap& distance_target, uint64_t topk,
+                bool ascending);
 
-    static Status TopkResult(scheduler::ResultSet &result_src,
-                             uint64_t topk,
-                             bool ascending,
-                             scheduler::ResultSet &result_target);
+    static Status
+    TopkResult(scheduler::ResultSet& result_src, uint64_t topk, bool ascending, scheduler::ResultSet& result_target);
 
  public:
     TableFileSchemaPtr file_;
@@ -66,6 +61,6 @@ class XSearchTask : public Task {
     static std::mutex merge_mutex_;
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

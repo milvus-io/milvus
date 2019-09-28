@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <getopt.h>
 #include <libgen.h>
 #include <cstring>
@@ -24,10 +23,10 @@
 #include "src/ClientTest.h"
 
 void
-print_help(const std::string &app_name);
+print_help(const std::string& app_name);
 
 int
-main(int argc, char *argv[]) {
+main(int argc, char* argv[]) {
     printf("Client start...\n");
 
     std::string app_name = basename(argv[0]);
@@ -44,19 +43,20 @@ main(int argc, char *argv[]) {
     while ((value = getopt_long(argc, argv, "s:p:h", long_options, &option_index)) != -1) {
         switch (value) {
             case 's': {
-                char *address_ptr = strdup(optarg);
+                char* address_ptr = strdup(optarg);
                 address = address_ptr;
                 free(address_ptr);
                 break;
             }
             case 'p': {
-                char *port_ptr = strdup(optarg);
+                char* port_ptr = strdup(optarg);
                 port = port_ptr;
                 free(port_ptr);
                 break;
             }
             case 'h':
-            default:print_help(app_name);
+            default:
+                print_help(app_name);
                 return EXIT_SUCCESS;
         }
     }
@@ -69,7 +69,7 @@ main(int argc, char *argv[]) {
 }
 
 void
-print_help(const std::string &app_name) {
+print_help(const std::string& app_name) {
     printf("\n Usage: %s [OPTIONS]\n\n", app_name.c_str());
     printf("  Options:\n");
     printf("   -s --server   Server address, default 127.0.0.1\n");

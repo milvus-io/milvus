@@ -17,8 +17,8 @@
 
 #pragma once
 
-#include "utils/Error.h"
 #include "ConfigNode.h"
+#include "utils/Error.h"
 
 #include <string>
 
@@ -42,16 +42,22 @@ namespace server {
 
 class ConfigMgr {
  public:
-    static ConfigMgr *GetInstance();
+    static ConfigMgr*
+    GetInstance();
 
-    virtual ErrorCode LoadConfigFile(const std::string &filename) = 0;
-    virtual void Print() const = 0;//will be deleted
-    virtual std::string DumpString() const = 0;
+    virtual ErrorCode
+    LoadConfigFile(const std::string& filename) = 0;
+    virtual void
+    Print() const = 0;  // will be deleted
+    virtual std::string
+    DumpString() const = 0;
 
-    virtual const ConfigNode &GetRootNode() const = 0;
-    virtual ConfigNode &GetRootNode() = 0;
+    virtual const ConfigNode&
+    GetRootNode() const = 0;
+    virtual ConfigNode&
+    GetRootNode() = 0;
 };
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz
