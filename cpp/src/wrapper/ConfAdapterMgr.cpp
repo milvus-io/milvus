@@ -15,18 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "src/utils/Exception.h"
-#include "ConfAdapterMgr.h"
-
+#include "wrapper/ConfAdapterMgr.h"
+#include "utils/Exception.h"
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 ConfAdapterPtr
-AdapterMgr::GetAdapter(const IndexType &indexType) {
-    if (!init_) RegisterAdapter();
+AdapterMgr::GetAdapter(const IndexType& indexType) {
+    if (!init_)
+        RegisterAdapter();
 
     auto it = table_.find(indexType);
     if (it != table_.end()) {
@@ -36,8 +35,8 @@ AdapterMgr::GetAdapter(const IndexType &indexType) {
     }
 }
 
+#define REGISTER_CONF_ADAPTER(T, KEY, NAME) static AdapterMgr::register_t<T> reg_##NAME##_(KEY)
 
-#define REGISTER_CONF_ADAPTER(T, KEY, NAME) static AdapterMgr::register_t<T>reg_##NAME##_(KEY)
 void
 AdapterMgr::RegisterAdapter() {
     init_ = true;
@@ -58,7 +57,6 @@ AdapterMgr::RegisterAdapter() {
     REGISTER_CONF_ADAPTER(NSGConfAdapter, IndexType::NSG_MIX, nsg_mix);
 }
 
-} // engine
-} // milvus
-} // zilliz
-
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

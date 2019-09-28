@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "utils/Status.h"
@@ -33,6 +32,6 @@ class KnowhereResource {
     Finalize();
 };
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz
