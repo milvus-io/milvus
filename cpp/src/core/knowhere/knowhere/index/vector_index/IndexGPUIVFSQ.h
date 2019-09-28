@@ -15,29 +15,31 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-#include "IndexGPUIVF.h"
+#include <memory>
+#include <utility>
 
+#include "IndexGPUIVF.h"
 
 namespace zilliz {
 namespace knowhere {
 
 class GPUIVFSQ : public GPUIVF {
-public:
-    explicit GPUIVFSQ(const int &device_id) : GPUIVF(device_id) {}
+ public:
+    explicit GPUIVFSQ(const int& device_id) : GPUIVF(device_id) {
+    }
 
-    explicit GPUIVFSQ(std::shared_ptr<faiss::Index> index, const int64_t &device_id, ResPtr &resource)
-            : GPUIVF(std::move(index), device_id, resource) {};
+    explicit GPUIVFSQ(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
+        : GPUIVF(std::move(index), device_id, resource) {
+    }
 
     IndexModelPtr
-    Train(const DatasetPtr &dataset, const Config &config) override;
+    Train(const DatasetPtr& dataset, const Config& config) override;
 
     VectorIndexPtr
-    CopyGpuToCpu(const Config &config) override;
+    CopyGpuToCpu(const Config& config) override;
 };
 
-} // knowhere
-} // zilliz
-
+}  // namespace knowhere
+}  // namespace zilliz

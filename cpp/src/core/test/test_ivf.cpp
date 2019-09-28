@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <gtest/gtest.h>
 
 #include <iostream>
@@ -25,21 +24,24 @@
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 
+#include "knowhere/adapter/Structure.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
-#include "knowhere/adapter/Structure.h"
-#include "knowhere/index/vector_index/helpers/Cloner.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
-#include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 
-#include "utils.h"
+#include "test/utils.h"
 
-using namespace zilliz::knowhere;
-using namespace zilliz::knowhere::cloner;
+namespace {
+
+namespace kn = zilliz::knowhere;
+
+}  // namespace
 
 using ::testing::TestWithParam;
 using ::testing::Values;
@@ -47,23 +49,24 @@ using ::testing::Combine;
 
 constexpr int device_id = 0;
 constexpr int64_t DIM = 128;
-constexpr int64_t NB = 1000000/100;
+constexpr int64_t NB = 1000000 / 100;
 constexpr int64_t NQ = 10;
 constexpr int64_t K = 10;
 
-IVFIndexPtr IndexFactory(const std::string &type) {
+kn::IVFIndexPtr
+IndexFactory(const std::string& type) {
     if (type == "IVF") {
-        return std::make_shared<IVF>();
+        return std::make_shared<kn::IVF>();
     } else if (type == "IVFPQ") {
-        return std::make_shared<IVFPQ>();
+        return std::make_shared<kn::IVFPQ>();
     } else if (type == "GPUIVF") {
-        return std::make_shared<GPUIVF>(device_id);
+        return std::make_shared<kn::GPUIVF>(device_id);
     } else if (type == "GPUIVFPQ") {
-        return std::make_shared<GPUIVFPQ>(device_id);
+        return std::make_shared<kn::GPUIVFPQ>(device_id);
     } else if (type == "IVFSQ") {
-        return std::make_shared<IVFSQ>();
+        return std::make_shared<kn::IVFSQ>();
     } else if (type == "GPUIVFSQ") {
-        return std::make_shared<GPUIVFSQ>(device_id);
+        return std::make_shared<kn::GPUIVFSQ>(device_id);
     }
 }
 
@@ -76,24 +79,25 @@ enum class ParameterType {
 
 class ParamGenerator {
  public:
-    static ParamGenerator& GetInstance(){
+    static ParamGenerator&
+    GetInstance() {
         static ParamGenerator instance;
         return instance;
     }
 
-    Config Gen(const ParameterType& type){
+    kn::Config
+    Gen(const ParameterType& type) {
         if (type == ParameterType::ivf) {
-            auto tempconf = std::make_shared<IVFCfg>();
+            auto tempconf = std::make_shared<kn::IVFCfg>();
             tempconf->d = DIM;
             tempconf->gpu_id = device_id;
             tempconf->nlist = 100;
             tempconf->nprobe = 16;
             tempconf->k = K;
-            tempconf->metric_type = METRICTYPE::L2;
+            tempconf->metric_type = kn::METRICTYPE::L2;
             return tempconf;
-        }
-        else if (type == ParameterType::ivfpq) {
-            auto tempconf = std::make_shared<IVFPQCfg>();
+        } else if (type == ParameterType::ivfpq) {
+            auto tempconf = std::make_shared<kn::IVFPQCfg>();
             tempconf->d = DIM;
             tempconf->gpu_id = device_id;
             tempconf->nlist = 100;
@@ -101,70 +105,64 @@ class ParamGenerator {
             tempconf->k = K;
             tempconf->m = 8;
             tempconf->nbits = 8;
-            tempconf->metric_type = METRICTYPE::L2;
+            tempconf->metric_type = kn::METRICTYPE::L2;
             return tempconf;
-        }
-        else if (type == ParameterType::ivfsq) {
-            auto tempconf = std::make_shared<IVFSQCfg>();
+        } else if (type == ParameterType::ivfsq) {
+            auto tempconf = std::make_shared<kn::IVFSQCfg>();
             tempconf->d = DIM;
             tempconf->gpu_id = device_id;
             tempconf->nlist = 100;
             tempconf->nprobe = 16;
             tempconf->k = K;
             tempconf->nbits = 8;
-            tempconf->metric_type = METRICTYPE::L2;
+            tempconf->metric_type = kn::METRICTYPE::L2;
             return tempconf;
         }
     }
 };
 
-class IVFTest
-    : public DataGen, public TestWithParam<::std::tuple<std::string, ParameterType>> {
+class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, ParameterType>> {
  protected:
-    void SetUp() override {
+    void
+    SetUp() override {
         ParameterType parameter_type;
         std::tie(index_type, parameter_type) = GetParam();
-        //Init_with_default();
+        // Init_with_default();
         Generate(DIM, NB, NQ);
         index_ = IndexFactory(index_type);
         conf = ParamGenerator::GetInstance().Gen(parameter_type);
-        FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*600, 2);
+        kn::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024 * 1024 * 200, 1024 * 1024 * 600, 2);
     }
-    void TearDown() override {
-        FaissGpuResourceMgr::GetInstance().Free();
+
+    void
+    TearDown() override {
+        kn::FaissGpuResourceMgr::GetInstance().Free();
     }
 
  protected:
     std::string index_type;
-    Config conf;
-    IVFIndexPtr index_ = nullptr;
+    kn::Config conf;
+    kn::IVFIndexPtr index_ = nullptr;
 };
 
-
-
 INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
-                        Values(
-                            std::make_tuple("IVF", ParameterType::ivf),
-                            std::make_tuple("GPUIVF", ParameterType::ivf),
-//                            std::make_tuple("IVFPQ", ParameterType::ivfpq),
-//                            std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
-                            std::make_tuple("IVFSQ", ParameterType::ivfsq),
-                            std::make_tuple("GPUIVFSQ", ParameterType::ivfsq)
-                        )
-);
+                        Values(std::make_tuple("IVF", ParameterType::ivf),
+                               std::make_tuple("GPUIVF", ParameterType::ivf),
+                               //                            std::make_tuple("IVFPQ", ParameterType::ivfpq),
+                               //                            std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
+                               std::make_tuple("IVFSQ", ParameterType::ivfsq),
+                               std::make_tuple("GPUIVFSQ", ParameterType::ivfsq)));
 
-void AssertAnns(const DatasetPtr &result,
-                const int &nq,
-                const int &k) {
+void
+AssertAnns(const kn::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     for (auto i = 0; i < nq; i++) {
         EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
     }
 }
 
-void PrintResult(const DatasetPtr &result,
-                 const int &nq,
-                 const int &k) {
+void
+PrintResult(const kn::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     auto dists = result->array()[1];
 
@@ -195,10 +193,10 @@ TEST_P(IVFTest, ivf_basic) {
     EXPECT_EQ(index_->Dimension(), dim);
     auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
-    //PrintResult(result, nq, k);
+    // PrintResult(result, nq, k);
 }
 
-//TEST_P(IVFTest, gpu_to_cpu) {
+// TEST_P(IVFTest, gpu_to_cpu) {
 //    if (index_type.find("GPU") == std::string::npos) { return; }
 //
 //    // else
@@ -223,9 +221,9 @@ TEST_P(IVFTest, ivf_basic) {
 //}
 
 TEST_P(IVFTest, ivf_serialize) {
-    auto serialize = [](const std::string &filename, BinaryPtr &bin, uint8_t *ret) {
+    auto serialize = [](const std::string& filename, kn::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
-        writer(static_cast<void *>(bin->data.get()), bin->size);
+        writer(static_cast<void*>(bin->data.get()), bin->size);
 
         FileIOReader reader(filename);
         reader(ret, bin->size);
@@ -292,15 +290,14 @@ TEST_P(IVFTest, clone_test) {
     EXPECT_EQ(index_->Dimension(), dim);
     auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
-    //PrintResult(result, nq, k);
+    // PrintResult(result, nq, k);
 
-    auto AssertEqual = [&] (DatasetPtr p1, DatasetPtr p2) {
+    auto AssertEqual = [&](kn::DatasetPtr p1, kn::DatasetPtr p2) {
         auto ids_p1 = p1->array()[0];
         auto ids_p2 = p2->array()[0];
 
         for (int i = 0; i < nq * k; ++i) {
-            EXPECT_EQ(*(ids_p2->data()->GetValues<int64_t>(1, i)),
-                      *(ids_p1->data()->GetValues<int64_t>(1, i)));
+            EXPECT_EQ(*(ids_p2->data()->GetValues<int64_t>(1, i)), *(ids_p1->data()->GetValues<int64_t>(1, i)));
         }
     };
 
@@ -310,17 +307,19 @@ TEST_P(IVFTest, clone_test) {
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
-                                auto clone_index = index_->Clone();
-                                auto clone_result = clone_index->Search(query_dataset, conf);
-                                //AssertAnns(result, nq, conf->k);
-                                AssertEqual(result, clone_result);
-                                std::cout << "inplace clone [" << index_type << "] success" << std::endl;
-                            });
+                auto clone_index = index_->Clone();
+                auto clone_result = clone_index->Search(query_dataset, conf);
+                // AssertAnns(result, nq, conf->k);
+                AssertEqual(result, clone_result);
+                std::cout << "inplace clone [" << index_type << "] success" << std::endl;
+            });
         } else {
-            EXPECT_THROW({
-                             std::cout << "inplace clone [" << index_type << "] failed" << std::endl;
-                             auto clone_index = index_->Clone();
-                         }, KnowhereException);
+            EXPECT_THROW(
+                {
+                    std::cout << "inplace clone [" << index_type << "] failed" << std::endl;
+                    auto clone_index = index_->Clone();
+                },
+                kn::KnowhereException);
         }
     }
 
@@ -330,16 +329,18 @@ TEST_P(IVFTest, clone_test) {
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
-                                auto clone_index = CopyGpuToCpu(index_, Config());
-                                auto clone_result = clone_index->Search(query_dataset, conf);
-                                AssertEqual(result, clone_result);
-                                std::cout << "clone G <=> C [" << index_type << "] success" << std::endl;
-                            });
+                auto clone_index = kn::cloner::CopyGpuToCpu(index_, kn::Config());
+                auto clone_result = clone_index->Search(query_dataset, conf);
+                AssertEqual(result, clone_result);
+                std::cout << "clone G <=> C [" << index_type << "] success" << std::endl;
+            });
         } else {
-            EXPECT_THROW({
-                             std::cout << "clone G <=> C [" << index_type << "] failed" << std::endl;
-                             auto clone_index = CopyGpuToCpu(index_, Config());
-                         }, KnowhereException);
+            EXPECT_THROW(
+                {
+                    std::cout << "clone G <=> C [" << index_type << "] failed" << std::endl;
+                    auto clone_index = kn::cloner::CopyGpuToCpu(index_, kn::Config());
+                },
+                kn::KnowhereException);
         }
     }
 
@@ -349,22 +350,24 @@ TEST_P(IVFTest, clone_test) {
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
-                                auto clone_index = CopyCpuToGpu(index_, device_id, Config());
-                                auto clone_result = clone_index->Search(query_dataset, conf);
-                                AssertEqual(result, clone_result);
-                                std::cout << "clone C <=> G [" << index_type << "] success" << std::endl;
-                            });
+                auto clone_index = kn::cloner::CopyCpuToGpu(index_, device_id, kn::Config());
+                auto clone_result = clone_index->Search(query_dataset, conf);
+                AssertEqual(result, clone_result);
+                std::cout << "clone C <=> G [" << index_type << "] success" << std::endl;
+            });
         } else {
-            EXPECT_THROW({
-                             std::cout << "clone C <=> G [" << index_type << "] failed" << std::endl;
-                             auto clone_index = CopyCpuToGpu(index_, device_id, Config());
-                         }, KnowhereException);
+            EXPECT_THROW(
+                {
+                    std::cout << "clone C <=> G [" << index_type << "] failed" << std::endl;
+                    auto clone_index = kn::cloner::CopyCpuToGpu(index_, device_id, kn::Config());
+                },
+                kn::KnowhereException);
         }
     }
 }
 
 TEST_P(IVFTest, seal_test) {
-    //FaissGpuResourceMgr::GetInstance().InitDevice(device_id);
+    // FaissGpuResourceMgr::GetInstance().InitDevice(device_id);
 
     std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ"};
     auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
@@ -385,44 +388,44 @@ TEST_P(IVFTest, seal_test) {
     auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
 
-    auto cpu_idx = CopyGpuToCpu(index_, Config());
+    auto cpu_idx = kn::cloner::CopyGpuToCpu(index_, kn::Config());
 
-    TimeRecorder tc("CopyToGpu");
-    CopyCpuToGpu(cpu_idx, device_id, Config());
+    kn::TimeRecorder tc("CopyToGpu");
+    kn::cloner::CopyCpuToGpu(cpu_idx, device_id, kn::Config());
     auto without_seal = tc.RecordSection("Without seal");
     cpu_idx->Seal();
     tc.RecordSection("seal cost");
-    CopyCpuToGpu(cpu_idx, device_id, Config());
+    kn::cloner::CopyCpuToGpu(cpu_idx, device_id, kn::Config());
     auto with_seal = tc.RecordSection("With seal");
     ASSERT_GE(without_seal, with_seal);
 }
 
-
-class GPURESTEST
-    : public DataGen, public ::testing::Test {
+class GPURESTEST : public DataGen, public ::testing::Test {
  protected:
-    void SetUp() override {
+    void
+    SetUp() override {
         Generate(128, 1000000, 1000);
-        FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024*1024*200, 1024*1024*300, 2);
+        kn::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024 * 1024 * 200, 1024 * 1024 * 300, 2);
 
         k = 100;
         elems = nq * k;
-        ids = (int64_t *) malloc(sizeof(int64_t) * elems);
-        dis = (float *) malloc(sizeof(float) * elems);
+        ids = (int64_t*)malloc(sizeof(int64_t) * elems);
+        dis = (float*)malloc(sizeof(float) * elems);
     }
 
-    void TearDown() override {
+    void
+    TearDown() override {
         delete ids;
         delete dis;
-        FaissGpuResourceMgr::GetInstance().Free();
+        kn::FaissGpuResourceMgr::GetInstance().Free();
     }
 
  protected:
     std::string index_type;
-    IVFIndexPtr index_ = nullptr;
+    kn::IVFIndexPtr index_ = nullptr;
 
-    int64_t *ids = nullptr;
-    float *dis = nullptr;
+    int64_t* ids = nullptr;
+    float* dis = nullptr;
     int64_t elems = 0;
 };
 
@@ -433,16 +436,16 @@ TEST_F(GPURESTEST, gpu_ivf_resource_test) {
     assert(!xb.empty());
 
     {
-        index_ =  std::make_shared<GPUIVF>(-1);
-        ASSERT_EQ(std::dynamic_pointer_cast<GPUIVF>(index_)->GetGpuDevice(), -1);
-        std::dynamic_pointer_cast<GPUIVF>(index_)->SetGpuDevice(device_id);
-        ASSERT_EQ(std::dynamic_pointer_cast<GPUIVF>(index_)->GetGpuDevice(), device_id);
+        index_ = std::make_shared<kn::GPUIVF>(-1);
+        ASSERT_EQ(std::dynamic_pointer_cast<kn::GPUIVF>(index_)->GetGpuDevice(), -1);
+        std::dynamic_pointer_cast<kn::GPUIVF>(index_)->SetGpuDevice(device_id);
+        ASSERT_EQ(std::dynamic_pointer_cast<kn::GPUIVF>(index_)->GetGpuDevice(), device_id);
 
-        auto conf = std::make_shared<IVFCfg>();
+        auto conf = std::make_shared<kn::IVFCfg>();
         conf->nlist = 1638;
         conf->d = dim;
         conf->gpu_id = device_id;
-        conf->metric_type = METRICTYPE::L2;
+        conf->metric_type = kn::METRICTYPE::L2;
         conf->k = k;
         conf->nprobe = 1;
 
@@ -454,7 +457,7 @@ TEST_F(GPURESTEST, gpu_ivf_resource_test) {
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
 
-        TimeRecorder tc("knowere GPUIVF");
+        kn::TimeRecorder tc("knowere GPUIVF");
         for (int i = 0; i < search_count; ++i) {
             index_->Search(query_dataset, conf);
             if (i > search_count - 6 || i < 5)
@@ -462,7 +465,7 @@ TEST_F(GPURESTEST, gpu_ivf_resource_test) {
         }
         tc.ElapseFromBegin("search all");
     }
-    FaissGpuResourceMgr::GetInstance().Dump();
+    kn::FaissGpuResourceMgr::GetInstance().Dump();
 
     {
         // IVF-Search
@@ -473,7 +476,7 @@ TEST_F(GPURESTEST, gpu_ivf_resource_test) {
         device_index.train(nb, xb.data());
         device_index.add(nb, xb.data());
 
-        TimeRecorder tc("ori IVF");
+        kn::TimeRecorder tc("ori IVF");
         for (int i = 0; i < search_count; ++i) {
             device_index.search(nq, xq.data(), k, dis, ids);
             if (i > search_count - 6 || i < 5)
@@ -481,7 +484,6 @@ TEST_F(GPURESTEST, gpu_ivf_resource_test) {
         }
         tc.ElapseFromBegin("search all");
     }
-
 }
 
 TEST_F(GPURESTEST, gpuivfsq) {
@@ -490,11 +492,11 @@ TEST_F(GPURESTEST, gpuivfsq) {
         index_type = "GPUIVFSQ";
         index_ = IndexFactory(index_type);
 
-        auto conf = std::make_shared<IVFSQCfg>();
+        auto conf = std::make_shared<kn::IVFSQCfg>();
         conf->nlist = 1638;
         conf->d = dim;
         conf->gpu_id = device_id;
-        conf->metric_type = METRICTYPE::L2;
+        conf->metric_type = kn::METRICTYPE::L2;
         conf->k = k;
         conf->nbits = 8;
         conf->nprobe = 1;
@@ -507,11 +509,11 @@ TEST_F(GPURESTEST, gpuivfsq) {
         auto result = index_->Search(query_dataset, conf);
         AssertAnns(result, nq, k);
 
-        auto cpu_idx = CopyGpuToCpu(index_, Config());
+        auto cpu_idx = kn::cloner::CopyGpuToCpu(index_, kn::Config());
         cpu_idx->Seal();
 
-        TimeRecorder tc("knowhere GPUSQ8");
-        auto search_idx = CopyCpuToGpu(cpu_idx, device_id, Config());
+        kn::TimeRecorder tc("knowhere GPUSQ8");
+        auto search_idx = kn::cloner::CopyCpuToGpu(cpu_idx, device_id, kn::Config());
         tc.RecordSection("Copy to gpu");
         for (int i = 0; i < search_count; ++i) {
             search_idx->Search(query_dataset, conf);
@@ -523,8 +525,8 @@ TEST_F(GPURESTEST, gpuivfsq) {
 
     {
         // Ori gpuivfsq Test
-        const char *index_description = "IVF1638,SQ8";
-        faiss::Index *ori_index = faiss::index_factory(dim, index_description, faiss::METRIC_L2);
+        const char* index_description = "IVF1638,SQ8";
+        faiss::Index* ori_index = faiss::index_factory(dim, index_description, faiss::METRIC_L2);
 
         faiss::gpu::StandardGpuResources res;
         auto device_index = faiss::gpu::index_cpu_to_gpu(&res, device_id, ori_index);
@@ -532,7 +534,7 @@ TEST_F(GPURESTEST, gpuivfsq) {
         device_index->add(nb, xb.data());
 
         auto cpu_index = faiss::gpu::index_gpu_to_cpu(device_index);
-        auto idx = dynamic_cast<faiss::IndexIVF *>(cpu_index);
+        auto idx = dynamic_cast<faiss::IndexIVF*>(cpu_index);
         if (idx != nullptr) {
             idx->to_readonly();
         }
@@ -542,8 +544,8 @@ TEST_F(GPURESTEST, gpuivfsq) {
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
 
-        TimeRecorder tc("ori GPUSQ8");
-        faiss::Index *search_idx = faiss::gpu::index_cpu_to_gpu(&res, device_id, cpu_index, &option);
+        kn::TimeRecorder tc("ori GPUSQ8");
+        faiss::Index* search_idx = faiss::gpu::index_cpu_to_gpu(&res, device_id, cpu_index, &option);
         tc.RecordSection("Copy to gpu");
         for (int i = 0; i < search_count; ++i) {
             search_idx->search(nq, xq.data(), k, dis, ids);
@@ -554,7 +556,6 @@ TEST_F(GPURESTEST, gpuivfsq) {
         delete cpu_index;
         delete search_idx;
     }
-
 }
 
 TEST_F(GPURESTEST, copyandsearch) {
@@ -564,11 +565,11 @@ TEST_F(GPURESTEST, copyandsearch) {
     index_type = "GPUIVFSQ";
     index_ = IndexFactory(index_type);
 
-    auto conf = std::make_shared<IVFSQCfg>();
+    auto conf = std::make_shared<kn::IVFSQCfg>();
     conf->nlist = 1638;
     conf->d = dim;
     conf->gpu_id = device_id;
-    conf->metric_type = METRICTYPE::L2;
+    conf->metric_type = kn::METRICTYPE::L2;
     conf->k = k;
     conf->nbits = 8;
     conf->nprobe = 1;
@@ -581,32 +582,32 @@ TEST_F(GPURESTEST, copyandsearch) {
     auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
 
-    auto cpu_idx = CopyGpuToCpu(index_, Config());
+    auto cpu_idx = kn::cloner::CopyGpuToCpu(index_, kn::Config());
     cpu_idx->Seal();
 
-    auto search_idx = CopyCpuToGpu(cpu_idx, device_id, Config());
+    auto search_idx = kn::cloner::CopyCpuToGpu(cpu_idx, device_id, kn::Config());
 
     auto search_func = [&] {
-        //TimeRecorder tc("search&load");
+        // TimeRecorder tc("search&load");
         for (int i = 0; i < search_count; ++i) {
             search_idx->Search(query_dataset, conf);
-            //if (i > search_count - 6 || i == 0)
+            // if (i > search_count - 6 || i == 0)
             //    tc.RecordSection("search once");
         }
-        //tc.ElapseFromBegin("search finish");
+        // tc.ElapseFromBegin("search finish");
     };
     auto load_func = [&] {
-        //TimeRecorder tc("search&load");
+        // TimeRecorder tc("search&load");
         for (int i = 0; i < load_count; ++i) {
-            CopyCpuToGpu(cpu_idx, device_id, Config());
-            //if (i > load_count -5 || i < 5)
-                //tc.RecordSection("Copy to gpu");
+            kn::cloner::CopyCpuToGpu(cpu_idx, device_id, kn::Config());
+            // if (i > load_count -5 || i < 5)
+            // tc.RecordSection("Copy to gpu");
         }
-        //tc.ElapseFromBegin("load finish");
+        // tc.ElapseFromBegin("load finish");
     };
 
-    TimeRecorder tc("basic");
-    CopyCpuToGpu(cpu_idx, device_id, Config());
+    kn::TimeRecorder tc("basic");
+    kn::cloner::CopyCpuToGpu(cpu_idx, device_id, kn::Config());
     tc.RecordSection("Copy to gpu once");
     search_idx->Search(query_dataset, conf);
     tc.RecordSection("search once");
@@ -626,11 +627,11 @@ TEST_F(GPURESTEST, TrainAndSearch) {
     index_type = "GPUIVFSQ";
     index_ = IndexFactory(index_type);
 
-    auto conf = std::make_shared<IVFSQCfg>();
+    auto conf = std::make_shared<kn::IVFSQCfg>();
     conf->nlist = 1638;
     conf->d = dim;
     conf->gpu_id = device_id;
-    conf->metric_type = METRICTYPE::L2;
+    conf->metric_type = kn::METRICTYPE::L2;
     conf->k = k;
     conf->nbits = 8;
     conf->nprobe = 1;
@@ -641,9 +642,9 @@ TEST_F(GPURESTEST, TrainAndSearch) {
     auto new_index = IndexFactory(index_type);
     new_index->set_index_model(model);
     new_index->Add(base_dataset, conf);
-    auto cpu_idx = CopyGpuToCpu(new_index, Config());
+    auto cpu_idx = kn::cloner::CopyGpuToCpu(new_index, kn::Config());
     cpu_idx->Seal();
-    auto search_idx = CopyCpuToGpu(cpu_idx, device_id, Config());
+    auto search_idx = kn::cloner::CopyCpuToGpu(cpu_idx, device_id, kn::Config());
 
     constexpr int train_count = 1;
     constexpr int search_count = 5000;
@@ -655,18 +656,18 @@ TEST_F(GPURESTEST, TrainAndSearch) {
             test_idx->Add(base_dataset, conf);
         }
     };
-    auto search_stage = [&](VectorIndexPtr& search_idx) {
+    auto search_stage = [&](kn::VectorIndexPtr& search_idx) {
         for (int i = 0; i < search_count; ++i) {
             auto result = search_idx->Search(query_dataset, conf);
             AssertAnns(result, nq, k);
         }
     };
 
-    //TimeRecorder tc("record");
-    //train_stage();
-    //tc.RecordSection("train cost");
-    //search_stage(search_idx);
-    //tc.RecordSection("search cost");
+    // TimeRecorder tc("record");
+    // train_stage();
+    // tc.RecordSection("train cost");
+    // search_stage(search_idx);
+    // tc.RecordSection("search cost");
 
     {
         // search and build parallel
@@ -684,14 +685,12 @@ TEST_F(GPURESTEST, TrainAndSearch) {
     }
     {
         // search parallel
-        auto search_idx_2 = CopyCpuToGpu(cpu_idx, device_id, Config());
+        auto search_idx_2 = kn::cloner::CopyCpuToGpu(cpu_idx, device_id, kn::Config());
         std::thread search_1(search_stage, std::ref(search_idx));
         std::thread search_2(search_stage, std::ref(search_idx_2));
         search_1.join();
         search_2.join();
     }
 }
-
-
 
 // TODO(lxj): Add exception test
