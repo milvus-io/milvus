@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "scheduler/ResourceFactory.h"
 
 namespace zilliz {
@@ -23,10 +22,7 @@ namespace milvus {
 namespace scheduler {
 
 std::shared_ptr<Resource>
-ResourceFactory::Create(const std::string &name,
-                        const std::string &type,
-                        uint64_t device_id,
-                        bool enable_loader,
+ResourceFactory::Create(const std::string& name, const std::string& type, uint64_t device_id, bool enable_loader,
                         bool enable_executor) {
     if (type == "DISK") {
         return std::make_shared<DiskResource>(name, device_id, enable_loader, enable_executor);
@@ -39,6 +35,6 @@ ResourceFactory::Create(const std::string &name,
     }
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

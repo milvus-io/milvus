@@ -45,8 +45,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param context
      */
     ::grpc::Status
-    CreateTable(::grpc::ServerContext *context,
-                const ::milvus::grpc::TableSchema *request, ::milvus::grpc::Status *response) override;
+    CreateTable(::grpc::ServerContext* context, const ::milvus::grpc::TableSchema* request,
+                ::milvus::grpc::Status* response) override;
 
     /**
      * @brief Test table existence method
@@ -64,8 +64,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param context
      */
     ::grpc::Status
-    HasTable(::grpc::ServerContext *context,
-             const ::milvus::grpc::TableName *request, ::milvus::grpc::BoolReply *response) override;
+    HasTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+             ::milvus::grpc::BoolReply* response) override;
 
     /**
      * @brief Drop table method
@@ -83,8 +83,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param context
      */
     ::grpc::Status
-    DropTable(::grpc::ServerContext *context,
-              const ::milvus::grpc::TableName *request, ::milvus::grpc::Status *response) override;
+    DropTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+              ::milvus::grpc::Status* response) override;
 
     /**
      * @brief build index by table method
@@ -102,8 +102,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param context
      */
     ::grpc::Status
-    CreateIndex(::grpc::ServerContext *context,
-                const ::milvus::grpc::IndexParam *request, ::milvus::grpc::Status *response) override;
+    CreateIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
+                ::milvus::grpc::Status* response) override;
 
     /**
      * @brief Insert vector array to table
@@ -121,9 +121,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param response
      */
     ::grpc::Status
-    Insert(::grpc::ServerContext *context,
-           const ::milvus::grpc::InsertParam *request,
-           ::milvus::grpc::VectorIds *response) override;
+    Insert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request,
+           ::milvus::grpc::VectorIds* response) override;
 
     /**
      * @brief Query vector
@@ -146,9 +145,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param writer
      */
     ::grpc::Status
-    Search(::grpc::ServerContext *context,
-           const ::milvus::grpc::SearchParam *request,
-           ::milvus::grpc::TopKQueryResultList *response) override;
+    Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
+           ::milvus::grpc::TopKQueryResultList* response) override;
 
     /**
    * @brief Internal use query interface
@@ -171,9 +169,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
    * @param writer
    */
     ::grpc::Status
-    SearchInFiles(::grpc::ServerContext *context,
-                  const ::milvus::grpc::SearchInFilesParam *request,
-                  ::milvus::grpc::TopKQueryResultList *response) override;
+    SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
+                  ::milvus::grpc::TopKQueryResultList* response) override;
 
     /**
      * @brief Get table schema
@@ -191,9 +188,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param response
      */
     ::grpc::Status
-    DescribeTable(::grpc::ServerContext *context,
-                  const ::milvus::grpc::TableName *request,
-                  ::milvus::grpc::TableSchema *response) override;
+    DescribeTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                  ::milvus::grpc::TableSchema* response) override;
 
     /**
      * @brief Get table row count
@@ -211,9 +207,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param context
      */
     ::grpc::Status
-    CountTable(::grpc::ServerContext *context,
-               const ::milvus::grpc::TableName *request,
-               ::milvus::grpc::TableRowCount *response) override;
+    CountTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+               ::milvus::grpc::TableRowCount* response) override;
 
     /**
      * @brief List all tables in database
@@ -231,9 +226,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param writer
      */
     ::grpc::Status
-    ShowTables(::grpc::ServerContext *context,
-               const ::milvus::grpc::Command *request,
-               ::milvus::grpc::TableNameList *table_name_list) override;
+    ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
+               ::milvus::grpc::TableNameList* table_name_list) override;
 
     /**
      * @brief Give the server status
@@ -251,9 +245,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param response
      */
     ::grpc::Status
-    Cmd(::grpc::ServerContext *context,
-        const ::milvus::grpc::Command *request,
-        ::milvus::grpc::StringReply *response) override;
+    Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
+        ::milvus::grpc::StringReply* response) override;
 
     /**
      * @brief delete table by range
@@ -270,9 +263,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param response
      */
     ::grpc::Status
-    DeleteByRange(::grpc::ServerContext *context,
-                  const ::milvus::grpc::DeleteByRangeParam *request,
-                  ::milvus::grpc::Status *response) override;
+    DeleteByRange(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByRangeParam* request,
+                  ::milvus::grpc::Status* response) override;
 
     /**
      * @brief preload table
@@ -289,9 +281,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param response
      */
     ::grpc::Status
-    PreloadTable(::grpc::ServerContext *context,
-                 const ::milvus::grpc::TableName *request,
-                 ::milvus::grpc::Status *response) override;
+    PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                 ::milvus::grpc::Status* response) override;
 
     /**
      * @brief Describe index
@@ -308,9 +299,8 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param response
      */
     ::grpc::Status
-    DescribeIndex(::grpc::ServerContext *context,
-                  const ::milvus::grpc::TableName *request,
-                  ::milvus::grpc::IndexParam *response) override;
+    DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                  ::milvus::grpc::IndexParam* response) override;
 
     /**
      * @brief Drop index
@@ -327,13 +317,11 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      * @param response
      */
     ::grpc::Status
-    DropIndex(::grpc::ServerContext *context,
-              const ::milvus::grpc::TableName *request,
-              ::milvus::grpc::Status *response) override;
+    DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+              ::milvus::grpc::Status* response) override;
 };
 
-} // namespace grpc
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
-
+}  // namespace grpc
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz

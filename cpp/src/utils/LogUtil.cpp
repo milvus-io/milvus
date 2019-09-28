@@ -18,8 +18,8 @@
 #include "utils/LogUtil.h"
 
 #include <ctype.h>
-#include <string>
 #include <libgen.h>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -36,16 +36,16 @@ static int fatal_idx = 0;
 
 // TODO(yzb) : change the easylogging library to get the log level from parameter rather than filename
 void
-RolloutHandler(const char *filename, std::size_t size, el::Level level) {
-    char *dirc = strdup(filename);
-    char *basec = strdup(filename);
-    char *dir = dirname(dirc);
-    char *base = basename(basec);
+RolloutHandler(const char* filename, std::size_t size, el::Level level) {
+    char* dirc = strdup(filename);
+    char* basec = strdup(filename);
+    char* dir = dirname(dirc);
+    char* base = basename(basec);
 
     std::string s(base);
     std::stringstream ss;
-    std::string
-        list[] = {"\\", " ", "\'", "\"", "*", "\?", "{", "}", ";", "<", ">", "|", "^", "&", "$", "#", "!", "`", "~"};
+    std::string list[] = {"\\", " ", "\'", "\"", "*", "\?", "{", "}", ";", "<",
+                          ">",  "|", "^",  "&",  "$", "#",  "!", "`", "~"};
     std::string::size_type position;
     for (auto substr : list) {
         position = 0;
@@ -82,7 +82,7 @@ RolloutHandler(const char *filename, std::size_t size, el::Level level) {
 }
 
 Status
-InitLog(const std::string &log_config_file) {
+InitLog(const std::string& log_config_file) {
     el::Configurations conf(log_config_file);
     el::Loggers::reconfigureAllLoggers(conf);
 
@@ -93,6 +93,6 @@ InitLog(const std::string &log_config_file) {
     return Status::OK();
 }
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz

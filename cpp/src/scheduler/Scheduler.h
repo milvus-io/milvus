@@ -18,14 +18,14 @@
 #pragma once
 
 #include <memory>
-#include <string>
 #include <mutex>
-#include <thread>
 #include <queue>
+#include <string>
+#include <thread>
 #include <unordered_map>
 
-#include "resource/Resource.h"
 #include "ResourceMgr.h"
+#include "resource/Resource.h"
 #include "utils/Log.h"
 
 namespace zilliz {
@@ -37,8 +37,8 @@ class Scheduler {
  public:
     explicit Scheduler(ResourceMgrWPtr res_mgr);
 
-    Scheduler(const Scheduler &) = delete;
-    Scheduler(Scheduler &&) = delete;
+    Scheduler(const Scheduler&) = delete;
+    Scheduler(Scheduler&&) = delete;
 
     /*
      * Start worker thread;
@@ -56,7 +56,7 @@ class Scheduler {
      * Post event to scheduler event queue;
      */
     void
-    PostEvent(const EventPtr &event);
+    PostEvent(const EventPtr& event);
 
     /*
      * Dump as string;
@@ -74,7 +74,7 @@ class Scheduler {
      * Pull task from neighbours;
      */
     void
-    OnStartUp(const EventPtr &event);
+    OnStartUp(const EventPtr& event);
 
     /*
      * Process finish task events;
@@ -83,7 +83,7 @@ class Scheduler {
      * Pull task from neighbours;
      */
     void
-    OnFinishTask(const EventPtr &event);
+    OnFinishTask(const EventPtr& event);
 
     /*
      * Process copy completed events;
@@ -93,7 +93,7 @@ class Scheduler {
      * Pull task from neighbours;
      */
     void
-    OnLoadCompleted(const EventPtr &event);
+    OnLoadCompleted(const EventPtr& event);
 
     /*
      * Process task table updated events, which happened on task_table->put;
@@ -102,14 +102,14 @@ class Scheduler {
      * Push task to neighbours;
      */
     void
-    OnTaskTableUpdated(const EventPtr &event);
+    OnTaskTableUpdated(const EventPtr& event);
 
  private:
     /*
      * Dispatch event to event handler;
      */
     void
-    Process(const EventPtr &event);
+    Process(const EventPtr& event);
 
     /*
      * Called by worker_thread_;
@@ -131,6 +131,6 @@ class Scheduler {
 
 using SchedulerPtr = std::shared_ptr<Scheduler>;
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz
