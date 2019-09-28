@@ -93,7 +93,7 @@ Scheduler::Process(const EventPtr& event) {
     process_event(event);
 }
 
-// TODO: refactor the function
+// TODO(wxy): refactor the function
 void
 Scheduler::OnLoadCompleted(const EventPtr& event) {
     auto load_completed_event = std::static_pointer_cast<LoadCompletedEvent>(event);

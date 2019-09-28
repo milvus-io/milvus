@@ -50,11 +50,11 @@ HandleException(const std::string& desc, const char* what = nullptr) {
     if (what == nullptr) {
         ENGINE_LOG_ERROR << desc;
         return Status(DB_META_TRANSACTION_FAILED, desc);
-    } else {
-        std::string msg = desc + ":" + what;
-        ENGINE_LOG_ERROR << msg;
-        return Status(DB_META_TRANSACTION_FAILED, msg);
     }
+
+    std::string msg = desc + ":" + what;
+    ENGINE_LOG_ERROR << msg;
+    return Status(DB_META_TRANSACTION_FAILED, msg);
 }
 
 class MetaField {
@@ -324,7 +324,7 @@ MySQLMetaImpl::Initialize() {
     return Status::OK();
 }
 
-// PXU TODO: Temp solution. Will fix later
+// TODO(myh): Delete single vecotor by id
 Status
 MySQLMetaImpl::DropPartitionsByDates(const std::string& table_id, const DatesT& dates) {
     if (dates.empty()) {
@@ -1379,7 +1379,7 @@ MySQLMetaImpl::GetTableFiles(const std::string& table_id, const std::vector<size
     }
 }
 
-// PXU TODO: Support Swap
+// TODO(myh): Support swap to cloud storage
 Status
 MySQLMetaImpl::Archive() {
     auto& criterias = options_.archive_conf_.GetCriterias();
@@ -1984,9 +1984,8 @@ MySQLMetaImpl::DropAll() {
 
         if (dropTableQuery.exec()) {
             return Status::OK();
-        } else {
-            return HandleException("QUERY ERROR WHEN DROPPING ALL", dropTableQuery.error());
         }
+        return HandleException("QUERY ERROR WHEN DROPPING ALL", dropTableQuery.error());
     } catch (std::exception& e) {
         return HandleException("GENERAL ERROR WHEN DROPPING ALL", e.what());
     }

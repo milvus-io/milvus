@@ -111,14 +111,14 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
         exit 1
     fi
     echo "clang-format check passed!"
-#
-#    # clang-tidy check
-#    make check-clang-tidy
-#    if [ $? -ne 0 ]; then
-#        echo "ERROR! clang-tidy check failed"
-#        exit 1
-#    fi
-#    echo "clang-tidy check passed!"
+
+    # clang-tidy check
+    make check-clang-tidy
+    if [ $? -ne 0 ]; then
+        echo "ERROR! clang-tidy check failed"
+        exit 1
+    fi
+    echo "clang-tidy check passed!"
 else
     # compile and build
     make -j 4 || exit 1

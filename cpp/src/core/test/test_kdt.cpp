@@ -85,7 +85,7 @@ void PrintResult(const DatasetPtr &result,
     std::cout << "dist\n" << ss_dist.str() << std::endl;
 }
 
-// TODO(linxj): add test about count() and dimension()
+// TODO(lxj): add test about count() and dimension()
 TEST_F(KDTTest, kdt_basic) {
     assert(!xb.empty());
 
