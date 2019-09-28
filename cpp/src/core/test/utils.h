@@ -15,24 +15,27 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-#include <vector>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
+#include <string>
+#include <vector>
 
 #include "knowhere/adapter/Structure.h"
 #include "knowhere/common/Log.h"
 
-class DataGen  {
+class DataGen {
  protected:
-    void Init_with_default();
+    void
+    Init_with_default();
 
-    void Generate(const int &dim, const int &nb, const int &nq);
+    void
+    Generate(const int& dim, const int& nb, const int& nq);
 
-    zilliz::knowhere::DatasetPtr GenQuery(const int&nq);
+    zilliz::knowhere::DatasetPtr
+    GenQuery(const int& nq);
 
  protected:
     int nb = 10000;
@@ -46,49 +49,41 @@ class DataGen  {
     zilliz::knowhere::DatasetPtr query_dataset = nullptr;
 };
 
+extern void
+GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids, const int64_t& nq,
+       std::vector<float>& xq);
 
-extern void GenAll(const int64_t dim,
-                   const int64_t &nb,
-                   std::vector<float> &xb,
-                   std::vector<int64_t> &ids,
-                   const int64_t &nq,
-                   std::vector<float> &xq);
+extern void
+GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, const int64_t& nq, float* xq);
 
-extern void GenAll(const int64_t &dim,
-                   const int64_t &nb,
-                   float *xb,
-                   int64_t *ids,
-                   const int64_t &nq,
-                   float *xq);
+extern void
+GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids);
 
-extern void GenBase(const int64_t &dim,
-                    const int64_t &nb,
-                    float *xb,
-                    int64_t *ids);
-
-extern void InitLog();
+extern void
+InitLog();
 
 zilliz::knowhere::DatasetPtr
-generate_dataset(int64_t nb, int64_t dim, float *xb, long *ids);
+generate_dataset(int64_t nb, int64_t dim, float* xb, int64_t* ids);
 
 zilliz::knowhere::DatasetPtr
-generate_query_dataset(int64_t nb, int64_t dim, float *xb);
+generate_query_dataset(int64_t nb, int64_t dim, float* xb);
 
 struct FileIOWriter {
     std::fstream fs;
     std::string name;
 
-    FileIOWriter(const std::string &fname);
+    explicit FileIOWriter(const std::string& fname);
     ~FileIOWriter();
-    size_t operator()(void *ptr, size_t size);
+    size_t
+    operator()(void* ptr, size_t size);
 };
 
 struct FileIOReader {
     std::fstream fs;
     std::string name;
 
-    FileIOReader(const std::string &fname);
+    explicit FileIOReader(const std::string& fname);
     ~FileIOReader();
-    size_t operator()(void *ptr, size_t size);
+    size_t
+    operator()(void* ptr, size_t size);
 };
-

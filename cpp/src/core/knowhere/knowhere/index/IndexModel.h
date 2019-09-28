@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <memory>
@@ -24,19 +23,16 @@
 namespace zilliz {
 namespace knowhere {
 
-
 class IndexModel {
  public:
     virtual BinarySet
     Serialize() = 0;
 
     virtual void
-    Load(const BinarySet &binary) = 0;
+    Load(const BinarySet& binary) = 0;
 };
 
 using IndexModelPtr = std::shared_ptr<IndexModel>;
 
-
-
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere
+}  // namespace zilliz
