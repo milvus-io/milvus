@@ -19,9 +19,9 @@
 
 #include "Constants.h"
 
-#include <string>
-#include <memory>
 #include <map>
+#include <memory>
+#include <string>
 #include <vector>
 
 namespace zilliz {
@@ -30,27 +30,32 @@ namespace engine {
 
 class Env;
 
-static const char *ARCHIVE_CONF_DISK = "disk";
-static const char *ARCHIVE_CONF_DAYS = "days";
+static const char* ARCHIVE_CONF_DISK = "disk";
+static const char* ARCHIVE_CONF_DAYS = "days";
 
 struct ArchiveConf {
     using CriteriaT = std::map<std::string, int>;
 
-    explicit ArchiveConf(const std::string &type, const std::string &criterias = std::string());
+    explicit ArchiveConf(const std::string& type, const std::string& criterias = std::string());
 
-    const std::string &GetType() const {
+    const std::string&
+    GetType() const {
         return type_;
     }
 
-    const CriteriaT GetCriterias() const {
+    const CriteriaT
+    GetCriterias() const {
         return criterias_;
     }
 
-    void SetCriterias(const ArchiveConf::CriteriaT &criterial);
+    void
+    SetCriterias(const ArchiveConf::CriteriaT& criterial);
 
  private:
-    void ParseCritirias(const std::string &type);
-    void ParseType(const std::string &criterias);
+    void
+    ParseCritirias(const std::string& type);
+    void
+    ParseType(const std::string& criterias);
 
     std::string type_;
     CriteriaT criterias_;
@@ -61,14 +66,10 @@ struct DBMetaOptions {
     std::vector<std::string> slave_paths_;
     std::string backend_uri_;
     ArchiveConf archive_conf_ = ArchiveConf("delete");
-}; // DBMetaOptions
+};  // DBMetaOptions
 
 struct DBOptions {
-    typedef enum {
-        SINGLE = 0,
-        CLUSTER_READONLY,
-        CLUSTER_WRITABLE
-    } MODE;
+    typedef enum { SINGLE = 0, CLUSTER_READONLY, CLUSTER_WRITABLE } MODE;
 
     uint16_t merge_trigger_number_ = 2;
     DBMetaOptions meta_;
@@ -76,9 +77,8 @@ struct DBOptions {
 
     size_t insert_buffer_size_ = 4 * ONE_GB;
     bool insert_cache_immediately_ = false;
-}; // Options
+};  // Options
 
-
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

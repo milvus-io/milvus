@@ -15,12 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "mysql++/mysql++.h"
 
-#include <string>
 #include <unistd.h>
 #include <atomic>
+#include <string>
 
 #include "utils/Log.h"
 
@@ -32,20 +31,16 @@ namespace meta {
 class MySQLConnectionPool : public mysqlpp::ConnectionPool {
  public:
     // The object's only constructor
-    MySQLConnectionPool(std::string dbName,
-                        std::string userName,
-                        std::string passWord,
-                        std::string serverIp,
-                        int port = 0,
-                        int maxPoolSize = 8) :
-        db_(dbName),
-        user_(userName),
-        password_(passWord),
-        server_(serverIp),
-        port_(port),
-        max_pool_size_(maxPoolSize) {
+    MySQLConnectionPool(std::string dbName, std::string userName, std::string passWord, std::string serverIp,
+                        int port = 0, int maxPoolSize = 8)
+        : db_(dbName),
+          user_(userName),
+          password_(passWord),
+          server_(serverIp),
+          port_(port),
+          max_pool_size_(maxPoolSize) {
         conns_in_use_ = 0;
-        max_idle_time_ = 10; //10 seconds
+        max_idle_time_ = 10;  // 10 seconds
     }
 
     // The destructor.  We _must_ call ConnectionPool::clear() here,
@@ -54,24 +49,30 @@ class MySQLConnectionPool : public mysqlpp::ConnectionPool {
         clear();
     }
 
-    mysqlpp::Connection *grab() override;
+    mysqlpp::Connection*
+    grab() override;
 
     // Other half of in-use conn count limit
-    void release(const mysqlpp::Connection *pc) override;
+    void
+    release(const mysqlpp::Connection* pc) override;
 
-//    int getConnectionsInUse();
-//
-//    void set_max_idle_time(int max_idle);
+    //    int getConnectionsInUse();
+    //
+    //    void set_max_idle_time(int max_idle);
 
-    std::string getDB();
+    std::string
+    getDB();
 
  protected:
     // Superclass overrides
-    mysqlpp::Connection *create() override;
+    mysqlpp::Connection*
+    create() override;
 
-    void destroy(mysqlpp::Connection *cp) override;
+    void
+    destroy(mysqlpp::Connection* cp) override;
 
-    unsigned int max_idle_time() override;
+    unsigned int
+    max_idle_time() override;
 
  private:
     // Number of connections currently in use
@@ -86,7 +87,7 @@ class MySQLConnectionPool : public mysqlpp::ConnectionPool {
     unsigned int max_idle_time_;
 };
 
-} // namespace meta
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace meta
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

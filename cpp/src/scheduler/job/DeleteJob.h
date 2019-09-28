@@ -16,16 +16,16 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 #include "Job.h"
 #include "db/meta/Meta.h"
@@ -36,10 +36,7 @@ namespace scheduler {
 
 class DeleteJob : public Job {
  public:
-    DeleteJob(JobId id,
-              std::string table_id,
-              engine::meta::MetaPtr meta_ptr,
-              uint64_t num_resource);
+    DeleteJob(JobId id, std::string table_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource);
 
  public:
     void
@@ -71,6 +68,6 @@ class DeleteJob : public Job {
 
 using DeleteJobPtr = std::shared_ptr<DeleteJob>;
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

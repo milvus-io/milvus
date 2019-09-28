@@ -15,15 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "scheduler/resource/GpuResource.h"
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-std::ostream &
-operator<<(std::ostream &out, const GpuResource &resource) {
+std::ostream&
+operator<<(std::ostream& out, const GpuResource& resource) {
     out << resource.Dump();
     return out;
 }
@@ -42,6 +41,6 @@ GpuResource::Process(TaskPtr task) {
     task->Execute();
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

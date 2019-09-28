@@ -20,8 +20,8 @@
 #include "scheduler/event/Event.h"
 
 #include <memory>
-#include <utility>
 #include <string>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
@@ -29,8 +29,7 @@ namespace scheduler {
 
 class StartUpEvent : public Event {
  public:
-    explicit StartUpEvent(std::weak_ptr<Resource> resource)
-        : Event(EventType::START_UP, std::move(resource)) {
+    explicit StartUpEvent(std::weak_ptr<Resource> resource) : Event(EventType::START_UP, std::move(resource)) {
     }
 
     inline std::string
@@ -38,9 +37,10 @@ class StartUpEvent : public Event {
         return "<StartUpEvent>";
     }
 
-    friend std::ostream &operator<<(std::ostream &out, const StartUpEvent &event);
+    friend std::ostream&
+    operator<<(std::ostream& out, const StartUpEvent& event);
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

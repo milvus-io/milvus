@@ -19,18 +19,18 @@
 
 #include "DB.h"
 #include "Types.h"
-#include "utils/ThreadPool.h"
 #include "src/db/insert/MemManager.h"
+#include "utils/ThreadPool.h"
 
-#include <mutex>
-#include <condition_variable>
-#include <memory>
 #include <atomic>
-#include <thread>
+#include <condition_variable>
 #include <list>
+#include <memory>
+#include <mutex>
 #include <set>
-#include <vector>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace zilliz {
 namespace milvus {
@@ -44,92 +44,101 @@ class Meta;
 
 class DBImpl : public DB {
  public:
-    explicit DBImpl(const DBOptions &options);
+    explicit DBImpl(const DBOptions& options);
     ~DBImpl();
 
-    Status Start() override;
-    Status Stop() override;
-    Status DropAll() override;
+    Status
+    Start() override;
+    Status
+    Stop() override;
+    Status
+    DropAll() override;
 
-    Status CreateTable(meta::TableSchema &table_schema) override;
+    Status
+    CreateTable(meta::TableSchema& table_schema) override;
 
-    Status DeleteTable(const std::string &table_id, const meta::DatesT &dates) override;
+    Status
+    DeleteTable(const std::string& table_id, const meta::DatesT& dates) override;
 
-    Status DescribeTable(meta::TableSchema &table_schema) override;
+    Status
+    DescribeTable(meta::TableSchema& table_schema) override;
 
-    Status HasTable(const std::string &table_id, bool &has_or_not) override;
+    Status
+    HasTable(const std::string& table_id, bool& has_or_not) override;
 
-    Status AllTables(std::vector<meta::TableSchema> &table_schema_array) override;
+    Status
+    AllTables(std::vector<meta::TableSchema>& table_schema_array) override;
 
-    Status PreloadTable(const std::string &table_id) override;
+    Status
+    PreloadTable(const std::string& table_id) override;
 
-    Status UpdateTableFlag(const std::string &table_id, int64_t flag);
+    Status
+    UpdateTableFlag(const std::string& table_id, int64_t flag);
 
-    Status GetTableRowCount(const std::string &table_id, uint64_t &row_count) override;
+    Status
+    GetTableRowCount(const std::string& table_id, uint64_t& row_count) override;
 
-    Status InsertVectors(const std::string &table_id, uint64_t n, const float *vectors, IDNumbers &vector_ids) override;
+    Status
+    InsertVectors(const std::string& table_id, uint64_t n, const float* vectors, IDNumbers& vector_ids) override;
 
-    Status CreateIndex(const std::string &table_id, const TableIndex &index) override;
+    Status
+    CreateIndex(const std::string& table_id, const TableIndex& index) override;
 
-    Status DescribeIndex(const std::string &table_id, TableIndex &index) override;
+    Status
+    DescribeIndex(const std::string& table_id, TableIndex& index) override;
 
-    Status DropIndex(const std::string &table_id) override;
+    Status
+    DropIndex(const std::string& table_id) override;
 
-    Status Query(const std::string &table_id,
-                 uint64_t k,
-                 uint64_t nq,
-                 uint64_t nprobe,
-                 const float *vectors,
-                 QueryResults &results) override;
+    Status
+    Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
+          QueryResults& results) override;
 
-    Status Query(const std::string &table_id,
-                 uint64_t k,
-                 uint64_t nq,
-                 uint64_t nprobe,
-                 const float *vectors,
-                 const meta::DatesT &dates,
-                 QueryResults &results) override;
+    Status
+    Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
+          const meta::DatesT& dates, QueryResults& results) override;
 
-    Status Query(const std::string &table_id,
-                 const std::vector<std::string> &file_ids,
-                 uint64_t k,
-                 uint64_t nq,
-                 uint64_t nprobe,
-                 const float *vectors,
-                 const meta::DatesT &dates,
-                 QueryResults &results) override;
+    Status
+    Query(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
+          uint64_t nprobe, const float* vectors, const meta::DatesT& dates, QueryResults& results) override;
 
-    Status Size(uint64_t &result) override;
+    Status
+    Size(uint64_t& result) override;
 
  private:
-    Status QueryAsync(const std::string &table_id,
-                      const meta::TableFilesSchema &files,
-                      uint64_t k,
-                      uint64_t nq,
-                      uint64_t nprobe,
-                      const float *vectors,
-                      const meta::DatesT &dates,
-                      QueryResults &results);
+    Status
+    QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
+               uint64_t nprobe, const float* vectors, const meta::DatesT& dates, QueryResults& results);
 
-    void BackgroundTimerTask();
-    void WaitMergeFileFinish();
-    void WaitBuildIndexFinish();
+    void
+    BackgroundTimerTask();
+    void
+    WaitMergeFileFinish();
+    void
+    WaitBuildIndexFinish();
 
-    void StartMetricTask();
+    void
+    StartMetricTask();
 
-    void StartCompactionTask();
-    Status MergeFiles(const std::string &table_id,
-                      const meta::DateT &date,
-                      const meta::TableFilesSchema &files);
-    Status BackgroundMergeFiles(const std::string &table_id);
-    void BackgroundCompaction(std::set<std::string> table_ids);
+    void
+    StartCompactionTask();
+    Status
+    MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files);
+    Status
+    BackgroundMergeFiles(const std::string& table_id);
+    void
+    BackgroundCompaction(std::set<std::string> table_ids);
 
-    void StartBuildIndexTask(bool force = false);
-    void BackgroundBuildIndex();
+    void
+    StartBuildIndexTask(bool force = false);
+    void
+    BackgroundBuildIndex();
 
-    Status BuildIndex(const meta::TableFileSchema &);
+    Status
+    BuildIndex(const meta::TableFileSchema&);
 
-    Status MemSerialize();
+    Status
+    MemSerialize();
 
  private:
     const DBOptions options_;
@@ -152,9 +161,8 @@ class DBImpl : public DB {
     std::list<std::future<void>> index_thread_results_;
 
     std::mutex build_index_mutex_;
-}; // DBImpl
+};  // DBImpl
 
-
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz
