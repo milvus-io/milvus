@@ -15,18 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
-
 
 #include <memory>
 
 #include "knowhere/common/Config.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/common/Dataset.h"
 #include "knowhere/index/Index.h"
 #include "knowhere/index/preprocessor/Preprocessor.h"
-
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace zilliz {
 namespace knowhere {
@@ -34,17 +31,20 @@ namespace knowhere {
 class VectorIndex;
 using VectorIndexPtr = std::shared_ptr<VectorIndex>;
 
-
 class VectorIndex : public Index {
  public:
     virtual PreprocessorPtr
-    BuildPreprocessor(const DatasetPtr &dataset, const Config &config) { return nullptr; }
+    BuildPreprocessor(const DatasetPtr& dataset, const Config& config) {
+        return nullptr;
+    }
 
     virtual IndexModelPtr
-    Train(const DatasetPtr &dataset, const Config &config) { return nullptr; }
+    Train(const DatasetPtr& dataset, const Config& config) {
+        return nullptr;
+    }
 
     virtual void
-    Add(const DatasetPtr &dataset, const Config &config) = 0;
+    Add(const DatasetPtr& dataset, const Config& config) = 0;
 
     virtual void
     Seal() = 0;
@@ -59,7 +59,5 @@ class VectorIndex : public Index {
     Dimension() = 0;
 };
 
-
-
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere
+}  // namespace zilliz

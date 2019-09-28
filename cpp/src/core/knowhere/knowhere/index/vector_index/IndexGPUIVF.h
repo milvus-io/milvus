@@ -15,84 +15,84 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
+#include <memory>
+#include <utility>
 
 #include "IndexIVF.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
-
 
 namespace zilliz {
 namespace knowhere {
 
 class GPUIndex {
-public:
-     explicit GPUIndex(const int &device_id) : gpu_id_(device_id) {}
+ public:
+    explicit GPUIndex(const int& device_id) : gpu_id_(device_id) {
+    }
 
-     GPUIndex(const int& device_id, const ResPtr& resource): gpu_id_(device_id), res_(resource) {}
+    GPUIndex(const int& device_id, const ResPtr& resource) : gpu_id_(device_id), res_(resource) {
+    }
 
-     virtual VectorIndexPtr
-     CopyGpuToCpu(const Config &config) = 0;
+    virtual VectorIndexPtr
+    CopyGpuToCpu(const Config& config) = 0;
 
-     virtual VectorIndexPtr
-     CopyGpuToGpu(const int64_t &device_id, const Config &config) = 0;
+    virtual VectorIndexPtr
+    CopyGpuToGpu(const int64_t& device_id, const Config& config) = 0;
 
-     void
-     SetGpuDevice(const int &gpu_id);
+    void
+    SetGpuDevice(const int& gpu_id);
 
-     const int64_t &
-     GetGpuDevice();
+    const int64_t&
+    GetGpuDevice();
 
-protected:
-     int64_t gpu_id_;
-     ResWPtr res_;
+ protected:
+    int64_t gpu_id_;
+    ResWPtr res_;
 };
 
 class GPUIVF : public IVF, public GPUIndex {
-public:
-     explicit GPUIVF(const int &device_id) : IVF(), GPUIndex(device_id) {}
+ public:
+    explicit GPUIVF(const int& device_id) : IVF(), GPUIndex(device_id) {
+    }
 
-     explicit GPUIVF(std::shared_ptr<faiss::Index> index, const int64_t &device_id, ResPtr &resource)
-          : IVF(std::move(index)), GPUIndex(device_id, resource) {};
+    explicit GPUIVF(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
+        : IVF(std::move(index)), GPUIndex(device_id, resource) {
+    }
 
-     IndexModelPtr
-     Train(const DatasetPtr &dataset, const Config &config) override;
+    IndexModelPtr
+    Train(const DatasetPtr& dataset, const Config& config) override;
 
-     void
-     Add(const DatasetPtr &dataset, const Config &config) override;
+    void
+    Add(const DatasetPtr& dataset, const Config& config) override;
 
-     void
-     set_index_model(IndexModelPtr model) override;
+    void
+    set_index_model(IndexModelPtr model) override;
 
-     //DatasetPtr Search(const DatasetPtr &dataset, const Config &config) override;
-     VectorIndexPtr
-     CopyGpuToCpu(const Config &config) override;
+    // DatasetPtr Search(const DatasetPtr &dataset, const Config &config) override;
+    VectorIndexPtr
+    CopyGpuToCpu(const Config& config) override;
 
-     VectorIndexPtr
-     CopyGpuToGpu(const int64_t &device_id, const Config &config) override;
+    VectorIndexPtr
+    CopyGpuToGpu(const int64_t& device_id, const Config& config) override;
 
-     VectorIndexPtr
-     Clone() final;
+    VectorIndexPtr
+    Clone() final;
 
-     // TODO(linxj): Deprecated
-     virtual IVFIndexPtr Copy_index_gpu_to_cpu();
+    // TODO(linxj): Deprecated
+    virtual IVFIndexPtr
+    Copy_index_gpu_to_cpu();
 
-protected:
-     void
-     search_impl(int64_t n,
-                 const float *data,
-                 int64_t k,
-                 float *distances,
-                 int64_t *labels,
-                 const Config &cfg) override;
+ protected:
+    void
+    search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) override;
 
-     BinarySet
-     SerializeImpl() override;
+    BinarySet
+    SerializeImpl() override;
 
-     void
-     LoadImpl(const BinarySet &index_binary) override;
+    void
+    LoadImpl(const BinarySet& index_binary) override;
 };
 
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere
+}  // namespace zilliz

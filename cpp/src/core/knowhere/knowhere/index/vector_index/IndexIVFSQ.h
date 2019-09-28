@@ -15,8 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
+
+#include <memory>
+#include <utility>
 
 #include "IndexIVF.h"
 
@@ -24,22 +26,22 @@ namespace zilliz {
 namespace knowhere {
 
 class IVFSQ : public IVF {
-public:
-    explicit IVFSQ(std::shared_ptr<faiss::Index> index) : IVF(std::move(index)) {}
+ public:
+    explicit IVFSQ(std::shared_ptr<faiss::Index> index) : IVF(std::move(index)) {
+    }
 
     IVFSQ() = default;
 
     IndexModelPtr
-    Train(const DatasetPtr &dataset, const Config &config) override;
+    Train(const DatasetPtr& dataset, const Config& config) override;
 
     VectorIndexPtr
-    CopyCpuToGpu(const int64_t &device_id, const Config &config) override;
+    CopyCpuToGpu(const int64_t& device_id, const Config& config) override;
 
-protected:
+ protected:
     VectorIndexPtr
-    Clone_impl(const std::shared_ptr<faiss::Index> &index) override;
+    Clone_impl(const std::shared_ptr<faiss::Index>& index) override;
 };
 
-} // knowhere
-} // zilliz
-
+}  // namespace knowhere
+}  // namespace zilliz

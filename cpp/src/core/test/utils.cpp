@@ -15,24 +15,35 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "test/utils.h"
 
-#include "utils.h"
+#include <memory>
+#include <string>
+#include <utility>
 
 INITIALIZE_EASYLOGGINGPP
 
-void InitLog() {
+namespace {
+
+namespace kn = zilliz::knowhere;
+
+}  // namespace
+
+void
+InitLog() {
     el::Configurations defaultConf;
     defaultConf.setToDefault();
-    defaultConf.set(el::Level::Debug,
-                    el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
+    defaultConf.set(el::Level::Debug, el::ConfigurationType::Format, "[%thread-%datetime-%level]: %msg (%fbase:%line)");
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
-void DataGen::Init_with_default() {
+void
+DataGen::Init_with_default() {
     Generate(dim, nb, nq);
 }
 
-void DataGen::Generate(const int &dim, const int &nb, const int &nq) {
+void
+DataGen::Generate(const int& dim, const int& nb, const int& nq) {
     this->nb = nb;
     this->nq = nq;
     this->dim = dim;
@@ -43,9 +54,10 @@ void DataGen::Generate(const int &dim, const int &nb, const int &nq) {
 
     base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
     query_dataset = generate_query_dataset(nq, dim, xq.data());
-
 }
-zilliz::knowhere::DatasetPtr DataGen::GenQuery(const int &nq) {
+
+zilliz::knowhere::DatasetPtr
+DataGen::GenQuery(const int& nq) {
     xq.resize(nq * dim);
     for (int i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
@@ -53,37 +65,28 @@ zilliz::knowhere::DatasetPtr DataGen::GenQuery(const int &nq) {
     return generate_query_dataset(nq, dim, xq.data());
 }
 
-void GenAll(const int64_t dim,
-            const int64_t &nb,
-            std::vector<float> &xb,
-            std::vector<int64_t> &ids,
-            const int64_t &nq,
-            std::vector<float> &xq) {
+void
+GenAll(const int64_t dim, const int64_t& nb, std::vector<float>& xb, std::vector<int64_t>& ids, const int64_t& nq,
+       std::vector<float>& xq) {
     xb.resize(nb * dim);
     xq.resize(nq * dim);
     ids.resize(nb);
     GenAll(dim, nb, xb.data(), ids.data(), nq, xq.data());
 }
 
-void GenAll(const int64_t &dim,
-            const int64_t &nb,
-            float *xb,
-            int64_t *ids,
-            const int64_t &nq,
-            float *xq) {
+void
+GenAll(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids, const int64_t& nq, float* xq) {
     GenBase(dim, nb, xb, ids);
     for (int64_t i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
     }
 }
 
-void GenBase(const int64_t &dim,
-             const int64_t &nb,
-             float *xb,
-             int64_t *ids) {
+void
+GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids) {
     for (auto i = 0; i < nb; ++i) {
         for (auto j = 0; j < dim; ++j) {
-            //p_data[i * d + j] = float(base + i);
+            // p_data[i * d + j] = float(base + i);
             xb[i * dim + j] = drand48();
         }
         xb[dim * i] += i / 1000.;
@@ -91,7 +94,7 @@ void GenBase(const int64_t &dim,
     }
 }
 
-FileIOReader::FileIOReader(const std::string &fname) {
+FileIOReader::FileIOReader(const std::string& fname) {
     name = fname;
     fs = std::fstream(name, std::ios::in | std::ios::binary);
 }
@@ -100,12 +103,13 @@ FileIOReader::~FileIOReader() {
     fs.close();
 }
 
-size_t FileIOReader::operator()(void *ptr, size_t size) {
-    fs.read(reinterpret_cast<char *>(ptr), size);
+size_t
+FileIOReader::operator()(void* ptr, size_t size) {
+    fs.read(reinterpret_cast<char*>(ptr), size);
     return size;
 }
 
-FileIOWriter::FileIOWriter(const std::string &fname) {
+FileIOWriter::FileIOWriter(const std::string& fname) {
     name = fname;
     fs = std::fstream(name, std::ios::out | std::ios::binary);
 }
@@ -114,39 +118,37 @@ FileIOWriter::~FileIOWriter() {
     fs.close();
 }
 
-size_t FileIOWriter::operator()(void *ptr, size_t size) {
-    fs.write(reinterpret_cast<char *>(ptr), size);
+size_t
+FileIOWriter::operator()(void* ptr, size_t size) {
+    fs.write(reinterpret_cast<char*>(ptr), size);
     return size;
 }
 
-using namespace zilliz::knowhere;
-
-DatasetPtr
-generate_dataset(int64_t nb, int64_t dim, float *xb, long *ids) {
+kn::DatasetPtr
+generate_dataset(int64_t nb, int64_t dim, float* xb, int64_t* ids) {
     std::vector<int64_t> shape{nb, dim};
-    auto tensor = ConstructFloatTensor((uint8_t *) xb, nb * dim * sizeof(float), shape);
-    std::vector<TensorPtr> tensors{tensor};
-    std::vector<FieldPtr> tensor_fields{ConstructFloatField("data")};
-    auto tensor_schema = std::make_shared<Schema>(tensor_fields);
+    auto tensor = kn::ConstructFloatTensor((uint8_t*)xb, nb * dim * sizeof(float), shape);
+    std::vector<kn::TensorPtr> tensors{tensor};
+    std::vector<kn::FieldPtr> tensor_fields{kn::ConstructFloatField("data")};
+    auto tensor_schema = std::make_shared<kn::Schema>(tensor_fields);
 
-    auto id_array = ConstructInt64Array((uint8_t *) ids, nb * sizeof(int64_t));
-    std::vector<ArrayPtr> arrays{id_array};
-    std::vector<FieldPtr> array_fields{ConstructInt64Field("id")};
-    auto array_schema = std::make_shared<Schema>(tensor_fields);
+    auto id_array = kn::ConstructInt64Array((uint8_t*)ids, nb * sizeof(int64_t));
+    std::vector<kn::ArrayPtr> arrays{id_array};
+    std::vector<kn::FieldPtr> array_fields{kn::ConstructInt64Field("id")};
+    auto array_schema = std::make_shared<kn::Schema>(tensor_fields);
 
-    auto dataset = std::make_shared<Dataset>(std::move(arrays), array_schema,
-                                             std::move(tensors), tensor_schema);
+    auto dataset = std::make_shared<kn::Dataset>(std::move(arrays), array_schema, std::move(tensors), tensor_schema);
     return dataset;
 }
 
-DatasetPtr
-generate_query_dataset(int64_t nb, int64_t dim, float *xb) {
+kn::DatasetPtr
+generate_query_dataset(int64_t nb, int64_t dim, float* xb) {
     std::vector<int64_t> shape{nb, dim};
-    auto tensor = ConstructFloatTensor((uint8_t *) xb, nb * dim * sizeof(float), shape);
-    std::vector<TensorPtr> tensors{tensor};
-    std::vector<FieldPtr> tensor_fields{ConstructFloatField("data")};
-    auto tensor_schema = std::make_shared<Schema>(tensor_fields);
+    auto tensor = kn::ConstructFloatTensor((uint8_t*)xb, nb * dim * sizeof(float), shape);
+    std::vector<kn::TensorPtr> tensors{tensor};
+    std::vector<kn::FieldPtr> tensor_fields{kn::ConstructFloatField("data")};
+    auto tensor_schema = std::make_shared<kn::Schema>(tensor_fields);
 
-    auto dataset = std::make_shared<Dataset>(std::move(tensors), tensor_schema);
+    auto dataset = std::make_shared<kn::Dataset>(std::move(tensors), tensor_schema);
     return dataset;
 }

@@ -15,47 +15,51 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVFPQ.h>
+#include <memory>
+#include <utility>
 
-#include "IndexIVFPQ.h"
-#include "knowhere/common/Exception.h"
 #include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
 
 namespace zilliz {
 namespace knowhere {
 
-IndexModelPtr IVFPQ::Train(const DatasetPtr &dataset, const Config &config) {
+IndexModelPtr
+IVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<IVFPQCfg>(config);
     if (build_cfg != nullptr) {
-        build_cfg->CheckValid(); // throw exception
+        build_cfg->CheckValid();  // throw exception
     }
 
     GETTENSOR(dataset)
 
-    faiss::Index *coarse_quantizer = new faiss::IndexFlat(dim, GetMetricType(build_cfg->metric_type));
-    auto index = std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim,
-                                                     build_cfg->nlist, build_cfg->m, build_cfg->nbits);
-    index->train(rows, (float *) p_data);
+    faiss::Index* coarse_quantizer = new faiss::IndexFlat(dim, GetMetricType(build_cfg->metric_type));
+    auto index =
+        std::make_shared<faiss::IndexIVFPQ>(coarse_quantizer, dim, build_cfg->nlist, build_cfg->m, build_cfg->nbits);
+    index->train(rows, (float*)p_data);
 
     return std::make_shared<IVFIndexModel>(index);
 }
 
-std::shared_ptr<faiss::IVFSearchParameters> IVFPQ::GenParams(const Config &config) {
+std::shared_ptr<faiss::IVFSearchParameters>
+IVFPQ::GenParams(const Config& config) {
     auto params = std::make_shared<faiss::IVFPQSearchParameters>();
     auto search_cfg = std::dynamic_pointer_cast<IVFPQCfg>(config);
     params->nprobe = search_cfg->nprobe;
-//    params->scan_table_threshold = conf->scan_table_threhold;
-//    params->polysemous_ht = conf->polysemous_ht;
-//    params->max_codes = conf->max_codes;
+    //    params->scan_table_threshold = conf->scan_table_threhold;
+    //    params->polysemous_ht = conf->polysemous_ht;
+    //    params->max_codes = conf->max_codes;
 
     return params;
 }
 
-VectorIndexPtr IVFPQ::Clone_impl(const std::shared_ptr<faiss::Index> &index) {
+VectorIndexPtr
+IVFPQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
     return std::make_shared<IVFPQ>(index);
 }
 
-} // knowhere
-} // zilliz
+}  // namespace knowhere
+}  // namespace zilliz

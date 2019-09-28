@@ -15,40 +15,40 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <memory>
-#include "knowhere/common/Dataset.h"
+#include <string>
+#include <vector>
 
+#include "knowhere/common/Dataset.h"
 
 namespace zilliz {
 namespace knowhere {
 
 extern ArrayPtr
-ConstructInt64ArraySmart(uint8_t *data, int64_t size);
+ConstructInt64ArraySmart(uint8_t* data, int64_t size);
 
 extern ArrayPtr
-ConstructFloatArraySmart(uint8_t *data, int64_t size);
+ConstructFloatArraySmart(uint8_t* data, int64_t size);
 
 extern TensorPtr
-ConstructFloatTensorSmart(uint8_t *data, int64_t size, std::vector<int64_t> shape);
+ConstructFloatTensorSmart(uint8_t* data, int64_t size, std::vector<int64_t> shape);
 
 extern ArrayPtr
-ConstructInt64Array(uint8_t *data, int64_t size);
+ConstructInt64Array(uint8_t* data, int64_t size);
 
 extern ArrayPtr
-ConstructFloatArray(uint8_t *data, int64_t size);
+ConstructFloatArray(uint8_t* data, int64_t size);
 
 extern TensorPtr
-ConstructFloatTensor(uint8_t *data, int64_t size, std::vector<int64_t> shape);
+ConstructFloatTensor(uint8_t* data, int64_t size, std::vector<int64_t> shape);
 
 extern FieldPtr
-ConstructInt64Field(const std::string &name);
+ConstructInt64Field(const std::string& name);
 
 extern FieldPtr
-ConstructFloatField(const std::string &name);
+ConstructFloatField(const std::string& name);
 
-
-}
-}
+}  // namespace knowhere
+}  // namespace zilliz
