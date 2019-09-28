@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "db/insert/MemTableFile.h"
 #include "db/Constants.h"
 #include "db/engine/EngineFactory.h"
@@ -29,20 +28,14 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-MemTableFile::MemTableFile(const std::string &table_id,
-                           const meta::MetaPtr &meta,
-                           const DBOptions &options) :
-    table_id_(table_id),
-    meta_(meta),
-    options_(options) {
+MemTableFile::MemTableFile(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options)
+    : table_id_(table_id), meta_(meta), options_(options) {
     current_mem_ = 0;
     auto status = CreateTableFile();
     if (status.ok()) {
-        execution_engine_ = EngineFactory::Build(table_file_schema_.dimension_,
-                                                 table_file_schema_.location_,
-                                                 (EngineType) table_file_schema_.engine_type_,
-                                                 (MetricType) table_file_schema_.metric_type_,
-                                                 table_file_schema_.nlist_);
+        execution_engine_ = EngineFactory::Build(
+            table_file_schema_.dimension_, table_file_schema_.location_, (EngineType)table_file_schema_.engine_type_,
+            (MetricType)table_file_schema_.metric_type_, table_file_schema_.nlist_);
     }
 }
 
@@ -61,10 +54,11 @@ MemTableFile::CreateTableFile() {
 }
 
 Status
-MemTableFile::Add(const VectorSourcePtr &source, IDNumbers &vector_ids) {
+MemTableFile::Add(const VectorSourcePtr& source, IDNumbers& vector_ids) {
     if (table_file_schema_.dimension_ <= 0) {
         std::string err_msg = "MemTableFile::Add: table_file_schema dimension = " +
-            std::to_string(table_file_schema_.dimension_) + ", table_id = " + table_file_schema_.table_id_;
+                              std::to_string(table_file_schema_.dimension_) + ", table_id = " +
+                              table_file_schema_.table_id_;
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, "Not able to create table file");
     }
@@ -109,11 +103,11 @@ MemTableFile::Serialize() {
     table_file_schema_.file_size_ = execution_engine_->PhysicalSize();
     table_file_schema_.row_count_ = execution_engine_->Count();
 
-    //if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
-    //else set file type to RAW, no need to build index
-    if (table_file_schema_.engine_type_ != (int) EngineType::FAISS_IDMAP) {
-        table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ?
-                                        meta::TableFileSchema::TO_INDEX : meta::TableFileSchema::RAW;
+    // if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
+    // else set file type to RAW, no need to build index
+    if (table_file_schema_.engine_type_ != (int)EngineType::FAISS_IDMAP) {
+        table_file_schema_.file_type_ = (size >= table_file_schema_.index_file_size_) ? meta::TableFileSchema::TO_INDEX
+                                                                                      : meta::TableFileSchema::RAW;
     } else {
         table_file_schema_.file_type_ = meta::TableFileSchema::RAW;
     }
@@ -130,6 +124,6 @@ MemTableFile::Serialize() {
     return status;
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

@@ -22,20 +22,13 @@ namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-SearchJob::SearchJob(zilliz::milvus::scheduler::JobId id,
-                     uint64_t topk,
-                     uint64_t nq,
-                     uint64_t nprobe,
-                     const float *vectors)
-    : Job(id, JobType::SEARCH),
-      topk_(topk),
-      nq_(nq),
-      nprobe_(nprobe),
-      vectors_(vectors) {
+SearchJob::SearchJob(zilliz::milvus::scheduler::JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe,
+                     const float* vectors)
+    : Job(id, JobType::SEARCH), topk_(topk), nq_(nq), nprobe_(nprobe), vectors_(vectors) {
 }
 
 bool
-SearchJob::AddIndexFile(const TableFileSchemaPtr &index_file) {
+SearchJob::AddIndexFile(const TableFileSchemaPtr& index_file) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (index_file == nullptr || index_files_.find(index_file->id_) != index_files_.end()) {
         return false;
@@ -50,9 +43,7 @@ SearchJob::AddIndexFile(const TableFileSchemaPtr &index_file) {
 void
 SearchJob::WaitResult() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] {
-        return index_files_.empty();
-    });
+    cv_.wait(lock, [this] { return index_files_.empty(); });
     SERVER_LOG_DEBUG << "SearchJob " << id() << " all done";
 }
 
@@ -64,16 +55,16 @@ SearchJob::SearchDone(size_t index_id) {
     SERVER_LOG_DEBUG << "SearchJob " << id() << " finish index file: " << index_id;
 }
 
-ResultSet &
+ResultSet&
 SearchJob::GetResult() {
     return result_;
 }
 
-Status &
+Status&
 SearchJob::GetStatus() {
     return status_;
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

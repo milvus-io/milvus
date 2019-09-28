@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "cache/CpuCacheMgr.h"
 #include "server/Config.h"
 #include "utils/Log.h"
@@ -31,7 +30,7 @@ constexpr int64_t unit = 1024 * 1024 * 1024;
 }
 
 CpuCacheMgr::CpuCacheMgr() {
-    server::Config &config = server::Config::GetInstance();
+    server::Config& config = server::Config::GetInstance();
     Status s;
 
     int32_t cpu_cache_cap;
@@ -50,19 +49,19 @@ CpuCacheMgr::CpuCacheMgr() {
     if (cpu_cache_threshold > 0.0 && cpu_cache_threshold <= 1.0) {
         cache_->set_freemem_percent(cpu_cache_threshold);
     } else {
-        SERVER_LOG_ERROR << "Invalid cpu_cache_threshold: " << cpu_cache_threshold
-                         << ", by default set to " << cache_->freemem_percent();
+        SERVER_LOG_ERROR << "Invalid cpu_cache_threshold: " << cpu_cache_threshold << ", by default set to "
+                         << cache_->freemem_percent();
     }
 }
 
-CpuCacheMgr *
+CpuCacheMgr*
 CpuCacheMgr::GetInstance() {
     static CpuCacheMgr s_mgr;
     return &s_mgr;
 }
 
 engine::VecIndexPtr
-CpuCacheMgr::GetIndex(const std::string &key) {
+CpuCacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
     if (obj != nullptr) {
         return obj->data();
@@ -71,6 +70,6 @@ CpuCacheMgr::GetIndex(const std::string &key) {
     return nullptr;
 }
 
-} // namespace cache
-} // namespace milvus
-} // namespace zilliz
+}  // namespace cache
+}  // namespace milvus
+}  // namespace zilliz

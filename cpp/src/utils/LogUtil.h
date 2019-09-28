@@ -20,18 +20,18 @@
 #include "utils/Status.h"
 #include "utils/easylogging++.h"
 
-#include <string>
 #include <sstream>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
 namespace server {
 
 Status
-InitLog(const std::string &log_config_file);
+InitLog(const std::string& log_config_file);
 
 void
-RolloutHandler(const char *filename, std::size_t size, el::Level level);
+RolloutHandler(const char* filename, std::size_t size, el::Level level);
 
 #define SHOW_LOCATION
 #ifdef SHOW_LOCATION
@@ -40,6 +40,6 @@ RolloutHandler(const char *filename, std::size_t size, el::Level level);
 #define LOCATION_INFO ""
 #endif
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz

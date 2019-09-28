@@ -20,8 +20,8 @@
 #include "Event.h"
 
 #include <memory>
-#include <utility>
 #include <string>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
@@ -38,9 +38,10 @@ class TaskTableUpdatedEvent : public Event {
         return "<TaskTableUpdatedEvent>";
     }
 
-    friend std::ostream &operator<<(std::ostream &out, const TaskTableUpdatedEvent &event);
+    friend std::ostream&
+    operator<<(std::ostream& out, const TaskTableUpdatedEvent& event);
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

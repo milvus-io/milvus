@@ -19,27 +19,27 @@
 
 #include "db/engine/ExecutionEngine.h"
 
-#include <vector>
 #include <stdint.h>
 #include <utility>
+#include <vector>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 typedef int64_t IDNumber;
-typedef IDNumber *IDNumberPtr;
+typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 
 typedef std::vector<std::pair<IDNumber, double>> QueryResult;
 typedef std::vector<QueryResult> QueryResults;
 
 struct TableIndex {
-    int32_t engine_type_ = (int) EngineType::FAISS_IDMAP;
+    int32_t engine_type_ = (int)EngineType::FAISS_IDMAP;
     int32_t nlist_ = 16384;
-    int32_t metric_type_ = (int) MetricType::L2;
+    int32_t metric_type_ = (int)MetricType::L2;
 };
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

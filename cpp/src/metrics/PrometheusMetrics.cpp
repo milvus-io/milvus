@@ -15,12 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "metrics/PrometheusMetrics.h"
+#include "SystemInfo.h"
 #include "cache/GpuCacheMgr.h"
 #include "server/Config.h"
 #include "utils/Log.h"
-#include "SystemInfo.h"
 
 #include <string>
 #include <utility>
@@ -32,7 +31,7 @@ namespace server {
 ErrorCode
 PrometheusMetrics::Init() {
     try {
-        Config &config = Config::GetInstance();
+        Config& config = Config::GetInstance();
         Status s = config.GetMetricConfigEnableMonitor(startup_);
         if (!s.ok()) return s.code();
         if (!startup_) return SERVER_SUCCESS;
@@ -49,7 +48,7 @@ PrometheusMetrics::Init() {
 
         // Exposer Registry
         exposer_ptr_->RegisterCollectable(registry_);
-    } catch (std::exception &ex) {
+    } catch (std::exception& ex) {
         SERVER_LOG_ERROR << "Failed to connect prometheus server: " << std::string(ex.what());
         return SERVER_UNEXPECTED_ERROR;
     }
@@ -79,8 +78,8 @@ PrometheusMetrics::GPUPercentGaugeSet() {
     std::vector<uint64_t> used_memory = server::SystemInfo::GetInstance().GPUMemoryUsed();
 
     for (int i = 0; i < numDevice; ++i) {
-        prometheus::Gauge &GPU_percent = GPU_percent_.Add({{"DeviceNum", std::to_string(i)}});
-        double percent = (double) used_memory[i] / (double) used_total[i];
+        prometheus::Gauge& GPU_percent = GPU_percent_.Add({{"DeviceNum", std::to_string(i)}});
+        double percent = (double)used_memory[i] / (double)used_total[i];
         GPU_percent.Set(percent * 100);
     }
 }
@@ -93,7 +92,7 @@ PrometheusMetrics::GPUMemoryUsageGaugeSet() {
     int numDevice = server::SystemInfo::GetInstance().num_device();
 
     for (int i = 0; i < numDevice; ++i) {
-        prometheus::Gauge &GPU_memory = GPU_memory_usage_.Add({{"DeviceNum", std::to_string(i)}});
+        prometheus::Gauge& GPU_memory = GPU_memory_usage_.Add({{"DeviceNum", std::to_string(i)}});
         GPU_memory.Set(values[i] / MtoB);
     }
 }
@@ -155,54 +154,51 @@ PrometheusMetrics::OctetsSet() {
 
 void
 PrometheusMetrics::CPUCoreUsagePercentSet() {
-    if (!startup_)
-        return;
+    if (!startup_) return;
 
     std::vector<double> cpu_core_percent = server::SystemInfo::GetInstance().CPUCorePercent();
 
     for (int i = 0; i < cpu_core_percent.size(); ++i) {
-        prometheus::Gauge &core_percent = CPU_.Add({{"CPU", std::to_string(i)}});
+        prometheus::Gauge& core_percent = CPU_.Add({{"CPU", std::to_string(i)}});
         core_percent.Set(cpu_core_percent[i]);
     }
 }
 
 void
 PrometheusMetrics::GPUTemperature() {
-    if (!startup_)
-        return;
+    if (!startup_) return;
 
     std::vector<uint64_t> GPU_temperatures = server::SystemInfo::GetInstance().GPUTemperature();
 
     for (int i = 0; i < GPU_temperatures.size(); ++i) {
-        prometheus::Gauge &gpu_temp = GPU_temperature_.Add({{"GPU", std::to_string(i)}});
+        prometheus::Gauge& gpu_temp = GPU_temperature_.Add({{"GPU", std::to_string(i)}});
         gpu_temp.Set(GPU_temperatures[i]);
     }
 }
 
 void
 PrometheusMetrics::CPUTemperature() {
-    if (!startup_)
-        return;
+    if (!startup_) return;
 
     std::vector<float> CPU_temperatures = server::SystemInfo::GetInstance().CPUTemperature();
 
     for (int i = 0; i < CPU_temperatures.size(); ++i) {
-        prometheus::Gauge &cpu_temp = CPU_temperature_.Add({{"CPU", std::to_string(i)}});
+        prometheus::Gauge& cpu_temp = CPU_temperature_.Add({{"CPU", std::to_string(i)}});
         cpu_temp.Set(CPU_temperatures[i]);
     }
 }
 
 void
 PrometheusMetrics::GpuCacheUsageGaugeSet() {
-//    std::vector<uint64_t > gpu_ids = {0};
-//    for(auto i = 0; i < gpu_ids.size(); ++i) {
-//        uint64_t cache_usage = cache::GpuCacheMgr::GetInstance(gpu_ids[i])->CacheUsage();
-//        uint64_t cache_capacity = cache::GpuCacheMgr::GetInstance(gpu_ids[i])->CacheCapacity();
-//        prometheus::Gauge &gpu_cache = gpu_cache_usage_.Add({{"GPU_Cache", std::to_string(i)}});
-//        gpu_cache.Set(cache_usage * 100 / cache_capacity);
-//    }
+    //    std::vector<uint64_t > gpu_ids = {0};
+    //    for(auto i = 0; i < gpu_ids.size(); ++i) {
+    //        uint64_t cache_usage = cache::GpuCacheMgr::GetInstance(gpu_ids[i])->CacheUsage();
+    //        uint64_t cache_capacity = cache::GpuCacheMgr::GetInstance(gpu_ids[i])->CacheCapacity();
+    //        prometheus::Gauge &gpu_cache = gpu_cache_usage_.Add({{"GPU_Cache", std::to_string(i)}});
+    //        gpu_cache.Set(cache_usage * 100 / cache_capacity);
+    //    }
 }
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz
