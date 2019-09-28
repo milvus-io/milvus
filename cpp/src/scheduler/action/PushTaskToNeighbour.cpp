@@ -30,7 +30,8 @@ get_neighbours(const ResourcePtr& self) {
     std::vector<ResourcePtr> neighbours;
     for (auto& neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
-        if (not node) continue;
+        if (not node)
+            continue;
 
         auto resource = std::static_pointer_cast<Resource>(node);
         //        if (not resource->HasExecutor()) continue;
@@ -45,7 +46,8 @@ get_neighbours_with_connetion(const ResourcePtr& self) {
     std::vector<std::pair<ResourcePtr, Connection>> neighbours;
     for (auto& neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
-        if (not node) continue;
+        if (not node)
+            continue;
 
         auto resource = std::static_pointer_cast<Resource>(node);
         //        if (not resource->HasExecutor()) continue;

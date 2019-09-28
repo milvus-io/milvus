@@ -48,7 +48,7 @@ class ResourceMgr {
     Add(ResourcePtr&& resource);
 
     bool
-    Connect(const std::string& res1, const std::string& res2, Connection& connection);
+    Connect(const std::string& name1, const std::string& name2, Connection& connection);
 
     void
     Clear();

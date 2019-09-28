@@ -33,13 +33,20 @@ PrometheusMetrics::Init() {
     try {
         Config& config = Config::GetInstance();
         Status s = config.GetMetricConfigEnableMonitor(startup_);
-        if (!s.ok()) return s.code();
-        if (!startup_) return SERVER_SUCCESS;
+        if (!s.ok()) {
+            return s.code();
+        }
+        if (!startup_) {
+            return SERVER_SUCCESS;
+        }
 
         // Following should be read from config file.
         std::string bind_address;
         s = config.GetMetricConfigPrometheusPort(bind_address);
-        if (!s.ok()) return s.code();
+        if (!s.ok()) {
+            return s.code();
+        }
+
         const std::string uri = std::string("/tmp/metrics");
         const std::size_t num_threads = 2;
 
@@ -58,21 +65,30 @@ PrometheusMetrics::Init() {
 
 void
 PrometheusMetrics::CPUUsagePercentSet() {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
+
     double usage_percent = server::SystemInfo::GetInstance().CPUPercent();
     CPU_usage_percent_.Set(usage_percent);
 }
 
 void
 PrometheusMetrics::RAMUsagePercentSet() {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
+
     double usage_percent = server::SystemInfo::GetInstance().MemoryPercent();
     RAM_usage_percent_.Set(usage_percent);
 }
 
 void
 PrometheusMetrics::GPUPercentGaugeSet() {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
+
     int numDevice = server::SystemInfo::GetInstance().num_device();
     std::vector<uint64_t> used_total = server::SystemInfo::GetInstance().GPUMemoryTotal();
     std::vector<uint64_t> used_memory = server::SystemInfo::GetInstance().GPUMemoryUsed();
@@ -86,7 +102,10 @@ PrometheusMetrics::GPUPercentGaugeSet() {
 
 void
 PrometheusMetrics::GPUMemoryUsageGaugeSet() {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
+
     std::vector<uint64_t> values = server::SystemInfo::GetInstance().GPUMemoryUsed();
     constexpr uint64_t MtoB = 1024 * 1024;
     int numDevice = server::SystemInfo::GetInstance().num_device();
@@ -100,7 +119,9 @@ PrometheusMetrics::GPUMemoryUsageGaugeSet() {
 void
 PrometheusMetrics::AddVectorsPerSecondGaugeSet(int num_vector, int dim, double time) {
     // MB/s
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
 
     int64_t MtoB = 1024 * 1024;
     int64_t size = num_vector * dim * 4;
@@ -109,7 +130,10 @@ PrometheusMetrics::AddVectorsPerSecondGaugeSet(int num_vector, int dim, double t
 
 void
 PrometheusMetrics::QueryIndexTypePerSecondSet(std::string type, double value) {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
+
     if (type == "IVF") {
         query_index_IVF_type_per_second_gauge_.Set(value);
     } else if (type == "IDMap") {
@@ -119,19 +143,27 @@ PrometheusMetrics::QueryIndexTypePerSecondSet(std::string type, double value) {
 
 void
 PrometheusMetrics::ConnectionGaugeIncrement() {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
+
     connection_gauge_.Increment();
 }
 
 void
 PrometheusMetrics::ConnectionGaugeDecrement() {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
+
     connection_gauge_.Decrement();
 }
 
 void
 PrometheusMetrics::OctetsSet() {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
 
     // get old stats and reset them
     uint64_t old_inoctets = SystemInfo::GetInstance().get_inoctets();
@@ -147,14 +179,19 @@ PrometheusMetrics::OctetsSet() {
     auto now_time = std::chrono::system_clock::now();
     auto total_microsecond = METRICS_MICROSECONDS(old_time, now_time);
     auto total_second = total_microsecond * micro_to_second;
-    if (total_second == 0) return;
+    if (total_second == 0) {
+        return;
+    }
+
     inoctets_gauge_.Set((in_and_out_octets.first - old_inoctets) / total_second);
     outoctets_gauge_.Set((in_and_out_octets.second - old_outoctets) / total_second);
 }
 
 void
 PrometheusMetrics::CPUCoreUsagePercentSet() {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
 
     std::vector<double> cpu_core_percent = server::SystemInfo::GetInstance().CPUCorePercent();
 
@@ -166,7 +203,9 @@ PrometheusMetrics::CPUCoreUsagePercentSet() {
 
 void
 PrometheusMetrics::GPUTemperature() {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
 
     std::vector<uint64_t> GPU_temperatures = server::SystemInfo::GetInstance().GPUTemperature();
 
@@ -178,7 +217,9 @@ PrometheusMetrics::GPUTemperature() {
 
 void
 PrometheusMetrics::CPUTemperature() {
-    if (!startup_) return;
+    if (!startup_) {
+        return;
+    }
 
     std::vector<float> CPU_temperatures = server::SystemInfo::GetInstance().CPUTemperature();
 

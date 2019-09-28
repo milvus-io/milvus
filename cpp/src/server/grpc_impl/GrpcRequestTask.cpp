@@ -159,7 +159,7 @@ CreateTableTask::OnExecute() {
         // step 2: construct table schema
         engine::meta::TableSchema table_info;
         table_info.table_id_ = schema_->table_name();
-        table_info.dimension_ = (uint16_t)schema_->dimension();
+        table_info.dimension_ = static_cast<uint16_t>(schema_->dimension());
         table_info.index_file_size_ = schema_->index_file_size();
         table_info.metric_type_ = schema_->metric_type();
 
@@ -446,13 +446,13 @@ InsertTask::OnExecute() {
         // all user provide id, or all internal id
         bool user_provide_ids = !insert_param_->row_id_array().empty();
         // user already provided id before, all insert action require user id
-        if ((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) && !user_provide_ids) {
+        if ((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
                           "Table vector ids are user defined, please provide id for this batch");
         }
 
         // user didn't provided id before, no need to provide user id
-        if ((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) && user_provide_ids) {
+        if ((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
                           "Table vector ids are auto generated, no need to provide id for this batch");
         }
@@ -487,12 +487,12 @@ InsertTask::OnExecute() {
         rc.ElapseFromBegin("prepare vectors data");
 
         // step 5: insert vectors
-        auto vec_count = (uint64_t)insert_param_->row_record_array_size();
+        auto vec_count = static_cast<uint64_t>(insert_param_->row_record_array_size());
         std::vector<int64_t> vec_ids(insert_param_->row_id_array_size(), 0);
         if (!insert_param_->row_id_array().empty()) {
             const int64_t* src_data = insert_param_->row_id_array().data();
             int64_t* target_data = vec_ids.data();
-            memcpy(target_data, src_data, (size_t)(sizeof(int64_t) * insert_param_->row_id_array_size()));
+            memcpy(target_data, src_data, static_cast<size_t>(sizeof(int64_t) * insert_param_->row_id_array_size()));
         }
 
         status = DBWrapper::DB()->InsertVectors(insert_param_->table_name(), vec_count, vec_f.data(), vec_ids);
@@ -710,7 +710,7 @@ CountTableTask::OnExecute() {
             return status;
         }
 
-        row_count_ = (int64_t)row_count;
+        row_count_ = static_cast<int64_t>(row_count);
 
         rc.ElapseFromBegin("total cost");
     } catch (std::exception& ex) {

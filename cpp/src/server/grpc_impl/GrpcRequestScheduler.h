@@ -69,7 +69,7 @@ class GrpcBaseTask {
     OnExecute() = 0;
 
     Status
-    SetStatus(ErrorCode error_code, const std::string& msg);
+    SetStatus(ErrorCode error_code, const std::string& error_msg);
 
  protected:
     mutable std::mutex finish_mtx_;

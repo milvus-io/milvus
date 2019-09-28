@@ -146,7 +146,7 @@ Server::Daemonize() {
 
 void
 Server::Start() {
-    if (daemonized_) {
+    if (daemonized_ != 0) {
         Daemonize();
     }
 

@@ -81,7 +81,7 @@ void NsgIndex::Build_with_ids(size_t nb, const float *data, const long *ids, con
     //>> Debug code
     ///
     int total_degree = 0;
-    for (int i = 0; i < ntotal; ++i) {
+    for (size_t i = 0; i < ntotal; ++i) {
         total_degree += nsg[i].size();
     }
 
@@ -172,7 +172,7 @@ void NsgIndex::GetNeighbors(const float *query,
         for (size_t i = 0; i < init_ids.size(); ++i) {
             node_t id = init_ids[i];
 
-            if (id >= ntotal) {
+            if (id >= static_cast<node_t>(ntotal)) {
                 KNOWHERE_THROW_MSG("Build Index Error, id > ntotal");
                 continue;
             }
@@ -262,7 +262,7 @@ void NsgIndex::GetNeighbors(const float *query, std::vector<Neighbor> &resset, s
         for (size_t i = 0; i < init_ids.size(); ++i) {
             node_t id = init_ids[i];
 
-            if (id >= ntotal) {
+            if (id >= static_cast<node_t>(ntotal)) {
                 KNOWHERE_THROW_MSG("Build Index Error, id > ntotal");
                 continue;
             }
@@ -350,7 +350,7 @@ void NsgIndex::GetNeighbors(const float *query,
             node_t id = init_ids[i];
 
             //assert(id < ntotal);
-            if (id >= ntotal) {
+            if (id >= static_cast<node_t>(ntotal)) {
                 KNOWHERE_THROW_MSG("Build Index Error, id > ntotal");
                 continue;
             }
@@ -461,7 +461,7 @@ void NsgIndex::Link() {
     //}
     /////
 
-    for (int i = 0; i < ntotal; ++i) {
+    for (size_t i = 0; i < ntotal; ++i) {
         nsg[i].shrink_to_fit();
     }
 }
@@ -483,7 +483,9 @@ void NsgIndex::SyncPrune(size_t n,
     unsigned cursor = 0;
     std::sort(pool.begin(), pool.end());
     std::vector<Neighbor> result;
-    if (pool[cursor].id == n) cursor++;
+    if (pool[cursor].id == static_cast<node_t>(n)) {
+        cursor++;
+    }
     result.push_back(pool[cursor]); // init result with nearest neighbor
 
     SelectEdge(cursor, pool, result, true);
@@ -518,7 +520,7 @@ void NsgIndex::InterInsert(unsigned n, std::vector<std::mutex> &mutex_vec, float
         int duplicate = false;
         {
             LockGuard lk(mutex_vec[current_neighbor]);
-            for (int j = 0; j < out_degree; ++j) {
+            for (size_t j = 0; j < out_degree; ++j) {
                 if (nsn_dist_pool[j] == -1) break;
 
                 // 保证至少有一条边能连回来
@@ -551,14 +553,14 @@ void NsgIndex::InterInsert(unsigned n, std::vector<std::mutex> &mutex_vec, float
 
             {
                 LockGuard lk(mutex_vec[current_neighbor]);
-                for (int j = 0; j < result.size(); ++j) {
+                for (size_t j = 0; j < result.size(); ++j) {
                     nsn_id_pool[j] = result[j].id;
                     nsn_dist_pool[j] = result[j].distance;
                 }
             }
         } else {
             LockGuard lk(mutex_vec[current_neighbor]);
-            for (int j = 0; j < out_degree; ++j) {
+            for (size_t j = 0; j < out_degree; ++j) {
                 if (nsn_dist_pool[j] == -1) {
                     nsn_id_pool.push_back(current_as_neighbor.id);
                     nsn_dist_pool[j] = current_as_neighbor.distance;
@@ -605,9 +607,11 @@ void NsgIndex::CheckConnectivity() {
     boost::dynamic_bitset<> has_linked{ntotal, 0};
     int64_t linked_count = 0;
 
-    while (linked_count < ntotal) {
+    while (linked_count < static_cast<int64_t>(ntotal)) {
         DFS(root, has_linked, linked_count);
-        if (linked_count >= ntotal) break;
+        if (linked_count >= static_cast<int64_t>(ntotal)) {
+            break;
+        }
         FindUnconnectedNode(has_linked, root);
     }
 }
@@ -697,7 +701,7 @@ void NsgIndex::Search(const float *query,
     } else{
         //#pragma omp parallel for schedule(dynamic, 50)
         #pragma omp parallel for
-        for (int i = 0; i < nq; ++i) {
+        for (unsigned int i = 0; i < nq; ++i) {
             // TODO(linxj): when to use openmp
             auto single_query = query + i * dim;
             GetNeighbors(single_query, resset[i], nsg, &params);
@@ -705,8 +709,8 @@ void NsgIndex::Search(const float *query,
     }
     rc.ElapseFromBegin("cost");
 
-    for (int i = 0; i < nq; ++i) {
-        for (int j = 0; j < k; ++j) {
+    for (unsigned int i = 0; i < nq; ++i) {
+        for (unsigned int j = 0; j < k; ++j) {
             //ids[i * k + j] = resset[i][j].id;
 
             // Fix(linxj): bug, reset[i][j] out of range

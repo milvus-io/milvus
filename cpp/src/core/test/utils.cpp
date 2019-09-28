@@ -38,8 +38,8 @@ void DataGen::Generate(const int &dim, const int &nb, const int &nq) {
     this->dim = dim;
 
     GenAll(dim, nb, xb, ids, nq, xq);
-    assert(xb.size() == dim * nb);
-    assert(xq.size() == dim * nq);
+    assert(xb.size() == (size_t)dim * nb);
+    assert(xq.size() == (size_t)dim * nq);
 
     base_dataset = generate_dataset(nb, dim, xb.data(), ids.data());
     query_dataset = generate_query_dataset(nq, dim, xq.data());
@@ -47,7 +47,7 @@ void DataGen::Generate(const int &dim, const int &nb, const int &nq) {
 }
 zilliz::knowhere::DatasetPtr DataGen::GenQuery(const int &nq) {
     xq.resize(nq * dim);
-    for (size_t i = 0; i < nq * dim; ++i) {
+    for (int i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
     }
     return generate_query_dataset(nq, dim, xq.data());
@@ -72,7 +72,7 @@ void GenAll(const int64_t &dim,
             const int64_t &nq,
             float *xq) {
     GenBase(dim, nb, xb, ids);
-    for (size_t i = 0; i < nq * dim; ++i) {
+    for (int64_t i = 0; i < nq * dim; ++i) {
         xq[i] = xb[i];
     }
 }

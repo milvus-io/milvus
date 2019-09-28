@@ -28,7 +28,7 @@ namespace server {
 
 class DBWrapper {
  private:
-    DBWrapper();
+    DBWrapper() = default;
     ~DBWrapper() = default;
 
  public:
