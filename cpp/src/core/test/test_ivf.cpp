@@ -694,4 +694,4 @@ TEST_F(GPURESTEST, TrainAndSearch) {
 
 
 
-// TODO(linxj): Add exception test
+// TODO(lxj): Add exception test

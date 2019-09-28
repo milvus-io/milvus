@@ -32,7 +32,7 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr> {
     CpuCacheMgr();
 
  public:
-    // TODO: use smart pointer instead
+    // TODO(myh): use smart pointer instead
     static CpuCacheMgr*
     GetInstance();
 

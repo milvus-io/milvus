@@ -68,7 +68,7 @@ MySQLConnectionPool::create() {
     try {
         // Create connection using the parameters we were passed upon
         // creation.
-        mysqlpp::Connection* conn = new mysqlpp::Connection();
+        auto conn = new mysqlpp::Connection();
         conn->set_option(new mysqlpp::ReconnectOption(true));
         conn->connect(db_.empty() ? 0 : db_.c_str(), server_.empty() ? 0 : server_.c_str(),
                       user_.empty() ? 0 : user_.c_str(), password_.empty() ? 0 : password_.c_str(), port_);

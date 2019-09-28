@@ -30,10 +30,10 @@ main(int argc, char* argv[]) {
     printf("Client start...\n");
 
     std::string app_name = basename(argv[0]);
-    static struct option long_options[] = {{"server", optional_argument, 0, 's'},
-                                           {"port", optional_argument, 0, 'p'},
-                                           {"help", no_argument, 0, 'h'},
-                                           {NULL, 0, 0, 0}};
+    static struct option long_options[] = {{"server", optional_argument, nullptr, 's'},
+                                           {"port", optional_argument, nullptr, 'p'},
+                                           {"help", no_argument, nullptr, 'h'},
+                                           {nullptr, 0, nullptr, 0}};
 
     int option_index = 0;
     std::string address = "127.0.0.1", port = "19530";

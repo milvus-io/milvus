@@ -44,7 +44,7 @@ DatasetPtr
 generate_queries(int64_t n, int64_t d, int64_t k, int64_t base) {
     size_t size = sizeof(float) * n * d;
     auto v = (float *) malloc(size);
-    // TODO: check malloc
+    // TODO(lxj): check malloc
     for (auto i = 0; i < n; ++i) {
         for (auto j = 0; j < d; ++j) {
             v[i * d + j] = float(base + i);
