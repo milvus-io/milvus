@@ -17,12 +17,12 @@
 
 #pragma once
 
+#include "JobMgr.h"
 #include "ResourceMgr.h"
 #include "Scheduler.h"
-#include "JobMgr.h"
 
-#include <mutex>
 #include <memory>
+#include <mutex>
 
 namespace zilliz {
 namespace milvus {
@@ -88,6 +88,6 @@ StartSchedulerService();
 void
 StopSchedulerService();
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

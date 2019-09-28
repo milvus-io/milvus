@@ -15,11 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "db/insert/MemManagerImpl.h"
 #include "VectorSource.h"
-#include "utils/Log.h"
 #include "db/Constants.h"
+#include "utils/Log.h"
 
 #include <thread>
 
@@ -28,7 +27,7 @@ namespace milvus {
 namespace engine {
 
 MemTablePtr
-MemManagerImpl::GetMemByTable(const std::string &table_id) {
+MemManagerImpl::GetMemByTable(const std::string& table_id) {
     auto memIt = mem_id_map_.find(table_id);
     if (memIt != mem_id_map_.end()) {
         return memIt->second;
@@ -39,10 +38,7 @@ MemManagerImpl::GetMemByTable(const std::string &table_id) {
 }
 
 Status
-MemManagerImpl::InsertVectors(const std::string &table_id_,
-                              size_t n_,
-                              const float *vectors_,
-                              IDNumbers &vector_ids_) {
+MemManagerImpl::InsertVectors(const std::string& table_id_, size_t n_, const float* vectors_, IDNumbers& vector_ids_) {
     while (GetCurrentMem() > options_.insert_buffer_size_) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -53,10 +49,8 @@ MemManagerImpl::InsertVectors(const std::string &table_id_,
 }
 
 Status
-MemManagerImpl::InsertVectorsNoLock(const std::string &table_id,
-                                    size_t n,
-                                    const float *vectors,
-                                    IDNumbers &vector_ids) {
+MemManagerImpl::InsertVectorsNoLock(const std::string& table_id, size_t n, const float* vectors,
+                                    IDNumbers& vector_ids) {
     MemTablePtr mem = GetMemByTable(table_id);
     VectorSourcePtr source = std::make_shared<VectorSource>(n, vectors);
 
@@ -73,9 +67,9 @@ Status
 MemManagerImpl::ToImmutable() {
     std::unique_lock<std::mutex> lock(mutex_);
     MemIdMap temp_map;
-    for (auto &kv : mem_id_map_) {
+    for (auto& kv : mem_id_map_) {
         if (kv.second->Empty()) {
-            //empty table, no need to serialize
+            // empty table, no need to serialize
             temp_map.insert(kv);
         } else {
             immu_mem_list_.push_back(kv.second);
@@ -87,11 +81,11 @@ MemManagerImpl::ToImmutable() {
 }
 
 Status
-MemManagerImpl::Serialize(std::set<std::string> &table_ids) {
+MemManagerImpl::Serialize(std::set<std::string>& table_ids) {
     ToImmutable();
     std::unique_lock<std::mutex> lock(serialization_mtx_);
     table_ids.clear();
-    for (auto &mem : immu_mem_list_) {
+    for (auto& mem : immu_mem_list_) {
         mem->Serialize();
         table_ids.insert(mem->GetTableId());
     }
@@ -100,16 +94,16 @@ MemManagerImpl::Serialize(std::set<std::string> &table_ids) {
 }
 
 Status
-MemManagerImpl::EraseMemVector(const std::string &table_id) {
-    {//erase MemVector from rapid-insert cache
+MemManagerImpl::EraseMemVector(const std::string& table_id) {
+    {  // erase MemVector from rapid-insert cache
         std::unique_lock<std::mutex> lock(mutex_);
         mem_id_map_.erase(table_id);
     }
 
-    {//erase MemVector from serialize cache
+    {  // erase MemVector from serialize cache
         std::unique_lock<std::mutex> lock(serialization_mtx_);
         MemList temp_list;
-        for (auto &mem : immu_mem_list_) {
+        for (auto& mem : immu_mem_list_) {
             if (mem->GetTableId() != table_id) {
                 temp_list.push_back(mem);
             }
@@ -123,7 +117,7 @@ MemManagerImpl::EraseMemVector(const std::string &table_id) {
 size_t
 MemManagerImpl::GetCurrentMutableMem() {
     size_t total_mem = 0;
-    for (auto &kv : mem_id_map_) {
+    for (auto& kv : mem_id_map_) {
         auto memTable = kv.second;
         total_mem += memTable->GetCurrentMem();
     }
@@ -133,7 +127,7 @@ MemManagerImpl::GetCurrentMutableMem() {
 size_t
 MemManagerImpl::GetCurrentImmutableMem() {
     size_t total_mem = 0;
-    for (auto &mem_table : immu_mem_list_) {
+    for (auto& mem_table : immu_mem_list_) {
         total_mem += mem_table->GetCurrentMem();
     }
     return total_mem;
@@ -144,6 +138,6 @@ MemManagerImpl::GetCurrentMem() {
     return GetCurrentMutableMem() + GetCurrentImmutableMem();
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

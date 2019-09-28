@@ -22,12 +22,12 @@ namespace zilliz {
 namespace milvus {
 namespace server {
 
-ConfigMgr *
+ConfigMgr*
 ConfigMgr::GetInstance() {
     static YamlConfigMgr mgr;
     return &mgr;
 }
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz

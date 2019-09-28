@@ -17,22 +17,22 @@
 
 #pragma once
 
-#include "db/engine/ExecutionEngine.h"
 #include "db/Constants.h"
+#include "db/engine/ExecutionEngine.h"
 
-#include <vector>
 #include <map>
-#include <string>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
 
-constexpr int32_t DEFAULT_ENGINE_TYPE = (int) EngineType::FAISS_IDMAP;
+constexpr int32_t DEFAULT_ENGINE_TYPE = (int)EngineType::FAISS_IDMAP;
 constexpr int32_t DEFAULT_NLIST = 16384;
-constexpr int32_t DEFAULT_METRIC_TYPE = (int) MetricType::L2;
+constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
 constexpr int32_t DEFAULT_INDEX_FILE_SIZE = ONE_GB;
 
 constexpr int64_t FLAG_MASK_NO_USERID = 0x1;
@@ -50,7 +50,7 @@ struct TableSchema {
 
     size_t id_ = 0;
     std::string table_id_;
-    int32_t state_ = (int) NORMAL;
+    int32_t state_ = (int)NORMAL;
     uint16_t dimension_ = 0;
     int64_t created_on_ = 0;
     int64_t flag_ = 0;
@@ -58,7 +58,7 @@ struct TableSchema {
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     int32_t nlist_ = DEFAULT_NLIST;
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;
-}; // TableSchema
+};  // TableSchema
 
 struct TableFileSchema {
     typedef enum {
@@ -83,17 +83,17 @@ struct TableFileSchema {
     std::string location_;
     int64_t updated_time_ = 0;
     int64_t created_on_ = 0;
-    int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE; //not persist to meta
+    int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;  // not persist to meta
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
-    int32_t nlist_ = DEFAULT_NLIST; //not persist to meta
-    int32_t metric_type_ = DEFAULT_METRIC_TYPE; //not persist to meta
-}; // TableFileSchema
+    int32_t nlist_ = DEFAULT_NLIST;              // not persist to meta
+    int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
+};                                               // TableFileSchema
 
 using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
 using TableFilesSchema = std::vector<TableFileSchema>;
 using DatePartionedTableFilesSchema = std::map<DateT, TableFilesSchema>;
 
-} // namespace meta
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace meta
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

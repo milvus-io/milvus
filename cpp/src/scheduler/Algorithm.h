@@ -15,23 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "resource/Resource.h"
 #include "ResourceMgr.h"
+#include "resource/Resource.h"
 
-#include <vector>
 #include <string>
+#include <vector>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 uint64_t
-ShortestPath(const ResourcePtr &src,
-             const ResourcePtr &dest,
-             const ResourceMgrPtr &res_mgr,
-             std::vector<std::string> &path);
+ShortestPath(const ResourcePtr& src, const ResourcePtr& dest, const ResourceMgrPtr& res_mgr,
+             std::vector<std::string>& path);
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

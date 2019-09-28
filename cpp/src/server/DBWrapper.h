@@ -17,8 +17,8 @@
 
 #pragma once
 
-#include "utils/Status.h"
 #include "db/DB.h"
+#include "utils/Status.h"
 
 #include <memory>
 
@@ -32,19 +32,24 @@ class DBWrapper {
     ~DBWrapper() = default;
 
  public:
-    static DBWrapper &GetInstance() {
+    static DBWrapper&
+    GetInstance() {
         static DBWrapper wrapper;
         return wrapper;
     }
 
-    static engine::DBPtr DB() {
+    static engine::DBPtr
+    DB() {
         return GetInstance().EngineDB();
     }
 
-    Status StartService();
-    Status StopService();
+    Status
+    StartService();
+    Status
+    StopService();
 
-    engine::DBPtr EngineDB() {
+    engine::DBPtr
+    EngineDB() {
         return db_;
     }
 
@@ -52,6 +57,6 @@ class DBWrapper {
     engine::DBPtr db_;
 };
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz
