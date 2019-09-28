@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "knowhere/adapter/Structure.h"
@@ -25,11 +24,11 @@ namespace milvus {
 namespace engine {
 
 extern zilliz::knowhere::DatasetPtr
-GenDatasetWithIds(const int64_t &nb, const int64_t &dim, const float *xb, const int64_t *ids);
+GenDatasetWithIds(const int64_t& nb, const int64_t& dim, const float* xb, const int64_t* ids);
 
 extern zilliz::knowhere::DatasetPtr
-GenDataset(const int64_t &nb, const int64_t &dim, const float *xb);
+GenDataset(const int64_t& nb, const int64_t& dim, const float* xb);
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz
