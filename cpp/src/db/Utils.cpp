@@ -228,7 +228,7 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
         info.port_ = pieces_match[5].str();
         info.db_name_ = pieces_match[6].str();
 
-        // TODO: verify host, port...
+        // TODO(myh): verify host, port...
     } else {
         return Status(DB_INVALID_META_URI, "Invalid meta uri: " + uri);
     }

@@ -468,7 +468,7 @@ InsertTask::OnExecute() {
         // step 4: prepare float data
         std::vector<float> vec_f(insert_param_->row_record_array_size() * table_info.dimension_, 0);
 
-        // TODO: change to one dimension array in protobuf or use multiple-thread to copy the data
+        // TODO(yk): change to one dimension array or use multiple-thread to copy the data
         for (size_t i = 0; i < insert_param_->row_record_array_size(); i++) {
             if (insert_param_->row_record_array(i).vector_data().empty()) {
                 return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array data is empty");
