@@ -53,9 +53,9 @@ struct ArchiveConf {
 
  private:
     void
-    ParseCritirias(const std::string& type);
+    ParseCritirias(const std::string& criterias);
     void
-    ParseType(const std::string& criterias);
+    ParseType(const std::string& type);
 
     std::string type_;
     CriteriaT criterias_;
