@@ -28,7 +28,6 @@
 #include <sstream>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -47,4 +46,3 @@ DBFactory::Build(const DBOptions& options) {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

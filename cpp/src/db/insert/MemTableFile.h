@@ -25,7 +25,6 @@
 #include <memory>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -66,4 +65,3 @@ using MemTableFilePtr = std::shared_ptr<MemTableFile>;
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

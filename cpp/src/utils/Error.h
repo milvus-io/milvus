@@ -21,7 +21,6 @@
 #include <exception>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 
 using ErrorCode = int32_t;
@@ -123,4 +122,3 @@ class ServerException : public std::exception {
 }  // namespace server
 
 }  // namespace milvus
-}  // namespace zilliz

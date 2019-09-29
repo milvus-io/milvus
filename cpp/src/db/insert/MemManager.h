@@ -24,7 +24,6 @@
 #include <set>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -53,4 +52,3 @@ using MemManagerPtr = std::shared_ptr<MemManager>;
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

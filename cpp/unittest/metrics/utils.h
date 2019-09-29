@@ -41,7 +41,7 @@
 #endif
 
 void
-ASSERT_STATS(zilliz::milvus::Status &stat);
+ASSERT_STATS(milvus::Status &stat);
 
 //class TestEnv : public ::testing::Environment {
 //public:
@@ -66,10 +66,10 @@ ASSERT_STATS(zilliz::milvus::Status &stat);
 
 class MetricTest : public ::testing::Test {
  protected:
-    zilliz::milvus::engine::DBPtr db_;
+    milvus::engine::DBPtr db_;
 
     void InitLog();
     void SetUp() override;
     void TearDown() override;
-    virtual zilliz::milvus::engine::DBOptions GetOptions();
+    virtual milvus::engine::DBOptions GetOptions();
 };

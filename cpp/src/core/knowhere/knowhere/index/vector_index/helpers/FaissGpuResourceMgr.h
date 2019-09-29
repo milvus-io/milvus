@@ -26,7 +26,6 @@
 
 #include "src/utils/BlockingQueue.h"
 
-namespace zilliz {
 namespace knowhere {
 
 struct Resource {
@@ -45,7 +44,7 @@ using ResWPtr = std::weak_ptr<Resource>;
 class FaissGpuResourceMgr {
  public:
     friend class ResScope;
-    using ResBQ = zilliz::milvus::server::BlockingQueue<ResPtr>;
+    using ResBQ = milvus::server::BlockingQueue<ResPtr>;
 
  public:
     struct DeviceParams {
@@ -127,4 +126,3 @@ class ResScope {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

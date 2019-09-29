@@ -21,7 +21,6 @@
 #include <memory>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -104,4 +103,3 @@ MemTable::GetCurrentMem() {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

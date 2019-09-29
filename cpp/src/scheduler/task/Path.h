@@ -20,7 +20,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -82,4 +81,3 @@ class Path {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

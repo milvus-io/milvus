@@ -24,7 +24,6 @@
 
 // TODO(lxj): add conf checker
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -162,4 +161,3 @@ NSGConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type)
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

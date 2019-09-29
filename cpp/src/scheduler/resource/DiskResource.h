@@ -21,7 +21,6 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -47,4 +46,3 @@ class DiskResource : public Resource {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

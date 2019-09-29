@@ -23,7 +23,6 @@
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
-namespace zilliz {
 namespace knowhere {
 
 FaissBaseIndex::FaissBaseIndex(std::shared_ptr<faiss::Index> index) : index_(std::move(index)) {
@@ -79,4 +78,3 @@ FaissBaseIndex::SealImpl() {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

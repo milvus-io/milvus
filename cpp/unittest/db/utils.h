@@ -48,13 +48,13 @@ class BaseTest : public ::testing::Test {
 
     void SetUp() override;
     void TearDown() override;
-    virtual zilliz::milvus::engine::DBOptions GetOptions();
+    virtual milvus::engine::DBOptions GetOptions();
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class DBTest : public BaseTest {
  protected:
-    zilliz::milvus::engine::DBPtr db_;
+    milvus::engine::DBPtr db_;
 
     void SetUp() override;
     void TearDown() override;
@@ -63,7 +63,7 @@ class DBTest : public BaseTest {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class DBTest2 : public DBTest {
  protected:
-    zilliz::milvus::engine::DBOptions GetOptions() override;
+    milvus::engine::DBOptions GetOptions() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -73,7 +73,7 @@ class EngineTest : public DBTest {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class MetaTest : public BaseTest {
  protected:
-    std::shared_ptr<zilliz::milvus::engine::meta::SqliteMetaImpl> impl_;
+    std::shared_ptr<milvus::engine::meta::SqliteMetaImpl> impl_;
 
     void SetUp() override;
     void TearDown() override;
@@ -82,17 +82,17 @@ class MetaTest : public BaseTest {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class MySqlDBTest : public DBTest {
  protected:
-    zilliz::milvus::engine::DBOptions GetOptions() override;
+    milvus::engine::DBOptions GetOptions() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class MySqlMetaTest : public BaseTest {
  protected:
-    std::shared_ptr<zilliz::milvus::engine::meta::MySQLMetaImpl> impl_;
+    std::shared_ptr<milvus::engine::meta::MySQLMetaImpl> impl_;
 
     void SetUp() override;
     void TearDown() override;
-    zilliz::milvus::engine::DBOptions GetOptions() override;
+    milvus::engine::DBOptions GetOptions() override;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -28,7 +28,7 @@
 
 namespace {
 
-namespace kn = zilliz::knowhere;
+namespace kn = knowhere;
 
 }  // namespace
 
@@ -98,7 +98,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dimension(), dim);
-    ASSERT_THROW({ index_->Clone(); }, zilliz::knowhere::KnowhereException);
+    ASSERT_THROW({ index_->Clone(); }, knowhere::KnowhereException);
     ASSERT_NO_THROW({
         index_->Add(base_dataset, kn::Config());
         index_->Seal();

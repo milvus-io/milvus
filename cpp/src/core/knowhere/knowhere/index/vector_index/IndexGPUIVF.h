@@ -23,7 +23,6 @@
 #include "IndexIVF.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 
-namespace zilliz {
 namespace knowhere {
 
 class GPUIndex {
@@ -95,4 +94,3 @@ class GPUIVF : public IVF, public GPUIndex {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

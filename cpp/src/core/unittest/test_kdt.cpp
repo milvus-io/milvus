@@ -30,7 +30,7 @@
 
 namespace {
 
-namespace kn = zilliz::knowhere;
+namespace kn = knowhere;
 
 }  // namespace
 
@@ -132,7 +132,7 @@ TEST_F(KDTTest, kdt_serialize) {
     PrintResult(result, nq, k);
     ASSERT_EQ(new_index->Count(), nb);
     ASSERT_EQ(new_index->Dimension(), dim);
-    ASSERT_THROW({ new_index->Clone(); }, zilliz::knowhere::KnowhereException);
+    ASSERT_THROW({ new_index->Clone(); }, knowhere::KnowhereException);
     ASSERT_NO_THROW({ new_index->Seal(); });
 
     {

@@ -38,7 +38,6 @@
 #include <string>
 #include <thread>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -1994,4 +1993,3 @@ MySQLMetaImpl::DropAll() {
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

@@ -23,7 +23,6 @@
 #include "VectorIndex.h"
 #include "knowhere/index/IndexModel.h"
 
-namespace zilliz {
 namespace knowhere {
 
 class CPUKDTRNG : public VectorIndex {
@@ -86,4 +85,3 @@ class CPUKDTRNGIndexModel : public IndexModel {
 using CPUKDTRNGIndexModelPtr = std::shared_ptr<CPUKDTRNGIndexModel>;
 
 }  // namespace knowhere
-}  // namespace zilliz

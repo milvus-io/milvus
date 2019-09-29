@@ -28,7 +28,6 @@
 #include <sstream>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -39,4 +38,3 @@ MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOption
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

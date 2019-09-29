@@ -24,7 +24,6 @@
 #include <ctime>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace utils {
@@ -69,4 +68,3 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info);
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

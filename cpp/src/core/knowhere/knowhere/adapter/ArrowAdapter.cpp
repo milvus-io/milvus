@@ -17,7 +17,6 @@
 
 #include "knowhere/adapter/ArrowAdapter.h"
 
-namespace zilliz {
 namespace knowhere {
 
 ArrayPtr
@@ -52,4 +51,3 @@ CopySchema(const SchemaPtr& origin) {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

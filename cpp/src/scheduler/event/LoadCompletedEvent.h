@@ -24,7 +24,6 @@
 #include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -48,4 +47,3 @@ class LoadCompletedEvent : public Event {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

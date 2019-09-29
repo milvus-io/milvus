@@ -17,7 +17,6 @@
 
 #include "scheduler/resource/GpuResource.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -43,4 +42,3 @@ GpuResource::Process(TaskPtr task) {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

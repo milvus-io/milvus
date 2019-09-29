@@ -24,7 +24,6 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -59,4 +58,3 @@ using VectorSourcePtr = std::shared_ptr<VectorSource>;
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

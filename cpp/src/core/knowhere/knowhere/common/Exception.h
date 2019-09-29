@@ -20,7 +20,6 @@
 #include <exception>
 #include <string>
 
-namespace zilliz {
 namespace knowhere {
 
 class KnowhereException : public std::exception {
@@ -52,4 +51,3 @@ class KnowhereException : public std::exception {
     } while (false)
 
 }  // namespace knowhere
-}  // namespace zilliz

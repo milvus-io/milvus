@@ -19,7 +19,6 @@
 
 #include "knowhere/common/Timer.h"
 
-namespace zilliz {
 namespace knowhere {
 
 TimeRecorder::TimeRecorder(const std::string& header, int64_t log_level) : header_(header), log_level_(log_level) {
@@ -99,4 +98,3 @@ TimeRecorder::ElapseFromBegin(const std::string& msg) {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

@@ -22,7 +22,6 @@
 #include <utility>
 #include <vector>
 
-namespace zilliz {
 namespace knowhere {
 
 using KDTParameter = std::pair<std::string, std::string>;
@@ -51,4 +50,3 @@ class KDTParameterMgr {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz
