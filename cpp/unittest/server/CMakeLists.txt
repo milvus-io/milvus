@@ -43,11 +43,11 @@ set(server_test_files
         ${grpc_server_files}
         ${grpc_service_files}
         ${util_files}
-        ${unittest_files}
+        ${entry_file}
         ${test_files}
         )
 
-cuda_add_executable(server_test ${server_test_files})
+cuda_add_executable(test_server ${server_test_files})
 
 set(client_grpc_lib
         grpcpp_channelz
@@ -56,7 +56,7 @@ set(client_grpc_lib
         grpc_protobuf
         grpc_protoc)
 
-target_link_libraries(server_test
+target_link_libraries(test_server
         knowhere
         stdc++
         snappy
@@ -66,7 +66,7 @@ target_link_libraries(server_test
         ${unittest_libs}
         )
 
-install(TARGETS server_test DESTINATION unittest)
+install(TARGETS test_server DESTINATION unittest)
 
 configure_file(appendix/server_config.yaml
         "${CMAKE_CURRENT_BINARY_DIR}/milvus/conf/server_config.yaml"
