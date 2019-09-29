@@ -17,7 +17,6 @@
 
 #pragma once
 
-namespace zilliz {
 namespace knowhere {
 namespace definition {
 
@@ -27,4 +26,3 @@ namespace definition {
 
 }  // namespace definition
 }  // namespace knowhere
-}  // namespace zilliz

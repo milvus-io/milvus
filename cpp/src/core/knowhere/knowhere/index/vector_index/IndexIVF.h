@@ -26,7 +26,6 @@
 #include "VectorIndex.h"
 #include "faiss/IndexIVF.h"
 
-namespace zilliz {
 namespace knowhere {
 
 using Graph = std::vector<std::vector<int64_t>>;
@@ -122,4 +121,3 @@ class IVFIndexModel : public IndexModel, public FaissBaseIndex {
 using IVFIndexModelPtr = std::shared_ptr<IVFIndexModel>;
 
 }  // namespace knowhere
-}  // namespace zilliz

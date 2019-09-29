@@ -19,7 +19,6 @@
 
 #include <utility>
 
-namespace zilliz {
 namespace knowhere {
 
 FaissGpuResourceMgr&
@@ -125,4 +124,3 @@ FaissGpuResourceMgr::Dump() {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

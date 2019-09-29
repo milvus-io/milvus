@@ -25,7 +25,6 @@
 #include <utility>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -85,4 +84,3 @@ KnowhereResource::Finalize() {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

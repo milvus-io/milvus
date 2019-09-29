@@ -28,7 +28,6 @@
  * only responible for index combination
  */
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -115,14 +114,14 @@ VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* i
     return Status::OK();
 }
 
-zilliz::knowhere::BinarySet
+knowhere::BinarySet
 VecIndexImpl::Serialize() {
     type = ConvertToCpuIndexType(type);
     return index_->Serialize();
 }
 
 Status
-VecIndexImpl::Load(const zilliz::knowhere::BinarySet& index_binary) {
+VecIndexImpl::Load(const knowhere::BinarySet& index_binary) {
     index_->Load(index_binary);
     dim = Dimension();
     return Status::OK();
@@ -146,7 +145,7 @@ VecIndexImpl::GetType() {
 VecIndexPtr
 VecIndexImpl::CopyToGpu(const int64_t& device_id, const Config& cfg) {
     // TODO(linxj): exception handle
-    auto gpu_index = zilliz::knowhere::cloner::CopyCpuToGpu(index_, device_id, cfg);
+    auto gpu_index = knowhere::cloner::CopyCpuToGpu(index_, device_id, cfg);
     auto new_index = std::make_shared<VecIndexImpl>(gpu_index, ConvertToGpuIndexType(type));
     new_index->dim = dim;
     return new_index;
@@ -155,7 +154,7 @@ VecIndexImpl::CopyToGpu(const int64_t& device_id, const Config& cfg) {
 VecIndexPtr
 VecIndexImpl::CopyToCpu(const Config& cfg) {
     // TODO(linxj): exception handle
-    auto cpu_index = zilliz::knowhere::cloner::CopyGpuToCpu(index_, cfg);
+    auto cpu_index = knowhere::cloner::CopyGpuToCpu(index_, cfg);
     auto new_index = std::make_shared<VecIndexImpl>(cpu_index, ConvertToCpuIndexType(type));
     new_index->dim = dim;
     return new_index;
@@ -259,7 +258,7 @@ IVFMixIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, co
 }
 
 Status
-IVFMixIndex::Load(const zilliz::knowhere::BinarySet& index_binary) {
+IVFMixIndex::Load(const knowhere::BinarySet& index_binary) {
     index_->Load(index_binary);
     dim = Dimension();
     return Status::OK();
@@ -267,4 +266,3 @@ IVFMixIndex::Load(const zilliz::knowhere::BinarySet& index_binary) {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

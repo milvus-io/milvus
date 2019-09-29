@@ -18,7 +18,6 @@
 #include "config/ConfigMgr.h"
 #include "YamlConfigMgr.h"
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -30,4 +29,3 @@ ConfigMgr::GetInstance() {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

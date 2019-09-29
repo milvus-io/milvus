@@ -22,7 +22,6 @@
 #include <string>
 #include <unordered_map>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
@@ -46,4 +45,3 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr> {
 
 }  // namespace cache
 }  // namespace milvus
-}  // namespace zilliz

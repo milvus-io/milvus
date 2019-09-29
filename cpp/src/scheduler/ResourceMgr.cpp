@@ -19,7 +19,6 @@
 #include "scheduler/ResourceMgr.h"
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -201,4 +200,3 @@ ResourceMgr::event_process() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

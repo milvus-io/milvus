@@ -22,7 +22,6 @@
 
 #include "VectorIndex.h"
 
-namespace zilliz {
 namespace knowhere {
 
 namespace algo {
@@ -63,4 +62,3 @@ class NSG : public VectorIndex {
 using NSGIndexPtr = std::shared_ptr<NSG>();
 
 }  // namespace knowhere
-}  // namespace zilliz

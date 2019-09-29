@@ -25,7 +25,6 @@
 
 #include "Id.h"
 
-namespace zilliz {
 namespace knowhere {
 
 struct Binary {
@@ -74,4 +73,3 @@ class BinarySet {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

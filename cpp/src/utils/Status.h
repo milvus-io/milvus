@@ -21,7 +21,6 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 
 using StatusCode = ErrorCode;
@@ -75,4 +74,3 @@ class Status {
 };  // Status
 
 }  // namespace milvus
-}  // namespace zilliz

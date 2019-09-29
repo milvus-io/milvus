@@ -22,7 +22,6 @@
 
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -239,4 +238,3 @@ GrpcRequestScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

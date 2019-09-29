@@ -17,7 +17,6 @@
 
 #include "scheduler/task/DeleteTask.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -36,4 +35,3 @@ XDeleteTask::Execute() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

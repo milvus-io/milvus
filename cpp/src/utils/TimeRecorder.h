@@ -20,7 +20,6 @@
 #include <chrono>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 
 class TimeRecorder {
@@ -52,4 +51,3 @@ class TimeRecorder {
 };
 
 }  // namespace milvus
-}  // namespace zilliz

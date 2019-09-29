@@ -19,7 +19,6 @@
 
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
 
-namespace zilliz {
 namespace knowhere {
 namespace algo {
 
@@ -68,4 +67,3 @@ read_index(MemoryIOReader& reader) {
 
 }  // namespace algo
 }  // namespace knowhere
-}  // namespace zilliz

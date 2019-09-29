@@ -21,7 +21,6 @@
 
 #include "Resource.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -47,4 +46,3 @@ class CpuResource : public Resource {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

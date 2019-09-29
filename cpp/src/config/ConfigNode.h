@@ -21,7 +21,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -94,4 +93,3 @@ class ConfigNode {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

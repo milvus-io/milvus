@@ -18,7 +18,6 @@
 #include "wrapper/ConfAdapterMgr.h"
 #include "utils/Exception.h"
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -59,4 +58,3 @@ AdapterMgr::RegisterAdapter() {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

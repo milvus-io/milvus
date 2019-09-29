@@ -22,7 +22,6 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 class MetricsBase {
@@ -208,4 +207,3 @@ class MetricsBase {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

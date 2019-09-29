@@ -21,7 +21,6 @@
 #include <chrono>
 #include <iostream>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -64,4 +63,3 @@ SimpleIDGenerator::GetNextIDNumbers(size_t n, IDNumbers& ids) {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

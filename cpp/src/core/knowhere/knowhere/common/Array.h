@@ -22,7 +22,6 @@
 
 #include "Schema.h"
 
-namespace zilliz {
 namespace knowhere {
 
 using ArrayData = arrow::ArrayData;
@@ -49,4 +48,3 @@ using Decimal128Array = arrow::Decimal128Array;
 using Decimal128ArrayPtr = std::shared_ptr<arrow::Decimal128Array>;
 
 }  // namespace knowhere
-}  // namespace zilliz

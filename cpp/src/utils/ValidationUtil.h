@@ -22,7 +22,6 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -79,4 +78,3 @@ class ValidationUtil {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

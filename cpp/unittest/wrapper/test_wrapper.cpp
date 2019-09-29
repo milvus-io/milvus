@@ -27,8 +27,8 @@ INITIALIZE_EASYLOGGINGPP
 
 namespace {
 
-namespace ms = zilliz::milvus::engine;
-namespace kw = zilliz::knowhere;
+namespace ms = milvus::engine;
+namespace kw = knowhere;
 
 } // namespace
 
@@ -50,41 +50,41 @@ class ParamGenerator {
     kw::Config Gen(const ms::IndexType &type) {
         switch (type) {
             case ms::IndexType::FAISS_IDMAP: {
-                auto tempconf = std::make_shared<zilliz::knowhere::Cfg>();
-                tempconf->metric_type = zilliz::knowhere::METRICTYPE::L2;
+                auto tempconf = std::make_shared<knowhere::Cfg>();
+                tempconf->metric_type = knowhere::METRICTYPE::L2;
                 return tempconf;
             }
             case ms::IndexType::FAISS_IVFFLAT_CPU:
             case ms::IndexType::FAISS_IVFFLAT_GPU:
             case ms::IndexType::FAISS_IVFFLAT_MIX: {
-                auto tempconf = std::make_shared<zilliz::knowhere::IVFCfg>();
+                auto tempconf = std::make_shared<knowhere::IVFCfg>();
                 tempconf->nlist = 100;
                 tempconf->nprobe = 16;
-                tempconf->metric_type = zilliz::knowhere::METRICTYPE::L2;
+                tempconf->metric_type = knowhere::METRICTYPE::L2;
                 return tempconf;
             }
             case ms::IndexType::FAISS_IVFSQ8_CPU:
             case ms::IndexType::FAISS_IVFSQ8_GPU:
             case ms::IndexType::FAISS_IVFSQ8_MIX: {
-                auto tempconf = std::make_shared<zilliz::knowhere::IVFSQCfg>();
+                auto tempconf = std::make_shared<knowhere::IVFSQCfg>();
                 tempconf->nlist = 100;
                 tempconf->nprobe = 16;
                 tempconf->nbits = 8;
-                tempconf->metric_type = zilliz::knowhere::METRICTYPE::L2;
+                tempconf->metric_type = knowhere::METRICTYPE::L2;
                 return tempconf;
             }
             case ms::IndexType::FAISS_IVFPQ_CPU:
             case ms::IndexType::FAISS_IVFPQ_GPU: {
-                auto tempconf = std::make_shared<zilliz::knowhere::IVFPQCfg>();
+                auto tempconf = std::make_shared<knowhere::IVFPQCfg>();
                 tempconf->nlist = 100;
                 tempconf->nprobe = 16;
                 tempconf->nbits = 8;
                 tempconf->m = 8;
-                tempconf->metric_type = zilliz::knowhere::METRICTYPE::L2;
+                tempconf->metric_type = knowhere::METRICTYPE::L2;
                 return tempconf;
             }
             case ms::IndexType::NSG_MIX: {
-                auto tempconf = std::make_shared<zilliz::knowhere::NSGCfg>();
+                auto tempconf = std::make_shared<knowhere::NSGCfg>();
                 tempconf->nlist = 100;
                 tempconf->nprobe = 16;
                 tempconf->search_length = 8;
@@ -92,7 +92,7 @@ class ParamGenerator {
                 tempconf->search_length = 40; // TODO(linxj): be 20 when search
                 tempconf->out_degree = 60;
                 tempconf->candidate_pool_size = 200;
-                tempconf->metric_type = zilliz::knowhere::METRICTYPE::L2;
+                tempconf->metric_type = knowhere::METRICTYPE::L2;
                 return tempconf;
             }
         }
@@ -103,7 +103,7 @@ class KnowhereWrapperTest
     : public TestWithParam<::std::tuple<ms::IndexType, std::string, int, int, int, int>> {
  protected:
     void SetUp() override {
-        zilliz::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID,
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID,
                                                                         1024 * 1024 * 200,
                                                                         1024 * 1024 * 300,
                                                                         2);
@@ -123,7 +123,7 @@ class KnowhereWrapperTest
     }
 
     void TearDown() override {
-        zilliz::knowhere::FaissGpuResourceMgr::GetInstance().Free();
+        knowhere::FaissGpuResourceMgr::GetInstance().Free();
     }
 
     void AssertResult(const std::vector<int64_t> &ids, const std::vector<float> &dis) {

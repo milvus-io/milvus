@@ -23,7 +23,7 @@
 
 namespace {
 
-namespace ms = zilliz::milvus;
+namespace ms = milvus;
 
 } // namespace
 

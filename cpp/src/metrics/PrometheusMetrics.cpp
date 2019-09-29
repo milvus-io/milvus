@@ -24,7 +24,6 @@
 #include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -242,4 +241,3 @@ PrometheusMetrics::GpuCacheUsageGaugeSet() {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

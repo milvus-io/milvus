@@ -23,7 +23,6 @@
 
 #include "knowhere/common/Array.h"
 
-namespace zilliz {
 namespace knowhere {
 
 ArrayPtr
@@ -33,4 +32,3 @@ SchemaPtr
 CopySchema(const SchemaPtr& origin);
 
 }  // namespace knowhere
-}  // namespace zilliz

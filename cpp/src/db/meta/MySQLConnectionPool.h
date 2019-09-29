@@ -23,7 +23,6 @@
 
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -90,4 +89,3 @@ class MySQLConnectionPool : public mysqlpp::ConnectionPool {
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

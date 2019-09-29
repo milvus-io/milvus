@@ -23,7 +23,6 @@
 
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -63,4 +62,3 @@ class XSearchTask : public Task {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

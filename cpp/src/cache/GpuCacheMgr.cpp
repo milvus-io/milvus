@@ -22,7 +22,6 @@
 #include <sstream>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
@@ -84,4 +83,3 @@ GpuCacheMgr::GetIndex(const std::string& key) {
 
 }  // namespace cache
 }  // namespace milvus
-}  // namespace zilliz
