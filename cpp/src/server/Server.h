@@ -28,26 +28,32 @@ namespace server {
 
 class Server {
  public:
-    static Server &GetInstance();
+    static Server&
+    GetInstance();
 
-    void Init(int64_t daemonized,
-              const std::string &pid_filename,
-              const std::string &config_filename,
-              const std::string &log_config_file);
+    void
+    Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename,
+         const std::string& log_config_file);
 
-    void Start();
-    void Stop();
+    void
+    Start();
+    void
+    Stop();
 
  private:
     Server() = default;
     ~Server() = default;
 
-    void Daemonize();
+    void
+    Daemonize();
 
-    ErrorCode LoadConfig();
+    ErrorCode
+    LoadConfig();
 
-    void StartService();
-    void StopService();
+    void
+    StartService();
+    void
+    StopService();
 
  private:
     int64_t daemonized_ = 0;
@@ -57,6 +63,6 @@ class Server {
     std::string log_config_file_;
 };  // Server
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz

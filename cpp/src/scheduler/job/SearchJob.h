@@ -16,25 +16,24 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "Job.h"
 #include "db/meta/MetaTypes.h"
 
-
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
-
 
 using engine::meta::TableFileSchemaPtr;
 
@@ -43,12 +42,12 @@ using Id2DistanceMap = std::vector<std::pair<int64_t, double>>;
 using ResultSet = std::vector<Id2DistanceMap>;
 
 class SearchJob : public Job {
-public:
-    SearchJob(JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe, const float *vectors);
+ public:
+    SearchJob(JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors);
 
-public:
+ public:
     bool
-    AddIndexFile(const TableFileSchemaPtr &index_file);
+    AddIndexFile(const TableFileSchemaPtr& index_file);
 
     void
     WaitResult();
@@ -56,13 +55,13 @@ public:
     void
     SearchDone(size_t index_id);
 
-    ResultSet &
+    ResultSet&
     GetResult();
 
-    Status &
+    Status&
     GetStatus();
 
-public:
+ public:
     uint64_t
     topk() const {
         return topk_;
@@ -77,22 +76,23 @@ public:
     nprobe() const {
         return nprobe_;
     }
-    const float *
+
+    const float*
     vectors() const {
         return vectors_;
     }
 
-    Id2IndexMap &
+    Id2IndexMap&
     index_files() {
         return index_files_;
     }
 
-private:
+ private:
     uint64_t topk_ = 0;
     uint64_t nq_ = 0;
     uint64_t nprobe_ = 0;
     // TODO: smart pointer
-    const float *vectors_ = nullptr;
+    const float* vectors_ = nullptr;
 
     Id2IndexMap index_files_;
     // TODO: column-base better ?
@@ -105,7 +105,6 @@ private:
 
 using SearchJobPtr = std::shared_ptr<SearchJob>;
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

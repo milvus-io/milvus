@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <x86intrin.h>
@@ -26,14 +25,15 @@
 #include "NSG.h"
 #include "knowhere/common/Config.h"
 
-
 namespace zilliz {
 namespace knowhere {
 namespace algo {
 
-extern int InsertIntoPool(Neighbor *addr, unsigned K, Neighbor nn);
-extern float calculate(const float *a, const float *b, unsigned size);
+extern int
+InsertIntoPool(Neighbor* addr, unsigned K, Neighbor nn);
+extern float
+calculate(const float* a, const float* b, unsigned size);
 
-}
-}
-}
+}  // namespace algo
+}  // namespace knowhere
+}  // namespace zilliz

@@ -19,11 +19,11 @@
 
 #include "utils/Status.h"
 
-#include <memory>
+#include <grpcpp/grpcpp.h>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <thread>
-#include <grpcpp/grpcpp.h>
 
 namespace zilliz {
 namespace milvus {
@@ -32,27 +32,32 @@ namespace grpc {
 
 class GrpcServer {
  public:
-    static GrpcServer &GetInstance() {
+    static GrpcServer&
+    GetInstance() {
         static GrpcServer grpc_server;
         return grpc_server;
     }
 
-    void Start();
-    void Stop();
+    void
+    Start();
+    void
+    Stop();
 
  private:
     GrpcServer() = default;
     ~GrpcServer() = default;
 
-    Status StartService();
-    Status StopService();
+    Status
+    StartService();
+    Status
+    StopService();
 
  private:
     std::unique_ptr<::grpc::Server> server_ptr_;
     std::shared_ptr<std::thread> thread_ptr_;
 };
 
-} // namespace grpc
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace grpc
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz

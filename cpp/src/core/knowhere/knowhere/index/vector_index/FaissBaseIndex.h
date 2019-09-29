@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <memory>
@@ -23,7 +22,6 @@
 #include <faiss/Index.h>
 
 #include "knowhere/common/BinarySet.h"
-
 
 namespace zilliz {
 namespace knowhere {
@@ -36,7 +34,7 @@ class FaissBaseIndex {
     SerializeImpl();
 
     virtual void
-    LoadImpl(const BinarySet &index_binary);
+    LoadImpl(const BinarySet& index_binary);
 
     virtual void
     SealImpl();
@@ -45,8 +43,5 @@ class FaissBaseIndex {
     std::shared_ptr<faiss::Index> index_ = nullptr;
 };
 
-} // knowhere
-} // zilliz
-
-
-
+}  // namespace knowhere
+}  // namespace zilliz

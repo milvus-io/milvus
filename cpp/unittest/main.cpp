@@ -19,13 +19,11 @@
 #include <gmock/gmock.h>
 
 #include "utils/easylogging++.h"
-#include "utils/CommonUtil.h"
 
 INITIALIZE_EASYLOGGINGPP
 
-using namespace zilliz::milvus;
-
-int main(int argc, char **argv) {
+int
+main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

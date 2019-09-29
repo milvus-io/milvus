@@ -17,13 +17,16 @@
 
 #pragma once
 
-#include <vector>
 #include <deque>
+#include <functional>
+#include <memory>
 #include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "task/SearchTask.h"
 #include "event/Event.h"
-
+#include "task/SearchTask.h"
 
 namespace zilliz {
 namespace milvus {
@@ -31,13 +34,13 @@ namespace scheduler {
 
 enum class TaskTableItemState {
     INVALID,
-    START, // idle
-    LOADING, // loading data from other resource
-    LOADED, // ready to exec or move
-    EXECUTING, // executing, locking util executed or failed
-    EXECUTED, // executed, termination state
-    MOVING, // moving to another resource, locking util executed or failed
-    MOVED, // moved, termination state
+    START,      // idle
+    LOADING,    // loading data from other resource
+    LOADED,     // ready to exec or move
+    EXECUTING,  // executing, locking util executed or failed
+    EXECUTED,   // executed, termination state
+    MOVING,     // moving to another resource, locking util executed or failed
+    MOVED,      // moved, termination state
 };
 
 struct TaskTimestamp {
@@ -52,14 +55,15 @@ struct TaskTimestamp {
 };
 
 struct TaskTableItem {
-    TaskTableItem() : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex() {}
+    TaskTableItem() : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex() {
+    }
 
-    TaskTableItem(const TaskTableItem &src) = delete;
-    TaskTableItem(TaskTableItem &&) = delete;
+    TaskTableItem(const TaskTableItem& src) = delete;
+    TaskTableItem(TaskTableItem&&) = delete;
 
-    uint64_t id; // auto increment from 0;
-    TaskPtr task; // the task;
-    TaskTableItemState state; // the state;
+    uint64_t id;               // auto increment from 0;
+    TaskPtr task;              // the task;
+    TaskTableItemState state;  // the state;
     std::mutex mutex;
     TaskTimestamp timestamp;
 
@@ -91,11 +95,11 @@ struct TaskTableItem {
 using TaskTableItemPtr = std::shared_ptr<TaskTableItem>;
 
 class TaskTable {
-public:
+ public:
     TaskTable() = default;
 
-    TaskTable(const TaskTable &) = delete;
-    TaskTable(TaskTable &&) = delete;
+    TaskTable(const TaskTable&) = delete;
+    TaskTable(TaskTable&&) = delete;
 
     inline void
     RegisterSubscriber(std::function<void(void)> subscriber) {
@@ -113,7 +117,7 @@ public:
      * Called by DBImpl;
      */
     void
-    Put(std::vector<TaskPtr> &tasks);
+    Put(std::vector<TaskPtr>& tasks);
 
     /*
      * Return task table item reference;
@@ -122,12 +126,12 @@ public:
     Get(uint64_t index);
 
     /*
-     * TODO(wxyu): BIG GC
+     * TODO(wxy): BIG GC
      * Remove sequence task which is DONE or MOVED from front;
      * Called by ?
      */
-//    void
-//    Clear();
+    //    void
+    //    Clear();
 
     /*
      * Return true if task table empty, otherwise false;
@@ -145,27 +149,32 @@ public:
         return table_.size();
     }
 
-public:
-    TaskTableItemPtr &
-    operator[](uint64_t index) {
+ public:
+    TaskTableItemPtr& operator[](uint64_t index) {
         return table_[index];
     }
 
-    std::deque<TaskTableItemPtr>::iterator begin() { return table_.begin(); }
-    std::deque<TaskTableItemPtr>::iterator end() { return table_.end(); }
+    std::deque<TaskTableItemPtr>::iterator
+    begin() {
+        return table_.begin();
+    }
 
-public:
+    std::deque<TaskTableItemPtr>::iterator
+    end() {
+        return table_.end();
+    }
+
+ public:
     std::vector<uint64_t>
     PickToLoad(uint64_t limit);
 
     std::vector<uint64_t>
     PickToExecute(uint64_t limit);
 
-public:
-
+ public:
     /******** Action ********/
 
-    // TODO: bool to Status
+    // TODO(wxy): bool to Status
     /*
      * Load a task;
      * Set state loading;
@@ -227,14 +236,14 @@ public:
         return table_[index]->Moved();
     }
 
-public:
+ public:
     /*
      * Dump;
      */
     std::string
     Dump();
 
-private:
+ private:
     std::uint64_t id_ = 0;
     mutable std::mutex id_mutex_;
     std::deque<TaskTableItemPtr> table_;
@@ -246,7 +255,6 @@ private:
     uint64_t last_finish_ = -1;
 };
 
-
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

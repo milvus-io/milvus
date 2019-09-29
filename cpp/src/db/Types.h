@@ -19,14 +19,15 @@
 
 #include "db/engine/ExecutionEngine.h"
 
-#include <vector>
 #include <stdint.h>
+#include <utility>
+#include <vector>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-typedef long IDNumber;
+typedef int64_t IDNumber;
 typedef IDNumber* IDNumberPtr;
 typedef std::vector<IDNumber> IDNumbers;
 
@@ -39,6 +40,6 @@ struct TableIndex {
     int32_t metric_type_ = (int)MetricType::L2;
 };
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

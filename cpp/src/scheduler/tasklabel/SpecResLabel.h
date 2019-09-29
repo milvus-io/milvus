@@ -19,9 +19,8 @@
 
 #include "TaskLabel.h"
 
-#include <string>
 #include <memory>
-
+#include <string>
 
 class Resource;
 
@@ -32,28 +31,28 @@ namespace milvus {
 namespace scheduler {
 
 class SpecResLabel : public TaskLabel {
-public:
-    SpecResLabel(const ResourceWPtr &resource)
-        : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource) {}
+ public:
+    explicit SpecResLabel(const ResourceWPtr& resource)
+        : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource) {
+    }
 
-    inline ResourceWPtr &
+    inline ResourceWPtr&
     resource() {
         return resource_;
     }
 
-    inline std::string &
+    inline std::string&
     resource_name() {
         return resource_name_;
     }
 
-private:
+ private:
     ResourceWPtr resource_;
     std::string resource_name_;
 };
 
 using SpecResLabelPtr = std::shared_ptr<SpecResLabel>();
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

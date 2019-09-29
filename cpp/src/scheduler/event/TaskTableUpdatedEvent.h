@@ -19,26 +19,29 @@
 
 #include "Event.h"
 
+#include <memory>
+#include <string>
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class TaskTableUpdatedEvent : public Event {
-public:
-    explicit
-    TaskTableUpdatedEvent(std::weak_ptr<Resource> resource)
-        : Event(EventType::TASK_TABLE_UPDATED, std::move(resource)) {}
+ public:
+    explicit TaskTableUpdatedEvent(std::weak_ptr<Resource> resource)
+        : Event(EventType::TASK_TABLE_UPDATED, std::move(resource)) {
+    }
 
     inline std::string
     Dump() const override {
         return "<TaskTableUpdatedEvent>";
     }
 
-    friend std::ostream &operator<<(std::ostream &out, const TaskTableUpdatedEvent &event);
+    friend std::ostream&
+    operator<<(std::ostream& out, const TaskTableUpdatedEvent& event);
 };
 
-
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

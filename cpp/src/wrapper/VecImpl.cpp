@@ -15,28 +15,28 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "wrapper/VecImpl.h"
-#include "utils/Log.h"
-#include "knowhere/index/vector_index/IndexIDMAP.h"
-#include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "DataTransfer.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/index/vector_index/helpers/Cloner.h"
+#include "utils/Log.h"
+
+/*
+ * no parameter check in this layer.
+ * only responible for index combination
+ */
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
 Status
-VecIndexImpl::BuildAll(const int64_t &nb,
-                       const float *xb,
-                       const int64_t *ids,
-                       const Config &cfg,
-                       const int64_t &nt,
-                       const float *xt) {
+VecIndexImpl::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
+                       const float* xt) {
     try {
-        dim = cfg["dim"].as<int>();
+        dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
@@ -44,13 +44,10 @@ VecIndexImpl::BuildAll(const int64_t &nb,
         auto model = index_->Train(dataset, cfg);
         index_->set_index_model(model);
         index_->Add(dataset, cfg);
-    } catch (knowhere::KnowhereException &e) {
+    } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
     }
@@ -58,18 +55,15 @@ VecIndexImpl::BuildAll(const int64_t &nb,
 }
 
 Status
-VecIndexImpl::Add(const int64_t &nb, const float *xb, const int64_t *ids, const Config &cfg) {
+VecIndexImpl::Add(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg) {
     try {
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         index_->Add(dataset, cfg);
-    } catch (knowhere::KnowhereException &e) {
+    } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
     }
@@ -77,14 +71,12 @@ VecIndexImpl::Add(const int64_t &nb, const float *xb, const int64_t *ids, const 
 }
 
 Status
-VecIndexImpl::Search(const int64_t &nq, const float *xq, float *dist, int64_t *ids, const Config &cfg) {
+VecIndexImpl::Search(const int64_t& nq, const float* xq, float* dist, int64_t* ids, const Config& cfg) {
     try {
-        auto k = cfg["k"].as<int>();
+        auto k = cfg->k;
         auto dataset = GenDataset(nq, dim, xq);
 
         Config search_cfg = cfg;
-
-        ParameterValidation(type, search_cfg);
 
         auto res = index_->Search(dataset, search_cfg);
         auto ids_array = res->array()[0];
@@ -113,13 +105,10 @@ VecIndexImpl::Search(const int64_t &nq, const float *xq, float *dist, int64_t *i
         // TODO(linxj): avoid copy here.
         memcpy(ids, p_ids, sizeof(int64_t) * nq * k);
         memcpy(dist, p_dist, sizeof(float) * nq * k);
-    } catch (knowhere::KnowhereException &e) {
+    } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
     }
@@ -133,7 +122,7 @@ VecIndexImpl::Serialize() {
 }
 
 Status
-VecIndexImpl::Load(const zilliz::knowhere::BinarySet &index_binary) {
+VecIndexImpl::Load(const zilliz::knowhere::BinarySet& index_binary) {
     index_->Load(index_binary);
     dim = Dimension();
     return Status::OK();
@@ -155,7 +144,7 @@ VecIndexImpl::GetType() {
 }
 
 VecIndexPtr
-VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg) {
+VecIndexImpl::CopyToGpu(const int64_t& device_id, const Config& cfg) {
     // TODO(linxj): exception handle
     auto gpu_index = zilliz::knowhere::cloner::CopyCpuToGpu(index_, device_id, cfg);
     auto new_index = std::make_shared<VecIndexImpl>(gpu_index, ConvertToGpuIndexType(type));
@@ -164,7 +153,7 @@ VecIndexImpl::CopyToGpu(const int64_t &device_id, const Config &cfg) {
 }
 
 VecIndexPtr
-VecIndexImpl::CopyToCpu(const Config &cfg) {
+VecIndexImpl::CopyToCpu(const Config& cfg) {
     // TODO(linxj): exception handle
     auto cpu_index = zilliz::knowhere::cloner::CopyGpuToCpu(index_, cfg);
     auto new_index = std::make_shared<VecIndexImpl>(cpu_index, ConvertToCpuIndexType(type));
@@ -186,33 +175,32 @@ VecIndexImpl::GetDeviceId() {
         return device_idx->GetGpuDevice();
     }
     // else
-    return -1; // -1 == cpu
+    return -1;  // -1 == cpu
 }
 
-float *
+float*
 BFIndex::GetRawVectors() {
     auto raw_index = std::dynamic_pointer_cast<knowhere::IDMAP>(index_);
-    if (raw_index) { return raw_index->GetRawVectors(); }
+    if (raw_index) {
+        return raw_index->GetRawVectors();
+    }
     return nullptr;
 }
 
-int64_t *
+int64_t*
 BFIndex::GetRawIds() {
     return std::static_pointer_cast<knowhere::IDMAP>(index_)->GetRawIds();
 }
 
 ErrorCode
-BFIndex::Build(const Config &cfg) {
+BFIndex::Build(const Config& cfg) {
     try {
-        dim = cfg["dim"].as<int>();
+        dim = cfg->d;
         std::static_pointer_cast<knowhere::IDMAP>(index_)->Train(cfg);
-    } catch (knowhere::KnowhereException &e) {
+    } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return KNOWHERE_UNEXPECTED_ERROR;
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return KNOWHERE_INVALID_ARGUMENT;
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         WRAPPER_LOG_ERROR << e.what();
         return KNOWHERE_ERROR;
     }
@@ -220,25 +208,18 @@ BFIndex::Build(const Config &cfg) {
 }
 
 Status
-BFIndex::BuildAll(const int64_t &nb,
-                  const float *xb,
-                  const int64_t *ids,
-                  const Config &cfg,
-                  const int64_t &nt,
-                  const float *xt) {
+BFIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
+                  const float* xt) {
     try {
-        dim = cfg["dim"].as<int>();
+        dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         std::static_pointer_cast<knowhere::IDMAP>(index_)->Train(cfg);
         index_->Add(dataset, cfg);
-    } catch (knowhere::KnowhereException &e) {
+    } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
     }
@@ -247,14 +228,10 @@ BFIndex::BuildAll(const int64_t &nb,
 
 // TODO(linxj): add lock here.
 Status
-IVFMixIndex::BuildAll(const int64_t &nb,
-                      const float *xb,
-                      const int64_t *ids,
-                      const Config &cfg,
-                      const int64_t &nt,
-                      const float *xt) {
+IVFMixIndex::BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt,
+                      const float* xt) {
     try {
-        dim = cfg["dim"].as<int>();
+        dim = cfg->d;
         auto dataset = GenDatasetWithIds(nb, dim, xb, ids);
 
         auto preprocessor = index_->BuildPreprocessor(dataset, cfg);
@@ -271,13 +248,10 @@ IVFMixIndex::BuildAll(const int64_t &nb,
             WRAPPER_LOG_ERROR << "Build IVFMIXIndex Failed";
             return Status(KNOWHERE_ERROR, "Build IVFMIXIndex Failed");
         }
-    } catch (knowhere::KnowhereException &e) {
+    } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (jsoncons::json_exception &e) {
-        WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_INVALID_ARGUMENT, e.what());
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
     }
@@ -285,13 +259,12 @@ IVFMixIndex::BuildAll(const int64_t &nb,
 }
 
 Status
-IVFMixIndex::Load(const zilliz::knowhere::BinarySet &index_binary) {
-    //index_ = std::make_shared<IVF>();
+IVFMixIndex::Load(const zilliz::knowhere::BinarySet& index_binary) {
     index_->Load(index_binary);
     dim = Dimension();
     return Status::OK();
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

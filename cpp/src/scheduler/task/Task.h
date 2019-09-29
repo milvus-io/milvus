@@ -17,14 +17,13 @@
 
 #pragma once
 
-#include "scheduler/tasklabel/TaskLabel.h"
-#include "scheduler/job/Job.h"
-#include "utils/Status.h"
 #include "Path.h"
+#include "scheduler/job/Job.h"
+#include "scheduler/tasklabel/TaskLabel.h"
+#include "utils/Status.h"
 
-#include <string>
 #include <memory>
-
+#include <string>
 
 namespace zilliz {
 namespace milvus {
@@ -49,15 +48,17 @@ using TaskPtr = std::shared_ptr<Task>;
 
 // TODO: re-design
 class Task {
-public:
-    explicit
-    Task(TaskType type) : type_(type) {}
+ public:
+    explicit Task(TaskType type) : type_(type) {
+    }
 
     /*
      * Just Getter;
      */
     inline TaskType
-    Type() const { return type_; }
+    Type() const {
+        return type_;
+    }
 
     /*
      * Transport path;
@@ -70,27 +71,26 @@ public:
     /*
      * Getter and Setter;
      */
-    inline TaskLabelPtr &
+    inline TaskLabelPtr&
     label() {
         return label_;
     }
 
-public:
+ public:
     virtual void
     Load(LoadType type, uint8_t device_id) = 0;
 
     virtual void
     Execute() = 0;
 
-public:
+ public:
     Path task_path_;
-//    std::vector<SearchContextPtr> search_contexts_;
+    //    std::vector<SearchContextPtr> search_contexts_;
     scheduler::JobWPtr job_;
     TaskType type_;
     TaskLabelPtr label_ = nullptr;
 };
 
-
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

@@ -15,27 +15,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <memory>
 
 #include "knowhere/common/Dataset.h"
 
-
 namespace zilliz {
 namespace knowhere {
-
 
 class Preprocessor {
  public:
     virtual DatasetPtr
-    Preprocess(const DatasetPtr &input) = 0;
+    Preprocess(const DatasetPtr& input) = 0;
 };
-
 
 using PreprocessorPtr = std::shared_ptr<Preprocessor>;
 
-
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere
+}  // namespace zilliz

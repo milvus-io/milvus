@@ -101,6 +101,7 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "src/core/cmake_build*" \
     "src/core/thirdparty*" \
     "src/grpc*"\
+    "src/metrics/MetricBase.h"\
     "src/server/Server.cpp"\
     "src/server/DBWrapper.cpp"\
     "src/server/grpc_impl/GrpcMilvusServer.cpp"\
