@@ -26,7 +26,7 @@
 #include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/helpers/Definitions.h"
 
-#include "test/utils.h"
+#include "unittest/utils.h"
 
 namespace {
 

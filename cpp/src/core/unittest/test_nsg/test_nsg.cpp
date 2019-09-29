@@ -24,7 +24,7 @@
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
 
-#include "test/utils.h"
+#include "unittest/utils.h"
 
 namespace {
 
