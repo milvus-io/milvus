@@ -26,7 +26,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -96,4 +95,3 @@ using DBPtr = std::shared_ptr<DB>;
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

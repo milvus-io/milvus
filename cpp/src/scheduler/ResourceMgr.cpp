@@ -19,7 +19,6 @@
 #include "scheduler/ResourceMgr.h"
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -75,7 +74,7 @@ ResourceMgr::Connect(const std::string& name1, const std::string& name2, Connect
     auto res2 = GetResource(name2);
     if (res1 && res2) {
         res1->AddNeighbour(std::static_pointer_cast<Node>(res2), connection);
-        // TODO: enable when task balance supported
+        // TODO(wxy): enable when task balance supported
         //        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
         return true;
     }
@@ -201,4 +200,3 @@ ResourceMgr::event_process() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

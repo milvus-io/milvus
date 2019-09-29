@@ -31,7 +31,6 @@
 #include "Job.h"
 #include "db/meta/MetaTypes.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -107,4 +106,3 @@ using SearchJobPtr = std::shared_ptr<SearchJob>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

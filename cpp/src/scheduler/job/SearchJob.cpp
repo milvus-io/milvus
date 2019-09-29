@@ -18,12 +18,10 @@
 #include "scheduler/job/SearchJob.h"
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-SearchJob::SearchJob(zilliz::milvus::scheduler::JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe,
-                     const float* vectors)
+SearchJob::SearchJob(milvus::scheduler::JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors)
     : Job(id, JobType::SEARCH), topk_(topk), nq_(nq), nprobe_(nprobe), vectors_(vectors) {
 }
 
@@ -67,4 +65,3 @@ SearchJob::GetStatus() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

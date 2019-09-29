@@ -21,7 +21,6 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
@@ -65,4 +64,3 @@ using DataObjPtr = std::shared_ptr<DataObj>;
 
 }  // namespace cache
 }  // namespace milvus
-}  // namespace zilliz

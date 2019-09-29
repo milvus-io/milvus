@@ -23,7 +23,6 @@
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -227,7 +226,7 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
      */
     ::grpc::Status
     ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
-               ::milvus::grpc::TableNameList* table_name_list) override;
+               ::milvus::grpc::TableNameList* response) override;
 
     /**
      * @brief Give the server status
@@ -324,4 +323,3 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

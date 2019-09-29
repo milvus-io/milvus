@@ -23,3 +23,5 @@ AccessModifierOffset: -3
 AlwaysBreakAfterReturnType: All
 AllowShortBlocksOnASingleLine: false
 AllowShortFunctionsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: false
+AlignTrailingComments: true

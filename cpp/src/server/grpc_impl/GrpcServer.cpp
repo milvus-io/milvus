@@ -36,7 +36,6 @@
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -119,4 +118,3 @@ GrpcServer::StopService() {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

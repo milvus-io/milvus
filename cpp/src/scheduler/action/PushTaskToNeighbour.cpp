@@ -22,7 +22,6 @@
 #include "src/cache/GpuCacheMgr.h"
 #include "src/server/Config.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -31,7 +30,8 @@ get_neighbours(const ResourcePtr& self) {
     std::vector<ResourcePtr> neighbours;
     for (auto& neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
-        if (not node) continue;
+        if (not node)
+            continue;
 
         auto resource = std::static_pointer_cast<Resource>(node);
         //        if (not resource->HasExecutor()) continue;
@@ -46,7 +46,8 @@ get_neighbours_with_connetion(const ResourcePtr& self) {
     std::vector<std::pair<ResourcePtr, Connection>> neighbours;
     for (auto& neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
-        if (not node) continue;
+        if (not node)
+            continue;
 
         auto resource = std::static_pointer_cast<Resource>(node);
         //        if (not resource->HasExecutor()) continue;
@@ -82,7 +83,7 @@ Action::PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self
         }
 
     } else {
-        // TODO: process
+        // TODO(wxy): process
     }
 }
 
@@ -112,7 +113,7 @@ Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
             auto location = index_engine->GetLocation();
 
             for (auto i = 0; i < res_mgr.lock()->GetNumGpuResource(); ++i) {
-                auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
+                auto index = milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
                 if (index != nullptr) {
                     moved = true;
                     auto dest_resource = res_mgr.lock()->GetResource(ResourceType::GPU, i);
@@ -192,4 +193,3 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

@@ -29,11 +29,7 @@ namespace milvus {
 bool
 UriCheck(const std::string& uri) {
     size_t index = uri.find_first_of(':', 0);
-    if (index == std::string::npos) {
-        return false;
-    } else {
-        return true;
-    }
+    return (index != std::string::npos);
 }
 
 Status
@@ -45,11 +41,11 @@ ClientProxy::Connect(const ConnectParam& param) {
         connected_ = true;
         client_ptr_ = std::make_shared<GrpcClient>(channel_);
         return Status::OK();
-    } else {
-        std::string reason = "connect failed!";
-        connected_ = false;
-        return Status(StatusCode::NotConnected, reason);
     }
+
+    std::string reason = "connect failed!";
+    connected_ = false;
+    return Status(StatusCode::NotConnected, reason);
 }
 
 Status
@@ -100,7 +96,7 @@ ClientProxy::CreateTable(const TableSchema& param) {
         schema.set_table_name(param.table_name);
         schema.set_dimension(param.dimension);
         schema.set_index_file_size(param.index_file_size);
-        schema.set_metric_type((int32_t)param.metric_type);
+        schema.set_metric_type(static_cast<int32_t>(param.metric_type));
 
         return client_ptr_->CreateTable(schema);
     } catch (std::exception& ex) {
@@ -131,10 +127,9 @@ ClientProxy::DropTable(const std::string& table_name) {
 Status
 ClientProxy::CreateIndex(const IndexParam& index_param) {
     try {
-        // TODO: add index params
         ::milvus::grpc::IndexParam grpc_index_param;
         grpc_index_param.set_table_name(index_param.table_name);
-        grpc_index_param.mutable_index()->set_index_type((int32_t)index_param.index_type);
+        grpc_index_param.mutable_index()->set_index_type(static_cast<int32_t>(index_param.index_type));
         grpc_index_param.mutable_index()->set_nlist(index_param.nlist);
         return client_ptr_->CreateIndex(grpc_index_param);
     } catch (std::exception& ex) {
@@ -275,7 +270,7 @@ ClientProxy::DescribeTable(const std::string& table_name, TableSchema& table_sch
         table_schema.table_name = grpc_schema.table_name();
         table_schema.dimension = grpc_schema.dimension();
         table_schema.index_file_size = grpc_schema.index_file_size();
-        table_schema.metric_type = (MetricType)grpc_schema.metric_type();
+        table_schema.metric_type = static_cast<MetricType>(grpc_schema.metric_type());
 
         return status;
     } catch (std::exception& ex) {
@@ -385,7 +380,7 @@ ClientProxy::DescribeIndex(const std::string& table_name, IndexParam& index_para
         grpc_table_name.set_table_name(table_name);
         ::milvus::grpc::IndexParam grpc_index_param;
         Status status = client_ptr_->DescribeIndex(grpc_table_name, grpc_index_param);
-        index_param.index_type = (IndexType)(grpc_index_param.mutable_index()->index_type());
+        index_param.index_type = static_cast<IndexType>(grpc_index_param.mutable_index()->index_type());
         index_param.nlist = grpc_index_param.mutable_index()->nlist();
 
         return status;

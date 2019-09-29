@@ -28,7 +28,6 @@
 #include <thread>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -69,7 +68,7 @@ class GrpcBaseTask {
     OnExecute() = 0;
 
     Status
-    SetStatus(ErrorCode error_code, const std::string& msg);
+    SetStatus(ErrorCode error_code, const std::string& error_msg);
 
  protected:
     mutable std::mutex finish_mtx_;
@@ -130,4 +129,3 @@ class GrpcRequestScheduler {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

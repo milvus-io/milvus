@@ -26,7 +26,6 @@
 #include <thread>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -98,6 +97,9 @@ CollectFileMetrics(int file_type, size_t file_size) {
 
 XSearchTask::XSearchTask(TableFileSchemaPtr file) : Task(TaskType::SearchTask), file_(file) {
     if (file_) {
+        if (file_->metric_type_ != static_cast<int>(MetricType::L2)) {
+            metric_l2 = false;
+        }
         index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, (EngineType)file_->engine_type_,
                                              (MetricType)file_->metric_type_, file_->nlist_);
     }
@@ -374,4 +376,3 @@ XSearchTask::TopkResult(scheduler::ResultSet& result_src, uint64_t topk, bool as
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

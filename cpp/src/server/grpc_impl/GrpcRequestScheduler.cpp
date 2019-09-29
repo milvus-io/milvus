@@ -22,7 +22,6 @@
 
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -163,7 +162,8 @@ GrpcRequestScheduler::Stop() {
     }
 
     for (auto iter : execute_threads_) {
-        if (iter == nullptr) continue;
+        if (iter == nullptr)
+            continue;
 
         iter->join();
     }
@@ -238,4 +238,3 @@ GrpcRequestScheduler::PutTaskToQueue(const BaseTaskPtr& task_ptr) {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

@@ -25,7 +25,6 @@
 #include <string>
 #include <thread>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -60,4 +59,3 @@ class GrpcServer {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

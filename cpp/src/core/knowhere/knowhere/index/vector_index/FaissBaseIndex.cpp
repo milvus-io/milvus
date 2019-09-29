@@ -15,23 +15,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include <faiss/index_io.h>
 #include <faiss/IndexIVF.h>
+#include <faiss/index_io.h>
+#include <utility>
 
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/FaissBaseIndex.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
-#include "FaissBaseIndex.h"
 
-
-namespace zilliz {
 namespace knowhere {
 
-FaissBaseIndex::FaissBaseIndex(std::shared_ptr<faiss::Index> index) : index_(std::move(index)) {}
+FaissBaseIndex::FaissBaseIndex(std::shared_ptr<faiss::Index> index) : index_(std::move(index)) {
+}
 
-BinarySet FaissBaseIndex::SerializeImpl() {
+BinarySet
+FaissBaseIndex::SerializeImpl() {
     try {
-        faiss::Index *index = index_.get();
+        faiss::Index* index = index_.get();
 
         SealImpl();
 
@@ -44,37 +44,37 @@ BinarySet FaissBaseIndex::SerializeImpl() {
         // TODO(linxj): use virtual func Name() instead of raw string.
         res_set.Append("IVF", data, writer.rp);
         return res_set;
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         KNOWHERE_THROW_MSG(e.what());
     }
 }
 
-void FaissBaseIndex::LoadImpl(const BinarySet &index_binary) {
+void
+FaissBaseIndex::LoadImpl(const BinarySet& index_binary) {
     auto binary = index_binary.GetByName("IVF");
 
     MemoryIOReader reader;
     reader.total = binary->size;
     reader.data_ = binary->data.get();
 
-    faiss::Index *index = faiss::read_index(&reader);
+    faiss::Index* index = faiss::read_index(&reader);
 
     index_.reset(index);
 }
 
-void FaissBaseIndex::SealImpl() {
-// TODO(linxj): enable
-//#ifdef ZILLIZ_FAISS
-    faiss::Index *index = index_.get();
-    auto idx = dynamic_cast<faiss::IndexIVF *>(index);
+void
+FaissBaseIndex::SealImpl() {
+    // TODO(linxj): enable
+    //#ifdef ZILLIZ_FAISS
+    faiss::Index* index = index_.get();
+    auto idx = dynamic_cast<faiss::IndexIVF*>(index);
     if (idx != nullptr) {
         idx->to_readonly();
     }
-    //else {
+    // else {
     //    KNOHWERE_ERROR_MSG("Seal failed");
     //}
-//#endif
+    //#endif
 }
 
-} // knowhere
-} // zilliz
-
+}  // namespace knowhere

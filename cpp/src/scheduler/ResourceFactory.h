@@ -25,7 +25,6 @@
 #include "resource/GpuResource.h"
 #include "resource/Resource.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -38,4 +37,3 @@ class ResourceFactory {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

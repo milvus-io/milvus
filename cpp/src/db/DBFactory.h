@@ -23,7 +23,6 @@
 #include <memory>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -38,4 +37,3 @@ class DBFactory {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

@@ -18,7 +18,6 @@
 #include "utils/TimeRecorder.h"
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 
 TimeRecorder::TimeRecorder(const std::string& header, int64_t log_level) : header_(header), log_level_(log_level) {
@@ -39,7 +38,8 @@ TimeRecorder::GetTimeSpanStr(double span) {
 void
 TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
     std::string str_log;
-    if (!header_.empty()) str_log += header_ + ": ";
+    if (!header_.empty())
+        str_log += header_ + ": ";
     str_log += msg;
     str_log += " (";
     str_log += TimeRecorder::GetTimeSpanStr(span);
@@ -97,4 +97,3 @@ TimeRecorder::ElapseFromBegin(const std::string& msg) {
 }
 
 }  // namespace milvus
-}  // namespace zilliz

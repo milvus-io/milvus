@@ -20,7 +20,6 @@
 #include "MetricBase.h"
 #include "db/meta/MetaTypes.h"
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -255,4 +254,3 @@ class MetricCollector : CollectMetricsBase {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

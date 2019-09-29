@@ -15,18 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <iostream>  // TODO(linxj): using Log instead
 
-#include <iostream> // TODO(linxj): using Log instead
+#include "knowhere/common/Timer.h"
 
-#include "Timer.h"
-
-namespace zilliz {
 namespace knowhere {
 
-TimeRecorder::TimeRecorder(const std::string &header,
-                           int64_t log_level) :
-    header_(header),
-    log_level_(log_level) {
+TimeRecorder::TimeRecorder(const std::string& header, int64_t log_level) : header_(header), log_level_(log_level) {
     start_ = last_ = stdclock::now();
 }
 
@@ -42,9 +37,10 @@ TimeRecorder::GetTimeSpanStr(double span) {
 }
 
 void
-TimeRecorder::PrintTimeRecord(const std::string &msg, double span) {
+TimeRecorder::PrintTimeRecord(const std::string& msg, double span) {
     std::string str_log;
-    if (!header_.empty()) str_log += header_ + ": ";
+    if (!header_.empty())
+        str_log += header_ + ": ";
     str_log += msg;
     str_log += " (";
     str_log += TimeRecorder::GetTimeSpanStr(span);
@@ -55,35 +51,35 @@ TimeRecorder::PrintTimeRecord(const std::string &msg, double span) {
             std::cout << str_log << std::endl;
             break;
         }
-        //case 1: {
-        //    SERVER_LOG_DEBUG << str_log;
-        //    break;
-        //}
-        //case 2: {
-        //    SERVER_LOG_INFO << str_log;
-        //    break;
-        //}
-        //case 3: {
-        //    SERVER_LOG_WARNING << str_log;
-        //    break;
-        //}
-        //case 4: {
-        //    SERVER_LOG_ERROR << str_log;
-        //    break;
-        //}
-        //case 5: {
-        //    SERVER_LOG_FATAL << str_log;
-        //    break;
-        //}
-        //default: {
-        //    SERVER_LOG_INFO << str_log;
-        //    break;
-        //}
+            // case 1: {
+            //    SERVER_LOG_DEBUG << str_log;
+            //    break;
+            //}
+            // case 2: {
+            //    SERVER_LOG_INFO << str_log;
+            //    break;
+            //}
+            // case 3: {
+            //    SERVER_LOG_WARNING << str_log;
+            //    break;
+            //}
+            // case 4: {
+            //    SERVER_LOG_ERROR << str_log;
+            //    break;
+            //}
+            // case 5: {
+            //    SERVER_LOG_FATAL << str_log;
+            //    break;
+            //}
+            // default: {
+            //    SERVER_LOG_INFO << str_log;
+            //    break;
+            //}
     }
 }
 
 double
-TimeRecorder::RecordSection(const std::string &msg) {
+TimeRecorder::RecordSection(const std::string& msg) {
     stdclock::time_point curr = stdclock::now();
     double span = (std::chrono::duration<double, std::micro>(curr - last_)).count();
     last_ = curr;
@@ -93,7 +89,7 @@ TimeRecorder::RecordSection(const std::string &msg) {
 }
 
 double
-TimeRecorder::ElapseFromBegin(const std::string &msg) {
+TimeRecorder::ElapseFromBegin(const std::string& msg) {
     stdclock::time_point curr = stdclock::now();
     double span = (std::chrono::duration<double, std::micro>(curr - start_)).count();
 
@@ -101,5 +97,4 @@ TimeRecorder::ElapseFromBegin(const std::string &msg) {
     return span;
 }
 
-}
-}
+}  // namespace knowhere

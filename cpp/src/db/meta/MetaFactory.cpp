@@ -30,7 +30,6 @@
 #include <sstream>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -75,4 +74,3 @@ MetaFactory::Build(const DBMetaOptions& metaOptions, const int& mode) {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

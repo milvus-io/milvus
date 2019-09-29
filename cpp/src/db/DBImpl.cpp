@@ -40,8 +40,6 @@
 #include <iostream>
 #include <thread>
 
-
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -244,15 +242,19 @@ DBImpl::GetTableRowCount(const std::string &table_id, uint64_t &row_count) {
 }
 
 Status
+<<<<<<< HEAD
 DBImpl::InsertVectors(const std::string &table_id_, uint64_t n, const float *vectors, IDNumbers &vector_ids_) {
+=======
+DBImpl::InsertVectors(const std::string& table_id, uint64_t n, const float* vectors, IDNumbers& vector_ids) {
+>>>>>>> upstream/branch-0.5.0
     //    ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
 
     Status status;
-    zilliz::milvus::server::CollectInsertMetrics metrics(n, status);
-    status = mem_mgr_->InsertVectors(table_id_, n, vectors, vector_ids_);
+    milvus::server::CollectInsertMetrics metrics(n, status);
+    status = mem_mgr_->InsertVectors(table_id, n, vectors, vector_ids);
     //    std::chrono::microseconds time_span =
     //          std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
     //    double average_time = double(time_span.count()) / n;
@@ -297,6 +299,7 @@ DBImpl::CreateIndex(const std::string &table_id, const TableIndex &index) {
     // for IDMAP type, only wait all NEW file converted to RAW file
     // for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
+<<<<<<< HEAD
     if (index.engine_type_ == (int) EngineType::FAISS_IDMAP) {
         file_types = {
             (int) meta::TableFileSchema::NEW, (int) meta::TableFileSchema::NEW_MERGE,
@@ -306,6 +309,19 @@ DBImpl::CreateIndex(const std::string &table_id, const TableIndex &index) {
             (int) meta::TableFileSchema::RAW, (int) meta::TableFileSchema::NEW,
             (int) meta::TableFileSchema::NEW_MERGE, (int) meta::TableFileSchema::NEW_INDEX,
             (int) meta::TableFileSchema::TO_INDEX,
+=======
+    if (index.engine_type_ == static_cast<int32_t>(EngineType::FAISS_IDMAP)) {
+        file_types = {
+            static_cast<int32_t>(meta::TableFileSchema::NEW), static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
+        };
+    } else {
+        file_types = {
+            static_cast<int32_t>(meta::TableFileSchema::RAW),
+            static_cast<int32_t>(meta::TableFileSchema::NEW),
+            static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
+            static_cast<int32_t>(meta::TableFileSchema::NEW_INDEX),
+            static_cast<int32_t>(meta::TableFileSchema::TO_INDEX),
+>>>>>>> upstream/branch-0.5.0
         };
     }
 
@@ -640,7 +656,8 @@ DBImpl::MergeFiles(const std::string &table_id, const meta::DateT &date, const m
         ENGINE_LOG_DEBUG << "Merging file " << file_schema.file_id_;
         index_size = index->Size();
 
-        if (index_size >= file_schema.index_file_size_) break;
+        if (index_size >= file_schema.index_file_size_)
+            break;
     }
 
     // step 3: serialize to disk
@@ -936,4 +953,3 @@ DBImpl::BackgroundBuildIndex() {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

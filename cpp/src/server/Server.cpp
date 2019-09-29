@@ -37,7 +37,6 @@
 #include "utils/TimeRecorder.h"
 #include "wrapper/KnowhereResource.h"
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -146,7 +145,7 @@ Server::Daemonize() {
 
 void
 Server::Start() {
-    if (daemonized_) {
+    if (daemonized_ != 0) {
         Daemonize();
     }
 
@@ -264,4 +263,3 @@ Server::StopService() {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

@@ -31,7 +31,6 @@
 #include "job/Job.h"
 #include "task/Task.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -72,4 +71,3 @@ using JobMgrPtr = std::shared_ptr<JobMgr>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

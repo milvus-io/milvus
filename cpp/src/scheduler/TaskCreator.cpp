@@ -22,7 +22,6 @@
 #include "SchedInst.h"
 
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -39,7 +38,7 @@ TaskCreator::Create(const JobPtr &job) {
             return Create(std::static_pointer_cast<BuildIndexJob>(job));
         }
         default: {
-            // TODO: error
+            // TODO(wxy): error
             return std::vector<TaskPtr>();
         }
     }
@@ -86,4 +85,3 @@ TaskCreator::Create(const zilliz::milvus::scheduler::BuildIndexJobPtr &job) {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

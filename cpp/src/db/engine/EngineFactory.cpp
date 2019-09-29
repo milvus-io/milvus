@@ -21,7 +21,6 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -43,4 +42,3 @@ EngineFactory::Build(uint16_t dimension, const std::string& location, EngineType
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

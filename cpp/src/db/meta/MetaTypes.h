@@ -25,7 +25,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -96,4 +95,3 @@ using DatePartionedTableFilesSchema = std::map<DateT, TableFilesSchema>;
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

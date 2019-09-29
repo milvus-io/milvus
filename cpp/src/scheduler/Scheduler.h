@@ -28,11 +28,10 @@
 #include "resource/Resource.h"
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-// TODO: refactor, not friendly to unittest, logical in framework code
+// TODO(wxy): refactor, not friendly to unittest, logical in framework code
 class Scheduler {
  public:
     explicit Scheduler(ResourceMgrWPtr res_mgr);
@@ -133,4 +132,3 @@ using SchedulerPtr = std::shared_ptr<Scheduler>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz
