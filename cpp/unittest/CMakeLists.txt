@@ -17,25 +17,25 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
+include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
+
+foreach(dir ${CORE_INCLUDE_DIRS})
+    include_directories(${dir})
+endforeach()
+
 include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
+link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
-
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
-
+aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler db_scheduler_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context db_scheduler_context_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task db_scheduler_task_files)
-set(db_scheduler_files
-        ${db_scheduler_files}
-        ${db_scheduler_context_files}
-        ${db_scheduler_task_files}
-        )
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -43,8 +43,6 @@ set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
         )
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
@@ -63,12 +61,10 @@ set(scheduler_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_server_files)
-
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
-
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
-set(unittest_files
+set(entry_file
         ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
 set(helper_files
@@ -87,7 +83,6 @@ set(common_files
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
-        ${db_scheduler_files}
         ${metrics_files}
         ${scheduler_files}
         ${wrapper_files}
@@ -117,12 +112,6 @@ set(unittest_libs
         cudart
         cublas
         )
-
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-message(STATUS "CMAKE_CURRENT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}")
-foreach(dir ${CORE_INCLUDE_DIRS})
-    include_directories(${dir})
-endforeach()
 
 add_subdirectory(db)
 add_subdirectory(wrapper)
