@@ -15,8 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
+
+#include <memory>
 
 #include "IndexGPUIVF.h"
 
@@ -24,24 +25,22 @@ namespace zilliz {
 namespace knowhere {
 
 class GPUIVFPQ : public GPUIVF {
-public:
-    explicit GPUIVFPQ(const int &device_id) : GPUIVF(device_id) {}
+ public:
+    explicit GPUIVFPQ(const int& device_id) : GPUIVF(device_id) {
+    }
 
     IndexModelPtr
-    Train(const DatasetPtr &dataset, const Config &config) override;
+    Train(const DatasetPtr& dataset, const Config& config) override;
 
-public:
+ public:
     VectorIndexPtr
-    CopyGpuToCpu(const Config &config) override;
+    CopyGpuToCpu(const Config& config) override;
 
-protected:
+ protected:
     // TODO(linxj): remove GenParams.
     std::shared_ptr<faiss::IVFSearchParameters>
-    GenParams(const Config &config) override;
+    GenParams(const Config& config) override;
 };
 
-} // knowhere
-} // zilliz
-
-
-
+}  // namespace knowhere
+}  // namespace zilliz

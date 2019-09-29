@@ -16,17 +16,17 @@
 // under the License.
 
 #include "wrapper/VecIndex.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
+#include "VecImpl.h"
+#include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
-#include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
-#include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
+#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
-#include "knowhere/common/Exception.h"
-#include "VecImpl.h"
 #include "utils/Log.h"
 
 #include <cuda.h>
@@ -35,24 +35,22 @@ namespace zilliz {
 namespace milvus {
 namespace engine {
 
-static constexpr float TYPICAL_COUNT = 1000000.0;
-
 struct FileIOReader {
     std::fstream fs;
     std::string name;
 
-    explicit FileIOReader(const std::string &fname);
+    explicit FileIOReader(const std::string& fname);
 
     ~FileIOReader();
 
     size_t
-    operator()(void *ptr, size_t size);
+    operator()(void* ptr, size_t size);
 
     size_t
-    operator()(void *ptr, size_t size, size_t pos);
+    operator()(void* ptr, size_t size, size_t pos);
 };
 
-FileIOReader::FileIOReader(const std::string &fname) {
+FileIOReader::FileIOReader(const std::string& fname) {
     name = fname;
     fs = std::fstream(name, std::ios::in | std::ios::binary);
 }
@@ -62,12 +60,12 @@ FileIOReader::~FileIOReader() {
 }
 
 size_t
-FileIOReader::operator()(void *ptr, size_t size) {
-    fs.read(reinterpret_cast<char *>(ptr), size);
+FileIOReader::operator()(void* ptr, size_t size) {
+    fs.read(reinterpret_cast<char*>(ptr), size);
 }
 
 size_t
-FileIOReader::operator()(void *ptr, size_t size, size_t pos) {
+FileIOReader::operator()(void* ptr, size_t size, size_t pos) {
     return 0;
 }
 
@@ -75,12 +73,13 @@ struct FileIOWriter {
     std::fstream fs;
     std::string name;
 
-    explicit FileIOWriter(const std::string &fname);
+    explicit FileIOWriter(const std::string& fname);
     ~FileIOWriter();
-    size_t operator()(void *ptr, size_t size);
+    size_t
+    operator()(void* ptr, size_t size);
 };
 
-FileIOWriter::FileIOWriter(const std::string &fname) {
+FileIOWriter::FileIOWriter(const std::string& fname) {
     name = fname;
     fs = std::fstream(name, std::ios::out | std::ios::binary);
 }
@@ -90,14 +89,14 @@ FileIOWriter::~FileIOWriter() {
 }
 
 size_t
-FileIOWriter::operator()(void *ptr, size_t size) {
-    fs.write(reinterpret_cast<char *>(ptr), size);
+FileIOWriter::operator()(void* ptr, size_t size) {
+    fs.write(reinterpret_cast<char*>(ptr), size);
 }
 
 VecIndexPtr
-GetVecIndexFactory(const IndexType &type, const Config &cfg) {
+GetVecIndexFactory(const IndexType& type, const Config& cfg) {
     std::shared_ptr<zilliz::knowhere::VectorIndex> index;
-    auto gpu_device = cfg.get_with_default("gpu_id", 0);
+    auto gpu_device = -1;  // TODO(linxj): remove hardcode here
     switch (type) {
         case IndexType::FAISS_IDMAP: {
             index = std::make_shared<zilliz::knowhere::IDMAP>();
@@ -108,12 +107,11 @@ GetVecIndexFactory(const IndexType &type, const Config &cfg) {
             break;
         }
         case IndexType::FAISS_IVFFLAT_GPU: {
-            // TODO(linxj): 规范化参数
             index = std::make_shared<zilliz::knowhere::GPUIVF>(gpu_device);
             break;
         }
         case IndexType::FAISS_IVFFLAT_MIX: {
-            index = std::make_shared<zilliz::knowhere::GPUIVF>(0);
+            index = std::make_shared<zilliz::knowhere::GPUIVF>(gpu_device);
             return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFFLAT_MIX);
         }
         case IndexType::FAISS_IVFPQ_CPU: {
@@ -140,26 +138,24 @@ GetVecIndexFactory(const IndexType &type, const Config &cfg) {
             index = std::make_shared<zilliz::knowhere::GPUIVFSQ>(gpu_device);
             break;
         }
-        case IndexType::NSG_MIX: { // TODO(linxj): bug.
+        case IndexType::NSG_MIX: {
             index = std::make_shared<zilliz::knowhere::NSG>(gpu_device);
             break;
         }
-        default: {
-            return nullptr;
-        }
+        default: { return nullptr; }
     }
     return std::make_shared<VecIndexImpl>(index, type);
 }
 
 VecIndexPtr
-LoadVecIndex(const IndexType &index_type, const zilliz::knowhere::BinarySet &index_binary) {
+LoadVecIndex(const IndexType& index_type, const zilliz::knowhere::BinarySet& index_binary) {
     auto index = GetVecIndexFactory(index_type);
     index->Load(index_binary);
     return index;
 }
 
 VecIndexPtr
-read_index(const std::string &location) {
+read_index(const std::string& location) {
     knowhere::BinarySet load_data_list;
     FileIOReader reader(location);
     reader.fs.seekg(0, reader.fs.end);
@@ -204,28 +200,28 @@ read_index(const std::string &location) {
 }
 
 Status
-write_index(VecIndexPtr index, const std::string &location) {
+write_index(VecIndexPtr index, const std::string& location) {
     try {
         auto binaryset = index->Serialize();
         auto index_type = index->GetType();
 
         FileIOWriter writer(location);
         writer(&index_type, sizeof(IndexType));
-        for (auto &iter : binaryset.binary_map_) {
+        for (auto& iter : binaryset.binary_map_) {
             auto meta = iter.first.c_str();
             size_t meta_length = iter.first.length();
             writer(&meta_length, sizeof(meta_length));
-            writer((void *) meta, meta_length);
+            writer((void*)meta, meta_length);
 
             auto binary = iter.second;
             int64_t binary_length = binary->size;
             writer(&binary_length, sizeof(binary_length));
-            writer((void *) binary->data.get(), binary_length);
+            writer((void*)binary->data.get(), binary_length);
         }
-    } catch (knowhere::KnowhereException &e) {
+    } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
-    } catch (std::exception &e) {
+    } catch (std::exception& e) {
         WRAPPER_LOG_ERROR << e.what();
         std::string estring(e.what());
         if (estring.find("No space left on device") != estring.npos) {
@@ -238,71 +234,8 @@ write_index(VecIndexPtr index, const std::string &location) {
     return Status::OK();
 }
 
-// TODO(linxj): redo here.
-void
-AutoGenParams(const IndexType &type, const int64_t &size, zilliz::knowhere::Config &cfg) {
-    auto nlist = cfg.get_with_default("nlist", 0);
-    if (size <= TYPICAL_COUNT / 16384 + 1) {
-        //handle less row count, avoid nlist set to 0
-        cfg["nlist"] = 1;
-    } else if (int(size / TYPICAL_COUNT) *nlist == 0) {
-        //calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
-        cfg["nlist"] = int(size / TYPICAL_COUNT * 16384);
-    }
-
-    if (!cfg.contains("gpu_id")) { cfg["gpu_id"] = int(0); }
-    if (!cfg.contains("metric_type")) { cfg["metric_type"] = "L2"; }
-
-    switch (type) {
-        case IndexType::FAISS_IVFSQ8_MIX: {
-            if (!cfg.contains("nbits")) { cfg["nbits"] = int(8); }
-            break;
-        }
-        case IndexType::NSG_MIX: {
-            auto scale_factor = round(cfg["dim"].as<int>() / 128.0);
-            scale_factor = scale_factor >= 4 ? 4 : scale_factor;
-            cfg["nlist"] = int(size / 1000000.0 * 8192);
-            if (!cfg.contains("nprobe")) { cfg["nprobe"] = 6 + 10 * scale_factor; }
-            if (!cfg.contains("knng")) { cfg["knng"] = 100 + 100 * scale_factor; }
-            if (!cfg.contains("search_length")) { cfg["search_length"] = 40 + 5 * scale_factor; }
-            if (!cfg.contains("out_degree")) { cfg["out_degree"] = 50 + 5 * scale_factor; }
-            if (!cfg.contains("candidate_pool_size")) { cfg["candidate_pool_size"] = 200 + 100 * scale_factor; }
-            WRAPPER_LOG_DEBUG << pretty_print(cfg);
-            break;
-        }
-    }
-}
-
-#if CUDA_VERSION > 9000
-#define GPU_MAX_NRPOBE 2048
-#else
-#define GPU_MAX_NRPOBE 1024
-#endif
-
-void
-ParameterValidation(const IndexType &type, Config &cfg) {
-    switch (type) {
-        case IndexType::FAISS_IVFSQ8_GPU:
-        case IndexType::FAISS_IVFFLAT_GPU:
-        case IndexType::FAISS_IVFPQ_GPU: {
-            //search on GPU
-            if (cfg.get_with_default("nprobe", 0) != 0) {
-                auto nprobe = cfg["nprobe"].as<int>();
-                if (nprobe > GPU_MAX_NRPOBE) {
-                    WRAPPER_LOG_WARNING << "When search with GPU, nprobe shoud be no more than " << GPU_MAX_NRPOBE
-                                        << ", but you passed " << nprobe
-                                        << ". Search with " << GPU_MAX_NRPOBE << " instead";
-                    cfg.insert_or_assign("nprobe", GPU_MAX_NRPOBE);
-                }
-            }
-            break;
-        }
-        default:break;
-    }
-}
-
 IndexType
-ConvertToCpuIndexType(const IndexType &type) {
+ConvertToCpuIndexType(const IndexType& type) {
     // TODO(linxj): add IDMAP
     switch (type) {
         case IndexType::FAISS_IVFFLAT_GPU:
@@ -313,14 +246,12 @@ ConvertToCpuIndexType(const IndexType &type) {
         case IndexType::FAISS_IVFSQ8_MIX: {
             return IndexType::FAISS_IVFSQ8_CPU;
         }
-        default: {
-            return type;
-        }
+        default: { return type; }
     }
 }
 
 IndexType
-ConvertToGpuIndexType(const IndexType &type) {
+ConvertToGpuIndexType(const IndexType& type) {
     switch (type) {
         case IndexType::FAISS_IVFFLAT_MIX:
         case IndexType::FAISS_IVFFLAT_CPU: {
@@ -330,12 +261,10 @@ ConvertToGpuIndexType(const IndexType &type) {
         case IndexType::FAISS_IVFSQ8_CPU: {
             return IndexType::FAISS_IVFSQ8_GPU;
         }
-        default: {
-            return type;
-        }
+        default: { return type; }
     }
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

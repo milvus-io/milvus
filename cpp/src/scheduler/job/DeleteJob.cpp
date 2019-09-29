@@ -15,29 +15,30 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "DeleteJob.h"
+#include "scheduler/job/DeleteJob.h"
 
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-DeleteJob::DeleteJob(JobId id,
-                     std::string table_id,
-                     engine::meta::MetaPtr meta_ptr,
-                     uint64_t num_resource)
+DeleteJob::DeleteJob(JobId id, std::string table_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource)
     : Job(id, JobType::DELETE),
       table_id_(std::move(table_id)),
       meta_ptr_(std::move(meta_ptr)),
-      num_resource_(num_resource) {}
+      num_resource_(num_resource) {
+}
 
-void DeleteJob::WaitAndDelete() {
+void
+DeleteJob::WaitAndDelete() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [&] { return done_resource == num_resource_; });
     meta_ptr_->DeleteTableFiles(table_id_);
 }
 
-void DeleteJob::ResourceDone() {
+void
+DeleteJob::ResourceDone() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         ++done_resource;
@@ -45,7 +46,6 @@ void DeleteJob::ResourceDone() {
     cv_.notify_one();
 }
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

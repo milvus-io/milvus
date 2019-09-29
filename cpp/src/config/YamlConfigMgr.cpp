@@ -25,7 +25,7 @@ namespace milvus {
 namespace server {
 
 ErrorCode
-YamlConfigMgr::LoadConfigFile(const std::string &filename) {
+YamlConfigMgr::LoadConfigFile(const std::string& filename) {
     struct stat directoryStat;
     int statOK = stat(filename.c_str(), &directoryStat);
     if (statOK != 0) {
@@ -36,8 +36,7 @@ YamlConfigMgr::LoadConfigFile(const std::string &filename) {
     try {
         node_ = YAML::LoadFile(filename);
         LoadConfigNode(node_, config_);
-    }
-    catch (YAML::Exception &e) {
+    } catch (YAML::Exception& e) {
         SERVER_LOG_ERROR << "Failed to load config file: " << std::string(e.what());
         return SERVER_UNEXPECTED_ERROR;
     }
@@ -56,20 +55,18 @@ YamlConfigMgr::DumpString() const {
     return config_.DumpString("");
 }
 
-const ConfigNode &
+const ConfigNode&
 YamlConfigMgr::GetRootNode() const {
     return config_;
 }
 
-ConfigNode &
+ConfigNode&
 YamlConfigMgr::GetRootNode() {
     return config_;
 }
 
 bool
-YamlConfigMgr::SetConfigValue(const YAML::Node &node,
-                              const std::string &key,
-                              ConfigNode &config) {
+YamlConfigMgr::SetConfigValue(const YAML::Node& node, const std::string& key, ConfigNode& config) {
     if (node[key].IsDefined()) {
         config.SetValue(key, node[key].as<std::string>());
         return true;
@@ -78,9 +75,7 @@ YamlConfigMgr::SetConfigValue(const YAML::Node &node,
 }
 
 bool
-YamlConfigMgr::SetChildConfig(const YAML::Node &node,
-                              const std::string &child_name,
-                              ConfigNode &config) {
+YamlConfigMgr::SetChildConfig(const YAML::Node& node, const std::string& child_name, ConfigNode& config) {
     if (node[child_name].IsDefined()) {
         ConfigNode sub_config;
         LoadConfigNode(node[child_name], sub_config);
@@ -91,9 +86,7 @@ YamlConfigMgr::SetChildConfig(const YAML::Node &node,
 }
 
 bool
-YamlConfigMgr::SetSequence(const YAML::Node &node,
-                           const std::string &child_name,
-                           ConfigNode &config) {
+YamlConfigMgr::SetSequence(const YAML::Node& node, const std::string& child_name, ConfigNode& config) {
     if (node[child_name].IsDefined()) {
         size_t cnt = node[child_name].size();
         for (size_t i = 0; i < cnt; i++) {
@@ -105,7 +98,7 @@ YamlConfigMgr::SetSequence(const YAML::Node &node,
 }
 
 void
-YamlConfigMgr::LoadConfigNode(const YAML::Node &node, ConfigNode &config) {
+YamlConfigMgr::LoadConfigNode(const YAML::Node& node, ConfigNode& config) {
     std::string key;
     for (YAML::const_iterator it = node.begin(); it != node.end(); ++it) {
         if (!it->first.IsNull()) {
@@ -121,6 +114,6 @@ YamlConfigMgr::LoadConfigNode(const YAML::Node &node, ConfigNode &config) {
     }
 }
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus
+}  // namespace zilliz

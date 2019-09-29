@@ -16,19 +16,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ResourceMgr.h"
+#include "scheduler/ResourceMgr.h"
 #include "utils/Log.h"
-
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-
 void
 ResourceMgr::Start() {
     std::lock_guard<std::mutex> lck(resources_mutex_);
-    for (auto &resource : resources_) {
+    for (auto& resource : resources_) {
         resource->Start();
     }
     running_ = true;
@@ -46,13 +44,13 @@ ResourceMgr::Stop() {
     worker_thread_.join();
 
     std::lock_guard<std::mutex> lck(resources_mutex_);
-    for (auto &resource : resources_) {
+    for (auto& resource : resources_) {
         resource->Stop();
     }
 }
 
 ResourceWPtr
-ResourceMgr::Add(ResourcePtr &&resource) {
+ResourceMgr::Add(ResourcePtr&& resource) {
     ResourceWPtr ret(resource);
 
     std::lock_guard<std::mutex> lck(resources_mutex_);
@@ -72,13 +70,13 @@ ResourceMgr::Add(ResourcePtr &&resource) {
 }
 
 bool
-ResourceMgr::Connect(const std::string &name1, const std::string &name2, Connection &connection) {
+ResourceMgr::Connect(const std::string& name1, const std::string& name2, Connection& connection) {
     auto res1 = GetResource(name1);
     auto res2 = GetResource(name2);
     if (res1 && res2) {
         res1->AddNeighbour(std::static_pointer_cast<Node>(res2), connection);
-        // TODO: enable when task balance supported
-//        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
+        // TODO(wxy): enable when task balance supported
+        //        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
         return true;
     }
     return false;
@@ -94,7 +92,7 @@ ResourceMgr::Clear() {
 std::vector<ResourcePtr>
 ResourceMgr::GetComputeResources() {
     std::vector<ResourcePtr> result;
-    for (auto &resource : resources_) {
+    for (auto& resource : resources_) {
         if (resource->HasExecutor()) {
             result.emplace_back(resource);
         }
@@ -104,7 +102,7 @@ ResourceMgr::GetComputeResources() {
 
 ResourcePtr
 ResourceMgr::GetResource(ResourceType type, uint64_t device_id) {
-    for (auto &resource : resources_) {
+    for (auto& resource : resources_) {
         if (resource->type() == type && resource->device_id() == device_id) {
             return resource;
         }
@@ -113,8 +111,8 @@ ResourceMgr::GetResource(ResourceType type, uint64_t device_id) {
 }
 
 ResourcePtr
-ResourceMgr::GetResource(const std::string &name) {
-    for (auto &resource : resources_) {
+ResourceMgr::GetResource(const std::string& name) {
+    for (auto& resource : resources_) {
         if (resource->name() == name) {
             return resource;
         }
@@ -130,7 +128,7 @@ ResourceMgr::GetNumOfResource() const {
 uint64_t
 ResourceMgr::GetNumOfComputeResource() const {
     uint64_t count = 0;
-    for (auto &res : resources_) {
+    for (auto& res : resources_) {
         if (res->HasExecutor()) {
             ++count;
         }
@@ -141,7 +139,7 @@ ResourceMgr::GetNumOfComputeResource() const {
 uint64_t
 ResourceMgr::GetNumGpuResource() const {
     uint64_t num = 0;
-    for (auto &res : resources_) {
+    for (auto& res : resources_) {
         if (res->type() == ResourceType::GPU) {
             num++;
         }
@@ -155,7 +153,7 @@ ResourceMgr::Dump() {
 
     for (uint64_t i = 0; i < resources_.size(); ++i) {
         str += "Resource No." + std::to_string(i) + ":\n";
-        //str += resources_[i]->Dump();
+        // str += resources_[i]->Dump();
     }
 
     return str;
@@ -165,7 +163,7 @@ std::string
 ResourceMgr::DumpTaskTables() {
     std::stringstream ss;
     ss << ">>>>>>>>>>>>>>>ResourceMgr::DumpTaskTable<<<<<<<<<<<<<<<" << std::endl;
-    for (auto &resource : resources_) {
+    for (auto& resource : resources_) {
         ss << resource->Dump() << std::endl;
         ss << resource->task_table().Dump();
         ss << resource->Dump() << std::endl << std::endl;
@@ -174,7 +172,7 @@ ResourceMgr::DumpTaskTables() {
 }
 
 void
-ResourceMgr::post_event(const EventPtr &event) {
+ResourceMgr::post_event(const EventPtr& event) {
     {
         std::lock_guard<std::mutex> lock(event_mutex_);
         queue_.emplace(event);
@@ -201,6 +199,6 @@ ResourceMgr::event_process() {
     }
 }
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

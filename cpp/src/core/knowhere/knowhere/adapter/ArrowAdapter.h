@@ -15,22 +15,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "knowhere/common/Array.h"
-
 
 namespace zilliz {
 namespace knowhere {
 
 ArrayPtr
-CopyArray(const ArrayPtr &origin);
+CopyArray(const ArrayPtr& origin);
 
 SchemaPtr
-CopySchema(const SchemaPtr &origin);
+CopySchema(const SchemaPtr& origin);
 
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere
+}  // namespace zilliz

@@ -15,28 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "scheduler/job/SearchJob.h"
 #include "utils/Log.h"
-
-#include "SearchJob.h"
-
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-SearchJob::SearchJob(zilliz::milvus::scheduler::JobId id,
-                     uint64_t topk,
-                     uint64_t nq,
-                     uint64_t nprobe,
-                     const float *vectors)
-    : Job(id, JobType::SEARCH),
-      topk_(topk),
-      nq_(nq),
-      nprobe_(nprobe),
-      vectors_(vectors) {}
+SearchJob::SearchJob(zilliz::milvus::scheduler::JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe,
+                     const float* vectors)
+    : Job(id, JobType::SEARCH), topk_(topk), nq_(nq), nprobe_(nprobe), vectors_(vectors) {
+}
 
 bool
-SearchJob::AddIndexFile(const TableFileSchemaPtr &index_file) {
+SearchJob::AddIndexFile(const TableFileSchemaPtr& index_file) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (index_file == nullptr || index_files_.find(index_file->id_) != index_files_.end()) {
         return false;
@@ -47,7 +39,6 @@ SearchJob::AddIndexFile(const TableFileSchemaPtr &index_file) {
     index_files_[index_file->id_] = index_file;
     return true;
 }
-
 
 void
 SearchJob::WaitResult() {
@@ -64,7 +55,7 @@ SearchJob::SearchDone(size_t index_id) {
     SERVER_LOG_DEBUG << "SearchJob " << id() << " finish index file: " << index_id;
 }
 
-ResultSet &
+ResultSet&
 SearchJob::GetResult() {
     return result_;
 }
@@ -74,9 +65,6 @@ SearchJob::GetStatus() {
     return status_;
 }
 
-
-}
-}
-}
-
-
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

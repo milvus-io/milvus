@@ -33,6 +33,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-575 - Add Clang-format & Clang-tidy & Cpplint
 - MS-586 - Remove BUILD_FAISS_WITH_MKL option
 - MS-590 - Refine cmake code to support cpplint
+- MS-600 - Reconstruct unittest code
 
 # Milvus 0.4.0 (2019-09-12)
 

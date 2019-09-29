@@ -15,16 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "wrapper/KnowhereResource.h"
 #include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "server/Config.h"
 
 #include <map>
 #include <set>
-#include <vector>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace zilliz {
 namespace milvus {
@@ -43,22 +42,24 @@ KnowhereResource::Initialize() {
     GpuResourcesArray gpu_resources;
     Status s;
 
-    //get build index gpu resource
-    server::Config &config = server::Config::GetInstance();
+    // get build index gpu resource
+    server::Config& config = server::Config::GetInstance();
 
     int32_t build_index_gpu;
     s = config.GetDBConfigBuildIndexGPU(build_index_gpu);
-    if (!s.ok()) return s;
+    if (!s.ok())
+        return s;
 
     gpu_resources.insert(std::make_pair(build_index_gpu, GpuResourceSetting()));
 
-    //get search gpu resource
+    // get search gpu resource
     std::vector<std::string> pool;
     s = config.GetResourceConfigPool(pool);
-    if (!s.ok()) return s;
+    if (!s.ok())
+        return s;
 
     std::set<uint64_t> gpu_ids;
-    for (auto &resource : pool) {
+    for (auto& resource : pool) {
         if (resource.length() < 4 || resource.substr(0, 3) != "gpu") {
             // invalid
             continue;
@@ -67,12 +68,10 @@ KnowhereResource::Initialize() {
         gpu_resources.insert(std::make_pair(gpu_id, GpuResourceSetting()));
     }
 
-    //init gpu resources
+    // init gpu resources
     for (auto iter = gpu_resources.begin(); iter != gpu_resources.end(); ++iter) {
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(iter->first,
-                                                                iter->second.pinned_memory,
-                                                                iter->second.temp_memory,
-                                                                iter->second.resource_num);
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(iter->first, iter->second.pinned_memory,
+                                                                iter->second.temp_memory, iter->second.resource_num);
     }
 
     return Status::OK();
@@ -80,10 +79,10 @@ KnowhereResource::Initialize() {
 
 Status
 KnowhereResource::Finalize() {
-    knowhere::FaissGpuResourceMgr::GetInstance().Free(); // free gpu resource.
+    knowhere::FaissGpuResourceMgr::GetInstance().Free();  // free gpu resource.
     return Status::OK();
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz

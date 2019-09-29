@@ -15,14 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "TestResource.h"
+#include "scheduler/resource/TestResource.h"
 
+#include <string>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-std::ostream &operator<<(std::ostream &out, const TestResource &resource) {
+std::ostream&
+operator<<(std::ostream& out, const TestResource& resource) {
     out << resource.Dump();
     return out;
 }
@@ -31,15 +33,16 @@ TestResource::TestResource(std::string name, uint64_t device_id, bool enable_loa
     : Resource(std::move(name), ResourceType::TEST, device_id, enable_loader, enable_executor) {
 }
 
-void TestResource::LoadFile(TaskPtr task) {
+void
+TestResource::LoadFile(TaskPtr task) {
     task->Load(LoadType::TEST, 0);
 }
 
-void TestResource::Process(TaskPtr task) {
+void
+TestResource::Process(TaskPtr task) {
     task->Execute();
 }
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

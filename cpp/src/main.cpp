@@ -17,34 +17,34 @@
 
 #include <getopt.h>
 #include <libgen.h>
-#include <cstring>
-#include <string>
 #include <signal.h>
 #include <unistd.h>
+#include <cstring>
+#include <string>
 
-#include "utils/easylogging++.h"
-#include "utils/SignalUtil.h"
-#include "utils/CommonUtil.h"
+#include "../version.h"
 #include "metrics/Metrics.h"
 #include "server/Server.h"
-#include "../version.h"
-
+#include "utils/CommonUtil.h"
+#include "utils/SignalUtil.h"
+#include "utils/easylogging++.h"
 
 INITIALIZE_EASYLOGGINGPP
 
-void print_help(const std::string &app_name);
+void
+print_help(const std::string& app_name);
 
 int
-main(int argc, char *argv[]) {
+main(int argc, char* argv[]) {
     std::cout << std::endl << "Welcome to use Milvus by Zilliz!" << std::endl;
     std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << " built at " << BUILD_TIME << std::endl;
 
-    static struct option long_options[] = {{"conf_file", required_argument, 0, 'c'},
-                                           {"log_conf_file", required_argument, 0, 'l'},
-                                           {"help", no_argument, 0, 'h'},
-                                           {"daemon", no_argument, 0, 'd'},
-                                           {"pid_file", required_argument, 0, 'p'},
-                                           {NULL, 0, 0, 0}};
+    static struct option long_options[] = {{"conf_file", required_argument, nullptr, 'c'},
+                                           {"log_conf_file", required_argument, nullptr, 'l'},
+                                           {"help", no_argument, nullptr, 'h'},
+                                           {"daemon", no_argument, nullptr, 'd'},
+                                           {"pid_file", required_argument, nullptr, 'p'},
+                                           {nullptr, 0, nullptr, 0}};
 
     int option_index = 0;
     int64_t start_daemonized = 0;
@@ -63,28 +63,26 @@ main(int argc, char *argv[]) {
     while ((value = getopt_long(argc, argv, "c:l:p:dh", long_options, &option_index)) != -1) {
         switch (value) {
             case 'c': {
-                char *config_filename_ptr = strdup(optarg);
+                char* config_filename_ptr = strdup(optarg);
                 config_filename = config_filename_ptr;
                 free(config_filename_ptr);
                 std::cout << "Loading configuration from: " << config_filename << std::endl;
                 break;
             }
             case 'l': {
-                char *log_filename_ptr = strdup(optarg);
+                char* log_filename_ptr = strdup(optarg);
                 log_config_file = log_filename_ptr;
                 free(log_filename_ptr);
                 std::cout << "Initial log config from: " << log_config_file << std::endl;
                 break;
             }
-
             case 'p': {
-                char *pid_filename_ptr = strdup(optarg);
+                char* pid_filename_ptr = strdup(optarg);
                 pid_filename = pid_filename_ptr;
                 free(pid_filename_ptr);
                 std::cout << pid_filename << std::endl;
                 break;
             }
-
             case 'd':
                 start_daemonized = 1;
                 break;
@@ -108,7 +106,7 @@ main(int argc, char *argv[]) {
     signal(SIGUSR2, zilliz::milvus::server::SignalUtil::HandleSignal);
     signal(SIGTERM, zilliz::milvus::server::SignalUtil::HandleSignal);
 
-    zilliz::milvus::server::Server &server = zilliz::milvus::server::Server::GetInstance();
+    zilliz::milvus::server::Server& server = zilliz::milvus::server::Server::GetInstance();
     server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
     server.Start();
 
@@ -119,7 +117,7 @@ main(int argc, char *argv[]) {
 }
 
 void
-print_help(const std::string &app_name) {
+print_help(const std::string& app_name) {
     std::cout << std::endl << "Usage: " << app_name << " [OPTIONS]" << std::endl << std::endl;
     std::cout << "  Options:" << std::endl;
     std::cout << "   -h --help                 Print this help" << std::endl;

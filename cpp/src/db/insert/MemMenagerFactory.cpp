@@ -15,26 +15,28 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "MemMenagerFactory.h"
+#include "db/insert/MemMenagerFactory.h"
 #include "MemManagerImpl.h"
-#include "utils/Log.h"
 #include "utils/Exception.h"
+#include "utils/Log.h"
 
 #include <stdlib.h>
 #include <time.h>
-#include <sstream>
 #include <cstdlib>
-#include <string>
+#include <memory>
 #include <regex>
+#include <sstream>
+#include <string>
 
 namespace zilliz {
 namespace milvus {
 namespace engine {
 
-MemManagerPtr MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options) {
+MemManagerPtr
+MemManagerFactory::Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options) {
     return std::make_shared<MemManagerImpl>(meta, options);
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus
+}  // namespace zilliz
