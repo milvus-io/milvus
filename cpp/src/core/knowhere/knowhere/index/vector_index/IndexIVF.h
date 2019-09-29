@@ -15,54 +15,55 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <memory>
 #include <mutex>
+#include <utility>
+#include <vector>
 
-#include "VectorIndex.h"
 #include "FaissBaseIndex.h"
+#include "VectorIndex.h"
 #include "faiss/IndexIVF.h"
 
-
-namespace zilliz {
 namespace knowhere {
 
 using Graph = std::vector<std::vector<int64_t>>;
 
 class IVF : public VectorIndex, protected FaissBaseIndex {
  public:
-    IVF() : FaissBaseIndex(nullptr) {};
+    IVF() : FaissBaseIndex(nullptr) {
+    }
 
-    explicit IVF(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {}
+    explicit IVF(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
+    }
 
     VectorIndexPtr
-    Clone() override;;
+    Clone() override;
 
     IndexModelPtr
-    Train(const DatasetPtr &dataset, const Config &config) override;
+    Train(const DatasetPtr& dataset, const Config& config) override;
 
     void
     set_index_model(IndexModelPtr model) override;
 
     void
-    Add(const DatasetPtr &dataset, const Config &config) override;
+    Add(const DatasetPtr& dataset, const Config& config) override;
 
     void
-    AddWithoutIds(const DatasetPtr &dataset, const Config &config);
+    AddWithoutIds(const DatasetPtr& dataset, const Config& config);
 
     DatasetPtr
-    Search(const DatasetPtr &dataset, const Config &config) override;
+    Search(const DatasetPtr& dataset, const Config& config) override;
 
     void
-    GenGraph(const int64_t &k, Graph &graph, const DatasetPtr &dataset, const Config &config);
+    GenGraph(const int64_t& k, Graph& graph, const DatasetPtr& dataset, const Config& config);
 
     BinarySet
     Serialize() override;
 
     void
-    Load(const BinarySet &index_binary) override;
+    Load(const BinarySet& index_binary) override;
 
     int64_t
     Count() override;
@@ -74,23 +75,17 @@ class IVF : public VectorIndex, protected FaissBaseIndex {
     Seal() override;
 
     virtual VectorIndexPtr
-    CopyCpuToGpu(const int64_t &device_id, const Config &config);
-
+    CopyCpuToGpu(const int64_t& device_id, const Config& config);
 
  protected:
     virtual std::shared_ptr<faiss::IVFSearchParameters>
-    GenParams(const Config &config);
+    GenParams(const Config& config);
 
     virtual VectorIndexPtr
-    Clone_impl(const std::shared_ptr<faiss::Index> &index);
+    Clone_impl(const std::shared_ptr<faiss::Index>& index);
 
     virtual void
-    search_impl(int64_t n,
-                const float *data,
-                int64_t k,
-                float *distances,
-                int64_t *labels,
-                const Config &cfg);
+    search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg);
 
  protected:
     std::mutex mutex_;
@@ -106,13 +101,14 @@ class IVFIndexModel : public IndexModel, public FaissBaseIndex {
  public:
     explicit IVFIndexModel(std::shared_ptr<faiss::Index> index);
 
-    IVFIndexModel() : FaissBaseIndex(nullptr) {};
+    IVFIndexModel() : FaissBaseIndex(nullptr) {
+    }
 
     BinarySet
     Serialize() override;
 
     void
-    Load(const BinarySet &binary) override;
+    Load(const BinarySet& binary) override;
 
  protected:
     void
@@ -121,7 +117,7 @@ class IVFIndexModel : public IndexModel, public FaissBaseIndex {
  protected:
     std::mutex mutex_;
 };
+
 using IVFIndexModelPtr = std::shared_ptr<IVFIndexModel>;
 
-}
-}
+}  // namespace knowhere

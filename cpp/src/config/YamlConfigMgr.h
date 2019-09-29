@@ -24,7 +24,6 @@
 #include <yaml-cpp/yaml.h>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -47,7 +46,7 @@ class YamlConfigMgr : public ConfigMgr {
     SetConfigValue(const YAML::Node& node, const std::string& key, ConfigNode& config);
 
     bool
-    SetChildConfig(const YAML::Node& node, const std::string& name, ConfigNode& config);
+    SetChildConfig(const YAML::Node& node, const std::string& child_name, ConfigNode& config);
 
     bool
     SetSequence(const YAML::Node& node, const std::string& child_name, ConfigNode& config);
@@ -62,4 +61,3 @@ class YamlConfigMgr : public ConfigMgr {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

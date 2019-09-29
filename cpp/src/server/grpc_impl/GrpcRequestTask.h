@@ -29,7 +29,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -41,7 +40,7 @@ class CreateTableTask : public GrpcBaseTask {
     Create(const ::milvus::grpc::TableSchema* schema);
 
  protected:
-    explicit CreateTableTask(const ::milvus::grpc::TableSchema* request);
+    explicit CreateTableTask(const ::milvus::grpc::TableSchema* schema);
 
     Status
     OnExecute() override;
@@ -57,7 +56,7 @@ class HasTableTask : public GrpcBaseTask {
     Create(const std::string& table_name, bool& has_table);
 
  protected:
-    HasTableTask(const std::string& request, bool& has_table);
+    HasTableTask(const std::string& table_name, bool& has_table);
 
     Status
     OnExecute() override;
@@ -104,10 +103,10 @@ class DropTableTask : public GrpcBaseTask {
 class CreateIndexTask : public GrpcBaseTask {
  public:
     static BaseTaskPtr
-    Create(const ::milvus::grpc::IndexParam* index_Param);
+    Create(const ::milvus::grpc::IndexParam* index_param);
 
  protected:
-    explicit CreateIndexTask(const ::milvus::grpc::IndexParam* index_Param);
+    explicit CreateIndexTask(const ::milvus::grpc::IndexParam* index_param);
 
     Status
     OnExecute() override;
@@ -136,10 +135,10 @@ class ShowTablesTask : public GrpcBaseTask {
 class InsertTask : public GrpcBaseTask {
  public:
     static BaseTaskPtr
-    Create(const ::milvus::grpc::InsertParam* insert_Param, ::milvus::grpc::VectorIds* record_ids_);
+    Create(const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids);
 
  protected:
-    InsertTask(const ::milvus::grpc::InsertParam* insert_Param, ::milvus::grpc::VectorIds* record_ids_);
+    InsertTask(const ::milvus::grpc::InsertParam* insert_param, ::milvus::grpc::VectorIds* record_ids);
 
     Status
     OnExecute() override;
@@ -271,4 +270,3 @@ class DropIndexTask : public GrpcBaseTask {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

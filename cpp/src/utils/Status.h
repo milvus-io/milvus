@@ -21,7 +21,6 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 
 using StatusCode = ErrorCode;
@@ -71,8 +70,7 @@ class Status {
     MoveFrom(Status& s);
 
  private:
-    const char* state_ = nullptr;
+    char* state_ = nullptr;
 };  // Status
 
 }  // namespace milvus
-}  // namespace zilliz

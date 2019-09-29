@@ -27,7 +27,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -124,4 +123,3 @@ using MetaPtr = std::shared_ptr<Meta>;
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

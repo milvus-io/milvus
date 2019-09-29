@@ -22,7 +22,6 @@
 #include <cstdint>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -65,4 +64,3 @@ class Server {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

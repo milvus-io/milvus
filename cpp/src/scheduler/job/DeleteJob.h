@@ -30,7 +30,6 @@
 #include "Job.h"
 #include "db/meta/Meta.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -70,4 +69,3 @@ using DeleteJobPtr = std::shared_ptr<DeleteJob>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

@@ -17,7 +17,6 @@
 
 #pragma once
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -41,4 +40,3 @@ const size_t W_SEC = 7 * D_SEC;
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

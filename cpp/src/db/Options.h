@@ -24,7 +24,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -53,9 +52,9 @@ struct ArchiveConf {
 
  private:
     void
-    ParseCritirias(const std::string& type);
+    ParseCritirias(const std::string& criterias);
     void
-    ParseType(const std::string& criterias);
+    ParseType(const std::string& type);
 
     std::string type_;
     CriteriaT criterias_;
@@ -81,4 +80,3 @@ struct DBOptions {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

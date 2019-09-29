@@ -39,12 +39,12 @@ main(int argc, char* argv[]) {
     std::cout << std::endl << "Welcome to use Milvus by Zilliz!" << std::endl;
     std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << " built at " << BUILD_TIME << std::endl;
 
-    static struct option long_options[] = {{"conf_file", required_argument, 0, 'c'},
-                                           {"log_conf_file", required_argument, 0, 'l'},
-                                           {"help", no_argument, 0, 'h'},
-                                           {"daemon", no_argument, 0, 'd'},
-                                           {"pid_file", required_argument, 0, 'p'},
-                                           {NULL, 0, 0, 0}};
+    static struct option long_options[] = {{"conf_file", required_argument, nullptr, 'c'},
+                                           {"log_conf_file", required_argument, nullptr, 'l'},
+                                           {"help", no_argument, nullptr, 'h'},
+                                           {"daemon", no_argument, nullptr, 'd'},
+                                           {"pid_file", required_argument, nullptr, 'p'},
+                                           {nullptr, 0, nullptr, 0}};
 
     int option_index = 0;
     int64_t start_daemonized = 0;
@@ -99,14 +99,14 @@ main(int argc, char* argv[]) {
     }
 
     /* Handle Signal */
-    signal(SIGHUP, zilliz::milvus::server::SignalUtil::HandleSignal);
-    signal(SIGINT, zilliz::milvus::server::SignalUtil::HandleSignal);
-    signal(SIGUSR1, zilliz::milvus::server::SignalUtil::HandleSignal);
-    signal(SIGSEGV, zilliz::milvus::server::SignalUtil::HandleSignal);
-    signal(SIGUSR2, zilliz::milvus::server::SignalUtil::HandleSignal);
-    signal(SIGTERM, zilliz::milvus::server::SignalUtil::HandleSignal);
+    signal(SIGHUP, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGINT, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGUSR1, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGSEGV, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGUSR2, milvus::server::SignalUtil::HandleSignal);
+    signal(SIGTERM, milvus::server::SignalUtil::HandleSignal);
 
-    zilliz::milvus::server::Server& server = zilliz::milvus::server::Server::GetInstance();
+    milvus::server::Server& server = milvus::server::Server::GetInstance();
     server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
     server.Start();
 

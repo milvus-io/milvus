@@ -34,7 +34,6 @@
 #include <stdexcept>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -324,7 +323,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
 Status
 ExecutionEngineImpl::Cache() {
     cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index_, PhysicalSize());
-    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, obj);
+    milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, obj);
 
     return Status::OK();
 }
@@ -332,7 +331,7 @@ ExecutionEngineImpl::Cache() {
 Status
 ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
     cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index_, PhysicalSize());
-    zilliz::milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, obj);
+    milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, obj);
 
     return Status::OK();
 }
@@ -342,11 +341,12 @@ Status
 ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
     Status s = config.GetDBConfigBuildIndexGPU(gpu_num_);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     return Status::OK();
 }
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

@@ -30,7 +30,6 @@
 
 #define MAX_THREADS_NUM 32
 
-namespace zilliz {
 namespace milvus {
 
 class ThreadPool {
@@ -70,7 +69,8 @@ inline ThreadPool::ThreadPool(size_t threads, size_t queue_size) : max_queue_siz
                 {
                     std::unique_lock<std::mutex> lock(this->queue_mutex_);
                     this->condition_.wait(lock, [this] { return this->stop || !this->tasks_.empty(); });
-                    if (this->stop && this->tasks_.empty()) return;
+                    if (this->stop && this->tasks_.empty())
+                        return;
                     task = std::move(this->tasks_.front());
                     this->tasks_.pop();
                 }
@@ -95,7 +95,8 @@ ThreadPool::enqueue(F&& f, Args&&... args) -> std::future<typename std::result_o
         std::unique_lock<std::mutex> lock(queue_mutex_);
         this->condition_.wait(lock, [this] { return this->tasks_.size() < max_queue_size_; });
         // don't allow enqueueing after stopping the pool
-        if (stop) throw std::runtime_error("enqueue on stopped ThreadPool");
+        if (stop)
+            throw std::runtime_error("enqueue on stopped ThreadPool");
 
         tasks_.emplace([task]() { (*task)(); });
     }
@@ -116,4 +117,3 @@ inline ThreadPool::~ThreadPool() {
 }
 
 }  // namespace milvus
-}  // namespace zilliz

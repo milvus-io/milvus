@@ -24,7 +24,6 @@
 #include <memory>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
@@ -70,6 +69,5 @@ class CacheMgr {
 
 }  // namespace cache
 }  // namespace milvus
-}  // namespace zilliz
 
 #include "cache/CacheMgr.inl"

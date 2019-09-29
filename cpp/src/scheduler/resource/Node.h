@@ -25,7 +25,6 @@
 #include "Connection.h"
 #include "scheduler/TaskTable.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -41,7 +40,7 @@ struct Neighbour {
     Connection connection;
 };
 
-// TODO(linxj): return type void -> Status
+// TODO(lxj): return type void -> Status
 class Node {
  public:
     Node();
@@ -67,4 +66,3 @@ using NodeWPtr = std::weak_ptr<Node>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

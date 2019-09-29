@@ -21,7 +21,6 @@
 #include "StartUpEvent.h"
 #include "TaskTableUpdatedEvent.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -57,4 +56,3 @@ operator<<(std::ostream& out, const TaskTableUpdatedEvent& event) {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

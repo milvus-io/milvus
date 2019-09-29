@@ -23,7 +23,6 @@
 #include <stdlib.h>
 #include <boost/algorithm/string.hpp>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -91,4 +90,3 @@ ArchiveConf::ParseType(const std::string& type) {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

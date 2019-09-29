@@ -34,7 +34,7 @@
 #include <set>
 #include <sqlite_orm.h>
 
-namespace zilliz {
+
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -155,7 +155,7 @@ SqliteMetaImpl::Initialize() {
     return Status::OK();
 }
 
-// PXU TODO: Temp solution. Will fix later
+// TODO(myh): Delete single vecotor by id
 Status
 SqliteMetaImpl::DropPartitionsByDates(const std::string &table_id,
                                       const DatesT &dates) {
@@ -885,7 +885,7 @@ SqliteMetaImpl::GetTableFiles(const std::string &table_id,
     }
 }
 
-// PXU TODO: Support Swap
+// TODO(myh): Support swap to cloud storage
 Status
 SqliteMetaImpl::Archive() {
     auto &criterias = options_.archive_conf_.GetCriterias();
@@ -1298,4 +1298,4 @@ SqliteMetaImpl::DropAll() {
 } // namespace meta
 } // namespace engine
 } // namespace milvus
-} // namespace zilliz
+

@@ -29,7 +29,6 @@
 #include <utility>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -132,4 +131,3 @@ class SystemInfo {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

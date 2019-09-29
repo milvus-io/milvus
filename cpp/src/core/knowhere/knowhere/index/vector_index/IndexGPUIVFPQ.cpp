@@ -15,23 +15,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include <faiss/gpu/GpuIndexIVFPQ.h>
-#include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/IndexIVFPQ.h>
+#include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/gpu/GpuIndexIVFPQ.h>
+#include <memory>
 
-#include "IndexGPUIVFPQ.h"
-#include "knowhere/common/Exception.h"
 #include "knowhere/adapter/VectorAdapter.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
 
-
-namespace zilliz {
 namespace knowhere {
 
-IndexModelPtr GPUIVFPQ::Train(const DatasetPtr &dataset, const Config &config) {
+IndexModelPtr
+GPUIVFPQ::Train(const DatasetPtr& dataset, const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<IVFPQCfg>(config);
     if (build_cfg != nullptr) {
-        build_cfg->CheckValid(); // throw exception
+        build_cfg->CheckValid();  // throw exception
     }
     gpu_id_ = build_cfg->gpu_id;
 
@@ -40,9 +39,9 @@ IndexModelPtr GPUIVFPQ::Train(const DatasetPtr &dataset, const Config &config) {
     // TODO(linxj): set device here.
     // TODO(linxj): set gpu resource here.
     faiss::gpu::StandardGpuResources res;
-    faiss::gpu::GpuIndexIVFPQ device_index(&res, dim, build_cfg->nlist, build_cfg->m,
-                                           build_cfg->nbits, GetMetricType(build_cfg->metric_type)); // IP not support
-    device_index.train(rows, (float *) p_data);
+    faiss::gpu::GpuIndexIVFPQ device_index(&res, dim, build_cfg->nlist, build_cfg->m, build_cfg->nbits,
+                                           GetMetricType(build_cfg->metric_type));  // IP not support
+    device_index.train(rows, (float*)p_data);
 
     std::shared_ptr<faiss::Index> host_index = nullptr;
     host_index.reset(faiss::gpu::index_gpu_to_cpu(&device_index));
@@ -50,20 +49,21 @@ IndexModelPtr GPUIVFPQ::Train(const DatasetPtr &dataset, const Config &config) {
     return std::make_shared<IVFIndexModel>(host_index);
 }
 
-std::shared_ptr<faiss::IVFSearchParameters> GPUIVFPQ::GenParams(const Config &config) {
+std::shared_ptr<faiss::IVFSearchParameters>
+GPUIVFPQ::GenParams(const Config& config) {
     auto params = std::make_shared<faiss::IVFPQSearchParameters>();
     auto search_cfg = std::dynamic_pointer_cast<IVFPQCfg>(config);
     params->nprobe = search_cfg->nprobe;
-//    params->scan_table_threshold = conf->scan_table_threhold;
-//    params->polysemous_ht = conf->polysemous_ht;
-//    params->max_codes = conf->max_codes;
+    //    params->scan_table_threshold = conf->scan_table_threhold;
+    //    params->polysemous_ht = conf->polysemous_ht;
+    //    params->max_codes = conf->max_codes;
 
     return params;
 }
 
-VectorIndexPtr GPUIVFPQ::CopyGpuToCpu(const Config &config) {
+VectorIndexPtr
+GPUIVFPQ::CopyGpuToCpu(const Config& config) {
     KNOWHERE_THROW_MSG("not support yet");
 }
 
-} // knowhere
-} // zilliz
+}  // namespace knowhere

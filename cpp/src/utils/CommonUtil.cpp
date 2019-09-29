@@ -38,7 +38,6 @@
 #define THREAD_MULTIPLY_CPU 1
 #endif
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -59,7 +58,9 @@ CommonUtil::GetSystemAvailableThreads(uint32_t& thread_count) {
     // threadCnt = std::thread::hardware_concurrency();
     thread_count = sysconf(_SC_NPROCESSORS_CONF);
     thread_count *= THREAD_MULTIPLY_CPU;
-    if (thread_count == 0) thread_count = 8;
+    if (thread_count == 0) {
+        thread_count = 8;
+    }
 
     return true;
 }
@@ -162,9 +163,9 @@ CommonUtil::GetFileSize(const std::string& path) {
     struct stat file_info;
     if (stat(path.c_str(), &file_info) < 0) {
         return 0;
-    } else {
-        return (uint64_t)file_info.st_size;
     }
+
+    return static_cast<uint64_t>(file_info.st_size);
 }
 
 std::string
@@ -223,4 +224,3 @@ CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

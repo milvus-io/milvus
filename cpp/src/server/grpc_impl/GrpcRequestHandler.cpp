@@ -21,7 +21,6 @@
 
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -197,4 +196,3 @@ GrpcRequestHandler::DropIndex(::grpc::ServerContext* context, const ::milvus::gr
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

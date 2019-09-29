@@ -25,13 +25,14 @@
 #include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
 void
 SystemInfo::Init() {
-    if (initialized_) return;
+    if (initialized_) {
+        return;
+    }
 
     initialized_ = true;
 
@@ -44,8 +45,10 @@ SystemInfo::Init() {
     last_user_cpu_ = time_sample.tms_utime;
     file = fopen("/proc/cpuinfo", "r");
     num_processors_ = 0;
-    while (fgets(line, 128, file) != NULL) {
-        if (strncmp(line, "processor", 9) == 0) num_processors_++;
+    while (fgets(line, 128, file) != nullptr) {
+        if (strncmp(line, "processor", 9) == 0) {
+            num_processors_++;
+        }
         if (strncmp(line, "physical", 8) == 0) {
             num_physical_processors_ = ParseLine(line);
         }
@@ -78,7 +81,9 @@ SystemInfo::ParseLine(char* line) {
     // This assumes that a digit will be found and the line ends in " Kb".
     int i = strlen(line);
     const char* p = line;
-    while (*p < '0' || *p > '9') p++;
+    while (*p < '0' || *p > '9') {
+        p++;
+    }
     line[i - 3] = '\0';
     i = atoi(p);
     return static_cast<uint64_t>(i);
@@ -103,7 +108,7 @@ SystemInfo::GetProcessUsedMemory() {
     constexpr uint64_t KB_SIZE = 1024;
     char line[line_length];
 
-    while (fgets(line, line_length, file) != NULL) {
+    while (fgets(line, line_length, file) != nullptr) {
         if (strncmp(line, "VmRSS:", 6) == 0) {
             result = ParseLine(line);
             break;
@@ -116,8 +121,12 @@ SystemInfo::GetProcessUsedMemory() {
 
 double
 SystemInfo::MemoryPercent() {
-    if (!initialized_) Init();
-    return (double)(GetProcessUsedMemory() * 100) / (double)total_ram_;
+    if (!initialized_) {
+        Init();
+    }
+
+    double mem_used = static_cast<double>(GetProcessUsedMemory() * 100);
+    return mem_used / static_cast<double>(total_ram_);
 }
 
 std::vector<double>
@@ -171,7 +180,9 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
 
 double
 SystemInfo::CPUPercent() {
-    if (!initialized_) Init();
+    if (!initialized_) {
+        Init();
+    }
     struct tms time_sample;
     clock_t now;
     double percent;
@@ -195,7 +206,8 @@ SystemInfo::CPUPercent() {
 std::vector<uint64_t>
 SystemInfo::GPUMemoryTotal() {
     // get GPU usage percent
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
     std::vector<uint64_t> result;
     nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
@@ -209,7 +221,8 @@ SystemInfo::GPUMemoryTotal() {
 
 std::vector<uint64_t>
 SystemInfo::GPUTemperature() {
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
     std::vector<uint64_t> result;
     for (int i = 0; i < num_device_; i++) {
         nvmlDevice_t device;
@@ -227,7 +240,7 @@ SystemInfo::CPUTemperature() {
     for (int i = 0; i <= num_physical_processors_; ++i) {
         std::string path = "/sys/class/thermal/thermal_zone" + std::to_string(i) + "/temp";
         FILE* file = fopen(path.data(), "r");
-        if (file == NULL) {
+        if (file == nullptr) {
             perror("Could not open thermal file");
             return result;
         }
@@ -241,7 +254,8 @@ SystemInfo::CPUTemperature() {
 std::vector<uint64_t>
 SystemInfo::GPUMemoryUsed() {
     // get GPU memory used
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
 
     std::vector<uint64_t> result;
     nvmlMemory_t nvmlMemory;
@@ -262,7 +276,7 @@ SystemInfo::Octets() {
     std::ifstream file(filename);
     std::string lastline = "";
     std::string line = "";
-    while (file) {
+    while (true) {
         getline(file, line);
         if (file.fail()) {
             break;
@@ -291,4 +305,3 @@ SystemInfo::Octets() {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

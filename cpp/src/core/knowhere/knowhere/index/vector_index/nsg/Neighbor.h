@@ -15,13 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <mutex>
 
-
-namespace zilliz {
 namespace knowhere {
 namespace algo {
 
@@ -29,21 +26,25 @@ using node_t = int64_t;
 
 // TODO: search use simple neighbor
 struct Neighbor {
-    node_t id; // offset of node in origin data
+    node_t id;  // offset of node in origin data
     float distance;
     bool has_explored;
 
     Neighbor() = default;
-    explicit Neighbor(node_t id, float distance, bool f) : id{id}, distance{distance}, has_explored(f) {}
 
-    explicit Neighbor(node_t id, float distance) : id{id}, distance{distance}, has_explored(false) {}
+    explicit Neighbor(node_t id, float distance, bool f) : id{id}, distance{distance}, has_explored(f) {
+    }
 
-    inline bool operator<(const Neighbor &other) const {
+    explicit Neighbor(node_t id, float distance) : id{id}, distance{distance}, has_explored(false) {
+    }
+
+    inline bool
+    operator<(const Neighbor& other) const {
         return distance < other.distance;
     }
 };
 
-//struct SimpleNeighbor {
+// struct SimpleNeighbor {
 //    node_t id; // offset of node in origin data
 //    float distance;
 //
@@ -57,7 +58,5 @@ struct Neighbor {
 
 typedef std::lock_guard<std::mutex> LockGuard;
 
-
-}
-}
-}
+}  // namespace algo
+}  // namespace knowhere

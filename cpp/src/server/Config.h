@@ -26,7 +26,6 @@
 #include "config/ConfigNode.h"
 #include "utils/Status.h"
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -359,4 +358,3 @@ class Config {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz
