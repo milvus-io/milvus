@@ -17,7 +17,6 @@
 
 #include "sdk/examples/grpcsimple/src/ClientTest.h"
 #include "MilvusApi.h"
-#include "cache/CpuCacheMgr.h"
 
 #include <time.h>
 #include <unistd.h>
