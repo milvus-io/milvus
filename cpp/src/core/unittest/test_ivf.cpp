@@ -35,7 +35,7 @@
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 
-#include "test/utils.h"
+#include "unittest/utils.h"
 
 namespace {
 
