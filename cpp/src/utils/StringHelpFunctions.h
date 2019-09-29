@@ -22,7 +22,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -61,4 +60,3 @@ class StringHelpFunctions {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

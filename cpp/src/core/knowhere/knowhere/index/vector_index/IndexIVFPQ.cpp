@@ -24,7 +24,6 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 
-namespace zilliz {
 namespace knowhere {
 
 IndexModelPtr
@@ -62,4 +61,3 @@ IVFPQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

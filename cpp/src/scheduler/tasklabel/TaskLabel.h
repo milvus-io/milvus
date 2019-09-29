@@ -19,7 +19,6 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -48,4 +47,3 @@ using TaskLabelPtr = std::shared_ptr<TaskLabel>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

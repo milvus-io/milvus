@@ -23,7 +23,6 @@
 #include <memory>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
@@ -42,4 +41,3 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr> {
 
 }  // namespace cache
 }  // namespace milvus
-}  // namespace zilliz

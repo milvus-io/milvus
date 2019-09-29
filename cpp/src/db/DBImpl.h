@@ -32,7 +32,6 @@
 #include <thread>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -165,4 +164,3 @@ class DBImpl : public DB {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

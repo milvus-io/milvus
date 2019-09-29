@@ -21,7 +21,7 @@
 //#include "preprocessor.h"
 //
 //
-// namespace zilliz {
+//
 // namespace knowhere {
 //
 // class NormalizePreprocessor : public Preprocessor {
@@ -40,4 +40,4 @@
 //
 //
 //} // namespace knowhere
-//} // namespace zilliz
+//

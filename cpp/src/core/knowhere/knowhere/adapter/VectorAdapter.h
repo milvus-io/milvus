@@ -17,7 +17,6 @@
 
 #pragma once
 
-namespace zilliz {
 namespace knowhere {
 
 #define GETTENSOR(dataset)              \
@@ -27,4 +26,3 @@ namespace knowhere {
     auto rows = tensor->shape()[0];
 
 }  // namespace knowhere
-}  // namespace zilliz

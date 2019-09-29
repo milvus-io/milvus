@@ -24,7 +24,7 @@
 #include "scheduler/ResourceMgr.h"
 #include <gtest/gtest.h>
 
-namespace zilliz {
+
 namespace milvus {
 namespace scheduler {
 
@@ -191,4 +191,4 @@ TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
 
 } // namespace scheduler
 } // namespace milvus
-} // namespace zilliz
+

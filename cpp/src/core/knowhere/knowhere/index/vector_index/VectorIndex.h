@@ -25,7 +25,6 @@
 #include "knowhere/index/preprocessor/Preprocessor.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
-namespace zilliz {
 namespace knowhere {
 
 class VectorIndex;
@@ -60,4 +59,3 @@ class VectorIndex : public Index {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

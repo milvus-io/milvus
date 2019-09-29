@@ -17,7 +17,6 @@
 
 #include <cstdint>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -29,4 +28,3 @@ get_num_gpu();
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

@@ -23,7 +23,6 @@
 #include <sstream>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -244,4 +243,3 @@ TaskTable::Dump() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

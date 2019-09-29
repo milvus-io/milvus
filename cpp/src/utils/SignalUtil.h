@@ -17,7 +17,6 @@
 
 #pragma once
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -31,4 +30,3 @@ class SignalUtil {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

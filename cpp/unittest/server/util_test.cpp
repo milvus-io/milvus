@@ -33,7 +33,7 @@
 
 namespace {
 
-namespace ms = zilliz::milvus;
+namespace ms = milvus;
 
 static const char *LOG_FILE_PATH = "./milvus/conf/log_config.conf";
 

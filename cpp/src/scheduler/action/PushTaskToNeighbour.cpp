@@ -21,7 +21,6 @@
 #include "Action.h"
 #include "src/cache/GpuCacheMgr.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -113,7 +112,7 @@ Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
             auto location = index_engine->GetLocation();
 
             for (auto i = 0; i < res_mgr.lock()->GetNumGpuResource(); ++i) {
-                auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
+                auto index = milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
                 if (index != nullptr) {
                     moved = true;
                     auto dest_resource = res_mgr.lock()->GetResource(ResourceType::GPU, i);
@@ -178,4 +177,3 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

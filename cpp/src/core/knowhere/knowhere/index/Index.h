@@ -25,7 +25,6 @@
 #include "knowhere/common/Dataset.h"
 #include "knowhere/index/preprocessor/Preprocessor.h"
 
-namespace zilliz {
 namespace knowhere {
 
 class Index {
@@ -66,4 +65,3 @@ class Index {
 using IndexPtr = std::shared_ptr<Index>;
 
 }  // namespace knowhere
-}  // namespace zilliz

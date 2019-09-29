@@ -17,7 +17,7 @@
 
 
 
-namespace zilliz {
+
 namespace milvus {
 namespace cache {
 
@@ -190,5 +190,5 @@ Cache<ItemObj>::print() {
 
 } // namespace cache
 } // namespace milvus
-} // namespace zilliz
+
 

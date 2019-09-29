@@ -28,7 +28,6 @@
 #include "event/Event.h"
 #include "task/SearchTask.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -257,4 +256,3 @@ class TaskTable {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

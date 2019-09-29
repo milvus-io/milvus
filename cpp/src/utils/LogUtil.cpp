@@ -21,7 +21,6 @@
 #include <libgen.h>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -95,4 +94,3 @@ InitLog(const std::string& log_config_file) {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

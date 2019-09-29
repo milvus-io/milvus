@@ -18,7 +18,6 @@
 #include "utils/TimeRecorder.h"
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 
 TimeRecorder::TimeRecorder(const std::string& header, int64_t log_level) : header_(header), log_level_(log_level) {
@@ -98,4 +97,3 @@ TimeRecorder::ElapseFromBegin(const std::string& msg) {
 }
 
 }  // namespace milvus
-}  // namespace zilliz

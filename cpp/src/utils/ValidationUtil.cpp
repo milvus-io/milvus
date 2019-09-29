@@ -25,7 +25,6 @@
 #include <regex>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -290,4 +289,3 @@ ValidationUtil::ValidateDbURI(const std::string& uri) {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

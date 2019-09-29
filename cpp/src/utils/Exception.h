@@ -22,7 +22,6 @@
 #include <exception>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 
 class Exception : public std::exception {
@@ -62,4 +61,3 @@ class InvalidArgumentException : public Exception {
 };
 
 }  // namespace milvus
-}  // namespace zilliz

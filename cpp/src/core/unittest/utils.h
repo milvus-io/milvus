@@ -34,7 +34,7 @@ class DataGen {
     void
     Generate(const int& dim, const int& nb, const int& nq);
 
-    zilliz::knowhere::DatasetPtr
+    knowhere::DatasetPtr
     GenQuery(const int& nq);
 
  protected:
@@ -45,8 +45,8 @@ class DataGen {
     std::vector<float> xb;
     std::vector<float> xq;
     std::vector<int64_t> ids;
-    zilliz::knowhere::DatasetPtr base_dataset = nullptr;
-    zilliz::knowhere::DatasetPtr query_dataset = nullptr;
+    knowhere::DatasetPtr base_dataset = nullptr;
+    knowhere::DatasetPtr query_dataset = nullptr;
 };
 
 extern void
@@ -62,10 +62,10 @@ GenBase(const int64_t& dim, const int64_t& nb, float* xb, int64_t* ids);
 extern void
 InitLog();
 
-zilliz::knowhere::DatasetPtr
+knowhere::DatasetPtr
 generate_dataset(int64_t nb, int64_t dim, float* xb, int64_t* ids);
 
-zilliz::knowhere::DatasetPtr
+knowhere::DatasetPtr
 generate_query_dataset(int64_t nb, int64_t dim, float* xb);
 
 struct FileIOWriter {

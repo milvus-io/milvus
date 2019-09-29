@@ -21,7 +21,6 @@
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
-namespace zilliz {
 namespace knowhere {
 namespace algo {
 
@@ -32,4 +31,3 @@ read_index(MemoryIOReader& reader);
 
 }  // namespace algo
 }  // namespace knowhere
-}  // namespace zilliz

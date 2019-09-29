@@ -21,7 +21,6 @@
 #include <iostream>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -178,4 +177,3 @@ Resource::executor_function() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

@@ -23,7 +23,6 @@
 #include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "grpc/gen-status/status.pb.h"
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -324,4 +323,3 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

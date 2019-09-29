@@ -23,7 +23,6 @@
 #include <memory>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -119,4 +118,3 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

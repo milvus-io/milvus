@@ -16,7 +16,7 @@
 // under the License.
 
 
-namespace zilliz {
+
 namespace milvus {
 namespace cache {
 
@@ -142,4 +142,4 @@ CacheMgr<ItemObj>::SetCapacity(int64_t capacity) {
 
 } // namespace cache
 } // namespace milvus
-} // namespace zilliz
+

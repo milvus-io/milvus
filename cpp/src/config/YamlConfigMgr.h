@@ -24,7 +24,6 @@
 #include <yaml-cpp/yaml.h>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -62,4 +61,3 @@ class YamlConfigMgr : public ConfigMgr {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

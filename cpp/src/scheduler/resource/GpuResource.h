@@ -22,7 +22,6 @@
 #include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -48,4 +47,3 @@ class GpuResource : public Resource {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

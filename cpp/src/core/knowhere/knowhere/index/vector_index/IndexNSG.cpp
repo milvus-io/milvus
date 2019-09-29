@@ -25,7 +25,6 @@
 #include "knowhere/index/vector_index/nsg/NSG.h"
 #include "knowhere/index/vector_index/nsg/NSGIO.h"
 
-namespace zilliz {
 namespace knowhere {
 
 BinarySet
@@ -167,4 +166,3 @@ NSG::Seal() {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz
