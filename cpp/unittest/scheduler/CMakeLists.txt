@@ -19,18 +19,15 @@
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
-include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
-link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
-
-set(scheduler_test_files
+cuda_add_executable(test_scheduler
         ${common_files}
-        ${unittest_files}
+        ${entry_file}
         ${test_files}
         )
 
-cuda_add_executable(scheduler_test ${scheduler_test_files})
+target_link_libraries(test_scheduler
+        knowhere
+        ${unittest_libs})
 
-target_link_libraries(scheduler_test knowhere ${unittest_libs})
-
-install(TARGETS scheduler_test DESTINATION unittest)
+install(TARGETS test_scheduler DESTINATION unittest)
 
