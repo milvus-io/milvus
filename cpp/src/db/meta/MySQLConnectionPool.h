@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "mysql++/mysql++.h"
+#include <mysql++/mysql++.h>
 
 #include <unistd.h>
 #include <atomic>

@@ -70,11 +70,11 @@ fi
 for test in `ls ${DIR_UNITTEST}`; do
     echo $test
     case ${test} in
-        db_test)
-            # set run args for db_test
+        test_db)
+            # set run args for test_db
             args="mysql://${MYSQL_USER_NAME}:${MYSQL_PASSWORD}@${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DB_NAME}"
             ;;
-        *_test)
+        *test_*)
             args=""
             ;;
     esac
