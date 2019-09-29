@@ -27,7 +27,6 @@
 #include <unordered_map>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -66,4 +65,3 @@ using JobWPtr = std::weak_ptr<Job>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

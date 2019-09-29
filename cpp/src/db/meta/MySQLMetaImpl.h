@@ -27,7 +27,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -143,4 +142,3 @@ class MySQLMetaImpl : public Meta {
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

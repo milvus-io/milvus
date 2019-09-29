@@ -24,7 +24,6 @@
 #include <memory>
 #include <mutex>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -90,4 +89,3 @@ StopSchedulerService();
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

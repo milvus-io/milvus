@@ -15,14 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-#include "knowhere/common/Config.h"
 #include "VecIndex.h"
+#include "knowhere/common/Config.h"
 
+#include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -42,16 +41,17 @@ struct TempMetaConf {
 class ConfAdapter {
  public:
     virtual knowhere::Config
-    Match(const TempMetaConf &metaconf);
+    Match(const TempMetaConf& metaconf);
 
     virtual knowhere::Config
-    MatchSearch(const TempMetaConf &metaconf, const IndexType &type);
+    MatchSearch(const TempMetaConf& metaconf, const IndexType& type);
 
-//    virtual void
-//    Dump(){}
+    //    virtual void
+    //    Dump(){}
 
  protected:
-    static void MatchBase(knowhere::Config conf);
+    static void
+    MatchBase(knowhere::Config conf);
 };
 
 using ConfAdapterPtr = std::shared_ptr<ConfAdapter>;
@@ -59,36 +59,36 @@ using ConfAdapterPtr = std::shared_ptr<ConfAdapter>;
 class IVFConfAdapter : public ConfAdapter {
  public:
     knowhere::Config
-    Match(const TempMetaConf &metaconf) override;
+    Match(const TempMetaConf& metaconf) override;
 
     knowhere::Config
-    MatchSearch(const TempMetaConf &metaconf, const IndexType &type) override;
+    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) override;
 
  protected:
-    static int64_t MatchNlist(const int64_t &size, const int64_t &nlist);
+    static int64_t
+    MatchNlist(const int64_t& size, const int64_t& nlist);
 };
 
 class IVFSQConfAdapter : public IVFConfAdapter {
  public:
     knowhere::Config
-    Match(const TempMetaConf &metaconf) override;
+    Match(const TempMetaConf& metaconf) override;
 };
 
 class IVFPQConfAdapter : public IVFConfAdapter {
  public:
     knowhere::Config
-    Match(const TempMetaConf &metaconf) override;
+    Match(const TempMetaConf& metaconf) override;
 };
 
 class NSGConfAdapter : public IVFConfAdapter {
  public:
     knowhere::Config
-    Match(const TempMetaConf &metaconf) override;
+    Match(const TempMetaConf& metaconf) override;
 
     knowhere::Config
-    MatchSearch(const TempMetaConf &metaconf, const IndexType &type) final;
+    MatchSearch(const TempMetaConf& metaconf, const IndexType& type) final;
 };
 
-}
-}
-}
+}  // namespace engine
+}  // namespace milvus

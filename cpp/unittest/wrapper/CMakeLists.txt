@@ -17,8 +17,7 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
-link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
 set(wrapper_files
         ${MILVUS_ENGINE_SRC}/wrapper/DataTransfer.cpp
@@ -31,13 +30,13 @@ set(util_files
         ${MILVUS_ENGINE_SRC}/utils/Status.cpp
         )
 
-set(knowhere_libs
+add_executable(test_wrapper
+        ${test_files}
+        ${wrapper_files}
+        ${util_files})
+
+target_link_libraries(test_wrapper
         knowhere
-        cudart
-        cublas
-        )
+        ${unittest_libs})
 
-add_executable(wrapper_test wrapper_test.cpp ${wrapper_files} ${util_files})
-target_link_libraries(wrapper_test ${knowhere_libs} ${unittest_libs})
-
-install(TARGETS wrapper_test DESTINATION unittest)
+install(TARGETS test_wrapper DESTINATION unittest)

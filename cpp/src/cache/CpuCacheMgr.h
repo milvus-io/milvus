@@ -23,7 +23,6 @@
 #include <memory>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
@@ -32,7 +31,7 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr> {
     CpuCacheMgr();
 
  public:
-    // TODO: use smart pointer instead
+    // TODO(myh): use smart pointer instead
     static CpuCacheMgr*
     GetInstance();
 
@@ -42,4 +41,3 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr> {
 
 }  // namespace cache
 }  // namespace milvus
-}  // namespace zilliz

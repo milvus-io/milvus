@@ -1,4 +1,4 @@
-<code_scheme name="Default" version="173">
+<code_scheme name="milvus" version="173">
   <Objective-C>
     <option name="INDENT_NAMESPACE_MEMBERS" value="0" />
     <option name="INDENT_VISIBILITY_KEYWORDS" value="1" />
@@ -26,7 +26,6 @@
     <option name="BLANK_LINES_AROUND_CLASS" value="0" />
     <option name="BLANK_LINES_AROUND_METHOD_IN_INTERFACE" value="0" />
     <option name="BLANK_LINES_AFTER_CLASS_HEADER" value="1" />
-    <option name="ALIGN_MULTILINE_BINARY_OPERATION" value="false" />
     <option name="SPACE_AFTER_TYPE_CAST" value="false" />
     <option name="BINARY_OPERATION_SIGN_ON_NEXT_LINE" value="true" />
     <option name="KEEP_SIMPLE_BLOCKS_IN_ONE_LINE" value="false" />

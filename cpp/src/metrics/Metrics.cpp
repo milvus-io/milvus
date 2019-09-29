@@ -21,7 +21,6 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -47,4 +46,3 @@ Metrics::CreateMetricsCollector() {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

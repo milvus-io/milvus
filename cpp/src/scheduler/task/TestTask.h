@@ -19,7 +19,6 @@
 
 #include "SearchTask.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -48,4 +47,3 @@ class TestTask : public XSearchTask {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

@@ -21,7 +21,6 @@
 #include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -54,4 +53,3 @@ using EventPtr = std::shared_ptr<Event>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

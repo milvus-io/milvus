@@ -23,7 +23,6 @@
 #include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -44,4 +43,3 @@ class TaskTableUpdatedEvent : public Event {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

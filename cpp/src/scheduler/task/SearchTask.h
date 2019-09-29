@@ -23,11 +23,10 @@
 
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-// TODO: rewrite
+// TODO(wxy): rewrite
 class XSearchTask : public Task {
  public:
     explicit XSearchTask(TableFileSchemaPtr file);
@@ -63,4 +62,3 @@ class XSearchTask : public Task {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

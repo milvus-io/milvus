@@ -15,15 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <arrow/array.h>
+#include <memory>
 
 #include "Schema.h"
 
-
-namespace zilliz {
 namespace knowhere {
 
 using ArrayData = arrow::ArrayData;
@@ -35,9 +33,9 @@ using ArrayPtr = std::shared_ptr<Array>;
 using BooleanArray = arrow::BooleanArray;
 using BooleanArrayPtr = std::shared_ptr<arrow::BooleanArray>;
 
-template<typename DType>
+template <typename DType>
 using NumericArray = arrow::NumericArray<DType>;
-template<typename DType>
+template <typename DType>
 using NumericArrayPtr = std::shared_ptr<arrow::NumericArray<DType>>;
 
 using BinaryArray = arrow::BinaryArray;
@@ -49,6 +47,4 @@ using FixedSizeBinaryArrayPtr = std::shared_ptr<arrow::FixedSizeBinaryArray>;
 using Decimal128Array = arrow::Decimal128Array;
 using Decimal128ArrayPtr = std::shared_ptr<arrow::Decimal128Array>;
 
-
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere

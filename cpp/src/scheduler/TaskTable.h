@@ -28,7 +28,6 @@
 #include "event/Event.h"
 #include "task/SearchTask.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -126,7 +125,7 @@ class TaskTable {
     Get(uint64_t index);
 
     /*
-     * TODO(wxyu): BIG GC
+     * TODO(wxy): BIG GC
      * Remove sequence task which is DONE or MOVED from front;
      * Called by ?
      */
@@ -174,7 +173,7 @@ class TaskTable {
  public:
     /******** Action ********/
 
-    // TODO: bool to Status
+    // TODO(wxy): bool to Status
     /*
      * Load a task;
      * Set state loading;
@@ -257,4 +256,3 @@ class TaskTable {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

@@ -28,7 +28,6 @@
 #include "resource/Resource.h"
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -48,7 +47,7 @@ class ResourceMgr {
     Add(ResourcePtr&& resource);
 
     bool
-    Connect(const std::string& res1, const std::string& res2, Connection& connection);
+    Connect(const std::string& name1, const std::string& name2, Connection& connection);
 
     void
     Clear();
@@ -65,7 +64,7 @@ class ResourceMgr {
         return disk_resources_;
     }
 
-    // TODO: why return shared pointer
+    // TODO(wxy): why return shared pointer
     inline std::vector<ResourcePtr>
     GetAllResources() {
         return resources_;
@@ -90,7 +89,7 @@ class ResourceMgr {
     GetNumGpuResource() const;
 
  public:
-    // TODO: add stats interface(low)
+    // TODO(wxy): add stats interface(low)
 
  public:
     /******** Utility Functions ********/
@@ -127,4 +126,3 @@ using ResourceMgrWPtr = std::weak_ptr<ResourceMgr>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

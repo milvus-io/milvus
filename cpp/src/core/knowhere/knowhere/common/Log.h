@@ -15,12 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "utils/easylogging++.h"
 
-namespace zilliz {
 namespace knowhere {
 
 #define KNOWHERE_DOMAIN_NAME "[KNOWHERE] "
@@ -33,5 +31,4 @@ namespace knowhere {
 #define KNOWHERE_LOG_ERROR LOG(ERROR) << KNOWHERE_DOMAIN_NAME
 #define KNOWHERE_LOG_FATAL LOG(FATAL) << KNOWHERE_DOMAIN_NAME
 
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere

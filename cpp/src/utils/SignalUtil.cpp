@@ -23,7 +23,6 @@
 #include <signal.h>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -68,4 +67,3 @@ SignalUtil::PrintStacktrace() {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

@@ -21,7 +21,6 @@
 #include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -61,4 +60,3 @@ class Connection {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

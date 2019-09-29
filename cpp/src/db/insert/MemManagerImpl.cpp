@@ -22,7 +22,6 @@
 
 #include <thread>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -140,4 +139,3 @@ MemManagerImpl::GetCurrentMem() {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

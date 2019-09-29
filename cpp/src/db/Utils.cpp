@@ -25,7 +25,6 @@
 #include <regex>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace utils {
@@ -143,14 +142,14 @@ GetTableFilePath(const DBMetaOptions& options, meta::TableFileSchema& table_file
     if (boost::filesystem::exists(file_path)) {
         table_file.location_ = file_path;
         return Status::OK();
-    } else {
-        for (auto& path : options.slave_paths_) {
-            parent_path = ConstructParentFolder(path, table_file);
-            file_path = parent_path + "/" + table_file.file_id_;
-            if (boost::filesystem::exists(file_path)) {
-                table_file.location_ = file_path;
-                return Status::OK();
-            }
+    }
+
+    for (auto& path : options.slave_paths_) {
+        parent_path = ConstructParentFolder(path, table_file);
+        file_path = parent_path + "/" + table_file.file_id_;
+        if (boost::filesystem::exists(file_path)) {
+            table_file.location_ = file_path;
+            return Status::OK();
         }
     }
 
@@ -228,7 +227,7 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
         info.port_ = pieces_match[5].str();
         info.db_name_ = pieces_match[6].str();
 
-        // TODO: verify host, port...
+        // TODO(myh): verify host, port...
     } else {
         return Status(DB_INVALID_META_URI, "Invalid meta uri: " + uri);
     }
@@ -239,4 +238,3 @@ ParseMetaUri(const std::string& uri, MetaUriInfo& info) {
 }  // namespace utils
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

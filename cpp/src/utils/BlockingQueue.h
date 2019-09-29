@@ -23,7 +23,6 @@
 #include <queue>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -69,6 +68,5 @@ class BlockingQueue {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz
 
 #include "./BlockingQueue.inl"

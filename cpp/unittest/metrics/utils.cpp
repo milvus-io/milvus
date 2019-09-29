@@ -28,7 +28,7 @@ INITIALIZE_EASYLOGGINGPP
 
 namespace {
 
-namespace ms = zilliz::milvus;
+namespace ms = milvus;
 
 class DBTestEnvironment : public ::testing::Environment {
  public:

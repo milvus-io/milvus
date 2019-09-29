@@ -15,13 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-
-namespace zilliz {
 namespace knowhere {
-
 
 enum class IndexType {
     kUnknown = 0,
@@ -30,6 +26,4 @@ enum class IndexType {
     kVecIdxEnd,
 };
 
-
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere

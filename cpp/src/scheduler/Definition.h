@@ -30,7 +30,6 @@
 #include "db/engine/ExecutionEngine.h"
 #include "db/meta/MetaTypes.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -44,4 +43,3 @@ using MetricType = engine::MetricType;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

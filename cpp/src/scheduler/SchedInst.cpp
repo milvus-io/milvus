@@ -26,7 +26,6 @@
 #include <utility>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -147,7 +146,7 @@ load_advance_config() {
     //        }
     //    } catch (const char *msg) {
     //        SERVER_LOG_ERROR << msg;
-    //        // TODO: throw exception instead
+    //        // TODO(wxy): throw exception instead
     //        exit(-1);
     ////        throw std::exception();
     //    }
@@ -171,4 +170,3 @@ StopSchedulerService() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz
