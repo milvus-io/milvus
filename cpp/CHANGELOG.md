@@ -35,6 +35,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-586 - Remove BUILD_FAISS_WITH_MKL option
 - MS-590 - Refine cmake code to support cpplint
 - MS-600 - Reconstruct unittest code
+- MS-602 - Remove zilliz namespace
 
 # Milvus 0.4.0 (2019-09-12)
 

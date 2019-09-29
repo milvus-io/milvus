@@ -23,7 +23,6 @@
 #include <sstream>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -35,11 +34,10 @@ RolloutHandler(const char* filename, std::size_t size, el::Level level);
 
 #define SHOW_LOCATION
 #ifdef SHOW_LOCATION
-#define LOCATION_INFO "[" << zilliz::sql::server::GetFileName(__FILE__) << ":" << __LINE__ << "] "
+#define LOCATION_INFO "[" << sql::server::GetFileName(__FILE__) << ":" << __LINE__ << "] "
 #else
 #define LOCATION_INFO ""
 #endif
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

@@ -33,7 +33,6 @@
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 
-namespace zilliz {
 namespace knowhere {
 
 IndexModelPtr
@@ -268,4 +267,3 @@ IVFIndexModel::SealImpl() {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

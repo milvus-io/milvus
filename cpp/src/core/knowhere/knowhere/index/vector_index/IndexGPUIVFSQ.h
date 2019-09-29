@@ -22,7 +22,6 @@
 
 #include "IndexGPUIVF.h"
 
-namespace zilliz {
 namespace knowhere {
 
 class GPUIVFSQ : public GPUIVF {
@@ -42,4 +41,3 @@ class GPUIVFSQ : public GPUIVF {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

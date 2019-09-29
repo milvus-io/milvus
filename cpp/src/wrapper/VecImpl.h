@@ -23,13 +23,12 @@
 #include <memory>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class VecIndexImpl : public VecIndex {
  public:
-    explicit VecIndexImpl(std::shared_ptr<zilliz::knowhere::VectorIndex> index, const IndexType& type)
+    explicit VecIndexImpl(std::shared_ptr<knowhere::VectorIndex> index, const IndexType& type)
         : index_(std::move(index)), type(type) {
     }
 
@@ -55,11 +54,11 @@ class VecIndexImpl : public VecIndex {
     Status
     Add(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg) override;
 
-    zilliz::knowhere::BinarySet
+    knowhere::BinarySet
     Serialize() override;
 
     Status
-    Load(const zilliz::knowhere::BinarySet& index_binary) override;
+    Load(const knowhere::BinarySet& index_binary) override;
 
     VecIndexPtr
     Clone() override;
@@ -75,12 +74,12 @@ class VecIndexImpl : public VecIndex {
 
     IndexType type = IndexType::INVALID;
 
-    std::shared_ptr<zilliz::knowhere::VectorIndex> index_ = nullptr;
+    std::shared_ptr<knowhere::VectorIndex> index_ = nullptr;
 };
 
 class IVFMixIndex : public VecIndexImpl {
  public:
-    explicit IVFMixIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index, const IndexType& type)
+    explicit IVFMixIndex(std::shared_ptr<knowhere::VectorIndex> index, const IndexType& type)
         : VecIndexImpl(std::move(index), type) {
     }
 
@@ -89,12 +88,12 @@ class IVFMixIndex : public VecIndexImpl {
              const float* xt) override;
 
     Status
-    Load(const zilliz::knowhere::BinarySet& index_binary) override;
+    Load(const knowhere::BinarySet& index_binary) override;
 };
 
 class BFIndex : public VecIndexImpl {
  public:
-    explicit BFIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index)
+    explicit BFIndex(std::shared_ptr<knowhere::VectorIndex> index)
         : VecIndexImpl(std::move(index), IndexType::FAISS_IDMAP) {
     }
 
@@ -114,4 +113,3 @@ class BFIndex : public VecIndexImpl {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

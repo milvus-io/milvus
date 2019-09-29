@@ -28,7 +28,7 @@
 #include "utils/Error.h"
 #include "wrapper/VecIndex.h"
 
-namespace zilliz {
+
 namespace milvus {
 namespace scheduler {
 
@@ -43,7 +43,7 @@ class MockVecIndex : public engine::VecIndex {
     }
 
     engine::VecIndexPtr Clone() override {
-        return zilliz::milvus::engine::VecIndexPtr();
+        return milvus::engine::VecIndexPtr();
     }
 
     int64_t GetDeviceId() override {
@@ -81,12 +81,12 @@ class MockVecIndex : public engine::VecIndex {
         return ntotal_;
     }
 
-    virtual zilliz::knowhere::BinarySet Serialize() {
-        zilliz::knowhere::BinarySet binset;
+    virtual knowhere::BinarySet Serialize() {
+        knowhere::BinarySet binset;
         return binset;
     }
 
-    virtual Status Load(const zilliz::knowhere::BinarySet &index_binary) {
+    virtual Status Load(const knowhere::BinarySet &index_binary) {
     }
 
  public:
@@ -253,4 +253,4 @@ TEST_F(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
 
 } // namespace scheduler
 } // namespace milvus
-} // namespace zilliz
+

@@ -20,7 +20,7 @@
 #include "knowhere/index/preprocessor/Normalize.h"
 //
 //
-// namespace zilliz {
+//
 // namespace knowhere {
 //
 // DatasetPtr
@@ -54,4 +54,4 @@
 //}
 //
 //} // namespace knowhere
-//} // namespace zilliz
+//

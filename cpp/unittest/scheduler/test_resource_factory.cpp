@@ -21,7 +21,7 @@
 
 namespace {
 
-namespace ms = zilliz::milvus::scheduler;
+namespace ms = milvus::scheduler;
 
 } // namespace
 

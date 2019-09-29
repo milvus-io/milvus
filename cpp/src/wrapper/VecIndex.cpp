@@ -31,7 +31,6 @@
 
 #include <cuda.h>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -95,51 +94,51 @@ FileIOWriter::operator()(void* ptr, size_t size) {
 
 VecIndexPtr
 GetVecIndexFactory(const IndexType& type, const Config& cfg) {
-    std::shared_ptr<zilliz::knowhere::VectorIndex> index;
+    std::shared_ptr<knowhere::VectorIndex> index;
     auto gpu_device = -1;  // TODO(linxj): remove hardcode here
     switch (type) {
         case IndexType::FAISS_IDMAP: {
-            index = std::make_shared<zilliz::knowhere::IDMAP>();
+            index = std::make_shared<knowhere::IDMAP>();
             return std::make_shared<BFIndex>(index);
         }
         case IndexType::FAISS_IVFFLAT_CPU: {
-            index = std::make_shared<zilliz::knowhere::IVF>();
+            index = std::make_shared<knowhere::IVF>();
             break;
         }
         case IndexType::FAISS_IVFFLAT_GPU: {
-            index = std::make_shared<zilliz::knowhere::GPUIVF>(gpu_device);
+            index = std::make_shared<knowhere::GPUIVF>(gpu_device);
             break;
         }
         case IndexType::FAISS_IVFFLAT_MIX: {
-            index = std::make_shared<zilliz::knowhere::GPUIVF>(gpu_device);
+            index = std::make_shared<knowhere::GPUIVF>(gpu_device);
             return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFFLAT_MIX);
         }
         case IndexType::FAISS_IVFPQ_CPU: {
-            index = std::make_shared<zilliz::knowhere::IVFPQ>();
+            index = std::make_shared<knowhere::IVFPQ>();
             break;
         }
         case IndexType::FAISS_IVFPQ_GPU: {
-            index = std::make_shared<zilliz::knowhere::GPUIVFPQ>(gpu_device);
+            index = std::make_shared<knowhere::GPUIVFPQ>(gpu_device);
             break;
         }
         case IndexType::SPTAG_KDT_RNT_CPU: {
-            index = std::make_shared<zilliz::knowhere::CPUKDTRNG>();
+            index = std::make_shared<knowhere::CPUKDTRNG>();
             break;
         }
         case IndexType::FAISS_IVFSQ8_MIX: {
-            index = std::make_shared<zilliz::knowhere::GPUIVFSQ>(gpu_device);
+            index = std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
             return std::make_shared<IVFMixIndex>(index, IndexType::FAISS_IVFSQ8_MIX);
         }
         case IndexType::FAISS_IVFSQ8_CPU: {
-            index = std::make_shared<zilliz::knowhere::IVFSQ>();
+            index = std::make_shared<knowhere::IVFSQ>();
             break;
         }
         case IndexType::FAISS_IVFSQ8_GPU: {
-            index = std::make_shared<zilliz::knowhere::GPUIVFSQ>(gpu_device);
+            index = std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
             break;
         }
         case IndexType::NSG_MIX: {
-            index = std::make_shared<zilliz::knowhere::NSG>(gpu_device);
+            index = std::make_shared<knowhere::NSG>(gpu_device);
             break;
         }
         default: { return nullptr; }
@@ -148,7 +147,7 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
 }
 
 VecIndexPtr
-LoadVecIndex(const IndexType& index_type, const zilliz::knowhere::BinarySet& index_binary) {
+LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binary) {
     auto index = GetVecIndexFactory(index_type);
     index->Load(index_binary);
     return index;
@@ -267,4 +266,3 @@ ConvertToGpuIndexType(const IndexType& type) {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

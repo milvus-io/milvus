@@ -28,7 +28,6 @@
 #include <thread>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -130,4 +129,3 @@ class GrpcRequestScheduler {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

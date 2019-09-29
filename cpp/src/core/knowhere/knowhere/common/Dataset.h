@@ -28,7 +28,6 @@
 #include "Tensor.h"
 #include "knowhere/adapter/ArrowAdapter.h"
 
-namespace zilliz {
 namespace knowhere {
 
 class Dataset;
@@ -148,4 +147,3 @@ class Dataset {
 using DatasetPtr = std::shared_ptr<Dataset>;
 
 }  // namespace knowhere
-}  // namespace zilliz

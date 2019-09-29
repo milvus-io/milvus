@@ -20,7 +20,6 @@
 
 #include "knowhere/index/vector_index/nsg/NSGHelper.h"
 
-namespace zilliz {
 namespace knowhere {
 namespace algo {
 
@@ -180,4 +179,3 @@ calculate(const float* a, const float* b, unsigned size) {
 
 }  // namespace algo
 }  // namespace knowhere
-}  // namespace zilliz

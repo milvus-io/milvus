@@ -26,7 +26,6 @@ class Resource;
 
 using ResourceWPtr = std::weak_ptr<Resource>;
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -55,4 +54,3 @@ using SpecResLabelPtr = std::shared_ptr<SpecResLabel>();
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

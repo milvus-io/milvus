@@ -22,7 +22,6 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -35,4 +34,3 @@ class EngineFactory {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

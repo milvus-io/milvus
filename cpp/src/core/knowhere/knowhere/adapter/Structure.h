@@ -23,7 +23,6 @@
 
 #include "knowhere/common/Dataset.h"
 
-namespace zilliz {
 namespace knowhere {
 
 extern ArrayPtr
@@ -51,4 +50,3 @@ extern FieldPtr
 ConstructFloatField(const std::string& name);
 
 }  // namespace knowhere
-}  // namespace zilliz

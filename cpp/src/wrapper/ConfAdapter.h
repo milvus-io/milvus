@@ -22,7 +22,6 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -93,4 +92,3 @@ class NSGConfAdapter : public IVFConfAdapter {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

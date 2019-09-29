@@ -19,7 +19,6 @@
 #include "scheduler/tasklabel/BroadcastLabel.h"
 #include "tasklabel/DefaultLabel.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -65,4 +64,3 @@ TaskCreator::Create(const DeleteJobPtr& job) {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

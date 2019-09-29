@@ -30,7 +30,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -80,4 +79,3 @@ class MemManagerImpl : public MemManager {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

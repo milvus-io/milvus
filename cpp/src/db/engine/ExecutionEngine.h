@@ -23,7 +23,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -105,4 +104,3 @@ using ExecutionEnginePtr = std::shared_ptr<ExecutionEngine>;
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

@@ -20,7 +20,6 @@
 
 #include <sys/stat.h>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -116,4 +115,3 @@ YamlConfigMgr::LoadConfigNode(const YAML::Node& node, ConfigNode& config) {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

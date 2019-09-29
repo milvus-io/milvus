@@ -22,7 +22,6 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -34,4 +33,3 @@ class MemManagerFactory {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

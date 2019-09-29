@@ -20,7 +20,6 @@
 #include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -44,4 +43,3 @@ DiskResource::Process(TaskPtr task) {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

@@ -23,7 +23,7 @@
 
 namespace {
 
-namespace ms = zilliz::milvus;
+namespace ms = milvus;
 
 class InvalidCacheMgr : public ms::cache::CacheMgr<ms::cache::DataObjPtr> {
  public:
@@ -55,7 +55,7 @@ class MockVecIndex : public ms::engine::VecIndex {
     }
 
     ms::engine::VecIndexPtr Clone() override {
-        return zilliz::milvus::engine::VecIndexPtr();
+        return milvus::engine::VecIndexPtr();
     }
 
     int64_t GetDeviceId() override {
@@ -98,12 +98,12 @@ class MockVecIndex : public ms::engine::VecIndex {
         return ntotal_;
     }
 
-    virtual zilliz::knowhere::BinarySet Serialize() {
-        zilliz::knowhere::BinarySet binset;
+    virtual knowhere::BinarySet Serialize() {
+        knowhere::BinarySet binset;
         return binset;
     }
 
-    virtual ms::Status Load(const zilliz::knowhere::BinarySet &index_binary) {
+    virtual ms::Status Load(const knowhere::BinarySet &index_binary) {
         return ms::Status();
     }
 
@@ -127,7 +127,7 @@ TEST(CacheTest, DUMMY_TEST) {
     mock_index.CopyToGpu(1, cfg);
     mock_index.GetDeviceId();
     mock_index.GetType();
-    zilliz::knowhere::BinarySet index_binary;
+    knowhere::BinarySet index_binary;
     mock_index.Load(index_binary);
     mock_index.Serialize();
 }

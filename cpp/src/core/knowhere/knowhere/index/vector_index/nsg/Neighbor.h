@@ -19,7 +19,6 @@
 
 #include <mutex>
 
-namespace zilliz {
 namespace knowhere {
 namespace algo {
 
@@ -61,4 +60,3 @@ typedef std::lock_guard<std::mutex> LockGuard;
 
 }  // namespace algo
 }  // namespace knowhere
-}  // namespace zilliz

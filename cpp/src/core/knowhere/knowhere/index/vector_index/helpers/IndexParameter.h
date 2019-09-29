@@ -22,7 +22,6 @@
 
 #include "knowhere/common/Config.h"
 
-namespace zilliz {
 namespace knowhere {
 
 extern faiss::MetricType
@@ -132,4 +131,3 @@ struct KDTCfg : public Cfg {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

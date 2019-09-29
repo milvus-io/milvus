@@ -17,13 +17,9 @@
 
 #pragma once
 
-//#include "zcommon/id/id.h"
-// using ID = zilliz::common::ID;
-
 #include <stdint.h>
 #include <string>
 
-namespace zilliz {
 namespace knowhere {
 
 class ID {
@@ -58,4 +54,3 @@ class ID {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

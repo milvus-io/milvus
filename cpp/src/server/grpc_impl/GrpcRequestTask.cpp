@@ -34,7 +34,6 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -43,8 +42,8 @@ static const char* DQL_TASK_GROUP = "dql";
 static const char* DDL_DML_TASK_GROUP = "ddl_dml";
 static const char* PING_TASK_GROUP = "ping";
 
-using DB_META = zilliz::milvus::engine::meta::Meta;
-using DB_DATE = zilliz::milvus::engine::meta::DateT;
+using DB_META = milvus::engine::meta::Meta;
+using DB_DATE = milvus::engine::meta::DateT;
 
 namespace {
 engine::EngineType
@@ -934,4 +933,3 @@ DropIndexTask::OnExecute() {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

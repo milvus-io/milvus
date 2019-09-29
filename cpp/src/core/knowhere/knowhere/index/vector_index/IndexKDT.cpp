@@ -30,7 +30,6 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/helpers/KDTParameterMgr.h"
 
-namespace zilliz {
 namespace knowhere {
 
 BinarySet
@@ -174,4 +173,3 @@ CPUKDTRNGIndexModel::Load(const BinarySet& binary) {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

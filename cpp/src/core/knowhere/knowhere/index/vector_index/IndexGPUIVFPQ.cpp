@@ -24,7 +24,6 @@
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
 
-namespace zilliz {
 namespace knowhere {
 
 IndexModelPtr
@@ -68,4 +67,3 @@ GPUIVFPQ::CopyGpuToCpu(const Config& config) {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

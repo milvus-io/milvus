@@ -28,7 +28,6 @@
 #include "resource/Resource.h"
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -127,4 +126,3 @@ using ResourceMgrWPtr = std::weak_ptr<ResourceMgr>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

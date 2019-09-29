@@ -21,7 +21,7 @@
 #include "server/Config.h"
 #include "scheduler/SchedInst.h"
 
-namespace zilliz {
+
 namespace milvus {
 namespace scheduler {
 
@@ -83,6 +83,6 @@ TEST_F(SchedInstTest, SIMPLE_GPU) {
 
 } // namespace scheduler
 } // namespace milvus
-} // namespace zilliz
+
 
 

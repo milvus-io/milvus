@@ -21,7 +21,6 @@
 #include "metrics/Metrics.h"
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -77,4 +76,3 @@ VectorSource::GetVectorIds() {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

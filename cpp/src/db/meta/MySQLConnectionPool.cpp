@@ -17,7 +17,6 @@
 
 #include "db/meta/MySQLConnectionPool.h"
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -95,4 +94,3 @@ MySQLConnectionPool::max_idle_time() {
 }  // namespace meta
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

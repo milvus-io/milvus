@@ -28,7 +28,6 @@
 #include "resource/Resource.h"
 #include "utils/Log.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -133,4 +132,3 @@ using SchedulerPtr = std::shared_ptr<Scheduler>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

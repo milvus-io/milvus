@@ -19,7 +19,6 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace knowhere {
 
 enum class METRICTYPE {
@@ -55,4 +54,3 @@ struct Cfg {
 using Config = std::shared_ptr<Cfg>;
 
 }  // namespace knowhere
-}  // namespace zilliz

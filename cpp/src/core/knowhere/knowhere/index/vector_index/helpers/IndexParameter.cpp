@@ -20,7 +20,6 @@
 
 #include <faiss/Index.h>
 
-namespace zilliz {
 namespace knowhere {
 
 faiss::MetricType
@@ -36,4 +35,3 @@ GetMetricType(METRICTYPE& type) {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

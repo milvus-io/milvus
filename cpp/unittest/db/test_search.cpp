@@ -24,7 +24,7 @@
 
 namespace {
 
-namespace ms = zilliz::milvus;
+namespace ms = milvus;
 
 static constexpr uint64_t NQ = 15;
 static constexpr uint64_t TOP_K = 64;

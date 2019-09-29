@@ -37,7 +37,7 @@
 
 namespace {
 
-namespace ms = zilliz::milvus;
+namespace ms = milvus;
 
 static constexpr int64_t TABLE_DIM = 256;
 

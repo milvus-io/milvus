@@ -20,7 +20,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace knowhere {
 
 ArrayPtr
@@ -86,4 +85,3 @@ ConstructFloatField(const std::string& name) {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

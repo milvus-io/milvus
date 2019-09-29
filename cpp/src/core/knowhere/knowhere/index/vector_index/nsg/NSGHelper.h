@@ -25,7 +25,6 @@
 #include "NSG.h"
 #include "knowhere/common/Config.h"
 
-namespace zilliz {
 namespace knowhere {
 namespace algo {
 
@@ -36,4 +35,3 @@ calculate(const float* a, const float* b, unsigned size);
 
 }  // namespace algo
 }  // namespace knowhere
-}  // namespace zilliz

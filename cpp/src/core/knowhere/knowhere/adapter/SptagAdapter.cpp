@@ -19,7 +19,6 @@
 #include "knowhere/adapter/Structure.h"
 #include "knowhere/index/vector_index/helpers/Definitions.h"
 
-namespace zilliz {
 namespace knowhere {
 
 std::shared_ptr<SPTAG::MetadataSet>
@@ -121,4 +120,3 @@ ConvertToDataset(std::vector<SPTAG::QueryResult> query_results) {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

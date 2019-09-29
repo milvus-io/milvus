@@ -19,7 +19,6 @@
 
 #include "knowhere/index/vector_index/VectorIndex.h"
 
-namespace zilliz {
 namespace knowhere {
 namespace cloner {
 
@@ -32,4 +31,3 @@ CopyGpuToCpu(const VectorIndexPtr& index, const Config& config);
 
 }  // namespace cloner
 }  // namespace knowhere
-}  // namespace zilliz
