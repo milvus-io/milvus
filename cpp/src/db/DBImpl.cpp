@@ -39,7 +39,6 @@
 #include <iostream>
 #include <thread>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -249,7 +248,7 @@ DBImpl::InsertVectors(const std::string& table_id, uint64_t n, const float* vect
     }
 
     Status status;
-    zilliz::milvus::server::CollectInsertMetrics metrics(n, status);
+    milvus::server::CollectInsertMetrics metrics(n, status);
     status = mem_mgr_->InsertVectors(table_id, n, vectors, vector_ids);
     //    std::chrono::microseconds time_span =
     //          std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
@@ -914,4 +913,3 @@ DBImpl::BackgroundBuildIndex() {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

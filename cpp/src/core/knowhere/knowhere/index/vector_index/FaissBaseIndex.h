@@ -23,7 +23,6 @@
 
 #include "knowhere/common/BinarySet.h"
 
-namespace zilliz {
 namespace knowhere {
 
 class FaissBaseIndex {
@@ -44,4 +43,3 @@ class FaissBaseIndex {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

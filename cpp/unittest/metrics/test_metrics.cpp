@@ -31,7 +31,7 @@
 
 namespace {
 
-namespace ms = zilliz::milvus;
+namespace ms = milvus;
 
 } // namespace
 
@@ -47,8 +47,8 @@ TEST_F(MetricTest, METRIC_TEST) {
     ms::server::Metrics::GetInstance().Init();
 
 //    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
-    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL * 1024 * 1024 * 1024);
-    std::cout << zilliz::milvus::cache::CpuCacheMgr::GetInstance()->CacheCapacity() << std::endl;
+    milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL * 1024 * 1024 * 1024);
+    std::cout << milvus::cache::CpuCacheMgr::GetInstance()->CacheCapacity() << std::endl;
 
     static const char *group_name = "test_group";
     static const int group_dim = 256;

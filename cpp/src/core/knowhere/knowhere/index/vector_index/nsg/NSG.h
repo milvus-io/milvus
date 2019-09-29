@@ -24,7 +24,6 @@
 #include <boost/dynamic_bitset.hpp>
 #include "Neighbor.h"
 
-namespace zilliz {
 namespace knowhere {
 namespace algo {
 
@@ -143,4 +142,3 @@ class NsgIndex {
 
 }  // namespace algo
 }  // namespace knowhere
-}  // namespace zilliz

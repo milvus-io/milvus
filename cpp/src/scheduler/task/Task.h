@@ -25,7 +25,6 @@
 #include <memory>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -93,4 +92,3 @@ class Task {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

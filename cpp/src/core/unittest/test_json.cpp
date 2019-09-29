@@ -19,7 +19,7 @@
 
 namespace {
 
-namespace kn = zilliz::knowhere;
+namespace kn = knowhere;
 
 }  // namespace
 

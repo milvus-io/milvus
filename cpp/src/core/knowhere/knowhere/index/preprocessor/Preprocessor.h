@@ -21,7 +21,6 @@
 
 #include "knowhere/common/Dataset.h"
 
-namespace zilliz {
 namespace knowhere {
 
 class Preprocessor {
@@ -33,4 +32,3 @@ class Preprocessor {
 using PreprocessorPtr = std::shared_ptr<Preprocessor>;
 
 }  // namespace knowhere
-}  // namespace zilliz

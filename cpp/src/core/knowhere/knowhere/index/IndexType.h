@@ -17,7 +17,6 @@
 
 #pragma once
 
-namespace zilliz {
 namespace knowhere {
 
 enum class IndexType {
@@ -28,4 +27,3 @@ enum class IndexType {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

@@ -25,7 +25,6 @@
 #include "Connection.h"
 #include "scheduler/TaskTable.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -67,4 +66,3 @@ using NodeWPtr = std::weak_ptr<Node>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

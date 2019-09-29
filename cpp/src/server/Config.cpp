@@ -30,7 +30,6 @@
 #include "utils/CommonUtil.h"
 #include "utils/ValidationUtil.h"
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -1363,4 +1362,3 @@ Config::SetResourceConfigMode(const std::string& value) {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

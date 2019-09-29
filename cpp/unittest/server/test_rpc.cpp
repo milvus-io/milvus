@@ -36,7 +36,7 @@
 
 namespace {
 
-namespace ms = zilliz::milvus;
+namespace ms = milvus;
 
 static const char *TABLE_NAME = "test_grpc";
 static constexpr int64_t TABLE_DIM = 256;

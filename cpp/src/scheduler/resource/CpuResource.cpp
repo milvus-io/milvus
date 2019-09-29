@@ -19,7 +19,6 @@
 
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -45,4 +44,3 @@ CpuResource::Process(TaskPtr task) {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

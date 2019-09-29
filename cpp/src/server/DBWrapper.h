@@ -22,7 +22,6 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -59,4 +58,3 @@ class DBWrapper {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

@@ -17,7 +17,6 @@
 
 #include "scheduler/ResourceFactory.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -37,4 +36,3 @@ ResourceFactory::Create(const std::string& name, const std::string& type, uint64
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

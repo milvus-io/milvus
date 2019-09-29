@@ -20,7 +20,6 @@
 #include <memory>
 #include "knowhere/common/BinarySet.h"
 
-namespace zilliz {
 namespace knowhere {
 
 class IndexModel {
@@ -35,4 +34,3 @@ class IndexModel {
 using IndexModelPtr = std::shared_ptr<IndexModel>;
 
 }  // namespace knowhere
-}  // namespace zilliz

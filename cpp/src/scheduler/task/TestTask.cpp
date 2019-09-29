@@ -18,7 +18,6 @@
 #include "scheduler/task/TestTask.h"
 #include "cache/GpuCacheMgr.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -48,4 +47,3 @@ TestTask::Wait() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

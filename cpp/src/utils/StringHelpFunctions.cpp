@@ -19,7 +19,6 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -125,4 +124,3 @@ StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::strin
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

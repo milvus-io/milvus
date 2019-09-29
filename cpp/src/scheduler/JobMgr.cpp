@@ -21,7 +21,6 @@
 
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -85,4 +84,3 @@ JobMgr::build_task(const JobPtr& job) {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

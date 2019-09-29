@@ -38,7 +38,6 @@
 #define THREAD_MULTIPLY_CPU 1
 #endif
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -225,4 +224,3 @@ CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

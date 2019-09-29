@@ -20,7 +20,6 @@
 #include "Task.h"
 #include "scheduler/job/DeleteJob.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -40,4 +39,3 @@ class XDeleteTask : public Task {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

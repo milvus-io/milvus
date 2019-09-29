@@ -19,7 +19,6 @@
 
 #include "utils/Status.h"
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -34,4 +33,3 @@ class KnowhereResource {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

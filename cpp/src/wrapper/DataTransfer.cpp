@@ -21,7 +21,6 @@
 #include <utility>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -57,4 +56,3 @@ GenDataset(const int64_t& nb, const int64_t& dim, const float* xb) {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

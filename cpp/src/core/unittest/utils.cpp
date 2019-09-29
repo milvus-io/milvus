@@ -25,7 +25,7 @@ INITIALIZE_EASYLOGGINGPP
 
 namespace {
 
-namespace kn = zilliz::knowhere;
+namespace kn = knowhere;
 
 }  // namespace
 
@@ -56,7 +56,7 @@ DataGen::Generate(const int& dim, const int& nb, const int& nq) {
     query_dataset = generate_query_dataset(nq, dim, xq.data());
 }
 
-zilliz::knowhere::DatasetPtr
+knowhere::DatasetPtr
 DataGen::GenQuery(const int& nq) {
     xq.resize(nq * dim);
     for (int i = 0; i < nq * dim; ++i) {

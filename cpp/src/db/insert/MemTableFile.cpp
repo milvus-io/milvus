@@ -24,7 +24,6 @@
 #include <cmath>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -126,4 +125,3 @@ MemTableFile::Serialize() {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

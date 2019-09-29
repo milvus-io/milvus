@@ -31,7 +31,6 @@
 //#define server::Metrics::GetInstance() server::GetInstance()
 #define METRICS_MICROSECONDS(a, b) (std::chrono::duration_cast<std::chrono::microseconds>(b - a)).count();
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -654,4 +653,3 @@ class PrometheusMetrics : public MetricsBase {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

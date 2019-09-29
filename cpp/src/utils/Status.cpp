@@ -19,7 +19,6 @@
 
 #include <cstring>
 
-namespace zilliz {
 namespace milvus {
 
 constexpr int CODE_WIDTH = sizeof(StatusCode);
@@ -138,4 +137,3 @@ Status::ToString() const {
 }
 
 }  // namespace milvus
-}  // namespace zilliz

@@ -26,7 +26,6 @@
 #include <utility>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -171,4 +170,3 @@ StopSchedulerService() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

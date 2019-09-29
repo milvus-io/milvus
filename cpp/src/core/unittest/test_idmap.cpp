@@ -27,7 +27,7 @@
 
 namespace {
 
-namespace kn = zilliz::knowhere;
+namespace kn = knowhere;
 
 }  // namespace
 
@@ -179,9 +179,9 @@ TEST_F(IDMAPTest, copy_test) {
         auto clone_result = clone_index->Search(query_dataset, conf);
         AssertAnns(clone_result, nq, k);
         ASSERT_THROW({ std::static_pointer_cast<kn::GPUIDMAP>(clone_index)->GetRawVectors(); },
-                     zilliz::knowhere::KnowhereException);
+                     knowhere::KnowhereException);
         ASSERT_THROW({ std::static_pointer_cast<kn::GPUIDMAP>(clone_index)->GetRawIds(); },
-                     zilliz::knowhere::KnowhereException);
+                     knowhere::KnowhereException);
 
         auto binary = clone_index->Serialize();
         clone_index->Load(binary);

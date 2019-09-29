@@ -22,7 +22,6 @@
 
 #include "IndexIVF.h"
 
-namespace zilliz {
 namespace knowhere {
 
 class IVFSQ : public IVF {
@@ -44,4 +43,3 @@ class IVFSQ : public IVF {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

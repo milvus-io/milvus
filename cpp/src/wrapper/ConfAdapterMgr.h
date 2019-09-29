@@ -23,7 +23,6 @@
 #include <map>
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -55,4 +54,3 @@ class AdapterMgr {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

@@ -24,11 +24,10 @@
 #include "knowhere/common/Config.h"
 #include "utils/Status.h"
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
-using Config = zilliz::knowhere::Config;
+using Config = knowhere::Config;
 
 enum class IndexType {
     INVALID = 0,
@@ -82,11 +81,11 @@ class VecIndex {
     virtual int64_t
     Count() = 0;
 
-    virtual zilliz::knowhere::BinarySet
+    virtual knowhere::BinarySet
     Serialize() = 0;
 
     virtual Status
-    Load(const zilliz::knowhere::BinarySet& index_binary) = 0;
+    Load(const knowhere::BinarySet& index_binary) = 0;
 };
 
 extern Status
@@ -99,7 +98,7 @@ extern VecIndexPtr
 GetVecIndexFactory(const IndexType& type, const Config& cfg = Config());
 
 extern VecIndexPtr
-LoadVecIndex(const IndexType& index_type, const zilliz::knowhere::BinarySet& index_binary);
+LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binary);
 
 extern IndexType
 ConvertToCpuIndexType(const IndexType& type);
@@ -109,4 +108,3 @@ ConvertToGpuIndexType(const IndexType& type);
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

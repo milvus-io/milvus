@@ -22,7 +22,6 @@
 #include <time.h>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -61,4 +60,3 @@ class CommonUtil {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz
