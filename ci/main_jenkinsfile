@@ -33,12 +33,30 @@ pipeline {
                             cloud 'build-kubernetes'
                             label 'build'
                             defaultContainer 'jnlp'
-                            containerTemplate {
-                                name 'milvus-build-env'
-                                image 'registry.zilliz.com/milvus/milvus-build-env:v0.12'
-                                ttyEnabled true
-                                command 'cat'
-                            }
+                            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  name: milvus-build-env
+  labels:
+    app: milvus
+    componet: build-env
+spec:
+  containers:
+  - name: milvus-build-env
+    image: registry.zilliz.com/milvus/milvus-build-env:v0.12
+    command:
+    - cat
+    tty: true
+    resources:
+      limits:
+        memory: "28Gi"
+        cpu: "10.0"
+        nvidia.com/gpu: 1
+      requests:
+        memory: "14Gi"
+        cpu: "5.0"
+"""
                         }
                     }
                     stages {
