@@ -39,6 +39,7 @@ enum class LoadType {
 enum class TaskType {
     SearchTask,
     DeleteTask,
+    BuildIndexTask,
     TestTask,
 };
 
