@@ -29,7 +29,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
@@ -271,4 +270,3 @@ class DropIndexTask : public GrpcBaseTask {
 }  // namespace grpc
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

@@ -26,7 +26,6 @@
 #include <thread>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -374,4 +373,3 @@ XSearchTask::TopkResult(scheduler::ResultSet& result_src, uint64_t topk, bool as
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

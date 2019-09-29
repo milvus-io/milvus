@@ -19,7 +19,6 @@
 
 #include "knowhere/index/vector_index/helpers/KDTParameterMgr.h"
 
-namespace zilliz {
 namespace knowhere {
 
 const std::vector<KDTParameter>&
@@ -54,4 +53,3 @@ KDTParameterMgr::KDTParameterMgr() {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

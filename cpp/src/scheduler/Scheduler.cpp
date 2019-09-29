@@ -23,7 +23,6 @@
 
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -139,4 +138,3 @@ Scheduler::OnTaskTableUpdated(const EventPtr& event) {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

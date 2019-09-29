@@ -23,7 +23,6 @@
 #include <utility>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -42,4 +41,3 @@ struct TableIndex {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

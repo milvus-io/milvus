@@ -30,7 +30,6 @@
 
 #define MAX_THREADS_NUM 32
 
-namespace zilliz {
 namespace milvus {
 
 class ThreadPool {
@@ -118,4 +117,3 @@ inline ThreadPool::~ThreadPool() {
 }
 
 }  // namespace milvus
-}  // namespace zilliz

@@ -21,7 +21,6 @@
 
 #include <arrow/buffer.h>
 
-namespace zilliz {
 namespace knowhere {
 
 using Buffer = arrow::Buffer;
@@ -60,4 +59,3 @@ MakeMutableBuffer(uint8_t* data, const int64_t size) {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

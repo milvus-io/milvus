@@ -19,7 +19,6 @@
 
 #include "utils/easylogging++.h"
 
-namespace zilliz {
 namespace knowhere {
 
 #define KNOWHERE_DOMAIN_NAME "[KNOWHERE] "
@@ -33,4 +32,3 @@ namespace knowhere {
 #define KNOWHERE_LOG_FATAL LOG(FATAL) << KNOWHERE_DOMAIN_NAME
 
 }  // namespace knowhere
-}  // namespace zilliz

@@ -19,7 +19,6 @@
 
 #include <faiss/AuxIndexStructures.h>
 
-namespace zilliz {
 namespace knowhere {
 
 struct MemoryIOWriter : public faiss::IOWriter {
@@ -41,4 +40,3 @@ struct MemoryIOReader : public faiss::IOReader {
 };
 
 }  // namespace knowhere
-}  // namespace zilliz

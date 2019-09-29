@@ -34,7 +34,6 @@
 #include "task/SearchTask.h"
 #include "task/Task.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -53,4 +52,3 @@ class TaskCreator {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

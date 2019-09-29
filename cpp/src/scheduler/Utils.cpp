@@ -20,7 +20,6 @@
 #include <cuda_runtime.h>
 #include <chrono>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -41,4 +40,3 @@ get_num_gpu() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

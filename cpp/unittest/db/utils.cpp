@@ -33,7 +33,7 @@ INITIALIZE_EASYLOGGINGPP
 
 namespace {
 
-namespace ms = zilliz::milvus;
+namespace ms = milvus;
 
 class DBTestEnvironment : public ::testing::Environment {
  public:
@@ -73,14 +73,14 @@ void
 BaseTest::SetUp() {
     InitLog();
 
-    zilliz::knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(0, 1024 * 1024 * 200, 1024 * 1024 * 300, 2);
+    knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(0, 1024 * 1024 * 200, 1024 * 1024 * 300, 2);
 }
 
 void
 BaseTest::TearDown() {
-    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->ClearCache();
-    zilliz::milvus::cache::GpuCacheMgr::GetInstance(0)->ClearCache();
-    zilliz::knowhere::FaissGpuResourceMgr::GetInstance().Free();
+    milvus::cache::CpuCacheMgr::GetInstance()->ClearCache();
+    milvus::cache::GpuCacheMgr::GetInstance(0)->ClearCache();
+    knowhere::FaissGpuResourceMgr::GetInstance().Free();
 }
 
 ms::engine::DBOptions

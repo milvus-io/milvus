@@ -19,7 +19,6 @@
 
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -48,4 +47,3 @@ DeleteJob::ResourceDone() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

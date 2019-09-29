@@ -23,7 +23,6 @@
 #include <memory>
 #include <utility>
 
-namespace zilliz {
 namespace knowhere {
 
 class IDMAP : public VectorIndex, public FaissBaseIndex {
@@ -97,4 +96,3 @@ class GPUIDMAP : public IDMAP, public GPUIndex {
 using GPUIDMAPPtr = std::shared_ptr<GPUIDMAP>;
 
 }  // namespace knowhere
-}  // namespace zilliz

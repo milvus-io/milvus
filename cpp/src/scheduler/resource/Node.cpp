@@ -20,7 +20,6 @@
 #include <atomic>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -61,4 +60,3 @@ Node::AddNeighbour(const NeighbourNodePtr& neighbour_node, Connection& connectio
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

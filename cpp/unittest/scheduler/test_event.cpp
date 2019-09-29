@@ -23,7 +23,7 @@
 #include "scheduler/event/StartUpEvent.h"
 
 
-namespace zilliz {
+
 namespace milvus {
 namespace scheduler {
 
@@ -62,5 +62,5 @@ TEST(EventTest, TASKTABLE_UPDATED_EVENT) {
 
 } // namespace scheduler
 } // namespace milvus
-} // namespace zilliz
+
 

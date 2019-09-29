@@ -22,7 +22,6 @@
 #include <cstddef>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -56,4 +55,3 @@ class SimpleIDGenerator : public IDGenerator {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

@@ -30,7 +30,7 @@
 
 namespace {
 
-namespace ms = zilliz::milvus;
+namespace ms = milvus;
 
 static const char *TABLE_NAME = "test_group";
 static constexpr int64_t TABLE_DIM = 256;
@@ -81,11 +81,11 @@ ConvertTimeRangeToDBDates(const std::string &start_value,
 
     time_t tt_start, tt_end;
     tm tm_start, tm_end;
-    if (!zilliz::milvus::server::CommonUtil::TimeStrToTime(start_value, tt_start, tm_start)) {
+    if (!milvus::server::CommonUtil::TimeStrToTime(start_value, tt_start, tm_start)) {
         return;
     }
 
-    if (!zilliz::milvus::server::CommonUtil::TimeStrToTime(end_value, tt_end, tm_end)) {
+    if (!milvus::server::CommonUtil::TimeStrToTime(end_value, tt_end, tm_end)) {
         return;
     }
 
@@ -98,7 +98,7 @@ ConvertTimeRangeToDBDates(const std::string &start_value,
     for (int64_t i = 0; i < days; i++) {
         time_t tt_day = tt_start + DAY_SECONDS * i;
         tm tm_day;
-        zilliz::milvus::server::CommonUtil::ConvertTime(tt_day, tm_day);
+        milvus::server::CommonUtil::ConvertTime(tt_day, tm_day);
 
         int64_t date = tm_day.tm_year * 10000 + tm_day.tm_mon * 100 +
             tm_day.tm_mday;//according to db logic

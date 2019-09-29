@@ -35,7 +35,6 @@
 #include "Connection.h"
 #include "Node.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -211,4 +210,3 @@ using ResourceWPtr = std::weak_ptr<Resource>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

@@ -21,7 +21,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -31,4 +30,3 @@ ShortestPath(const ResourcePtr& src, const ResourcePtr& dest, const ResourceMgrP
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

@@ -24,7 +24,7 @@
 #include "scheduler/ResourceFactory.h"
 #include "scheduler/Algorithm.h"
 
-namespace zilliz {
+
 namespace milvus {
 namespace scheduler {
 
@@ -105,4 +105,4 @@ TEST_F(AlgorithmTest, SHORTESTPATH_TEST) {
 
 } // namespace scheduler
 } // namespace milvus
-} // namespace zilliz
+

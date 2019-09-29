@@ -25,7 +25,6 @@
 #include <set>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
@@ -88,6 +87,5 @@ class Cache {
 
 }  // namespace cache
 }  // namespace milvus
-}  // namespace zilliz
 
 #include "cache/Cache.inl"

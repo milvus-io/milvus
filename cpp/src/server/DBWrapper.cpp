@@ -26,7 +26,6 @@
 #include <omp.h>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -170,4 +169,3 @@ DBWrapper::StopService() {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

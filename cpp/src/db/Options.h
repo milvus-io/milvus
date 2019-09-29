@@ -24,7 +24,6 @@
 #include <string>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -81,4 +80,3 @@ struct DBOptions {
 
 }  // namespace engine
 }  // namespace milvus
-}  // namespace zilliz

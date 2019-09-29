@@ -19,7 +19,7 @@
 #include "scheduler/task/SearchTask.h"
 #include <gtest/gtest.h>
 
-namespace zilliz {
+
 namespace milvus {
 namespace scheduler {
 
@@ -30,5 +30,5 @@ TEST(TaskTest, INVALID_INDEX) {
 
 } // namespace scheduler
 } // namespace milvus
-} // namespace zilliz
+
 

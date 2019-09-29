@@ -23,7 +23,6 @@
 
 #include "knowhere/common/Dataset.h"
 
-namespace zilliz {
 namespace knowhere {
 
 std::shared_ptr<SPTAG::VectorSet>
@@ -39,4 +38,3 @@ DatasetPtr
 ConvertToDataset(std::vector<SPTAG::QueryResult> query_results);
 
 }  // namespace knowhere
-}  // namespace zilliz

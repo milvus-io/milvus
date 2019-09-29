@@ -25,7 +25,6 @@
 #include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -306,4 +305,3 @@ SystemInfo::Octets() {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

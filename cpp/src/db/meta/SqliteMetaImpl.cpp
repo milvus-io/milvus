@@ -34,7 +34,7 @@
 #include <set>
 #include <sqlite_orm.h>
 
-namespace zilliz {
+
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -1298,4 +1298,4 @@ SqliteMetaImpl::DropAll() {
 } // namespace meta
 } // namespace engine
 } // namespace milvus
-} // namespace zilliz
+

@@ -32,7 +32,6 @@
 // TODO: enable macro
 //#include <gperftools/profiler.h>
 
-namespace zilliz {
 namespace knowhere {
 namespace algo {
 
@@ -792,4 +791,3 @@ NsgIndex::SetKnnGraph(Graph& g) {
 
 }  // namespace algo
 }  // namespace knowhere
-}  // namespace zilliz

@@ -23,7 +23,6 @@
 #include <unordered_map>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
@@ -121,4 +120,3 @@ class LRU {
 
 }  // namespace cache
 }  // namespace milvus
-}  // namespace zilliz

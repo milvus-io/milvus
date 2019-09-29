@@ -29,7 +29,6 @@
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
-namespace zilliz {
 namespace knowhere {
 
 IndexModelPtr
@@ -171,7 +170,7 @@ GPUIVF::CopyGpuToCpu(const Config& config) {
 VectorIndexPtr
 GPUIVF::Clone() {
     auto cpu_idx = CopyGpuToCpu(Config());
-    return ::zilliz::knowhere::cloner::CopyCpuToGpu(cpu_idx, gpu_id_, Config());
+    return knowhere::cloner::CopyCpuToGpu(cpu_idx, gpu_id_, Config());
 }
 
 VectorIndexPtr
@@ -201,4 +200,3 @@ GPUIndex::GetGpuDevice() {
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

@@ -23,7 +23,6 @@
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
 
-namespace zilliz {
 namespace knowhere {
 namespace cloner {
 
@@ -57,4 +56,3 @@ CopyCpuToGpu(const VectorIndexPtr& index, const int64_t& device_id, const Config
 
 }  // namespace cloner
 }  // namespace knowhere
-}  // namespace zilliz

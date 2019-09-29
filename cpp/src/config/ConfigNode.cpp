@@ -23,7 +23,6 @@
 #include <sstream>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -234,4 +233,3 @@ ConfigNode::DumpString(const std::string& prefix) const {
 
 }  // namespace server
 }  // namespace milvus
-}  // namespace zilliz

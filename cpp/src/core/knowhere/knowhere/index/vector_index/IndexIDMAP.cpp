@@ -27,7 +27,6 @@
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
-namespace zilliz {
 namespace knowhere {
 
 BinarySet
@@ -269,4 +268,3 @@ GPUIDMAP::search_impl(int64_t n, const float* data, int64_t k, float* distances,
 }
 
 }  // namespace knowhere
-}  // namespace zilliz

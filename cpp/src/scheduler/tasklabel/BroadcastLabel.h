@@ -21,7 +21,6 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -35,4 +34,3 @@ using BroadcastLabelPtr = std::shared_ptr<BroadcastLabel>;
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz
