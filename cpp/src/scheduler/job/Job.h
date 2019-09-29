@@ -16,17 +16,16 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
-
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 namespace zilliz {
 namespace milvus {
@@ -42,7 +41,7 @@ enum class JobType {
 using JobId = std::uint64_t;
 
 class Job {
-public:
+ public:
     inline JobId
     id() const {
         return id_;
@@ -53,10 +52,11 @@ public:
         return type_;
     }
 
-protected:
-    Job(JobId id, JobType type) : id_(id), type_(type) {}
+ protected:
+    Job(JobId id, JobType type) : id_(id), type_(type) {
+    }
 
-private:
+ private:
     JobId id_;
     JobType type_;
 };
@@ -64,7 +64,6 @@ private:
 using JobPtr = std::shared_ptr<Job>;
 using JobWPtr = std::weak_ptr<Job>;
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

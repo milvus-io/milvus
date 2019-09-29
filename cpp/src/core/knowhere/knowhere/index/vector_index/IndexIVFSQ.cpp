@@ -15,43 +15,46 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <faiss/gpu/GpuAutoTune.h>
+#include <memory>
 
-#include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 #include "knowhere/adapter/VectorAdapter.h"
-#include "IndexIVFSQ.h"
-#include "IndexGPUIVFSQ.h"
-
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexGPUIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
 
 namespace zilliz {
 namespace knowhere {
 
-IndexModelPtr IVFSQ::Train(const DatasetPtr &dataset, const Config &config) {
-    auto nlist = config["nlist"].as<size_t>();
-    auto nbits = config["nbits"].as<size_t>(); // TODO(linxj): only support SQ4 SQ6 SQ8 SQ16
-    auto metric_type = config["metric_type"].as_string() == "L2" ?
-                       faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+IndexModelPtr
+IVFSQ::Train(const DatasetPtr& dataset, const Config& config) {
+    auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
+    if (build_cfg != nullptr) {
+        build_cfg->CheckValid();  // throw exception
+    }
 
     GETTENSOR(dataset)
 
     std::stringstream index_type;
-    index_type << "IVF" << nlist << "," << "SQ" << nbits;
-    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), metric_type);
-    build_index->train(rows, (float *) p_data);
+    index_type << "IVF" << build_cfg->nlist << ","
+               << "SQ" << build_cfg->nbits;
+    auto build_index = faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(build_cfg->metric_type));
+    build_index->train(rows, (float*)p_data);
 
     std::shared_ptr<faiss::Index> ret_index;
     ret_index.reset(build_index);
     return std::make_shared<IVFIndexModel>(ret_index);
 }
 
-VectorIndexPtr IVFSQ::Clone_impl(const std::shared_ptr<faiss::Index> &index) {
+VectorIndexPtr
+IVFSQ::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
     return std::make_shared<IVFSQ>(index);
 }
 
-VectorIndexPtr IVFSQ::CopyCpuToGpu(const int64_t &device_id, const Config &config) {
-    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)){
+VectorIndexPtr
+IVFSQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
+    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
@@ -66,5 +69,5 @@ VectorIndexPtr IVFSQ::CopyCpuToGpu(const int64_t &device_id, const Config &confi
     }
 }
 
-} // knowhere
-} // zilliz
+}  // namespace knowhere
+}  // namespace zilliz

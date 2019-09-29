@@ -15,9 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <cstdint>
-
 
 namespace zilliz {
 namespace milvus {
@@ -29,6 +27,6 @@ get_current_timestamp();
 uint64_t
 get_num_gpu();
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

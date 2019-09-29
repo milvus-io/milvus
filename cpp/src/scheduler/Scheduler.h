@@ -18,29 +18,27 @@
 #pragma once
 
 #include <memory>
-#include <string>
 #include <mutex>
-#include <thread>
 #include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
 
-#include "resource/Resource.h"
 #include "ResourceMgr.h"
+#include "resource/Resource.h"
 #include "utils/Log.h"
-
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-
-// TODO: refactor, not friendly to unittest, logical in framework code
+// TODO(wxy): refactor, not friendly to unittest, logical in framework code
 class Scheduler {
-public:
-    explicit
-    Scheduler(ResourceMgrWPtr res_mgr);
+ public:
+    explicit Scheduler(ResourceMgrWPtr res_mgr);
 
-    Scheduler(const Scheduler &) = delete;
-    Scheduler(Scheduler &&) = delete;
+    Scheduler(const Scheduler&) = delete;
+    Scheduler(Scheduler&&) = delete;
 
     /*
      * Start worker thread;
@@ -58,7 +56,7 @@ public:
      * Post event to scheduler event queue;
      */
     void
-    PostEvent(const EventPtr &event);
+    PostEvent(const EventPtr& event);
 
     /*
      * Dump as string;
@@ -66,7 +64,7 @@ public:
     std::string
     Dump();
 
-private:
+ private:
     /******** Events ********/
 
     /*
@@ -76,7 +74,7 @@ private:
      * Pull task from neighbours;
      */
     void
-    OnStartUp(const EventPtr &event);
+    OnStartUp(const EventPtr& event);
 
     /*
      * Process finish task events;
@@ -85,7 +83,7 @@ private:
      * Pull task from neighbours;
      */
     void
-    OnFinishTask(const EventPtr &event);
+    OnFinishTask(const EventPtr& event);
 
     /*
      * Process copy completed events;
@@ -95,7 +93,7 @@ private:
      * Pull task from neighbours;
      */
     void
-    OnLoadCompleted(const EventPtr &event);
+    OnLoadCompleted(const EventPtr& event);
 
     /*
      * Process task table updated events, which happened on task_table->put;
@@ -104,14 +102,14 @@ private:
      * Push task to neighbours;
      */
     void
-    OnTaskTableUpdated(const EventPtr &event);
+    OnTaskTableUpdated(const EventPtr& event);
 
-private:
+ private:
     /*
      * Dispatch event to event handler;
      */
     void
-    Process(const EventPtr &event);
+    Process(const EventPtr& event);
 
     /*
      * Called by worker_thread_;
@@ -119,7 +117,7 @@ private:
     void
     worker_function();
 
-private:
+ private:
     bool running_;
 
     std::unordered_map<uint64_t, std::function<void(EventPtr)>> event_register_;
@@ -133,7 +131,6 @@ private:
 
 using SchedulerPtr = std::shared_ptr<Scheduler>;
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

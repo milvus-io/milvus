@@ -20,29 +20,24 @@
 include_directories(${MILVUS_SOURCE_DIR})
 include_directories(${MILVUS_ENGINE_SRC})
 
-add_subdirectory(core)
+include_directories(${CUDA_TOOLKIT_ROOT_DIR}/include)
+include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
+include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
+#this statement must put here, since the CORE_INCLUDE_DIRS is defined in code/CMakeList.txt
+add_subdirectory(core)
 set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
 foreach (dir ${CORE_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/cache cache_files)
-
 aux_source_directory(${MILVUS_ENGINE_SRC}/config config_files)
-
+aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db db_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/engine db_engine_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/insert db_insert_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/db/meta db_meta_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler db_scheduler_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/context db_scheduler_context_files)
-aux_source_directory(${MILVUS_ENGINE_SRC}/db/scheduler/task db_scheduler_task_files)
-set(db_scheduler_files
-        ${db_scheduler_files}
-        ${db_scheduler_context_files}
-        ${db_scheduler_task_files}
-        )
 
 set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-milvus/milvus.grpc.pb.cc
@@ -50,8 +45,6 @@ set(grpc_service_files
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.grpc.pb.cc
         ${MILVUS_ENGINE_SRC}/grpc/gen-status/status.pb.cc
         )
-
-aux_source_directory(${MILVUS_ENGINE_SRC}/metrics metrics_files)
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler scheduler_main_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/scheduler/action scheduler_action_files)
@@ -70,9 +63,7 @@ set(scheduler_files
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/server server_files)
 aux_source_directory(${MILVUS_ENGINE_SRC}/server/grpc_impl grpc_server_files)
-
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
-
 aux_source_directory(${MILVUS_ENGINE_SRC}/wrapper wrapper_files)
 
 set(engine_files
@@ -82,15 +73,10 @@ set(engine_files
         ${db_engine_files}
         ${db_insert_files}
         ${db_meta_files}
-        ${db_scheduler_files}
         ${metrics_files}
         ${utils_files}
         ${wrapper_files}
         )
-
-include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
-include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
-include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 set(client_grpc_lib
         grpcpp_channelz
@@ -112,6 +98,12 @@ set(boost_lib
         boost_serialization_static
         )
 
+set(cuda_lib
+        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+        cudart
+        cublas
+        )
+
 set(third_party_libs
         sqlite
         ${client_grpc_lib}
@@ -123,17 +115,15 @@ set(third_party_libs
         snappy
         zlib
         zstd
-        cudart
-        cublas
+        ${cuda_lib}
         mysqlpp
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
-        cudart
         )
+
 if (MILVUS_ENABLE_PROFILING STREQUAL "ON")
     set(third_party_libs ${third_party_libs}
-            gperftools
-            libunwind
-            )
+        gperftools
+        libunwind
+        )
 endif ()
 
 link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
@@ -141,7 +131,6 @@ set(engine_libs
         pthread
         libgomp.a
         libgfortran.a
-        ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
         )
 
 if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
@@ -152,7 +141,11 @@ if (NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
 endif ()
 
 cuda_add_library(milvus_engine STATIC ${engine_files})
-target_link_libraries(milvus_engine ${engine_libs} knowhere ${third_party_libs})
+target_link_libraries(milvus_engine
+        knowhere
+        ${engine_libs}
+        ${third_party_libs}
+        )
 
 add_library(metrics STATIC ${metrics_files})
 
@@ -180,7 +173,9 @@ add_executable(milvus_server
         ${utils_files}
         )
 
-target_link_libraries(milvus_server ${server_libs})
+target_link_libraries(milvus_server
+        ${server_libs}
+        )
 
 install(TARGETS milvus_server DESTINATION bin)
 

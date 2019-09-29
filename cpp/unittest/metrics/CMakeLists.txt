@@ -19,16 +19,13 @@
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
-include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
-link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
-
-set(metrics_test_files
+add_executable(test_metrics
         ${common_files}
         ${test_files}
         )
 
-add_executable(metrics_test ${metrics_test_files})
+target_link_libraries(test_metrics
+        knowhere
+        ${unittest_libs})
 
-target_link_libraries(metrics_test knowhere ${unittest_libs})
-
-install(TARGETS metrics_test DESTINATION unittest)
+install(TARGETS test_metrics DESTINATION unittest)

@@ -15,21 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-#include "knowhere/index/vector_index/helpers/FaissIO.h"
 #include "NSG.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
-
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace zilliz {
 namespace knowhere {
 namespace algo {
 
-extern void write_index(NsgIndex* index, MemoryIOWriter& writer);
-extern NsgIndex* read_index(MemoryIOReader& reader);
+extern void
+write_index(NsgIndex* index, MemoryIOWriter& writer);
+extern NsgIndex*
+read_index(MemoryIOReader& reader);
 
-}
-}
-}
+}  // namespace algo
+}  // namespace knowhere
+}  // namespace zilliz

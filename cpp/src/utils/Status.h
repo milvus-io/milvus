@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "utils/Error.h"
@@ -29,19 +28,19 @@ using StatusCode = ErrorCode;
 
 class Status {
  public:
-    Status(StatusCode code, const std::string &msg);
+    Status(StatusCode code, const std::string& msg);
     Status();
     ~Status();
 
-    Status(const Status &s);
+    Status(const Status& s);
 
-    Status &
-    operator=(const Status &s);
+    Status&
+    operator=(const Status& s);
 
-    Status(Status &&s);
+    Status(Status&& s);
 
-    Status &
-    operator=(Status &&s);
+    Status&
+    operator=(Status&& s);
 
     static Status
     OK() {
@@ -55,7 +54,7 @@ class Status {
 
     StatusCode
     code() const {
-        return (state_ == nullptr) ? 0 : *(StatusCode *) (state_);
+        return (state_ == nullptr) ? 0 : *(StatusCode*)(state_);
     }
 
     std::string
@@ -66,14 +65,14 @@ class Status {
 
  private:
     inline void
-    CopyFrom(const Status &s);
+    CopyFrom(const Status& s);
 
     inline void
-    MoveFrom(Status &s);
+    MoveFrom(Status& s);
 
  private:
-    const char *state_ = nullptr;
-}; // Status
+    char* state_ = nullptr;
+};  // Status
 
-} // namespace milvus
-} // namespace zilliz
+}  // namespace milvus
+}  // namespace zilliz

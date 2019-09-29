@@ -15,11 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-#include "VectorIndex.h"
+#include <memory>
+#include <vector>
 
+#include "VectorIndex.h"
 
 namespace zilliz {
 namespace knowhere {
@@ -30,18 +31,30 @@ class NsgIndex;
 
 class NSG : public VectorIndex {
  public:
-    explicit NSG(const int64_t& gpu_num):gpu_(gpu_num){}
+    explicit NSG(const int64_t& gpu_num) : gpu_(gpu_num) {
+    }
+
     NSG() = default;
 
-    IndexModelPtr Train(const DatasetPtr &dataset, const Config &config) override;
-    DatasetPtr Search(const DatasetPtr &dataset, const Config &config) override;
-    void Add(const DatasetPtr &dataset, const Config &config) override;
-    BinarySet Serialize() override;
-    void Load(const BinarySet &index_binary) override;
-    int64_t Count() override;
-    int64_t Dimension() override;
-    VectorIndexPtr Clone() override;
-    void Seal() override;
+    IndexModelPtr
+    Train(const DatasetPtr& dataset, const Config& config) override;
+    DatasetPtr
+    Search(const DatasetPtr& dataset, const Config& config) override;
+    void
+    Add(const DatasetPtr& dataset, const Config& config) override;
+    BinarySet
+    Serialize() override;
+    void
+    Load(const BinarySet& index_binary) override;
+    int64_t
+    Count() override;
+    int64_t
+    Dimension() override;
+    VectorIndexPtr
+    Clone() override;
+    void
+    Seal() override;
+
  private:
     std::shared_ptr<algo::NsgIndex> index_;
     int64_t gpu_;
@@ -49,5 +62,5 @@ class NSG : public VectorIndex {
 
 using NSGIndexPtr = std::shared_ptr<NSG>();
 
-}
-}
+}  // namespace knowhere
+}  // namespace zilliz

@@ -15,30 +15,34 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "scheduler/resource/CpuResource.h"
 
-#include "CpuResource.h"
-
+#include <utility>
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-std::ostream &operator<<(std::ostream &out, const CpuResource &resource) {
+std::ostream&
+operator<<(std::ostream& out, const CpuResource& resource) {
     out << resource.Dump();
     return out;
 }
 
 CpuResource::CpuResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor)
-    : Resource(std::move(name), ResourceType::CPU, device_id, enable_loader, enable_executor) {}
+    : Resource(std::move(name), ResourceType::CPU, device_id, enable_loader, enable_executor) {
+}
 
-void CpuResource::LoadFile(TaskPtr task) {
+void
+CpuResource::LoadFile(TaskPtr task) {
     task->Load(LoadType::DISK2CPU, 0);
 }
 
-void CpuResource::Process(TaskPtr task) {
+void
+CpuResource::Process(TaskPtr task) {
     task->Execute();
 }
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

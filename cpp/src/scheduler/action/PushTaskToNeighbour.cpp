@@ -15,27 +15,26 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <list>
 #include <random>
 #include "../Algorithm.h"
-#include "src/cache/GpuCacheMgr.h"
 #include "Action.h"
-
+#include "src/cache/GpuCacheMgr.h"
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 std::vector<ResourcePtr>
-get_neighbours(const ResourcePtr &self) {
+get_neighbours(const ResourcePtr& self) {
     std::vector<ResourcePtr> neighbours;
-    for (auto &neighbour_node : self->GetNeighbours()) {
+    for (auto& neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
-        if (not node) continue;
+        if (not node)
+            continue;
 
         auto resource = std::static_pointer_cast<Resource>(node);
-//        if (not resource->HasExecutor()) continue;
+        //        if (not resource->HasExecutor()) continue;
 
         neighbours.emplace_back(resource);
     }
@@ -43,29 +42,28 @@ get_neighbours(const ResourcePtr &self) {
 }
 
 std::vector<std::pair<ResourcePtr, Connection>>
-get_neighbours_with_connetion(const ResourcePtr &self) {
+get_neighbours_with_connetion(const ResourcePtr& self) {
     std::vector<std::pair<ResourcePtr, Connection>> neighbours;
-    for (auto &neighbour_node : self->GetNeighbours()) {
+    for (auto& neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
-        if (not node) continue;
+        if (not node)
+            continue;
 
         auto resource = std::static_pointer_cast<Resource>(node);
-//        if (not resource->HasExecutor()) continue;
+        //        if (not resource->HasExecutor()) continue;
         Connection conn = neighbour_node.connection;
         neighbours.emplace_back(std::make_pair(resource, conn));
     }
     return neighbours;
 }
 
-
 void
-Action::PushTaskToNeighbourRandomly(const TaskPtr &task,
-                                    const ResourcePtr &self) {
+Action::PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self) {
     auto neighbours = get_neighbours_with_connetion(self);
     if (not neighbours.empty()) {
-        std::vector<uint64_t > speeds;
+        std::vector<uint64_t> speeds;
         uint64_t total_speed = 0;
-        for (auto &neighbour : neighbours) {
+        for (auto& neighbour : neighbours) {
             uint64_t speed = neighbour.second.speed();
             speeds.emplace_back(speed);
             total_speed += speed;
@@ -85,15 +83,14 @@ Action::PushTaskToNeighbourRandomly(const TaskPtr &task,
         }
 
     } else {
-        //TODO: process
+        // TODO(wxy): process
     }
-
 }
 
 void
-Action::PushTaskToAllNeighbour(const TaskPtr &task, const ResourcePtr &self) {
+Action::PushTaskToAllNeighbour(const TaskPtr& task, const ResourcePtr& self) {
     auto neighbours = get_neighbours(self);
-    for (auto &neighbour : neighbours) {
+    for (auto& neighbour : neighbours) {
         neighbour->task_table().Put(task);
     }
 }
@@ -104,15 +101,14 @@ Action::PushTaskToResource(const TaskPtr& task, const ResourcePtr& dest) {
 }
 
 void
-Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr,
-                          ResourcePtr resource,
-                          std::shared_ptr<LoadCompletedEvent> event) {
+Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
+                                  std::shared_ptr<LoadCompletedEvent> event) {
     if (not resource->HasExecutor() && event->task_table_item_->Move()) {
         auto task = event->task_table_item_->task;
         auto search_task = std::static_pointer_cast<XSearchTask>(task);
         bool moved = false;
 
-        //to support test task, REFACTOR
+        // to support test task, REFACTOR
         if (auto index_engine = search_task->index_engine_) {
             auto location = index_engine->GetLocation();
 
@@ -134,16 +130,15 @@ Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr,
 }
 
 void
-Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr,
-                                    ResourcePtr resource,
-                                    std::shared_ptr<LoadCompletedEvent> event) {
+Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
+                                            std::shared_ptr<LoadCompletedEvent> event) {
     auto task = event->task_table_item_->task;
     if (resource->type() == ResourceType::DISK) {
         // step 1: calculate shortest path per resource, from disk to compute resource
         auto compute_resources = res_mgr.lock()->GetComputeResources();
         std::vector<std::vector<std::string>> paths;
         std::vector<uint64_t> transport_costs;
-        for (auto &res : compute_resources) {
+        for (auto& res : compute_resources) {
             std::vector<std::string> path;
             uint64_t transport_cost = ShortestPath(resource, res, res_mgr.lock(), path);
             transport_costs.push_back(transport_cost);
@@ -158,8 +153,8 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr,
                 min_cost_idx = i;
                 break;
             }
-            uint64_t cost = compute_resources[i]->TaskAvgCost() * compute_resources[i]->NumOfTaskToExec()
-                + transport_costs[i];
+            uint64_t cost =
+                compute_resources[i]->TaskAvgCost() * compute_resources[i]->NumOfTaskToExec() + transport_costs[i];
             if (min_cost > cost) {
                 min_cost = cost;
                 min_cost_idx = i;
@@ -181,7 +176,6 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr,
     }
 }
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

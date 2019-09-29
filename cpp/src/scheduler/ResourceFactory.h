@@ -17,31 +17,25 @@
 
 #pragma once
 
-#include <string>
 #include <memory>
+#include <string>
 
-#include "resource/Resource.h"
 #include "resource/CpuResource.h"
-#include "resource/GpuResource.h"
 #include "resource/DiskResource.h"
-
+#include "resource/GpuResource.h"
+#include "resource/Resource.h"
 
 namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class ResourceFactory {
-public:
+ public:
     static std::shared_ptr<Resource>
-    Create(const std::string &name,
-           const std::string &type,
-           uint64_t device_id,
-           bool enable_loader = true,
+    Create(const std::string& name, const std::string& type, uint64_t device_id, bool enable_loader = true,
            bool enable_executor = true);
 };
 
-
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus
+}  // namespace zilliz

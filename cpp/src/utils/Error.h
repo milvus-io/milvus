@@ -50,7 +50,7 @@ ToKnowhereErrorCode(const ErrorCode error_code) {
     return KNOWHERE_ERROR_CODE_BASE + error_code;
 }
 
-//server error code
+// server error code
 constexpr ErrorCode SERVER_UNEXPECTED_ERROR = ToServerErrorCode(1);
 constexpr ErrorCode SERVER_UNSUPPORTED_ERROR = ToServerErrorCode(2);
 constexpr ErrorCode SERVER_NULL_POINTER = ToServerErrorCode(3);
@@ -83,7 +83,7 @@ constexpr ErrorCode SERVER_INVALID_INDEX_METRIC_TYPE = ToServerErrorCode(115);
 constexpr ErrorCode SERVER_INVALID_INDEX_FILE_SIZE = ToServerErrorCode(116);
 constexpr ErrorCode SERVER_OUT_OF_MEMORY = ToServerErrorCode(117);
 
-//db error code
+// db error code
 constexpr ErrorCode DB_META_TRANSACTION_FAILED = ToDbErrorCode(1);
 constexpr ErrorCode DB_ERROR = ToDbErrorCode(2);
 constexpr ErrorCode DB_NOT_FOUND = ToDbErrorCode(3);
@@ -92,7 +92,7 @@ constexpr ErrorCode DB_INVALID_PATH = ToDbErrorCode(5);
 constexpr ErrorCode DB_INCOMPATIB_META = ToDbErrorCode(6);
 constexpr ErrorCode DB_INVALID_META_URI = ToDbErrorCode(7);
 
-//knowhere error code
+// knowhere error code
 constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);
 constexpr ErrorCode KNOWHERE_INVALID_ARGUMENT = ToKnowhereErrorCode(2);
 constexpr ErrorCode KNOWHERE_UNEXPECTED_ERROR = ToKnowhereErrorCode(3);
@@ -101,17 +101,18 @@ constexpr ErrorCode KNOWHERE_NO_SPACE = ToKnowhereErrorCode(4);
 namespace server {
 class ServerException : public std::exception {
  public:
-    ServerException(ErrorCode error_code,
-                    const std::string &message = std::string())
+    explicit ServerException(ErrorCode error_code, const std::string& message = std::string())
         : error_code_(error_code), message_(message) {
     }
 
  public:
-    ErrorCode error_code() const {
+    ErrorCode
+    error_code() const {
         return error_code_;
     }
 
-    virtual const char *what() const noexcept {
+    virtual const char*
+    what() const noexcept {
         return message_.c_str();
     }
 
@@ -119,7 +120,7 @@ class ServerException : public std::exception {
     ErrorCode error_code_;
     std::string message_;
 };
-} // namespace server
+}  // namespace server
 
 }  // namespace milvus
 }  // namespace zilliz
