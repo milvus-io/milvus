@@ -20,6 +20,7 @@
 #include "../Algorithm.h"
 #include "Action.h"
 #include "src/cache/GpuCacheMgr.h"
+#include "src/server/Config.h"
 
 namespace zilliz {
 namespace milvus {
@@ -142,26 +143,41 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr
             transport_costs.push_back(transport_cost);
             paths.emplace_back(path);
         }
-
-        // step 2: select min cost, cost(resource) = avg_cost * task_to_do + transport_cost
-        uint64_t min_cost = std::numeric_limits<uint64_t>::max();
-        uint64_t min_cost_idx = 0;
-        for (uint64_t i = 0; i < compute_resources.size(); ++i) {
-            if (compute_resources[i]->TotalTasks() == 0) {
-                min_cost_idx = i;
-                break;
+        if (task->job_.lock()->type() == JobType::SEARCH) {
+            // step 2: select min cost, cost(resource) = avg_cost * task_to_do + transport_cost
+            uint64_t min_cost = std::numeric_limits<uint64_t>::max();
+            uint64_t min_cost_idx = 0;
+            for (uint64_t i = 0; i < compute_resources.size(); ++i) {
+                if (compute_resources[i]->TotalTasks() == 0) {
+                    min_cost_idx = i;
+                    break;
+                }
+                uint64_t cost =
+                    compute_resources[i]->TaskAvgCost() * compute_resources[i]->NumOfTaskToExec() + transport_costs[i];
+                if (min_cost > cost) {
+                    min_cost = cost;
+                    min_cost_idx = i;
+                }
             }
-            uint64_t cost =
-                compute_resources[i]->TaskAvgCost() * compute_resources[i]->NumOfTaskToExec() + transport_costs[i];
-            if (min_cost > cost) {
-                min_cost = cost;
-                min_cost_idx = i;
+
+            // step 3: set path in task
+            Path task_path(paths[min_cost_idx], paths[min_cost_idx].size() - 1);
+            task->path() = task_path;
+        } else if (task->job_.lock()->type() == JobType::BUILD) {
+            //step2: Read device id in config
+            //get build index gpu resource
+            server::Config &config = server::Config::GetInstance();
+            int32_t build_index_gpu;
+            Status stat = config.GetDBConfigBuildIndexGPU(build_index_gpu);
+
+            for (uint64_t i = 0; i < compute_resources.size(); ++i) {
+                if (compute_resources[i]->device_id() == build_index_gpu) {
+                    Path task_path(paths[i], paths[i].size() - 1);
+                    task->path() = task_path;
+                    break;
+                }
             }
         }
-
-        // step 3: set path in task
-        Path task_path(paths[min_cost_idx], paths[min_cost_idx].size() - 1);
-        task->path() = task_path;
     }
 
     if (resource->name() == task->path().Last()) {

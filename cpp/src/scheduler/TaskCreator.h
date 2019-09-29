@@ -32,6 +32,7 @@
 #include "job/SearchJob.h"
 #include "task/DeleteTask.h"
 #include "task/SearchTask.h"
+#include "task/BuildIndexTask.h"
 #include "task/Task.h"
 
 namespace zilliz {
@@ -49,6 +50,9 @@ class TaskCreator {
 
     static std::vector<TaskPtr>
     Create(const DeleteJobPtr& job);
+
+    static std::vector<TaskPtr>
+    Create(const BuildIndexJobPtr& job);
 };
 
 }  // namespace scheduler
