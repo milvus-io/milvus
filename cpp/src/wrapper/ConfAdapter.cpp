@@ -81,7 +81,7 @@ IVFConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist) {
         // calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
         return int(size / TYPICAL_COUNT * 16384);
     }
-    return 0;
+    return nlist;
 }
 
 knowhere::Config

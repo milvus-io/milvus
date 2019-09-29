@@ -30,7 +30,7 @@ set(util_srcs
         ${CORE_SOURCE_DIR}/knowhere/knowhere/adapter/ArrowAdapter.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/Exception.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/common/Timer.cpp
-        ${CORE_SOURCE_DIR}/test/utils.cpp
+        ${CORE_SOURCE_DIR}/unittest/utils.cpp
         )
 
 #<IVF-TEST>
