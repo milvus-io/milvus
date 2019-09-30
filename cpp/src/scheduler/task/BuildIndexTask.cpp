@@ -26,7 +26,6 @@
 #include <thread>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -39,7 +38,7 @@ XBuildIndexTask::XBuildIndexTask(TableFileSchemaPtr file)
 }
 
 void
-XBuildIndexTask::Load(zilliz::milvus::scheduler::LoadType type, uint8_t device_id) {
+XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
     TimeRecorder rc("");
     Status stat = Status::OK();
     std::string error_msg;
@@ -50,7 +49,7 @@ XBuildIndexTask::Load(zilliz::milvus::scheduler::LoadType type, uint8_t device_i
             stat = to_index_engine_->Load();
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
-            stat = to_index_engine_->CopyToGpu(device_id);
+//            stat = to_index_engine_->CopyToGpu(device_id);
             type_str = "CPU2GPU";
         } else if (type == LoadType::GPU2CPU) {
             stat = to_index_engine_->CopyToCpu();
@@ -90,8 +89,8 @@ XBuildIndexTask::Load(zilliz::milvus::scheduler::LoadType type, uint8_t device_i
         " bytes from location: " + file_->location_ + " totally cost";
     double span = rc.ElapseFromBegin(info);
 
-//    to_index_id_ = file_->id_;
-//    to_index_type_ = file_->file_type_;
+    to_index_id_ = file_->id_;
+    to_index_type_ = file_->file_type_;
 }
 
 void
@@ -103,22 +102,106 @@ XBuildIndexTask::Execute() {
     TimeRecorder rc("DoBuildIndex file id:" + std::to_string(to_index_id_));
 
     if (auto job = job_.lock()) {
-        auto build_job = std::static_pointer_cast<scheduler::BuildIndexJob>(job);
+        auto build_index_job = std::static_pointer_cast<scheduler::BuildIndexJob>(job);
         std::string location = file_->location_;
         EngineType engine_type = (EngineType)file_->engine_type_;
         std::shared_ptr<engine::ExecutionEngine> index;
 
+        // step 2: create table file
+        engine::meta::TableFileSchema table_file;
+        table_file.table_id_ = file_->table_id_;
+        table_file.date_ = file_->date_;
+        table_file.file_type_ =
+            engine::meta::TableFileSchema::NEW_INDEX;  // for multi-db-path, distribute index file averagely to each path
+
+        engine::meta::MetaPtr meta_ptr = build_index_job->meta();
+        Status status = build_index_job->meta()->CreateTableFile(table_file);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Failed to create table file: " << status.ToString();
+            build_index_job->BuildIndexDone(to_index_id_);
+            //TODO: return status
+        }
+
+        // step 3: build index
         try {
             index = to_index_engine_->BuildIndex(location, engine_type);
             if (index == nullptr) {
-                table_file_.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
-                //TODO: updatetablefile
+                table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
+                status = meta_ptr->UpdateTableFile(table_file);
+                ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_
+                                 << " to to_delete";
+
+                return;
             }
         } catch (std::exception &ex) {
-            ENGINE_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
+            std::string msg = "BuildIndex encounter exception: " + std::string(ex.what());
+            ENGINE_LOG_ERROR << msg;
+
+            table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
+            status = meta_ptr->UpdateTableFile(table_file);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
+
+            std::cout << "ERROR: failed to build index, index file is too large or gpu memory is not enough"
+                      << std::endl;
+
+            build_index_job->GetStatus() = Status(DB_ERROR, msg);
+            return;
         }
 
-        build_job->BuildIndexDone(to_index_id_);
+        // step 4: if table has been deleted, dont save index file
+        bool has_table = false;
+        meta_ptr->HasTable(file_->table_id_, has_table);
+        if (!has_table) {
+            meta_ptr->DeleteTableFiles(file_->table_id_);
+//            return Status::OK();
+        }
+
+        // step 5: save index file
+        try {
+            index->Serialize();
+        } catch (std::exception &ex) {
+            // typical error: out of disk space or permition denied
+            std::string msg = "Serialize index encounter exception: " + std::string(ex.what());
+            ENGINE_LOG_ERROR << msg;
+
+            table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
+            status = meta_ptr->UpdateTableFile(table_file);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
+
+            std::cout << "ERROR: failed to persist index file: " << table_file.location_
+                      << ", possible out of disk space" << std::endl;
+
+//            return Status(DB_ERROR, msg);
+        }
+
+        // step 6: update meta
+        table_file.file_type_ = engine::meta::TableFileSchema::INDEX;
+        table_file.file_size_ = index->PhysicalSize();
+        table_file.row_count_ = index->Count();
+
+        auto origin_file = *file_;
+        origin_file.file_type_ = engine::meta::TableFileSchema::BACKUP;
+
+        engine::meta::TableFilesSchema update_files = {table_file, origin_file};
+        status = meta_ptr->UpdateTableFiles(update_files);
+        if (status.ok()) {
+            ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size " << index->PhysicalSize()
+                             << " bytes"
+                             << " from file " << origin_file.file_id_;
+
+//            index->Cache();
+        } else {
+            // failed to update meta, mark the new file as to_delete, don't delete old file
+            origin_file.file_type_ = engine::meta::TableFileSchema::TO_INDEX;
+            status = meta_ptr->UpdateTableFile(origin_file);
+            ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << origin_file.file_id_ << " to to_index";
+
+            table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
+            status = meta_ptr->UpdateTableFile(table_file);
+            ENGINE_LOG_DEBUG << "Failed to up  date file to index, mark file: " << table_file.file_id_ << " to to_delete";
+        }
+
+        build_index_job->BuildIndexDone(to_index_id_);
     }
 
     rc.ElapseFromBegin("totally cost");
@@ -128,4 +211,3 @@ XBuildIndexTask::Execute() {
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

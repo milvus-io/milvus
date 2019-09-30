@@ -19,27 +19,24 @@
 #include "utils/Log.h"
 
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-BuildIndexJob::BuildIndexJob(zilliz::milvus::scheduler::JobId id)
-    : Job(id, JobType::BUILD){
+BuildIndexJob::BuildIndexJob(JobId id, engine::meta::MetaPtr meta_ptr)
+    : Job(id, JobType::BUILD), meta_ptr_(std::move(meta_ptr)) {
 
 }
 
 bool
-BuildIndexJob::AddToIndexFiles(const engine::meta::TableFileSchemaPtr &to_index_file,
-                               const TableFileSchema table_file) {
+BuildIndexJob::AddToIndexFiles(const engine::meta::TableFileSchemaPtr &to_index_file) {
     std::unique_lock<std::mutex> lock(mutex_);
-    if (to_index_file == nullptr) {
+    if (to_index_file == nullptr || to_index_files_.find(to_index_file->id_) != to_index_files_.end()) {
         return false;
     }
 
     SERVER_LOG_DEBUG << "BuildIndexJob " << id() << " add to_index file: " << to_index_file->id_;
 
     to_index_files_[to_index_file->id_] = to_index_file;
-    table_files_[table_file.id_] = table_file;
 }
 
 Status&
@@ -58,6 +55,5 @@ BuildIndexJob::BuildIndexDone(size_t to_index_id) {
 }
 
 
-}
 }
 }

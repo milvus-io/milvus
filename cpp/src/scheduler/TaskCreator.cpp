@@ -69,7 +69,7 @@ TaskCreator::Create(const DeleteJobPtr &job) {
 }
 
 std::vector<TaskPtr>
-TaskCreator::Create(const zilliz::milvus::scheduler::BuildIndexJobPtr &job) {
+TaskCreator::Create(const BuildIndexJobPtr &job) {
     std::vector<TaskPtr> tasks;
     //TODO(yukun): remove "disk" hardcode here
     ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("disk");
