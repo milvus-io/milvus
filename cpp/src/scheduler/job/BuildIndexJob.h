@@ -32,7 +32,6 @@
 #include "scheduler/Definition.h"
 
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -43,11 +42,11 @@ using Id2ToTableFileMap = std::unordered_map<size_t, TableFileSchema>;
 
 class BuildIndexJob : public Job {
  public:
-    explicit BuildIndexJob(JobId id);
+    explicit BuildIndexJob(JobId id, engine::meta::MetaPtr meta_ptr);
 
  public:
     bool
-    AddToIndexFiles(const TableFileSchemaPtr &to_index_file, const TableFileSchema table_file);
+    AddToIndexFiles(const TableFileSchemaPtr &to_index_file);
 
     Status &
     WaitBuildIndexFinish();
@@ -66,21 +65,31 @@ class BuildIndexJob : public Job {
 //        return engine_type_;
 //    }
 
+    Status &
+    GetStatus() {
+        return status_;
+    }
+
     Id2ToIndexMap &
     to_index_files() {
         return to_index_files_;
     }
 
+    engine::meta::MetaPtr
+    meta() const {
+        return meta_ptr_;
+    }
+
  private:
     Id2ToIndexMap to_index_files_;
-    Id2ToTableFileMap table_files_;
+    engine::meta::MetaPtr meta_ptr_;
 
+    Status status_;
     std::mutex mutex_;
     std::condition_variable cv_;
 };
 
 using BuildIndexJobPtr = std::shared_ptr<BuildIndexJob>;
 
-}
 }
 }

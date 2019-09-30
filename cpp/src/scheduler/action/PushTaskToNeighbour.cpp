@@ -172,7 +172,8 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr
             Status stat = config.GetDBConfigBuildIndexGPU(build_index_gpu);
 
             for (uint64_t i = 0; i < compute_resources.size(); ++i) {
-                if (compute_resources[i]->device_id() == build_index_gpu) {
+                if (compute_resources[i]->name()
+                    == res_mgr.lock()->GetResource(ResourceType::GPU, build_index_gpu)->name()) {
                     Path task_path(paths[i], paths[i].size() - 1);
                     task->path() = task_path;
                     break;

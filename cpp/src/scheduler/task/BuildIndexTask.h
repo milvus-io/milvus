@@ -22,7 +22,6 @@
 #include "scheduler/job/BuildIndexJob.h"
 
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -42,8 +41,8 @@ class XBuildIndexTask : public Task {
     size_t to_index_id_ = 0;
     int to_index_type_ = 0;
     ExecutionEnginePtr to_index_engine_ = nullptr;
+
 };
 
 }  // namespace scheduler
 }  // namespace milvus
-}  // namespace zilliz

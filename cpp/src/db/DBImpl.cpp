@@ -242,11 +242,7 @@ DBImpl::GetTableRowCount(const std::string &table_id, uint64_t &row_count) {
 }
 
 Status
-<<<<<<< HEAD
-DBImpl::InsertVectors(const std::string &table_id_, uint64_t n, const float *vectors, IDNumbers &vector_ids_) {
-=======
 DBImpl::InsertVectors(const std::string& table_id, uint64_t n, const float* vectors, IDNumbers& vector_ids) {
->>>>>>> upstream/branch-0.5.0
     //    ENGINE_LOG_DEBUG << "Insert " << n << " vectors to cache";
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
@@ -299,17 +295,6 @@ DBImpl::CreateIndex(const std::string &table_id, const TableIndex &index) {
     // for IDMAP type, only wait all NEW file converted to RAW file
     // for other type, wait NEW/RAW/NEW_MERGE/NEW_INDEX/TO_INDEX files converted to INDEX files
     std::vector<int> file_types;
-<<<<<<< HEAD
-    if (index.engine_type_ == (int) EngineType::FAISS_IDMAP) {
-        file_types = {
-            (int) meta::TableFileSchema::NEW, (int) meta::TableFileSchema::NEW_MERGE,
-        };
-    } else {
-        file_types = {
-            (int) meta::TableFileSchema::RAW, (int) meta::TableFileSchema::NEW,
-            (int) meta::TableFileSchema::NEW_MERGE, (int) meta::TableFileSchema::NEW_INDEX,
-            (int) meta::TableFileSchema::TO_INDEX,
-=======
     if (index.engine_type_ == static_cast<int32_t>(EngineType::FAISS_IDMAP)) {
         file_types = {
             static_cast<int32_t>(meta::TableFileSchema::NEW), static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
@@ -321,7 +306,6 @@ DBImpl::CreateIndex(const std::string &table_id, const TableIndex &index) {
             static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
             static_cast<int32_t>(meta::TableFileSchema::NEW_INDEX),
             static_cast<int32_t>(meta::TableFileSchema::TO_INDEX),
->>>>>>> upstream/branch-0.5.0
         };
     }
 
@@ -915,38 +899,36 @@ DBImpl::BackgroundBuildIndex() {
     Status status;
 
     scheduler::BuildIndexJobPtr
-        job = std::make_shared<scheduler::BuildIndexJob>(0);
+        job = std::make_shared<scheduler::BuildIndexJob>(0, meta_ptr_);
 
     // step 2: put build index task to scheduler
-    scheduler::JobMgrInst::GetInstance()->Put(job);
-    for (auto &file : to_index_files) {
-        std::cout << "get to index file" << std::endl;
-        meta::TableFileSchema table_file;
-        table_file.table_id_ = file.table_id_;
-        table_file.date_ = file.date_;
-        table_file.file_type_ =
-            meta::TableFileSchema::NEW_INDEX;  // for multi-db-path, distribute index file averagely to each path
-        status = meta_ptr_->CreateTableFile(table_file);
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Failed to create table file: " << status.ToString();
-        }
-
-        scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
-        job->AddToIndexFiles(file_ptr, table_file);
-    }
-    job->WaitBuildIndexFinish();
-
 //    for (auto &file : to_index_files) {
-//        status = BuildIndex(file);
-//        if (!status.ok()) {
+//        std::cout << "get to index file" << std::endl;
+//
+//        scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
+//        job->AddToIndexFiles(file_ptr);
+//
+//        if (!job->GetStatus().ok()) {
+//            Status status = job->GetStatus();
 //            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
 //        }
 //
-//        if (shutting_down_.load(std::memory_order_acquire)) {
-//            ENGINE_LOG_DEBUG << "Server will shutdown, skip build index action";
-//            break;
-//        }
 //    }
+//    scheduler::JobMgrInst::GetInstance()->Put(job);
+//    job->WaitBuildIndexFinish();
+
+    for (auto &file : to_index_files) {
+        std::cout << "get to index file" << std::endl;
+        status = BuildIndex(file);
+        if (!status.ok()) {
+            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
+        }
+
+        if (shutting_down_.load(std::memory_order_acquire)) {
+            ENGINE_LOG_DEBUG << "Server will shutdown, skip build index action";
+            break;
+        }
+    }
 
     ENGINE_LOG_TRACE << "Background build index thread exit";
 }
