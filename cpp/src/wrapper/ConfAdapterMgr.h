@@ -21,6 +21,7 @@
 #include "VecIndex.h"
 #include "ConfAdapter.h"
 
+#include <functional>
 
 namespace zilliz {
 namespace milvus {
