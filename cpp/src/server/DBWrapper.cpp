@@ -26,6 +26,7 @@
 #include <string>
 #include <omp.h>
 #include <faiss/utils.h>
+#include <cmath>
 
 namespace zilliz {
 namespace milvus {

@@ -25,6 +25,7 @@
 #include <arpa/inet.h>
 #include <regex>
 #include <algorithm>
+#include <cmath>
 
 namespace zilliz {
 namespace milvus {
