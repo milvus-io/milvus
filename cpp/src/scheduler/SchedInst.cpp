@@ -146,7 +146,7 @@ load_advance_config() {
     //        }
     //    } catch (const char *msg) {
     //        SERVER_LOG_ERROR << msg;
-    //        // TODO(wxy): throw exception instead
+    //        // TODO(wxyu): throw exception instead
     //        exit(-1);
     ////        throw std::exception();
     //    }
