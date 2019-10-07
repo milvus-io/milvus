@@ -26,10 +26,10 @@
 namespace milvus {
 namespace scheduler {
 
-// TODO(wxy): rewrite
+// TODO(wxyu): rewrite
 class XSearchTask : public Task {
  public:
-    explicit XSearchTask(TableFileSchemaPtr file);
+    explicit XSearchTask(TableFileSchemaPtr file, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;
