@@ -64,7 +64,7 @@ class ResourceMgr {
         return disk_resources_;
     }
 
-    // TODO(wxy): why return shared pointer
+    // TODO(wxyu): why return shared pointer
     inline std::vector<ResourcePtr>
     GetAllResources() {
         return resources_;
@@ -89,7 +89,7 @@ class ResourceMgr {
     GetNumGpuResource() const;
 
  public:
-    // TODO(wxy): add stats interface(low)
+    // TODO(wxyu): add stats interface(low)
 
  public:
     /******** Utility Functions ********/
