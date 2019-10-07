@@ -23,6 +23,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-574 - Milvus configuration refactor
 - MS-578 - Make sure milvus5.0 don't crack 0.3.1 data
 - MS-585 - Update namespace in scheduler
+- MS-608 - Update TODO names
+- MS-609 - Update task construct function
 
 ## New Feature
 

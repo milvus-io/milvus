@@ -22,6 +22,7 @@
 
 #include <map>
 #include <memory>
+#include <functional>
 
 namespace milvus {
 namespace engine {
