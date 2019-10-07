@@ -54,7 +54,8 @@ TEST(NormalTest, INST_TEST) {
     ASSERT_FALSE(disks.empty());
     if (auto observe = disks[0].lock()) {
         for (uint64_t i = 0; i < NUM_TASK; ++i) {
-            auto task = std::make_shared<ms::TestTask>(dummy);
+            auto label = std::make_shared<ms::DefaultLabel>();
+            auto task = std::make_shared<ms::TestTask>(dummy, label);
             task->label() = std::make_shared<ms::DefaultLabel>();
             tasks.push_back(task);
             observe->task_table().Put(task);

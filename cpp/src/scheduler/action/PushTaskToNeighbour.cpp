@@ -82,7 +82,7 @@ Action::PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self
         }
 
     } else {
-        // TODO(wxy): process
+        // TODO(wxyu): process
     }
 }
 
