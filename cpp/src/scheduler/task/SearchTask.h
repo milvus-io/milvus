@@ -26,7 +26,7 @@
 namespace milvus {
 namespace scheduler {
 
-// TODO(wxy): rewrite
+// TODO(wxyu): rewrite
 class XSearchTask : public Task {
  public:
     explicit XSearchTask(TableFileSchemaPtr file);
