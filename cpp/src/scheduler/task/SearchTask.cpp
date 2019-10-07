@@ -95,7 +95,8 @@ CollectFileMetrics(int file_type, size_t file_size) {
     }
 }
 
-XSearchTask::XSearchTask(TableFileSchemaPtr file) : Task(TaskType::SearchTask), file_(file) {
+XSearchTask::XSearchTask(TableFileSchemaPtr file, TaskLabelPtr label)
+    : Task(TaskType::SearchTask, std::move(label)), file_(file) {
     if (file_) {
         if (file_->metric_type_ != static_cast<int>(MetricType::L2)) {
             metric_l2 = false;

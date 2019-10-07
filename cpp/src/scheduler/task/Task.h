@@ -48,7 +48,7 @@ using TaskPtr = std::shared_ptr<Task>;
 // TODO: re-design
 class Task {
  public:
-    explicit Task(TaskType type) : type_(type) {
+    explicit Task(TaskType type, TaskLabelPtr label) : type_(type), label_(std::move(label)) {
     }
 
     /*

@@ -18,6 +18,7 @@
 
 #include "scheduler/TaskTable.h"
 #include "scheduler/task/TestTask.h"
+#include "scheduler/tasklabel/DefaultLabel.h"
 #include <gtest/gtest.h>
 
 namespace {
@@ -172,8 +173,9 @@ class TaskTableBaseTest : public ::testing::Test {
     SetUp() override {
         ms::TableFileSchemaPtr dummy = nullptr;
         invalid_task_ = nullptr;
-        task1_ = std::make_shared<ms::TestTask>(dummy);
-        task2_ = std::make_shared<ms::TestTask>(dummy);
+        auto label = std::make_shared<ms::DefaultLabel>();
+        task1_ = std::make_shared<ms::TestTask>(dummy, label);
+        task2_ = std::make_shared<ms::TestTask>(dummy, label);
     }
 
     ms::TaskPtr invalid_task_;
@@ -340,7 +342,8 @@ class TaskTableAdvanceTest : public ::testing::Test {
     SetUp() override {
         ms::TableFileSchemaPtr dummy = nullptr;
         for (uint64_t i = 0; i < 8; ++i) {
-            auto task = std::make_shared<ms::TestTask>(dummy);
+            auto label = std::make_shared<ms::DefaultLabel>();
+            auto task = std::make_shared<ms::TestTask>(dummy, label);
             table1_.Put(task);
         }
 

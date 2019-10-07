@@ -21,6 +21,7 @@
 #include "scheduler/resource/DiskResource.h"
 #include "scheduler/resource/TestResource.h"
 #include "scheduler/task/TestTask.h"
+#include "scheduler/tasklabel/DefaultLabel.h"
 #include "scheduler/ResourceMgr.h"
 #include <gtest/gtest.h>
 
@@ -184,7 +185,8 @@ TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
     };
     mgr1_->RegisterSubscriber(callback);
     TableFileSchemaPtr dummy = nullptr;
-    disk_res->task_table().Put(std::make_shared<TestTask>(dummy));
+    auto label = std::make_shared<DefaultLabel>();
+    disk_res->task_table().Put(std::make_shared<TestTask>(dummy, label));
     sleep(1);
     ASSERT_TRUE(flag);
 }
