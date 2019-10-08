@@ -38,7 +38,7 @@ TaskCreator::Create(const JobPtr &job) {
             return Create(std::static_pointer_cast<BuildIndexJob>(job));
         }
         default: {
-            // TODO(wxy): error
+            // TODO(wxyu): error
             return std::vector<TaskPtr>();
         }
     }
@@ -47,9 +47,9 @@ TaskCreator::Create(const JobPtr &job) {
 std::vector<TaskPtr>
 TaskCreator::Create(const SearchJobPtr &job) {
     std::vector<TaskPtr> tasks;
-    for (auto &index_file : job->index_files()) {
-        auto task = std::make_shared<XSearchTask>(index_file.second);
-        task->label() = std::make_shared<DefaultLabel>();
+    for (auto& index_file : job->index_files()) {
+        auto label = std::make_shared<DefaultLabel>();
+        auto task = std::make_shared<XSearchTask>(index_file.second, label);
         task->job_ = job;
         tasks.emplace_back(task);
     }
@@ -60,8 +60,8 @@ TaskCreator::Create(const SearchJobPtr &job) {
 std::vector<TaskPtr>
 TaskCreator::Create(const DeleteJobPtr &job) {
     std::vector<TaskPtr> tasks;
-    auto task = std::make_shared<XDeleteTask>(job);
-    task->label() = std::make_shared<BroadcastLabel>();
+    auto label = std::make_shared<BroadcastLabel>();
+    auto task = std::make_shared<XDeleteTask>(job, label);
     task->job_ = job;
     tasks.emplace_back(task);
 

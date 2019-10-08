@@ -31,7 +31,7 @@
 namespace milvus {
 namespace scheduler {
 
-// TODO(wxy): refactor, not friendly to unittest, logical in framework code
+// TODO(wxyu): refactor, not friendly to unittest, logical in framework code
 class Scheduler {
  public:
     explicit Scheduler(ResourceMgrWPtr res_mgr);

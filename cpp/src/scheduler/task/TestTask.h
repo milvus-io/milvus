@@ -24,7 +24,7 @@ namespace scheduler {
 
 class TestTask : public XSearchTask {
  public:
-    explicit TestTask(TableFileSchemaPtr& file);
+    explicit TestTask(TableFileSchemaPtr& file, TaskLabelPtr label);
 
  public:
     void

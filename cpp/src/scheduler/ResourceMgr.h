@@ -64,7 +64,17 @@ class ResourceMgr {
         return disk_resources_;
     }
 
-    // TODO(wxy): why return shared pointer
+    inline std::vector<ResourceWPtr>&
+    GetCpuResources() {
+        return cpu_resources_;
+    }
+
+    inline std::vector<ResourceWPtr>&
+    GetGpuResources() {
+        return gpu_resources_;
+    }
+
+    // TODO(wxyu): why return shared pointer
     inline std::vector<ResourcePtr>
     GetAllResources() {
         return resources_;
@@ -89,7 +99,7 @@ class ResourceMgr {
     GetNumGpuResource() const;
 
  public:
-    // TODO(wxy): add stats interface(low)
+    // TODO(wxyu): add stats interface(low)
 
  public:
     /******** Utility Functions ********/
@@ -100,6 +110,9 @@ class ResourceMgr {
     DumpTaskTables();
 
  private:
+    bool
+    check_resource_valid();
+
     void
     post_event(const EventPtr& event);
 
@@ -110,6 +123,8 @@ class ResourceMgr {
     bool running_ = false;
 
     std::vector<ResourceWPtr> disk_resources_;
+    std::vector<ResourceWPtr> cpu_resources_;
+    std::vector<ResourceWPtr> gpu_resources_;
     std::vector<ResourcePtr> resources_;
     mutable std::mutex resources_mutex_;
 
