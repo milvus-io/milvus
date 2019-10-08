@@ -329,7 +329,7 @@ TEST_F(MemManagerTest2, CONCURRENT_INSERT_SEARCH_TEST) {
 
             START_TIMER;
             stat = db_->Query(GetTableName(), k, qb, 10, qxb.data(), results);
-            ss << "Search " << j << " With Size " << count / ms::engine::meta::M << " M";
+            ss << "Search " << j << " With Size " << count / ms::engine::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
