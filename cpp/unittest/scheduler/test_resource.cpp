@@ -23,6 +23,7 @@
 #include "scheduler/resource/TestResource.h"
 #include "scheduler/task/Task.h"
 #include "scheduler/task/TestTask.h"
+#include "scheduler/tasklabel/DefaultLabel.h"
 #include "scheduler/ResourceFactory.h"
 #include <gtest/gtest.h>
 
@@ -185,7 +186,8 @@ TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto task = std::make_shared<TestTask>(dummy);
+        auto label = std::make_shared<DefaultLabel>();
+        auto task = std::make_shared<TestTask>(dummy, label);
         tasks.push_back(task);
         disk_resource_->task_table().Put(task);
     }
@@ -210,7 +212,8 @@ TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto task = std::make_shared<TestTask>(dummy);
+        auto label = std::make_shared<DefaultLabel>();
+        auto task = std::make_shared<TestTask>(dummy, label);
         tasks.push_back(task);
         cpu_resource_->task_table().Put(task);
     }
@@ -235,7 +238,8 @@ TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto task = std::make_shared<TestTask>(dummy);
+        auto label = std::make_shared<DefaultLabel>();
+        auto task = std::make_shared<TestTask>(dummy, label);
         tasks.push_back(task);
         gpu_resource_->task_table().Put(task);
     }
@@ -260,7 +264,8 @@ TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto task = std::make_shared<TestTask>(dummy);
+        auto label = std::make_shared<DefaultLabel>();
+        auto task = std::make_shared<TestTask>(dummy, label);
         tasks.push_back(task);
         test_resource_->task_table().Put(task);
     }

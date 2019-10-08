@@ -14,15 +14,19 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Improvement
 - MS-552 - Add and change the easylogging library
 - MS-553 - Refine cache code
-- MS-557 - Merge Log.h
+- MS-555 - Remove old scheduler
 - MS-556 - Add Job Definition in Scheduler
+- MS-557 - Merge Log.h
 - MS-558 - Refine status code
 - MS-562 - Add JobMgr and TaskCreator in Scheduler
 - MS-566 - Refactor cmake
-- MS-555 - Remove old scheduler
 - MS-574 - Milvus configuration refactor
 - MS-578 - Make sure milvus5.0 don't crack 0.3.1 data
 - MS-585 - Update namespace in scheduler
+- MS-606 - Speed up result reduce
+- MS-608 - Update TODO names
+- MS-609 - Update task construct function
+- MS-611 - Add resources validity check in ResourceMgr
 
 ## New Feature
 
@@ -36,6 +40,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-590 - Refine cmake code to support cpplint
 - MS-600 - Reconstruct unittest code
 - MS-602 - Remove zilliz namespace
+- MS-610 - Change error code base value from hex to decimal
 
 # Milvus 0.4.0 (2019-09-12)
 
