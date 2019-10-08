@@ -79,9 +79,7 @@ ResourceMgr::Add(ResourcePtr&& resource) {
             gpu_resources_.emplace_back(ResourceWPtr(resource));
             break;
         }
-        default: {
-            break;
-        }
+        default: { break; }
     }
     resources_.emplace_back(resource);
 
@@ -104,6 +102,10 @@ ResourceMgr::Connect(const std::string& name1, const std::string& name2, Connect
 void
 ResourceMgr::Clear() {
     std::lock_guard<std::mutex> lck(resources_mutex_);
+    if (running_) {
+        ENGINE_LOG_ERROR << "ResourceMgr is running, cannot clear.";
+        return;
+    }
     disk_resources_.clear();
     cpu_resources_.clear();
     gpu_resources_.clear();
@@ -196,13 +198,19 @@ bool
 ResourceMgr::check_resource_valid() {
     {
         // TODO: check one disk-resource, one cpu-resource, zero or more gpu-resource;
-        if (GetDiskResources().size() != 1) return false;
-        if (GetCpuResources().size() != 1) return false;
+        if (GetDiskResources().size() != 1) {
+            return false;
+        }
+        if (GetCpuResources().size() != 1) {
+            return false;
+        }
     }
 
     {
         // TODO: one compute-resource at least;
-        if (GetNumOfComputeResource() < 1) return false;
+        if (GetNumOfComputeResource() < 1) {
+            return false;
+        }
     }
 
     {
@@ -233,9 +241,7 @@ void
 ResourceMgr::event_process() {
     while (running_) {
         std::unique_lock<std::mutex> lock(event_mutex_);
-        event_cv_.wait(lock, [this] {
-            return !queue_.empty();
-        });
+        event_cv_.wait(lock, [this] { return !queue_.empty(); });
 
         auto event = queue_.front();
         queue_.pop();
