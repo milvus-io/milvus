@@ -104,6 +104,10 @@ ResourceMgr::Connect(const std::string& name1, const std::string& name2, Connect
 void
 ResourceMgr::Clear() {
     std::lock_guard<std::mutex> lck(resources_mutex_);
+    if (running_) {
+        ENGINE_LOG_ERROR << "ResourceMgr is running, cannot clear.";
+        return;
+    }
     disk_resources_.clear();
     cpu_resources_.clear();
     gpu_resources_.clear();
