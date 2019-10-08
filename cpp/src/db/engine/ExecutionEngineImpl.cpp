@@ -133,7 +133,6 @@ ExecutionEngineImpl::Serialize() {
 
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
-    std::cout << "load" << std::endl;
     index_ = cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
@@ -162,7 +161,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
-    std::cout << "copy2gpu" << std::endl;
+    std::cout << "copytogpu" << std::endl;
     auto index = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
@@ -186,6 +185,17 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
         GpuCache(device_id);
     }
 
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
+    auto index = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
+    bool already_in_cache = (index != nullptr);
+    if (!already_in_cache) {
+        cache::DataObjPtr obj = std::make_shared<cache::DataObj>(nullptr, PhysicalSize());
+        milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
+    }
     return Status::OK();
 }
 
