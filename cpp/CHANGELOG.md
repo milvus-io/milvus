@@ -25,6 +25,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-585 - Update namespace in scheduler
 - MS-608 - Update TODO names
 - MS-609 - Update task construct function
+- MS-611 - Add resources validity check in ResourceMgr
 
 ## New Feature
 
