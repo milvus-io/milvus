@@ -22,9 +22,9 @@
 #include "scheduler/task/SearchTask.h"
 #include "utils/TimeRecorder.h"
 
-using namespace milvus::scheduler;
-
 namespace {
+
+namespace ms = milvus::scheduler;
 
 void
 BuildResult(uint64_t nq,
@@ -45,14 +45,14 @@ BuildResult(uint64_t nq,
     }
 }
 
-void CheckTopkResult(const std::vector<long> &input_ids_1,
+void CheckTopkResult(const std::vector<int64_t> &input_ids_1,
                      const std::vector<float> &input_distance_1,
-                     const std::vector<long> &input_ids_2,
+                     const std::vector<int64_t> &input_ids_2,
                      const std::vector<float> &input_distance_2,
                      uint64_t nq,
                      uint64_t topk,
                      bool ascending,
-                     const ResultSet& result) {
+                     const ms::ResultSet& result) {
     ASSERT_EQ(result.size(), nq);
     ASSERT_EQ(input_ids_1.size(), input_distance_1.size());
     ASSERT_EQ(input_ids_2.size(), input_distance_2.size());
@@ -85,21 +85,21 @@ TEST(DBSearchTest, TOPK_TEST) {
     uint64_t NQ = 15;
     uint64_t TOP_K = 64;
     bool ascending;
-    std::vector<long> ids1, ids2;
+    std::vector<int64_t> ids1, ids2;
     std::vector<float> dist1, dist2;
-    ResultSet result;
+    ms::ResultSet result;
     milvus::Status status;
 
     /* test1, id1/dist1 valid, id2/dist2 empty */
     ascending = true;
     BuildResult(NQ, TOP_K, ascending, ids1, dist1);
-    status = XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
     /* test2, id1/dist1 valid, id2/dist2 valid */
     BuildResult(NQ, TOP_K, ascending, ids2, dist2);
-    status = XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
@@ -108,9 +108,9 @@ TEST(DBSearchTest, TOPK_TEST) {
     dist1.clear();
     result.clear();
     BuildResult(NQ, TOP_K/2, ascending, ids1, dist1);
-    status = XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    status = XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
@@ -119,9 +119,9 @@ TEST(DBSearchTest, TOPK_TEST) {
     dist2.clear();
     result.clear();
     BuildResult(NQ, TOP_K/3, ascending, ids2, dist2);
-    status = XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    status = XSearchTask::TopkResult(ids2, dist2, TOP_K/3, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K/3, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
@@ -135,13 +135,13 @@ TEST(DBSearchTest, TOPK_TEST) {
 
     /* test1, id1/dist1 valid, id2/dist2 empty */
     BuildResult(NQ, TOP_K, ascending, ids1, dist1);
-    status = XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
     /* test2, id1/dist1 valid, id2/dist2 valid */
     BuildResult(NQ, TOP_K, ascending, ids2, dist2);
-    status = XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
@@ -150,9 +150,9 @@ TEST(DBSearchTest, TOPK_TEST) {
     dist1.clear();
     result.clear();
     BuildResult(NQ, TOP_K/2, ascending, ids1, dist1);
-    status = XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    status = XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
@@ -161,9 +161,9 @@ TEST(DBSearchTest, TOPK_TEST) {
     dist2.clear();
     result.clear();
     BuildResult(NQ, TOP_K/3, ascending, ids2, dist2);
-    status = XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    status = XSearchTask::TopkResult(ids2, dist2, TOP_K/3, NQ, TOP_K, ascending, result);
+    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K/3, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 }
@@ -173,9 +173,9 @@ TEST(DBSearchTest, REDUCE_PERF_TEST) {
     int32_t top_k = 1000;
     int32_t index_file_num = 478;   /* sift1B dataset, index files num */
     bool ascending = true;
-    std::vector<long> input_ids;
+    std::vector<int64_t> input_ids;
     std::vector<float> input_distance;
-    ResultSet final_result;
+    ms::ResultSet final_result;
     milvus::Status status;
 
     double span, reduce_cost = 0.0;
@@ -187,7 +187,7 @@ TEST(DBSearchTest, REDUCE_PERF_TEST) {
         rc.RecordSection("do search for context: " + std::to_string(i));
 
         // pick up topk result
-        status = XSearchTask::TopkResult(input_ids, input_distance, top_k, nq, top_k, ascending, final_result);
+        status = ms::XSearchTask::TopkResult(input_ids, input_distance, top_k, nq, top_k, ascending, final_result);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(final_result.size(), nq);
 
