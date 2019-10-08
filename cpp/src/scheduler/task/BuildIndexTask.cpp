@@ -29,8 +29,8 @@
 namespace milvus {
 namespace scheduler {
 
-XBuildIndexTask::XBuildIndexTask(TableFileSchemaPtr file)
-    : Task(TaskType::BuildIndexTask), file_(file) {
+XBuildIndexTask::XBuildIndexTask(TableFileSchemaPtr file, TaskLabelPtr label)
+    : Task(TaskType::BuildIndexTask, std::move(label)), file_(file) {
     if (file_) {
         to_index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, (EngineType) file_->engine_type_,
                                                 (MetricType) file_->metric_type_, file_->nlist_);
