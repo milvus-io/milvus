@@ -21,11 +21,6 @@ namespace milvus {
 namespace engine {
 namespace meta {
 
-const size_t K = 1024UL;
-const size_t M = K * K;
-const size_t G = K * M;
-const size_t T = K * G;
-
 const size_t S_PS = 1UL;
 const size_t MS_PS = 1000 * S_PS;
 const size_t US_PS = 1000 * MS_PS;

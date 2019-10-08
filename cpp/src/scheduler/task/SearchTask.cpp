@@ -22,6 +22,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
+#include <algorithm>
 #include <string>
 #include <thread>
 #include <utility>
@@ -230,13 +231,8 @@ XSearchTask::Execute() {
 }
 
 Status
-XSearchTask::TopkResult(const std::vector<long> &input_ids,
-                        const std::vector<float> &input_distance,
-                        uint64_t input_k,
-                        uint64_t nq,
-                        uint64_t topk,
-                        bool ascending,
-                        scheduler::ResultSet &result) {
+XSearchTask::TopkResult(const std::vector<int64_t>& input_ids, const std::vector<float>& input_distance,
+                        uint64_t input_k, uint64_t nq, uint64_t topk, bool ascending, scheduler::ResultSet& result) {
     scheduler::ResultSet result_buf;
 
     if (result.empty()) {
@@ -266,7 +262,7 @@ XSearchTask::TopkResult(const std::vector<long> &input_ids,
                 auto& result_buf_item = result_buf_i[buf_k];
                 auto& result_item = result_i[tar_k];
                 if ((ascending && input_distance[src_idx] < result_item.second) ||
-                   (!ascending && input_distance[src_idx] > result_item.second)) {
+                    (!ascending && input_distance[src_idx] > result_item.second)) {
                     result_buf_item.first = input_ids[src_idx];
                     result_buf_item.second = input_distance[src_idx];
                     src_k++;
