@@ -75,8 +75,8 @@ TaskCreator::Create(const BuildIndexJobPtr &job) {
     ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("disk");
 
     for (auto &to_index_file : job->to_index_files()) {
-        auto task = std::make_shared<XBuildIndexTask>(to_index_file.second);
-        task->label() = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+        auto task = std::make_shared<XBuildIndexTask>(to_index_file.second, label);
         task->job_ = job;
         tasks.emplace_back(task);
     }

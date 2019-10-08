@@ -27,7 +27,7 @@ namespace scheduler {
 
 class XBuildIndexTask : public Task {
  public:
-    explicit XBuildIndexTask(TableFileSchemaPtr file);
+    explicit XBuildIndexTask(TableFileSchemaPtr file, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;
