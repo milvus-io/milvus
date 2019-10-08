@@ -18,6 +18,7 @@
 #include "db/utils.h"
 #include "db/DB.h"
 #include "db/DBImpl.h"
+#include "db/Constants.h"
 #include "db/meta/MetaConsts.h"
 #include "db/DBFactory.h"
 #include "cache/CpuCacheMgr.h"
@@ -190,7 +191,7 @@ TEST_F(DBTest, DB_TEST) {
 
             START_TIMER;
             stat = db_->Query(TABLE_NAME, k, qb, 10, qxb.data(), results);
-            ss << "Search " << j << " With Size " << count / ms::engine::meta::M << " M";
+            ss << "Search " << j << " With Size " << count / ms::engine::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
@@ -439,7 +440,7 @@ TEST_F(DBTest2, ARHIVE_DISK_CHECK) {
 
     db_->Size(size);
     LOG(DEBUG) << "size=" << size;
-    ASSERT_LE(size, 1 * ms::engine::meta::G);
+    ASSERT_LE(size, 1 * ms::engine::G);
 }
 
 TEST_F(DBTest2, DELETE_TEST) {
