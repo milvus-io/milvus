@@ -26,6 +26,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-608 - Update TODO names
 - MS-609 - Update task construct function
 - MS-611 - Add resources validity check in ResourceMgr
+- MS-619 - Add optimizer class in scheduler
 
 ## New Feature
 
