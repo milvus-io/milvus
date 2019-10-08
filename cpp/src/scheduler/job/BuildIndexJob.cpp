@@ -22,8 +22,8 @@
 namespace milvus {
 namespace scheduler {
 
-BuildIndexJob::BuildIndexJob(JobId id, engine::meta::MetaPtr meta_ptr)
-    : Job(id, JobType::BUILD), meta_ptr_(std::move(meta_ptr)) {
+BuildIndexJob::BuildIndexJob(JobId id, engine::meta::MetaPtr meta_ptr, engine::DBOptions options)
+    : Job(id, JobType::BUILD), meta_ptr_(std::move(meta_ptr)), options_(std::move(options)) {
 
 }
 
