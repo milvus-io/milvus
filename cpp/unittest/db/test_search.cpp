@@ -22,12 +22,9 @@
 #include "scheduler/task/SearchTask.h"
 #include "utils/TimeRecorder.h"
 
+using namespace milvus::scheduler;
+
 namespace {
-
-namespace ms = milvus;
-
-static constexpr uint64_t NQ = 15;
-static constexpr uint64_t TOP_K = 64;
 
 void
 BuildResult(uint64_t nq,
@@ -48,76 +45,36 @@ BuildResult(uint64_t nq,
     }
 }
 
-void
-CheckResult(const ms::scheduler::Id2DistanceMap &src_1,
-            const ms::scheduler::Id2DistanceMap &src_2,
-            const ms::scheduler::Id2DistanceMap &target,
-            bool ascending) {
-    for (uint64_t i = 0; i < target.size() - 1; i++) {
+void CheckTopkResult(const std::vector<long> &input_ids_1,
+                     const std::vector<float> &input_distance_1,
+                     const std::vector<long> &input_ids_2,
+                     const std::vector<float> &input_distance_2,
+                     uint64_t nq,
+                     uint64_t topk,
+                     bool ascending,
+                     const ResultSet& result) {
+    ASSERT_EQ(result.size(), nq);
+    ASSERT_EQ(input_ids_1.size(), input_distance_1.size());
+    ASSERT_EQ(input_ids_2.size(), input_distance_2.size());
+
+    uint64_t input_k1 = input_ids_1.size() / nq;
+    uint64_t input_k2 = input_ids_2.size() / nq;
+
+    for (int64_t i = 0; i < nq; i++) {
+        std::vector<float> src_vec(input_distance_1.begin()+i*input_k1, input_distance_1.begin()+(i+1)*input_k1);
+        src_vec.insert(src_vec.end(), input_distance_2.begin()+i*input_k2, input_distance_2.begin()+(i+1)*input_k2);
         if (ascending) {
-            ASSERT_LE(target[i].second, target[i + 1].second);
+            std::sort(src_vec.begin(), src_vec.end());
         } else {
-            ASSERT_GE(target[i].second, target[i + 1].second);
-        }
-    }
-
-    using ID2DistMap = std::map<int64_t, float>;
-    ID2DistMap src_map_1, src_map_2;
-    for (const auto &pair : src_1) {
-        src_map_1.insert(pair);
-    }
-    for (const auto &pair : src_2) {
-        src_map_2.insert(pair);
-    }
-
-    for (const auto &pair : target) {
-        ASSERT_TRUE(src_map_1.find(pair.first) != src_map_1.end() || src_map_2.find(pair.first) != src_map_2.end());
-
-        float dist = src_map_1.find(pair.first) != src_map_1.end() ? src_map_1[pair.first] : src_map_2[pair.first];
-        ASSERT_LT(fabs(pair.second - dist), std::numeric_limits<float>::epsilon());
-    }
-}
-
-void
-CheckCluster(const std::vector<int64_t> &target_ids,
-             const std::vector<float> &target_distence,
-             const ms::scheduler::ResultSet &src_result,
-             int64_t nq,
-             int64_t topk) {
-    ASSERT_EQ(src_result.size(), nq);
-    for (int64_t i = 0; i < nq; i++) {
-        auto &res = src_result[i];
-        ASSERT_EQ(res.size(), topk);
-
-        if (res.empty()) {
-            continue;
+            std::sort(src_vec.begin(), src_vec.end(), std::greater<float>());
         }
 
-        ASSERT_EQ(res[0].first, target_ids[i * topk]);
-        ASSERT_EQ(res[topk - 1].first, target_ids[i * topk + topk - 1]);
-    }
-}
-
-void
-CheckTopkResult(const ms::scheduler::ResultSet &src_result,
-                bool ascending,
-                int64_t nq,
-                int64_t topk) {
-    ASSERT_EQ(src_result.size(), nq);
-    for (int64_t i = 0; i < nq; i++) {
-        auto &res = src_result[i];
-        ASSERT_EQ(res.size(), topk);
-
-        if (res.empty()) {
-            continue;
-        }
-
-        for (int64_t k = 0; k < topk - 1; k++) {
-            if (ascending) {
-                ASSERT_LE(res[k].second, res[k + 1].second);
-            } else {
-                ASSERT_GE(res[k].second, res[k + 1].second);
+        uint64_t n = std::min(topk, input_k1+input_k2);
+        for (uint64_t j = 0; j < n; j++) {
+            if (src_vec[j] != result[i][j].second) {
+                std::cout << src_vec[j] << " " << result[i][j].second << std::endl;
             }
+            ASSERT_TRUE(src_vec[j] == result[i][j].second);
         }
     }
 }
@@ -125,179 +82,117 @@ CheckTopkResult(const ms::scheduler::ResultSet &src_result,
 } // namespace
 
 TEST(DBSearchTest, TOPK_TEST) {
-    bool ascending = true;
-    std::vector<int64_t> target_ids;
-    std::vector<float> target_distence;
-    ms::scheduler::ResultSet src_result;
-    auto status = ms::scheduler::XSearchTask::ClusterResult(target_ids, target_distence, NQ, TOP_K, src_result);
-    ASSERT_FALSE(status.ok());
-    ASSERT_TRUE(src_result.empty());
+    uint64_t NQ = 15;
+    uint64_t TOP_K = 64;
+    bool ascending;
+    std::vector<long> ids1, ids2;
+    std::vector<float> dist1, dist2;
+    ResultSet result;
+    milvus::Status status;
 
-    BuildResult(NQ, TOP_K, ascending, target_ids, target_distence);
-    status = ms::scheduler::XSearchTask::ClusterResult(target_ids, target_distence, NQ, TOP_K, src_result);
+    /* test1, id1/dist1 valid, id2/dist2 empty */
+    ascending = true;
+    BuildResult(NQ, TOP_K, ascending, ids1, dist1);
+    status = XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(src_result.size(), NQ);
+    CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
-    ms::scheduler::ResultSet target_result;
-    status = ms::scheduler::XSearchTask::TopkResult(target_result, TOP_K, ascending, target_result);
+    /* test2, id1/dist1 valid, id2/dist2 valid */
+    BuildResult(NQ, TOP_K, ascending, ids2, dist2);
+    status = XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
+    CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
-    status = ms::scheduler::XSearchTask::TopkResult(target_result, TOP_K, ascending, src_result);
-    ASSERT_FALSE(status.ok());
-
-    status = ms::scheduler::XSearchTask::TopkResult(src_result, TOP_K, ascending, target_result);
+    /* test3, id1/dist1 small topk */
+    ids1.clear();
+    dist1.clear();
+    result.clear();
+    BuildResult(NQ, TOP_K/2, ascending, ids1, dist1);
+    status = XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    ASSERT_TRUE(src_result.empty());
-    ASSERT_EQ(target_result.size(), NQ);
-
-    std::vector<int64_t> src_ids;
-    std::vector<float> src_distence;
-    uint64_t wrong_topk = TOP_K - 10;
-    BuildResult(NQ, wrong_topk, ascending, src_ids, src_distence);
-
-    status = ms::scheduler::XSearchTask::ClusterResult(src_ids, src_distence, NQ, wrong_topk, src_result);
+    status = XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
+    CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
-    status = ms::scheduler::XSearchTask::TopkResult(src_result, TOP_K, ascending, target_result);
+    /* test4, id1/dist1 small topk, id2/dist2 small topk */
+    ids2.clear();
+    dist2.clear();
+    result.clear();
+    BuildResult(NQ, TOP_K/3, ascending, ids2, dist2);
+    status = XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    for (uint64_t i = 0; i < NQ; i++) {
-        ASSERT_EQ(target_result[i].size(), TOP_K);
-    }
-
-    wrong_topk = TOP_K + 10;
-    BuildResult(NQ, wrong_topk, ascending, src_ids, src_distence);
-
-    status = ms::scheduler::XSearchTask::TopkResult(src_result, TOP_K, ascending, target_result);
+    status = XSearchTask::TopkResult(ids2, dist2, TOP_K/3, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    for (uint64_t i = 0; i < NQ; i++) {
-        ASSERT_EQ(target_result[i].size(), TOP_K);
-    }
+    CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
+
+/////////////////////////////////////////////////////////////////////////////////////////
+    ascending = false;
+    ids1.clear();
+    dist1.clear();
+    ids2.clear();
+    dist2.clear();
+    result.clear();
+
+    /* test1, id1/dist1 valid, id2/dist2 empty */
+    BuildResult(NQ, TOP_K, ascending, ids1, dist1);
+    status = XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
+    ASSERT_TRUE(status.ok());
+    CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
+
+    /* test2, id1/dist1 valid, id2/dist2 valid */
+    BuildResult(NQ, TOP_K, ascending, ids2, dist2);
+    status = XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
+    ASSERT_TRUE(status.ok());
+    CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
+
+    /* test3, id1/dist1 small topk */
+    ids1.clear();
+    dist1.clear();
+    result.clear();
+    BuildResult(NQ, TOP_K/2, ascending, ids1, dist1);
+    status = XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    ASSERT_TRUE(status.ok());
+    status = XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
+    ASSERT_TRUE(status.ok());
+    CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
+
+    /* test4, id1/dist1 small topk, id2/dist2 small topk */
+    ids2.clear();
+    dist2.clear();
+    result.clear();
+    BuildResult(NQ, TOP_K/3, ascending, ids2, dist2);
+    status = XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    ASSERT_TRUE(status.ok());
+    status = XSearchTask::TopkResult(ids2, dist2, TOP_K/3, NQ, TOP_K, ascending, result);
+    ASSERT_TRUE(status.ok());
+    CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 }
 
-TEST(DBSearchTest, MERGE_TEST) {
+TEST(DBSearchTest, REDUCE_PERF_TEST) {
+    int32_t nq = 100;
+    int32_t top_k = 1000;
+    int32_t index_file_num = 478;   /* sift1B dataset, index files num */
     bool ascending = true;
-    std::vector<int64_t> target_ids;
-    std::vector<float> target_distence;
-    std::vector<int64_t> src_ids;
-    std::vector<float> src_distence;
-    ms::scheduler::ResultSet src_result, target_result;
+    std::vector<long> input_ids;
+    std::vector<float> input_distance;
+    ResultSet final_result;
+    milvus::Status status;
 
-    uint64_t src_count = 5, target_count = 8;
-    BuildResult(1, src_count, ascending, src_ids, src_distence);
-    BuildResult(1, target_count, ascending, target_ids, target_distence);
-    auto status = ms::scheduler::XSearchTask::ClusterResult(src_ids, src_distence, 1, src_count, src_result);
-    ASSERT_TRUE(status.ok());
-    status = ms::scheduler::XSearchTask::ClusterResult(target_ids, target_distence, 1, target_count, target_result);
-    ASSERT_TRUE(status.ok());
+    double span, reduce_cost = 0.0;
+    milvus::TimeRecorder rc("");
 
-    {
-        ms::scheduler::Id2DistanceMap src = src_result[0];
-        ms::scheduler::Id2DistanceMap target = target_result[0];
-        status = ms::scheduler::XSearchTask::MergeResult(src, target, 10, ascending);
+    for (int32_t i = 0; i < index_file_num; i++) {
+        BuildResult(nq, top_k, ascending, input_ids, input_distance);
+
+        rc.RecordSection("do search for context: " + std::to_string(i));
+
+        // pick up topk result
+        status = XSearchTask::TopkResult(input_ids, input_distance, top_k, nq, top_k, ascending, final_result);
         ASSERT_TRUE(status.ok());
-        ASSERT_EQ(target.size(), 10);
-        CheckResult(src_result[0], target_result[0], target, ascending);
+        ASSERT_EQ(final_result.size(), nq);
+
+        span = rc.RecordSection("reduce topk for context: " + std::to_string(i));
+        reduce_cost += span;
     }
-
-    {
-        ms::scheduler::Id2DistanceMap src = src_result[0];
-        ms::scheduler::Id2DistanceMap target;
-        status = ms::scheduler::XSearchTask::MergeResult(src, target, 10, ascending);
-        ASSERT_TRUE(status.ok());
-        ASSERT_EQ(target.size(), src_count);
-        ASSERT_TRUE(src.empty());
-        CheckResult(src_result[0], target_result[0], target, ascending);
-    }
-
-    {
-        ms::scheduler::Id2DistanceMap src = src_result[0];
-        ms::scheduler::Id2DistanceMap target = target_result[0];
-        status = ms::scheduler::XSearchTask::MergeResult(src, target, 30, ascending);
-        ASSERT_TRUE(status.ok());
-        ASSERT_EQ(target.size(), src_count + target_count);
-        CheckResult(src_result[0], target_result[0], target, ascending);
-    }
-
-    {
-        ms::scheduler::Id2DistanceMap target = src_result[0];
-        ms::scheduler::Id2DistanceMap src = target_result[0];
-        status = ms::scheduler::XSearchTask::MergeResult(src, target, 30, ascending);
-        ASSERT_TRUE(status.ok());
-        ASSERT_EQ(target.size(), src_count + target_count);
-        CheckResult(src_result[0], target_result[0], target, ascending);
-    }
-}
-
-TEST(DBSearchTest, PARALLEL_CLUSTER_TEST) {
-    bool ascending = true;
-    std::vector<int64_t> target_ids;
-    std::vector<float> target_distence;
-    ms::scheduler::ResultSet src_result;
-
-    auto DoCluster = [&](int64_t nq, int64_t topk) {
-        ms::TimeRecorder rc("DoCluster");
-        src_result.clear();
-        BuildResult(nq, topk, ascending, target_ids, target_distence);
-        rc.RecordSection("build id/dietance map");
-
-        auto status = ms::scheduler::XSearchTask::ClusterResult(target_ids, target_distence, nq, topk, src_result);
-        ASSERT_TRUE(status.ok());
-        ASSERT_EQ(src_result.size(), nq);
-
-        rc.RecordSection("cluster result");
-
-        CheckCluster(target_ids, target_distence, src_result, nq, topk);
-        rc.RecordSection("check result");
-    };
-
-    DoCluster(10000, 1000);
-    DoCluster(333, 999);
-    DoCluster(1, 1000);
-    DoCluster(1, 1);
-    DoCluster(7, 0);
-    DoCluster(9999, 1);
-    DoCluster(10001, 1);
-    DoCluster(58273, 1234);
-}
-
-TEST(DBSearchTest, PARALLEL_TOPK_TEST) {
-    std::vector<int64_t> target_ids;
-    std::vector<float> target_distence;
-    ms::scheduler::ResultSet src_result;
-
-    std::vector<int64_t> insufficient_ids;
-    std::vector<float> insufficient_distence;
-    ms::scheduler::ResultSet insufficient_result;
-
-    auto DoTopk = [&](int64_t nq, int64_t topk, int64_t insufficient_topk, bool ascending) {
-        src_result.clear();
-        insufficient_result.clear();
-
-        ms::TimeRecorder rc("DoCluster");
-
-        BuildResult(nq, topk, ascending, target_ids, target_distence);
-        auto status = ms::scheduler::XSearchTask::ClusterResult(target_ids, target_distence, nq, topk, src_result);
-        rc.RecordSection("cluster result");
-
-        BuildResult(nq, insufficient_topk, ascending, insufficient_ids, insufficient_distence);
-        status = ms::scheduler::XSearchTask::ClusterResult(target_ids,
-                                                           target_distence,
-                                                           nq,
-                                                           insufficient_topk,
-                                                           insufficient_result);
-        rc.RecordSection("cluster result");
-
-        ms::scheduler::XSearchTask::TopkResult(insufficient_result, topk, ascending, src_result);
-        ASSERT_TRUE(status.ok());
-        rc.RecordSection("topk");
-
-        CheckTopkResult(src_result, ascending, nq, topk);
-        rc.RecordSection("check result");
-    };
-
-    DoTopk(5, 10, 4, false);
-    DoTopk(20005, 998, 123, true);
-//    DoTopk(9987, 12, 10, false);
-//    DoTopk(77777, 1000, 1, false);
-//    DoTopk(5432, 8899, 8899, true);
+    std::cout << "total reduce time: " << reduce_cost/1000 << " ms" << std::endl;
 }

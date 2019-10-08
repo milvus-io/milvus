@@ -37,8 +37,9 @@ namespace scheduler {
 using engine::meta::TableFileSchemaPtr;
 
 using Id2IndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
-using Id2DistanceMap = std::vector<std::pair<int64_t, double>>;
-using ResultSet = std::vector<Id2DistanceMap>;
+using IdDistPair = std::pair<int64_t, double>;
+using Id2DistVec = std::vector<IdDistPair>;
+using ResultSet = std::vector<Id2DistVec>;
 
 class SearchJob : public Job {
  public:
