@@ -18,11 +18,12 @@
 #include "scheduler/task/TestTask.h"
 #include "cache/GpuCacheMgr.h"
 
+#include <utility>
+
 namespace milvus {
 namespace scheduler {
 
-TestTask::TestTask(TableFileSchemaPtr& file, TaskLabelPtr label)
-    : XSearchTask(file, std::move(label)) {
+TestTask::TestTask(TableFileSchemaPtr& file, TaskLabelPtr label) : XSearchTask(file, std::move(label)) {
 }
 
 void
@@ -43,9 +44,7 @@ TestTask::Execute() {
 void
 TestTask::Wait() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [&] {
-        return done_;
-    });
+    cv_.wait(lock, [&] { return done_; });
 }
 
 }  // namespace scheduler
