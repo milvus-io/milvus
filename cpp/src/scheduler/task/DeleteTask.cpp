@@ -17,6 +17,8 @@
 
 #include "scheduler/task/DeleteTask.h"
 
+#include <utility>
+
 namespace milvus {
 namespace scheduler {
 

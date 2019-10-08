@@ -26,7 +26,7 @@ namespace milvus {
 using ErrorCode = int32_t;
 
 constexpr ErrorCode SERVER_SUCCESS = 0;
-constexpr ErrorCode SERVER_ERROR_CODE_BASE = 0x30000;
+constexpr ErrorCode SERVER_ERROR_CODE_BASE = 30000;
 
 constexpr ErrorCode
 ToServerErrorCode(const ErrorCode error_code) {
@@ -34,7 +34,7 @@ ToServerErrorCode(const ErrorCode error_code) {
 }
 
 constexpr ErrorCode DB_SUCCESS = 0;
-constexpr ErrorCode DB_ERROR_CODE_BASE = 0x40000;
+constexpr ErrorCode DB_ERROR_CODE_BASE = 40000;
 
 constexpr ErrorCode
 ToDbErrorCode(const ErrorCode error_code) {
@@ -42,7 +42,7 @@ ToDbErrorCode(const ErrorCode error_code) {
 }
 
 constexpr ErrorCode KNOWHERE_SUCCESS = 0;
-constexpr ErrorCode KNOWHERE_ERROR_CODE_BASE = 0x50000;
+constexpr ErrorCode KNOWHERE_ERROR_CODE_BASE = 50000;
 
 constexpr ErrorCode
 ToKnowhereErrorCode(const ErrorCode error_code) {
