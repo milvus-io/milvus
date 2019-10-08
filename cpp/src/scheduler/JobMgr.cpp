@@ -66,12 +66,10 @@ JobMgr::worker_function() {
         }
 
         auto tasks = build_task(job);
-        auto disk_list = res_mgr_->GetDiskResources();
-        if (!disk_list.empty()) {
-            if (auto disk = disk_list[0].lock()) {
-                for (auto& task : tasks) {
-                    disk->task_table().Put(task);
-                }
+        // disk resources NEVER be empty.
+        if (auto disk = res_mgr_->GetDiskResources()[0].lock()) {
+            for (auto& task : tasks) {
+                disk->task_table().Put(task);
             }
         }
     }
