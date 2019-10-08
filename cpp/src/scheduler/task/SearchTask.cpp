@@ -34,6 +34,7 @@ static constexpr size_t PARALLEL_REDUCE_BATCH = 1000;
 
 std::mutex XSearchTask::merge_mutex_;
 
+// TODO(wxyu): remove unused code
 // bool
 // NeedParallelReduce(uint64_t nq, uint64_t topk) {
 //    server::ServerConfig &config = server::ServerConfig::GetInstance();
