@@ -17,11 +17,13 @@
 
 #include "scheduler/task/DeleteTask.h"
 
+#include <utility>
+
 namespace milvus {
 namespace scheduler {
 
-XDeleteTask::XDeleteTask(const scheduler::DeleteJobPtr& delete_job)
-    : Task(TaskType::DeleteTask), delete_job_(delete_job) {
+XDeleteTask::XDeleteTask(const scheduler::DeleteJobPtr& delete_job, TaskLabelPtr label)
+    : Task(TaskType::DeleteTask, std::move(label)), delete_job_(delete_job) {
 }
 
 void

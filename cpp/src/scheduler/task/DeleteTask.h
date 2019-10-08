@@ -25,7 +25,7 @@ namespace scheduler {
 
 class XDeleteTask : public Task {
  public:
-    explicit XDeleteTask(const scheduler::DeleteJobPtr& delete_job);
+    explicit XDeleteTask(const scheduler::DeleteJobPtr& delete_job, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;

@@ -38,7 +38,7 @@
 namespace milvus {
 namespace scheduler {
 
-// TODO(wxy): Storage, Route, Executor
+// TODO(wxyu): Storage, Route, Executor
 enum class ResourceType {
     DISK = 0,
     CPU = 1,
@@ -114,11 +114,11 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
         return enable_executor_;
     }
 
-    // TODO(wxy): const
+    // TODO(wxyu): const
     uint64_t
     NumOfTaskToExec();
 
-    // TODO(wxy): need double ?
+    // TODO(wxyu): need double ?
     inline uint64_t
     TaskAvgCost() const {
         return total_cost_ / total_task_;

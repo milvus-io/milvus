@@ -125,7 +125,7 @@ class TaskTable {
     Get(uint64_t index);
 
     /*
-     * TODO(wxy): BIG GC
+     * TODO(wxyu): BIG GC
      * Remove sequence task which is DONE or MOVED from front;
      * Called by ?
      */
@@ -173,7 +173,7 @@ class TaskTable {
  public:
     /******** Action ********/
 
-    // TODO(wxy): bool to Status
+    // TODO(wxyu): bool to Status
     /*
      * Load a task;
      * Set state loading;

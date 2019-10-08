@@ -155,7 +155,8 @@ TEST_F(SchedulerTest, ON_LOAD_COMPLETED) {
     insert_dummy_index_into_gpu_cache(1);
 
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto task = std::make_shared<TestTask>(dummy);
+        auto label = std::make_shared<DefaultLabel>();
+        auto task = std::make_shared<TestTask>(dummy, label);
         task->label() = std::make_shared<DefaultLabel>();
         tasks.push_back(task);
         cpu_resource_.lock()->task_table().Put(task);
@@ -174,7 +175,8 @@ TEST_F(SchedulerTest, PUSH_TASK_TO_NEIGHBOUR_RANDOMLY_TEST) {
     tasks.clear();
 
     for (uint64_t i = 0; i < NUM; ++i) {
-        auto task = std::make_shared<TestTask>(dummy1);
+        auto label = std::make_shared<DefaultLabel>();
+        auto task = std::make_shared<TestTask>(dummy1, label);
         task->label() = std::make_shared<DefaultLabel>();
         tasks.push_back(task);
         cpu_resource_.lock()->task_table().Put(task);
@@ -242,7 +244,8 @@ TEST_F(SchedulerTest2, SPECIFIED_RESOURCE_TEST) {
     dummy->location_ = "location";
 
     for (uint64_t i = 0; i < NUM; ++i) {
-        std::shared_ptr<TestTask> task = std::make_shared<TestTask>(dummy);
+        auto label = std::make_shared<DefaultLabel>();
+        std::shared_ptr<TestTask> task = std::make_shared<TestTask>(dummy, label);
         task->label() = std::make_shared<SpecResLabel>(disk_);
         tasks.push_back(task);
         disk_.lock()->task_table().Put(task);

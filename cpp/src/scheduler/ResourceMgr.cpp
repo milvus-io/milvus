@@ -24,6 +24,12 @@ namespace scheduler {
 
 void
 ResourceMgr::Start() {
+    if (not check_resource_valid()) {
+        ENGINE_LOG_ERROR << "Resources invalid, cannot start ResourceMgr.";
+        ENGINE_LOG_ERROR << Dump();
+        return;
+    }
+
     std::lock_guard<std::mutex> lck(resources_mutex_);
     for (auto& resource : resources_) {
         resource->Start();
@@ -60,8 +66,22 @@ ResourceMgr::Add(ResourcePtr&& resource) {
 
     resource->RegisterSubscriber(std::bind(&ResourceMgr::post_event, this, std::placeholders::_1));
 
-    if (resource->type() == ResourceType::DISK) {
-        disk_resources_.emplace_back(ResourceWPtr(resource));
+    switch (resource->type()) {
+        case ResourceType::DISK: {
+            disk_resources_.emplace_back(ResourceWPtr(resource));
+            break;
+        }
+        case ResourceType::CPU: {
+            cpu_resources_.emplace_back(ResourceWPtr(resource));
+            break;
+        }
+        case ResourceType::GPU: {
+            gpu_resources_.emplace_back(ResourceWPtr(resource));
+            break;
+        }
+        default: {
+            break;
+        }
     }
     resources_.emplace_back(resource);
 
@@ -74,7 +94,7 @@ ResourceMgr::Connect(const std::string& name1, const std::string& name2, Connect
     auto res2 = GetResource(name2);
     if (res1 && res2) {
         res1->AddNeighbour(std::static_pointer_cast<Node>(res2), connection);
-        // TODO(wxy): enable when task balance supported
+        // TODO(wxyu): enable when task balance supported
         //        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
         return true;
     }
@@ -85,6 +105,8 @@ void
 ResourceMgr::Clear() {
     std::lock_guard<std::mutex> lck(resources_mutex_);
     disk_resources_.clear();
+    cpu_resources_.clear();
+    gpu_resources_.clear();
     resources_.clear();
 }
 
@@ -148,14 +170,14 @@ ResourceMgr::GetNumGpuResource() const {
 
 std::string
 ResourceMgr::Dump() {
-    std::string str = "ResourceMgr contains " + std::to_string(resources_.size()) + " resources.\n";
+    std::stringstream ss;
+    ss << "ResourceMgr contains " << resources_.size() << " resources." << std::endl;
 
-    for (uint64_t i = 0; i < resources_.size(); ++i) {
-        str += "Resource No." + std::to_string(i) + ":\n";
-        // str += resources_[i]->Dump();
+    for (auto& res : resources_) {
+        ss << res->Dump();
     }
 
-    return str;
+    return ss.str();
 }
 
 std::string
@@ -168,6 +190,34 @@ ResourceMgr::DumpTaskTables() {
         ss << resource->Dump() << std::endl << std::endl;
     }
     return ss.str();
+}
+
+bool
+ResourceMgr::check_resource_valid() {
+    {
+        // TODO: check one disk-resource, one cpu-resource, zero or more gpu-resource;
+        if (GetDiskResources().size() != 1) return false;
+        if (GetCpuResources().size() != 1) return false;
+    }
+
+    {
+        // TODO: one compute-resource at least;
+        if (GetNumOfComputeResource() < 1) return false;
+    }
+
+    {
+        // TODO: check disk only connect with cpu
+    }
+
+    {
+        // TODO: check gpu only connect with cpu
+    }
+
+    {
+        // TODO: check if exists isolated node
+    }
+
+    return true;
 }
 
 void
@@ -183,7 +233,9 @@ void
 ResourceMgr::event_process() {
     while (running_) {
         std::unique_lock<std::mutex> lock(event_mutex_);
-        event_cv_.wait(lock, [this] { return !queue_.empty(); });
+        event_cv_.wait(lock, [this] {
+            return !queue_.empty();
+        });
 
         auto event = queue_.front();
         queue_.pop();
