@@ -20,9 +20,9 @@
 #include "ConfAdapter.h"
 #include "VecIndex.h"
 
+#include <functional>
 #include <map>
 #include <memory>
-#include <functional>
 
 namespace milvus {
 namespace engine {
