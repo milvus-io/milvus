@@ -84,7 +84,6 @@ class Task {
 
  public:
     Path task_path_;
-    //    std::vector<SearchContextPtr> search_contexts_;
     scheduler::JobWPtr job_;
     TaskType type_;
     TaskLabelPtr label_ = nullptr;
