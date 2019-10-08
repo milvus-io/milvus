@@ -147,27 +147,33 @@ void GPUIVF::search_impl(int64_t n,
     std::lock_guard<std::mutex> lk(mutex_);
 
     // TODO(linxj): gpu index support GenParams
-    if (auto device_index = std::static_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
+    if (auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
         auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(cfg);
         device_index->setNumProbes(search_cfg->nprobe);
 
         {
-            // TODO(linxj): allocate mem
+            // TODO(linxj): allocate gpu mem
             ResScope rs(res_, gpu_id_);
             device_index->search(n, (float *) data, k, distances, labels);
         }
+    } else {
+        KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");
     }
 }
 
 VectorIndexPtr GPUIVF::CopyGpuToCpu(const Config &config) {
     std::lock_guard<std::mutex> lk(mutex_);
 
-    faiss::Index *device_index = index_.get();
-    faiss::Index *host_index = faiss::gpu::index_gpu_to_cpu(device_index);
+    if ( auto device_idx = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
+        faiss::Index *device_index = index_.get();
+        faiss::Index *host_index = faiss::gpu::index_gpu_to_cpu(device_index);
 
-    std::shared_ptr<faiss::Index> new_index;
-    new_index.reset(host_index);
-    return std::make_shared<IVF>(new_index);
+        std::shared_ptr<faiss::Index> new_index;
+        new_index.reset(host_index);
+        return std::make_shared<IVF>(new_index);
+    } else {
+        return std::make_shared<IVF>(index_);
+    }
 }
 
 VectorIndexPtr GPUIVF::Clone() {

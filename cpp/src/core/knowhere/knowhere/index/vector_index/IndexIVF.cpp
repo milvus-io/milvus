@@ -141,7 +141,7 @@ void IVF::set_index_model(IndexModelPtr model) {
 }
 
 std::shared_ptr<faiss::IVFSearchParameters> IVF::GenParams(const Config &config) {
-    auto params = std::make_shared<faiss::IVFPQSearchParameters>();
+    auto params = std::make_shared<faiss::IVFSearchParameters>();
 
     auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
     params->nprobe = search_cfg->nprobe;

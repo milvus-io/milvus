@@ -134,6 +134,15 @@ class IVFTest
         FaissGpuResourceMgr::GetInstance().Free();
     }
 
+    VectorIndexPtr ChooseTodo() {
+        std::vector<std::string> gpu_idx{"GPUIVFSQ"};
+        auto finder = std::find(gpu_idx.cbegin(), gpu_idx.cend(), index_type);
+        if (finder != gpu_idx.cend()) {
+            return CopyCpuToGpu(index_, device_id, Config());
+        }
+        return index_;
+    }
+
  protected:
     std::string index_type;
     Config conf;
@@ -193,7 +202,9 @@ TEST_P(IVFTest, ivf_basic) {
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    auto result = index_->Search(query_dataset, conf);
+
+    auto new_idx = ChooseTodo();
+    auto result = new_idx->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
     //PrintResult(result, nq, k);
 }
@@ -250,7 +261,8 @@ TEST_P(IVFTest, ivf_serialize) {
 
         index_->set_index_model(model);
         index_->Add(base_dataset, conf);
-        auto result = index_->Search(query_dataset, conf);
+        auto new_idx = ChooseTodo();
+        auto result = new_idx->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
     }
 
@@ -274,7 +286,8 @@ TEST_P(IVFTest, ivf_serialize) {
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
-        auto result = index_->Search(query_dataset, conf);
+        auto new_idx = ChooseTodo();
+        auto result = new_idx->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
     }
 }
@@ -290,7 +303,8 @@ TEST_P(IVFTest, clone_test) {
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    auto result = index_->Search(query_dataset, conf);
+    auto new_idx = ChooseTodo();
+    auto result = new_idx->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
     //PrintResult(result, nq, k);
 
@@ -382,7 +396,8 @@ TEST_P(IVFTest, seal_test) {
     index_->Add(base_dataset, conf);
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dimension(), dim);
-    auto result = index_->Search(query_dataset, conf);
+    auto new_idx = ChooseTodo();
+    auto result = new_idx->Search(query_dataset, conf);
     AssertAnns(result, nq, conf->k);
 
     auto cpu_idx = CopyGpuToCpu(index_, Config());
@@ -504,8 +519,8 @@ TEST_F(GPURESTEST, gpuivfsq) {
         auto model = index_->Train(base_dataset, conf);
         index_->set_index_model(model);
         index_->Add(base_dataset, conf);
-        auto result = index_->Search(query_dataset, conf);
-        AssertAnns(result, nq, k);
+//        auto result = index_->Search(query_dataset, conf);
+//        AssertAnns(result, nq, k);
 
         auto cpu_idx = CopyGpuToCpu(index_, Config());
         cpu_idx->Seal();
@@ -578,8 +593,8 @@ TEST_F(GPURESTEST, copyandsearch) {
     auto model = index_->Train(base_dataset, conf);
     index_->set_index_model(model);
     index_->Add(base_dataset, conf);
-    auto result = index_->Search(query_dataset, conf);
-    AssertAnns(result, nq, k);
+//    auto result = index_->Search(query_dataset, conf);
+//    AssertAnns(result, nq, k);
 
     auto cpu_idx = CopyGpuToCpu(index_, Config());
     cpu_idx->Seal();
