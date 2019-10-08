@@ -123,6 +123,7 @@ DBTest::TearDown() {
     ms::scheduler::JobMgrInst::GetInstance()->Stop();
     ms::scheduler::SchedInst::GetInstance()->Stop();
     ms::scheduler::ResMgrInst::GetInstance()->Stop();
+    ms::scheduler::ResMgrInst::GetInstance()->Clear();
 
     BaseTest::TearDown();
 
