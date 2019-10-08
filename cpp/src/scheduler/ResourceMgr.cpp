@@ -105,6 +105,8 @@ void
 ResourceMgr::Clear() {
     std::lock_guard<std::mutex> lck(resources_mutex_);
     disk_resources_.clear();
+    cpu_resources_.clear();
+    gpu_resources_.clear();
     resources_.clear();
 }
 
