@@ -14,15 +14,16 @@ Please mark all change in change log and use the ticket from JIRA.
 ## Improvement
 - MS-552 - Add and change the easylogging library
 - MS-553 - Refine cache code
-- MS-557 - Merge Log.h
+- MS-555 - Remove old scheduler
 - MS-556 - Add Job Definition in Scheduler
+- MS-557 - Merge Log.h
 - MS-558 - Refine status code
 - MS-562 - Add JobMgr and TaskCreator in Scheduler
 - MS-566 - Refactor cmake
-- MS-555 - Remove old scheduler
 - MS-574 - Milvus configuration refactor
 - MS-578 - Make sure milvus5.0 don't crack 0.3.1 data
 - MS-585 - Update namespace in scheduler
+- MS-606 - Speed up result reduce
 - MS-608 - Update TODO names
 - MS-609 - Update task construct function
 

@@ -39,15 +39,13 @@ class XSearchTask : public Task {
 
  public:
     static Status
-    ClusterResult(const std::vector<int64_t>& output_ids, const std::vector<float>& output_distence, uint64_t nq,
-                  uint64_t topk, scheduler::ResultSet& result_set);
-
-    static Status
-    MergeResult(scheduler::Id2DistanceMap& distance_src, scheduler::Id2DistanceMap& distance_target, uint64_t topk,
-                bool ascending);
-
-    static Status
-    TopkResult(scheduler::ResultSet& result_src, uint64_t topk, bool ascending, scheduler::ResultSet& result_target);
+    TopkResult(const std::vector<long> &input_ids,
+               const std::vector<float> &input_distance,
+               uint64_t input_k,
+               uint64_t nq,
+               uint64_t topk,
+               bool ascending,
+               scheduler::ResultSet &result);
 
  public:
     TableFileSchemaPtr file_;
