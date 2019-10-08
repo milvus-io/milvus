@@ -39,13 +39,8 @@ class XSearchTask : public Task {
 
  public:
     static Status
-    TopkResult(const std::vector<long> &input_ids,
-               const std::vector<float> &input_distance,
-               uint64_t input_k,
-               uint64_t nq,
-               uint64_t topk,
-               bool ascending,
-               scheduler::ResultSet &result);
+    TopkResult(const std::vector<int64_t>& input_ids, const std::vector<float>& input_distance, uint64_t input_k,
+               uint64_t nq, uint64_t topk, bool ascending, scheduler::ResultSet& result);
 
  public:
     TableFileSchemaPtr file_;

@@ -18,6 +18,7 @@
 #include "db/utils.h"
 #include "db/meta/SqliteMetaImpl.h"
 #include "db/Utils.h"
+#include "db/Constants.h"
 #include "db/meta/MetaConsts.h"
 
 #include <gtest/gtest.h>
@@ -192,7 +193,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     for (auto i = 0; i < cnt; ++i) {
         status = impl.CreateTableFile(table_file);
         table_file.file_type_ = ms::engine::meta::TableFileSchema::NEW;
-        table_file.file_size_ = each_size * ms::engine::meta::G;
+        table_file.file_size_ = each_size * ms::engine::G;
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
         ids.push_back(table_file.id_);
