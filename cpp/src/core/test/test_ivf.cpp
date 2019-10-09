@@ -25,6 +25,7 @@
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 
+#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Timer.h"
 #include "knowhere/adapter/Structure.h"
@@ -208,6 +209,37 @@ TEST_P(IVFTest, ivf_basic) {
     AssertAnns(result, nq, conf->k);
     //PrintResult(result, nq, k);
 }
+
+//TEST_P(IVFTest, hybrid) {
+//    assert(!xb.empty());
+//
+//    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
+//    index_->set_preprocessor(preprocessor);
+//
+//    auto model = index_->Train(base_dataset, conf);
+//    index_->set_index_model(model);
+//    index_->Add(base_dataset, conf);
+//    EXPECT_EQ(index_->Count(), nb);
+//    EXPECT_EQ(index_->Dimension(), dim);
+//
+////    auto new_idx = ChooseTodo();
+////    auto result = new_idx->Search(query_dataset, conf);
+////    AssertAnns(result, nq, conf->k);
+//
+//    auto iss_idx = std::make_shared<IVFSQHybrid>(device_id);
+//
+//    auto binaryset = index_->Serialize();
+//    iss_idx->Load(binaryset);
+//
+//    auto quantizer_conf = std::make_shared<QuantizerCfg>();
+//    quantizer_conf->mode = 1;
+//    quantizer_conf->gpu_id = 1;
+//    auto q = iss_idx->LoadQuantizer(quantizer_conf);
+//    iss_idx->SetQuantizer(q);
+//    auto result = iss_idx->Search(query_dataset, conf);
+//    AssertAnns(result, nq, conf->k);
+//    //PrintResult(result, nq, k);
+//}
 
 //TEST_P(IVFTest, gpu_to_cpu) {
 //    if (index_type.find("GPU") == std::string::npos) { return; }

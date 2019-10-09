@@ -101,6 +101,13 @@ class IVFMixIndex : public VecIndexImpl {
     Load(const zilliz::knowhere::BinarySet &index_binary) override;
 };
 
+class IVFHybridIndex : public IVFMixIndex {
+ public:
+    knowhere::QuantizerPtr LoadQuantizer(const Config& conf) override;
+
+    Status SetQuantizer(knowhere::QuantizerPtr q) override;
+};
+
 class BFIndex : public VecIndexImpl {
  public:
     explicit BFIndex(std::shared_ptr<zilliz::knowhere::VectorIndex> index) : VecIndexImpl(std::move(index),

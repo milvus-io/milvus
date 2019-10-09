@@ -75,9 +75,6 @@ public:
      VectorIndexPtr
      Clone() final;
 
-     // TODO(linxj): Deprecated
-     virtual IVFIndexPtr Copy_index_gpu_to_cpu();
-
 protected:
      void
      search_impl(int64_t n,
