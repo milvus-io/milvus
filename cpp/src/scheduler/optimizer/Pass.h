@@ -16,16 +16,16 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 #include "scheduler/task/Task.h"
 
@@ -35,12 +35,13 @@ namespace scheduler {
 class Pass {
  public:
     virtual void
-    Init() {}
+    Init() {
+    }
 
     virtual bool
     Run(const TaskPtr& task) = 0;
 };
 using PassPtr = std::shared_ptr<Pass>;
 
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

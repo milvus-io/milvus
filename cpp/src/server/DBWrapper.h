@@ -21,6 +21,7 @@
 #include "utils/Status.h"
 
 #include <memory>
+#include <string>
 
 namespace milvus {
 namespace server {
