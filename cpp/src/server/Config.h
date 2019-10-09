@@ -56,6 +56,7 @@ static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "4";
 static const char* CONFIG_DB_BUILD_INDEX_GPU = "build_index_gpu";
 static const char* CONFIG_DB_BUILD_INDEX_GPU_DEFAULT = "0";
+static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 
 /* cache config */
 static const char* CONFIG_CACHE = "cache_config";
@@ -204,6 +205,8 @@ class Config {
     GetDBConfigStrInsertBufferSize();
     std::string
     GetDBConfigStrBuildIndexGPU();
+    std::string
+    GetDBConfigStrPreloadTable();
 
     /* metric config */
     std::string
@@ -261,6 +264,8 @@ class Config {
     GetDBConfigInsertBufferSize(int32_t& value);
     Status
     GetDBConfigBuildIndexGPU(int32_t& value);
+    Status
+    GetDBConfigPreloadTable(std::string& value);
 
     /* metric config */
     Status
