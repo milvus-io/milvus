@@ -148,15 +148,18 @@ static const MetaSchema TABLES_SCHEMA(META_TABLES, {
                                                    });
 
 // TableFiles schema
-static const MetaSchema TABLEFILES_SCHEMA(
-    META_TABLEFILES,
-    {
-        MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"), MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
-        MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"), MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
-        MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"), MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
-        MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"), MetaField("updated_time", "BIGINT", "NOT NULL"),
-        MetaField("created_on", "BIGINT", "NOT NULL"), MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
-    });
+static const MetaSchema TABLEFILES_SCHEMA(META_TABLEFILES, {
+                                                               MetaField("id", "BIGINT", "PRIMARY KEY AUTO_INCREMENT"),
+                                                               MetaField("table_id", "VARCHAR(255)", "NOT NULL"),
+                                                               MetaField("engine_type", "INT", "DEFAULT 1 NOT NULL"),
+                                                               MetaField("file_id", "VARCHAR(255)", "NOT NULL"),
+                                                               MetaField("file_type", "INT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("file_size", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("row_count", "BIGINT", "DEFAULT 0 NOT NULL"),
+                                                               MetaField("updated_time", "BIGINT", "NOT NULL"),
+                                                               MetaField("created_on", "BIGINT", "NOT NULL"),
+                                                               MetaField("date", "INT", "DEFAULT -1 NOT NULL"),
+                                                           });
 
 }  // namespace
 

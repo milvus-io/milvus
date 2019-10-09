@@ -31,7 +31,7 @@ static int warning_idx = 0;
 static int trace_idx = 0;
 static int error_idx = 0;
 static int fatal_idx = 0;
-}
+}  // namespace
 
 // TODO(yzb) : change the easylogging library to get the log level from parameter rather than filename
 void
