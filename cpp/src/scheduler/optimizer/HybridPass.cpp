@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "cpp/src/scheduler/optimizer/HybridPass.h"
+#include "scheduler/optimizer/HybridPass.h"
 #include "scheduler/task/SearchTask.h"
 
 namespace milvus {
