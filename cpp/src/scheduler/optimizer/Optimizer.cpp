@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "Optimizer.h"
+#include "cpp/src/scheduler/optimizer/Optimizer.h"
 
 namespace milvus {
 namespace scheduler {
@@ -38,6 +38,6 @@ Optimizer::Run(const TaskPtr& task) {
     return false;
 }
 
-}
-}
+} // namespace scheduler
+} // namespace milvus
 
