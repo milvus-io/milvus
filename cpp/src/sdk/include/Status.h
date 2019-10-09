@@ -20,12 +20,12 @@
 #include <string>
 
 /** \brief Milvus SDK namespace
-*/
+ */
 namespace milvus {
 
 /**
-* @brief Status Code for SDK interface return
-*/
+ * @brief Status Code for SDK interface return
+ */
 enum class StatusCode {
     OK = 0,
 
@@ -41,8 +41,8 @@ enum class StatusCode {
 };
 
 /**
-* @brief Status for SDK interface return
-*/
+ * @brief Status for SDK interface return
+ */
 class Status {
  public:
     Status(StatusCode code, const std::string& msg);

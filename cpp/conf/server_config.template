@@ -18,6 +18,9 @@ db_config:
                                     # sum of insert_buffer_size and cpu_cache_capacity cannot exceed total memory
   build_index_gpu: 0                # gpu id used for building index
 
+  preload_table:                    # preload data at startup, '*' means load all tables, empty value means no preload
+                                    # you can specify preload tables like this: table1,table2,table3
+
 metric_config:
   enable_monitor: false             # enable monitoring or not
   collector: prometheus             # prometheus
