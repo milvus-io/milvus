@@ -25,6 +25,7 @@
 #include <faiss/utils.h>
 #include <omp.h>
 #include <string>
+#include <vector>
 
 namespace milvus {
 namespace server {
@@ -155,6 +156,20 @@ DBWrapper::StartService() {
 
     db_->Start();
 
+    // preload table
+    std::string preload_tables;
+    s = config.GetDBConfigPreloadTable(preload_tables);
+    if (!s.ok()) {
+        return s;
+    }
+
+    s = PreloadTables(preload_tables);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to preload tables: " << preload_tables << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
+
     return Status::OK();
 }
 
@@ -162,6 +177,35 @@ Status
 DBWrapper::StopService() {
     if (db_) {
         db_->Stop();
+    }
+
+    return Status::OK();
+}
+
+Status
+DBWrapper::PreloadTables(const std::string& preload_tables) {
+    if (preload_tables.empty()) {
+        // do nothing
+    } else if (preload_tables == "*") {
+        // load all tables
+        std::vector<engine::meta::TableSchema> table_schema_array;
+        db_->AllTables(table_schema_array);
+
+        for (auto& schema : table_schema_array) {
+            auto status = db_->PreloadTable(schema.table_id_);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+    } else {
+        std::vector<std::string> table_names;
+        StringHelpFunctions::SplitStringByDelimeter(preload_tables, ",", table_names);
+        for (auto& name : table_names) {
+            auto status = db_->PreloadTable(name);
+            if (!status.ok()) {
+                return status;
+            }
+        }
     }
 
     return Status::OK();
