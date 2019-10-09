@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <faiss/IndexIVFPQ.h>
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexIVFPQ.h>
 #include <memory>
@@ -23,6 +22,7 @@
 #include "knowhere/adapter/VectorAdapter.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
 
 namespace knowhere {
 

@@ -15,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <faiss/IndexIVF.h>
 #include <faiss/index_io.h>
 #include <utility>
 
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/FaissBaseIndex.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/helpers/FaissIO.h"
 
 namespace knowhere {
