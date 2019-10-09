@@ -157,8 +157,8 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 
     size_t file_size = index_engine_->PhysicalSize();
 
-    std::string info = "Load file id:" + std::to_string(file_->id_) + " file type:" +
-                       std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
+    std::string info = "Load file id:" + std::to_string(file_->id_) +
+                       " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
                        " bytes from location: " + file_->location_ + " totally cost";
     double span = rc.ElapseFromBegin(info);
     //    for (auto &context : search_contexts_) {

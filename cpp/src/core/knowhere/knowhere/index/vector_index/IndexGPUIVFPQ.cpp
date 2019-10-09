@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <faiss/IndexIVFPQ.h>
 #include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/gpu/GpuIndexIVFPQ.h>
 #include <memory>
