@@ -15,16 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "BuildIndexJob.h"
 #include "utils/Log.h"
-
+#include "BuildIndexJob.h"
 
 namespace milvus {
 namespace scheduler {
 
 BuildIndexJob::BuildIndexJob(JobId id, engine::meta::MetaPtr meta_ptr, engine::DBOptions options)
     : Job(id, JobType::BUILD), meta_ptr_(std::move(meta_ptr)), options_(std::move(options)) {
-
 }
 
 bool
@@ -54,6 +52,5 @@ BuildIndexJob::BuildIndexDone(size_t to_index_id) {
     SERVER_LOG_DEBUG << "BuildIndexJob " << id() << " finish index file: " << to_index_id;
 }
 
-
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

@@ -59,7 +59,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     CopyToGpu(uint64_t device_id) override;
 
     Status
-    CopyToIndexFileToGpu(uint64_t device_id) override; 
+    CopyToIndexFileToGpu(uint64_t device_id) override;
 
     Status
     CopyToCpu() override;
