@@ -207,7 +207,7 @@ DBImpl::PreloadTable(const std::string &table_id) {
 
             size += engine->PhysicalSize();
             if (size > available_size) {
-                break;
+                return Status(SERVER_CACHE_FULL, "Cache is full");
             } else {
                 try {
                     // step 1: load index
@@ -297,7 +297,8 @@ DBImpl::CreateIndex(const std::string &table_id, const TableIndex &index) {
     std::vector<int> file_types;
     if (index.engine_type_ == static_cast<int32_t>(EngineType::FAISS_IDMAP)) {
         file_types = {
-            static_cast<int32_t>(meta::TableFileSchema::NEW), static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
+            static_cast<int32_t>(meta::TableFileSchema::NEW),
+            static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
         };
     } else {
         file_types = {
@@ -640,8 +641,9 @@ DBImpl::MergeFiles(const std::string &table_id, const meta::DateT &date, const m
         ENGINE_LOG_DEBUG << "Merging file " << file_schema.file_id_;
         index_size = index->Size();
 
-        if (index_size >= file_schema.index_file_size_)
+        if (index_size >= file_schema.index_file_size_) {
             break;
+        }
     }
 
     // step 3: serialize to disk

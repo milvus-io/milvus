@@ -10,6 +10,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-577 - Unittest Query randomly hung
 - MS-587 - Count get wrong result after adding vectors and index built immediately
 - MS-599 - search wrong result when table created with metric_type: IP
+- MS-601 - Docker logs error caused by get CPUTemperature error
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
@@ -28,6 +29,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-609 - Update task construct function
 - MS-611 - Add resources validity check in ResourceMgr
 - MS-619 - Add optimizer class in scheduler
+- MS-614 - Preload table at startup
 
 ## New Feature
 
