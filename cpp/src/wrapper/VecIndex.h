@@ -105,11 +105,14 @@ class VecIndex {
 
     // TODO(linxj): refactor later
     virtual knowhere::QuantizerPtr
-    LoadQuantizer(const Config& conf) {}
+    LoadQuantizer(const Config& conf) { return Status::OK(); }
 
     // TODO(linxj): refactor later
     virtual Status
-    SetQuantizer(knowhere::QuantizerPtr q) {}
+    SetQuantizer(const knowhere::QuantizerPtr& q) { return Status::OK(); }
+
+    virtual Status
+    UnsetQuantizer() { return Status::OK(); }
 };
 
 extern Status

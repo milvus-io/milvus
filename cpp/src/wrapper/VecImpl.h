@@ -103,9 +103,14 @@ class IVFMixIndex : public VecIndexImpl {
 
 class IVFHybridIndex : public IVFMixIndex {
  public:
-    knowhere::QuantizerPtr LoadQuantizer(const Config& conf) override;
+    knowhere::QuantizerPtr
+    LoadQuantizer(const Config& conf) override;
 
-    Status SetQuantizer(knowhere::QuantizerPtr q) override;
+    Status
+    SetQuantizer(const knowhere::QuantizerPtr& q) override;
+
+    Status
+    UnsetQuantizer() override;
 };
 
 class BFIndex : public VecIndexImpl {
