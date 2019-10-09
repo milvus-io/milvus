@@ -263,8 +263,8 @@ SystemInfo::CPUTemperature() {
                 object += "/temp1_input";
                 FILE *file = fopen(object.c_str(), "r");
                 if (file == nullptr) {
-                    SERVER_LOG_ERROR << "Could not open temperature file"
-                    exit(1);
+                    SERVER_LOG_ERROR << "Could not open temperature file";
+                    return result;
                 }
                 float temp;
                 fscanf(file, "%f", &temp);
