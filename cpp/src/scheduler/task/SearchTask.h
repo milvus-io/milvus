@@ -38,9 +38,25 @@ class XSearchTask : public Task {
     Execute() override;
 
  public:
-    static Status
-    TopkResult(const std::vector<int64_t>& input_ids, const std::vector<float>& input_distance, uint64_t input_k,
-               uint64_t nq, uint64_t topk, bool ascending, scheduler::ResultSet& result);
+    static void
+    MergeTopkToResultSet(const std::vector<int64_t>& input_ids,
+                         const std::vector<float>& input_distance,
+                         uint64_t input_k,
+                         uint64_t nq,
+                         uint64_t topk,
+                         bool ascending,
+                         scheduler::ResultSet& result);
+
+    static void
+    MergeTopkArray(std::vector<int64_t>& tar_ids,
+                   std::vector<float>& tar_distance,
+                   uint64_t& tar_input_k,
+                   const std::vector<int64_t>& src_ids,
+                   const std::vector<float>& src_distance,
+                   uint64_t src_input_k,
+                   uint64_t nq,
+                   uint64_t topk,
+                   bool ascending);
 
  public:
     TableFileSchemaPtr file_;
@@ -49,8 +65,6 @@ class XSearchTask : public Task {
     int index_type_ = 0;
     ExecutionEnginePtr index_engine_ = nullptr;
     bool metric_l2 = true;
-
-    static std::mutex merge_mutex_;
 };
 
 }  // namespace scheduler
