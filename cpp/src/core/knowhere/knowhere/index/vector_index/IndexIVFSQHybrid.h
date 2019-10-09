@@ -49,7 +49,10 @@ class IVFSQHybrid : public GPUIVFSQ {
     LoadQuantizer(const Config &conf);
 
     void
-    SetQuantizer(QuantizerPtr q);
+    SetQuantizer(const QuantizerPtr& q);
+
+    void
+    UnsetQuantizer();
 
     IndexModelPtr
     Train(const DatasetPtr &dataset, const Config &config) override;

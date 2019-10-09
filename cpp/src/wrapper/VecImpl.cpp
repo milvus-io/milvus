@@ -277,7 +277,8 @@ IVFMixIndex::Load(const zilliz::knowhere::BinarySet &index_binary) {
     return Status::OK();
 }
 
-knowhere::QuantizerPtr IVFHybridIndex::LoadQuantizer(const Config& conf) {
+knowhere::QuantizerPtr
+IVFHybridIndex::LoadQuantizer(const Config& conf) {
     // TODO(linxj): Hardcode here
     if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)){
         return new_idx->LoadQuantizer(conf);
@@ -286,11 +287,31 @@ knowhere::QuantizerPtr IVFHybridIndex::LoadQuantizer(const Config& conf) {
     }
 }
 
-Status IVFHybridIndex::SetQuantizer(knowhere::QuantizerPtr q) {
+Status
+IVFHybridIndex::SetQuantizer(const knowhere::QuantizerPtr& q) {
     try {
         // TODO(linxj): Hardcode here
         if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
             new_idx->SetQuantizer(q);
+        } else {
+            WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
+            return Status(KNOWHERE_ERROR, "not support");
+        }
+    } catch (knowhere::KnowhereException &e) {
+        WRAPPER_LOG_ERROR << e.what();
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
+    } catch (std::exception &e) {
+        WRAPPER_LOG_ERROR << e.what();
+        return Status(KNOWHERE_ERROR, e.what());
+    }
+}
+
+Status
+IVFHybridIndex::UnsetQuantizer() {
+    try {
+        // TODO(linxj): Hardcode here
+        if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
+            new_idx->UnsetQuantizer();
         } else {
             WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
             return Status(KNOWHERE_ERROR, "not support");
