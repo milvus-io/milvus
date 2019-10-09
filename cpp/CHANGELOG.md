@@ -28,6 +28,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-609 - Update task construct function
 - MS-611 - Add resources validity check in ResourceMgr
 - MS-619 - Add optimizer class in scheduler
+- MS-614 - Preload table at startup
 
 ## New Feature
 
