@@ -24,6 +24,7 @@
 #include "utils/Status.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/common/BinarySet.h"
+#include "knowhere/index/vector_index/Quantizer.h"
 
 namespace zilliz {
 namespace milvus {
@@ -43,6 +44,7 @@ enum class IndexType {
     FAISS_IVFSQ8_MIX,
     FAISS_IVFSQ8_CPU,
     FAISS_IVFSQ8_GPU,
+    FAISS_IVFSQ8_HYBRID, // only support build on gpu.
     NSG_MIX,
 };
 
@@ -100,6 +102,14 @@ class VecIndex {
 
     virtual Status
     Load(const zilliz::knowhere::BinarySet &index_binary) = 0;
+
+    // TODO(linxj): refactor later
+    virtual knowhere::QuantizerPtr
+    LoadQuantizer(const Config& conf) {}
+
+    // TODO(linxj): refactor later
+    virtual Status
+    SetQuantizer(knowhere::QuantizerPtr q) {}
 };
 
 extern Status
