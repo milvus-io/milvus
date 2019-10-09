@@ -127,17 +127,6 @@ void GPUIVF::LoadImpl(const BinarySet &index_binary) {
     }
 }
 
-IVFIndexPtr GPUIVF::Copy_index_gpu_to_cpu() {
-    std::lock_guard<std::mutex> lk(mutex_);
-
-    faiss::Index *device_index = index_.get();
-    faiss::Index *host_index = faiss::gpu::index_gpu_to_cpu(device_index);
-
-    std::shared_ptr<faiss::Index> new_index;
-    new_index.reset(host_index);
-    return std::make_shared<IVF>(new_index);
-}
-
 void GPUIVF::search_impl(int64_t n,
                          const float *data,
                          int64_t k,
