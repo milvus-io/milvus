@@ -46,7 +46,7 @@ PrometheusMetrics::Init() {
             return s.code();
         }
 
-        const std::string uri = std::string("/tmp/metrics");
+        const std::string uri = std::string("/metrics");
         const std::size_t num_threads = 2;
 
         // Init Exposer
