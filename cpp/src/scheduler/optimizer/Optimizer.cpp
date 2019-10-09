@@ -38,6 +38,5 @@ Optimizer::Run(const TaskPtr& task) {
     return false;
 }
 
-} // namespace scheduler
-} // namespace milvus
-
+}  // namespace scheduler
+}  // namespace milvus

@@ -16,16 +16,16 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 #include "Pass.h"
 
@@ -43,6 +43,5 @@ class HybridPass : public Pass {
 
 using HybridPassPtr = std::shared_ptr<HybridPass>;
 
-} // namespace scheduler
-} // namespace milvus
-
+}  // namespace scheduler
+}  // namespace milvus

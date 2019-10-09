@@ -16,16 +16,16 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 #include "Pass.h"
 
@@ -40,12 +40,11 @@ class Optimizer {
     Init();
 
     bool
-    Run(const TaskPtr &task);
+    Run(const TaskPtr& task);
 
  private:
     std::vector<PassPtr> pass_list_;
 };
 
-} // namespace scheduler
-} // namespace milvus
-
+}  // namespace scheduler
+}  // namespace milvus
