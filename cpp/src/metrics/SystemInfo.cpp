@@ -16,6 +16,7 @@
 // under the License.
 
 #include "metrics/SystemInfo.h"
+#include "utils/Log.h"
 
 #include <nvml.h>
 #include <sys/types.h>
@@ -63,12 +64,12 @@ SystemInfo::Init() {
     nvmlReturn_t nvmlresult;
     nvmlresult = nvmlInit();
     if (NVML_SUCCESS != nvmlresult) {
-        printf("System information initilization failed");
+        SERVER_LOG_ERROR <<  "System information initilization failed";
         return;
     }
     nvmlresult = nvmlDeviceGetCount(&num_device_);
     if (NVML_SUCCESS != nvmlresult) {
-        printf("Unable to get devidce number");
+        SERVER_LOG_ERROR << "Unable to get devidce number";
         return;
     }
 
@@ -154,7 +155,7 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
     std::vector<uint64_t> total_time_array;
     FILE* file = fopen("/proc/stat", "r");
     if (file == NULL) {
-        perror("Could not open stat file");
+        SERVER_LOG_ERROR << "Could not open stat file";
         return total_time_array;
     }
 
@@ -165,7 +166,7 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
         char buffer[1024];
         char* ret = fgets(buffer, sizeof(buffer) - 1, file);
         if (ret == NULL) {
-            perror("Could not read stat file");
+            SERVER_LOG_ERROR << "Could not read stat file";
             fclose(file);
             return total_time_array;
         }
@@ -245,7 +246,7 @@ SystemInfo::CPUTemperature() {
     DIR *dir = NULL;
     dir = opendir(path.c_str());
     if (!dir) {
-        perror("opendir");
+        SERVER_LOG_ERROR << "Could not open hwmon directory";
         return result;
     }
 
@@ -262,7 +263,7 @@ SystemInfo::CPUTemperature() {
                 object += "/temp1_input";
                 FILE *file = fopen(object.c_str(), "r");
                 if (file == nullptr) {
-                    perror("Could not open temperature file");
+                    SERVER_LOG_ERROR << "Could not open temperature file"
                     exit(1);
                 }
                 float temp;
