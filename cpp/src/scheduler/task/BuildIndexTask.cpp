@@ -26,6 +26,7 @@
 #include <thread>
 #include <utility>
 
+
 namespace milvus {
 namespace scheduler {
 
@@ -61,7 +62,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
                 error_msg = "Wrong load type";
                 stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
             }
-        } catch (std::exception& ex) {
+        } catch (std::exception &ex) {
             // typical error: out of disk space or permition denied
             error_msg = "Failed to load to_index file: " + std::string(ex.what());
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
@@ -69,7 +70,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
 
         if (!stat.ok()) {
             Status s;
-            if(stat.ToString().find("out of memory") != std::string::npos) {
+            if (stat.ToString().find("out of memory") != std::string::npos) {
                 error_msg = "out of memory: " + type_str;
                 s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
             } else {
@@ -108,7 +109,7 @@ XBuildIndexTask::Execute() {
     if (auto job = job_.lock()) {
         auto build_index_job = std::static_pointer_cast<scheduler::BuildIndexJob>(job);
         std::string location = file_->location_;
-        EngineType engine_type = (EngineType)file_->engine_type_;
+        EngineType engine_type = (EngineType) file_->engine_type_;
         std::shared_ptr<engine::ExecutionEngine> index;
 
         // step 2: create table file
@@ -116,7 +117,7 @@ XBuildIndexTask::Execute() {
         table_file.table_id_ = file_->table_id_;
         table_file.date_ = file_->date_;
         table_file.file_type_ =
-            engine::meta::TableFileSchema::NEW_INDEX;  // for multi-db-path, distribute index file averagely to each path
+            engine::meta::TableFileSchema::NEW_INDEX;
 
         engine::meta::MetaPtr meta_ptr = build_index_job->meta();
         Status status = build_index_job->meta()->CreateTableFile(table_file);
@@ -204,7 +205,8 @@ XBuildIndexTask::Execute() {
 
             table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
             status = meta_ptr->UpdateTableFile(table_file);
-            ENGINE_LOG_DEBUG << "Failed to up  date file to index, mark file: " << table_file.file_id_ << " to to_delete";
+            ENGINE_LOG_DEBUG << "Failed to up  date file to index, mark file: " << table_file.file_id_
+                             << " to to_delete";
         }
 
         build_index_job->BuildIndexDone(to_index_id_);

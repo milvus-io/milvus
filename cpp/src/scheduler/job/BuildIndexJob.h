@@ -87,5 +87,5 @@ class BuildIndexJob : public Job {
 
 using BuildIndexJobPtr = std::shared_ptr<BuildIndexJob>;
 
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

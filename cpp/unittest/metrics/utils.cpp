@@ -66,6 +66,7 @@ ms::engine::DBOptions MetricTest::GetOptions() {
 }
 
 void MetricTest::SetUp() {
+    boost::filesystem::remove_all("/tmp/milvus_test");
     InitLog();
     auto options = GetOptions();
     db_ = ms::engine::DBFactory::Build(options);
