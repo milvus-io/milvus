@@ -21,6 +21,7 @@
 
 #include "scheduler/task/SearchTask.h"
 #include "utils/TimeRecorder.h"
+#include "utils/ThreadPool.h"
 
 namespace {
 
@@ -91,42 +92,35 @@ TEST(DBSearchTest, TOPK_TEST) {
     bool ascending;
     std::vector<int64_t> ids1, ids2;
     std::vector<float> dist1, dist2;
-    milvus::scheduler::ResultSet result;
-    milvus::Status status;
+    ms::ResultSet result;
 
     /* test1, id1/dist1 valid, id2/dist2 empty */
     ascending = true;
     BuildResult(NQ, TOP_K, ascending, ids1, dist1);
-    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
+    ms::XSearchTask::MergeTopkToResultSet(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
     /* test2, id1/dist1 valid, id2/dist2 valid */
     BuildResult(NQ, TOP_K, ascending, ids2, dist2);
-    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
+    ms::XSearchTask::MergeTopkToResultSet(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
     /* test3, id1/dist1 small topk */
     ids1.clear();
     dist1.clear();
     result.clear();
-    BuildResult(NQ, TOP_K / 2, ascending, ids1, dist1);
-    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K / 2, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
-    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
+    BuildResult(NQ, TOP_K/2, ascending, ids1, dist1);
+    ms::XSearchTask::MergeTopkToResultSet(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    ms::XSearchTask::MergeTopkToResultSet(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
     /* test4, id1/dist1 small topk, id2/dist2 small topk */
     ids2.clear();
     dist2.clear();
     result.clear();
-    BuildResult(NQ, TOP_K / 3, ascending, ids2, dist2);
-    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K / 2, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
-    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K / 3, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
+    BuildResult(NQ, TOP_K/3, ascending, ids2, dist2);
+    ms::XSearchTask::MergeTopkToResultSet(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    ms::XSearchTask::MergeTopkToResultSet(ids2, dist2, TOP_K/3, NQ, TOP_K, ascending, result);
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -139,36 +133,30 @@ TEST(DBSearchTest, TOPK_TEST) {
 
     /* test1, id1/dist1 valid, id2/dist2 empty */
     BuildResult(NQ, TOP_K, ascending, ids1, dist1);
-    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
+    ms::XSearchTask::MergeTopkToResultSet(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
     /* test2, id1/dist1 valid, id2/dist2 valid */
     BuildResult(NQ, TOP_K, ascending, ids2, dist2);
-    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
+    ms::XSearchTask::MergeTopkToResultSet(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
     /* test3, id1/dist1 small topk */
     ids1.clear();
     dist1.clear();
     result.clear();
-    BuildResult(NQ, TOP_K / 2, ascending, ids1, dist1);
-    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K / 2, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
-    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
+    BuildResult(NQ, TOP_K/2, ascending, ids1, dist1);
+    ms::XSearchTask::MergeTopkToResultSet(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    ms::XSearchTask::MergeTopkToResultSet(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
     /* test4, id1/dist1 small topk, id2/dist2 small topk */
     ids2.clear();
     dist2.clear();
     result.clear();
-    BuildResult(NQ, TOP_K / 3, ascending, ids2, dist2);
-    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K / 2, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
-    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K / 3, NQ, TOP_K, ascending, result);
-    ASSERT_TRUE(status.ok());
+    BuildResult(NQ, TOP_K/3, ascending, ids2, dist2);
+    ms::XSearchTask::MergeTopkToResultSet(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    ms::XSearchTask::MergeTopkToResultSet(ids2, dist2, TOP_K/3, NQ, TOP_K, ascending, result);
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 }
 
@@ -177,32 +165,112 @@ TEST(DBSearchTest, REDUCE_PERF_TEST) {
     int32_t top_k = 1000;
     int32_t index_file_num = 478;   /* sift1B dataset, index files num */
     bool ascending = true;
+    std::vector<std::vector<int64_t>> id_vec;
+    std::vector<std::vector<float>> dist_vec;
+    std::vector<uint64_t> k_vec;
     std::vector<int64_t> input_ids;
     std::vector<float> input_distance;
-    milvus::scheduler::ResultSet final_result;
-    milvus::Status status;
+    ms::ResultSet final_result, final_result_2, final_result_3;
 
-    double span, reduce_cost = 0.0;
+    int32_t i, k, step;
+    double reduce_cost = 0.0;
     milvus::TimeRecorder rc("");
 
-    for (int32_t i = 0; i < index_file_num; i++) {
+    for (i = 0; i < index_file_num; i++) {
         BuildResult(nq, top_k, ascending, input_ids, input_distance);
-
-        rc.RecordSection("do search for context: " + std::to_string(i));
-
-        // pick up topk result
-        status = milvus::scheduler::XSearchTask::TopkResult(input_ids,
-                                                            input_distance,
-                                                            top_k,
-                                                            nq,
-                                                            top_k,
-                                                            ascending,
-                                                            final_result);
-        ASSERT_TRUE(status.ok());
-        ASSERT_EQ(final_result.size(), nq);
-
-        span = rc.RecordSection("reduce topk for context: " + std::to_string(i));
-        reduce_cost += span;
+        id_vec.push_back(input_ids);
+        dist_vec.push_back(input_distance);
+        k_vec.push_back(top_k);
     }
-    std::cout << "total reduce time: " << reduce_cost / 1000 << " ms" << std::endl;
+
+    rc.RecordSection("Method-1 result reduce start");
+
+    /* method-1 */
+    for (i = 0; i < index_file_num; i++) {
+        ms::XSearchTask::MergeTopkToResultSet(id_vec[i], dist_vec[i], k_vec[i], nq, top_k, ascending, final_result);
+        ASSERT_EQ(final_result.size(), nq);
+    }
+
+    reduce_cost = rc.RecordSection("Method-1 result reduce done");
+    std::cout << "Method-1: total reduce time " << reduce_cost/1000 << " ms" << std::endl;
+
+    /* method-2 */
+    std::vector<std::vector<int64_t>> id_vec_2(id_vec);
+    std::vector<std::vector<float>> dist_vec_2(dist_vec);
+    std::vector<uint64_t> k_vec_2(k_vec);
+
+    rc.RecordSection("Method-2 result reduce start");
+
+    for (step = 1; step < index_file_num; step *= 2) {
+        for (i = 0; i+step < index_file_num; i += step*2) {
+            ms::XSearchTask::MergeTopkArray(id_vec_2[i], dist_vec_2[i], k_vec_2[i],
+                                            id_vec_2[i+step], dist_vec_2[i+step], k_vec_2[i+step],
+                                            nq, top_k, ascending);
+        }
+    }
+    ms::XSearchTask::MergeTopkToResultSet(id_vec_2[0], dist_vec_2[0], k_vec_2[0], nq, top_k, ascending, final_result_2);
+    ASSERT_EQ(final_result_2.size(), nq);
+
+    reduce_cost = rc.RecordSection("Method-2 result reduce done");
+    std::cout << "Method-2: total reduce time " << reduce_cost/1000 << " ms" << std::endl;
+
+    for (i = 0; i < nq; i++) {
+        ASSERT_EQ(final_result[i].size(), final_result_2[i].size());
+        for (k = 0; k < final_result.size(); k++) {
+            ASSERT_EQ(final_result[i][k].first, final_result_2[i][k].first);
+            ASSERT_EQ(final_result[i][k].second, final_result_2[i][k].second);
+        }
+    }
+
+    /* method-3 parallel */
+    std::vector<std::vector<int64_t>> id_vec_3(id_vec);
+    std::vector<std::vector<float>> dist_vec_3(dist_vec);
+    std::vector<uint64_t> k_vec_3(k_vec);
+
+    uint32_t max_thread_count = std::min(std::thread::hardware_concurrency() - 1, (uint32_t)MAX_THREADS_NUM);
+    milvus::ThreadPool threadPool(max_thread_count);
+    std::list<std::future<void>> threads_list;
+
+    rc.RecordSection("Method-3 parallel result reduce start");
+
+    for (step = 1; step < index_file_num; step *= 2) {
+        for (i = 0; i+step < index_file_num; i += step*2) {
+            threads_list.push_back(
+                threadPool.enqueue(ms::XSearchTask::MergeTopkArray,
+                                   std::ref(id_vec_3[i]), std::ref(dist_vec_3[i]), std::ref(k_vec_3[i]),
+                                   std::ref(id_vec_3[i+step]), std::ref(dist_vec_3[i+step]), std::ref(k_vec_3[i+step]),
+                                   nq, top_k, ascending));
+        }
+
+        while (threads_list.size() > 0) {
+            int nready = 0;
+            for (auto it = threads_list.begin(); it != threads_list.end(); it = it) {
+                auto &p = *it;
+                std::chrono::milliseconds span(0);
+                if (p.wait_for(span) == std::future_status::ready) {
+                    threads_list.erase(it++);
+                    ++nready;
+                } else {
+                    ++it;
+                }
+            }
+
+            if (nready == 0) {
+                std::this_thread::yield();
+            }
+        }
+    }
+    ms::XSearchTask::MergeTopkToResultSet(id_vec_3[0], dist_vec_3[0], k_vec_3[0], nq, top_k, ascending, final_result_3);
+    ASSERT_EQ(final_result_3.size(), nq);
+
+    reduce_cost = rc.RecordSection("Method-3 parallel result reduce done");
+    std::cout << "Method-3 parallel: total reduce time " << reduce_cost/1000 << " ms" << std::endl;
+
+    for (i = 0; i < nq; i++) {
+        ASSERT_EQ(final_result[i].size(), final_result_3[i].size());
+        for (k = 0; k < final_result.size(); k++) {
+            ASSERT_EQ(final_result[i][k].first, final_result_3[i][k].first);
+            ASSERT_EQ(final_result[i][k].second, final_result_3[i][k].second);
+        }
+    }
 }
