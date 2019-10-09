@@ -24,6 +24,9 @@
 #include <iostream>
 #include <string>
 #include <utility>
+#include<stdlib.h>
+#include<dirent.h>
+#include<stdio.h>
 
 namespace milvus {
 namespace server {
@@ -237,18 +240,39 @@ SystemInfo::GPUTemperature() {
 std::vector<float>
 SystemInfo::CPUTemperature() {
     std::vector<float> result;
-    for (int i = 0; i <= num_physical_processors_; ++i) {
-        std::string path = "/sys/class/thermal/thermal_zone" + std::to_string(i) + "/temp";
-        FILE* file = fopen(path.data(), "r");
-        if (file == nullptr) {
-            perror("Could not open thermal file");
-            return result;
-        }
-        float temp;
-        fscanf(file, "%f", &temp);
-        result.push_back(temp / 1000);
-        fclose(file);
+    std::string path = "/sys/class/hwmon/";
+
+    DIR *dir = NULL;
+    dir = opendir(path.c_str());
+    if (!dir) {
+        perror("opendir");
+        return result;
     }
+
+    struct dirent *ptr = NULL;
+    while ((ptr = readdir(dir)) != NULL) {
+        std::string filename(path);
+        filename.append(ptr->d_name);
+
+        char buf[100];
+        if (readlink(filename.c_str(), buf, 100) != -1) {
+            std::string m(buf);
+            if (m.find("coretemp") != std::string::npos) {
+                std::string object = filename;
+                object += "/temp1_input";
+                FILE *file = fopen(object.c_str(), "r");
+                if (file == nullptr) {
+                    perror("Could not open temperature file");
+                    exit(1);
+                }
+                float temp;
+                fscanf(file, "%f", &temp);
+                result.push_back(temp / 1000);
+            }
+        }
+    }
+    closedir(dir);
+    return result;
 }
 
 std::vector<uint64_t>
