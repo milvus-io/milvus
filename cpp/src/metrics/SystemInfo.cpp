@@ -18,16 +18,16 @@
 #include "metrics/SystemInfo.h"
 #include "utils/Log.h"
 
+#include <dirent.h>
 #include <nvml.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <utility>
-#include<stdlib.h>
-#include<dirent.h>
-#include<stdio.h>
 
 namespace milvus {
 namespace server {
@@ -64,7 +64,7 @@ SystemInfo::Init() {
     nvmlReturn_t nvmlresult;
     nvmlresult = nvmlInit();
     if (NVML_SUCCESS != nvmlresult) {
-        SERVER_LOG_ERROR <<  "System information initilization failed";
+        SERVER_LOG_ERROR << "System information initilization failed";
         return;
     }
     nvmlresult = nvmlDeviceGetCount(&num_device_);
@@ -243,14 +243,14 @@ SystemInfo::CPUTemperature() {
     std::vector<float> result;
     std::string path = "/sys/class/hwmon/";
 
-    DIR *dir = NULL;
+    DIR* dir = NULL;
     dir = opendir(path.c_str());
     if (!dir) {
         SERVER_LOG_ERROR << "Could not open hwmon directory";
         return result;
     }
 
-    struct dirent *ptr = NULL;
+    struct dirent* ptr = NULL;
     while ((ptr = readdir(dir)) != NULL) {
         std::string filename(path);
         filename.append(ptr->d_name);
@@ -261,7 +261,7 @@ SystemInfo::CPUTemperature() {
             if (m.find("coretemp") != std::string::npos) {
                 std::string object = filename;
                 object += "/temp1_input";
-                FILE *file = fopen(object.c_str(), "r");
+                FILE* file = fopen(object.c_str(), "r");
                 if (file == nullptr) {
                     SERVER_LOG_ERROR << "Could not open temperature file";
                     return result;
