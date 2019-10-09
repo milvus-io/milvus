@@ -179,64 +179,8 @@ class Config {
     Status
     CheckResourceConfigPool(const std::vector<std::string>& value);
 
-    ///////////////////////////////////////////////////////////////////////////
-    /* server config */
     std::string
-    GetServerConfigStrAddress();
-    std::string
-    GetServerConfigStrPort();
-    std::string
-    GetServerConfigStrDeployMode();
-    std::string
-    GetServerConfigStrTimeZone();
-
-    /* db config */
-    std::string
-    GetDBConfigStrPrimaryPath();
-    std::string
-    GetDBConfigStrSecondaryPath();
-    std::string
-    GetDBConfigStrBackendUrl();
-    std::string
-    GetDBConfigStrArchiveDiskThreshold();
-    std::string
-    GetDBConfigStrArchiveDaysThreshold();
-    std::string
-    GetDBConfigStrInsertBufferSize();
-    std::string
-    GetDBConfigStrBuildIndexGPU();
-    std::string
-    GetDBConfigStrPreloadTable();
-
-    /* metric config */
-    std::string
-    GetMetricConfigStrEnableMonitor();
-    std::string
-    GetMetricConfigStrCollector();
-    std::string
-    GetMetricConfigStrPrometheusPort();
-
-    /* cache config */
-    std::string
-    GetCacheConfigStrCpuCacheCapacity();
-    std::string
-    GetCacheConfigStrCpuCacheThreshold();
-    std::string
-    GetCacheConfigStrGpuCacheCapacity();
-    std::string
-    GetCacheConfigStrGpuCacheThreshold();
-    std::string
-    GetCacheConfigStrCacheInsertData();
-
-    /* engine config */
-    std::string
-    GetEngineConfigStrUseBlasThreshold();
-    std::string
-    GetEngineConfigStrOmpThreadNum();
-
-    /* resource config */
-    std::string
-    GetResourceConfigStrMode();
+    GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
 
  public:
     /* server config */
