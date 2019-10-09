@@ -36,7 +36,7 @@ struct BufferDeleter {
         free((void*)buffer->data());
     }
 };
-}
+}  // namespace internal
 
 inline BufferPtr
 MakeBufferSmart(uint8_t* data, const int64_t size) {
