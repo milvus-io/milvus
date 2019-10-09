@@ -43,9 +43,9 @@ namespace kn = knowhere;
 
 }  // namespace
 
+using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
-using ::testing::Combine;
 
 constexpr int device_id = 0;
 constexpr int64_t DIM = 128;
