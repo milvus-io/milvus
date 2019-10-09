@@ -71,7 +71,11 @@ ValidationUtil::ValidateTableName(const std::string& table_name) {
 
 Status
 ValidationUtil::ValidateTableDimension(int64_t dimension) {
-    if (dimension <= 0 || dimension > TABLE_DIMENSION_LIMIT) {
+    if (dimension <= 0) {
+        std::string msg = "Dimension value should be greater than 0";
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
+    } else if (dimension > TABLE_DIMENSION_LIMIT) {
         std::string msg = "Table dimension excceed the limitation: " + std::to_string(TABLE_DIMENSION_LIMIT);
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
