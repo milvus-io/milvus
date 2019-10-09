@@ -27,7 +27,8 @@
 namespace zilliz {
 namespace knowhere {
 
-IndexModelPtr IVFSQHybrid::Train(const DatasetPtr &dataset, const Config &config) {
+IndexModelPtr
+IVFSQHybrid::Train(const DatasetPtr &dataset, const Config &config) {
     auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
     if (build_cfg != nullptr) {
         build_cfg->CheckValid(); // throw exception
@@ -58,7 +59,8 @@ IndexModelPtr IVFSQHybrid::Train(const DatasetPtr &dataset, const Config &config
     }
 }
 
-VectorIndexPtr IVFSQHybrid::CopyGpuToCpu(const Config &config) {
+VectorIndexPtr
+IVFSQHybrid::CopyGpuToCpu(const Config &config) {
     std::lock_guard<std::mutex> lk(mutex_);
 
     if (auto device_idx = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_)) {
@@ -74,7 +76,8 @@ VectorIndexPtr IVFSQHybrid::CopyGpuToCpu(const Config &config) {
     }
 }
 
-VectorIndexPtr IVFSQHybrid::CopyCpuToGpu(const int64_t &device_id, const Config &config) {
+VectorIndexPtr
+IVFSQHybrid::CopyCpuToGpu(const int64_t &device_id, const Config &config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
         faiss::gpu::GpuClonerOptions option;
@@ -95,11 +98,13 @@ VectorIndexPtr IVFSQHybrid::CopyCpuToGpu(const int64_t &device_id, const Config 
     }
 }
 
-void IVFSQHybrid::LoadImpl(const BinarySet &index_binary) {
+void
+IVFSQHybrid::LoadImpl(const BinarySet &index_binary) {
     FaissBaseIndex::LoadImpl(index_binary); // load on cpu
 }
 
-void IVFSQHybrid::search_impl(int64_t n,
+void
+IVFSQHybrid::search_impl(int64_t n,
                               const float *data,
                               int64_t k,
                               float *distances,
@@ -112,7 +117,8 @@ void IVFSQHybrid::search_impl(int64_t n,
     }
 }
 
-QuantizerPtr IVFSQHybrid::LoadQuantizer(const Config &conf) {
+QuantizerPtr
+IVFSQHybrid::LoadQuantizer(const Config &conf) {
     auto quantizer_conf = std::dynamic_pointer_cast<QuantizerCfg>(conf);
     if (quantizer_conf != nullptr) {
         quantizer_conf->CheckValid(); // throw exception
@@ -140,7 +146,8 @@ QuantizerPtr IVFSQHybrid::LoadQuantizer(const Config &conf) {
     }
 }
 
-void IVFSQHybrid::SetQuantizer(QuantizerPtr q) {
+void
+IVFSQHybrid::SetQuantizer(const QuantizerPtr& q) {
     auto ivf_quantizer = std::dynamic_pointer_cast<FaissIVFQuantizer>(q);
     if (ivf_quantizer == nullptr) {
         KNOWHERE_THROW_MSG("Quantizer type error");
@@ -156,6 +163,16 @@ void IVFSQHybrid::SetQuantizer(QuantizerPtr q) {
         delete ivf_index->quantizer;
         ivf_index->quantizer = ivf_quantizer->quantizer->quantizer;
     }
+}
+
+void
+IVFSQHybrid::UnsetQuantizer() {
+    auto *ivf_index = dynamic_cast<faiss::IndexIVF *>(index_.get());
+    if(ivf_index == nullptr) {
+        KNOWHERE_THROW_MSG("Index type error");
+    }
+
+    ivf_index->quantizer = nullptr;
 }
 
 }
