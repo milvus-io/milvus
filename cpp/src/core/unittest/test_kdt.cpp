@@ -34,9 +34,9 @@ namespace kn = knowhere;
 
 }  // namespace
 
+using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
-using ::testing::Combine;
 
 class KDTTest : public DataGen, public ::testing::Test {
  protected:

@@ -42,5 +42,5 @@ class Pass {
 };
 using PassPtr = std::shared_ptr<Pass>;
 
-}
-}
+} // namespace scheduler
+} // namespace milvus

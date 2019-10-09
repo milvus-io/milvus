@@ -55,9 +55,9 @@ MemTableFile::CreateTableFile() {
 Status
 MemTableFile::Add(const VectorSourcePtr& source, IDNumbers& vector_ids) {
     if (table_file_schema_.dimension_ <= 0) {
-        std::string err_msg = "MemTableFile::Add: table_file_schema dimension = " +
-                              std::to_string(table_file_schema_.dimension_) + ", table_id = " +
-                              table_file_schema_.table_id_;
+        std::string err_msg =
+            "MemTableFile::Add: table_file_schema dimension = " + std::to_string(table_file_schema_.dimension_) +
+            ", table_id = " + table_file_schema_.table_id_;
         ENGINE_LOG_ERROR << err_msg;
         return Status(DB_ERROR, "Not able to create table file");
     }

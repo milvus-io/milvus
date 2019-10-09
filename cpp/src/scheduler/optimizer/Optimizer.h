@@ -46,6 +46,6 @@ class Optimizer {
     std::vector<PassPtr> pass_list_;
 };
 
-}
-}
+} // namespace scheduler
+} // namespace milvus
 
