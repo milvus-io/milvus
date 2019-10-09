@@ -770,6 +770,16 @@ Config::GetDBConfigStrBuildIndexGPU() {
     return value;
 }
 
+std::string
+Config::GetDBConfigStrPreloadTable() {
+    std::string value;
+    if (!GetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE, value).ok()) {
+        value = GetConfigNode(CONFIG_DB).GetValue(CONFIG_DB_PRELOAD_TABLE);
+        SetConfigValueInMem(CONFIG_DB, CONFIG_DB_PRELOAD_TABLE, value);
+    }
+    return value;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 /* metric config */
 std::string
@@ -985,6 +995,12 @@ Config::GetDBConfigBuildIndexGPU(int32_t& value) {
     }
 
     value = std::stoi(str);
+    return Status::OK();
+}
+
+Status
+Config::GetDBConfigPreloadTable(std::string& value) {
+    value = GetDBConfigStrPreloadTable();
     return Status::OK();
 }
 
