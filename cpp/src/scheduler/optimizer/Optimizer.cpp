@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "cpp/src/scheduler/optimizer/Optimizer.h"
+#include "scheduler/optimizer/Optimizer.h"
 
 namespace milvus {
 namespace scheduler {
