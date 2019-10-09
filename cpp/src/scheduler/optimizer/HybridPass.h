@@ -43,6 +43,6 @@ class HybridPass : public Pass {
 
 using HybridPassPtr = std::shared_ptr<HybridPass>;
 
-}
-}
+} // namespace scheduler
+} // namespace milvus
 
