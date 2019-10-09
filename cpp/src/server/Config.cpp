@@ -735,8 +735,7 @@ Config::GetDBConfigArchiveDaysThreshold(int32_t& value) {
 
 Status
 Config::GetDBConfigInsertBufferSize(int32_t& value) {
-    std::string str =
-        GetConfigStr(CONFIG_DB, CONFIG_DB_INSERT_BUFFER_SIZE, CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT);
+    std::string str = GetConfigStr(CONFIG_DB, CONFIG_DB_INSERT_BUFFER_SIZE, CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT);
     Status s = CheckDBConfigInsertBufferSize(str);
     if (!s.ok()) {
         return s;
@@ -748,8 +747,7 @@ Config::GetDBConfigInsertBufferSize(int32_t& value) {
 
 Status
 Config::GetDBConfigBuildIndexGPU(int32_t& value) {
-    std::string str =
-        GetConfigStr(CONFIG_DB, CONFIG_DB_BUILD_INDEX_GPU, CONFIG_DB_BUILD_INDEX_GPU_DEFAULT);
+    std::string str = GetConfigStr(CONFIG_DB, CONFIG_DB_BUILD_INDEX_GPU, CONFIG_DB_BUILD_INDEX_GPU_DEFAULT);
     Status s = CheckDBConfigBuildIndexGPU(str);
     if (!s.ok()) {
         return s;
@@ -767,8 +765,7 @@ Config::GetDBConfigPreloadTable(std::string& value) {
 
 Status
 Config::GetMetricConfigEnableMonitor(bool& value) {
-    std::string str =
-        GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_ENABLE_MONITOR, CONFIG_METRIC_ENABLE_MONITOR_DEFAULT);
+    std::string str = GetConfigStr(CONFIG_METRIC, CONFIG_METRIC_ENABLE_MONITOR, CONFIG_METRIC_ENABLE_MONITOR_DEFAULT);
     Status s = CheckMetricConfigEnableMonitor(str);
     if (!s.ok()) {
         return s;
@@ -872,8 +869,7 @@ Config::GetEngineConfigUseBlasThreshold(int32_t& value) {
 
 Status
 Config::GetEngineConfigOmpThreadNum(int32_t& value) {
-    std::string str =
-        GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_OMP_THREAD_NUM, CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT);
+    std::string str = GetConfigStr(CONFIG_ENGINE, CONFIG_ENGINE_OMP_THREAD_NUM, CONFIG_ENGINE_OMP_THREAD_NUM_DEFAULT);
     Status s = CheckEngineConfigOmpThreadNum(str);
     if (!s.ok()) {
         return s;
