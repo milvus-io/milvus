@@ -35,7 +35,7 @@ class CpuCacheMgr : public CacheMgr<DataObjPtr> {
     static CpuCacheMgr*
     GetInstance();
 
-    engine::VecIndexPtr
+    DataObjPtr
     GetIndex(const std::string& key);
 };
 

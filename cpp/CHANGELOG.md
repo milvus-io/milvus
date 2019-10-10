@@ -32,6 +32,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-611 - Add resources validity check in ResourceMgr
 - MS-619 - Add optimizer class in scheduler
 - MS-614 - Preload table at startup
+- MS-626 - Refactor DataObj to support cache any type data
 
 ## New Feature
 

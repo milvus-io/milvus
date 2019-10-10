@@ -91,6 +91,60 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     return index;
 }
 
+void
+ExecutionEngineImpl::HybridLoad() {
+//    if (index_type_ != EngineType::FAISS_IVFSQ8Hybrid) {
+//        return;
+//    }
+//
+//    const std::string key = location_ + ".quantizer";
+//    std::vector<uint64_t> gpus;
+//
+//    // cache hit
+//    {
+//        int64_t selected = -1;
+//        void* quantizer = nullptr;
+//        for (auto& gpu : gpus) {
+//            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+//            if (auto quan = cache->GetIndex(key)) {
+//                selected = gpu;
+//                quantizer = quan;
+//            }
+//        }
+//
+//        if (selected != -1) {
+//            // set quantizer into index;
+//            return;
+//        }
+//    }
+//
+//    // cache miss
+//    {
+//        std::vector<int64_t> all_free_mem;
+//        for (auto& gpu : gpus) {
+//            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+//            auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
+//            all_free_mem.push_back(free_mem);
+//        }
+//
+//        auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
+//        auto best = std::distance(all_free_mem.begin(), max_e);
+//
+//        // load to best device;
+//        // cache quantizer
+//    }
+//
+//    // if index_type == Hybrid
+//
+//    // 1. quantizer in which gpu
+//
+//    // 2.1 which gpu cache best
+//
+//    // 2.2 load to that gpu cache
+//
+//    // set quantizer into index
+}
+
 Status
 ExecutionEngineImpl::AddWithIds(int64_t n, const float* xdata, const int64_t* xids) {
     auto status = index_->Add(n, xdata, xids);
@@ -133,7 +187,7 @@ ExecutionEngineImpl::Serialize() {
 
 Status
 ExecutionEngineImpl::Load(bool to_cache) {
-    index_ = cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    index_ = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
         try {
@@ -161,7 +215,7 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
-    auto index = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
+    auto index = std::static_pointer_cast<VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
@@ -200,7 +254,7 @@ ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
 
 Status
 ExecutionEngineImpl::CopyToCpu() {
-    auto index = cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+    auto index = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
@@ -333,7 +387,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
 
 Status
 ExecutionEngineImpl::Cache() {
-    cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index_, PhysicalSize());
+    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
     milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, obj);
 
     return Status::OK();
@@ -341,7 +395,7 @@ ExecutionEngineImpl::Cache() {
 
 Status
 ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
-    cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index_, PhysicalSize());
+    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
     milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, obj);
 
     return Status::OK();
