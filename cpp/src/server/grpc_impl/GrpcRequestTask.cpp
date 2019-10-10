@@ -706,7 +706,11 @@ CountTableTask::OnExecute() {
         uint64_t row_count = 0;
         status = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
         if (!status.ok()) {
-            return status;
+            if (status.code(), DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+            } else {
+                return status;
+            }
         }
 
         row_count_ = static_cast<int64_t>(row_count);
