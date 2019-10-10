@@ -104,15 +104,19 @@ class VecIndex {
     Load(const zilliz::knowhere::BinarySet &index_binary) = 0;
 
     // TODO(linxj): refactor later
+    ////////////////
     virtual knowhere::QuantizerPtr
-    LoadQuantizer(const Config& conf) { return Status::OK(); }
+    LoadQuantizer(const Config& conf) { return nullptr; }
 
-    // TODO(linxj): refactor later
+    virtual Status
+    LoadData(const knowhere::QuantizerPtr &q, const Config &conf) { return Status::OK(); }
+
     virtual Status
     SetQuantizer(const knowhere::QuantizerPtr& q) { return Status::OK(); }
 
     virtual Status
     UnsetQuantizer() { return Status::OK(); }
+    ////////////////
 };
 
 extern Status
