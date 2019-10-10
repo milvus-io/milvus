@@ -36,12 +36,12 @@ GpuCacheMgr::GpuCacheMgr() {
     server::Config& config = server::Config::GetInstance();
     Status s;
 
-    int32_t gpu_cache_cap;
+    int64_t gpu_cache_cap;
     s = config.GetCacheConfigGpuCacheCapacity(gpu_cache_cap);
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
     }
-    int32_t cap = gpu_cache_cap * G_BYTE;
+    int64_t cap = gpu_cache_cap * G_BYTE;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
 
     float gpu_mem_threshold;

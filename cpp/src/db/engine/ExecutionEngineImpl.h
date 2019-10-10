@@ -108,7 +108,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Load(const std::string& location);
 
     void
-    HybridLoad();
+    HybridLoad() const;
+    
+    void
+    HybridUnset() const;
 
  protected:
     VecIndexPtr index_ = nullptr;

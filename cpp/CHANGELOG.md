@@ -36,6 +36,7 @@ Please mark all change in change log and use the ticket from JIRA.
 
 ## New Feature
 - MS-627 - Integrate new index: IVFSQHybrid
+- MS-631 - IVFSQ8H Index support
 
 ## Task
 - MS-554 - Change license to Apache 2.0
