@@ -71,14 +71,10 @@ GpuCacheMgr::GetInstance(uint64_t gpu_id) {
     }
 }
 
-engine::VecIndexPtr
+DataObjPtr
 GpuCacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
-    if (obj != nullptr) {
-        return obj->data();
-    }
-
-    return nullptr;
+    return obj;
 }
 
 }  // namespace cache

@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 
+#include "cache/DataObj.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Config.h"
 #include "utils/Status.h"
@@ -48,7 +49,7 @@ class VecIndex;
 
 using VecIndexPtr = std::shared_ptr<VecIndex>;
 
-class VecIndex {
+class VecIndex : public cache::DataObj {
  public:
     virtual Status
     BuildAll(const int64_t& nb, const float* xb, const int64_t* ids, const Config& cfg, const int64_t& nt = 0,
@@ -80,6 +81,9 @@ class VecIndex {
 
     virtual int64_t
     Count() = 0;
+
+    int64_t
+    Size() override;
 
     virtual knowhere::BinarySet
     Serialize() = 0;

@@ -35,7 +35,7 @@ class GpuCacheMgr : public CacheMgr<DataObjPtr> {
     static GpuCacheMgr*
     GetInstance(uint64_t gpu_id);
 
-    engine::VecIndexPtr
+    DataObjPtr
     GetIndex(const std::string& key);
 
  private:
