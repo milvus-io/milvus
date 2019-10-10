@@ -31,18 +31,18 @@
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 
+#include <src/scheduler/Utils.h>
 #include <stdexcept>
 #include <utility>
-#include <src/scheduler/Utils.h>
+#include <vector>
 
 namespace milvus {
 namespace engine {
 
 class CachedQuantizer : public cache::DataObj {
  public:
-    explicit
-    CachedQuantizer(knowhere::QuantizerPtr data)
-        : data_(std::move(data)) {}
+    explicit CachedQuantizer(knowhere::QuantizerPtr data) : data_(std::move(data)) {
+    }
 
     knowhere::QuantizerPtr
     Data() {

@@ -164,7 +164,7 @@ IVFSQHybrid::SetQuantizer(const QuantizerPtr& q) {
 
     faiss::gpu::GpuIndexFlat* is_gpu_flat_index = dynamic_cast<faiss::gpu::GpuIndexFlat*>(ivf_index->quantizer);
     if (is_gpu_flat_index == nullptr) {
-//        delete ivf_index->quantizer;
+        //        delete ivf_index->quantizer;
         ivf_index->quantizer = ivf_quantizer->quantizer;
     }
 }
