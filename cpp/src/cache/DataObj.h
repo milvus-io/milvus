@@ -17,7 +17,6 @@
 
 #pragma once
 
-
 #include <memory>
 
 namespace milvus {
@@ -27,7 +26,6 @@ class DataObj {
  public:
     virtual int64_t
     Size() = 0;
-
 };
 
 using DataObjPtr = std::shared_ptr<DataObj>;
