@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "utils/Log.h"
 #include "BuildIndexJob.h"
+#include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
