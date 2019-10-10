@@ -29,15 +29,20 @@ namespace zilliz {
 namespace knowhere {
 
 struct FaissIVFQuantizer : public Quantizer {
-    faiss::IndexComposition *quantizer = nullptr;
+    faiss::gpu::GpuIndexFlat *quantizer = nullptr;
 };
 using FaissIVFQuantizerPtr = std::shared_ptr<FaissIVFQuantizer>;
 
 class IVFSQHybrid : public GPUIVFSQ {
  public:
-    explicit IVFSQHybrid(const int &device_id) : GPUIVFSQ(device_id) {}
+    explicit IVFSQHybrid(const int &device_id) : GPUIVFSQ(device_id) {
+        gpu_mode = false;
+    }
 
-    explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index) : GPUIVFSQ(-1) {gpu_mode = false;}
+    explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index) : GPUIVFSQ(-1) {
+        index_ = index;
+        gpu_mode = false;
+    }
 
     explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index, const int64_t &device_id, ResPtr &resource)
         : GPUIVFSQ(index, device_id, resource) {
@@ -53,6 +58,9 @@ class IVFSQHybrid : public GPUIVFSQ {
 
     void
     UnsetQuantizer();
+
+    void
+    LoadData(const knowhere::QuantizerPtr &q, const Config& conf);
 
     IndexModelPtr
     Train(const DatasetPtr &dataset, const Config &config) override;

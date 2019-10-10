@@ -304,6 +304,7 @@ IVFHybridIndex::SetQuantizer(const knowhere::QuantizerPtr& q) {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
     }
+    return Status::OK();
 }
 
 Status
@@ -323,6 +324,26 @@ IVFHybridIndex::UnsetQuantizer() {
         WRAPPER_LOG_ERROR << e.what();
         return Status(KNOWHERE_ERROR, e.what());
     }
+    return Status::OK();
+}
+
+Status IVFHybridIndex::LoadData(const knowhere::QuantizerPtr &q, const Config &conf) {
+    try {
+        // TODO(linxj): Hardcode here
+        if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
+            new_idx->LoadData(q, conf);
+        } else {
+            WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
+            return Status(KNOWHERE_ERROR, "not support");
+        }
+    } catch (knowhere::KnowhereException &e) {
+        WRAPPER_LOG_ERROR << e.what();
+        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
+    } catch (std::exception &e) {
+        WRAPPER_LOG_ERROR << e.what();
+        return Status(KNOWHERE_ERROR, e.what());
+    }
+    return Status::OK();
 }
 
 } // namespace engine
