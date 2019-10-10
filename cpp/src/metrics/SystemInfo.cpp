@@ -16,8 +16,12 @@
 // under the License.
 
 #include "metrics/SystemInfo.h"
+#include "utils/Log.h"
 
+#include <dirent.h>
 #include <nvml.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <fstream>
@@ -60,12 +64,12 @@ SystemInfo::Init() {
     nvmlReturn_t nvmlresult;
     nvmlresult = nvmlInit();
     if (NVML_SUCCESS != nvmlresult) {
-        printf("System information initilization failed");
+        SERVER_LOG_ERROR << "System information initilization failed";
         return;
     }
     nvmlresult = nvmlDeviceGetCount(&num_device_);
     if (NVML_SUCCESS != nvmlresult) {
-        printf("Unable to get devidce number");
+        SERVER_LOG_ERROR << "Unable to get devidce number";
         return;
     }
 
@@ -151,7 +155,7 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
     std::vector<uint64_t> total_time_array;
     FILE* file = fopen("/proc/stat", "r");
     if (file == NULL) {
-        perror("Could not open stat file");
+        SERVER_LOG_ERROR << "Could not open stat file";
         return total_time_array;
     }
 
@@ -162,7 +166,7 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
         char buffer[1024];
         char* ret = fgets(buffer, sizeof(buffer) - 1, file);
         if (ret == NULL) {
-            perror("Could not read stat file");
+            SERVER_LOG_ERROR << "Could not read stat file";
             fclose(file);
             return total_time_array;
         }
@@ -237,18 +241,39 @@ SystemInfo::GPUTemperature() {
 std::vector<float>
 SystemInfo::CPUTemperature() {
     std::vector<float> result;
-    for (int i = 0; i <= num_physical_processors_; ++i) {
-        std::string path = "/sys/class/thermal/thermal_zone" + std::to_string(i) + "/temp";
-        FILE* file = fopen(path.data(), "r");
-        if (file == nullptr) {
-            perror("Could not open thermal file");
-            return result;
-        }
-        float temp;
-        fscanf(file, "%f", &temp);
-        result.push_back(temp / 1000);
-        fclose(file);
+    std::string path = "/sys/class/hwmon/";
+
+    DIR* dir = NULL;
+    dir = opendir(path.c_str());
+    if (!dir) {
+        SERVER_LOG_ERROR << "Could not open hwmon directory";
+        return result;
     }
+
+    struct dirent* ptr = NULL;
+    while ((ptr = readdir(dir)) != NULL) {
+        std::string filename(path);
+        filename.append(ptr->d_name);
+
+        char buf[100];
+        if (readlink(filename.c_str(), buf, 100) != -1) {
+            std::string m(buf);
+            if (m.find("coretemp") != std::string::npos) {
+                std::string object = filename;
+                object += "/temp1_input";
+                FILE* file = fopen(object.c_str(), "r");
+                if (file == nullptr) {
+                    SERVER_LOG_ERROR << "Could not open temperature file";
+                    return result;
+                }
+                float temp;
+                fscanf(file, "%f", &temp);
+                result.push_back(temp / 1000);
+            }
+        }
+    }
+    closedir(dir);
+    return result;
 }
 
 std::vector<uint64_t>

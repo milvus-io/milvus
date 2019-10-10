@@ -26,6 +26,7 @@
 #include "meta/SqliteMetaImpl.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/job/BuildIndexJob.h"
 #include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
 #include "utils/Log.h"
@@ -206,7 +207,7 @@ DBImpl::PreloadTable(const std::string& table_id) {
 
             size += engine->PhysicalSize();
             if (size > available_size) {
-                break;
+                return Status(SERVER_CACHE_FULL, "Cache is full");
             } else {
                 try {
                     // step 1: load index
@@ -296,7 +297,8 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     std::vector<int> file_types;
     if (index.engine_type_ == static_cast<int32_t>(EngineType::FAISS_IDMAP)) {
         file_types = {
-            static_cast<int32_t>(meta::TableFileSchema::NEW), static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
+            static_cast<int32_t>(meta::TableFileSchema::NEW),
+            static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
         };
     } else {
         file_types = {
@@ -639,8 +641,9 @@ DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const m
         ENGINE_LOG_DEBUG << "Merging file " << file_schema.file_id_;
         index_size = index->Size();
 
-        if (index_size >= file_schema.index_file_size_)
+        if (index_size >= file_schema.index_file_size_) {
             break;
+        }
     }
 
     // step 3: serialize to disk
@@ -896,17 +899,32 @@ DBImpl::BackgroundBuildIndex() {
     meta::TableFilesSchema to_index_files;
     meta_ptr_->FilesToIndex(to_index_files);
     Status status;
-    for (auto& file : to_index_files) {
-        status = BuildIndex(file);
-        if (!status.ok()) {
-            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
-        }
 
-        if (shutting_down_.load(std::memory_order_acquire)) {
-            ENGINE_LOG_DEBUG << "Server will shutdown, skip build index action";
-            break;
-        }
+    scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(0, meta_ptr_, options_);
+
+    // step 2: put build index task to scheduler
+    for (auto& file : to_index_files) {
+        scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
+        job->AddToIndexFiles(file_ptr);
     }
+    scheduler::JobMgrInst::GetInstance()->Put(job);
+    job->WaitBuildIndexFinish();
+    if (!job->GetStatus().ok()) {
+        Status status = job->GetStatus();
+        ENGINE_LOG_ERROR << "Building index failed: " << status.ToString();
+    }
+
+    //    for (auto &file : to_index_files) {
+    //        status = BuildIndex(file);
+    //        if (!status.ok()) {
+    //            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
+    //        }
+    //
+    //        if (shutting_down_.load(std::memory_order_acquire)) {
+    //            ENGINE_LOG_DEBUG << "Server will shutdown, skip build index action";
+    //            break;
+    //        }
+    //    }
 
     ENGINE_LOG_TRACE << "Background build index thread exit";
 }

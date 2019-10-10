@@ -14,34 +14,33 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+
 #pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
-
-#include "Pass.h"
+#include "Task.h"
+#include "scheduler/Definition.h"
+#include "scheduler/job/BuildIndexJob.h"
 
 namespace milvus {
 namespace scheduler {
 
-class HybridPass : public Pass {
+class XBuildIndexTask : public Task {
  public:
-    HybridPass() = default;
+    explicit XBuildIndexTask(TableFileSchemaPtr file, TaskLabelPtr label);
+
+    void
+    Load(LoadType type, uint8_t device_id) override;
+
+    void
+    Execute() override;
 
  public:
-    bool
-    Run(const TaskPtr& task) override;
+    TableFileSchemaPtr file_;
+    TableFileSchema table_file_;
+    size_t to_index_id_ = 0;
+    int to_index_type_ = 0;
+    ExecutionEnginePtr to_index_engine_ = nullptr;
 };
-
-using HybridPassPtr = std::shared_ptr<HybridPass>;
 
 }  // namespace scheduler
 }  // namespace milvus

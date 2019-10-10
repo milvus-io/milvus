@@ -16,6 +16,8 @@
 // under the License.
 
 #include "scheduler/TaskCreator.h"
+#include <src/scheduler/tasklabel/SpecResLabel.h>
+#include "SchedInst.h"
 #include "scheduler/tasklabel/BroadcastLabel.h"
 #include "tasklabel/DefaultLabel.h"
 
@@ -30,6 +32,9 @@ TaskCreator::Create(const JobPtr& job) {
         }
         case JobType::DELETE: {
             return Create(std::static_pointer_cast<DeleteJob>(job));
+        }
+        case JobType::BUILD: {
+            return Create(std::static_pointer_cast<BuildIndexJob>(job));
         }
         default: {
             // TODO(wxyu): error
@@ -59,6 +64,21 @@ TaskCreator::Create(const DeleteJobPtr& job) {
     task->job_ = job;
     tasks.emplace_back(task);
 
+    return tasks;
+}
+
+std::vector<TaskPtr>
+TaskCreator::Create(const BuildIndexJobPtr& job) {
+    std::vector<TaskPtr> tasks;
+    // TODO(yukun): remove "disk" hardcode here
+    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("disk");
+
+    for (auto& to_index_file : job->to_index_files()) {
+        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+        auto task = std::make_shared<XBuildIndexTask>(to_index_file.second, label);
+        task->job_ = job;
+        tasks.emplace_back(task);
+    }
     return tasks;
 }
 

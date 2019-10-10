@@ -56,6 +56,7 @@ static const char* CONFIG_DB_INSERT_BUFFER_SIZE = "insert_buffer_size";
 static const char* CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT = "4";
 static const char* CONFIG_DB_BUILD_INDEX_GPU = "build_index_gpu";
 static const char* CONFIG_DB_BUILD_INDEX_GPU_DEFAULT = "0";
+static const char* CONFIG_DB_PRELOAD_TABLE = "preload_table";
 
 /* cache config */
 static const char* CONFIG_CACHE = "cache_config";
@@ -178,62 +179,8 @@ class Config {
     Status
     CheckResourceConfigPool(const std::vector<std::string>& value);
 
-    ///////////////////////////////////////////////////////////////////////////
-    /* server config */
     std::string
-    GetServerConfigStrAddress();
-    std::string
-    GetServerConfigStrPort();
-    std::string
-    GetServerConfigStrDeployMode();
-    std::string
-    GetServerConfigStrTimeZone();
-
-    /* db config */
-    std::string
-    GetDBConfigStrPrimaryPath();
-    std::string
-    GetDBConfigStrSecondaryPath();
-    std::string
-    GetDBConfigStrBackendUrl();
-    std::string
-    GetDBConfigStrArchiveDiskThreshold();
-    std::string
-    GetDBConfigStrArchiveDaysThreshold();
-    std::string
-    GetDBConfigStrInsertBufferSize();
-    std::string
-    GetDBConfigStrBuildIndexGPU();
-
-    /* metric config */
-    std::string
-    GetMetricConfigStrEnableMonitor();
-    std::string
-    GetMetricConfigStrCollector();
-    std::string
-    GetMetricConfigStrPrometheusPort();
-
-    /* cache config */
-    std::string
-    GetCacheConfigStrCpuCacheCapacity();
-    std::string
-    GetCacheConfigStrCpuCacheThreshold();
-    std::string
-    GetCacheConfigStrGpuCacheCapacity();
-    std::string
-    GetCacheConfigStrGpuCacheThreshold();
-    std::string
-    GetCacheConfigStrCacheInsertData();
-
-    /* engine config */
-    std::string
-    GetEngineConfigStrUseBlasThreshold();
-    std::string
-    GetEngineConfigStrOmpThreadNum();
-
-    /* resource config */
-    std::string
-    GetResourceConfigStrMode();
+    GetConfigStr(const std::string& parent_key, const std::string& child_key, const std::string& default_value = "");
 
  public:
     /* server config */
@@ -261,6 +208,8 @@ class Config {
     GetDBConfigInsertBufferSize(int32_t& value);
     Status
     GetDBConfigBuildIndexGPU(int32_t& value);
+    Status
+    GetDBConfigPreloadTable(std::string& value);
 
     /* metric config */
     Status
