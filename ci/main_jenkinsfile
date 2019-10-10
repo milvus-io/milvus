@@ -44,7 +44,7 @@ metadata:
 spec:
   containers:
   - name: milvus-build-env
-    image: registry.zilliz.com/milvus/milvus-build-env:v0.12
+    image: registry.zilliz.com/milvus/milvus-build-env:v0.13
     command:
     - cat
     tty: true

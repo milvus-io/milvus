@@ -21,6 +21,7 @@
 #include "utils/Status.h"
 
 #include <memory>
+#include <string>
 
 namespace milvus {
 namespace server {
@@ -51,6 +52,10 @@ class DBWrapper {
     EngineDB() {
         return db_;
     }
+
+ private:
+    Status
+    PreloadTables(const std::string& preload_tables);
 
  private:
     engine::DBPtr db_;

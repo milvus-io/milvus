@@ -105,14 +105,30 @@ please reinstall CMake with curl:
    ```
 
 ##### code format and linting
-
+Install clang-format and clang-tidy
 ```shell
 CentOS 7:   
 $ yum install clang
-Ubuntu 16.04 or 18.04: 
-$ sudo apt-get install clang-format clang-tidy
-    
+Ubuntu 16.04: 
+$ sudo apt-get install clang-tidy
+$ sudo su
+$ wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+$ apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-6.0 main"
+$ apt-get update
+$ apt-get install clang-format-6.0
+Ubuntu 18.04: 
+$ sudo apt-get install clang-tidy clang-format
+
+$ rm cmake_build/CMakeCache.txt
+```  
+Check code style
+```shell
 $ ./build.sh -l
+```
+To format the code
+```shell
+$ cd cmake_build
+$ make clang-format
 ```
 
 ##### Run unit test
@@ -122,13 +138,14 @@ $ ./build.sh -u
 ```
 
 ##### Run code coverage
-
+Install lcov
 ```shell
 CentOS 7:   
 $ yum install lcov
 Ubuntu 16.04 or 18.04: 
 $ sudo apt-get install lcov
-    
+``` 
+```shell  
 $ ./build.sh -u -c
 ```
 

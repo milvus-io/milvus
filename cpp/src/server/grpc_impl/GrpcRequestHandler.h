@@ -148,25 +148,25 @@ class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
            ::milvus::grpc::TopKQueryResultList* response) override;
 
     /**
-   * @brief Internal use query interface
-   *
-   * This method is used to query vector in specified files.
-   *
-   * @param context, add context for every RPC
-   * @param request:
-   *                file_id_array, specified files id array, queried.
-   *                query_record_array, all vector are going to be queried.
-   *                query_range_array, optional ranges for conditional search. If not specified, search whole table
-   *                topk, how many similarity vectors will be searched.
-   *
-   * @param writer, write query result array.
-   *
-   * @return status
-   *
-   * @param context
-   * @param request
-   * @param writer
-   */
+     * @brief Internal use query interface
+     *
+     * This method is used to query vector in specified files.
+     *
+     * @param context, add context for every RPC
+     * @param request:
+     *                file_id_array, specified files id array, queried.
+     *                query_record_array, all vector are going to be queried.
+     *                query_range_array, optional ranges for conditional search. If not specified, search whole table
+     *                topk, how many similarity vectors will be searched.
+     *
+     * @param writer, write query result array.
+     *
+     * @return status
+     *
+     * @param context
+     * @param request
+     * @param writer
+     */
     ::grpc::Status
     SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
                   ::milvus::grpc::TopKQueryResultList* response) override;

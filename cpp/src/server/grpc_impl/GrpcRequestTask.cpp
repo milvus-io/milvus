@@ -42,6 +42,8 @@ static const char* DQL_TASK_GROUP = "dql";
 static const char* DDL_DML_TASK_GROUP = "ddl_dml";
 static const char* PING_TASK_GROUP = "ping";
 
+constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
+
 using DB_META = milvus::engine::meta::Meta;
 using DB_DATE = milvus::engine::meta::DateT;
 
@@ -78,8 +80,6 @@ IndexType(engine::EngineType type) {
     return map_type[type];
 }
 
-constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
-
 Status
 ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array, std::vector<DB_DATE>& dates) {
     dates.clear();
@@ -94,10 +94,10 @@ ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array,
             return Status(SERVER_INVALID_TIME_RANGE, "Invalid time range: " + range.start_value());
         }
 
-        int64_t days = (tt_end > tt_start) ? (tt_end - tt_start) / DAY_SECONDS : (tt_start - tt_end) / DAY_SECONDS;
-        if (days == 0) {
+        int64_t days = (tt_end - tt_start) / DAY_SECONDS;
+        if (days <= 0) {
             return Status(SERVER_INVALID_TIME_RANGE,
-                          "Invalid time range: " + range.start_value() + " to " + range.end_value());
+                          "Invalid time range: The start-date should be smaller than end-date!");
         }
 
         // range: [start_day, end_day)
@@ -511,8 +511,8 @@ InsertTask::OnExecute() {
         }
 
         // step 6: update table flag
-        user_provide_ids ? table_info.flag_ |= engine::meta::FLAG_MASK_HAS_USERID : table_info.flag_ |=
-                                                                                    engine::meta::FLAG_MASK_NO_USERID;
+        user_provide_ids ? table_info.flag_ |= engine::meta::FLAG_MASK_HAS_USERID
+                         : table_info.flag_ |= engine::meta::FLAG_MASK_NO_USERID;
         status = DBWrapper::DB()->UpdateTableFlag(insert_param_->table_name(), table_info.flag_);
 
 #ifdef MILVUS_ENABLE_PROFILING
@@ -706,7 +706,11 @@ CountTableTask::OnExecute() {
         uint64_t row_count = 0;
         status = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
         if (!status.ok()) {
-            return status;
+            if (status.code(), DB_NOT_FOUND) {
+                return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+            } else {
+                return status;
+            }
         }
 
         row_count_ = static_cast<int64_t>(row_count);
