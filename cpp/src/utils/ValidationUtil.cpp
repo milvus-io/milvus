@@ -99,7 +99,7 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
 Status
 ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
     if (nlist <= 0) {
-        std::string msg = "Invalid nlist value: " + std::to_string(nlist);
+        std::string msg = "nlist value should be greater than 0";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_NLIST, msg);
     }
@@ -132,7 +132,7 @@ ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
 Status
 ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema) {
     if (top_k <= 0 || top_k > 2048) {
-        std::string msg = "Invalid top k value: " + std::to_string(top_k);
+        std::string msg = "Invalid top k value: " + std::to_string(top_k) + ", rational range [1, 2048]";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TOPK, msg);
     }
@@ -143,7 +143,8 @@ ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchem
 Status
 ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema) {
     if (nprobe <= 0 || nprobe > table_schema.nlist_) {
-        std::string msg = "Invalid nprobe value: " + std::to_string(nprobe);
+        std::string msg = "Invalid nprobe value: " + std::to_string(nprobe) + ", rational range [1, " +
+                          std::to_string(table_schema.nlist_) + "]";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_NPROBE, msg);
     }
