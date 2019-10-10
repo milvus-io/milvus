@@ -30,6 +30,7 @@
 #include "job/DeleteJob.h"
 #include "job/Job.h"
 #include "job/SearchJob.h"
+#include "task/BuildIndexTask.h"
 #include "task/DeleteTask.h"
 #include "task/SearchTask.h"
 #include "task/Task.h"
@@ -48,6 +49,9 @@ class TaskCreator {
 
     static std::vector<TaskPtr>
     Create(const DeleteJobPtr& job);
+
+    static std::vector<TaskPtr>
+    Create(const BuildIndexJobPtr& job);
 };
 
 }  // namespace scheduler

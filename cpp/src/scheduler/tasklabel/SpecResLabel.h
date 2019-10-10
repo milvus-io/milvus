@@ -18,13 +18,14 @@
 #pragma once
 
 #include "TaskLabel.h"
+#include "scheduler/ResourceMgr.h"
 
 #include <memory>
 #include <string>
 
-class Resource;
-
-using ResourceWPtr = std::weak_ptr<Resource>;
+// class Resource;
+//
+// using ResourceWPtr = std::weak_ptr<Resource>;
 
 namespace milvus {
 namespace scheduler {
