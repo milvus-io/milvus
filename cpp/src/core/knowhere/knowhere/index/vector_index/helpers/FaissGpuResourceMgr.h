@@ -96,6 +96,11 @@ class ResScope {
         Lock();
     }
 
+    ResScope(ResWPtr& res, const int64_t& device_id, const bool& isown)
+        : resource(res), device_id(device_id), move(true), own(isown) {
+        Lock();
+    }
+
     // specif for search
     // get the ownership of gpuresource and gpu
     ResScope(ResWPtr& res, const int64_t& device_id) : device_id(device_id), move(false), own(true) {

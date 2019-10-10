@@ -24,6 +24,7 @@
 
 #include <faiss/utils.h>
 #include <omp.h>
+#include <cmath>
 #include <string>
 #include <vector>
 

@@ -22,6 +22,7 @@
 #include <arpa/inet.h>
 #include <cuda_runtime.h>
 #include <algorithm>
+#include <cmath>
 #include <regex>
 #include <string>
 

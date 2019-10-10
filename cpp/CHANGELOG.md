@@ -35,6 +35,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-626 - Refactor DataObj to support cache any type data
 
 ## New Feature
+- MS-627 - Integrate new index: IVFSQHybrid
 
 ## Task
 - MS-554 - Change license to Apache 2.0

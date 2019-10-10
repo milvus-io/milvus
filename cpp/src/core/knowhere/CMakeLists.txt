@@ -50,6 +50,7 @@ set(index_srcs
         knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
         knowhere/index/vector_index/IndexIVFSQ.cpp
         knowhere/index/vector_index/IndexGPUIVFSQ.cpp
+        knowhere/index/vector_index/IndexIVFSQHybrid.cpp
         knowhere/index/vector_index/IndexIVFPQ.cpp
         knowhere/index/vector_index/IndexGPUIVFPQ.cpp
         knowhere/index/vector_index/FaissBaseIndex.cpp
