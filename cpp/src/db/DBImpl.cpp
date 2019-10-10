@@ -26,9 +26,9 @@
 #include "meta/SqliteMetaImpl.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/job/BuildIndexJob.h"
 #include "scheduler/job/DeleteJob.h"
 #include "scheduler/job/SearchJob.h"
-#include "scheduler/job/BuildIndexJob.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
@@ -51,7 +51,7 @@ constexpr uint64_t INDEX_ACTION_INTERVAL = 1;
 
 }  // namespace
 
-DBImpl::DBImpl(const DBOptions &options)
+DBImpl::DBImpl(const DBOptions& options)
     : options_(options), shutting_down_(true), compact_thread_pool_(1, 1), index_thread_pool_(1, 1) {
     meta_ptr_ = MetaFactory::Build(options.meta_, options.mode_);
     mem_mgr_ = MemManagerFactory::Build(meta_ptr_, options_);
@@ -111,7 +111,7 @@ DBImpl::DropAll() {
 }
 
 Status
-DBImpl::CreateTable(meta::TableSchema &table_schema) {
+DBImpl::CreateTable(meta::TableSchema& table_schema) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -122,7 +122,7 @@ DBImpl::CreateTable(meta::TableSchema &table_schema) {
 }
 
 Status
-DBImpl::DeleteTable(const std::string &table_id, const meta::DatesT &dates) {
+DBImpl::DeleteTable(const std::string& table_id, const meta::DatesT& dates) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -147,7 +147,7 @@ DBImpl::DeleteTable(const std::string &table_id, const meta::DatesT &dates) {
 }
 
 Status
-DBImpl::DescribeTable(meta::TableSchema &table_schema) {
+DBImpl::DescribeTable(meta::TableSchema& table_schema) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -158,7 +158,7 @@ DBImpl::DescribeTable(meta::TableSchema &table_schema) {
 }
 
 Status
-DBImpl::HasTable(const std::string &table_id, bool &has_or_not) {
+DBImpl::HasTable(const std::string& table_id, bool& has_or_not) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -167,7 +167,7 @@ DBImpl::HasTable(const std::string &table_id, bool &has_or_not) {
 }
 
 Status
-DBImpl::AllTables(std::vector<meta::TableSchema> &table_schema_array) {
+DBImpl::AllTables(std::vector<meta::TableSchema>& table_schema_array) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -176,7 +176,7 @@ DBImpl::AllTables(std::vector<meta::TableSchema> &table_schema_array) {
 }
 
 Status
-DBImpl::PreloadTable(const std::string &table_id) {
+DBImpl::PreloadTable(const std::string& table_id) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -195,11 +195,11 @@ DBImpl::PreloadTable(const std::string &table_id) {
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     int64_t available_size = cache_total - cache_usage;
 
-    for (auto &day_files : files) {
-        for (auto &file : day_files.second) {
+    for (auto& day_files : files) {
+        for (auto& file : day_files.second) {
             ExecutionEnginePtr engine =
-                EngineFactory::Build(file.dimension_, file.location_, (EngineType) file.engine_type_,
-                                     (MetricType) file.metric_type_, file.nlist_);
+                EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_,
+                                     (MetricType)file.metric_type_, file.nlist_);
             if (engine == nullptr) {
                 ENGINE_LOG_ERROR << "Invalid engine type";
                 return Status(DB_ERROR, "Invalid engine type");
@@ -212,7 +212,7 @@ DBImpl::PreloadTable(const std::string &table_id) {
                 try {
                     // step 1: load index
                     engine->Load(true);
-                } catch (std::exception &ex) {
+                } catch (std::exception& ex) {
                     std::string msg = "Pre-load table encounter exception: " + std::string(ex.what());
                     ENGINE_LOG_ERROR << msg;
                     return Status(DB_ERROR, msg);
@@ -224,7 +224,7 @@ DBImpl::PreloadTable(const std::string &table_id) {
 }
 
 Status
-DBImpl::UpdateTableFlag(const std::string &table_id, int64_t flag) {
+DBImpl::UpdateTableFlag(const std::string& table_id, int64_t flag) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -233,7 +233,7 @@ DBImpl::UpdateTableFlag(const std::string &table_id, int64_t flag) {
 }
 
 Status
-DBImpl::GetTableRowCount(const std::string &table_id, uint64_t &row_count) {
+DBImpl::GetTableRowCount(const std::string& table_id, uint64_t& row_count) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -261,7 +261,7 @@ DBImpl::InsertVectors(const std::string& table_id, uint64_t n, const float* vect
 }
 
 Status
-DBImpl::CreateIndex(const std::string &table_id, const TableIndex &index) {
+DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     {
         std::unique_lock<std::mutex> lock(build_index_mutex_);
 
@@ -316,7 +316,7 @@ DBImpl::CreateIndex(const std::string &table_id, const TableIndex &index) {
 
     while (!file_ids.empty()) {
         ENGINE_LOG_DEBUG << "Non index files detected! Will build index " << times;
-        if (index.engine_type_ != (int) EngineType::FAISS_IDMAP) {
+        if (index.engine_type_ != (int)EngineType::FAISS_IDMAP) {
             status = meta_ptr_->UpdateTableFilesToIndex(table_id);
         }
 
@@ -329,19 +329,19 @@ DBImpl::CreateIndex(const std::string &table_id, const TableIndex &index) {
 }
 
 Status
-DBImpl::DescribeIndex(const std::string &table_id, TableIndex &index) {
+DBImpl::DescribeIndex(const std::string& table_id, TableIndex& index) {
     return meta_ptr_->DescribeTableIndex(table_id, index);
 }
 
 Status
-DBImpl::DropIndex(const std::string &table_id) {
+DBImpl::DropIndex(const std::string& table_id) {
     ENGINE_LOG_DEBUG << "Drop index for table: " << table_id;
     return meta_ptr_->DropTableIndex(table_id);
 }
 
 Status
-DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float *vectors,
-              QueryResults &results) {
+DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
+              QueryResults& results) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -353,8 +353,8 @@ DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint64_t npr
 }
 
 Status
-DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float *vectors,
-              const meta::DatesT &dates, QueryResults &results) {
+DBImpl::Query(const std::string& table_id, uint64_t k, uint64_t nq, uint64_t nprobe, const float* vectors,
+              const meta::DatesT& dates, QueryResults& results) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -370,8 +370,8 @@ DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint64_t npr
     }
 
     meta::TableFilesSchema file_id_array;
-    for (auto &day_files : files) {
-        for (auto &file : day_files.second) {
+    for (auto& day_files : files) {
+        for (auto& file : day_files.second) {
             file_id_array.push_back(file);
         }
     }
@@ -383,8 +383,8 @@ DBImpl::Query(const std::string &table_id, uint64_t k, uint64_t nq, uint64_t npr
 }
 
 Status
-DBImpl::Query(const std::string &table_id, const std::vector<std::string> &file_ids, uint64_t k, uint64_t nq,
-              uint64_t nprobe, const float *vectors, const meta::DatesT &dates, QueryResults &results) {
+DBImpl::Query(const std::string& table_id, const std::vector<std::string>& file_ids, uint64_t k, uint64_t nq,
+              uint64_t nprobe, const float* vectors, const meta::DatesT& dates, QueryResults& results) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -393,7 +393,7 @@ DBImpl::Query(const std::string &table_id, const std::vector<std::string> &file_
 
     // get specified files
     std::vector<size_t> ids;
-    for (auto &id : file_ids) {
+    for (auto& id : file_ids) {
         meta::TableFileSchema table_file;
         table_file.table_id_ = table_id;
         std::string::size_type sz;
@@ -407,8 +407,8 @@ DBImpl::Query(const std::string &table_id, const std::vector<std::string> &file_
     }
 
     meta::TableFilesSchema file_id_array;
-    for (auto &day_files : files_array) {
-        for (auto &file : day_files.second) {
+    for (auto& day_files : files_array) {
+        for (auto& file : day_files.second) {
             file_id_array.push_back(file);
         }
     }
@@ -424,7 +424,7 @@ DBImpl::Query(const std::string &table_id, const std::vector<std::string> &file_
 }
 
 Status
-DBImpl::Size(uint64_t &result) {
+DBImpl::Size(uint64_t& result) {
     if (shutting_down_.load(std::memory_order_acquire)) {
         return Status(DB_ERROR, "Milsvus server is shutdown!");
     }
@@ -436,8 +436,8 @@ DBImpl::Size(uint64_t &result) {
 // internal methods
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 Status
-DBImpl::QueryAsync(const std::string &table_id, const meta::TableFilesSchema &files, uint64_t k, uint64_t nq,
-                   uint64_t nprobe, const float *vectors, const meta::DatesT &dates, QueryResults &results) {
+DBImpl::QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
+                   uint64_t nprobe, const float* vectors, const meta::DatesT& dates, QueryResults& results) {
     server::CollectQueryMetrics metrics(nq);
 
     TimeRecorder rc("");
@@ -446,7 +446,7 @@ DBImpl::QueryAsync(const std::string &table_id, const meta::TableFilesSchema &fi
     ENGINE_LOG_DEBUG << "Engine query begin, index file count: " << files.size()
                      << " date range count: " << dates.size();
     scheduler::SearchJobPtr job = std::make_shared<scheduler::SearchJob>(0, k, nq, nprobe, vectors);
-    for (auto &file : files) {
+    for (auto& file : files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddIndexFile(file_ptr);
     }
@@ -514,7 +514,7 @@ DBImpl::BackgroundTimerTask() {
 void
 DBImpl::WaitMergeFileFinish() {
     std::lock_guard<std::mutex> lck(compact_result_mutex_);
-    for (auto &iter : compact_thread_results_) {
+    for (auto& iter : compact_thread_results_) {
         iter.wait();
     }
 }
@@ -522,7 +522,7 @@ DBImpl::WaitMergeFileFinish() {
 void
 DBImpl::WaitBuildIndexFinish() {
     std::lock_guard<std::mutex> lck(index_result_mutex_);
-    for (auto &iter : index_thread_results_) {
+    for (auto& iter : index_thread_results_) {
         iter.wait();
     }
 }
@@ -563,7 +563,7 @@ DBImpl::MemSerialize() {
     std::lock_guard<std::mutex> lck(mem_serialize_mutex_);
     std::set<std::string> temp_table_ids;
     mem_mgr_->Serialize(temp_table_ids);
-    for (auto &id : temp_table_ids) {
+    for (auto& id : temp_table_ids) {
         compact_table_ids_.insert(id);
     }
 
@@ -608,7 +608,7 @@ DBImpl::StartCompactionTask() {
 }
 
 Status
-DBImpl::MergeFiles(const std::string &table_id, const meta::DateT &date, const meta::TableFilesSchema &files) {
+DBImpl::MergeFiles(const std::string& table_id, const meta::DateT& date, const meta::TableFilesSchema& files) {
     ENGINE_LOG_DEBUG << "Merge files for table: " << table_id;
 
     // step 1: create table file
@@ -625,13 +625,13 @@ DBImpl::MergeFiles(const std::string &table_id, const meta::DateT &date, const m
 
     // step 2: merge files
     ExecutionEnginePtr index =
-        EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType) table_file.engine_type_,
-                             (MetricType) table_file.metric_type_, table_file.nlist_);
+        EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_,
+                             (MetricType)table_file.metric_type_, table_file.nlist_);
 
     meta::TableFilesSchema updated;
     int64_t index_size = 0;
 
-    for (auto &file : files) {
+    for (auto& file : files) {
         server::CollectMergeFilesMetrics metrics;
 
         index->Merge(file.location_);
@@ -649,7 +649,7 @@ DBImpl::MergeFiles(const std::string &table_id, const meta::DateT &date, const m
     // step 3: serialize to disk
     try {
         index->Serialize();
-    } catch (std::exception &ex) {
+    } catch (std::exception& ex) {
         // typical error: out of disk space or permition denied
         std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
         ENGINE_LOG_ERROR << msg;
@@ -667,7 +667,7 @@ DBImpl::MergeFiles(const std::string &table_id, const meta::DateT &date, const m
     // step 4: update table files state
     // if index type isn't IDMAP, set file type to TO_INDEX if file size execeed index_file_size
     // else set file type to RAW, no need to build index
-    if (table_file.engine_type_ != (int) EngineType::FAISS_IDMAP) {
+    if (table_file.engine_type_ != (int)EngineType::FAISS_IDMAP) {
         table_file.file_type_ = (index->PhysicalSize() >= table_file.index_file_size_) ? meta::TableFileSchema::TO_INDEX
                                                                                        : meta::TableFileSchema::RAW;
     } else {
@@ -687,7 +687,7 @@ DBImpl::MergeFiles(const std::string &table_id, const meta::DateT &date, const m
 }
 
 Status
-DBImpl::BackgroundMergeFiles(const std::string &table_id) {
+DBImpl::BackgroundMergeFiles(const std::string& table_id) {
     meta::DatePartionedTableFilesSchema raw_files;
     auto status = meta_ptr_->FilesToMerge(table_id, raw_files);
     if (!status.ok()) {
@@ -696,7 +696,7 @@ DBImpl::BackgroundMergeFiles(const std::string &table_id) {
     }
 
     bool has_merge = false;
-    for (auto &kv : raw_files) {
+    for (auto& kv : raw_files) {
         auto files = kv.second;
         if (files.size() < options_.merge_trigger_number_) {
             ENGINE_LOG_DEBUG << "Files number not greater equal than merge trigger number, skip merge action";
@@ -719,7 +719,7 @@ DBImpl::BackgroundCompaction(std::set<std::string> table_ids) {
     ENGINE_LOG_TRACE << " Background compaction thread start";
 
     Status status;
-    for (auto &table_id : table_ids) {
+    for (auto& table_id : table_ids) {
         status = BackgroundMergeFiles(table_id);
         if (!status.ok()) {
             ENGINE_LOG_ERROR << "Merge files for table " << table_id << " failed: " << status.ToString();
@@ -771,9 +771,9 @@ DBImpl::StartBuildIndexTask(bool force) {
 }
 
 Status
-DBImpl::BuildIndex(const meta::TableFileSchema &file) {
-    ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension_, file.location_, (EngineType) file.engine_type_,
-                                                       (MetricType) file.metric_type_, file.nlist_);
+DBImpl::BuildIndex(const meta::TableFileSchema& file) {
+    ExecutionEnginePtr to_index = EngineFactory::Build(file.dimension_, file.location_, (EngineType)file.engine_type_,
+                                                       (MetricType)file.metric_type_, file.nlist_);
     if (to_index == nullptr) {
         ENGINE_LOG_ERROR << "Invalid engine type";
         return Status(DB_ERROR, "Invalid engine type");
@@ -804,7 +804,7 @@ DBImpl::BuildIndex(const meta::TableFileSchema &file) {
 
         try {
             server::CollectBuildIndexMetrics metrics;
-            index = to_index->BuildIndex(table_file.location_, (EngineType) table_file.engine_type_);
+            index = to_index->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
             if (index == nullptr) {
                 table_file.file_type_ = meta::TableFileSchema::TO_DELETE;
                 status = meta_ptr_->UpdateTableFile(table_file);
@@ -813,7 +813,7 @@ DBImpl::BuildIndex(const meta::TableFileSchema &file) {
 
                 return status;
             }
-        } catch (std::exception &ex) {
+        } catch (std::exception& ex) {
             // typical error: out of gpu memory
             std::string msg = "BuildIndex encounter exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
@@ -839,7 +839,7 @@ DBImpl::BuildIndex(const meta::TableFileSchema &file) {
         // step 5: save index file
         try {
             index->Serialize();
-        } catch (std::exception &ex) {
+        } catch (std::exception& ex) {
             // typical error: out of disk space or permition denied
             std::string msg = "Serialize index encounter exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
@@ -882,7 +882,7 @@ DBImpl::BuildIndex(const meta::TableFileSchema &file) {
             status = meta_ptr_->UpdateTableFile(table_file);
             ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
         }
-    } catch (std::exception &ex) {
+    } catch (std::exception& ex) {
         std::string msg = "Build index encounter exception: " + std::string(ex.what());
         ENGINE_LOG_ERROR << msg;
         return Status(DB_ERROR, msg);
@@ -900,11 +900,10 @@ DBImpl::BackgroundBuildIndex() {
     meta_ptr_->FilesToIndex(to_index_files);
     Status status;
 
-    scheduler::BuildIndexJobPtr
-        job = std::make_shared<scheduler::BuildIndexJob>(0, meta_ptr_, options_);
+    scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(0, meta_ptr_, options_);
 
     // step 2: put build index task to scheduler
-    for (auto &file : to_index_files) {
+    for (auto& file : to_index_files) {
         scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
         job->AddToIndexFiles(file_ptr);
     }
@@ -915,17 +914,17 @@ DBImpl::BackgroundBuildIndex() {
         ENGINE_LOG_ERROR << "Building index failed: " << status.ToString();
     }
 
-//    for (auto &file : to_index_files) {
-//        status = BuildIndex(file);
-//        if (!status.ok()) {
-//            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
-//        }
-//
-//        if (shutting_down_.load(std::memory_order_acquire)) {
-//            ENGINE_LOG_DEBUG << "Server will shutdown, skip build index action";
-//            break;
-//        }
-//    }
+    //    for (auto &file : to_index_files) {
+    //        status = BuildIndex(file);
+    //        if (!status.ok()) {
+    //            ENGINE_LOG_ERROR << "Building index for " << file.id_ << " failed: " << status.ToString();
+    //        }
+    //
+    //        if (shutting_down_.load(std::memory_order_acquire)) {
+    //            ENGINE_LOG_DEBUG << "Server will shutdown, skip build index action";
+    //            break;
+    //        }
+    //    }
 
     ENGINE_LOG_TRACE << "Background build index thread exit";
 }
