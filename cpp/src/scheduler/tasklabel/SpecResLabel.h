@@ -23,9 +23,9 @@
 #include <memory>
 #include <string>
 
-//class Resource;
+// class Resource;
 //
-//using ResourceWPtr = std::weak_ptr<Resource>;
+// using ResourceWPtr = std::weak_ptr<Resource>;
 
 namespace milvus {
 namespace scheduler {
