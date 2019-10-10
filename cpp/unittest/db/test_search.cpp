@@ -30,8 +30,8 @@ void
 BuildResult(uint64_t nq,
             uint64_t topk,
             bool ascending,
-            std::vector<int64_t> &output_ids,
-            std::vector<float> &output_distence) {
+            std::vector<int64_t>& output_ids,
+            std::vector<float>& output_distence) {
     output_ids.clear();
     output_ids.resize(nq * topk);
     output_distence.clear();
@@ -39,20 +39,21 @@ BuildResult(uint64_t nq,
 
     for (uint64_t i = 0; i < nq; i++) {
         for (uint64_t j = 0; j < topk; j++) {
-            output_ids[i * topk + j] = (int64_t) (drand48() * 100000);
+            output_ids[i * topk + j] = (int64_t)(drand48() * 100000);
             output_distence[i * topk + j] = ascending ? (j + drand48()) : ((topk - j) + drand48());
         }
     }
 }
 
-void CheckTopkResult(const std::vector<int64_t> &input_ids_1,
-                     const std::vector<float> &input_distance_1,
-                     const std::vector<int64_t> &input_ids_2,
-                     const std::vector<float> &input_distance_2,
-                     uint64_t nq,
-                     uint64_t topk,
-                     bool ascending,
-                     const ms::ResultSet& result) {
+void
+CheckTopkResult(const std::vector<int64_t>& input_ids_1,
+                const std::vector<float>& input_distance_1,
+                const std::vector<int64_t>& input_ids_2,
+                const std::vector<float>& input_distance_2,
+                uint64_t nq,
+                uint64_t topk,
+                bool ascending,
+                const milvus::scheduler::ResultSet& result) {
     ASSERT_EQ(result.size(), nq);
     ASSERT_EQ(input_ids_1.size(), input_distance_1.size());
     ASSERT_EQ(input_ids_2.size(), input_distance_2.size());
@@ -61,15 +62,18 @@ void CheckTopkResult(const std::vector<int64_t> &input_ids_1,
     uint64_t input_k2 = input_ids_2.size() / nq;
 
     for (int64_t i = 0; i < nq; i++) {
-        std::vector<float> src_vec(input_distance_1.begin()+i*input_k1, input_distance_1.begin()+(i+1)*input_k1);
-        src_vec.insert(src_vec.end(), input_distance_2.begin()+i*input_k2, input_distance_2.begin()+(i+1)*input_k2);
+        std::vector<float>
+            src_vec(input_distance_1.begin() + i * input_k1, input_distance_1.begin() + (i + 1) * input_k1);
+        src_vec.insert(src_vec.end(),
+                       input_distance_2.begin() + i * input_k2,
+                       input_distance_2.begin() + (i + 1) * input_k2);
         if (ascending) {
             std::sort(src_vec.begin(), src_vec.end());
         } else {
             std::sort(src_vec.begin(), src_vec.end(), std::greater<float>());
         }
 
-        uint64_t n = std::min(topk, input_k1+input_k2);
+        uint64_t n = std::min(topk, input_k1 + input_k2);
         for (uint64_t j = 0; j < n; j++) {
             if (src_vec[j] != result[i][j].second) {
                 std::cout << src_vec[j] << " " << result[i][j].second << std::endl;
@@ -87,19 +91,19 @@ TEST(DBSearchTest, TOPK_TEST) {
     bool ascending;
     std::vector<int64_t> ids1, ids2;
     std::vector<float> dist1, dist2;
-    ms::ResultSet result;
+    milvus::scheduler::ResultSet result;
     milvus::Status status;
 
     /* test1, id1/dist1 valid, id2/dist2 empty */
     ascending = true;
     BuildResult(NQ, TOP_K, ascending, ids1, dist1);
-    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
     /* test2, id1/dist1 valid, id2/dist2 valid */
     BuildResult(NQ, TOP_K, ascending, ids2, dist2);
-    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
@@ -107,10 +111,10 @@ TEST(DBSearchTest, TOPK_TEST) {
     ids1.clear();
     dist1.clear();
     result.clear();
-    BuildResult(NQ, TOP_K/2, ascending, ids1, dist1);
-    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    BuildResult(NQ, TOP_K / 2, ascending, ids1, dist1);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K / 2, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
@@ -118,10 +122,10 @@ TEST(DBSearchTest, TOPK_TEST) {
     ids2.clear();
     dist2.clear();
     result.clear();
-    BuildResult(NQ, TOP_K/3, ascending, ids2, dist2);
-    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    BuildResult(NQ, TOP_K / 3, ascending, ids2, dist2);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K / 2, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K/3, NQ, TOP_K, ascending, result);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K / 3, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
@@ -135,13 +139,13 @@ TEST(DBSearchTest, TOPK_TEST) {
 
     /* test1, id1/dist1 valid, id2/dist2 empty */
     BuildResult(NQ, TOP_K, ascending, ids1, dist1);
-    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
     /* test2, id1/dist1 valid, id2/dist2 valid */
     BuildResult(NQ, TOP_K, ascending, ids2, dist2);
-    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
@@ -149,10 +153,10 @@ TEST(DBSearchTest, TOPK_TEST) {
     ids1.clear();
     dist1.clear();
     result.clear();
-    BuildResult(NQ, TOP_K/2, ascending, ids1, dist1);
-    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    BuildResult(NQ, TOP_K / 2, ascending, ids1, dist1);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K / 2, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 
@@ -160,10 +164,10 @@ TEST(DBSearchTest, TOPK_TEST) {
     ids2.clear();
     dist2.clear();
     result.clear();
-    BuildResult(NQ, TOP_K/3, ascending, ids2, dist2);
-    status = ms::XSearchTask::TopkResult(ids1, dist1, TOP_K/2, NQ, TOP_K, ascending, result);
+    BuildResult(NQ, TOP_K / 3, ascending, ids2, dist2);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids1, dist1, TOP_K / 2, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
-    status = ms::XSearchTask::TopkResult(ids2, dist2, TOP_K/3, NQ, TOP_K, ascending, result);
+    status = milvus::scheduler::XSearchTask::TopkResult(ids2, dist2, TOP_K / 3, NQ, TOP_K, ascending, result);
     ASSERT_TRUE(status.ok());
     CheckTopkResult(ids1, dist1, ids2, dist2, NQ, TOP_K, ascending, result);
 }
@@ -175,7 +179,7 @@ TEST(DBSearchTest, REDUCE_PERF_TEST) {
     bool ascending = true;
     std::vector<int64_t> input_ids;
     std::vector<float> input_distance;
-    ms::ResultSet final_result;
+    milvus::scheduler::ResultSet final_result;
     milvus::Status status;
 
     double span, reduce_cost = 0.0;
@@ -187,12 +191,18 @@ TEST(DBSearchTest, REDUCE_PERF_TEST) {
         rc.RecordSection("do search for context: " + std::to_string(i));
 
         // pick up topk result
-        status = ms::XSearchTask::TopkResult(input_ids, input_distance, top_k, nq, top_k, ascending, final_result);
+        status = milvus::scheduler::XSearchTask::TopkResult(input_ids,
+                                                            input_distance,
+                                                            top_k,
+                                                            nq,
+                                                            top_k,
+                                                            ascending,
+                                                            final_result);
         ASSERT_TRUE(status.ok());
         ASSERT_EQ(final_result.size(), nq);
 
         span = rc.RecordSection("reduce topk for context: " + std::to_string(i));
         reduce_cost += span;
     }
-    std::cout << "total reduce time: " << reduce_cost/1000 << " ms" << std::endl;
+    std::cout << "total reduce time: " << reduce_cost / 1000 << " ms" << std::endl;
 }

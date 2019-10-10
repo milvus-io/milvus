@@ -33,8 +33,6 @@ INITIALIZE_EASYLOGGINGPP
 
 namespace {
 
-namespace ms = milvus;
-
 class DBTestEnvironment : public ::testing::Environment {
  public:
     explicit DBTestEnvironment(const std::string& uri)
@@ -83,9 +81,9 @@ BaseTest::TearDown() {
     knowhere::FaissGpuResourceMgr::GetInstance().Free();
 }
 
-ms::engine::DBOptions
+milvus::engine::DBOptions
 BaseTest::GetOptions() {
-    auto options = ms::engine::DBFactory::BuildOption();
+    auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = "/tmp/milvus_test";
     options.meta_.backend_uri_ = "sqlite://:@:/";
     return options;
@@ -96,23 +94,23 @@ void
 DBTest::SetUp() {
     BaseTest::SetUp();
 
-    auto res_mgr = ms::scheduler::ResMgrInst::GetInstance();
+    auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();
-    res_mgr->Add(ms::scheduler::ResourceFactory::Create("disk", "DISK", 0, true, false));
-    res_mgr->Add(ms::scheduler::ResourceFactory::Create("cpu", "CPU", 0, true, false));
-    res_mgr->Add(ms::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, true, false));
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0, true, false));
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
 
-    auto default_conn = ms::scheduler::Connection("IO", 500.0);
-    auto PCIE = ms::scheduler::Connection("IO", 11000.0);
+    auto default_conn = milvus::scheduler::Connection("IO", 500.0);
+    auto PCIE = milvus::scheduler::Connection("IO", 11000.0);
     res_mgr->Connect("disk", "cpu", default_conn);
     res_mgr->Connect("cpu", "gtx1660", PCIE);
     res_mgr->Start();
-    ms::scheduler::SchedInst::GetInstance()->Start();
+    milvus::scheduler::SchedInst::GetInstance()->Start();
 
-    ms::scheduler::JobMgrInst::GetInstance()->Start();
+    milvus::scheduler::JobMgrInst::GetInstance()->Start();
 
     auto options = GetOptions();
-    db_ = ms::engine::DBFactory::Build(options);
+    db_ = milvus::engine::DBFactory::Build(options);
 }
 
 void
@@ -120,10 +118,10 @@ DBTest::TearDown() {
     db_->Stop();
     db_->DropAll();
 
-    ms::scheduler::JobMgrInst::GetInstance()->Stop();
-    ms::scheduler::SchedInst::GetInstance()->Stop();
-    ms::scheduler::ResMgrInst::GetInstance()->Stop();
-    ms::scheduler::ResMgrInst::GetInstance()->Clear();
+    milvus::scheduler::JobMgrInst::GetInstance()->Stop();
+    milvus::scheduler::SchedInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Stop();
+    milvus::scheduler::ResMgrInst::GetInstance()->Clear();
 
     BaseTest::TearDown();
 
@@ -132,11 +130,11 @@ DBTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-ms::engine::DBOptions
+milvus::engine::DBOptions
 DBTest2::GetOptions() {
-    auto options = ms::engine::DBFactory::BuildOption();
+    auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = "/tmp/milvus_test";
-    options.meta_.archive_conf_ = ms::engine::ArchiveConf("delete", "disk:1");
+    options.meta_.archive_conf_ = milvus::engine::ArchiveConf("delete", "disk:1");
     options.meta_.backend_uri_ = "sqlite://:@:/";
     return options;
 }
@@ -147,7 +145,7 @@ MetaTest::SetUp() {
     BaseTest::SetUp();
 
     auto options = GetOptions();
-    impl_ = std::make_shared<ms::engine::meta::SqliteMetaImpl>(options.meta_);
+    impl_ = std::make_shared<milvus::engine::meta::SqliteMetaImpl>(options.meta_);
 }
 
 void
@@ -161,9 +159,9 @@ MetaTest::TearDown() {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-ms::engine::DBOptions
+milvus::engine::DBOptions
 MySqlDBTest::GetOptions() {
-    auto options = ms::engine::DBFactory::BuildOption();
+    auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = "/tmp/milvus_test";
     options.meta_.backend_uri_ = test_env->getURI();
 
@@ -176,7 +174,7 @@ MySqlMetaTest::SetUp() {
     BaseTest::SetUp();
 
     auto options = GetOptions();
-    impl_ = std::make_shared<ms::engine::meta::MySQLMetaImpl>(options.meta_, options.mode_);
+    impl_ = std::make_shared<milvus::engine::meta::MySQLMetaImpl>(options.meta_, options.mode_);
 }
 
 void
@@ -189,9 +187,9 @@ MySqlMetaTest::TearDown() {
     boost::filesystem::remove_all(options.meta_.path_);
 }
 
-ms::engine::DBOptions
+milvus::engine::DBOptions
 MySqlMetaTest::GetOptions() {
-    auto options = ms::engine::DBFactory::BuildOption();
+    auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = "/tmp/milvus_test";
     options.meta_.backend_uri_ = test_env->getURI();
 

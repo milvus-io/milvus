@@ -22,19 +22,13 @@
 #include <gtest/gtest.h>
 #include <iostream>
 
-namespace {
-
-namespace ms = milvus;
-
-} // namespace
-
 TEST(PrometheusTest, PROMETHEUS_TEST) {
-    ms::server::Config::GetInstance().SetMetricConfigEnableMonitor("on");
+    milvus::server::Config::GetInstance().SetMetricConfigEnableMonitor("on");
 
-    ms::server::PrometheusMetrics instance = ms::server::PrometheusMetrics::GetInstance();
+    milvus::server::PrometheusMetrics instance = milvus::server::PrometheusMetrics::GetInstance();
     instance.Init();
     instance.SetStartup(true);
-    ms::server::SystemInfo::GetInstance().Init();
+    milvus::server::SystemInfo::GetInstance().Init();
     instance.AddVectorsSuccessTotalIncrement();
     instance.AddVectorsFailTotalIncrement();
     instance.AddVectorsDurationHistogramOberve(1.0);
@@ -80,7 +74,7 @@ TEST(PrometheusTest, PROMETHEUS_TEST) {
     instance.GPUTemperature();
     instance.CPUTemperature();
 
-    ms::server::Config::GetInstance().SetMetricConfigEnableMonitor("off");
+    milvus::server::Config::GetInstance().SetMetricConfigEnableMonitor("off");
     instance.Init();
     instance.CPUCoreUsagePercentSet();
     instance.GPUTemperature();

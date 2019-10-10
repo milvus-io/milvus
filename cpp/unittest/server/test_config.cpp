@@ -25,8 +25,6 @@
 
 namespace {
 
-namespace ms = milvus;
-
 static const char *CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
 static const char *LOG_FILE_PATH = "./milvus/conf/log_config.conf";
 
@@ -37,25 +35,25 @@ static constexpr uint64_t GB = MB * 1024;
 } // namespace
 
 TEST(ConfigTest, CONFIG_TEST) {
-    ms::server::ConfigMgr *config_mgr = ms::server::ConfigMgr::GetInstance();
+    milvus::server::ConfigMgr *config_mgr = milvus::server::ConfigMgr::GetInstance();
 
-    ms::ErrorCode err = config_mgr->LoadConfigFile("");
-    ASSERT_EQ(err, ms::SERVER_UNEXPECTED_ERROR);
+    milvus::ErrorCode err = config_mgr->LoadConfigFile("");
+    ASSERT_EQ(err, milvus::SERVER_UNEXPECTED_ERROR);
 
     err = config_mgr->LoadConfigFile(LOG_FILE_PATH);
-    ASSERT_EQ(err, ms::SERVER_UNEXPECTED_ERROR);
+    ASSERT_EQ(err, milvus::SERVER_UNEXPECTED_ERROR);
 
     err = config_mgr->LoadConfigFile(CONFIG_FILE_PATH);
-    ASSERT_EQ(err, ms::SERVER_SUCCESS);
+    ASSERT_EQ(err, milvus::SERVER_SUCCESS);
 
     config_mgr->Print();
 
-    ms::server::ConfigNode &root_config = config_mgr->GetRootNode();
-    ms::server::ConfigNode &server_config = root_config.GetChild("server_config");
-    ms::server::ConfigNode &db_config = root_config.GetChild("db_config");
-    ms::server::ConfigNode &metric_config = root_config.GetChild("metric_config");
-    ms::server::ConfigNode &cache_config = root_config.GetChild("cache_config");
-    ms::server::ConfigNode invalid_config = root_config.GetChild("invalid_config");
+    milvus::server::ConfigNode &root_config = config_mgr->GetRootNode();
+    milvus::server::ConfigNode &server_config = root_config.GetChild("server_config");
+    milvus::server::ConfigNode &db_config = root_config.GetChild("db_config");
+    milvus::server::ConfigNode &metric_config = root_config.GetChild("metric_config");
+    milvus::server::ConfigNode &cache_config = root_config.GetChild("cache_config");
+    milvus::server::ConfigNode invalid_config = root_config.GetChild("invalid_config");
     auto valus = invalid_config.GetSequence("not_exist");
     float ff = invalid_config.GetFloatValue("not_exist", 3.0);
     ASSERT_EQ(ff, 3.0);
@@ -69,10 +67,10 @@ TEST(ConfigTest, CONFIG_TEST) {
     double test = server_config.GetDoubleValue("test");
     ASSERT_EQ(test, 2.5);
 
-    ms::server::ConfigNode fake;
+    milvus::server::ConfigNode fake;
     server_config.AddChild("fake", fake);
     fake = server_config.GetChild("fake");
-    ms::server::ConfigNodeArr arr;
+    milvus::server::ConfigNodeArr arr;
     server_config.GetChildren(arr);
     ASSERT_EQ(arr.size(), 1UL);
 
@@ -89,7 +87,7 @@ TEST(ConfigTest, CONFIG_TEST) {
     auto seq = server_config.GetSequence("seq");
     ASSERT_EQ(seq.size(), 2UL);
 
-    ms::server::ConfigNode combine;
+    milvus::server::ConfigNode combine;
     combine.Combine(server_config);
 
     combine.PrintAll();
@@ -102,8 +100,8 @@ TEST(ConfigTest, CONFIG_TEST) {
 }
 
 TEST(ConfigTest, SERVER_CONFIG_TEST) {
-    ms::server::Config &config = ms::server::Config::GetInstance();
-    ms::Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
+    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
     ASSERT_TRUE(s.ok());
 
     s = config.ValidateConfig();
