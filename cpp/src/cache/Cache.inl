@@ -86,11 +86,11 @@ Cache<ItemObj>::insert(const std::string &key, const ItemObj &item) {
         //if key already exist, subtract old item size
         if (lru_.exists(key)) {
             const ItemObj &old_item = lru_.get(key);
-            usage_ -= old_item->size();
+            usage_ -= old_item->Size();
         }
 
         //plus new item size
-        usage_ += item->size();
+        usage_ += item->Size();
     }
 
     //if usage exceed capacity, free some items
@@ -106,7 +106,7 @@ Cache<ItemObj>::insert(const std::string &key, const ItemObj &item) {
         std::lock_guard<std::mutex> lock(mutex_);
 
         lru_.put(key, item);
-        SERVER_LOG_DEBUG << "Insert " << key << " size:" << item->size()
+        SERVER_LOG_DEBUG << "Insert " << key << " size:" << item->Size()
                          << " bytes into cache, usage: " << usage_ << " bytes";
     }
 }
@@ -120,9 +120,9 @@ Cache<ItemObj>::erase(const std::string &key) {
     }
 
     const ItemObj &old_item = lru_.get(key);
-    usage_ -= old_item->size();
+    usage_ -= old_item->Size();
 
-    SERVER_LOG_DEBUG << "Erase " << key << " size: " << old_item->size();
+    SERVER_LOG_DEBUG << "Erase " << key << " size: " << old_item->Size();
 
     lru_.erase(key);
 }
@@ -160,7 +160,7 @@ Cache<ItemObj>::free_memory() {
             auto &obj_ptr = it->second;
 
             key_array.emplace(key);
-            released_size += obj_ptr->size();
+            released_size += obj_ptr->Size();
             ++it;
         }
     }

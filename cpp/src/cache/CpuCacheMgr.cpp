@@ -59,14 +59,10 @@ CpuCacheMgr::GetInstance() {
     return &s_mgr;
 }
 
-engine::VecIndexPtr
+DataObjPtr
 CpuCacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
-    if (obj != nullptr) {
-        return obj->data();
-    }
-
-    return nullptr;
+    return obj;
 }
 
 }  // namespace cache

@@ -34,6 +34,11 @@
 namespace milvus {
 namespace engine {
 
+int64_t
+VecIndex::Size() {
+    return Count() * Dimension() * sizeof(float);
+}
+
 struct FileIOReader {
     std::fstream fs;
     std::string name;
