@@ -66,9 +66,9 @@ IndexFactory(const std::string& type) {
     } else if (type == "IVFSQ") {
         return std::make_shared<kn::IVFSQ>();
     } else if (type == "GPUIVFSQ") {
-        return std::make_shared<GPUIVFSQ>(device_id);
+        return std::make_shared<kn::GPUIVFSQ>(device_id);
     } else if (type == "IVFSQHybrid") {
-        return std::make_shared<IVFSQHybrid>(device_id);
+        return std::make_shared<kn::IVFSQHybrid>(device_id);
     }
 }
 
@@ -111,7 +111,7 @@ class ParamGenerator {
             tempconf->metric_type = kn::METRICTYPE::L2;
             return tempconf;
         } else if (type == ParameterType::ivfsq || type == ParameterType::ivfsqhybrid) {
-            auto tempconf = std::make_shared<IVFSQCfg>();
+            auto tempconf = std::make_shared<kn::IVFSQCfg>();
             tempconf->d = DIM;
             tempconf->gpu_id = device_id;
             tempconf->nlist = 100;
@@ -142,12 +142,12 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
         kn::FaissGpuResourceMgr::GetInstance().Free();
     }
 
-    VectorIndexPtr
+    kn::VectorIndexPtr
     ChooseTodo() {
         std::vector<std::string> gpu_idx{"GPUIVFSQ"};
         auto finder = std::find(gpu_idx.cbegin(), gpu_idx.cend(), index_type);
         if (finder != gpu_idx.cend()) {
-            return CopyCpuToGpu(index_, device_id, Config());
+            return kn::cloner::CopyCpuToGpu(index_, device_id, kn::Config());
         }
         return index_;
     }
@@ -164,11 +164,11 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                                //                            std::make_tuple("IVFPQ", ParameterType::ivfpq),
                                //                            std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
                                std::make_tuple("IVFSQ", ParameterType::ivfsq),
-                               std::make_tuple("GPUIVFSQ", ParameterType::ivfsq)
+                               std::make_tuple("GPUIVFSQ", ParameterType::ivfsq),
                                    std::make_tuple("IVFSQHybrid", ParameterType::ivfsqhybrid)));
 
 void
-AssertAnns(const DatasetPtr& result, const int& nq, const int& k) {
+AssertAnns(const kn::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     for (auto i = 0; i < nq; i++) {
         EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
@@ -232,12 +232,12 @@ TEST_P(IVFTest, hybrid) {
     //    AssertAnns(result, nq, conf->k);
 
     {
-        auto hybrid_1_idx = std::make_shared<IVFSQHybrid>(device_id);
+        auto hybrid_1_idx = std::make_shared<kn::IVFSQHybrid>(device_id);
 
         auto binaryset = index_->Serialize();
         hybrid_1_idx->Load(binaryset);
 
-        auto quantizer_conf = std::make_shared<QuantizerCfg>();
+        auto quantizer_conf = std::make_shared<kn::QuantizerCfg>();
         quantizer_conf->mode = 1;
         quantizer_conf->gpu_id = device_id;
         auto q = hybrid_1_idx->LoadQuantizer(quantizer_conf);
@@ -248,12 +248,12 @@ TEST_P(IVFTest, hybrid) {
     }
 
     {
-        auto hybrid_2_idx = std::make_shared<IVFSQHybrid>(device_id);
+        auto hybrid_2_idx = std::make_shared<kn::IVFSQHybrid>(device_id);
 
         auto binaryset = index_->Serialize();
         hybrid_2_idx->Load(binaryset);
 
-        auto quantizer_conf = std::make_shared<QuantizerCfg>();
+        auto quantizer_conf = std::make_shared<kn::QuantizerCfg>();
         quantizer_conf->mode = 1;
         quantizer_conf->gpu_id = device_id;
         auto q = hybrid_2_idx->LoadQuantizer(quantizer_conf);
