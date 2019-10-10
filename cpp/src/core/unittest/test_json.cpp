@@ -17,15 +17,9 @@
 
 #include "knowhere/common/config.h"
 
-namespace {
-
-namespace kn = knowhere;
-
-}  // namespace
-
 int
 main() {
-    kn::Config cfg;
+    knowhere::Config cfg;
 
     cfg["size"] = size_t(199);
     auto size = cfg.get_with_default("size", 123);

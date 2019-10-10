@@ -21,53 +21,47 @@
 #include "scheduler/tasklabel/DefaultLabel.h"
 #include <gtest/gtest.h>
 
-namespace {
-
-namespace ms = milvus::scheduler;
-
-} // namespace
-
 /************ TaskTableBaseTest ************/
 
 class TaskTableItemTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        std::vector<ms::TaskTableItemState> states{
-            ms::TaskTableItemState::INVALID,
-            ms::TaskTableItemState::START,
-            ms::TaskTableItemState::LOADING,
-            ms::TaskTableItemState::LOADED,
-            ms::TaskTableItemState::EXECUTING,
-            ms::TaskTableItemState::EXECUTED,
-            ms::TaskTableItemState::MOVING,
-            ms::TaskTableItemState::MOVED};
+        std::vector<milvus::scheduler::TaskTableItemState> states{
+            milvus::scheduler::TaskTableItemState::INVALID,
+            milvus::scheduler::TaskTableItemState::START,
+            milvus::scheduler::TaskTableItemState::LOADING,
+            milvus::scheduler::TaskTableItemState::LOADED,
+            milvus::scheduler::TaskTableItemState::EXECUTING,
+            milvus::scheduler::TaskTableItemState::EXECUTED,
+            milvus::scheduler::TaskTableItemState::MOVING,
+            milvus::scheduler::TaskTableItemState::MOVED};
         for (auto &state : states) {
-            auto item = std::make_shared<ms::TaskTableItem>();
+            auto item = std::make_shared<milvus::scheduler::TaskTableItem>();
             item->state = state;
             items_.emplace_back(item);
         }
     }
 
-    ms::TaskTableItem default_;
-    std::vector<ms::TaskTableItemPtr> items_;
+    milvus::scheduler::TaskTableItem default_;
+    std::vector<milvus::scheduler::TaskTableItemPtr> items_;
 };
 
 TEST_F(TaskTableItemTest, CONSTRUCT) {
     ASSERT_EQ(default_.id, 0);
     ASSERT_EQ(default_.task, nullptr);
-    ASSERT_EQ(default_.state, ms::TaskTableItemState::INVALID);
+    ASSERT_EQ(default_.state, milvus::scheduler::TaskTableItemState::INVALID);
 }
 
 TEST_F(TaskTableItemTest, DESTRUCT) {
-    auto p_item = new ms::TaskTableItem();
+    auto p_item = new milvus::scheduler::TaskTableItem();
     delete p_item;
 }
 
 TEST_F(TaskTableItemTest, IS_FINISH) {
     for (auto &item : items_) {
-        if (item->state == ms::TaskTableItemState::EXECUTED
-            || item->state == ms::TaskTableItemState::MOVED) {
+        if (item->state == milvus::scheduler::TaskTableItemState::EXECUTED
+            || item->state == milvus::scheduler::TaskTableItemState::MOVED) {
             ASSERT_TRUE(item->IsFinish());
         } else {
             ASSERT_FALSE(item->IsFinish());
@@ -85,9 +79,9 @@ TEST_F(TaskTableItemTest, LOAD) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Load();
-        if (before_state == ms::TaskTableItemState::START) {
+        if (before_state == milvus::scheduler::TaskTableItemState::START) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, ms::TaskTableItemState::LOADING);
+            ASSERT_EQ(item->state, milvus::scheduler::TaskTableItemState::LOADING);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -99,9 +93,9 @@ TEST_F(TaskTableItemTest, LOADED) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Loaded();
-        if (before_state == ms::TaskTableItemState::LOADING) {
+        if (before_state == milvus::scheduler::TaskTableItemState::LOADING) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, ms::TaskTableItemState::LOADED);
+            ASSERT_EQ(item->state, milvus::scheduler::TaskTableItemState::LOADED);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -113,9 +107,9 @@ TEST_F(TaskTableItemTest, EXECUTE) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Execute();
-        if (before_state == ms::TaskTableItemState::LOADED) {
+        if (before_state == milvus::scheduler::TaskTableItemState::LOADED) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, ms::TaskTableItemState::EXECUTING);
+            ASSERT_EQ(item->state, milvus::scheduler::TaskTableItemState::EXECUTING);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -127,9 +121,9 @@ TEST_F(TaskTableItemTest, EXECUTED) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Executed();
-        if (before_state == ms::TaskTableItemState::EXECUTING) {
+        if (before_state == milvus::scheduler::TaskTableItemState::EXECUTING) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, ms::TaskTableItemState::EXECUTED);
+            ASSERT_EQ(item->state, milvus::scheduler::TaskTableItemState::EXECUTED);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -141,9 +135,9 @@ TEST_F(TaskTableItemTest, MOVE) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Move();
-        if (before_state == ms::TaskTableItemState::LOADED) {
+        if (before_state == milvus::scheduler::TaskTableItemState::LOADED) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, ms::TaskTableItemState::MOVING);
+            ASSERT_EQ(item->state, milvus::scheduler::TaskTableItemState::MOVING);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -155,9 +149,9 @@ TEST_F(TaskTableItemTest, MOVED) {
     for (auto &item : items_) {
         auto before_state = item->state;
         auto ret = item->Moved();
-        if (before_state == ms::TaskTableItemState::MOVING) {
+        if (before_state == milvus::scheduler::TaskTableItemState::MOVING) {
             ASSERT_TRUE(ret);
-            ASSERT_EQ(item->state, ms::TaskTableItemState::MOVED);
+            ASSERT_EQ(item->state, milvus::scheduler::TaskTableItemState::MOVED);
         } else {
             ASSERT_FALSE(ret);
             ASSERT_EQ(item->state, before_state);
@@ -171,17 +165,17 @@ class TaskTableBaseTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        ms::TableFileSchemaPtr dummy = nullptr;
+        milvus::scheduler::TableFileSchemaPtr dummy = nullptr;
         invalid_task_ = nullptr;
-        auto label = std::make_shared<ms::DefaultLabel>();
-        task1_ = std::make_shared<ms::TestTask>(dummy, label);
-        task2_ = std::make_shared<ms::TestTask>(dummy, label);
+        auto label = std::make_shared<milvus::scheduler::DefaultLabel>();
+        task1_ = std::make_shared<milvus::scheduler::TestTask>(dummy, label);
+        task2_ = std::make_shared<milvus::scheduler::TestTask>(dummy, label);
     }
 
-    ms::TaskPtr invalid_task_;
-    ms::TaskPtr task1_;
-    ms::TaskPtr task2_;
-    ms::TaskTable empty_table_;
+    milvus::scheduler::TaskPtr invalid_task_;
+    milvus::scheduler::TaskPtr task1_;
+    milvus::scheduler::TaskPtr task2_;
+    milvus::scheduler::TaskTable empty_table_;
 };
 
 TEST_F(TaskTableBaseTest, SUBSCRIBER) {
@@ -205,14 +199,14 @@ TEST_F(TaskTableBaseTest, PUT_INVALID_TEST) {
 }
 
 TEST_F(TaskTableBaseTest, PUT_BATCH) {
-    std::vector<ms::TaskPtr> tasks{task1_, task2_};
+    std::vector<milvus::scheduler::TaskPtr> tasks{task1_, task2_};
     empty_table_.Put(tasks);
     ASSERT_EQ(empty_table_.Get(0)->task, task1_);
     ASSERT_EQ(empty_table_.Get(1)->task, task2_);
 }
 
 TEST_F(TaskTableBaseTest, PUT_EMPTY_BATCH) {
-    std::vector<ms::TaskPtr> tasks{};
+    std::vector<milvus::scheduler::TaskPtr> tasks{};
     empty_table_.Put(tasks);
 }
 
@@ -238,8 +232,8 @@ TEST_F(TaskTableBaseTest, PICK_TO_LOAD) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
-    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
+    empty_table_[0]->state = milvus::scheduler::TaskTableItemState::MOVED;
+    empty_table_[1]->state = milvus::scheduler::TaskTableItemState::EXECUTED;
 
     auto indexes = empty_table_.PickToLoad(1);
     ASSERT_EQ(indexes.size(), 1);
@@ -251,8 +245,8 @@ TEST_F(TaskTableBaseTest, PICK_TO_LOAD_LIMIT) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
-    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
+    empty_table_[0]->state = milvus::scheduler::TaskTableItemState::MOVED;
+    empty_table_[1]->state = milvus::scheduler::TaskTableItemState::EXECUTED;
 
     auto indexes = empty_table_.PickToLoad(3);
     ASSERT_EQ(indexes.size(), 3);
@@ -266,8 +260,8 @@ TEST_F(TaskTableBaseTest, PICK_TO_LOAD_CACHE) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
-    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
+    empty_table_[0]->state = milvus::scheduler::TaskTableItemState::MOVED;
+    empty_table_[1]->state = milvus::scheduler::TaskTableItemState::EXECUTED;
 
     // first pick, non-cache
     auto indexes = empty_table_.PickToLoad(1);
@@ -276,7 +270,7 @@ TEST_F(TaskTableBaseTest, PICK_TO_LOAD_CACHE) {
 
     // second pick, iterate from 2
     // invalid state change
-    empty_table_[1]->state = ms::TaskTableItemState::START;
+    empty_table_[1]->state = milvus::scheduler::TaskTableItemState::START;
     indexes = empty_table_.PickToLoad(1);
     ASSERT_EQ(indexes.size(), 1);
     ASSERT_EQ(indexes[0], 2);
@@ -287,9 +281,9 @@ TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
-    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
-    empty_table_[2]->state = ms::TaskTableItemState::LOADED;
+    empty_table_[0]->state = milvus::scheduler::TaskTableItemState::MOVED;
+    empty_table_[1]->state = milvus::scheduler::TaskTableItemState::EXECUTED;
+    empty_table_[2]->state = milvus::scheduler::TaskTableItemState::LOADED;
 
     auto indexes = empty_table_.PickToExecute(1);
     ASSERT_EQ(indexes.size(), 1);
@@ -301,10 +295,10 @@ TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE_LIMIT) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
-    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
-    empty_table_[2]->state = ms::TaskTableItemState::LOADED;
-    empty_table_[3]->state = ms::TaskTableItemState::LOADED;
+    empty_table_[0]->state = milvus::scheduler::TaskTableItemState::MOVED;
+    empty_table_[1]->state = milvus::scheduler::TaskTableItemState::EXECUTED;
+    empty_table_[2]->state = milvus::scheduler::TaskTableItemState::LOADED;
+    empty_table_[3]->state = milvus::scheduler::TaskTableItemState::LOADED;
 
     auto indexes = empty_table_.PickToExecute(3);
     ASSERT_EQ(indexes.size(), 2);
@@ -317,9 +311,9 @@ TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE_CACHE) {
     for (size_t i = 0; i < NUM_TASKS; ++i) {
         empty_table_.Put(task1_);
     }
-    empty_table_[0]->state = ms::TaskTableItemState::MOVED;
-    empty_table_[1]->state = ms::TaskTableItemState::EXECUTED;
-    empty_table_[2]->state = ms::TaskTableItemState::LOADED;
+    empty_table_[0]->state = milvus::scheduler::TaskTableItemState::MOVED;
+    empty_table_[1]->state = milvus::scheduler::TaskTableItemState::EXECUTED;
+    empty_table_[2]->state = milvus::scheduler::TaskTableItemState::LOADED;
 
     // first pick, non-cache
     auto indexes = empty_table_.PickToExecute(1);
@@ -328,7 +322,7 @@ TEST_F(TaskTableBaseTest, PICK_TO_EXECUTE_CACHE) {
 
     // second pick, iterate from 2
     // invalid state change
-    empty_table_[1]->state = ms::TaskTableItemState::START;
+    empty_table_[1]->state = milvus::scheduler::TaskTableItemState::START;
     indexes = empty_table_.PickToExecute(1);
     ASSERT_EQ(indexes.size(), 1);
     ASSERT_EQ(indexes[0], 2);
@@ -340,28 +334,28 @@ class TaskTableAdvanceTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        ms::TableFileSchemaPtr dummy = nullptr;
+        milvus::scheduler::TableFileSchemaPtr dummy = nullptr;
         for (uint64_t i = 0; i < 8; ++i) {
-            auto label = std::make_shared<ms::DefaultLabel>();
-            auto task = std::make_shared<ms::TestTask>(dummy, label);
+            auto label = std::make_shared<milvus::scheduler::DefaultLabel>();
+            auto task = std::make_shared<milvus::scheduler::TestTask>(dummy, label);
             table1_.Put(task);
         }
 
-        table1_.Get(0)->state = ms::TaskTableItemState::INVALID;
-        table1_.Get(1)->state = ms::TaskTableItemState::START;
-        table1_.Get(2)->state = ms::TaskTableItemState::LOADING;
-        table1_.Get(3)->state = ms::TaskTableItemState::LOADED;
-        table1_.Get(4)->state = ms::TaskTableItemState::EXECUTING;
-        table1_.Get(5)->state = ms::TaskTableItemState::EXECUTED;
-        table1_.Get(6)->state = ms::TaskTableItemState::MOVING;
-        table1_.Get(7)->state = ms::TaskTableItemState::MOVED;
+        table1_.Get(0)->state = milvus::scheduler::TaskTableItemState::INVALID;
+        table1_.Get(1)->state = milvus::scheduler::TaskTableItemState::START;
+        table1_.Get(2)->state = milvus::scheduler::TaskTableItemState::LOADING;
+        table1_.Get(3)->state = milvus::scheduler::TaskTableItemState::LOADED;
+        table1_.Get(4)->state = milvus::scheduler::TaskTableItemState::EXECUTING;
+        table1_.Get(5)->state = milvus::scheduler::TaskTableItemState::EXECUTED;
+        table1_.Get(6)->state = milvus::scheduler::TaskTableItemState::MOVING;
+        table1_.Get(7)->state = milvus::scheduler::TaskTableItemState::MOVED;
     }
 
-    ms::TaskTable table1_;
+    milvus::scheduler::TaskTable table1_;
 };
 
 TEST_F(TaskTableAdvanceTest, LOAD) {
-    std::vector<ms::TaskTableItemState> before_state;
+    std::vector<milvus::scheduler::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -371,8 +365,8 @@ TEST_F(TaskTableAdvanceTest, LOAD) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == ms::TaskTableItemState::START) {
-            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::LOADING);
+        if (before_state[i] == milvus::scheduler::TaskTableItemState::START) {
+            ASSERT_EQ(table1_.Get(i)->state, milvus::scheduler::TaskTableItemState::LOADING);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
@@ -380,7 +374,7 @@ TEST_F(TaskTableAdvanceTest, LOAD) {
 }
 
 TEST_F(TaskTableAdvanceTest, LOADED) {
-    std::vector<ms::TaskTableItemState> before_state;
+    std::vector<milvus::scheduler::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -390,8 +384,8 @@ TEST_F(TaskTableAdvanceTest, LOADED) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == ms::TaskTableItemState::LOADING) {
-            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::LOADED);
+        if (before_state[i] == milvus::scheduler::TaskTableItemState::LOADING) {
+            ASSERT_EQ(table1_.Get(i)->state, milvus::scheduler::TaskTableItemState::LOADED);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
@@ -399,7 +393,7 @@ TEST_F(TaskTableAdvanceTest, LOADED) {
 }
 
 TEST_F(TaskTableAdvanceTest, EXECUTE) {
-    std::vector<ms::TaskTableItemState> before_state;
+    std::vector<milvus::scheduler::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -409,8 +403,8 @@ TEST_F(TaskTableAdvanceTest, EXECUTE) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == ms::TaskTableItemState::LOADED) {
-            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::EXECUTING);
+        if (before_state[i] == milvus::scheduler::TaskTableItemState::LOADED) {
+            ASSERT_EQ(table1_.Get(i)->state, milvus::scheduler::TaskTableItemState::EXECUTING);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
@@ -418,7 +412,7 @@ TEST_F(TaskTableAdvanceTest, EXECUTE) {
 }
 
 TEST_F(TaskTableAdvanceTest, EXECUTED) {
-    std::vector<ms::TaskTableItemState> before_state;
+    std::vector<milvus::scheduler::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -428,8 +422,8 @@ TEST_F(TaskTableAdvanceTest, EXECUTED) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == ms::TaskTableItemState::EXECUTING) {
-            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::EXECUTED);
+        if (before_state[i] == milvus::scheduler::TaskTableItemState::EXECUTING) {
+            ASSERT_EQ(table1_.Get(i)->state, milvus::scheduler::TaskTableItemState::EXECUTED);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
@@ -437,7 +431,7 @@ TEST_F(TaskTableAdvanceTest, EXECUTED) {
 }
 
 TEST_F(TaskTableAdvanceTest, MOVE) {
-    std::vector<ms::TaskTableItemState> before_state;
+    std::vector<milvus::scheduler::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -447,8 +441,8 @@ TEST_F(TaskTableAdvanceTest, MOVE) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == ms::TaskTableItemState::LOADED) {
-            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::MOVING);
+        if (before_state[i] == milvus::scheduler::TaskTableItemState::LOADED) {
+            ASSERT_EQ(table1_.Get(i)->state, milvus::scheduler::TaskTableItemState::MOVING);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
@@ -456,7 +450,7 @@ TEST_F(TaskTableAdvanceTest, MOVE) {
 }
 
 TEST_F(TaskTableAdvanceTest, MOVED) {
-    std::vector<ms::TaskTableItemState> before_state;
+    std::vector<milvus::scheduler::TaskTableItemState> before_state;
     for (auto &task : table1_) {
         before_state.push_back(task->state);
     }
@@ -466,8 +460,8 @@ TEST_F(TaskTableAdvanceTest, MOVED) {
     }
 
     for (size_t i = 0; i < table1_.Size(); ++i) {
-        if (before_state[i] == ms::TaskTableItemState::MOVING) {
-            ASSERT_EQ(table1_.Get(i)->state, ms::TaskTableItemState::MOVED);
+        if (before_state[i] == milvus::scheduler::TaskTableItemState::MOVING) {
+            ASSERT_EQ(table1_.Get(i)->state, milvus::scheduler::TaskTableItemState::MOVED);
         } else {
             ASSERT_EQ(table1_.Get(i)->state, before_state[i]);
         }
