@@ -19,14 +19,10 @@
 
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-DeleteJob::DeleteJob(JobId id,
-                     std::string table_id,
-                     engine::meta::MetaPtr meta_ptr,
-                     uint64_t num_resource)
+DeleteJob::DeleteJob(JobId id, std::string table_id, engine::meta::MetaPtr meta_ptr, uint64_t num_resource)
     : Job(id, JobType::DELETE),
       table_id_(std::move(table_id)),
       meta_ptr_(std::move(meta_ptr)),
@@ -36,9 +32,7 @@ DeleteJob::DeleteJob(JobId id,
 void
 DeleteJob::WaitAndDelete() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [&] {
-        return done_resource == num_resource_;
-    });
+    cv_.wait(lock, [&] { return done_resource == num_resource_; });
     meta_ptr_->DeleteTableFiles(table_id_);
 }
 
@@ -51,6 +45,5 @@ DeleteJob::ResourceDone() {
     cv_.notify_one();
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

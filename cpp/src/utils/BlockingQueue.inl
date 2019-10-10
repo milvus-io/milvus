@@ -18,7 +18,7 @@
 
 #pragma once
 
-namespace zilliz {
+
 namespace milvus {
 namespace server {
 
@@ -94,5 +94,5 @@ BlockingQueue<T>::SetCapacity(const size_t capacity) {
 
 } // namespace server
 } // namespace milvus
-} // namespace zilliz
+
 

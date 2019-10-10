@@ -15,13 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "scheduler/Utils.h"
 
-#include <chrono>
 #include <cuda_runtime.h>
+#include <chrono>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -40,6 +38,5 @@ get_num_gpu() {
     return n_devices;
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

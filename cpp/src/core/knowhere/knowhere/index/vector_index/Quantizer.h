@@ -18,9 +18,8 @@
 #pragma once
 
 #include <memory>
+#include "knowhere/common/Config.h"
 
-
-namespace zilliz {
 namespace knowhere {
 
 struct Quantizer {
@@ -29,9 +28,8 @@ struct Quantizer {
 using QuantizerPtr = std::shared_ptr<Quantizer>;
 
 struct QuantizerCfg : Cfg {
-    uint64_t mode = -1; // 0: all data, 1: copy quantizer, 2: copy data
+    uint64_t mode = -1;  // 0: all data, 1: copy quantizer, 2: copy data
 };
 using QuantizerConfig = std::shared_ptr<QuantizerCfg>;
 
-}
-}
+}  // namespace knowhere

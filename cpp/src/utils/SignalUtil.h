@@ -17,16 +17,16 @@
 
 #pragma once
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
 class SignalUtil {
  public:
-    static void HandleSignal(int signum);
-    static void PrintStacktrace();
+    static void
+    HandleSignal(int signum);
+    static void
+    PrintStacktrace();
 };
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus

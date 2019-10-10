@@ -17,22 +17,20 @@
 
 #pragma once
 
-#include "scheduler/event/Event.h"
 #include "scheduler/TaskTable.h"
+#include "scheduler/event/Event.h"
 
 #include <memory>
-#include <utility>
 #include <string>
+#include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class LoadCompletedEvent : public Event {
  public:
     LoadCompletedEvent(std::weak_ptr<Resource> resource, TaskTableItemPtr task_table_item)
-        : Event(EventType::LOAD_COMPLETED, std::move(resource)),
-          task_table_item_(std::move(task_table_item)) {
+        : Event(EventType::LOAD_COMPLETED, std::move(resource)), task_table_item_(std::move(task_table_item)) {
     }
 
     inline std::string
@@ -40,12 +38,12 @@ class LoadCompletedEvent : public Event {
         return "<LoadCompletedEvent>";
     }
 
-    friend std::ostream &operator<<(std::ostream &out, const LoadCompletedEvent &event);
+    friend std::ostream&
+    operator<<(std::ostream& out, const LoadCompletedEvent& event);
 
  public:
     TaskTableItemPtr task_table_item_;
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

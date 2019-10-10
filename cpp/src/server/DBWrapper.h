@@ -17,41 +17,49 @@
 
 #pragma once
 
-#include "utils/Status.h"
 #include "db/DB.h"
+#include "utils/Status.h"
 
 #include <memory>
+#include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
 class DBWrapper {
  private:
-    DBWrapper();
+    DBWrapper() = default;
     ~DBWrapper() = default;
 
  public:
-    static DBWrapper &GetInstance() {
+    static DBWrapper&
+    GetInstance() {
         static DBWrapper wrapper;
         return wrapper;
     }
 
-    static engine::DBPtr DB() {
+    static engine::DBPtr
+    DB() {
         return GetInstance().EngineDB();
     }
 
-    Status StartService();
-    Status StopService();
+    Status
+    StartService();
+    Status
+    StopService();
 
-    engine::DBPtr EngineDB() {
+    engine::DBPtr
+    EngineDB() {
         return db_;
     }
+
+ private:
+    Status
+    PreloadTables(const std::string& preload_tables);
 
  private:
     engine::DBPtr db_;
 };
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus

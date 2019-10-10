@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "ExecutionEngine.h"
@@ -23,20 +22,15 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class EngineFactory {
  public:
-    static ExecutionEnginePtr Build(uint16_t dimension,
-                                    const std::string &location,
-                                    EngineType index_type,
-                                    MetricType metric_type,
-                                    int32_t nlist);
+    static ExecutionEnginePtr
+    Build(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
+          int32_t nlist);
 };
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
-
+}  // namespace engine
+}  // namespace milvus

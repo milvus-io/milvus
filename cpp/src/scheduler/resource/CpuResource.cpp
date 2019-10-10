@@ -15,17 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "scheduler/resource/CpuResource.h"
 
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-std::ostream &
-operator<<(std::ostream &out, const CpuResource &resource) {
+std::ostream&
+operator<<(std::ostream& out, const CpuResource& resource) {
     out << resource.Dump();
     return out;
 }
@@ -44,6 +42,5 @@ CpuResource::Process(TaskPtr task) {
     task->Execute();
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

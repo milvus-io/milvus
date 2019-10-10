@@ -15,20 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-#include <unordered_map>
-#include <list>
 #include <cstddef>
+#include <list>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
-template<typename key_t, typename value_t>
+template <typename key_t, typename value_t>
 class LRU {
  public:
     typedef typename std::pair<key_t, value_t> key_value_pair_t;
@@ -38,7 +36,8 @@ class LRU {
     explicit LRU(size_t max_size) : max_size_(max_size) {
     }
 
-    void put(const key_t &key, const value_t &value) {
+    void
+    put(const key_t& key, const value_t& value) {
         auto it = cache_items_map_.find(key);
         cache_items_list_.push_front(key_value_pair_t(key, value));
         if (it != cache_items_map_.end()) {
@@ -55,7 +54,8 @@ class LRU {
         }
     }
 
-    const value_t &get(const key_t &key) {
+    const value_t&
+    get(const key_t& key) {
         auto it = cache_items_map_.find(key);
         if (it == cache_items_map_.end()) {
             throw std::range_error("There is no such key in cache");
@@ -65,7 +65,8 @@ class LRU {
         }
     }
 
-    void erase(const key_t &key) {
+    void
+    erase(const key_t& key) {
         auto it = cache_items_map_.find(key);
         if (it != cache_items_map_.end()) {
             cache_items_list_.erase(it->second);
@@ -73,32 +74,39 @@ class LRU {
         }
     }
 
-    bool exists(const key_t &key) const {
+    bool
+    exists(const key_t& key) const {
         return cache_items_map_.find(key) != cache_items_map_.end();
     }
 
-    size_t size() const {
+    size_t
+    size() const {
         return cache_items_map_.size();
     }
 
-    list_iterator_t begin() {
+    list_iterator_t
+    begin() {
         iter_ = cache_items_list_.begin();
         return iter_;
     }
 
-    list_iterator_t end() {
+    list_iterator_t
+    end() {
         return cache_items_list_.end();
     }
 
-    reverse_list_iterator_t rbegin() {
+    reverse_list_iterator_t
+    rbegin() {
         return cache_items_list_.rbegin();
     }
 
-    reverse_list_iterator_t rend() {
+    reverse_list_iterator_t
+    rend() {
         return cache_items_list_.rend();
     }
 
-    void clear() {
+    void
+    clear() {
         cache_items_list_.clear();
         cache_items_map_.clear();
     }
@@ -110,7 +118,5 @@ class LRU {
     list_iterator_t iter_;
 };
 
-} // namespace cache
-} // namespace milvus
-} // namespace zilliz
-
+}  // namespace cache
+}  // namespace milvus

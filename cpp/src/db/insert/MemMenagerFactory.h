@@ -22,15 +22,14 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class MemManagerFactory {
  public:
-    static MemManagerPtr Build(const std::shared_ptr<meta::Meta> &meta, const DBOptions &options);
+    static MemManagerPtr
+    Build(const std::shared_ptr<meta::Meta>& meta, const DBOptions& options);
 };
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

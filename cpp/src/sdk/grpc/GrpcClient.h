@@ -37,56 +37,51 @@
 namespace milvus {
 class GrpcClient {
  public:
-    explicit GrpcClient(std::shared_ptr<::grpc::Channel> &channel);
+    explicit GrpcClient(std::shared_ptr<::grpc::Channel>& channel);
 
-    virtual
-    ~GrpcClient();
+    virtual ~GrpcClient();
 
     Status
-    CreateTable(const grpc::TableSchema &table_schema);
+    CreateTable(const grpc::TableSchema& table_schema);
 
     bool
-    HasTable(const grpc::TableName &table_name, Status &status);
+    HasTable(const grpc::TableName& table_name, Status& status);
 
     Status
-    DropTable(const grpc::TableName &table_name);
+    DropTable(const grpc::TableName& table_name);
 
     Status
-    CreateIndex(const grpc::IndexParam &index_param);
+    CreateIndex(const grpc::IndexParam& index_param);
 
     void
-    Insert(grpc::VectorIds &vector_ids,
-           const grpc::InsertParam &insert_param,
-           Status &status);
+    Insert(grpc::VectorIds& vector_ids, const grpc::InsertParam& insert_param, Status& status);
 
     Status
-    Search(::milvus::grpc::TopKQueryResultList &topk_query_result_list,
-           const grpc::SearchParam &search_param);
+    Search(::milvus::grpc::TopKQueryResultList& topk_query_result_list, const grpc::SearchParam& search_param);
 
     Status
-    DescribeTable(grpc::TableSchema &grpc_schema,
-                  const std::string &table_name);
+    DescribeTable(grpc::TableSchema& grpc_schema, const std::string& table_name);
 
     int64_t
-    CountTable(const std::string &table_name, Status &status);
+    CountTable(const std::string& table_name, Status& status);
 
     Status
-    ShowTables(milvus::grpc::TableNameList &table_name_list);
+    ShowTables(milvus::grpc::TableNameList& table_name_list);
 
     Status
-    Cmd(std::string &result, const std::string &cmd);
+    Cmd(std::string& result, const std::string& cmd);
 
     Status
-    DeleteByRange(grpc::DeleteByRangeParam &delete_by_range_param);
+    DeleteByRange(grpc::DeleteByRangeParam& delete_by_range_param);
 
     Status
-    PreloadTable(grpc::TableName &table_name);
+    PreloadTable(grpc::TableName& table_name);
 
     Status
-    DescribeIndex(grpc::TableName &table_name, grpc::IndexParam &index_param);
+    DescribeIndex(grpc::TableName& table_name, grpc::IndexParam& index_param);
 
     Status
-    DropIndex(grpc::TableName &table_name);
+    DropIndex(grpc::TableName& table_name);
 
     Status
     Disconnect();
@@ -95,4 +90,4 @@ class GrpcClient {
     std::unique_ptr<grpc::MilvusService::Stub> stub_;
 };
 
-} // namespace milvus
+}  // namespace milvus

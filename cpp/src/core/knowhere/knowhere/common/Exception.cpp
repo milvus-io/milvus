@@ -15,41 +15,35 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <cstdio>
 
-#include "Exception.h"
 #include "Log.h"
+#include "knowhere/common/Exception.h"
 
-namespace zilliz {
 namespace knowhere {
 
+KnowhereException::KnowhereException(const std::string& msg) : msg(msg) {
+}
 
-KnowhereException::KnowhereException(const std::string &msg):msg(msg) {}
-
-KnowhereException::KnowhereException(const std::string &m, const char *funcName, const char *file, int line) {
+KnowhereException::KnowhereException(const std::string& m, const char* funcName, const char* file, int line) {
 #ifdef DEBUG
-    int size = snprintf(nullptr, 0, "Error in %s at %s:%d: %s",
-                        funcName, file, line, m.c_str());
+    int size = snprintf(nullptr, 0, "Error in %s at %s:%d: %s", funcName, file, line, m.c_str());
     msg.resize(size + 1);
-    snprintf(&msg[0], msg.size(), "Error in %s at %s:%d: %s",
-             funcName, file, line, m.c_str());
+    snprintf(&msg[0], msg.size(), "Error in %s at %s:%d: %s", funcName, file, line, m.c_str());
 #else
     std::string file_path(file);
     auto const pos = file_path.find_last_of('/');
-    auto filename = file_path.substr(pos+1).c_str();
+    auto filename = file_path.substr(pos + 1).c_str();
 
-    int size = snprintf(nullptr, 0, "Error in %s at %s:%d: %s",
-                        funcName, filename, line, m.c_str());
+    int size = snprintf(nullptr, 0, "Error in %s at %s:%d: %s", funcName, filename, line, m.c_str());
     msg.resize(size + 1);
-    snprintf(&msg[0], msg.size(), "Error in %s at %s:%d: %s",
-             funcName, filename, line, m.c_str());
+    snprintf(&msg[0], msg.size(), "Error in %s at %s:%d: %s", funcName, filename, line, m.c_str());
 #endif
 }
 
-const char *KnowhereException::what() const noexcept {
+const char*
+KnowhereException::what() const noexcept {
     return msg.c_str();
 }
 
-}
-}
+}  // namespace knowhere
