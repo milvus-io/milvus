@@ -17,7 +17,6 @@
 
 #pragma once
 
-
 #include <memory>
 
 namespace milvus {
