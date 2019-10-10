@@ -91,6 +91,21 @@ class IVFMixIndex : public VecIndexImpl {
     Load(const knowhere::BinarySet& index_binary) override;
 };
 
+class IVFHybridIndex : public IVFMixIndex {
+ public:
+    knowhere::QuantizerPtr
+    LoadQuantizer(const Config& conf) override;
+
+    Status
+    SetQuantizer(const knowhere::QuantizerPtr& q) override;
+
+    Status
+    UnsetQuantizer() override;
+
+    Status
+    LoadData(const knowhere::QuantizerPtr& q, const Config& conf) override;
+};
+
 class BFIndex : public VecIndexImpl {
  public:
     explicit BFIndex(std::shared_ptr<knowhere::VectorIndex> index)

@@ -17,76 +17,66 @@
 
 #pragma once
 
+#include <faiss/index_io.h>
 #include <memory>
-#include <utility>
 
-#include "IndexIVF.h"
-#include "knowhere/index/vector_index/helpers/FaissGpuResourceMgr.h"
+#include "IndexGPUIVFSQ.h"
+#include "Quantizer.h"
 
 namespace knowhere {
 
-class GPUIndex {
+struct FaissIVFQuantizer : public Quantizer {
+    faiss::gpu::GpuIndexFlat* quantizer = nullptr;
+};
+using FaissIVFQuantizerPtr = std::shared_ptr<FaissIVFQuantizer>;
+
+class IVFSQHybrid : public GPUIVFSQ {
  public:
-    explicit GPUIndex(const int& device_id) : gpu_id_(device_id) {
+    explicit IVFSQHybrid(const int& device_id) : GPUIVFSQ(device_id) {
+        gpu_mode = false;
     }
 
-    GPUIndex(const int& device_id, const ResPtr& resource) : gpu_id_(device_id), res_(resource) {
+    explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index) : GPUIVFSQ(-1) {
+        index_ = index;
+        gpu_mode = false;
     }
 
-    virtual VectorIndexPtr
-    CopyGpuToCpu(const Config& config) = 0;
+    explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
+        : GPUIVFSQ(index, device_id, resource) {
+        gpu_mode = true;
+    }
 
-    virtual VectorIndexPtr
-    CopyGpuToGpu(const int64_t& device_id, const Config& config) = 0;
+ public:
+    QuantizerPtr
+    LoadQuantizer(const Config& conf);
 
     void
-    SetGpuDevice(const int& gpu_id);
+    SetQuantizer(const QuantizerPtr& q);
 
-    const int64_t&
-    GetGpuDevice();
+    void
+    UnsetQuantizer();
 
- protected:
-    int64_t gpu_id_;
-    ResWPtr res_;
-};
-
-class GPUIVF : public IVF, public GPUIndex {
- public:
-    explicit GPUIVF(const int& device_id) : IVF(), GPUIndex(device_id) {
-    }
-
-    explicit GPUIVF(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
-        : IVF(std::move(index)), GPUIndex(device_id, resource) {
-    }
+    void
+    LoadData(const knowhere::QuantizerPtr& q, const Config& conf);
 
     IndexModelPtr
     Train(const DatasetPtr& dataset, const Config& config) override;
 
-    void
-    Add(const DatasetPtr& dataset, const Config& config) override;
-
-    void
-    set_index_model(IndexModelPtr model) override;
-
-    // DatasetPtr Search(const DatasetPtr &dataset, const Config &config) override;
     VectorIndexPtr
     CopyGpuToCpu(const Config& config) override;
 
     VectorIndexPtr
-    CopyGpuToGpu(const int64_t& device_id, const Config& config) override;
-
-    VectorIndexPtr
-    Clone() final;
+    CopyCpuToGpu(const int64_t& device_id, const Config& config) override;
 
  protected:
     void
     search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) override;
 
-    BinarySet
-    SerializeImpl() override;
-
     void
     LoadImpl(const BinarySet& index_binary) override;
+
+ protected:
+    bool gpu_mode = false;
 };
 
 }  // namespace knowhere

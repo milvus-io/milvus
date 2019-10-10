@@ -23,6 +23,7 @@
 #include "cache/DataObj.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Config.h"
+#include "knowhere/index/vector_index/Quantizer.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -42,6 +43,7 @@ enum class IndexType {
     FAISS_IVFSQ8_MIX,
     FAISS_IVFSQ8_CPU,
     FAISS_IVFSQ8_GPU,
+    FAISS_IVFSQ8_HYBRID,  // only support build on gpu.
     NSG_MIX,
 };
 
@@ -90,6 +92,29 @@ class VecIndex : public cache::DataObj {
 
     virtual Status
     Load(const knowhere::BinarySet& index_binary) = 0;
+
+    // TODO(linxj): refactor later
+    ////////////////
+    virtual knowhere::QuantizerPtr
+    LoadQuantizer(const Config& conf) {
+        return nullptr;
+    }
+
+    virtual Status
+    LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
+        return Status::OK();
+    }
+
+    virtual Status
+    SetQuantizer(const knowhere::QuantizerPtr& q) {
+        return Status::OK();
+    }
+
+    virtual Status
+    UnsetQuantizer() {
+        return Status::OK();
+    }
+    ////////////////
 };
 
 extern Status
