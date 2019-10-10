@@ -41,6 +41,7 @@ set(ivf_srcs
         ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexGPUIVFSQ.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFPQ.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexGPUIVFPQ.cpp
+        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIVFSQHybrid.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexIDMAP.cpp
         ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/FaissBaseIndex.cpp
         )

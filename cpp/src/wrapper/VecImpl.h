@@ -111,6 +111,9 @@ class IVFHybridIndex : public IVFMixIndex {
 
     Status
     UnsetQuantizer() override;
+
+    Status
+    LoadData(const knowhere::QuantizerPtr &q, const Config &conf) override;
 };
 
 class BFIndex : public VecIndexImpl {

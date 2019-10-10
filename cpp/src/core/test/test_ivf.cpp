@@ -65,6 +65,8 @@ IVFIndexPtr IndexFactory(const std::string &type) {
         return std::make_shared<IVFSQ>();
     } else if (type == "GPUIVFSQ") {
         return std::make_shared<GPUIVFSQ>(device_id);
+    } else if (type == "IVFSQHybrid") {
+        return std::make_shared<IVFSQHybrid>(device_id);
     }
 }
 
@@ -72,6 +74,7 @@ enum class ParameterType {
     ivf,
     ivfpq,
     ivfsq,
+    ivfsqhybrid,
     nsg,
 };
 
@@ -105,7 +108,7 @@ class ParamGenerator {
             tempconf->metric_type = METRICTYPE::L2;
             return tempconf;
         }
-        else if (type == ParameterType::ivfsq) {
+        else if (type == ParameterType::ivfsq || type == ParameterType::ivfsqhybrid) {
             auto tempconf = std::make_shared<IVFSQCfg>();
             tempconf->d = DIM;
             tempconf->gpu_id = device_id;
@@ -160,6 +163,7 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
 //                            std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
                             std::make_tuple("IVFSQ", ParameterType::ivfsq),
                             std::make_tuple("GPUIVFSQ", ParameterType::ivfsq)
+                            std::make_tuple("IVFSQHybrid", ParameterType::ivfsqhybrid)
                         )
 );
 
@@ -210,36 +214,60 @@ TEST_P(IVFTest, ivf_basic) {
     //PrintResult(result, nq, k);
 }
 
-//TEST_P(IVFTest, hybrid) {
-//    assert(!xb.empty());
-//
-//    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
-//    index_->set_preprocessor(preprocessor);
-//
-//    auto model = index_->Train(base_dataset, conf);
-//    index_->set_index_model(model);
-//    index_->Add(base_dataset, conf);
-//    EXPECT_EQ(index_->Count(), nb);
-//    EXPECT_EQ(index_->Dimension(), dim);
-//
-////    auto new_idx = ChooseTodo();
-////    auto result = new_idx->Search(query_dataset, conf);
-////    AssertAnns(result, nq, conf->k);
-//
-//    auto iss_idx = std::make_shared<IVFSQHybrid>(device_id);
-//
-//    auto binaryset = index_->Serialize();
-//    iss_idx->Load(binaryset);
-//
-//    auto quantizer_conf = std::make_shared<QuantizerCfg>();
-//    quantizer_conf->mode = 1;
-//    quantizer_conf->gpu_id = 1;
-//    auto q = iss_idx->LoadQuantizer(quantizer_conf);
-//    iss_idx->SetQuantizer(q);
-//    auto result = iss_idx->Search(query_dataset, conf);
+TEST_P(IVFTest, hybrid) {
+    if (index_type != "IVFSQHybrid") {
+        return;
+    }
+    assert(!xb.empty());
+
+    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
+    index_->set_preprocessor(preprocessor);
+
+    auto model = index_->Train(base_dataset, conf);
+    index_->set_index_model(model);
+    index_->Add(base_dataset, conf);
+    EXPECT_EQ(index_->Count(), nb);
+    EXPECT_EQ(index_->Dimension(), dim);
+
+//    auto new_idx = ChooseTodo();
+//    auto result = new_idx->Search(query_dataset, conf);
 //    AssertAnns(result, nq, conf->k);
-//    //PrintResult(result, nq, k);
-//}
+
+    {
+        auto hybrid_1_idx = std::make_shared<IVFSQHybrid>(device_id);
+
+        auto binaryset = index_->Serialize();
+        hybrid_1_idx->Load(binaryset);
+
+        auto quantizer_conf = std::make_shared<QuantizerCfg>();
+        quantizer_conf->mode = 1;
+        quantizer_conf->gpu_id = device_id;
+        auto q = hybrid_1_idx->LoadQuantizer(quantizer_conf);
+        hybrid_1_idx->SetQuantizer(q);
+        auto result = hybrid_1_idx->Search(query_dataset, conf);
+        AssertAnns(result, nq, conf->k);
+        PrintResult(result, nq, k);
+    }
+
+    {
+        auto hybrid_2_idx = std::make_shared<IVFSQHybrid>(device_id);
+
+        auto binaryset = index_->Serialize();
+        hybrid_2_idx->Load(binaryset);
+
+        auto quantizer_conf = std::make_shared<QuantizerCfg>();
+        quantizer_conf->mode = 1;
+        quantizer_conf->gpu_id = device_id;
+        auto q = hybrid_2_idx->LoadQuantizer(quantizer_conf);
+        quantizer_conf->mode = 2;
+        hybrid_2_idx->LoadData(q, quantizer_conf);
+
+        auto result = hybrid_2_idx->Search(query_dataset, conf);
+        AssertAnns(result, nq, conf->k);
+        PrintResult(result, nq, k);
+    }
+
+}
 
 //TEST_P(IVFTest, gpu_to_cpu) {
 //    if (index_type.find("GPU") == std::string::npos) { return; }
@@ -350,29 +378,35 @@ TEST_P(IVFTest, clone_test) {
         }
     };
 
+//    {
+//        // clone in place
+//        std::vector<std::string> support_idx_vec{"IVF", "GPUIVF", "IVFPQ", "IVFSQ", "GPUIVFSQ"};
+//        auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
+//        if (finder != support_idx_vec.cend()) {
+//            EXPECT_NO_THROW({
+//                                auto clone_index = index_->Clone();
+//                                auto clone_result = clone_index->Search(query_dataset, conf);
+//                                //AssertAnns(result, nq, conf->k);
+//                                AssertEqual(result, clone_result);
+//                                std::cout << "inplace clone [" << index_type << "] success" << std::endl;
+//                            });
+//        } else {
+//            EXPECT_THROW({
+//                             std::cout << "inplace clone [" << index_type << "] failed" << std::endl;
+//                             auto clone_index = index_->Clone();
+//                         }, KnowhereException);
+//        }
+//    }
+
     {
-        // clone in place
-        std::vector<std::string> support_idx_vec{"IVF", "GPUIVF", "IVFPQ", "IVFSQ", "GPUIVFSQ"};
-        auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
-        if (finder != support_idx_vec.cend()) {
-            EXPECT_NO_THROW({
-                                auto clone_index = index_->Clone();
-                                auto clone_result = clone_index->Search(query_dataset, conf);
-                                //AssertAnns(result, nq, conf->k);
-                                AssertEqual(result, clone_result);
-                                std::cout << "inplace clone [" << index_type << "] success" << std::endl;
-                            });
-        } else {
-            EXPECT_THROW({
-                             std::cout << "inplace clone [" << index_type << "] failed" << std::endl;
-                             auto clone_index = index_->Clone();
-                         }, KnowhereException);
+        if (index_type == "IVFSQHybrid") {
+            return;
         }
     }
 
     {
         // copy from gpu to cpu
-        std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ"};
+        std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ", "IVFSQHybrid"};
         auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
         if (finder != support_idx_vec.cend()) {
             EXPECT_NO_THROW({
@@ -412,7 +446,7 @@ TEST_P(IVFTest, clone_test) {
 TEST_P(IVFTest, seal_test) {
     //FaissGpuResourceMgr::GetInstance().InitDevice(device_id);
 
-    std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ"};
+    std::vector<std::string> support_idx_vec{"GPUIVF", "GPUIVFSQ", "IVFSQHybrid"};
     auto finder = std::find(support_idx_vec.cbegin(), support_idx_vec.cend(), index_type);
     if (finder == support_idx_vec.cend()) {
         return;
