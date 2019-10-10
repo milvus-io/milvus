@@ -18,31 +18,37 @@
 
 #include <iostream>
 #include <thread>
+#include <string>
 #include <boost/filesystem.hpp>
 
-#include "utils.h"
+#include "metrics/utils.h"
 #include "db/DBFactory.h"
 
 INITIALIZE_EASYLOGGINGPP
 
-using namespace zilliz::milvus;
+namespace {
 
-static std::string uri;
+namespace ms = milvus;
 
 class DBTestEnvironment : public ::testing::Environment {
-public:
+ public:
+    explicit DBTestEnvironment(const std::string& uri) : uri_(uri) {}
 
-//    explicit DBTestEnvironment(std::string uri) : uri_(uri) {}
-
-    static std::string getURI() {
-        return uri;
+    std::string getURI() const {
+        return uri_;
     }
 
     void SetUp() override {
         getURI();
     }
 
+ private:
+    std::string uri_;
 };
+
+DBTestEnvironment* test_env = nullptr;
+
+} // namespace
 
 void MetricTest::InitLog() {
     el::Configurations defaultConf;
@@ -52,17 +58,18 @@ void MetricTest::InitLog() {
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
-engine::DBOptions MetricTest::GetOptions() {
-    auto options = engine::DBFactory::BuildOption();
+ms::engine::DBOptions MetricTest::GetOptions() {
+    auto options = ms::engine::DBFactory::BuildOption();
     options.meta_.path_ = "/tmp/milvus_test";
     options.meta_.backend_uri_ = "sqlite://:@:/";
     return options;
 }
 
 void MetricTest::SetUp() {
+    boost::filesystem::remove_all("/tmp/milvus_test");
     InitLog();
     auto options = GetOptions();
-    db_ = engine::DBFactory::Build(options);
+    db_ = ms::engine::DBFactory::Build(options);
 }
 
 void MetricTest::TearDown() {
@@ -72,10 +79,12 @@ void MetricTest::TearDown() {
 
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
+
+    std::string uri;
     if (argc > 1) {
         uri = argv[1];
     }
-//    std::cout << uri << std::endl;
-    ::testing::AddGlobalTestEnvironment(new DBTestEnvironment);
+    test_env = new DBTestEnvironment(uri);
+    ::testing::AddGlobalTestEnvironment(test_env);
     return RUN_ALL_TESTS();
 }

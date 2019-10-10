@@ -21,22 +21,18 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
 ExecutionEnginePtr
-EngineFactory::Build(uint16_t dimension,
-                     const std::string &location,
-                     EngineType index_type,
-                     MetricType metric_type,
+EngineFactory::Build(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
                      int32_t nlist) {
     if (index_type == EngineType::INVALID) {
         ENGINE_LOG_ERROR << "Unsupported engine type";
         return nullptr;
     }
 
-    ENGINE_LOG_DEBUG << "EngineFactory index type: " << (int) index_type;
+    ENGINE_LOG_DEBUG << "EngineFactory index type: " << (int)index_type;
     ExecutionEnginePtr execution_engine_ptr =
         std::make_shared<ExecutionEngineImpl>(dimension, location, index_type, metric_type, nlist);
 
@@ -44,6 +40,5 @@ EngineFactory::Build(uint16_t dimension,
     return execution_engine_ptr;
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

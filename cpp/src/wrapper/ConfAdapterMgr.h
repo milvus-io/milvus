@@ -15,37 +15,35 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-#include "VecIndex.h"
 #include "ConfAdapter.h"
+#include "VecIndex.h"
 
 #include <functional>
+#include <map>
+#include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class AdapterMgr {
  public:
-    template<typename T>
+    template <typename T>
     struct register_t {
-        explicit register_t(const IndexType &key) {
-            AdapterMgr::GetInstance().table_.emplace(key, [] {
-                return std::make_shared<T>();
-            });
+        explicit register_t(const IndexType& key) {
+            AdapterMgr::GetInstance().table_.emplace(key, [] { return std::make_shared<T>(); });
         }
     };
 
-    static AdapterMgr &
+    static AdapterMgr&
     GetInstance() {
         static AdapterMgr instance;
         return instance;
     }
 
     ConfAdapterPtr
-    GetAdapter(const IndexType &indexType);
+    GetAdapter(const IndexType& indexType);
 
     void
     RegisterAdapter();
@@ -55,10 +53,5 @@ class AdapterMgr {
     std::map<IndexType, std::function<ConfAdapterPtr()> > table_;
 };
 
-
-} // engine
-} // milvus
-} // zilliz
-
-
-
+}  // namespace engine
+}  // namespace milvus

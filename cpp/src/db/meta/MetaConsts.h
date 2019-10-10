@@ -17,15 +17,9 @@
 
 #pragma once
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
-
-const size_t K = 1024UL;
-const size_t M = K * K;
-const size_t G = K * M;
-const size_t T = K * G;
 
 const size_t S_PS = 1UL;
 const size_t MS_PS = 1000 * S_PS;
@@ -38,7 +32,6 @@ const size_t H_SEC = 60 * M_SEC;
 const size_t D_SEC = 24 * H_SEC;
 const size_t W_SEC = 7 * D_SEC;
 
-} // namespace meta
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace meta
+}  // namespace engine
+}  // namespace milvus

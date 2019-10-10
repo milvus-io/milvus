@@ -17,22 +17,20 @@
 
 #pragma once
 
-#include <string>
 #include <sstream>
+#include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class Connection {
  public:
     // TODO: update construct function, speed: double->uint64_t
-    Connection(std::string name, double speed)
-        : name_(std::move(name)), speed_(speed) {
+    Connection(std::string name, double speed) : name_(std::move(name)), speed_(speed) {
     }
 
-    const std::string &
+    const std::string&
     name() const {
         return name_;
     }
@@ -60,6 +58,5 @@ class Connection {
     uint64_t speed_;
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

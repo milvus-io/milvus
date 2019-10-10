@@ -17,15 +17,14 @@
 
 #pragma once
 
-#include <vector>
-#include <memory>
 #include <map>
+#include <memory>
 #include <string>
+#include <vector>
 
-#include "scheduler/TaskTable.h"
 #include "Connection.h"
+#include "scheduler/TaskTable.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -34,21 +33,20 @@ class Node;
 using NeighbourNodePtr = std::weak_ptr<Node>;
 
 struct Neighbour {
-    Neighbour(NeighbourNodePtr nei, Connection conn)
-        : neighbour_node(nei), connection(conn) {
+    Neighbour(NeighbourNodePtr nei, Connection conn) : neighbour_node(nei), connection(conn) {
     }
 
     NeighbourNodePtr neighbour_node;
     Connection connection;
 };
 
-// TODO(linxj): return type void -> Status
+// TODO(lxj): return type void -> Status
 class Node {
  public:
     Node();
 
     void
-    AddNeighbour(const NeighbourNodePtr &neighbour_node, Connection &connection);
+    AddNeighbour(const NeighbourNodePtr& neighbour_node, Connection& connection);
 
     std::vector<Neighbour>
     GetNeighbours();
@@ -66,6 +64,5 @@ class Node {
 using NodePtr = std::shared_ptr<Node>;
 using NodeWPtr = std::weak_ptr<Node>;
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

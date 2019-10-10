@@ -15,20 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <map>
-#include <string>
-#include <vector>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "Id.h"
 
-
-namespace zilliz {
 namespace knowhere {
-
 
 struct Binary {
     ID id;
@@ -37,29 +34,28 @@ struct Binary {
 };
 using BinaryPtr = std::shared_ptr<Binary>;
 
-
 class BinarySet {
  public:
     BinaryPtr
-    GetByName(const std::string &name) const {
+    GetByName(const std::string& name) const {
         return binary_map_.at(name);
     }
 
     void
-    Append(const std::string &name, BinaryPtr binary) {
+    Append(const std::string& name, BinaryPtr binary) {
         binary_map_[name] = std::move(binary);
     }
 
     void
-    Append(const std::string &name, std::shared_ptr<uint8_t> data, int64_t size) {
+    Append(const std::string& name, std::shared_ptr<uint8_t> data, int64_t size) {
         auto binary = std::make_shared<Binary>();
         binary->data = data;
         binary->size = size;
         binary_map_[name] = std::move(binary);
     }
 
-    //void
-    //Append(const std::string &name, void *data, int64_t size, ID id) {
+    // void
+    // Append(const std::string &name, void *data, int64_t size, ID id) {
     //    Binary binary;
     //    binary.data = data;
     //    binary.size = size;
@@ -67,7 +63,8 @@ class BinarySet {
     //    binary_map_[name] = binary;
     //}
 
-    void clear() {
+    void
+    clear() {
         binary_map_.clear();
     }
 
@@ -75,6 +72,4 @@ class BinarySet {
     std::map<std::string, BinaryPtr> binary_map_;
 };
 
-
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere

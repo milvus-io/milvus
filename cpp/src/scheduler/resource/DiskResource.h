@@ -21,21 +21,20 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class DiskResource : public Resource {
  public:
-    explicit
-    DiskResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
+    explicit DiskResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
 
     inline std::string
     Dump() const override {
         return "<DiskResource, name=" + name_ + ">";
     }
 
-    friend std::ostream &operator<<(std::ostream &out, const DiskResource &resource);
+    friend std::ostream&
+    operator<<(std::ostream& out, const DiskResource& resource);
 
  protected:
     void
@@ -45,6 +44,5 @@ class DiskResource : public Resource {
     Process(TaskPtr task) override;
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
