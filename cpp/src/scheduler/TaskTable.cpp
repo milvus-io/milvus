@@ -15,36 +15,43 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "scheduler/TaskTable.h"
-#include "event/TaskTableUpdatedEvent.h"
 #include "Utils.h"
+#include "event/TaskTableUpdatedEvent.h"
 
-#include <vector>
-#include <sstream>
 #include <ctime>
+#include <sstream>
+#include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 std::string
 ToString(TaskTableItemState state) {
     switch (state) {
-        case TaskTableItemState::INVALID: return "INVALID";
-        case TaskTableItemState::START: return "START";
-        case TaskTableItemState::LOADING: return "LOADING";
-        case TaskTableItemState::LOADED: return "LOADED";
-        case TaskTableItemState::EXECUTING: return "EXECUTING";
-        case TaskTableItemState::EXECUTED: return "EXECUTED";
-        case TaskTableItemState::MOVING: return "MOVING";
-        case TaskTableItemState::MOVED: return "MOVED";
-        default: return "";
+        case TaskTableItemState::INVALID:
+            return "INVALID";
+        case TaskTableItemState::START:
+            return "START";
+        case TaskTableItemState::LOADING:
+            return "LOADING";
+        case TaskTableItemState::LOADED:
+            return "LOADED";
+        case TaskTableItemState::EXECUTING:
+            return "EXECUTING";
+        case TaskTableItemState::EXECUTED:
+            return "EXECUTED";
+        case TaskTableItemState::MOVING:
+            return "MOVING";
+        case TaskTableItemState::MOVED:
+            return "MOVED";
+        default:
+            return "";
     }
 }
 
 std::string
-ToString(const TaskTimestamp &timestamp) {
+ToString(const TaskTimestamp& timestamp) {
     std::stringstream ss;
     ss << "<start=" << timestamp.start;
     ss << ", load=" << timestamp.load;
@@ -195,9 +202,9 @@ TaskTable::Put(TaskPtr task) {
 }
 
 void
-TaskTable::Put(std::vector<TaskPtr> &tasks) {
+TaskTable::Put(std::vector<TaskPtr>& tasks) {
     std::lock_guard<std::mutex> lock(id_mutex_);
-    for (auto &task : tasks) {
+    for (auto& task : tasks) {
         auto item = std::make_shared<TaskTableItem>();
         item->id = id_++;
         item->task = std::move(task);
@@ -215,8 +222,8 @@ TaskTable::Get(uint64_t index) {
     return table_[index];
 }
 
-//void
-//TaskTable::Clear() {
+// void
+// TaskTable::Clear() {
 //// find first task is NOT (done or moved), erase from begin to it;
 ////        auto iterator = table_.begin();
 ////        while (iterator->state == TaskTableItemState::EXECUTED or
@@ -225,16 +232,14 @@ TaskTable::Get(uint64_t index) {
 ////        table_.erase(table_.begin(), iterator);
 //}
 
-
 std::string
 TaskTable::Dump() {
     std::stringstream ss;
-    for (auto &item : table_) {
+    for (auto& item : table_) {
         ss << item->Dump() << std::endl;
     }
     return ss.str();
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

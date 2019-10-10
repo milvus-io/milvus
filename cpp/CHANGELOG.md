@@ -9,19 +9,29 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-572 - Milvus crash when get SIGINT
 - MS-577 - Unittest Query randomly hung
 - MS-587 - Count get wrong result after adding vectors and index built immediately
+- MS-599 - search wrong result when table created with metric_type: IP
+- MS-601 - Docker logs error caused by get CPUTemperature error
+- MS-622 - Delete vectors should be failed if date range is invalid
+- MS-620 - Get table row counts display wrong error code
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
 - MS-553 - Refine cache code
-- MS-557 - Merge Log.h
+- MS-555 - Remove old scheduler
 - MS-556 - Add Job Definition in Scheduler
+- MS-557 - Merge Log.h
 - MS-558 - Refine status code
 - MS-562 - Add JobMgr and TaskCreator in Scheduler
 - MS-566 - Refactor cmake
-- MS-555 - Remove old scheduler
 - MS-574 - Milvus configuration refactor
 - MS-578 - Make sure milvus5.0 don't crack 0.3.1 data
 - MS-585 - Update namespace in scheduler
+- MS-606 - Speed up result reduce
+- MS-608 - Update TODO names
+- MS-609 - Update task construct function
+- MS-611 - Add resources validity check in ResourceMgr
+- MS-619 - Add optimizer class in scheduler
+- MS-614 - Preload table at startup
 
 ## New Feature
 
@@ -33,6 +43,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-575 - Add Clang-format & Clang-tidy & Cpplint
 - MS-586 - Remove BUILD_FAISS_WITH_MKL option
 - MS-590 - Refine cmake code to support cpplint
+- MS-600 - Reconstruct unittest code
+- MS-602 - Remove zilliz namespace
+- MS-610 - Change error code base value from hex to decimal
 
 # Milvus 0.4.0 (2019-09-12)
 

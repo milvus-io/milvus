@@ -20,9 +20,9 @@
 #include "MilvusApi.h"
 #include "sdk/grpc/ClientProxy.h"
 
-#include <vector>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace milvus {
 
@@ -32,10 +32,10 @@ class ConnectionImpl : public Connection {
 
     // Implementations of the Connection interface
     Status
-    Connect(const ConnectParam &param) override;
+    Connect(const ConnectParam& param) override;
 
     Status
-    Connect(const std::string &uri) override;
+    Connect(const std::string& uri) override;
 
     Status
     Connected() const override;
@@ -44,38 +44,34 @@ class ConnectionImpl : public Connection {
     Disconnect() override;
 
     Status
-    CreateTable(const TableSchema &param) override;
+    CreateTable(const TableSchema& param) override;
 
     bool
-    HasTable(const std::string &table_name) override;
+    HasTable(const std::string& table_name) override;
 
     Status
-    DropTable(const std::string &table_name) override;
+    DropTable(const std::string& table_name) override;
 
     Status
-    CreateIndex(const IndexParam &index_param) override;
+    CreateIndex(const IndexParam& index_param) override;
 
     Status
-    Insert(const std::string &table_name,
-           const std::vector<RowRecord> &record_array,
-           std::vector<int64_t> &id_array) override;
+    Insert(const std::string& table_name, const std::vector<RowRecord>& record_array,
+           std::vector<int64_t>& id_array) override;
 
     Status
-    Search(const std::string &table_name,
-           const std::vector<RowRecord> &query_record_array,
-           const std::vector<Range> &query_range_array,
-           int64_t topk,
-           int64_t nprobe,
-           std::vector<TopKQueryResult> &topk_query_result_array) override;
+    Search(const std::string& table_name, const std::vector<RowRecord>& query_record_array,
+           const std::vector<Range>& query_range_array, int64_t topk, int64_t nprobe,
+           std::vector<TopKQueryResult>& topk_query_result_array) override;
 
     Status
-    DescribeTable(const std::string &table_name, TableSchema &table_schema) override;
+    DescribeTable(const std::string& table_name, TableSchema& table_schema) override;
 
     Status
-    CountTable(const std::string &table_name, int64_t &row_count) override;
+    CountTable(const std::string& table_name, int64_t& row_count) override;
 
     Status
-    ShowTables(std::vector<std::string> &table_array) override;
+    ShowTables(std::vector<std::string>& table_array) override;
 
     std::string
     ClientVersion() const override;
@@ -90,20 +86,19 @@ class ConnectionImpl : public Connection {
     DumpTaskTables() const override;
 
     Status
-    DeleteByRange(Range &range,
-                  const std::string &table_name) override;
+    DeleteByRange(Range& range, const std::string& table_name) override;
 
     Status
-    PreloadTable(const std::string &table_name) const override;
+    PreloadTable(const std::string& table_name) const override;
 
     Status
-    DescribeIndex(const std::string &table_name, IndexParam &index_param) const override;
+    DescribeIndex(const std::string& table_name, IndexParam& index_param) const override;
 
     Status
-    DropIndex(const std::string &table_name) const override;
+    DropIndex(const std::string& table_name) const override;
 
  private:
     std::shared_ptr<ClientProxy> client_proxy_;
 };
 
-} // namespace milvus
+}  // namespace milvus

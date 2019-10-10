@@ -15,53 +15,53 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
+#include <SPTAG/AnnService/inc/Core/VectorIndex.h>
 #include <cstdint>
 #include <memory>
 #include "VectorIndex.h"
 #include "knowhere/index/IndexModel.h"
-#include <SPTAG/AnnService/inc/Core/VectorIndex.h>
 
-
-namespace zilliz {
 namespace knowhere {
-
 
 class CPUKDTRNG : public VectorIndex {
  public:
     CPUKDTRNG() {
-        index_ptr_ = SPTAG::VectorIndex::CreateInstance(SPTAG::IndexAlgoType::KDT,
-                                                        SPTAG::VectorValueType::Float);
+        index_ptr_ = SPTAG::VectorIndex::CreateInstance(SPTAG::IndexAlgoType::KDT, SPTAG::VectorValueType::Float);
         index_ptr_->SetParameter("DistCalcMethod", "L2");
     }
 
  public:
     BinarySet
     Serialize() override;
-    VectorIndexPtr Clone() override;
+    VectorIndexPtr
+    Clone() override;
     void
-    Load(const BinarySet &index_array) override;
+    Load(const BinarySet& index_array) override;
 
  public:
-    //PreprocessorPtr
-    //BuildPreprocessor(const DatasetPtr &dataset, const Config &config) override;
-    int64_t Count() override;
-    int64_t Dimension() override;
+    // PreprocessorPtr
+    // BuildPreprocessor(const DatasetPtr &dataset, const Config &config) override;
+    int64_t
+    Count() override;
+    int64_t
+    Dimension() override;
 
     IndexModelPtr
-    Train(const DatasetPtr &dataset, const Config &config) override;
+    Train(const DatasetPtr& dataset, const Config& config) override;
 
     void
-    Add(const DatasetPtr &dataset, const Config &config) override;
+    Add(const DatasetPtr& dataset, const Config& config) override;
 
     DatasetPtr
-    Search(const DatasetPtr &dataset, const Config &config) override;
-    void Seal() override;
+    Search(const DatasetPtr& dataset, const Config& config) override;
+    void
+    Seal() override;
+
  private:
     void
-    SetParameters(const Config &config);
+    SetParameters(const Config& config);
 
  private:
     PreprocessorPtr preprocessor_;
@@ -76,7 +76,7 @@ class CPUKDTRNGIndexModel : public IndexModel {
     Serialize() override;
 
     void
-    Load(const BinarySet &binary) override;
+    Load(const BinarySet& binary) override;
 
  private:
     std::shared_ptr<SPTAG::VectorIndex> index_;
@@ -84,5 +84,4 @@ class CPUKDTRNGIndexModel : public IndexModel {
 
 using CPUKDTRNGIndexModelPtr = std::shared_ptr<CPUKDTRNGIndexModel>;
 
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere

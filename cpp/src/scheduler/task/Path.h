@@ -17,10 +17,9 @@
 
 #pragma once
 
-#include <vector>
 #include <string>
+#include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -28,11 +27,11 @@ class Path {
  public:
     Path() = default;
 
-    Path(std::vector<std::string> &path, uint64_t index) : path_(path), index_(index) {
+    Path(std::vector<std::string>& path, uint64_t index) : path_(path), index_(index) {
     }
 
     void
-    push_back(const std::string &str) {
+    push_back(const std::string& str) {
         path_.push_back(str);
     }
 
@@ -61,16 +60,17 @@ class Path {
     }
 
  public:
-    std::string &
-    operator[](uint64_t index) {
+    std::string& operator[](uint64_t index) {
         return path_[index];
     }
 
-    std::vector<std::string>::iterator begin() {
+    std::vector<std::string>::iterator
+    begin() {
         return path_.begin();
     }
 
-    std::vector<std::string>::iterator end() {
+    std::vector<std::string>::iterator
+    end() {
         return path_.end();
     }
 
@@ -79,6 +79,5 @@ class Path {
     uint64_t index_ = 0;
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

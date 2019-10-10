@@ -11,25 +11,30 @@ db_config:
   secondary_path:                   # path used to store data only, split by semicolon
 
   backend_url: sqlite://:@:/        # URI format: dialect://username:password@host:port/database
-                                    # Keep 'dialect://:@:/', and replace other texts with real values.
+                                    # Keep 'dialect://:@:/', and replace other texts with real values
                                     # Replace 'dialect' with 'mysql' or 'sqlite'
 
   insert_buffer_size: 4             # GB, maximum insert buffer size allowed
+                                    # sum of insert_buffer_size and cpu_cache_capacity cannot exceed total memory
   build_index_gpu: 0                # gpu id used for building index
+
+  preload_table:                    # preload data at startup, '*' means load all tables, empty value means no preload
+                                    # you can specify preload tables like this: table1,table2,table3
 
 metric_config:
   enable_monitor: false             # enable monitoring or not
   collector: prometheus             # prometheus
   prometheus_config:
-    port: 8080                      # port prometheus used to fetch metrics
+    port: 8080                      # port prometheus uses to fetch metrics
 
 cache_config:
-  cpu_mem_capacity: 16              # GB, CPU memory used for cache
-  cpu_mem_threshold: 0.85           # percentage of data that will be kept when cache cleanup is triggered
+  cpu_cache_capacity: 16            # GB, CPU memory used for cache
+  cpu_cache_threshold: 0.85         # percentage of data that will be kept when cache cleanup is triggered
   cache_insert_data: false          # whether to load inserted data into cache
 
 engine_config:
-  blas_threshold: 20
+  use_blas_threshold: 20            # if nq <  use_blas_threshold, use SSE, faster with fluctuated response times
+                                    # if nq >= use_blas_threshold, use OpenBlas, slower with stable response times
 
 resource_config:
   resource_pool:

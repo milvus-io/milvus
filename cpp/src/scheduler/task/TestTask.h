@@ -19,13 +19,12 @@
 
 #include "SearchTask.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class TestTask : public XSearchTask {
  public:
-    explicit TestTask(TableFileSchemaPtr &file);
+    explicit TestTask(TableFileSchemaPtr& file, TaskLabelPtr label);
 
  public:
     void
@@ -46,6 +45,5 @@ class TestTask : public XSearchTask {
     std::condition_variable cv_;
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

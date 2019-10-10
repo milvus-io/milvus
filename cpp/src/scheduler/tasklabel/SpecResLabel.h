@@ -18,30 +18,30 @@
 #pragma once
 
 #include "TaskLabel.h"
+#include "scheduler/ResourceMgr.h"
 
-#include <string>
 #include <memory>
+#include <string>
 
-class Resource;
+// class Resource;
+//
+// using ResourceWPtr = std::weak_ptr<Resource>;
 
-using ResourceWPtr = std::weak_ptr<Resource>;
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class SpecResLabel : public TaskLabel {
  public:
-    explicit SpecResLabel(const ResourceWPtr &resource)
+    explicit SpecResLabel(const ResourceWPtr& resource)
         : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource) {
     }
 
-    inline ResourceWPtr &
+    inline ResourceWPtr&
     resource() {
         return resource_;
     }
 
-    inline std::string &
+    inline std::string&
     resource_name() {
         return resource_name_;
     }
@@ -53,6 +53,5 @@ class SpecResLabel : public TaskLabel {
 
 using SpecResLabelPtr = std::shared_ptr<SpecResLabel>();
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

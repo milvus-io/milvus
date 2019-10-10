@@ -15,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "wrapper/ConfAdapter.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "utils/Log.h"
 
 #include <cmath>
-#include "ConfAdapter.h"
-#include "src/utils/Log.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include <memory>
 
-// TODO: add conf checker
+// TODO(lxj): add conf checker
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -42,7 +42,7 @@ ConfAdapter::MatchBase(knowhere::Config conf) {
 }
 
 knowhere::Config
-ConfAdapter::Match(const TempMetaConf &metaconf) {
+ConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::Cfg>();
     conf->d = metaconf.dim;
     conf->metric_type = metaconf.metric_type;
@@ -52,14 +52,14 @@ ConfAdapter::Match(const TempMetaConf &metaconf) {
 }
 
 knowhere::Config
-ConfAdapter::MatchSearch(const TempMetaConf &metaconf, const IndexType &type) {
+ConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
     auto conf = std::make_shared<knowhere::Cfg>();
     conf->k = metaconf.k;
     return conf;
 }
 
 knowhere::Config
-IVFConfAdapter::Match(const TempMetaConf &metaconf) {
+IVFConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::IVFCfg>();
     conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
     conf->d = metaconf.dim;
@@ -72,7 +72,7 @@ IVFConfAdapter::Match(const TempMetaConf &metaconf) {
 static constexpr float TYPICAL_COUNT = 1000000.0;
 
 int64_t
-IVFConfAdapter::MatchNlist(const int64_t &size, const int64_t &nlist) {
+IVFConfAdapter::MatchNlist(const int64_t& size, const int64_t& nlist) {
     if (size <= TYPICAL_COUNT / 16384 + 1) {
         // handle less row count, avoid nlist set to 0
         return 1;
@@ -80,11 +80,11 @@ IVFConfAdapter::MatchNlist(const int64_t &size, const int64_t &nlist) {
         // calculate a proper nlist if nlist not specified or size less than TYPICAL_COUNT
         return int(size / TYPICAL_COUNT * 16384);
     }
-    return 0;
+    return nlist;
 }
 
 knowhere::Config
-IVFConfAdapter::MatchSearch(const TempMetaConf &metaconf, const IndexType &type) {
+IVFConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
     auto conf = std::make_shared<knowhere::IVFCfg>();
     conf->k = metaconf.k;
     conf->nprobe = metaconf.nprobe;
@@ -95,17 +95,16 @@ IVFConfAdapter::MatchSearch(const TempMetaConf &metaconf, const IndexType &type)
         case IndexType::FAISS_IVFPQ_GPU:
             if (conf->nprobe > GPU_MAX_NRPOBE) {
                 WRAPPER_LOG_WARNING << "When search with GPU, nprobe shoud be no more than " << GPU_MAX_NRPOBE
-                                    << ", but you passed " << conf->nprobe
-                                    << ". Search with " << GPU_MAX_NRPOBE << " instead";
+                                    << ", but you passed " << conf->nprobe << ". Search with " << GPU_MAX_NRPOBE
+                                    << " instead";
                 conf->nprobe = GPU_MAX_NRPOBE;
-
             }
     }
     return conf;
 }
 
 knowhere::Config
-IVFSQConfAdapter::Match(const TempMetaConf &metaconf) {
+IVFSQConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::IVFSQCfg>();
     conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
     conf->d = metaconf.dim;
@@ -117,7 +116,7 @@ IVFSQConfAdapter::Match(const TempMetaConf &metaconf) {
 }
 
 knowhere::Config
-IVFPQConfAdapter::Match(const TempMetaConf &metaconf) {
+IVFPQConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::IVFPQCfg>();
     conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
     conf->d = metaconf.dim;
@@ -130,7 +129,7 @@ IVFPQConfAdapter::Match(const TempMetaConf &metaconf) {
 }
 
 knowhere::Config
-NSGConfAdapter::Match(const TempMetaConf &metaconf) {
+NSGConfAdapter::Match(const TempMetaConf& metaconf) {
     auto conf = std::make_shared<knowhere::NSGCfg>();
     conf->nlist = MatchNlist(metaconf.size, metaconf.nlist);
     conf->d = metaconf.dim;
@@ -145,17 +144,20 @@ NSGConfAdapter::Match(const TempMetaConf &metaconf) {
     conf->out_degree = 50 + 5 * scale_factor;
     conf->candidate_pool_size = 200 + 100 * scale_factor;
     MatchBase(conf);
+
+    //    WRAPPER_LOG_DEBUG << "nlist: " << conf->nlist
+    //    << ", gpu_id: " << conf->gpu_id << ", d: " << conf->d
+    //    << ", nprobe: " << conf->nprobe << ", knng: " << conf->knng;
     return conf;
 }
 
 knowhere::Config
-NSGConfAdapter::MatchSearch(const TempMetaConf &metaconf, const IndexType &type) {
+NSGConfAdapter::MatchSearch(const TempMetaConf& metaconf, const IndexType& type) {
     auto conf = std::make_shared<knowhere::NSGCfg>();
     conf->k = metaconf.k;
     conf->search_length = metaconf.search_length;
     return conf;
 }
 
-}
-}
-}
+}  // namespace engine
+}  // namespace milvus
