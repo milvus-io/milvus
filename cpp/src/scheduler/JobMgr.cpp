@@ -19,8 +19,8 @@
 #include "TaskCreator.h"
 #include "task/Task.h"
 
-#include <utility>
 #include <src/scheduler/optimizer/Optimizer.h>
+#include <utility>
 
 namespace milvus {
 namespace scheduler {

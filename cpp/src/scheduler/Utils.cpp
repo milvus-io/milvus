@@ -15,12 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/Config.h"
 #include "scheduler/Utils.h"
+#include "server/Config.h"
 #include "utils/Log.h"
 
 #include <cuda_runtime.h>
 #include <chrono>
+#include <set>
+#include <string>
 
 namespace milvus {
 namespace scheduler {
@@ -75,7 +77,7 @@ get_gpu_pool() {
     }
 
     return gpu_pool;
-};
+}
 
 }  // namespace scheduler
 }  // namespace milvus

@@ -78,7 +78,7 @@ class IVFSQHybrid : public GPUIVFSQ {
     LoadImpl(const BinarySet& index_binary) override;
 
  protected:
-    int64_t gpu_mode = 0; // 0,1,2
+    int64_t gpu_mode = 0;  // 0,1,2
 };
 
 }  // namespace knowhere
