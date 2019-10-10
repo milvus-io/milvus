@@ -111,12 +111,15 @@ CentOS 7:
 $ yum install clang
 Ubuntu 16.04: 
 $ sudo apt-get install clang-tidy
+$ sudo su
 $ wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-$ sudo apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-6.0 main"
-$ sudo apt-get update
-$ sudo apt-get install clang-format-6.0
+$ apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-6.0 main"
+$ apt-get update
+$ apt-get install clang-format-6.0
 Ubuntu 18.04: 
 $ sudo apt-get install clang-tidy clang-format
+
+$ rm cmake_build/CMakeCache.txt
 ```  
 ```shell
 $ ./build.sh -l
