@@ -111,5 +111,16 @@ class BFIndex : public VecIndexImpl {
     GetRawIds();
 };
 
+class ToIndexData : public cache::DataObj {
+ public:
+    ToIndexData(int64_t size) : size_(size) {}
+
+    int64_t
+    Size() override {return size_;}
+
+ private:
+    int64_t size_;
+};
+
 }  // namespace engine
 }  // namespace milvus

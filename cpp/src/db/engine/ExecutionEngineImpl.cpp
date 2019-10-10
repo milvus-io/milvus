@@ -243,12 +243,9 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
 
 Status
 ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
-    auto index = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
-    bool already_in_cache = (index != nullptr);
-    if (!already_in_cache) {
-        cache::DataObjPtr obj = std::make_shared<cache::DataObj>(nullptr, PhysicalSize());
-        milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
-    }
+    auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
+    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
+    milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
     return Status::OK();
 }
 
