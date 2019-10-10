@@ -99,7 +99,7 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
 Status
 ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
     if (nlist <= 0) {
-        std::string msg = "Invalid nlist value: " + std::to_string(nlist);
+        std::string msg = "nlist value should be greater than 0";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_NLIST, msg);
     }
