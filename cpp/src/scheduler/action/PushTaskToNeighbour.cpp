@@ -20,14 +20,16 @@
 #include "../Algorithm.h"
 #include "Action.h"
 #include "src/cache/GpuCacheMgr.h"
+#include "src/server/Config.h"
+
 
 namespace milvus {
 namespace scheduler {
 
 std::vector<ResourcePtr>
-get_neighbours(const ResourcePtr& self) {
+get_neighbours(const ResourcePtr &self) {
     std::vector<ResourcePtr> neighbours;
-    for (auto& neighbour_node : self->GetNeighbours()) {
+    for (auto &neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
         if (not node)
             continue;
@@ -41,9 +43,9 @@ get_neighbours(const ResourcePtr& self) {
 }
 
 std::vector<std::pair<ResourcePtr, Connection>>
-get_neighbours_with_connetion(const ResourcePtr& self) {
+get_neighbours_with_connetion(const ResourcePtr &self) {
     std::vector<std::pair<ResourcePtr, Connection>> neighbours;
-    for (auto& neighbour_node : self->GetNeighbours()) {
+    for (auto &neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
         if (not node)
             continue;
@@ -57,12 +59,12 @@ get_neighbours_with_connetion(const ResourcePtr& self) {
 }
 
 void
-Action::PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self) {
+Action::PushTaskToNeighbourRandomly(const TaskPtr &task, const ResourcePtr &self) {
     auto neighbours = get_neighbours_with_connetion(self);
     if (not neighbours.empty()) {
         std::vector<uint64_t> speeds;
         uint64_t total_speed = 0;
-        for (auto& neighbour : neighbours) {
+        for (auto &neighbour : neighbours) {
             uint64_t speed = neighbour.second.speed();
             speeds.emplace_back(speed);
             total_speed += speed;
@@ -87,15 +89,15 @@ Action::PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self
 }
 
 void
-Action::PushTaskToAllNeighbour(const TaskPtr& task, const ResourcePtr& self) {
+Action::PushTaskToAllNeighbour(const TaskPtr &task, const ResourcePtr &self) {
     auto neighbours = get_neighbours(self);
-    for (auto& neighbour : neighbours) {
+    for (auto &neighbour : neighbours) {
         neighbour->task_table().Put(task);
     }
 }
 
 void
-Action::PushTaskToResource(const TaskPtr& task, const ResourcePtr& dest) {
+Action::PushTaskToResource(const TaskPtr &task, const ResourcePtr &dest) {
     dest->task_table().Put(task);
 }
 
@@ -137,32 +139,55 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr
         auto compute_resources = res_mgr.lock()->GetComputeResources();
         std::vector<std::vector<std::string>> paths;
         std::vector<uint64_t> transport_costs;
-        for (auto& res : compute_resources) {
+        for (auto &res : compute_resources) {
             std::vector<std::string> path;
             uint64_t transport_cost = ShortestPath(resource, res, res_mgr.lock(), path);
             transport_costs.push_back(transport_cost);
             paths.emplace_back(path);
         }
-
-        // step 2: select min cost, cost(resource) = avg_cost * task_to_do + transport_cost
-        uint64_t min_cost = std::numeric_limits<uint64_t>::max();
-        uint64_t min_cost_idx = 0;
-        for (uint64_t i = 0; i < compute_resources.size(); ++i) {
-            if (compute_resources[i]->TotalTasks() == 0) {
-                min_cost_idx = i;
-                break;
+        if (task->job_.lock()->type() == JobType::SEARCH) {
+            // step 2: select min cost, cost(resource) = avg_cost * task_to_do + transport_cost
+            uint64_t min_cost = std::numeric_limits<uint64_t>::max();
+            uint64_t min_cost_idx = 0;
+            for (uint64_t i = 0; i < compute_resources.size(); ++i) {
+                if (compute_resources[i]->TotalTasks() == 0) {
+                    min_cost_idx = i;
+                    break;
+                }
+                uint64_t cost =
+                    compute_resources[i]->TaskAvgCost() * compute_resources[i]->NumOfTaskToExec() + transport_costs[i];
+                if (min_cost > cost) {
+                    min_cost = cost;
+                    min_cost_idx = i;
+                }
             }
-            uint64_t cost =
-                compute_resources[i]->TaskAvgCost() * compute_resources[i]->NumOfTaskToExec() + transport_costs[i];
-            if (min_cost > cost) {
-                min_cost = cost;
-                min_cost_idx = i;
+
+            // step 3: set path in task
+            Path task_path(paths[min_cost_idx], paths[min_cost_idx].size() - 1);
+            task->path() = task_path;
+        } else if (task->job_.lock()->type() == JobType::BUILD) {
+            //step2: Read device id in config
+            //get build index gpu resource
+            server::Config &config = server::Config::GetInstance();
+            int32_t build_index_gpu;
+            Status stat = config.GetDBConfigBuildIndexGPU(build_index_gpu);
+
+            bool find_gpu_res = false;
+            for (uint64_t i = 0; i < compute_resources.size(); ++i) {
+                if (res_mgr.lock()->GetResource(ResourceType::GPU, build_index_gpu) != nullptr) {
+                    if (compute_resources[i]->name()
+                        == res_mgr.lock()->GetResource(ResourceType::GPU, build_index_gpu)->name()) {
+                        find_gpu_res = true;
+                        Path task_path(paths[i], paths[i].size() - 1);
+                        task->path() = task_path;
+                        break;
+                    }
+                }
+            }
+            if (not find_gpu_res) {
+                task->path() = Path(paths[0], paths[0].size() - 1);
             }
         }
-
-        // step 3: set path in task
-        Path task_path(paths[min_cost_idx], paths[min_cost_idx].size() - 1);
-        task->path() = task_path;
     }
 
     if (resource->name() == task->path().Last()) {

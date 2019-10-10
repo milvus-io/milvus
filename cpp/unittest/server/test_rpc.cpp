@@ -351,11 +351,11 @@ TEST_F(RpcHandlerTest, TABLES_TEST) {
     handler->Insert(&context, &request, &vector_ids);
 
 
-//Show table
-//    ::milvus::grpc::Command cmd;
-//    ::grpc::ServerWriter<::milvus::grpc::TableName> *writer;
-//    status = handler->ShowTables(&context, &cmd, writer);
-//    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
+    //show tables
+    ::milvus::grpc::Command cmd;
+    ::milvus::grpc::TableNameList table_name_list;
+    status = handler->ShowTables(&context, &cmd, &table_name_list);
+    ASSERT_EQ(status.error_code(), ::grpc::Status::OK.error_code());
 
     //Count Table
     ::milvus::grpc::TableRowCount count;
