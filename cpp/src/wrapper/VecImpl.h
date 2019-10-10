@@ -113,10 +113,13 @@ class BFIndex : public VecIndexImpl {
 
 class ToIndexData : public cache::DataObj {
  public:
-    ToIndexData(int64_t size) : size_(size) {}
+    explicit ToIndexData(int64_t size) : size_(size) {
+    }
 
     int64_t
-    Size() override {return size_;}
+    Size() override {
+        return size_;
+    }
 
  private:
     int64_t size_;

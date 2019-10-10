@@ -93,56 +93,56 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 
 void
 ExecutionEngineImpl::HybridLoad() {
-//    if (index_type_ != EngineType::FAISS_IVFSQ8Hybrid) {
-//        return;
-//    }
-//
-//    const std::string key = location_ + ".quantizer";
-//    std::vector<uint64_t> gpus;
-//
-//    // cache hit
-//    {
-//        int64_t selected = -1;
-//        void* quantizer = nullptr;
-//        for (auto& gpu : gpus) {
-//            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-//            if (auto quan = cache->GetIndex(key)) {
-//                selected = gpu;
-//                quantizer = quan;
-//            }
-//        }
-//
-//        if (selected != -1) {
-//            // set quantizer into index;
-//            return;
-//        }
-//    }
-//
-//    // cache miss
-//    {
-//        std::vector<int64_t> all_free_mem;
-//        for (auto& gpu : gpus) {
-//            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-//            auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
-//            all_free_mem.push_back(free_mem);
-//        }
-//
-//        auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
-//        auto best = std::distance(all_free_mem.begin(), max_e);
-//
-//        // load to best device;
-//        // cache quantizer
-//    }
-//
-//    // if index_type == Hybrid
-//
-//    // 1. quantizer in which gpu
-//
-//    // 2.1 which gpu cache best
-//
-//    // 2.2 load to that gpu cache
-//
-//    // set quantizer into index
+    //    if (index_type_ != EngineType::FAISS_IVFSQ8Hybrid) {
+    //        return;
+    //    }
+    //
+    //    const std::string key = location_ + ".quantizer";
+    //    std::vector<uint64_t> gpus;
+    //
+    //    // cache hit
+    //    {
+    //        int64_t selected = -1;
+    //        void* quantizer = nullptr;
+    //        for (auto& gpu : gpus) {
+    //            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+    //            if (auto quan = cache->GetIndex(key)) {
+    //                selected = gpu;
+    //                quantizer = quan;
+    //            }
+    //        }
+    //
+    //        if (selected != -1) {
+    //            // set quantizer into index;
+    //            return;
+    //        }
+    //    }
+    //
+    //    // cache miss
+    //    {
+    //        std::vector<int64_t> all_free_mem;
+    //        for (auto& gpu : gpus) {
+    //            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+    //            auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
+    //            all_free_mem.push_back(free_mem);
+    //        }
+    //
+    //        auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
+    //        auto best = std::distance(all_free_mem.begin(), max_e);
+    //
+    //        // load to best device;
+    //        // cache quantizer
+    //    }
+    //
+    //    // if index_type == Hybrid
+    //
+    //    // 1. quantizer in which gpu
+    //
+    //    // 2.1 which gpu cache best
+    //
+    //    // 2.2 load to that gpu cache
+    //
+    //    // set quantizer into index
 }
 
 Status
