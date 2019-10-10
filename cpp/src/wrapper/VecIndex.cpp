@@ -25,6 +25,7 @@
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
 #include "utils/Log.h"
@@ -142,7 +143,11 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
             break;
         }
-        case IndexType::NSG_MIX: {
+        case IndexType::FAISS_IVFSQ8_HYBRID: {
+            index = std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
+            break;
+        }
+        case IndexType::NSG_MIX: {  // TODO(linxj): bug.
             index = std::make_shared<knowhere::NSG>(gpu_device);
             break;
         }

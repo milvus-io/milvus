@@ -22,6 +22,7 @@
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 
 namespace knowhere {
 namespace cloner {
@@ -37,6 +38,10 @@ CopyGpuToCpu(const VectorIndexPtr& index, const Config& config) {
 
 VectorIndexPtr
 CopyCpuToGpu(const VectorIndexPtr& index, const int64_t& device_id, const Config& config) {
+    if (auto device_index = std::dynamic_pointer_cast<IVFSQHybrid>(index)) {
+        return device_index->CopyCpuToGpu(device_id, config);
+    }
+
     if (auto device_index = std::dynamic_pointer_cast<GPUIndex>(index)) {
         return device_index->CopyGpuToGpu(device_id, config);
     }
