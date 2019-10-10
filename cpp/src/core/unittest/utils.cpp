@@ -23,12 +23,6 @@
 
 INITIALIZE_EASYLOGGINGPP
 
-namespace {
-
-namespace kn = knowhere;
-
-}  // namespace
-
 void
 InitLog() {
     el::Configurations defaultConf;
@@ -124,31 +118,32 @@ FileIOWriter::operator()(void* ptr, size_t size) {
     return size;
 }
 
-kn::DatasetPtr
+knowhere::DatasetPtr
 generate_dataset(int64_t nb, int64_t dim, float* xb, int64_t* ids) {
     std::vector<int64_t> shape{nb, dim};
-    auto tensor = kn::ConstructFloatTensor((uint8_t*)xb, nb * dim * sizeof(float), shape);
-    std::vector<kn::TensorPtr> tensors{tensor};
-    std::vector<kn::FieldPtr> tensor_fields{kn::ConstructFloatField("data")};
-    auto tensor_schema = std::make_shared<kn::Schema>(tensor_fields);
+    auto tensor = knowhere::ConstructFloatTensor((uint8_t*)xb, nb * dim * sizeof(float), shape);
+    std::vector<knowhere::TensorPtr> tensors{tensor};
+    std::vector<knowhere::FieldPtr> tensor_fields{knowhere::ConstructFloatField("data")};
+    auto tensor_schema = std::make_shared<knowhere::Schema>(tensor_fields);
 
-    auto id_array = kn::ConstructInt64Array((uint8_t*)ids, nb * sizeof(int64_t));
-    std::vector<kn::ArrayPtr> arrays{id_array};
-    std::vector<kn::FieldPtr> array_fields{kn::ConstructInt64Field("id")};
-    auto array_schema = std::make_shared<kn::Schema>(tensor_fields);
+    auto id_array = knowhere::ConstructInt64Array((uint8_t*)ids, nb * sizeof(int64_t));
+    std::vector<knowhere::ArrayPtr> arrays{id_array};
+    std::vector<knowhere::FieldPtr> array_fields{knowhere::ConstructInt64Field("id")};
+    auto array_schema = std::make_shared<knowhere::Schema>(tensor_fields);
 
-    auto dataset = std::make_shared<kn::Dataset>(std::move(arrays), array_schema, std::move(tensors), tensor_schema);
+    auto dataset =
+        std::make_shared<knowhere::Dataset>(std::move(arrays), array_schema, std::move(tensors), tensor_schema);
     return dataset;
 }
 
-kn::DatasetPtr
+knowhere::DatasetPtr
 generate_query_dataset(int64_t nb, int64_t dim, float* xb) {
     std::vector<int64_t> shape{nb, dim};
-    auto tensor = kn::ConstructFloatTensor((uint8_t*)xb, nb * dim * sizeof(float), shape);
-    std::vector<kn::TensorPtr> tensors{tensor};
-    std::vector<kn::FieldPtr> tensor_fields{kn::ConstructFloatField("data")};
-    auto tensor_schema = std::make_shared<kn::Schema>(tensor_fields);
+    auto tensor = knowhere::ConstructFloatTensor((uint8_t*)xb, nb * dim * sizeof(float), shape);
+    std::vector<knowhere::TensorPtr> tensors{tensor};
+    std::vector<knowhere::FieldPtr> tensor_fields{knowhere::ConstructFloatField("data")};
+    auto tensor_schema = std::make_shared<knowhere::Schema>(tensor_fields);
 
-    auto dataset = std::make_shared<kn::Dataset>(std::move(tensors), tensor_schema);
+    auto dataset = std::make_shared<knowhere::Dataset>(std::move(tensors), tensor_schema);
     return dataset;
 }

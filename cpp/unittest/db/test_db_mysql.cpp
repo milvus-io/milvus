@@ -29,19 +29,17 @@
 
 namespace {
 
-namespace ms = milvus;
-
 static const char *TABLE_NAME = "test_group";
 static constexpr int64_t TABLE_DIM = 256;
 static constexpr int64_t VECTOR_COUNT = 25000;
 static constexpr int64_t INSERT_LOOP = 1000;
 
-ms::engine::meta::TableSchema
+milvus::engine::meta::TableSchema
 BuildTableSchema() {
-    ms::engine::meta::TableSchema table_info;
+    milvus::engine::meta::TableSchema table_info;
     table_info.dimension_ = TABLE_DIM;
     table_info.table_id_ = TABLE_NAME;
-    table_info.engine_type_ = (int) ms::engine::EngineType::FAISS_IDMAP;
+    table_info.engine_type_ = (int) milvus::engine::EngineType::FAISS_IDMAP;
     return table_info;
 }
 
@@ -59,17 +57,17 @@ BuildVectors(int64_t n, std::vector<float> &vectors) {
 } // namespace
 
 TEST_F(MySqlDBTest, DB_TEST) {
-    ms::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    ms::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
-    ms::engine::IDNumbers vector_ids;
-    ms::engine::IDNumbers target_ids;
+    milvus::engine::IDNumbers vector_ids;
+    milvus::engine::IDNumbers target_ids;
 
     int64_t nb = 50;
     std::vector<float> xb;
@@ -83,7 +81,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
     ASSERT_EQ(target_ids.size(), qb);
 
     std::thread search([&]() {
-        ms::engine::QueryResults results;
+        milvus::engine::QueryResults results;
         int k = 10;
         std::this_thread::sleep_for(std::chrono::seconds(5));
 
@@ -99,7 +97,7 @@ TEST_F(MySqlDBTest, DB_TEST) {
 
             START_TIMER;
             stat = db_->Query(TABLE_NAME, k, qb, 10, qxb.data(), results);
-            ss << "Search " << j << " With Size " << count / ms::engine::M << " M";
+            ss << "Search " << j << " With Size " << count / milvus::engine::M << " M";
             STOP_TIMER(ss.str());
 
             ASSERT_TRUE(stat.ok());
@@ -144,10 +142,10 @@ TEST_F(MySqlDBTest, DB_TEST) {
 }
 
 TEST_F(MySqlDBTest, SEARCH_TEST) {
-    ms::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    ms::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -190,16 +188,16 @@ TEST_F(MySqlDBTest, SEARCH_TEST) {
 
     sleep(2); // wait until build index finish
 
-    ms::engine::QueryResults results;
+    milvus::engine::QueryResults results;
     stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
     ASSERT_TRUE(stat.ok());
 }
 
 TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
-    ms::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
-    std::vector<ms::engine::meta::TableSchema> table_schema_array;
+    std::vector<milvus::engine::meta::TableSchema> table_schema_array;
     stat = db_->AllTables(table_schema_array);
     ASSERT_TRUE(stat.ok());
     bool bfound = false;
@@ -211,14 +209,14 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
     }
     ASSERT_TRUE(bfound);
 
-    ms::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(table_info_get.dimension_, TABLE_DIM);
 
-    ms::engine::IDNumbers vector_ids;
-    ms::engine::IDNumbers target_ids;
+    milvus::engine::IDNumbers vector_ids;
+    milvus::engine::IDNumbers target_ids;
 
     uint64_t size;
     db_->Size(size);
@@ -237,15 +235,15 @@ TEST_F(MySqlDBTest, ARHIVE_DISK_CHECK) {
 
     db_->Size(size);
     LOG(DEBUG) << "size=" << size;
-    ASSERT_LE(size, 1 * ms::engine::G);
+    ASSERT_LE(size, 1 * milvus::engine::G);
 }
 
 TEST_F(MySqlDBTest, DELETE_TEST) {
-    ms::engine::meta::TableSchema table_info = BuildTableSchema();
+    milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 //    std::cout << stat.ToString() << std::endl;
 
-    ms::engine::meta::TableSchema table_info_get;
+    milvus::engine::meta::TableSchema table_info_get;
     table_info_get.table_id_ = TABLE_NAME;
     stat = db_->DescribeTable(table_info_get);
     ASSERT_TRUE(stat.ok());
@@ -254,7 +252,7 @@ TEST_F(MySqlDBTest, DELETE_TEST) {
     db_->HasTable(TABLE_NAME, has_table);
     ASSERT_TRUE(has_table);
 
-    ms::engine::IDNumbers vector_ids;
+    milvus::engine::IDNumbers vector_ids;
 
     uint64_t size;
     db_->Size(size);

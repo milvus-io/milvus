@@ -22,13 +22,8 @@
 //#include "knowhere/index/vector_index/cpu_kdt_rng.h"
 //#include "knowhere/index/vector_index/definitions.h"
 //
-// namespace {
 //
-// namespace kn = knowhere;
-//
-//}  // namespace
-//
-// kn::DatasetPtr
+// knowhere::DatasetPtr
 // generate_dataset(int64_t n, int64_t d, int64_t base) {
 //    auto elems = n * d;
 //    auto p_data = (float*)malloc(elems * sizeof(float));
@@ -58,7 +53,7 @@
 //    return dataset;
 //}
 //
-// kn::DatasetPtr
+// knowhere::DatasetPtr
 // generate_queries(int64_t n, int64_t d, int64_t k, int64_t base) {
 //    size_t size = sizeof(float) * n * d;
 //    auto v = (float*)malloc(size);
@@ -86,7 +81,7 @@
 //    std::vector<FieldPtr> fields{field};
 //    auto schema = std::make_shared<Schema>(fields);
 //
-//    return std::make_shared<kn::Dataset>(data, schema);
+//    return std::make_shared<knowhere::Dataset>(data, schema);
 //}
 //
 // int

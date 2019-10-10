@@ -28,12 +28,6 @@
 
 #include "unittest/utils.h"
 
-namespace {
-
-namespace kn = knowhere;
-
-}  // namespace
-
 using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
@@ -42,9 +36,9 @@ class KDTTest : public DataGen, public ::testing::Test {
  protected:
     void
     SetUp() override {
-        index_ = std::make_shared<kn::CPUKDTRNG>();
+        index_ = std::make_shared<knowhere::CPUKDTRNG>();
 
-        auto tempconf = std::make_shared<kn::KDTCfg>();
+        auto tempconf = std::make_shared<knowhere::KDTCfg>();
         tempconf->tptnubmber = 1;
         tempconf->k = 10;
         conf = tempconf;
@@ -53,12 +47,12 @@ class KDTTest : public DataGen, public ::testing::Test {
     }
 
  protected:
-    kn::Config conf;
-    std::shared_ptr<kn::CPUKDTRNG> index_ = nullptr;
+    knowhere::Config conf;
+    std::shared_ptr<knowhere::CPUKDTRNG> index_ = nullptr;
 };
 
 void
-AssertAnns(const kn::DatasetPtr& result, const int& nq, const int& k) {
+AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     for (auto i = 0; i < nq; i++) {
         EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
@@ -66,7 +60,7 @@ AssertAnns(const kn::DatasetPtr& result, const int& nq, const int& k) {
 }
 
 void
-PrintResult(const kn::DatasetPtr& result, const int& nq, const int& k) {
+PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     auto dists = result->array()[1];
 
@@ -125,7 +119,7 @@ TEST_F(KDTTest, kdt_serialize) {
     auto model = index_->Train(base_dataset, conf);
     // index_->Add(base_dataset, conf);
     auto binaryset = index_->Serialize();
-    auto new_index = std::make_shared<kn::CPUKDTRNG>();
+    auto new_index = std::make_shared<knowhere::CPUKDTRNG>();
     new_index->Load(binaryset);
     auto result = new_index->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
@@ -150,7 +144,7 @@ TEST_F(KDTTest, kdt_serialize) {
             ++fileno;
         }
 
-        kn::BinarySet load_data_list;
+        knowhere::BinarySet load_data_list;
         for (int i = 0; i < filename_list.size() && i < meta_list.size(); ++i) {
             auto bin_size = meta_list[i].second;
             FileIOReader reader(filename_list[i]);
@@ -162,7 +156,7 @@ TEST_F(KDTTest, kdt_serialize) {
             load_data_list.Append(meta_list[i].first, data, bin_size);
         }
 
-        auto new_index = std::make_shared<kn::CPUKDTRNG>();
+        auto new_index = std::make_shared<knowhere::CPUKDTRNG>();
         new_index->Load(load_data_list);
         auto result = new_index->Search(query_dataset, conf);
         AssertAnns(result, nq, k);
