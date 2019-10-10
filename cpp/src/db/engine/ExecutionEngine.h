@@ -67,6 +67,9 @@ class ExecutionEngine {
     CopyToGpu(uint64_t device_id) = 0;
 
     virtual Status
+    CopyToIndexFileToGpu(uint64_t device_id) = 0;
+
+    virtual Status
     CopyToCpu() = 0;
 
     virtual std::shared_ptr<ExecutionEngine>

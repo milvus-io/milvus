@@ -17,41 +17,31 @@
 
 #pragma once
 
-#include "TaskLabel.h"
-#include "scheduler/ResourceMgr.h"
+#include "Task.h"
+#include "scheduler/Definition.h"
+#include "scheduler/job/BuildIndexJob.h"
 
-#include <memory>
-#include <string>
-
-//class Resource;
-//
-//using ResourceWPtr = std::weak_ptr<Resource>;
 
 namespace milvus {
 namespace scheduler {
 
-class SpecResLabel : public TaskLabel {
+class XBuildIndexTask : public Task {
  public:
-    explicit SpecResLabel(const ResourceWPtr& resource)
-        : TaskLabel(TaskLabelType::SPECIFIED_RESOURCE), resource_(resource) {
-    }
+    explicit XBuildIndexTask(TableFileSchemaPtr file, TaskLabelPtr label);
 
-    inline ResourceWPtr&
-    resource() {
-        return resource_;
-    }
+    void
+    Load(LoadType type, uint8_t device_id) override;
 
-    inline std::string&
-    resource_name() {
-        return resource_name_;
-    }
+    void
+    Execute() override;
 
- private:
-    ResourceWPtr resource_;
-    std::string resource_name_;
+ public:
+    TableFileSchemaPtr file_;
+    TableFileSchema table_file_;
+    size_t to_index_id_ = 0;
+    int to_index_type_ = 0;
+    ExecutionEnginePtr to_index_engine_ = nullptr;
 };
-
-using SpecResLabelPtr = std::shared_ptr<SpecResLabel>();
 
 }  // namespace scheduler
 }  // namespace milvus
