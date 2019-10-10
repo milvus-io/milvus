@@ -179,13 +179,13 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
 
 ErrorCode
 FileMetadataSet::SaveMetadataToMemory(void **pGraphMemFile, int64_t &len) {
-    // TODO: serialize file to mem?
+    // TODO(lxj): serialize file to mem?
     return ErrorCode::Fail;
 }
 
 ErrorCode
 FileMetadataSet::LoadMetadataFromMemory(void *pGraphMemFile) {
-    // TODO: not support yet
+    // TODO(lxj): not support yet
     return ErrorCode::Fail;
 }
 

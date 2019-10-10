@@ -15,22 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
+#include "knowhere/index/vector_index/helpers/Cloner.h"
 #include "knowhere/common/Exception.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/index/vector_index/IndexIVFSQ.h"
-#include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexIDMAP.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
+#include "knowhere/index/vector_index/IndexIVFSQ.h"
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
-#include "Cloner.h"
 
-
-namespace zilliz {
 namespace knowhere {
 namespace cloner {
 
-VectorIndexPtr CopyGpuToCpu(const VectorIndexPtr &index, const Config &config) {
+VectorIndexPtr
+CopyGpuToCpu(const VectorIndexPtr& index, const Config& config) {
     if (auto device_index = std::dynamic_pointer_cast<GPUIndex>(index)) {
         return device_index->CopyGpuToCpu(config);
     } else {
@@ -38,7 +36,8 @@ VectorIndexPtr CopyGpuToCpu(const VectorIndexPtr &index, const Config &config) {
     }
 }
 
-VectorIndexPtr CopyCpuToGpu(const VectorIndexPtr &index, const int64_t &device_id, const Config &config) {
+VectorIndexPtr
+CopyCpuToGpu(const VectorIndexPtr& index, const int64_t& device_id, const Config& config) {
     if (auto device_index = std::dynamic_pointer_cast<IVFSQHybrid>(index)) {
         return device_index->CopyCpuToGpu(device_id, config);
     }
@@ -60,6 +59,5 @@ VectorIndexPtr CopyCpuToGpu(const VectorIndexPtr &index, const int64_t &device_i
     }
 }
 
-} // cloner
-}
-}
+}  // namespace cloner
+}  // namespace knowhere

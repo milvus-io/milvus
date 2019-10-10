@@ -15,37 +15,41 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "VectorSource.h"
-#include "db/meta/Meta.h"
 #include "db/engine/ExecutionEngine.h"
+#include "db/meta/Meta.h"
 #include "utils/Status.h"
 
-#include <string>
 #include <memory>
+#include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class MemTableFile {
  public:
-    MemTableFile(const std::string &table_id, const meta::MetaPtr &meta, const DBOptions &options);
+    MemTableFile(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
 
-    Status Add(const VectorSourcePtr &source, IDNumbers &vector_ids);
+    Status
+    Add(const VectorSourcePtr& source, IDNumbers& vector_ids);
 
-    size_t GetCurrentMem();
+    size_t
+    GetCurrentMem();
 
-    size_t GetMemLeft();
+    size_t
+    GetMemLeft();
 
-    bool IsFull();
+    bool
+    IsFull();
 
-    Status Serialize();
+    Status
+    Serialize();
 
  private:
-    Status CreateTableFile();
+    Status
+    CreateTableFile();
 
  private:
     const std::string table_id_;
@@ -55,10 +59,9 @@ class MemTableFile {
     size_t current_mem_;
 
     ExecutionEnginePtr execution_engine_;
-}; //MemTableFile
+};  // MemTableFile
 
 using MemTableFilePtr = std::shared_ptr<MemTableFile>;
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

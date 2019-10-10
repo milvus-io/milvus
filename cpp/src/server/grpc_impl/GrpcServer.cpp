@@ -15,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "server/grpc_impl/GrpcServer.h"
+#include "GrpcRequestHandler.h"
+#include "grpc/gen-milvus/milvus.grpc.pb.h"
 #include "server/Config.h"
 #include "server/DBWrapper.h"
 #include "utils/Log.h"
-#include "GrpcRequestHandler.h"
 
 #include <chrono>
 #include <iostream>
@@ -36,21 +36,22 @@
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
 
 constexpr int64_t MESSAGE_SIZE = -1;
 
-//this class is to check port occupation during server start
+// this class is to check port occupation during server start
 class NoReusePortOption : public ::grpc::ServerBuilderOption {
  public:
-    void UpdateArguments(::grpc::ChannelArguments *args) override {
+    void
+    UpdateArguments(::grpc::ChannelArguments* args) override {
         args->SetInt(GRPC_ARG_ALLOW_REUSEPORT, 0);
     }
 
-    void UpdatePlugins(std::vector<std::unique_ptr<::grpc::ServerBuilderPlugin>> *plugins) override {
+    void
+    UpdatePlugins(std::vector<std::unique_ptr<::grpc::ServerBuilderPlugin>>* plugins) override {
     }
 };
 
@@ -70,7 +71,7 @@ GrpcServer::Stop() {
 
 Status
 GrpcServer::StartService() {
-    Config &config = Config::GetInstance();
+    Config& config = Config::GetInstance();
     std::string address, port;
     Status s;
 
@@ -87,7 +88,7 @@ GrpcServer::StartService() {
 
     ::grpc::ServerBuilder builder;
     builder.SetOption(std::unique_ptr<::grpc::ServerBuilderOption>(new NoReusePortOption));
-    builder.SetMaxReceiveMessageSize(MESSAGE_SIZE); //default 4 * 1024 * 1024
+    builder.SetMaxReceiveMessageSize(MESSAGE_SIZE);  // default 4 * 1024 * 1024
     builder.SetMaxSendMessageSize(MESSAGE_SIZE);
 
     builder.SetCompressionAlgorithmSupportStatus(GRPC_COMPRESS_STREAM_GZIP, true);
@@ -114,7 +115,6 @@ GrpcServer::StopService() {
     return Status::OK();
 }
 
-} // namespace grpc
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace grpc
+}  // namespace server
+}  // namespace milvus

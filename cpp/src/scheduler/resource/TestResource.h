@@ -19,24 +19,23 @@
 
 #include "Resource.h"
 
-#include <utility>
 #include <string>
+#include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class TestResource : public Resource {
  public:
-    explicit
-    TestResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
+    explicit TestResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
 
     inline std::string
     Dump() const override {
         return "<TestResource, name=" + name_ + ">";
     }
 
-    friend std::ostream &operator<<(std::ostream &out, const TestResource &resource);
+    friend std::ostream&
+    operator<<(std::ostream& out, const TestResource& resource);
 
  protected:
     void
@@ -46,6 +45,5 @@ class TestResource : public Resource {
     Process(TaskPtr task) override;
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

@@ -16,24 +16,23 @@
 // under the License.
 
 #include "metrics/Metrics.h"
-#include "server/Config.h"
 #include "PrometheusMetrics.h"
+#include "server/Config.h"
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
-MetricsBase &
+MetricsBase&
 Metrics::GetInstance() {
-    static MetricsBase &instance = CreateMetricsCollector();
+    static MetricsBase& instance = CreateMetricsCollector();
     return instance;
 }
 
-MetricsBase &
+MetricsBase&
 Metrics::CreateMetricsCollector() {
-    Config &config = Config::GetInstance();
+    Config& config = Config::GetInstance();
     std::string collector_type_str;
 
     config.GetMetricConfigCollector(collector_type_str);
@@ -45,6 +44,5 @@ Metrics::CreateMetricsCollector() {
     }
 }
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus

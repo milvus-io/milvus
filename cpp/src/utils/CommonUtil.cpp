@@ -18,15 +18,15 @@
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 
-#include <unistd.h>
-#include <sys/sysinfo.h>
-#include <pwd.h>
-#include <thread>
-#include <sys/stat.h>
 #include <dirent.h>
+#include <pwd.h>
 #include <string.h>
-#include <iostream>
+#include <sys/stat.h>
+#include <sys/sysinfo.h>
 #include <time.h>
+#include <unistd.h>
+#include <iostream>
+#include <thread>
 
 #include "boost/filesystem.hpp"
 
@@ -38,36 +38,36 @@
 #define THREAD_MULTIPLY_CPU 1
 #endif
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
 namespace fs = boost::filesystem;
 
 bool
-CommonUtil::GetSystemMemInfo(uint64_t &total_mem, uint64_t &free_mem) {
+CommonUtil::GetSystemMemInfo(uint64_t& total_mem, uint64_t& free_mem) {
     struct sysinfo info;
     int ret = sysinfo(&info);
     total_mem = info.totalram;
     free_mem = info.freeram;
 
-    return ret == 0;//succeed 0, failed -1
+    return ret == 0;  // succeed 0, failed -1
 }
 
 bool
-CommonUtil::GetSystemAvailableThreads(uint32_t &thread_count) {
-    //threadCnt = std::thread::hardware_concurrency();
+CommonUtil::GetSystemAvailableThreads(uint32_t& thread_count) {
+    // threadCnt = std::thread::hardware_concurrency();
     thread_count = sysconf(_SC_NPROCESSORS_CONF);
     thread_count *= THREAD_MULTIPLY_CPU;
-    if (thread_count == 0)
+    if (thread_count == 0) {
         thread_count = 8;
+    }
 
     return true;
 }
 
 bool
-CommonUtil::IsDirectoryExist(const std::string &path) {
-    DIR *dp = nullptr;
+CommonUtil::IsDirectoryExist(const std::string& path) {
+    DIR* dp = nullptr;
     if ((dp = opendir(path.c_str())) == nullptr) {
         return false;
     }
@@ -77,7 +77,7 @@ CommonUtil::IsDirectoryExist(const std::string &path) {
 }
 
 Status
-CommonUtil::CreateDirectory(const std::string &path) {
+CommonUtil::CreateDirectory(const std::string& path) {
     if (path.empty()) {
         return Status::OK();
     }
@@ -85,7 +85,7 @@ CommonUtil::CreateDirectory(const std::string &path) {
     struct stat directory_stat;
     int status = stat(path.c_str(), &directory_stat);
     if (status == 0) {
-        return Status::OK();//already exist
+        return Status::OK();  // already exist
     }
 
     fs::path fs_path(path);
@@ -97,7 +97,7 @@ CommonUtil::CreateDirectory(const std::string &path) {
 
     status = stat(path.c_str(), &directory_stat);
     if (status == 0) {
-        return Status::OK();//already exist
+        return Status::OK();  // already exist
     }
 
     int makeOK = mkdir(path.c_str(), S_IRWXU | S_IRGRP | S_IROTH);
@@ -110,17 +110,16 @@ CommonUtil::CreateDirectory(const std::string &path) {
 
 namespace {
 void
-RemoveDirectory(const std::string &path) {
-    DIR *dir = nullptr;
-    struct dirent *dmsg;
+RemoveDirectory(const std::string& path) {
+    DIR* dir = nullptr;
+    struct dirent* dmsg;
     const int32_t buf_size = 256;
     char file_name[buf_size];
 
     std::string folder_name = path + "/%s";
     if ((dir = opendir(path.c_str())) != nullptr) {
         while ((dmsg = readdir(dir)) != nullptr) {
-            if (strcmp(dmsg->d_name, ".") != 0
-                && strcmp(dmsg->d_name, "..") != 0) {
+            if (strcmp(dmsg->d_name, ".") != 0 && strcmp(dmsg->d_name, "..") != 0) {
                 snprintf(file_name, buf_size, folder_name.c_str(), dmsg->d_name);
                 std::string tmp = file_name;
                 if (tmp.find(".") == std::string::npos) {
@@ -136,10 +135,10 @@ RemoveDirectory(const std::string &path) {
     }
     remove(path.c_str());
 }
-} // namespace
+}  // namespace
 
 Status
-CommonUtil::DeleteDirectory(const std::string &path) {
+CommonUtil::DeleteDirectory(const std::string& path) {
     if (path.empty()) {
         return Status::OK();
     }
@@ -155,18 +154,18 @@ CommonUtil::DeleteDirectory(const std::string &path) {
 }
 
 bool
-CommonUtil::IsFileExist(const std::string &path) {
+CommonUtil::IsFileExist(const std::string& path) {
     return (access(path.c_str(), F_OK) == 0);
 }
 
 uint64_t
-CommonUtil::GetFileSize(const std::string &path) {
+CommonUtil::GetFileSize(const std::string& path) {
     struct stat file_info;
     if (stat(path.c_str(), &file_info) < 0) {
         return 0;
-    } else {
-        return (uint64_t) file_info.st_size;
     }
+
+    return static_cast<uint64_t>(file_info.st_size);
 }
 
 std::string
@@ -195,21 +194,13 @@ CommonUtil::GetExePath() {
 }
 
 bool
-CommonUtil::TimeStrToTime(const std::string &time_str,
-                          time_t &time_integer,
-                          tm &time_struct,
-                          const std::string &format) {
+CommonUtil::TimeStrToTime(const std::string& time_str, time_t& time_integer, tm& time_struct,
+                          const std::string& format) {
     time_integer = 0;
     memset(&time_struct, 0, sizeof(tm));
 
-    int ret = sscanf(time_str.c_str(),
-                     format.c_str(),
-                     &(time_struct.tm_year),
-                     &(time_struct.tm_mon),
-                     &(time_struct.tm_mday),
-                     &(time_struct.tm_hour),
-                     &(time_struct.tm_min),
-                     &(time_struct.tm_sec));
+    int ret = sscanf(time_str.c_str(), format.c_str(), &(time_struct.tm_year), &(time_struct.tm_mon),
+                     &(time_struct.tm_mday), &(time_struct.tm_hour), &(time_struct.tm_min), &(time_struct.tm_sec));
     if (ret <= 0) {
         return false;
     }
@@ -222,15 +213,14 @@ CommonUtil::TimeStrToTime(const std::string &time_str,
 }
 
 void
-CommonUtil::ConvertTime(time_t time_integer, tm &time_struct) {
+CommonUtil::ConvertTime(time_t time_integer, tm& time_struct) {
     localtime_r(&time_integer, &time_struct);
 }
 
 void
-CommonUtil::ConvertTime(tm time_struct, time_t &time_integer) {
+CommonUtil::ConvertTime(tm time_struct, time_t& time_integer) {
     time_integer = mktime(&time_struct);
 }
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus

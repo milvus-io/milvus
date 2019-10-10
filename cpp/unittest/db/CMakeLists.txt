@@ -20,18 +20,14 @@
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} test_files)
 
-include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
-link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
-
-
-set(db_test_files
+cuda_add_executable(test_db
         ${common_files}
         ${test_files}
-    )
+        )
 
-cuda_add_executable(db_test ${db_test_files})
+target_link_libraries(test_db
+        knowhere
+        ${unittest_libs})
 
-target_link_libraries(db_test knowhere ${unittest_libs})
-
-install(TARGETS db_test DESTINATION unittest)
+install(TARGETS test_db DESTINATION unittest)
 
