@@ -21,7 +21,6 @@
 #include "scheduler/Definition.h"
 #include "scheduler/job/BuildIndexJob.h"
 
-
 namespace milvus {
 namespace scheduler {
 
