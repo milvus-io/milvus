@@ -15,14 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "Status.h"
 
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
 
 /** \brief Milvus SDK namespace
  */
@@ -48,18 +47,18 @@ enum class MetricType {
  * @brief Connect API parameter
  */
 struct ConnectParam {
-    std::string ip_address;                                ///< Server IP address
-    std::string port;                                      ///< Server PORT
+    std::string ip_address;  ///< Server IP address
+    std::string port;        ///< Server PORT
 };
 
 /**
  * @brief Table Schema
  */
 struct TableSchema {
-    std::string table_name;                                ///< Table name
-    int64_t dimension = 0;                                 ///< Vector dimension, must be a positive value
-    int64_t index_file_size = 0;                           ///< Index file size, must be a positive value
-    MetricType metric_type = MetricType::L2;               ///< Index metric type
+    std::string table_name;                   ///< Table name
+    int64_t dimension = 0;                    ///< Vector dimension, must be a positive value
+    int64_t index_file_size = 0;              ///< Index file size, must be a positive value
+    MetricType metric_type = MetricType::L2;  ///< Index metric type
 };
 
 /**
@@ -67,30 +66,30 @@ struct TableSchema {
  * for DATE partition, the format is like: 'year-month-day'
  */
 struct Range {
-    std::string start_value;                                ///< Range start
-    std::string end_value;                                  ///< Range stop
+    std::string start_value;  ///< Range start
+    std::string end_value;    ///< Range stop
 };
 
 /**
  * @brief Record inserted
  */
 struct RowRecord {
-    std::vector<float> data;                               ///< Vector raw data
+    std::vector<float> data;  ///< Vector raw data
 };
 
 /**
  * @brief Query result
  */
 struct QueryResult {
-    int64_t id;                                             ///< Output result
-    double distance;                                        ///< Vector similarity distance
+    int64_t id;       ///< Output result
+    double distance;  ///< Vector similarity distance
 };
 
 /**
  * @brief TopK query result
  */
 struct TopKQueryResult {
-    std::vector<QueryResult> query_result_arrays;           ///< TopK query result
+    std::vector<QueryResult> query_result_arrays;  ///< TopK query result
 };
 
 /**
@@ -129,7 +128,7 @@ class Connection {
      */
 
     static Status
-    Destroy(std::shared_ptr<Connection> &connection_ptr);
+    Destroy(std::shared_ptr<Connection>& connection_ptr);
 
     /**
      * @brief Connect
@@ -143,7 +142,7 @@ class Connection {
      */
 
     virtual Status
-    Connect(const ConnectParam &param) = 0;
+    Connect(const ConnectParam& param) = 0;
 
     /**
      * @brief Connect
@@ -156,7 +155,7 @@ class Connection {
      * @return Indicate if connect is successful
      */
     virtual Status
-    Connect(const std::string &uri) = 0;
+    Connect(const std::string& uri) = 0;
 
     /**
      * @brief connected
@@ -188,7 +187,7 @@ class Connection {
      * @return Indicate if table is created successfully
      */
     virtual Status
-    CreateTable(const TableSchema &param) = 0;
+    CreateTable(const TableSchema& param) = 0;
 
     /**
      * @brief Test table existence method
@@ -200,7 +199,7 @@ class Connection {
      * @return Indicate if table is cexist
      */
     virtual bool
-    HasTable(const std::string &table_name) = 0;
+    HasTable(const std::string& table_name) = 0;
 
     /**
      * @brief Delete table method
@@ -212,7 +211,7 @@ class Connection {
      * @return Indicate if table is delete successfully.
      */
     virtual Status
-    DropTable(const std::string &table_name) = 0;
+    DropTable(const std::string& table_name) = 0;
 
     /**
      * @brief Create index method
@@ -228,7 +227,7 @@ class Connection {
      * @return Indicate if build index successfully.
      */
     virtual Status
-    CreateIndex(const IndexParam &index_param) = 0;
+    CreateIndex(const IndexParam& index_param) = 0;
 
     /**
      * @brief Add vector to table
@@ -242,9 +241,8 @@ class Connection {
      * @return Indicate if vector array are inserted successfully
      */
     virtual Status
-    Insert(const std::string &table_name,
-           const std::vector<RowRecord> &record_array,
-           std::vector<int64_t> &id_array) = 0;
+    Insert(const std::string& table_name, const std::vector<RowRecord>& record_array,
+           std::vector<int64_t>& id_array) = 0;
 
     /**
      * @brief Search vector
@@ -260,12 +258,9 @@ class Connection {
      * @return Indicate if query is successful.
      */
     virtual Status
-    Search(const std::string &table_name,
-           const std::vector<RowRecord> &query_record_array,
-           const std::vector<Range> &query_range_array,
-           int64_t topk,
-           int64_t nprobe,
-           std::vector<TopKQueryResult> &topk_query_result_array) = 0;
+    Search(const std::string& table_name, const std::vector<RowRecord>& query_record_array,
+           const std::vector<Range>& query_range_array, int64_t topk, int64_t nprobe,
+           std::vector<TopKQueryResult>& topk_query_result_array) = 0;
 
     /**
      * @brief Show table description
@@ -278,7 +273,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DescribeTable(const std::string &table_name, TableSchema &table_schema) = 0;
+    DescribeTable(const std::string& table_name, TableSchema& table_schema) = 0;
 
     /**
      * @brief Get table row count
@@ -291,8 +286,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    CountTable(const std::string &table_name,
-               int64_t &row_count) = 0;
+    CountTable(const std::string& table_name, int64_t& row_count) = 0;
 
     /**
      * @brief Show all tables in database
@@ -304,7 +298,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    ShowTables(std::vector<std::string> &table_array) = 0;
+    ShowTables(std::vector<std::string>& table_array) = 0;
 
     /**
      * @brief Give the client version
@@ -350,8 +344,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DeleteByRange(Range &range,
-                  const std::string &table_name) = 0;
+    DeleteByRange(Range& range, const std::string& table_name) = 0;
 
     /**
      * @brief preload table
@@ -363,7 +356,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    PreloadTable(const std::string &table_name) const = 0;
+    PreloadTable(const std::string& table_name) const = 0;
 
     /**
      * @brief describe index
@@ -375,7 +368,7 @@ class Connection {
      * @return index informations and indicate if this operation is successful.
      */
     virtual Status
-    DescribeIndex(const std::string &table_name, IndexParam &index_param) const = 0;
+    DescribeIndex(const std::string& table_name, IndexParam& index_param) const = 0;
 
     /**
      * @brief drop index
@@ -387,7 +380,7 @@ class Connection {
      * @return Indicate if this operation is successful.
      */
     virtual Status
-    DropIndex(const std::string &table_name) const = 0;
+    DropIndex(const std::string& table_name) const = 0;
 };
 
-} // namespace milvus
+}  // namespace milvus

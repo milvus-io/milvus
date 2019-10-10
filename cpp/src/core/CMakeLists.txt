@@ -46,9 +46,11 @@ if(NOT CMAKE_BUILD_TYPE)
 endif(NOT CMAKE_BUILD_TYPE)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -fopenmp")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
 else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -fopenmp")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
 endif()
 MESSAGE(STATUS "CMAKE_CXX_FLAGS" ${CMAKE_CXX_FLAGS})
 
@@ -93,7 +95,7 @@ endif()
 set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
 
 if(BUILD_UNIT_TEST STREQUAL "ON")
-    add_subdirectory(test)
+    add_subdirectory(unittest)
 endif()
 
 config_summary()

@@ -17,30 +17,29 @@
 
 #pragma once
 
-#include <vector>
 #include <deque>
-#include <mutex>
-#include <memory>
-#include <utility>
-#include <string>
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "task/SearchTask.h"
 #include "event/Event.h"
+#include "task/SearchTask.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 enum class TaskTableItemState {
     INVALID,
-    START, // idle
-    LOADING, // loading data from other resource
-    LOADED, // ready to exec or move
-    EXECUTING, // executing, locking util executed or failed
-    EXECUTED, // executed, termination state
-    MOVING, // moving to another resource, locking util executed or failed
-    MOVED, // moved, termination state
+    START,      // idle
+    LOADING,    // loading data from other resource
+    LOADED,     // ready to exec or move
+    EXECUTING,  // executing, locking util executed or failed
+    EXECUTED,   // executed, termination state
+    MOVING,     // moving to another resource, locking util executed or failed
+    MOVED,      // moved, termination state
 };
 
 struct TaskTimestamp {
@@ -58,12 +57,12 @@ struct TaskTableItem {
     TaskTableItem() : id(0), task(nullptr), state(TaskTableItemState::INVALID), mutex() {
     }
 
-    TaskTableItem(const TaskTableItem &src) = delete;
-    TaskTableItem(TaskTableItem &&) = delete;
+    TaskTableItem(const TaskTableItem& src) = delete;
+    TaskTableItem(TaskTableItem&&) = delete;
 
-    uint64_t id; // auto increment from 0;
-    TaskPtr task; // the task;
-    TaskTableItemState state; // the state;
+    uint64_t id;               // auto increment from 0;
+    TaskPtr task;              // the task;
+    TaskTableItemState state;  // the state;
     std::mutex mutex;
     TaskTimestamp timestamp;
 
@@ -98,8 +97,8 @@ class TaskTable {
  public:
     TaskTable() = default;
 
-    TaskTable(const TaskTable &) = delete;
-    TaskTable(TaskTable &&) = delete;
+    TaskTable(const TaskTable&) = delete;
+    TaskTable(TaskTable&&) = delete;
 
     inline void
     RegisterSubscriber(std::function<void(void)> subscriber) {
@@ -117,7 +116,7 @@ class TaskTable {
      * Called by DBImpl;
      */
     void
-    Put(std::vector<TaskPtr> &tasks);
+    Put(std::vector<TaskPtr>& tasks);
 
     /*
      * Return task table item reference;
@@ -130,8 +129,8 @@ class TaskTable {
      * Remove sequence task which is DONE or MOVED from front;
      * Called by ?
      */
-//    void
-//    Clear();
+    //    void
+    //    Clear();
 
     /*
      * Return true if task table empty, otherwise false;
@@ -150,16 +149,17 @@ class TaskTable {
     }
 
  public:
-    TaskTableItemPtr &
-    operator[](uint64_t index) {
+    TaskTableItemPtr& operator[](uint64_t index) {
         return table_[index];
     }
 
-    std::deque<TaskTableItemPtr>::iterator begin() {
+    std::deque<TaskTableItemPtr>::iterator
+    begin() {
         return table_.begin();
     }
 
-    std::deque<TaskTableItemPtr>::iterator end() {
+    std::deque<TaskTableItemPtr>::iterator
+    end() {
         return table_.end();
     }
 
@@ -173,7 +173,7 @@ class TaskTable {
  public:
     /******** Action ********/
 
-    // TODO: bool to Status
+    // TODO(wxyu): bool to Status
     /*
      * Load a task;
      * Set state loading;
@@ -254,6 +254,5 @@ class TaskTable {
     uint64_t last_finish_ = -1;
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

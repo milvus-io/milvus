@@ -16,18 +16,17 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -64,6 +63,5 @@ class Job {
 using JobPtr = std::shared_ptr<Job>;
 using JobWPtr = std::weak_ptr<Job>;
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

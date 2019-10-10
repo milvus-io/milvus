@@ -15,15 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "knowhere/adapter/Structure.h"
 
-#include "Structure.h"
+#include <string>
+#include <vector>
 
-
-namespace zilliz {
 namespace knowhere {
 
 ArrayPtr
-ConstructInt64ArraySmart(uint8_t *data, int64_t size) {
+ConstructInt64ArraySmart(uint8_t* data, int64_t size) {
     // TODO: magic
     std::vector<BufferPtr> id_buf{nullptr, MakeMutableBufferSmart(data, size)};
     auto type = std::make_shared<arrow::Int64Type>();
@@ -32,7 +32,7 @@ ConstructInt64ArraySmart(uint8_t *data, int64_t size) {
 }
 
 ArrayPtr
-ConstructFloatArraySmart(uint8_t *data, int64_t size) {
+ConstructFloatArraySmart(uint8_t* data, int64_t size) {
     // TODO: magic
     std::vector<BufferPtr> id_buf{nullptr, MakeMutableBufferSmart(data, size)};
     auto type = std::make_shared<arrow::FloatType>();
@@ -41,14 +41,14 @@ ConstructFloatArraySmart(uint8_t *data, int64_t size) {
 }
 
 TensorPtr
-ConstructFloatTensorSmart(uint8_t *data, int64_t size, std::vector<int64_t> shape) {
+ConstructFloatTensorSmart(uint8_t* data, int64_t size, std::vector<int64_t> shape) {
     auto buffer = MakeMutableBufferSmart(data, size);
     auto float_type = std::make_shared<arrow::FloatType>();
     return std::make_shared<Tensor>(float_type, buffer, shape);
 }
 
 ArrayPtr
-ConstructInt64Array(uint8_t *data, int64_t size) {
+ConstructInt64Array(uint8_t* data, int64_t size) {
     // TODO: magic
     std::vector<BufferPtr> id_buf{nullptr, MakeMutableBuffer(data, size)};
     auto type = std::make_shared<arrow::Int64Type>();
@@ -57,7 +57,7 @@ ConstructInt64Array(uint8_t *data, int64_t size) {
 }
 
 ArrayPtr
-ConstructFloatArray(uint8_t *data, int64_t size) {
+ConstructFloatArray(uint8_t* data, int64_t size) {
     // TODO: magic
     std::vector<BufferPtr> id_buf{nullptr, MakeMutableBuffer(data, size)};
     auto type = std::make_shared<arrow::FloatType>();
@@ -66,23 +66,22 @@ ConstructFloatArray(uint8_t *data, int64_t size) {
 }
 
 TensorPtr
-ConstructFloatTensor(uint8_t *data, int64_t size, std::vector<int64_t> shape) {
+ConstructFloatTensor(uint8_t* data, int64_t size, std::vector<int64_t> shape) {
     auto buffer = MakeMutableBuffer(data, size);
     auto float_type = std::make_shared<arrow::FloatType>();
     return std::make_shared<Tensor>(float_type, buffer, shape);
 }
 
 FieldPtr
-ConstructInt64Field(const std::string &name) {
+ConstructInt64Field(const std::string& name) {
     auto type = std::make_shared<arrow::Int64Type>();
     return std::make_shared<Field>(name, type);
 }
 
-
 FieldPtr
-ConstructFloatField(const std::string &name) {
+ConstructFloatField(const std::string& name) {
     auto type = std::make_shared<arrow::FloatType>();
     return std::make_shared<Field>(name, type);
 }
-}
-}
+
+}  // namespace knowhere

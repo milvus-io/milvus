@@ -19,37 +19,44 @@
 
 #include "utils/Status.h"
 
-#include <string>
 #include <time.h>
+#include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
 class CommonUtil {
  public:
-    static bool GetSystemMemInfo(uint64_t &total_mem, uint64_t &free_mem);
-    static bool GetSystemAvailableThreads(uint32_t &thread_count);
+    static bool
+    GetSystemMemInfo(uint64_t& total_mem, uint64_t& free_mem);
+    static bool
+    GetSystemAvailableThreads(uint32_t& thread_count);
 
-    static bool IsFileExist(const std::string &path);
-    static uint64_t GetFileSize(const std::string &path);
-    static bool IsDirectoryExist(const std::string &path);
-    static Status CreateDirectory(const std::string &path);
-    static Status DeleteDirectory(const std::string &path);
+    static bool
+    IsFileExist(const std::string& path);
+    static uint64_t
+    GetFileSize(const std::string& path);
+    static bool
+    IsDirectoryExist(const std::string& path);
+    static Status
+    CreateDirectory(const std::string& path);
+    static Status
+    DeleteDirectory(const std::string& path);
 
-    static std::string GetFileName(std::string filename);
-    static std::string GetExePath();
+    static std::string
+    GetFileName(std::string filename);
+    static std::string
+    GetExePath();
 
-    static bool TimeStrToTime(const std::string &time_str,
-                              time_t &time_integer,
-                              tm &time_struct,
-                              const std::string &format = "%d-%d-%d %d:%d:%d");
+    static bool
+    TimeStrToTime(const std::string& time_str, time_t& time_integer, tm& time_struct,
+                  const std::string& format = "%d-%d-%d %d:%d:%d");
 
-    static void ConvertTime(time_t time_integer, tm &time_struct);
-    static void ConvertTime(tm time_struct, time_t &time_integer);
+    static void
+    ConvertTime(time_t time_integer, tm& time_struct);
+    static void
+    ConvertTime(tm time_struct, time_t& time_integer);
 };
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
-
+}  // namespace server
+}  // namespace milvus

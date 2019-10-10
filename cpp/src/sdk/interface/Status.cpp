@@ -23,12 +23,12 @@ namespace milvus {
 
 constexpr int CODE_WIDTH = sizeof(StatusCode);
 
-Status::Status(StatusCode code, const std::string &msg) {
-    //4 bytes store code
-    //4 bytes store message length
-    //the left bytes store message string
-    const uint32_t length = (uint32_t) msg.size();
-    char *result = new char[length + sizeof(length) + CODE_WIDTH];
+Status::Status(StatusCode code, const std::string& msg) {
+    // 4 bytes store code
+    // 4 bytes store message length
+    // the left bytes store message string
+    const uint32_t length = (uint32_t)msg.size();
+    auto result = new char[length + sizeof(length) + CODE_WIDTH];
     memcpy(result, &code, CODE_WIDTH);
     memcpy(result + CODE_WIDTH, &length, sizeof(length));
     memcpy(result + sizeof(length) + CODE_WIDTH, msg.data(), length);
@@ -36,38 +36,35 @@ Status::Status(StatusCode code, const std::string &msg) {
     state_ = result;
 }
 
-Status::Status()
-    : state_(nullptr) {
+Status::Status() : state_(nullptr) {
 }
 
 Status::~Status() {
     delete state_;
 }
 
-Status::Status(const Status &s)
-    : state_(nullptr) {
+Status::Status(const Status& s) : state_(nullptr) {
     CopyFrom(s);
 }
 
-Status &
-Status::operator=(const Status &s) {
+Status&
+Status::operator=(const Status& s) {
     CopyFrom(s);
     return *this;
 }
 
-Status::Status(Status &&s)
-    : state_(nullptr) {
+Status::Status(Status&& s) : state_(nullptr) {
     MoveFrom(s);
 }
 
-Status &
-Status::operator=(Status &&s) {
+Status&
+Status::operator=(Status&& s) {
     MoveFrom(s);
     return *this;
 }
 
 void
-Status::CopyFrom(const Status &s) {
+Status::CopyFrom(const Status& s) {
     delete state_;
     state_ = nullptr;
     if (s.state_ == nullptr) {
@@ -78,11 +75,11 @@ Status::CopyFrom(const Status &s) {
     memcpy(&length, s.state_ + CODE_WIDTH, sizeof(length));
     int buff_len = length + sizeof(length) + CODE_WIDTH;
     state_ = new char[buff_len];
-    memcpy((void *) state_, (void *) s.state_, buff_len);
+    memcpy(state_, s.state_, buff_len);
 }
 
 void
-Status::MoveFrom(Status &s) {
+Status::MoveFrom(Status& s) {
     delete state_;
     state_ = s.state_;
     s.state_ = nullptr;
@@ -104,6 +101,4 @@ Status::message() const {
     return msg;
 }
 
-} // namespace milvus
-
-
+}  // namespace milvus

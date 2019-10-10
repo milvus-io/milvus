@@ -9,6 +9,7 @@ container('milvus-build-env') {
                         sh "git config --global user.email \"test@zilliz.com\""
                         sh "git config --global user.name \"test\""
                         withCredentials([usernamePassword(credentialsId: "${params.JFROG_USER}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                            sh "./build.sh -l"
                             sh "export JFROG_ARTFACTORY_URL='${params.JFROG_ARTFACTORY_URL}' && export JFROG_USER_NAME='${USERNAME}' && export JFROG_PASSWORD='${PASSWORD}' && ./build.sh -t ${params.BUILD_TYPE} -j"
                         }
                     }

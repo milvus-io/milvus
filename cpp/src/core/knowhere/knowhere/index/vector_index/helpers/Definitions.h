@@ -15,11 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-
-namespace zilliz {
 namespace knowhere {
 namespace definition {
 
@@ -27,6 +24,5 @@ namespace definition {
 #define META_DIM ("dimension")
 #define META_K ("k")
 
-} // definition
-} // knowhere
-} // zilliz
+}  // namespace definition
+}  // namespace knowhere

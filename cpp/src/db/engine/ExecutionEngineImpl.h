@@ -23,77 +23,89 @@
 #include <memory>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class ExecutionEngineImpl : public ExecutionEngine {
  public:
-    ExecutionEngineImpl(uint16_t dimension,
-                        const std::string &location,
-                        EngineType index_type,
-                        MetricType metric_type,
+    ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
                         int32_t nlist);
 
-    ExecutionEngineImpl(VecIndexPtr index,
-                        const std::string &location,
-                        EngineType index_type,
-                        MetricType metric_type,
+    ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type, MetricType metric_type,
                         int32_t nlist);
 
-    Status AddWithIds(int64_t n, const float *xdata, const int64_t *xids) override;
+    Status
+    AddWithIds(int64_t n, const float* xdata, const int64_t* xids) override;
 
-    size_t Count() const override;
+    size_t
+    Count() const override;
 
-    size_t Size() const override;
+    size_t
+    Size() const override;
 
-    size_t Dimension() const override;
+    size_t
+    Dimension() const override;
 
-    size_t PhysicalSize() const override;
+    size_t
+    PhysicalSize() const override;
 
-    Status Serialize() override;
+    Status
+    Serialize() override;
 
-    Status Load(bool to_cache) override;
+    Status
+    Load(bool to_cache) override;
 
-    Status CopyToGpu(uint64_t device_id) override;
+    Status
+    CopyToGpu(uint64_t device_id) override;
 
-    Status CopyToCpu() override;
+    Status
+    CopyToIndexFileToGpu(uint64_t device_id) override;
 
-    ExecutionEnginePtr Clone() override;
+    Status
+    CopyToCpu() override;
 
-    Status Merge(const std::string &location) override;
+    ExecutionEnginePtr
+    Clone() override;
 
-    Status Search(int64_t n,
-                  const float *data,
-                  int64_t k,
-                  int64_t nprobe,
-                  float *distances,
-                  int64_t *labels) const override;
+    Status
+    Merge(const std::string& location) override;
 
-    ExecutionEnginePtr BuildIndex(const std::string &location, EngineType engine_type) override;
+    Status
+    Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels) const override;
 
-    Status Cache() override;
+    ExecutionEnginePtr
+    BuildIndex(const std::string& location, EngineType engine_type) override;
 
-    Status GpuCache(uint64_t gpu_id) override;
+    Status
+    Cache() override;
 
-    Status Init() override;
+    Status
+    GpuCache(uint64_t gpu_id) override;
 
-    EngineType IndexEngineType() const override {
+    Status
+    Init() override;
+
+    EngineType
+    IndexEngineType() const override {
         return index_type_;
     }
 
-    MetricType IndexMetricType() const override {
+    MetricType
+    IndexMetricType() const override {
         return metric_type_;
     }
 
-    std::string GetLocation() const override {
+    std::string
+    GetLocation() const override {
         return location_;
     }
 
  private:
-    VecIndexPtr CreatetVecIndex(EngineType type);
+    VecIndexPtr
+    CreatetVecIndex(EngineType type);
 
-    VecIndexPtr Load(const std::string &location);
+    VecIndexPtr
+    Load(const std::string& location);
 
  protected:
     VecIndexPtr index_ = nullptr;
@@ -107,6 +119,5 @@ class ExecutionEngineImpl : public ExecutionEngine {
     int32_t gpu_num_ = 0;
 };
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

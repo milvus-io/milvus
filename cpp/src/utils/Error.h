@@ -21,13 +21,12 @@
 #include <exception>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 
 using ErrorCode = int32_t;
 
 constexpr ErrorCode SERVER_SUCCESS = 0;
-constexpr ErrorCode SERVER_ERROR_CODE_BASE = 0x30000;
+constexpr ErrorCode SERVER_ERROR_CODE_BASE = 30000;
 
 constexpr ErrorCode
 ToServerErrorCode(const ErrorCode error_code) {
@@ -35,7 +34,7 @@ ToServerErrorCode(const ErrorCode error_code) {
 }
 
 constexpr ErrorCode DB_SUCCESS = 0;
-constexpr ErrorCode DB_ERROR_CODE_BASE = 0x40000;
+constexpr ErrorCode DB_ERROR_CODE_BASE = 40000;
 
 constexpr ErrorCode
 ToDbErrorCode(const ErrorCode error_code) {
@@ -43,21 +42,20 @@ ToDbErrorCode(const ErrorCode error_code) {
 }
 
 constexpr ErrorCode KNOWHERE_SUCCESS = 0;
-constexpr ErrorCode KNOWHERE_ERROR_CODE_BASE = 0x50000;
+constexpr ErrorCode KNOWHERE_ERROR_CODE_BASE = 50000;
 
 constexpr ErrorCode
 ToKnowhereErrorCode(const ErrorCode error_code) {
     return KNOWHERE_ERROR_CODE_BASE + error_code;
 }
 
-//server error code
+// server error code
 constexpr ErrorCode SERVER_UNEXPECTED_ERROR = ToServerErrorCode(1);
 constexpr ErrorCode SERVER_UNSUPPORTED_ERROR = ToServerErrorCode(2);
 constexpr ErrorCode SERVER_NULL_POINTER = ToServerErrorCode(3);
 constexpr ErrorCode SERVER_INVALID_ARGUMENT = ToServerErrorCode(4);
 constexpr ErrorCode SERVER_FILE_NOT_FOUND = ToServerErrorCode(5);
 constexpr ErrorCode SERVER_NOT_IMPLEMENT = ToServerErrorCode(6);
-constexpr ErrorCode SERVER_BLOCKING_QUEUE_EMPTY = ToServerErrorCode(7);
 constexpr ErrorCode SERVER_CANNOT_CREATE_FOLDER = ToServerErrorCode(8);
 constexpr ErrorCode SERVER_CANNOT_CREATE_FILE = ToServerErrorCode(9);
 constexpr ErrorCode SERVER_CANNOT_DELETE_FOLDER = ToServerErrorCode(10);
@@ -75,7 +73,7 @@ constexpr ErrorCode SERVER_INVALID_ROWRECORD_ARRAY = ToServerErrorCode(107);
 constexpr ErrorCode SERVER_INVALID_TOPK = ToServerErrorCode(108);
 constexpr ErrorCode SERVER_ILLEGAL_VECTOR_ID = ToServerErrorCode(109);
 constexpr ErrorCode SERVER_ILLEGAL_SEARCH_RESULT = ToServerErrorCode(110);
-constexpr ErrorCode SERVER_CACHE_ERROR = ToServerErrorCode(111);
+constexpr ErrorCode SERVER_CACHE_FULL = ToServerErrorCode(111);
 constexpr ErrorCode SERVER_WRITE_ERROR = ToServerErrorCode(112);
 constexpr ErrorCode SERVER_INVALID_NPROBE = ToServerErrorCode(113);
 constexpr ErrorCode SERVER_INVALID_INDEX_NLIST = ToServerErrorCode(114);
@@ -83,7 +81,7 @@ constexpr ErrorCode SERVER_INVALID_INDEX_METRIC_TYPE = ToServerErrorCode(115);
 constexpr ErrorCode SERVER_INVALID_INDEX_FILE_SIZE = ToServerErrorCode(116);
 constexpr ErrorCode SERVER_OUT_OF_MEMORY = ToServerErrorCode(117);
 
-//db error code
+// db error code
 constexpr ErrorCode DB_META_TRANSACTION_FAILED = ToDbErrorCode(1);
 constexpr ErrorCode DB_ERROR = ToDbErrorCode(2);
 constexpr ErrorCode DB_NOT_FOUND = ToDbErrorCode(3);
@@ -92,7 +90,7 @@ constexpr ErrorCode DB_INVALID_PATH = ToDbErrorCode(5);
 constexpr ErrorCode DB_INCOMPATIB_META = ToDbErrorCode(6);
 constexpr ErrorCode DB_INVALID_META_URI = ToDbErrorCode(7);
 
-//knowhere error code
+// knowhere error code
 constexpr ErrorCode KNOWHERE_ERROR = ToKnowhereErrorCode(1);
 constexpr ErrorCode KNOWHERE_INVALID_ARGUMENT = ToKnowhereErrorCode(2);
 constexpr ErrorCode KNOWHERE_UNEXPECTED_ERROR = ToKnowhereErrorCode(3);
@@ -101,17 +99,18 @@ constexpr ErrorCode KNOWHERE_NO_SPACE = ToKnowhereErrorCode(4);
 namespace server {
 class ServerException : public std::exception {
  public:
-    ServerException(ErrorCode error_code,
-                    const std::string &message = std::string())
+    explicit ServerException(ErrorCode error_code, const std::string& message = std::string())
         : error_code_(error_code), message_(message) {
     }
 
  public:
-    ErrorCode error_code() const {
+    ErrorCode
+    error_code() const {
         return error_code_;
     }
 
-    virtual const char *what() const noexcept {
+    virtual const char*
+    what() const noexcept {
         return message_.c_str();
     }
 
@@ -119,7 +118,6 @@ class ServerException : public std::exception {
     ErrorCode error_code_;
     std::string message_;
 };
-} // namespace server
+}  // namespace server
 
 }  // namespace milvus
-}  // namespace zilliz

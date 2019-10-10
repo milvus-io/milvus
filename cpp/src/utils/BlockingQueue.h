@@ -23,33 +23,40 @@
 #include <queue>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
-template<typename T>
+template <typename T>
 class BlockingQueue {
  public:
     BlockingQueue() : mtx(), full_(), empty_() {
     }
 
-    BlockingQueue(const BlockingQueue &rhs) = delete;
+    BlockingQueue(const BlockingQueue& rhs) = delete;
 
-    BlockingQueue &operator=(const BlockingQueue &rhs) = delete;
+    BlockingQueue&
+    operator=(const BlockingQueue& rhs) = delete;
 
-    void Put(const T &task);
+    void
+    Put(const T& task);
 
-    T Take();
+    T
+    Take();
 
-    T Front();
+    T
+    Front();
 
-    T Back();
+    T
+    Back();
 
-    size_t Size();
+    size_t
+    Size();
 
-    bool Empty();
+    bool
+    Empty();
 
-    void SetCapacity(const size_t capacity);
+    void
+    SetCapacity(const size_t capacity);
 
  private:
     mutable std::mutex mtx;
@@ -59,8 +66,7 @@ class BlockingQueue {
     size_t capacity_ = 32;
 };
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus
 
 #include "./BlockingQueue.inl"

@@ -22,22 +22,19 @@
 #include <cstddef>
 #include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class IDGenerator {
  public:
-    virtual
-    IDNumber GetNextIDNumber() = 0;
+    virtual IDNumber
+    GetNextIDNumber() = 0;
 
     virtual void
-    GetNextIDNumbers(size_t n, IDNumbers &ids) = 0;
+    GetNextIDNumbers(size_t n, IDNumbers& ids) = 0;
 
-    virtual
-    ~IDGenerator() = 0;
-}; // IDGenerator
-
+    virtual ~IDGenerator() = 0;
+};  // IDGenerator
 
 class SimpleIDGenerator : public IDGenerator {
  public:
@@ -47,16 +44,14 @@ class SimpleIDGenerator : public IDGenerator {
     GetNextIDNumber() override;
 
     void
-    GetNextIDNumbers(size_t n, IDNumbers &ids) override;
+    GetNextIDNumbers(size_t n, IDNumbers& ids) override;
 
  private:
     void
-    NextIDNumbers(size_t n, IDNumbers &ids);
+    NextIDNumbers(size_t n, IDNumbers& ids);
 
     static constexpr size_t MAX_IDS_PER_MICRO = 1000;
-}; // SimpleIDGenerator
+};  // SimpleIDGenerator
 
-
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

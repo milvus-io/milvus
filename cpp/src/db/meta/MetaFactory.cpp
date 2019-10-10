@@ -16,33 +16,31 @@
 // under the License.
 
 #include "db/meta/MetaFactory.h"
-#include "SqliteMetaImpl.h"
 #include "MySQLMetaImpl.h"
-#include "utils/Log.h"
-#include "utils/Exception.h"
+#include "SqliteMetaImpl.h"
 #include "db/Utils.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
 
 #include <stdlib.h>
-#include <time.h>
-#include <sstream>
-#include <cstdlib>
-#include <string>
 #include <string.h>
+#include <time.h>
+#include <cstdlib>
 #include <memory>
+#include <sstream>
+#include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
 DBMetaOptions
-MetaFactory::BuildOption(const std::string &path) {
+MetaFactory::BuildOption(const std::string& path) {
     auto p = path;
     if (p == "") {
         srand(time(nullptr));
         std::stringstream ss;
-        uint32_t rd = 0;
-        rand_r(&rd);
-        ss << "/tmp/" << rd;
+        uint32_t seed = 1;
+        ss << "/tmp/" << rand_r(&seed);
         p = ss.str();
     }
 
@@ -52,7 +50,7 @@ MetaFactory::BuildOption(const std::string &path) {
 }
 
 meta::MetaPtr
-MetaFactory::Build(const DBMetaOptions &metaOptions, const int &mode) {
+MetaFactory::Build(const DBMetaOptions& metaOptions, const int& mode) {
     std::string uri = metaOptions.backend_uri_;
 
     utils::MetaUriInfo uri_info;
@@ -74,6 +72,5 @@ MetaFactory::Build(const DBMetaOptions &metaOptions, const int &mode) {
     }
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

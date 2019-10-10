@@ -16,38 +16,38 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "Job.h"
 #include "db/meta/MetaTypes.h"
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 using engine::meta::TableFileSchemaPtr;
 
 using Id2IndexMap = std::unordered_map<size_t, TableFileSchemaPtr>;
-using Id2DistanceMap = std::vector<std::pair<int64_t, double>>;
-using ResultSet = std::vector<Id2DistanceMap>;
+using IdDistPair = std::pair<int64_t, double>;
+using Id2DistVec = std::vector<IdDistPair>;
+using ResultSet = std::vector<Id2DistVec>;
 
 class SearchJob : public Job {
  public:
-    SearchJob(JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe, const float *vectors);
+    SearchJob(JobId id, uint64_t topk, uint64_t nq, uint64_t nprobe, const float* vectors);
 
  public:
     bool
-    AddIndexFile(const TableFileSchemaPtr &index_file);
+    AddIndexFile(const TableFileSchemaPtr& index_file);
 
     void
     WaitResult();
@@ -55,10 +55,10 @@ class SearchJob : public Job {
     void
     SearchDone(size_t index_id);
 
-    ResultSet &
+    ResultSet&
     GetResult();
 
-    Status &
+    Status&
     GetStatus();
 
  public:
@@ -77,12 +77,12 @@ class SearchJob : public Job {
         return nprobe_;
     }
 
-    const float *
+    const float*
     vectors() const {
         return vectors_;
     }
 
-    Id2IndexMap &
+    Id2IndexMap&
     index_files() {
         return index_files_;
     }
@@ -92,7 +92,7 @@ class SearchJob : public Job {
     uint64_t nq_ = 0;
     uint64_t nprobe_ = 0;
     // TODO: smart pointer
-    const float *vectors_ = nullptr;
+    const float* vectors_ = nullptr;
 
     Id2IndexMap index_files_;
     // TODO: column-base better ?
@@ -105,6 +105,5 @@ class SearchJob : public Job {
 
 using SearchJobPtr = std::shared_ptr<SearchJob>;
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus
