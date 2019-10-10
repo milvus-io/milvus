@@ -100,15 +100,19 @@ IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
 void
 IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
     FaissBaseIndex::LoadImpl(index_binary);  // load on cpu
+    auto* ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
+    ivf_index->backup_quantizer();
 }
 
 void
 IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels,
                          const Config& cfg) {
-    if (gpu_mode) {
+    if (gpu_mode == 2) {
         GPUIVF::search_impl(n, data, k, distances, labels, cfg);
-    } else {
+    } else if (gpu_mode == 1) {
         ResScope rs(res_, gpu_id_);
+        IVF::search_impl(n, data, k, distances, labels, cfg);
+    } else if (gpu_mode == 0) {
         IVF::search_impl(n, data, k, distances, labels, cfg);
     }
 }
@@ -137,8 +141,12 @@ IVFSQHybrid::LoadQuantizer(const Config& conf) {
         delete gpu_index;
 
         auto q = std::make_shared<FaissIVFQuantizer>();
-        q->quantizer = index_composition->quantizer;
+
+        auto& q_ptr = index_composition->quantizer;
+        q->size = q_ptr->d * q_ptr->getNumVecs() * sizeof(float);
+        q->quantizer = q_ptr;
         res_ = res;
+        gpu_mode = 1;
         return q;
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
@@ -156,7 +164,7 @@ IVFSQHybrid::SetQuantizer(const QuantizerPtr& q) {
 
     faiss::gpu::GpuIndexFlat* is_gpu_flat_index = dynamic_cast<faiss::gpu::GpuIndexFlat*>(ivf_index->quantizer);
     if (is_gpu_flat_index == nullptr) {
-        delete ivf_index->quantizer;
+//        delete ivf_index->quantizer;
         ivf_index->quantizer = ivf_quantizer->quantizer;
     }
 }
@@ -199,10 +207,18 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
 
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id_, index_composition, &option);
         index_.reset(gpu_index);
-        gpu_mode = true;  // all in gpu
+        gpu_mode = 2;  // all in gpu
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }
+}
+
+FaissIVFQuantizer::~FaissIVFQuantizer() {
+    if (quantizer != nullptr) {
+        delete quantizer;
+        quantizer = nullptr;
+    }
+    // else do nothing
 }
 
 }  // namespace knowhere

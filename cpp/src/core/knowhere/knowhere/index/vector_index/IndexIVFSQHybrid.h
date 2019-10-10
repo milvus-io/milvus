@@ -27,23 +27,25 @@ namespace knowhere {
 
 struct FaissIVFQuantizer : public Quantizer {
     faiss::gpu::GpuIndexFlat* quantizer = nullptr;
+
+    ~FaissIVFQuantizer() override;
 };
 using FaissIVFQuantizerPtr = std::shared_ptr<FaissIVFQuantizer>;
 
 class IVFSQHybrid : public GPUIVFSQ {
  public:
     explicit IVFSQHybrid(const int& device_id) : GPUIVFSQ(device_id) {
-        gpu_mode = false;
+        gpu_mode = 0;
     }
 
     explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index) : GPUIVFSQ(-1) {
         index_ = index;
-        gpu_mode = false;
+        gpu_mode = 0;
     }
 
     explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
         : GPUIVFSQ(index, device_id, resource) {
-        gpu_mode = true;
+        gpu_mode = 2;
     }
 
  public:
@@ -76,7 +78,7 @@ class IVFSQHybrid : public GPUIVFSQ {
     LoadImpl(const BinarySet& index_binary) override;
 
  protected:
-    bool gpu_mode = false;
+    int64_t gpu_mode = 0; // 0,1,2
 };
 
 }  // namespace knowhere

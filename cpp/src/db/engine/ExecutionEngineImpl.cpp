@@ -33,9 +33,30 @@
 
 #include <stdexcept>
 #include <utility>
+#include <src/scheduler/Utils.h>
 
 namespace milvus {
 namespace engine {
+
+class CachedQuantizer : public cache::DataObj {
+ public:
+    explicit
+    CachedQuantizer(knowhere::QuantizerPtr data)
+        : data_(std::move(data)) {}
+
+    knowhere::QuantizerPtr
+    Data() {
+        return data_;
+    }
+
+    int64_t
+    Size() override {
+        return data_->size;
+    }
+
+ private:
+    knowhere::QuantizerPtr data_;
+};
 
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
                                          MetricType metric_type, int32_t nlist)
@@ -83,6 +104,10 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = GetVecIndexFactory(IndexType::NSG_MIX);
             break;
         }
+        case EngineType::FAISS_IVFSQ8H: {
+            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
+            break;
+        }
         default: {
             ENGINE_LOG_ERROR << "Invalid engine type";
             return nullptr;
@@ -92,57 +117,63 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
 }
 
 void
-ExecutionEngineImpl::HybridLoad() {
-    //    if (index_type_ != EngineType::FAISS_IVFSQ8Hybrid) {
-    //        return;
-    //    }
-    //
-    //    const std::string key = location_ + ".quantizer";
-    //    std::vector<uint64_t> gpus;
-    //
-    //    // cache hit
-    //    {
-    //        int64_t selected = -1;
-    //        void* quantizer = nullptr;
-    //        for (auto& gpu : gpus) {
-    //            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-    //            if (auto quan = cache->GetIndex(key)) {
-    //                selected = gpu;
-    //                quantizer = quan;
-    //            }
-    //        }
-    //
-    //        if (selected != -1) {
-    //            // set quantizer into index;
-    //            return;
-    //        }
-    //    }
-    //
-    //    // cache miss
-    //    {
-    //        std::vector<int64_t> all_free_mem;
-    //        for (auto& gpu : gpus) {
-    //            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-    //            auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
-    //            all_free_mem.push_back(free_mem);
-    //        }
-    //
-    //        auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
-    //        auto best = std::distance(all_free_mem.begin(), max_e);
-    //
-    //        // load to best device;
-    //        // cache quantizer
-    //    }
-    //
-    //    // if index_type == Hybrid
-    //
-    //    // 1. quantizer in which gpu
-    //
-    //    // 2.1 which gpu cache best
-    //
-    //    // 2.2 load to that gpu cache
-    //
-    //    // set quantizer into index
+ExecutionEngineImpl::HybridLoad() const {
+    if (index_type_ != EngineType::FAISS_IVFSQ8H) {
+        return;
+    }
+
+    const std::string key = location_ + ".quantizer";
+    std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+
+    // cache hit
+    {
+        const int64_t NOT_FOUND = -1;
+        int64_t device_id = NOT_FOUND;
+        knowhere::QuantizerPtr quantizer = nullptr;
+
+        for (auto& gpu : gpus) {
+            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+            if (auto cached_quantizer = cache->GetIndex(key)) {
+                device_id = gpu;
+                quantizer = std::static_pointer_cast<CachedQuantizer>(cached_quantizer)->Data();
+            }
+        }
+
+        if (device_id != NOT_FOUND) {
+            index_->SetQuantizer(quantizer);
+            return;
+        }
+    }
+
+    // cache miss
+    {
+        std::vector<int64_t> all_free_mem;
+        for (auto& gpu : gpus) {
+            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+            auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
+            all_free_mem.push_back(free_mem);
+        }
+
+        auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
+        auto best_index = std::distance(all_free_mem.begin(), max_e);
+        auto best_device_id = gpus[best_index];
+
+        auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
+        quantizer_conf->mode = 1;
+        quantizer_conf->gpu_id = best_device_id;
+        auto quantizer = index_->LoadQuantizer(quantizer_conf);
+        index_->SetQuantizer(quantizer);
+        auto cache_quantizer = std::make_shared<CachedQuantizer>(quantizer);
+        cache::GpuCacheMgr::GetInstance(best_device_id)->InsertItem(key, cache_quantizer);
+    }
+}
+
+void
+ExecutionEngineImpl::HybridUnset() const {
+    if (index_type_ != EngineType::FAISS_IVFSQ8H) {
+        return;
+    }
+    index_->UnsetQuantizer();
 }
 
 Status
@@ -375,7 +406,12 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
 
+    HybridLoad();
+
     auto status = index_->Search(n, data, distances, labels, conf);
+
+    HybridUnset();
+
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Search error";
     }

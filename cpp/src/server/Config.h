@@ -221,11 +221,11 @@ class Config {
 
     /* cache config */
     Status
-    GetCacheConfigCpuCacheCapacity(int32_t& value);
+    GetCacheConfigCpuCacheCapacity(int64_t& value);
     Status
     GetCacheConfigCpuCacheThreshold(float& value);
     Status
-    GetCacheConfigGpuCacheCapacity(int32_t& value);
+    GetCacheConfigGpuCacheCapacity(int64_t& value);
     Status
     GetCacheConfigGpuCacheThreshold(float& value);
     Status
