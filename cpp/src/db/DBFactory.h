@@ -20,20 +20,20 @@
 #include "DB.h"
 #include "Options.h"
 
-#include <string>
 #include <memory>
+#include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
 class DBFactory {
  public:
-    static DBOptions BuildOption();
+    static DBOptions
+    BuildOption();
 
-    static DBPtr Build(const DBOptions &options);
+    static DBPtr
+    Build(const DBOptions& options);
 };
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

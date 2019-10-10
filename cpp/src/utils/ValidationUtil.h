@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "db/meta/MetaTypes.h"
@@ -23,7 +22,6 @@
 
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -33,7 +31,7 @@ class ValidationUtil {
 
  public:
     static Status
-    ValidateTableName(const std::string &table_name);
+    ValidateTableName(const std::string& table_name);
 
     static Status
     ValidateTableDimension(int64_t dimension);
@@ -51,33 +49,32 @@ class ValidationUtil {
     ValidateTableIndexMetricType(int32_t metric_type);
 
     static Status
-    ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema &table_schema);
+    ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema);
 
     static Status
-    ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema &table_schema);
+    ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema);
 
     static Status
     ValidateGpuIndex(uint32_t gpu_index);
 
     static Status
-    GetGpuMemory(uint32_t gpu_index, size_t &memory);
+    GetGpuMemory(uint32_t gpu_index, size_t& memory);
 
     static Status
-    ValidateIpAddress(const std::string &ip_address);
+    ValidateIpAddress(const std::string& ip_address);
 
     static Status
-    ValidateStringIsNumber(const std::string &str);
+    ValidateStringIsNumber(const std::string& str);
 
     static Status
-    ValidateStringIsBool(const std::string &str);
+    ValidateStringIsBool(const std::string& str);
 
     static Status
-    ValidateStringIsFloat(const std::string &str);
+    ValidateStringIsFloat(const std::string& str);
 
     static Status
-    ValidateDbURI(const std::string &uri);
+    ValidateDbURI(const std::string& uri);
 };
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus

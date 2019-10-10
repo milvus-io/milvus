@@ -15,51 +15,53 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <cstring>
 
-#include "FaissIO.h"
+#include "knowhere/index/vector_index/helpers/FaissIO.h"
 
-namespace zilliz {
 namespace knowhere {
 
 // TODO(linxj): Get From Config File
 static size_t magic_num = 2;
-size_t MemoryIOWriter::operator()(const void *ptr, size_t size, size_t nitems) {
+
+size_t
+MemoryIOWriter::operator()(const void* ptr, size_t size, size_t nitems) {
     auto total_need = size * nitems + rp;
 
-    if (!data_) { // data == nullptr
+    if (!data_) {  // data == nullptr
         total = total_need * magic_num;
         rp = size * nitems;
         data_ = new uint8_t[total];
-        memcpy((void *) (data_), ptr, rp);
+        memcpy((void*)(data_), ptr, rp);
     }
 
     if (total_need > total) {
         total = total_need * magic_num;
         auto new_data = new uint8_t[total];
-        memcpy((void *) new_data, (void *) data_, rp);
+        memcpy((void*)new_data, (void*)data_, rp);
         delete data_;
         data_ = new_data;
 
-        memcpy((void *) (data_ + rp), ptr, size * nitems);
+        memcpy((void*)(data_ + rp), ptr, size * nitems);
         rp = total_need;
     } else {
-        memcpy((void *) (data_ + rp), ptr, size * nitems);
+        memcpy((void*)(data_ + rp), ptr, size * nitems);
         rp = total_need;
     }
 
     return nitems;
 }
 
-size_t MemoryIOReader::operator()(void *ptr, size_t size, size_t nitems) {
-    if (rp >= total) return 0;
+size_t
+MemoryIOReader::operator()(void* ptr, size_t size, size_t nitems) {
+    if (rp >= total)
+        return 0;
     size_t nremain = (total - rp) / size;
-    if (nremain < nitems) nitems = nremain;
-    memcpy(ptr, (void *) (data_ + rp), size * nitems);
+    if (nremain < nitems)
+        nitems = nremain;
+    memcpy(ptr, (void*)(data_ + rp), size * nitems);
     rp += size * nitems;
     return nitems;
 }
 
-} // knowhere
-} // zilliz
+}  // namespace knowhere

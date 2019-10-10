@@ -15,29 +15,33 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "metrics/SystemInfo.h"
+#include "utils/Log.h"
 
+#include <dirent.h>
+#include <nvml.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <iostream>
 #include <fstream>
-#include <nvml.h>
+#include <iostream>
 #include <string>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
 void
 SystemInfo::Init() {
-    if (initialized_) return;
+    if (initialized_) {
+        return;
+    }
 
     initialized_ = true;
 
     // initialize CPU information
-    FILE *file;
+    FILE* file;
     struct tms time_sample;
     char line[128];
     last_cpu_ = times(&time_sample);
@@ -45,8 +49,10 @@ SystemInfo::Init() {
     last_user_cpu_ = time_sample.tms_utime;
     file = fopen("/proc/cpuinfo", "r");
     num_processors_ = 0;
-    while (fgets(line, 128, file) != NULL) {
-        if (strncmp(line, "processor", 9) == 0) num_processors_++;
+    while (fgets(line, 128, file) != nullptr) {
+        if (strncmp(line, "processor", 9) == 0) {
+            num_processors_++;
+        }
         if (strncmp(line, "physical", 8) == 0) {
             num_physical_processors_ = ParseLine(line);
         }
@@ -54,20 +60,20 @@ SystemInfo::Init() {
     total_ram_ = GetPhysicalMemory();
     fclose(file);
 
-    //initialize GPU information
+    // initialize GPU information
     nvmlReturn_t nvmlresult;
     nvmlresult = nvmlInit();
     if (NVML_SUCCESS != nvmlresult) {
-        printf("System information initilization failed");
+        SERVER_LOG_ERROR << "System information initilization failed";
         return;
     }
     nvmlresult = nvmlDeviceGetCount(&num_device_);
     if (NVML_SUCCESS != nvmlresult) {
-        printf("Unable to get devidce number");
+        SERVER_LOG_ERROR << "Unable to get devidce number";
         return;
     }
 
-    //initialize network traffic information
+    // initialize network traffic information
     std::pair<uint64_t, uint64_t> in_and_out_octets = Octets();
     in_octets_ = in_and_out_octets.first;
     out_octets_ = in_and_out_octets.second;
@@ -75,11 +81,13 @@ SystemInfo::Init() {
 }
 
 uint64_t
-SystemInfo::ParseLine(char *line) {
+SystemInfo::ParseLine(char* line) {
     // This assumes that a digit will be found and the line ends in " Kb".
     int i = strlen(line);
-    const char *p = line;
-    while (*p < '0' || *p > '9') p++;
+    const char* p = line;
+    while (*p < '0' || *p > '9') {
+        p++;
+    }
     line[i - 3] = '\0';
     i = atoi(p);
     return static_cast<uint64_t>(i);
@@ -90,21 +98,21 @@ SystemInfo::GetPhysicalMemory() {
     struct sysinfo memInfo;
     sysinfo(&memInfo);
     uint64_t totalPhysMem = memInfo.totalram;
-    //Multiply in next statement to avoid int overflow on right hand side...
+    // Multiply in next statement to avoid int overflow on right hand side...
     totalPhysMem *= memInfo.mem_unit;
     return totalPhysMem;
 }
 
 uint64_t
 SystemInfo::GetProcessUsedMemory() {
-    //Note: this value is in KB!
-    FILE *file = fopen("/proc/self/status", "r");
+    // Note: this value is in KB!
+    FILE* file = fopen("/proc/self/status", "r");
     constexpr uint64_t line_length = 128;
     uint64_t result = -1;
     constexpr uint64_t KB_SIZE = 1024;
     char line[line_length];
 
-    while (fgets(line, line_length, file) != NULL) {
+    while (fgets(line, line_length, file) != nullptr) {
         if (strncmp(line, "VmRSS:", 6) == 0) {
             result = ParseLine(line);
             break;
@@ -117,8 +125,12 @@ SystemInfo::GetProcessUsedMemory() {
 
 double
 SystemInfo::MemoryPercent() {
-    if (!initialized_) Init();
-    return (double) (GetProcessUsedMemory() * 100) / (double) total_ram_;
+    if (!initialized_) {
+        Init();
+    }
+
+    double mem_used = static_cast<double>(GetProcessUsedMemory() * 100);
+    return mem_used / static_cast<double>(total_ram_);
 }
 
 std::vector<double>
@@ -139,11 +151,11 @@ SystemInfo::CPUCorePercent() {
 }
 
 std::vector<uint64_t>
-SystemInfo::getTotalCpuTime(std::vector<uint64_t> &work_time_array) {
+SystemInfo::getTotalCpuTime(std::vector<uint64_t>& work_time_array) {
     std::vector<uint64_t> total_time_array;
-    FILE *file = fopen("/proc/stat", "r");
+    FILE* file = fopen("/proc/stat", "r");
     if (file == NULL) {
-        perror("Could not open stat file");
+        SERVER_LOG_ERROR << "Could not open stat file";
         return total_time_array;
     }
 
@@ -152,16 +164,15 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t> &work_time_array) {
 
     for (int i = 0; i < num_processors_; i++) {
         char buffer[1024];
-        char *ret = fgets(buffer, sizeof(buffer) - 1, file);
+        char* ret = fgets(buffer, sizeof(buffer) - 1, file);
         if (ret == NULL) {
-            perror("Could not read stat file");
+            SERVER_LOG_ERROR << "Could not read stat file";
             fclose(file);
             return total_time_array;
         }
 
-        sscanf(buffer,
-               "cpu  %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu",
-               &user, &nice, &system, &idle, &iowait, &irq, &softirq, &steal, &guest, &guestnice);
+        sscanf(buffer, "cpu  %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu %16lu", &user, &nice, &system, &idle,
+               &iowait, &irq, &softirq, &steal, &guest, &guestnice);
 
         work_time_array.push_back(user + nice + system);
         total_time_array.push_back(user + nice + system + idle + iowait + irq + softirq + steal);
@@ -173,19 +184,19 @@ SystemInfo::getTotalCpuTime(std::vector<uint64_t> &work_time_array) {
 
 double
 SystemInfo::CPUPercent() {
-    if (!initialized_) Init();
+    if (!initialized_) {
+        Init();
+    }
     struct tms time_sample;
     clock_t now;
     double percent;
 
     now = times(&time_sample);
-    if (now <= last_cpu_ || time_sample.tms_stime < last_sys_cpu_ ||
-        time_sample.tms_utime < last_user_cpu_) {
-        //Overflow detection. Just skip this value.
+    if (now <= last_cpu_ || time_sample.tms_stime < last_sys_cpu_ || time_sample.tms_utime < last_user_cpu_) {
+        // Overflow detection. Just skip this value.
         percent = -1.0;
     } else {
-        percent = (time_sample.tms_stime - last_sys_cpu_) +
-            (time_sample.tms_utime - last_user_cpu_);
+        percent = (time_sample.tms_stime - last_sys_cpu_) + (time_sample.tms_utime - last_user_cpu_);
         percent /= (now - last_cpu_);
         percent *= 100;
     }
@@ -199,7 +210,8 @@ SystemInfo::CPUPercent() {
 std::vector<uint64_t>
 SystemInfo::GPUMemoryTotal() {
     // get GPU usage percent
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
     std::vector<uint64_t> result;
     nvmlMemory_t nvmlMemory;
     for (int i = 0; i < num_device_; ++i) {
@@ -213,7 +225,8 @@ SystemInfo::GPUMemoryTotal() {
 
 std::vector<uint64_t>
 SystemInfo::GPUTemperature() {
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
     std::vector<uint64_t> result;
     for (int i = 0; i < num_device_; i++) {
         nvmlDevice_t device;
@@ -228,24 +241,46 @@ SystemInfo::GPUTemperature() {
 std::vector<float>
 SystemInfo::CPUTemperature() {
     std::vector<float> result;
-    for (int i = 0; i <= num_physical_processors_; ++i) {
-        std::string path = "/sys/class/thermal/thermal_zone" + std::to_string(i) + "/temp";
-        FILE *file = fopen(path.data(), "r");
-        if (file == NULL) {
-            perror("Could not open thermal file");
-            return result;
-        }
-        float temp;
-        fscanf(file, "%f", &temp);
-        result.push_back(temp / 1000);
-        fclose(file);
+    std::string path = "/sys/class/hwmon/";
+
+    DIR* dir = NULL;
+    dir = opendir(path.c_str());
+    if (!dir) {
+        SERVER_LOG_ERROR << "Could not open hwmon directory";
+        return result;
     }
+
+    struct dirent* ptr = NULL;
+    while ((ptr = readdir(dir)) != NULL) {
+        std::string filename(path);
+        filename.append(ptr->d_name);
+
+        char buf[100];
+        if (readlink(filename.c_str(), buf, 100) != -1) {
+            std::string m(buf);
+            if (m.find("coretemp") != std::string::npos) {
+                std::string object = filename;
+                object += "/temp1_input";
+                FILE* file = fopen(object.c_str(), "r");
+                if (file == nullptr) {
+                    SERVER_LOG_ERROR << "Could not open temperature file";
+                    return result;
+                }
+                float temp;
+                fscanf(file, "%f", &temp);
+                result.push_back(temp / 1000);
+            }
+        }
+    }
+    closedir(dir);
+    return result;
 }
 
 std::vector<uint64_t>
 SystemInfo::GPUMemoryUsed() {
     // get GPU memory used
-    if (!initialized_) Init();
+    if (!initialized_)
+        Init();
 
     std::vector<uint64_t> result;
     nvmlMemory_t nvmlMemory;
@@ -261,12 +296,12 @@ SystemInfo::GPUMemoryUsed() {
 std::pair<uint64_t, uint64_t>
 SystemInfo::Octets() {
     pid_t pid = getpid();
-//    const std::string filename = "/proc/"+std::to_string(pid)+"/net/netstat";
+    //    const std::string filename = "/proc/"+std::to_string(pid)+"/net/netstat";
     const std::string filename = "/proc/net/netstat";
     std::ifstream file(filename);
     std::string lastline = "";
     std::string line = "";
-    while (file) {
+    while (true) {
         getline(file, line);
         if (file.fail()) {
             break;
@@ -293,6 +328,5 @@ SystemInfo::Octets() {
     return res;
 }
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus

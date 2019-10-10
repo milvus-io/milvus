@@ -15,31 +15,27 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "MetricBase.h"
 #include "db/meta/MetaTypes.h"
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
 #define METRICS_NOW_TIME std::chrono::system_clock::now()
-#define METRICS_MICROSECONDS(a, b) (std::chrono::duration_cast<std::chrono::microseconds> (b-a)).count();
+#define METRICS_MICROSECONDS(a, b) (std::chrono::duration_cast<std::chrono::microseconds>(b - a)).count();
 
-enum class MetricCollectorType {
-    INVALID,
-    PROMETHEUS,
-    ZABBIX
-};
+enum class MetricCollectorType { INVALID, PROMETHEUS, ZABBIX };
 
 class Metrics {
  public:
-    static MetricsBase &GetInstance();
+    static MetricsBase&
+    GetInstance();
 
  private:
-    static MetricsBase &CreateMetricsCollector();
+    static MetricsBase&
+    CreateMetricsCollector();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectMetricsBase {
@@ -50,7 +46,8 @@ class CollectMetricsBase {
 
     virtual ~CollectMetricsBase() = default;
 
-    double TimeFromBegine() {
+    double
+    TimeFromBegine() {
         auto end_time = METRICS_NOW_TIME;
         return METRICS_MICROSECONDS(start_time_, end_time);
     }
@@ -63,7 +60,7 @@ class CollectMetricsBase {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectInsertMetrics : CollectMetricsBase {
  public:
-    CollectInsertMetrics(size_t n, Status &status) : n_(n), status_(status) {
+    CollectInsertMetrics(size_t n, Status& status) : n_(n), status_(status) {
     }
 
     ~CollectInsertMetrics() {
@@ -87,7 +84,7 @@ class CollectInsertMetrics : CollectMetricsBase {
 
  private:
     size_t n_;
-    Status &status_;
+    Status& status_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -162,7 +159,7 @@ class CollectSerializeMetrics : CollectMetricsBase {
 
     ~CollectSerializeMetrics() {
         auto total_time = TimeFromBegine();
-        server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double) size_ / total_time);
+        server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double)size_ / total_time);
     }
 
  private:
@@ -177,8 +174,7 @@ class CollectAddMetrics : CollectMetricsBase {
 
     ~CollectAddMetrics() {
         auto total_time = TimeFromBegine();
-        server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_),
-                                                                   static_cast<int>(dimension_),
+        server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_), static_cast<int>(dimension_),
                                                                    total_time);
     }
 
@@ -256,6 +252,5 @@ class MetricCollector : CollectMetricsBase {
     }
 };
 
-} // namespace server
-} // namespace milvus
-} // namespace zilliz
+}  // namespace server
+}  // namespace milvus

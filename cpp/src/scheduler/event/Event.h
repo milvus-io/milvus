@@ -18,28 +18,19 @@
 #pragma once
 
 #include <memory>
-#include <utility>
 #include <string>
+#include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-enum class EventType {
-    START_UP,
-    LOAD_COMPLETED,
-    FINISH_TASK,
-    TASK_TABLE_UPDATED
-};
+enum class EventType { START_UP, LOAD_COMPLETED, FINISH_TASK, TASK_TABLE_UPDATED };
 
 class Resource;
 
 class Event {
  public:
-    explicit
-    Event(EventType type, std::weak_ptr<Resource> resource)
-        : type_(type),
-          resource_(std::move(resource)) {
+    explicit Event(EventType type, std::weak_ptr<Resource> resource) : type_(type), resource_(std::move(resource)) {
     }
 
     inline EventType
@@ -50,7 +41,8 @@ class Event {
     virtual std::string
     Dump() const = 0;
 
-    friend std::ostream &operator<<(std::ostream &out, const Event &event);
+    friend std::ostream&
+    operator<<(std::ostream& out, const Event& event);
 
  public:
     EventType type_;
@@ -59,6 +51,5 @@ class Event {
 
 using EventPtr = std::shared_ptr<Event>;
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

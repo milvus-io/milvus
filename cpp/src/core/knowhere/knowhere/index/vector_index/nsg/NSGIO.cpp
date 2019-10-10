@@ -15,31 +15,30 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <cstring>
 
-#include "NSGIO.h"
+#include "knowhere/index/vector_index/nsg/NSGIO.h"
 
-
-namespace zilliz {
 namespace knowhere {
 namespace algo {
 
-void write_index(NsgIndex *index, MemoryIOWriter &writer) {
+void
+write_index(NsgIndex* index, MemoryIOWriter& writer) {
     writer(&index->ntotal, sizeof(index->ntotal), 1);
     writer(&index->dimension, sizeof(index->dimension), 1);
     writer(&index->navigation_point, sizeof(index->navigation_point), 1);
     writer(index->ori_data_, sizeof(float) * index->ntotal * index->dimension, 1);
-    writer(index->ids_, sizeof(long) * index->ntotal, 1);
+    writer(index->ids_, sizeof(int64_t) * index->ntotal, 1);
 
     for (unsigned i = 0; i < index->ntotal; ++i) {
-        auto neighbor_num = (node_t) index->nsg[i].size();
+        auto neighbor_num = (node_t)index->nsg[i].size();
         writer(&neighbor_num, sizeof(node_t), 1);
         writer(index->nsg[i].data(), neighbor_num * sizeof(node_t), 1);
     }
 }
 
-NsgIndex *read_index(MemoryIOReader &reader) {
+NsgIndex*
+read_index(MemoryIOReader& reader) {
     size_t ntotal;
     size_t dimension;
     reader(&ntotal, sizeof(size_t), 1);
@@ -48,9 +47,9 @@ NsgIndex *read_index(MemoryIOReader &reader) {
     reader(&index->navigation_point, sizeof(index->navigation_point), 1);
 
     index->ori_data_ = new float[index->ntotal * index->dimension];
-    index->ids_ = new long[index->ntotal];
+    index->ids_ = new int64_t[index->ntotal];
     reader(index->ori_data_, sizeof(float) * index->ntotal * index->dimension, 1);
-    reader(index->ids_, sizeof(long) * index->ntotal, 1);
+    reader(index->ids_, sizeof(int64_t) * index->ntotal, 1);
 
     index->nsg.reserve(index->ntotal);
     index->nsg.resize(index->ntotal);
@@ -66,6 +65,5 @@ NsgIndex *read_index(MemoryIOReader &reader) {
     return index;
 }
 
-}
-}
-}
+}  // namespace algo
+}  // namespace knowhere

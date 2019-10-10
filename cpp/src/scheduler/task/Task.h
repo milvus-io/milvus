@@ -17,15 +17,15 @@
 
 #pragma once
 
-#include "scheduler/tasklabel/TaskLabel.h"
-#include "scheduler/job/Job.h"
-#include "utils/Status.h"
 #include "Path.h"
+#include "scheduler/job/Job.h"
+#include "scheduler/tasklabel/TaskLabel.h"
+#include "utils/Status.h"
 
-#include <string>
 #include <memory>
+#include <string>
+#include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -39,6 +39,7 @@ enum class LoadType {
 enum class TaskType {
     SearchTask,
     DeleteTask,
+    BuildIndexTask,
     TestTask,
 };
 
@@ -49,7 +50,7 @@ using TaskPtr = std::shared_ptr<Task>;
 // TODO: re-design
 class Task {
  public:
-    explicit Task(TaskType type) : type_(type) {
+    explicit Task(TaskType type, TaskLabelPtr label) : type_(type), label_(std::move(label)) {
     }
 
     /*
@@ -63,7 +64,7 @@ class Task {
     /*
      * Transport path;
      */
-    inline Path &
+    inline Path&
     path() {
         return task_path_;
     }
@@ -71,7 +72,7 @@ class Task {
     /*
      * Getter and Setter;
      */
-    inline TaskLabelPtr &
+    inline TaskLabelPtr&
     label() {
         return label_;
     }
@@ -85,12 +86,10 @@ class Task {
 
  public:
     Path task_path_;
-//    std::vector<SearchContextPtr> search_contexts_;
     scheduler::JobWPtr job_;
     TaskType type_;
     TaskLabelPtr label_ = nullptr;
 };
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

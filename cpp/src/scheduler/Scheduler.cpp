@@ -16,20 +16,17 @@
 // under the License.
 
 #include "scheduler/Scheduler.h"
+#include "Algorithm.h"
+#include "action/Action.h"
 #include "cache/GpuCacheMgr.h"
 #include "event/LoadCompletedEvent.h"
-#include "action/Action.h"
-#include "Algorithm.h"
 
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-Scheduler::Scheduler(ResourceMgrWPtr res_mgr)
-    : running_(false),
-      res_mgr_(std::move(res_mgr)) {
+Scheduler::Scheduler(ResourceMgrWPtr res_mgr) : running_(false), res_mgr_(std::move(res_mgr)) {
     if (auto mgr = res_mgr_.lock()) {
         mgr->RegisterSubscriber(std::bind(&Scheduler::PostEvent, this, std::placeholders::_1));
     }
@@ -61,7 +58,7 @@ Scheduler::Stop() {
 }
 
 void
-Scheduler::PostEvent(const EventPtr &event) {
+Scheduler::PostEvent(const EventPtr& event) {
     {
         std::lock_guard<std::mutex> lock(event_mutex_);
         event_queue_.push(event);
@@ -78,9 +75,7 @@ void
 Scheduler::worker_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(event_mutex_);
-        event_cv_.wait(lock, [this] {
-            return !event_queue_.empty();
-        });
+        event_cv_.wait(lock, [this] { return !event_queue_.empty(); });
         auto event = event_queue_.front();
         event_queue_.pop();
         if (event == nullptr) {
@@ -92,14 +87,14 @@ Scheduler::worker_function() {
 }
 
 void
-Scheduler::Process(const EventPtr &event) {
+Scheduler::Process(const EventPtr& event) {
     auto process_event = event_register_.at(static_cast<int>(event->Type()));
     process_event(event);
 }
 
-// TODO: refactor the function
+// TODO(wxyu): refactor the function
 void
-Scheduler::OnLoadCompleted(const EventPtr &event) {
+Scheduler::OnLoadCompleted(const EventPtr& event) {
     auto load_completed_event = std::static_pointer_cast<LoadCompletedEvent>(event);
     if (auto resource = event->resource_.lock()) {
         resource->WakeupExecutor();
@@ -118,31 +113,28 @@ Scheduler::OnLoadCompleted(const EventPtr &event) {
                 Action::PushTaskToAllNeighbour(load_completed_event->task_table_item_->task, resource);
                 break;
             }
-            default: {
-                break;
-            }
+            default: { break; }
         }
     }
 }
 
 void
-Scheduler::OnStartUp(const EventPtr &event) {
+Scheduler::OnStartUp(const EventPtr& event) {
     if (auto resource = event->resource_.lock()) {
         resource->WakeupLoader();
     }
 }
 
 void
-Scheduler::OnFinishTask(const EventPtr &event) {
+Scheduler::OnFinishTask(const EventPtr& event) {
 }
 
 void
-Scheduler::OnTaskTableUpdated(const EventPtr &event) {
+Scheduler::OnTaskTableUpdated(const EventPtr& event) {
     if (auto resource = event->resource_.lock()) {
         resource->WakeupLoader();
     }
 }
 
-} // namespace scheduler
-} // namespace milvus
-} // namespace zilliz
+}  // namespace scheduler
+}  // namespace milvus

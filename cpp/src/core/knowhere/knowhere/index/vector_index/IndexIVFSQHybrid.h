@@ -15,27 +15,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-#include <memory>
 #include <faiss/index_io.h>
+#include <memory>
 
 #include "IndexGPUIVFSQ.h"
 #include "Quantizer.h"
 
-
-namespace zilliz {
 namespace knowhere {
 
 struct FaissIVFQuantizer : public Quantizer {
-    faiss::gpu::GpuIndexFlat *quantizer = nullptr;
+    faiss::gpu::GpuIndexFlat* quantizer = nullptr;
 };
 using FaissIVFQuantizerPtr = std::shared_ptr<FaissIVFQuantizer>;
 
 class IVFSQHybrid : public GPUIVFSQ {
  public:
-    explicit IVFSQHybrid(const int &device_id) : GPUIVFSQ(device_id) {
+    explicit IVFSQHybrid(const int& device_id) : GPUIVFSQ(device_id) {
         gpu_mode = false;
     }
 
@@ -44,14 +41,14 @@ class IVFSQHybrid : public GPUIVFSQ {
         gpu_mode = false;
     }
 
-    explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index, const int64_t &device_id, ResPtr &resource)
+    explicit IVFSQHybrid(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
         : GPUIVFSQ(index, device_id, resource) {
         gpu_mode = true;
     }
 
  public:
     QuantizerPtr
-    LoadQuantizer(const Config &conf);
+    LoadQuantizer(const Config& conf);
 
     void
     SetQuantizer(const QuantizerPtr& q);
@@ -60,31 +57,26 @@ class IVFSQHybrid : public GPUIVFSQ {
     UnsetQuantizer();
 
     void
-    LoadData(const knowhere::QuantizerPtr &q, const Config& conf);
+    LoadData(const knowhere::QuantizerPtr& q, const Config& conf);
 
     IndexModelPtr
-    Train(const DatasetPtr &dataset, const Config &config) override;
+    Train(const DatasetPtr& dataset, const Config& config) override;
 
     VectorIndexPtr
-    CopyGpuToCpu(const Config &config) override;
+    CopyGpuToCpu(const Config& config) override;
 
     VectorIndexPtr
-    CopyCpuToGpu(const int64_t &device_id, const Config &config) override;
+    CopyCpuToGpu(const int64_t& device_id, const Config& config) override;
 
  protected:
     void
-    search_impl(int64_t n,
-                const float *data,
-                int64_t k,
-                float *distances,
-                int64_t *labels,
-                const Config &cfg) override;
+    search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) override;
 
-    void LoadImpl(const BinarySet &index_binary) override;
+    void
+    LoadImpl(const BinarySet& index_binary) override;
 
  protected:
     bool gpu_mode = false;
 };
 
-}
-}
+}  // namespace knowhere

@@ -15,15 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include "cache/GpuCacheMgr.h"
-#include "utils/Log.h"
 #include "server/Config.h"
+#include "utils/Log.h"
 
 #include <sstream>
 #include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
@@ -35,31 +33,31 @@ constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
 }
 
 GpuCacheMgr::GpuCacheMgr() {
-    server::Config &config = server::Config::GetInstance();
+    server::Config& config = server::Config::GetInstance();
     Status s;
 
-    int32_t gpu_mem_cap;
-    s = config.GetCacheConfigGpuMemCapacity(gpu_mem_cap);
+    int32_t gpu_cache_cap;
+    s = config.GetCacheConfigGpuCacheCapacity(gpu_cache_cap);
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
     }
-    int32_t cap = gpu_mem_cap * G_BYTE;
+    int32_t cap = gpu_cache_cap * G_BYTE;
     cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
 
     float gpu_mem_threshold;
-    s = config.GetCacheConfigGpuMemThreshold(gpu_mem_threshold);
+    s = config.GetCacheConfigGpuCacheThreshold(gpu_mem_threshold);
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
     }
     if (gpu_mem_threshold > 0.0 && gpu_mem_threshold <= 1.0) {
         cache_->set_freemem_percent(gpu_mem_threshold);
     } else {
-        SERVER_LOG_ERROR << "Invalid gpu_mem_threshold: " << gpu_mem_threshold
-                         << ", by default set to " << cache_->freemem_percent();
+        SERVER_LOG_ERROR << "Invalid gpu_mem_threshold: " << gpu_mem_threshold << ", by default set to "
+                         << cache_->freemem_percent();
     }
 }
 
-GpuCacheMgr *
+GpuCacheMgr*
 GpuCacheMgr::GetInstance(uint64_t gpu_id) {
     if (instance_.find(gpu_id) == instance_.end()) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -74,7 +72,7 @@ GpuCacheMgr::GetInstance(uint64_t gpu_id) {
 }
 
 engine::VecIndexPtr
-GpuCacheMgr::GetIndex(const std::string &key) {
+GpuCacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
     if (obj != nullptr) {
         return obj->data();
@@ -83,6 +81,5 @@ GpuCacheMgr::GetIndex(const std::string &key) {
     return nullptr;
 }
 
-} // namespace cache
-} // namespace milvus
-} // namespace zilliz
+}  // namespace cache
+}  // namespace milvus
