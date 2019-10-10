@@ -161,7 +161,6 @@ ExecutionEngineImpl::Load(bool to_cache) {
 
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
-    std::cout << "copytogpu" << std::endl;
     auto index = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
