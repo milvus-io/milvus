@@ -15,8 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "BuildIndexJob.h"
+#include "scheduler/job/BuildIndexJob.h"
 #include "utils/Log.h"
+
+#include <utility>
 
 namespace milvus {
 namespace scheduler {
@@ -26,7 +28,7 @@ BuildIndexJob::BuildIndexJob(JobId id, engine::meta::MetaPtr meta_ptr, engine::D
 }
 
 bool
-BuildIndexJob::AddToIndexFiles(const engine::meta::TableFileSchemaPtr &to_index_file) {
+BuildIndexJob::AddToIndexFiles(const engine::meta::TableFileSchemaPtr& to_index_file) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (to_index_file == nullptr || to_index_files_.find(to_index_file->id_) != to_index_files_.end()) {
         return false;
