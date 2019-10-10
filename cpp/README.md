@@ -121,8 +121,14 @@ $ sudo apt-get install clang-tidy clang-format
 
 $ rm cmake_build/CMakeCache.txt
 ```  
+Check code style
 ```shell
 $ ./build.sh -l
+```
+To format the code
+```shell
+$ cd cmake_build
+$ make clang-format
 ```
 
 ##### Run unit test
