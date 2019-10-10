@@ -20,6 +20,7 @@
 #include "task/Task.h"
 
 #include <utility>
+#include <src/scheduler/optimizer/Optimizer.h>
 
 namespace milvus {
 namespace scheduler {
@@ -66,6 +67,9 @@ JobMgr::worker_function() {
         }
 
         auto tasks = build_task(job);
+
+        // TODO: optimizer all task
+
         // disk resources NEVER be empty.
         if (auto disk = res_mgr_->GetDiskResources()[0].lock()) {
             for (auto& task : tasks) {

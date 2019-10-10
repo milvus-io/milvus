@@ -161,7 +161,7 @@ Config::ValidateConfig() {
     }
 
     /* cache config */
-    int32_t cache_cpu_cache_capacity;
+    int64_t cache_cpu_cache_capacity;
     s = GetCacheConfigCpuCacheCapacity(cache_cpu_cache_capacity);
     if (!s.ok()) {
         return s;
@@ -173,7 +173,7 @@ Config::ValidateConfig() {
         return s;
     }
 
-    int32_t cache_gpu_cache_capacity;
+    int64_t cache_gpu_cache_capacity;
     s = GetCacheConfigGpuCacheCapacity(cache_gpu_cache_capacity);
     if (!s.ok()) {
         return s;
@@ -789,7 +789,7 @@ Config::GetMetricConfigPrometheusPort(std::string& value) {
 }
 
 Status
-Config::GetCacheConfigCpuCacheCapacity(int32_t& value) {
+Config::GetCacheConfigCpuCacheCapacity(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_CPU_CACHE_CAPACITY, CONFIG_CACHE_CPU_CACHE_CAPACITY_DEFAULT);
     Status s = CheckCacheConfigCpuCacheCapacity(str);
@@ -815,7 +815,7 @@ Config::GetCacheConfigCpuCacheThreshold(float& value) {
 }
 
 Status
-Config::GetCacheConfigGpuCacheCapacity(int32_t& value) {
+Config::GetCacheConfigGpuCacheCapacity(int64_t& value) {
     std::string str =
         GetConfigStr(CONFIG_CACHE, CONFIG_CACHE_GPU_CACHE_CAPACITY, CONFIG_CACHE_GPU_CACHE_CAPACITY_DEFAULT);
     Status s = CheckCacheConfigGpuCacheCapacity(str);

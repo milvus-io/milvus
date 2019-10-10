@@ -93,6 +93,10 @@ class IVFMixIndex : public VecIndexImpl {
 
 class IVFHybridIndex : public IVFMixIndex {
  public:
+    explicit IVFHybridIndex(std::shared_ptr<knowhere::VectorIndex> index, const IndexType& type)
+    : IVFMixIndex(std::move(index), type) {
+    }
+
     knowhere::QuantizerPtr
     LoadQuantizer(const Config& conf) override;
 

@@ -145,7 +145,7 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
         }
         case IndexType::FAISS_IVFSQ8_HYBRID: {
             index = std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
-            break;
+            return std::make_shared<IVFHybridIndex>(index, IndexType::FAISS_IVFSQ8_HYBRID);
         }
         case IndexType::NSG_MIX: {  // TODO(linxj): bug.
             index = std::make_shared<knowhere::NSG>(gpu_device);

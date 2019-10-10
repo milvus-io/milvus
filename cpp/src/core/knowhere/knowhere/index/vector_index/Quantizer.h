@@ -24,11 +24,13 @@ namespace knowhere {
 
 struct Quantizer {
     virtual ~Quantizer() = default;
+
+    int64_t size = -1;
 };
 using QuantizerPtr = std::shared_ptr<Quantizer>;
 
 struct QuantizerCfg : Cfg {
-    uint64_t mode = -1;  // 0: all data, 1: copy quantizer, 2: copy data
+    int64_t mode = -1;  // 0: all data, 1: copy quantizer, 2: copy data
 };
 using QuantizerConfig = std::shared_ptr<QuantizerCfg>;
 

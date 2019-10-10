@@ -32,7 +32,8 @@ enum class EngineType {
     FAISS_IVFFLAT,
     FAISS_IVFSQ8,
     NSG_MIX,
-    MAX_VALUE = NSG_MIX,
+    FAISS_IVFSQ8H,
+    MAX_VALUE = FAISS_IVFSQ8H,
 };
 
 enum class MetricType {
