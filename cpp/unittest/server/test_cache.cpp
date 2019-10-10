@@ -145,7 +145,7 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     for (uint64_t i = 0; i < item_count; i++) {
         //each vector is 1k byte, total size less than 1G
         ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000000);
-        ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
+        ms::cache::DataObjPtr data_obj = std::static_pointer_cast<ms::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
     ASSERT_LT(cpu_mgr->ItemCount(), g_num);
@@ -169,7 +169,7 @@ TEST(CacheTest, CPU_CACHE_TEST) {
 
         //each vector is 1k byte, total size less than 6G
         ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 6000000);
-        ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
+        ms::cache::DataObjPtr data_obj = std::static_pointer_cast<ms::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_6g", data_obj);
         ASSERT_TRUE(cpu_mgr->ItemExists("index_6g"));
     }
@@ -183,7 +183,7 @@ TEST(CacheTest, GPU_CACHE_TEST) {
     for (int i = 0; i < 20; i++) {
         //each vector is 1k byte
         ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000);
-        ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
+        ms::cache::DataObjPtr data_obj = std::static_pointer_cast<ms::cache::DataObj>(mock_index);
         gpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
 
@@ -196,8 +196,8 @@ TEST(CacheTest, GPU_CACHE_TEST) {
         // TODO(myh): use gpu index to mock
         //each vector is 1k byte, total size less than 2G
         ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2000000);
-        ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
-        std::cout << data_obj->size() << std::endl;
+        ms::cache::DataObjPtr data_obj = std::static_pointer_cast<ms::cache::DataObj>(mock_index);
+        std::cout << data_obj->Size() << std::endl;
         gpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
 
@@ -227,7 +227,7 @@ TEST(CacheTest, INVALID_TEST) {
         for (int i = 0; i < 20; i++) {
             //each vector is 1k byte
             ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2);
-            ms::cache::DataObjPtr data_obj = std::make_shared<ms::cache::DataObj>(mock_index);
+            ms::cache::DataObjPtr data_obj = std::static_pointer_cast<ms::cache::DataObj>(mock_index);
             mgr.InsertItem("index_" + std::to_string(i), data_obj);
         }
         ASSERT_EQ(mgr.GetItem("index_0"), nullptr);

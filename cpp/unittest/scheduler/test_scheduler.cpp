@@ -141,7 +141,7 @@ insert_dummy_index_into_gpu_cache(uint64_t device_id) {
     mock_index->ntotal_ = 1000;
     engine::VecIndexPtr index(mock_index);
 
-    cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index);
+    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index);
 
     cache::GpuCacheMgr::GetInstance(device_id)->InsertItem("location", obj);
 }
