@@ -23,63 +23,57 @@
 #include "db/engine/ExecutionEngineImpl.h"
 #include "db/utils.h"
 
-namespace {
-
-namespace ms = milvus;
-
-}
-
 TEST_F(EngineTest, FACTORY_TEST) {
     {
-        auto engine_ptr = ms::engine::EngineFactory::Build(
+        auto engine_ptr = milvus::engine::EngineFactory::Build(
                 512,
                 "/tmp/milvus_index_1",
-                ms::engine::EngineType::INVALID,
-                ms::engine::MetricType::IP,
+                milvus::engine::EngineType::INVALID,
+                milvus::engine::MetricType::IP,
                 1024);
 
         ASSERT_TRUE(engine_ptr == nullptr);
     }
 
     {
-        auto engine_ptr = ms::engine::EngineFactory::Build(
+        auto engine_ptr = milvus::engine::EngineFactory::Build(
                 512,
                 "/tmp/milvus_index_1",
-                ms::engine::EngineType::FAISS_IDMAP,
-                ms::engine::MetricType::IP,
+                milvus::engine::EngineType::FAISS_IDMAP,
+                milvus::engine::MetricType::IP,
                 1024);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
     {
-        auto engine_ptr = ms::engine::EngineFactory::Build(
+        auto engine_ptr = milvus::engine::EngineFactory::Build(
                 512,
                 "/tmp/milvus_index_1",
-                ms::engine::EngineType::FAISS_IVFFLAT,
-                ms::engine::MetricType::IP,
+                milvus::engine::EngineType::FAISS_IVFFLAT,
+                milvus::engine::MetricType::IP,
                 1024);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
     {
-        auto engine_ptr = ms::engine::EngineFactory::Build(
+        auto engine_ptr = milvus::engine::EngineFactory::Build(
                 512,
                 "/tmp/milvus_index_1",
-                ms::engine::EngineType::FAISS_IVFSQ8,
-                ms::engine::MetricType::IP,
+                milvus::engine::EngineType::FAISS_IVFSQ8,
+                milvus::engine::MetricType::IP,
                 1024);
 
         ASSERT_TRUE(engine_ptr != nullptr);
     }
 
     {
-        auto engine_ptr = ms::engine::EngineFactory::Build(
+        auto engine_ptr = milvus::engine::EngineFactory::Build(
                 512,
                 "/tmp/milvus_index_1",
-                ms::engine::EngineType::NSG_MIX,
-                ms::engine::MetricType::IP,
+                milvus::engine::EngineType::NSG_MIX,
+                milvus::engine::MetricType::IP,
                 1024);
 
         ASSERT_TRUE(engine_ptr != nullptr);
@@ -89,11 +83,11 @@ TEST_F(EngineTest, FACTORY_TEST) {
 TEST_F(EngineTest, ENGINE_IMPL_TEST) {
     uint16_t dimension = 64;
     std::string file_path = "/tmp/milvus_index_1";
-    auto engine_ptr = ms::engine::EngineFactory::Build(
+    auto engine_ptr = milvus::engine::EngineFactory::Build(
             dimension,
             file_path,
-            ms::engine::EngineType::FAISS_IVFFLAT,
-            ms::engine::MetricType::IP,
+            milvus::engine::EngineType::FAISS_IVFFLAT,
+            milvus::engine::MetricType::IP,
             1024);
 
     std::vector<float> data;
