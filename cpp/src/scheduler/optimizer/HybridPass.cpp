@@ -23,11 +23,14 @@ namespace scheduler {
 
 bool
 HybridPass::Run(const TaskPtr& task) {
-    // TODO: Index::IVFSQ8Hybrid, if nq < threshold set cpu, else set gpu
+    // TODO: future, Index::IVFSQ8H, if nq < threshold set cpu, else set gpu
     if (task->Type() != TaskType::SearchTask)
         return false;
     auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    // if (search_task->file_->engine_type_ == engine::EngineType::FAISS_IVFSQ8Hybrid)
+    if (search_task->file_->engine_type_ == (int)engine::EngineType::FAISS_IVFSQ8H) {
+        // TODO: make specified label
+        return true;
+    }
     return false;
 }
 

@@ -32,7 +32,7 @@ CpuCacheMgr::CpuCacheMgr() {
     server::Config& config = server::Config::GetInstance();
     Status s;
 
-    int32_t cpu_cache_cap;
+    int64_t cpu_cache_cap;
     s = config.GetCacheConfigCpuCacheCapacity(cpu_cache_cap);
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
