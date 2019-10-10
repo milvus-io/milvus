@@ -16,21 +16,20 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 #include "Job.h"
 #include "db/meta/Meta.h"
 #include "scheduler/Definition.h"
-
 
 namespace milvus {
 namespace scheduler {
@@ -46,21 +45,21 @@ class BuildIndexJob : public Job {
 
  public:
     bool
-    AddToIndexFiles(const TableFileSchemaPtr &to_index_file);
+    AddToIndexFiles(const TableFileSchemaPtr& to_index_file);
 
-    Status &
+    Status&
     WaitBuildIndexFinish();
 
     void
     BuildIndexDone(size_t to_index_id);
 
  public:
-    Status &
+    Status&
     GetStatus() {
         return status_;
     }
 
-    Id2ToIndexMap &
+    Id2ToIndexMap&
     to_index_files() {
         return to_index_files_;
     }

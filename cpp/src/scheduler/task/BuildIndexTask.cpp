@@ -15,18 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "BuildIndexTask.h"
+#include "scheduler/task/BuildIndexTask.h"
 #include "db/engine/EngineFactory.h"
 #include "metrics/Metrics.h"
 #include "scheduler/job/BuildIndexJob.h"
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
+#include <memory>
 #include <string>
 #include <thread>
 #include <utility>
-
 
 namespace milvus {
 namespace scheduler {
@@ -34,8 +33,8 @@ namespace scheduler {
 XBuildIndexTask::XBuildIndexTask(TableFileSchemaPtr file, TaskLabelPtr label)
     : Task(TaskType::BuildIndexTask, std::move(label)), file_(file) {
     if (file_) {
-        to_index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, (EngineType) file_->engine_type_,
-                                                (MetricType) file_->metric_type_, file_->nlist_);
+        to_index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, (EngineType)file_->engine_type_,
+                                                (MetricType)file_->metric_type_, file_->nlist_);
     }
 }
 
@@ -63,7 +62,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
                 error_msg = "Wrong load type";
                 stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
             }
-        } catch (std::exception &ex) {
+        } catch (std::exception& ex) {
             // typical error: out of disk space or permition denied
             error_msg = "Failed to load to_index file: " + std::string(ex.what());
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
@@ -89,9 +88,9 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
 
         size_t file_size = to_index_engine_->PhysicalSize();
 
-        std::string info = "Load file id:" + std::to_string(file_->id_) + " file type:" +
-            std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
-            " bytes from location: " + file_->location_ + " totally cost";
+        std::string info = "Load file id:" + std::to_string(file_->id_) +
+                           " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
+                           " bytes from location: " + file_->location_ + " totally cost";
         double span = rc.ElapseFromBegin(info);
 
         to_index_id_ = file_->id_;
@@ -110,15 +109,14 @@ XBuildIndexTask::Execute() {
     if (auto job = job_.lock()) {
         auto build_index_job = std::static_pointer_cast<scheduler::BuildIndexJob>(job);
         std::string location = file_->location_;
-        EngineType engine_type = (EngineType) file_->engine_type_;
+        EngineType engine_type = (EngineType)file_->engine_type_;
         std::shared_ptr<engine::ExecutionEngine> index;
 
         // step 2: create table file
         engine::meta::TableFileSchema table_file;
         table_file.table_id_ = file_->table_id_;
         table_file.date_ = file_->date_;
-        table_file.file_type_ =
-            engine::meta::TableFileSchema::NEW_INDEX;
+        table_file.file_type_ = engine::meta::TableFileSchema::NEW_INDEX;
 
         engine::meta::MetaPtr meta_ptr = build_index_job->meta();
         Status status = build_index_job->meta()->CreateTableFile(table_file);
@@ -131,7 +129,7 @@ XBuildIndexTask::Execute() {
 
         // step 3: build index
         try {
-            index = to_index_engine_->BuildIndex(table_file.location_, (EngineType) table_file.engine_type_);
+            index = to_index_engine_->BuildIndex(table_file.location_, (EngineType)table_file.engine_type_);
             if (index == nullptr) {
                 table_file.file_type_ = engine::meta::TableFileSchema::TO_DELETE;
                 status = meta_ptr->UpdateTableFile(table_file);
@@ -140,7 +138,7 @@ XBuildIndexTask::Execute() {
 
                 return;
             }
-        } catch (std::exception &ex) {
+        } catch (std::exception& ex) {
             std::string msg = "BuildIndex encounter exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
 
@@ -166,7 +164,7 @@ XBuildIndexTask::Execute() {
         // step 5: save index file
         try {
             index->Serialize();
-        } catch (std::exception &ex) {
+        } catch (std::exception& ex) {
             // typical error: out of disk space or permition denied
             std::string msg = "Serialize index encounter exception: " + std::string(ex.what());
             ENGINE_LOG_ERROR << msg;
@@ -197,7 +195,7 @@ XBuildIndexTask::Execute() {
                              << " bytes"
                              << " from file " << origin_file.file_id_;
 
-//            index->Cache();
+            //            index->Cache();
         } else {
             // failed to update meta, mark the new file as to_delete, don't delete old file
             origin_file.file_type_ = engine::meta::TableFileSchema::TO_INDEX;

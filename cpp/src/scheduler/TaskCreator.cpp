@@ -15,18 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <src/scheduler/tasklabel/SpecResLabel.h>
 #include "scheduler/TaskCreator.h"
+#include <src/scheduler/tasklabel/SpecResLabel.h>
+#include "SchedInst.h"
 #include "scheduler/tasklabel/BroadcastLabel.h"
 #include "tasklabel/DefaultLabel.h"
-#include "SchedInst.h"
-
 
 namespace milvus {
 namespace scheduler {
 
 std::vector<TaskPtr>
-TaskCreator::Create(const JobPtr &job) {
+TaskCreator::Create(const JobPtr& job) {
     switch (job->type()) {
         case JobType::SEARCH: {
             return Create(std::static_pointer_cast<SearchJob>(job));
@@ -45,7 +44,7 @@ TaskCreator::Create(const JobPtr &job) {
 }
 
 std::vector<TaskPtr>
-TaskCreator::Create(const SearchJobPtr &job) {
+TaskCreator::Create(const SearchJobPtr& job) {
     std::vector<TaskPtr> tasks;
     for (auto& index_file : job->index_files()) {
         auto label = std::make_shared<DefaultLabel>();
@@ -58,7 +57,7 @@ TaskCreator::Create(const SearchJobPtr &job) {
 }
 
 std::vector<TaskPtr>
-TaskCreator::Create(const DeleteJobPtr &job) {
+TaskCreator::Create(const DeleteJobPtr& job) {
     std::vector<TaskPtr> tasks;
     auto label = std::make_shared<BroadcastLabel>();
     auto task = std::make_shared<XDeleteTask>(job, label);
@@ -69,12 +68,12 @@ TaskCreator::Create(const DeleteJobPtr &job) {
 }
 
 std::vector<TaskPtr>
-TaskCreator::Create(const BuildIndexJobPtr &job) {
+TaskCreator::Create(const BuildIndexJobPtr& job) {
     std::vector<TaskPtr> tasks;
-    //TODO(yukun): remove "disk" hardcode here
+    // TODO(yukun): remove "disk" hardcode here
     ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("disk");
 
-    for (auto &to_index_file : job->to_index_files()) {
+    for (auto& to_index_file : job->to_index_files()) {
         auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
         auto task = std::make_shared<XBuildIndexTask>(to_index_file.second, label);
         task->job_ = job;
