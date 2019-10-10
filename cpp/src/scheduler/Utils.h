@@ -16,6 +16,7 @@
 // under the License.
 
 #include <cstdint>
+#include <vector>
 
 namespace milvus {
 namespace scheduler {
@@ -25,6 +26,9 @@ get_current_timestamp();
 
 uint64_t
 get_num_gpu();
+
+std::vector<uint64_t>
+get_gpu_pool();
 
 }  // namespace scheduler
 }  // namespace milvus
