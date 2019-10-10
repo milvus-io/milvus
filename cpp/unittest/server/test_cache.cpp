@@ -23,38 +23,36 @@
 
 namespace {
 
-namespace ms = milvus;
-
-class InvalidCacheMgr : public ms::cache::CacheMgr<ms::cache::DataObjPtr> {
+class InvalidCacheMgr : public milvus::cache::CacheMgr<milvus::cache::DataObjPtr> {
  public:
     InvalidCacheMgr() {
     }
 };
 
-class LessItemCacheMgr : public ms::cache::CacheMgr<ms::cache::DataObjPtr> {
+class LessItemCacheMgr : public milvus::cache::CacheMgr<milvus::cache::DataObjPtr> {
  public:
     LessItemCacheMgr() {
-        cache_ = std::make_shared<ms::cache::Cache<ms::cache::DataObjPtr>>(1UL << 12, 10);
+        cache_ = std::make_shared<milvus::cache::Cache<milvus::cache::DataObjPtr>>(1UL << 12, 10);
     }
 };
 
-class MockVecIndex : public ms::engine::VecIndex {
+class MockVecIndex : public milvus::engine::VecIndex {
  public:
     MockVecIndex(int64_t dim, int64_t total)
         : dimension_(dim),
           ntotal_(total) {
     }
 
-    virtual ms::Status BuildAll(const int64_t &nb,
+    virtual milvus::Status BuildAll(const int64_t &nb,
                                 const float *xb,
                                 const int64_t *ids,
-                                const ms::engine::Config &cfg,
+                                const milvus::engine::Config &cfg,
                                 const int64_t &nt = 0,
                                 const float *xt = nullptr) {
-        return ms::Status();
+        return milvus::Status();
     }
 
-    ms::engine::VecIndexPtr Clone() override {
+    milvus::engine::VecIndexPtr Clone() override {
         return milvus::engine::VecIndexPtr();
     }
 
@@ -62,31 +60,31 @@ class MockVecIndex : public ms::engine::VecIndex {
         return 0;
     }
 
-    ms::engine::IndexType GetType() override {
-        return ms::engine::IndexType::INVALID;
+    milvus::engine::IndexType GetType() override {
+        return milvus::engine::IndexType::INVALID;
     }
 
-    virtual ms::Status Add(const int64_t &nb,
+    virtual milvus::Status Add(const int64_t &nb,
                            const float *xb,
                            const int64_t *ids,
-                           const ms::engine::Config &cfg = ms::engine::Config()) {
-        return ms::Status();
+                           const milvus::engine::Config &cfg = milvus::engine::Config()) {
+        return milvus::Status();
     }
 
-    virtual ms::Status Search(const int64_t &nq,
+    virtual milvus::Status Search(const int64_t &nq,
                               const float *xq,
                               float *dist,
                               int64_t *ids,
-                              const ms::engine::Config &cfg = ms::engine::Config()) {
-        return ms::Status();
+                              const milvus::engine::Config &cfg = milvus::engine::Config()) {
+        return milvus::Status();
     }
 
-    ms::engine::VecIndexPtr CopyToGpu(const int64_t &device_id,
-                                      const ms::engine::Config &cfg) override {
+    milvus::engine::VecIndexPtr CopyToGpu(const int64_t &device_id,
+                                      const milvus::engine::Config &cfg) override {
         return nullptr;
     }
 
-    ms::engine::VecIndexPtr CopyToCpu(const ms::engine::Config &cfg) override {
+    milvus::engine::VecIndexPtr CopyToCpu(const milvus::engine::Config &cfg) override {
         return nullptr;
     }
 
@@ -103,8 +101,8 @@ class MockVecIndex : public ms::engine::VecIndex {
         return binset;
     }
 
-    virtual ms::Status Load(const knowhere::BinarySet &index_binary) {
-        return ms::Status();
+    virtual milvus::Status Load(const knowhere::BinarySet &index_binary) {
+        return milvus::Status();
     }
 
  public:
@@ -115,7 +113,7 @@ class MockVecIndex : public ms::engine::VecIndex {
 } // namespace
 
 TEST(CacheTest, DUMMY_TEST) {
-    ms::engine::Config cfg;
+    milvus::engine::Config cfg;
     MockVecIndex mock_index(256, 1000);
     mock_index.Dimension();
     mock_index.Count();
@@ -133,7 +131,7 @@ TEST(CacheTest, DUMMY_TEST) {
 }
 
 TEST(CacheTest, CPU_CACHE_TEST) {
-    auto cpu_mgr = ms::cache::CpuCacheMgr::GetInstance();
+    auto cpu_mgr = milvus::cache::CpuCacheMgr::GetInstance();
 
     const int64_t gbyte = 1024 * 1024 * 1024;
     int64_t g_num = 16;
@@ -144,8 +142,8 @@ TEST(CacheTest, CPU_CACHE_TEST) {
     uint64_t item_count = 20;
     for (uint64_t i = 0; i < item_count; i++) {
         //each vector is 1k byte, total size less than 1G
-        ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000000);
-        ms::cache::DataObjPtr data_obj = std::static_pointer_cast<ms::cache::DataObj>(mock_index);
+        milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000000);
+        milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
     ASSERT_LT(cpu_mgr->ItemCount(), g_num);
@@ -168,8 +166,8 @@ TEST(CacheTest, CPU_CACHE_TEST) {
         cpu_mgr->SetCapacity(g_num * gbyte);
 
         //each vector is 1k byte, total size less than 6G
-        ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 6000000);
-        ms::cache::DataObjPtr data_obj = std::static_pointer_cast<ms::cache::DataObj>(mock_index);
+        milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 6000000);
+        milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         cpu_mgr->InsertItem("index_6g", data_obj);
         ASSERT_TRUE(cpu_mgr->ItemExists("index_6g"));
     }
@@ -178,12 +176,12 @@ TEST(CacheTest, CPU_CACHE_TEST) {
 }
 
 TEST(CacheTest, GPU_CACHE_TEST) {
-    auto gpu_mgr = ms::cache::GpuCacheMgr::GetInstance(0);
+    auto gpu_mgr = milvus::cache::GpuCacheMgr::GetInstance(0);
 
     for (int i = 0; i < 20; i++) {
         //each vector is 1k byte
-        ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000);
-        ms::cache::DataObjPtr data_obj = std::static_pointer_cast<ms::cache::DataObj>(mock_index);
+        milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 1000);
+        milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         gpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
 
@@ -195,8 +193,8 @@ TEST(CacheTest, GPU_CACHE_TEST) {
     for (auto i = 0; i < 3; i++) {
         // TODO(myh): use gpu index to mock
         //each vector is 1k byte, total size less than 2G
-        ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2000000);
-        ms::cache::DataObjPtr data_obj = std::static_pointer_cast<ms::cache::DataObj>(mock_index);
+        milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2000000);
+        milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
         std::cout << data_obj->Size() << std::endl;
         gpu_mgr->InsertItem("index_" + std::to_string(i), data_obj);
     }
@@ -212,7 +210,7 @@ TEST(CacheTest, INVALID_TEST) {
         ASSERT_FALSE(mgr.ItemExists("test"));
         ASSERT_EQ(mgr.GetItem("test"), nullptr);
 
-        mgr.InsertItem("test", ms::cache::DataObjPtr());
+        mgr.InsertItem("test", milvus::cache::DataObjPtr());
         mgr.InsertItem("test", nullptr);
         mgr.EraseItem("test");
         mgr.PrintInfo();
@@ -226,8 +224,8 @@ TEST(CacheTest, INVALID_TEST) {
         LessItemCacheMgr mgr;
         for (int i = 0; i < 20; i++) {
             //each vector is 1k byte
-            ms::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2);
-            ms::cache::DataObjPtr data_obj = std::static_pointer_cast<ms::cache::DataObj>(mock_index);
+            milvus::engine::VecIndexPtr mock_index = std::make_shared<MockVecIndex>(256, 2);
+            milvus::cache::DataObjPtr data_obj = std::static_pointer_cast<milvus::cache::DataObj>(mock_index);
             mgr.InsertItem("index_" + std::to_string(i), data_obj);
         }
         ASSERT_EQ(mgr.GetItem("index_0"), nullptr);

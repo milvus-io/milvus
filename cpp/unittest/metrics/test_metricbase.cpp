@@ -21,16 +21,10 @@
 #include <gtest/gtest.h>
 #include <iostream>
 
-namespace {
-
-namespace ms = milvus;
-
-} // namespace
-
 TEST(MetricbaseTest, METRICBASE_TEST) {
-    ms::server::MetricsBase instance = ms::server::MetricsBase::GetInstance();
+    milvus::server::MetricsBase instance = milvus::server::MetricsBase::GetInstance();
     instance.Init();
-    ms::server::SystemInfo::GetInstance().Init();
+    milvus::server::SystemInfo::GetInstance().Init();
     instance.AddVectorsSuccessTotalIncrement();
     instance.AddVectorsFailTotalIncrement();
     instance.AddVectorsDurationHistogramOberve(1.0);
