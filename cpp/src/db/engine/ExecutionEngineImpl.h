@@ -107,6 +107,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     VecIndexPtr
     Load(const std::string& location);
 
+    void
+    HybridLoad();
+
  protected:
     VecIndexPtr index_ = nullptr;
     EngineType index_type_;
