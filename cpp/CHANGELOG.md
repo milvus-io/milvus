@@ -11,6 +11,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-587 - Count get wrong result after adding vectors and index built immediately
 - MS-599 - search wrong result when table created with metric_type: IP
 - MS-601 - Docker logs error caused by get CPUTemperature error
+- MS-622 - Delete vectors should be failed if date range is invalid
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
