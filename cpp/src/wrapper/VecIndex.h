@@ -20,10 +20,10 @@
 #include <memory>
 #include <string>
 
-#include "cache/DataObj.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/Quantizer.h"
+#include "cache/DataObj.h"
 #include "utils/Status.h"
 
 namespace milvus {

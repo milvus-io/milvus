@@ -25,12 +25,14 @@
 
 namespace knowhere {
 
+#ifdef CUSTOMIZATION
 struct FaissIVFQuantizer : public Quantizer {
     faiss::gpu::GpuIndexFlat* quantizer = nullptr;
 
     ~FaissIVFQuantizer() override;
 };
 using FaissIVFQuantizerPtr = std::shared_ptr<FaissIVFQuantizer>;
+#endif
 
 class IVFSQHybrid : public GPUIVFSQ {
  public:
