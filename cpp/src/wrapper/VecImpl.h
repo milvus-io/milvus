@@ -17,11 +17,11 @@
 
 #pragma once
 
-#include "VecIndex.h"
-#include "knowhere/index/vector_index/VectorIndex.h"
-
 #include <memory>
 #include <utility>
+
+#include "VecIndex.h"
+#include "knowhere/index/vector_index/VectorIndex.h"
 
 namespace milvus {
 namespace engine {
