@@ -160,8 +160,7 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
 #ifdef CUSTOMIZATION
                                std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
 #endif
-                               std::make_tuple("GPUIVFSQ", ParameterType::ivfsq))
-                               );
+                               std::make_tuple("GPUIVFSQ", ParameterType::ivfsq)));
 
 void
 AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
