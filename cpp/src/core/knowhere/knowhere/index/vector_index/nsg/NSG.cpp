@@ -765,8 +765,8 @@ NsgIndex::SetKnnGraph(Graph& g) {
 }
 
 // void NsgIndex::GetKnnGraphFromFile() {
-//    //std::string filename = "/home/zilliz/opt/workspace/wook/efanna_graph/tests/sift.1M.50NN.graph";
-//    std::string filename = "/home/zilliz/opt/workspace/wook/efanna_graph/tests/sift.50NN.graph";
+//    //std::string filename = "sift.1M.50NN.graph";
+//    std::string filename = "sift.50NN.graph";
 //
 //    std::ifstream in(filename, std::ios::binary);
 //    unsigned k;
