@@ -18,6 +18,7 @@
 #include "scheduler/TaskTable.h"
 #include "Utils.h"
 #include "event/TaskTableUpdatedEvent.h"
+#include "utils/Log.h"
 
 #include <ctime>
 #include <sstream>
@@ -157,6 +158,18 @@ TaskTableItem::Dump() {
 
 std::vector<uint64_t>
 TaskTable::PickToLoad(uint64_t limit) {
+    size_t count = 0;
+    for (int j = last_finish_ + 1; j < table_.size(); ++j) {
+        if (not table_[j]) {
+            SERVER_LOG_WARNING << "table[" << j << "] is nullptr";
+        }
+        if (table_[j]->state == TaskTableItemState::LOADED) {
+            ++count;
+            if (count > 2)
+                return std::vector<uint64_t>();
+        }
+    }
+
     std::vector<uint64_t> indexes;
     bool cross = false;
     for (uint64_t i = last_finish_ + 1, count = 0; i < table_.size() && count < limit; ++i) {
