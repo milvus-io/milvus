@@ -46,7 +46,7 @@ TEST(NormalTest, INST_TEST) {
     res_mgr->Start();
     scheduler->Start();
 
-    const uint64_t NUM_TASK = 1000;
+    const uint64_t NUM_TASK = 2;
     std::vector<std::shared_ptr<ms::TestTask>> tasks;
     ms::TableFileSchemaPtr dummy = nullptr;
 
