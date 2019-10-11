@@ -107,13 +107,13 @@ TEST(UtilTest, COMMON_TEST) {
 }
 
 TEST(UtilTest, STRINGFUNCTIONS_TEST) {
-    std::string str = " test zilliz";
+    std::string str = " test str";
     milvus::server::StringHelpFunctions::TrimStringBlank(str);
-    ASSERT_EQ(str, "test zilliz");
+    ASSERT_EQ(str, "test str");
 
-    str = "\"test zilliz\"";
+    str = "\"test str\"";
     milvus::server::StringHelpFunctions::TrimStringQuote(str, "\"");
-    ASSERT_EQ(str, "test zilliz");
+    ASSERT_EQ(str, "test str");
 
     str = "a,b,c";
     std::vector<std::string> result;
@@ -376,7 +376,7 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
 
         std::ofstream file;
         file.open(tmp.c_str());
-        file << "zilliz" << std::endl;
+        file << "test" << std::endl;
 
         milvus::server::RolloutHandler(tmp.c_str(), 0, list[i]);
 
@@ -386,7 +386,7 @@ TEST(UtilTest, ROLLOUTHANDLER_TEST) {
 
         std::string tmp2;
         file2 >> tmp2;
-        ASSERT_EQ(tmp2, "zilliz");
+        ASSERT_EQ(tmp2, "test");
     }
     boost::filesystem::remove_all(dir2);
 }
