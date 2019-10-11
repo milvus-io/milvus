@@ -20,9 +20,12 @@
 #include "JobMgr.h"
 #include "ResourceMgr.h"
 #include "Scheduler.h"
+#include "optimizer/HybridPass.h"
+#include "optimizer/Optimizer.h"
 
 #include <memory>
 #include <mutex>
+#include <vector>
 
 namespace milvus {
 namespace scheduler {
@@ -78,6 +81,27 @@ class JobMgrInst {
 
  private:
     static scheduler::JobMgrPtr instance;
+    static std::mutex mutex_;
+};
+
+class OptimizerInst {
+ public:
+    static OptimizerPtr
+    GetInstance() {
+        if (instance == nullptr) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (instance == nullptr) {
+                HybridPassPtr pass_ptr = std::make_shared<HybridPass>();
+                std::vector<PassPtr> pass_list;
+                pass_list.push_back(pass_ptr);
+                instance = std::make_shared<Optimizer>(pass_list);
+            }
+        }
+        return instance;
+    }
+
+ private:
+    static scheduler::OptimizerPtr instance;
     static std::mutex mutex_;
 };
 

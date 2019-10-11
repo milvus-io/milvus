@@ -23,13 +23,17 @@
 #include "db/DBFactory.h"
 #include "cache/CpuCacheMgr.h"
 #include "utils/CommonUtil.h"
+#include "server/Config.h"
 
 #include <gtest/gtest.h>
 #include <boost/filesystem.hpp>
 #include <thread>
 #include <random>
 
+
 namespace {
+
+static const char *CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
 
 static const char *TABLE_NAME = "test_group";
 static constexpr int64_t TABLE_DIM = 256;
@@ -228,6 +232,9 @@ TEST_F(DBTest, DB_TEST) {
 }
 
 TEST_F(DBTest, SEARCH_TEST) {
+    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
+
     milvus::engine::meta::TableSchema table_info = BuildTableSchema();
     auto stat = db_->CreateTable(table_info);
 
@@ -289,6 +296,25 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
         ASSERT_TRUE(stat.ok());
     }
+
+    //test FAISS_IVFSQ8H optimizer
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
+    db_->CreateIndex(TABLE_NAME, index); // wait until build index finish
+
+    {
+        milvus::engine::QueryResults results;
+        stat = db_->Query(TABLE_NAME, k, nq, 10, xq.data(), results);
+        ASSERT_TRUE(stat.ok());
+    }
+
+    {//search by specify index file
+        milvus::engine::meta::DatesT dates;
+        std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
+        milvus::engine::QueryResults results;
+        stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
+        ASSERT_TRUE(stat.ok());
+    }
+
 
     // TODO(lxj): add groundTruth assert
 }

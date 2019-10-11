@@ -25,6 +25,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "Pass.h"
@@ -34,7 +35,8 @@ namespace scheduler {
 
 class Optimizer {
  public:
-    Optimizer() = default;
+    explicit Optimizer(std::vector<PassPtr> pass_list) : pass_list_(std::move(pass_list)) {
+    }
 
     void
     Init();
@@ -45,6 +47,8 @@ class Optimizer {
  private:
     std::vector<PassPtr> pass_list_;
 };
+
+using OptimizerPtr = std::shared_ptr<Optimizer>;
 
 }  // namespace scheduler
 }  // namespace milvus
