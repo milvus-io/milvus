@@ -231,17 +231,14 @@ IVFSQHybrid::LoadQuantizer(const Config& conf) {
 
 void
 IVFSQHybrid::SetQuantizer(const QuantizerPtr& q) {
-
 }
 
 void
 IVFSQHybrid::UnsetQuantizer() {
-
 }
 
 void
 IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
-
 }
 
 IndexModelPtr
@@ -260,11 +257,7 @@ IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
 }
 
 void
-IVFSQHybrid::search_impl(int64_t n,
-                         const float* data,
-                         int64_t k,
-                         float* distances,
-                         int64_t* labels,
+IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels,
                          const Config& cfg) {
     GPUIVF::search_impl(n, data, k, distances, labels, cfg);
 }
