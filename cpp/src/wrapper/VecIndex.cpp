@@ -15,8 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "wrapper/VecIndex.h"
-#include "VecImpl.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"
@@ -28,6 +26,8 @@
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/IndexNSG.h"
+#include "wrapper/VecIndex.h"
+#include "VecImpl.h"
 #include "utils/Log.h"
 
 #include <cuda.h>
@@ -143,10 +143,12 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
             index = std::make_shared<knowhere::GPUIVFSQ>(gpu_device);
             break;
         }
+#ifdef CUSTOMIZATION
         case IndexType::FAISS_IVFSQ8_HYBRID: {
             index = std::make_shared<knowhere::IVFSQHybrid>(gpu_device);
             return std::make_shared<IVFHybridIndex>(index, IndexType::FAISS_IVFSQ8_HYBRID);
         }
+#endif
         case IndexType::NSG_MIX: {  // TODO(linxj): bug.
             index = std::make_shared<knowhere::NSG>(gpu_device);
             break;
@@ -159,6 +161,8 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
 VecIndexPtr
 LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binary) {
     auto index = GetVecIndexFactory(index_type);
+    if (index == nullptr) return nullptr;
+    // else
     index->Load(index_binary);
     return index;
 }

@@ -70,7 +70,6 @@ enum class ParameterType {
     ivf,
     ivfpq,
     ivfsq,
-    ivfsqhybrid,
     nsg,
 };
 
@@ -104,7 +103,7 @@ class ParamGenerator {
             tempconf->nbits = 8;
             tempconf->metric_type = knowhere::METRICTYPE::L2;
             return tempconf;
-        } else if (type == ParameterType::ivfsq || type == ParameterType::ivfsqhybrid) {
+        } else if (type == ParameterType::ivfsq) {
             auto tempconf = std::make_shared<knowhere::IVFSQCfg>();
             tempconf->d = DIM;
             tempconf->gpu_id = device_id;
@@ -158,8 +157,11 @@ INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                                //                            std::make_tuple("IVFPQ", ParameterType::ivfpq),
                                //                            std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
                                std::make_tuple("IVFSQ", ParameterType::ivfsq),
-                               std::make_tuple("GPUIVFSQ", ParameterType::ivfsq),
-                               std::make_tuple("IVFSQHybrid", ParameterType::ivfsqhybrid)));
+#ifdef CUSTOMIZATION
+                               std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
+#endif
+                               std::make_tuple("GPUIVFSQ", ParameterType::ivfsq))
+                               );
 
 void
 AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
@@ -558,6 +560,7 @@ TEST_F(GPURESTEST, gpu_ivf_resource_test) {
     }
 }
 
+#ifdef CUSTOMIZATION
 TEST_F(GPURESTEST, gpuivfsq) {
     {
         // knowhere gpu ivfsq
@@ -629,6 +632,7 @@ TEST_F(GPURESTEST, gpuivfsq) {
         delete search_idx;
     }
 }
+#endif
 
 TEST_F(GPURESTEST, copyandsearch) {
     // search and copy at the same time
