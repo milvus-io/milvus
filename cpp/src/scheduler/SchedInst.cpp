@@ -38,6 +38,9 @@ std::mutex SchedInst::mutex_;
 scheduler::JobMgrPtr JobMgrInst::instance = nullptr;
 std::mutex JobMgrInst::mutex_;
 
+OptimizerPtr OptimizerInst::instance = nullptr;
+std::mutex OptimizerInst::mutex_;
+
 void
 load_simple_config() {
     server::Config& config = server::Config::GetInstance();
