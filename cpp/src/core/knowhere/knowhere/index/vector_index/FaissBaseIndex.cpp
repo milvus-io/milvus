@@ -64,17 +64,13 @@ FaissBaseIndex::LoadImpl(const BinarySet& index_binary) {
 
 void
 FaissBaseIndex::SealImpl() {
-    // TODO(linxj): enable
-    //#ifdef ZILLIZ_FAISS
+#ifdef CUSTOMIZATION
     faiss::Index* index = index_.get();
     auto idx = dynamic_cast<faiss::IndexIVF*>(index);
     if (idx != nullptr) {
         idx->to_readonly();
     }
-    // else {
-    //    KNOHWERE_ERROR_MSG("Seal failed");
-    //}
-    //#endif
+#endif
 }
 
 }  // namespace knowhere
