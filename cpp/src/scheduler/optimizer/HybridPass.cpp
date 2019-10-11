@@ -16,7 +16,9 @@
 // under the License.
 
 #include "scheduler/optimizer/HybridPass.h"
+#include "scheduler/SchedInst.h"
 #include "scheduler/task/SearchTask.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
@@ -28,7 +30,10 @@ HybridPass::Run(const TaskPtr& task) {
         return false;
     auto search_task = std::static_pointer_cast<XSearchTask>(task);
     if (search_task->file_->engine_type_ == (int)engine::EngineType::FAISS_IVFSQ8H) {
-        // TODO: make specified label
+        // TODO: remove "cpu" hardcode
+        ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource("cpu");
+        auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+        task->label() = label;
         return true;
     }
     return false;

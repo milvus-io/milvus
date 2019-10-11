@@ -31,3 +31,12 @@ target_link_libraries(test_db
 
 install(TARGETS test_db DESTINATION unittest)
 
+configure_file(appendix/server_config.yaml
+        "${CMAKE_CURRENT_BINARY_DIR}/milvus/conf/server_config.yaml"
+        COPYONLY)
+
+configure_file(appendix/log_config.conf
+        "${CMAKE_CURRENT_BINARY_DIR}/milvus/conf/log_config.conf"
+        COPYONLY)
+
+
