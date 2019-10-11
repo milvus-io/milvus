@@ -97,7 +97,7 @@ DBTest::SetUp() {
     auto res_mgr = milvus::scheduler::ResMgrInst::GetInstance();
     res_mgr->Clear();
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("disk", "DISK", 0, true, false));
-    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0, true, false));
+    res_mgr->Add(milvus::scheduler::ResourceFactory::Create("cpu", "CPU", 0, true, true));
     res_mgr->Add(milvus::scheduler::ResourceFactory::Create("gtx1660", "GPU", 0, true, true));
 
     auto default_conn = milvus::scheduler::Connection("IO", 500.0);
