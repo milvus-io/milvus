@@ -50,6 +50,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-600 - Reconstruct unittest code
 - MS-602 - Remove zilliz namespace
 - MS-610 - Change error code base value from hex to decimal
+- MS-635 - Add compile option to support customized faiss
 
 # Milvus 0.4.0 (2019-09-12)
 
