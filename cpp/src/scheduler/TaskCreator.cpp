@@ -16,10 +16,10 @@
 // under the License.
 
 #include "scheduler/TaskCreator.h"
-#include <src/scheduler/tasklabel/SpecResLabel.h>
 #include "SchedInst.h"
-#include "scheduler/tasklabel/BroadcastLabel.h"
+#include "tasklabel/BroadcastLabel.h"
 #include "tasklabel/DefaultLabel.h"
+#include "tasklabel/SpecResLabel.h"
 
 namespace milvus {
 namespace scheduler {
