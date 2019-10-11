@@ -25,6 +25,7 @@
 
 namespace knowhere {
 
+#ifdef CUSTOMIZATION
 IndexModelPtr
 IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
@@ -221,4 +222,50 @@ FaissIVFQuantizer::~FaissIVFQuantizer() {
     // else do nothing
 }
 
+#else
+
+QuantizerPtr
+IVFSQHybrid::LoadQuantizer(const Config& conf) {
+    return knowhere::QuantizerPtr();
+}
+
+void
+IVFSQHybrid::SetQuantizer(const QuantizerPtr& q) {
+}
+
+void
+IVFSQHybrid::UnsetQuantizer() {
+}
+
+void
+IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
+}
+
+IndexModelPtr
+IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
+    return GPUIVFSQ::Train(dataset, config);
+}
+
+VectorIndexPtr
+IVFSQHybrid::CopyGpuToCpu(const Config& config) {
+    return GPUIVFSQ::CopyGpuToCpu(config);
+}
+
+VectorIndexPtr
+IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
+    return IVF::CopyCpuToGpu(device_id, config);
+}
+
+void
+IVFSQHybrid::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels,
+                         const Config& cfg) {
+    GPUIVF::search_impl(n, data, k, distances, labels, cfg);
+}
+
+void
+IVFSQHybrid::LoadImpl(const BinarySet& index_binary) {
+    GPUIVF::LoadImpl(index_binary);
+}
+
+#endif
 }  // namespace knowhere
