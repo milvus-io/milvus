@@ -158,8 +158,9 @@ TaskTableItem::Dump() {
 
 std::vector<uint64_t>
 TaskTable::PickToLoad(uint64_t limit) {
+    std::lock_guard<std::mutex> lock(mutex_);
     size_t count = 0;
-    for (int j = last_finish_ + 1; j < table_.size(); ++j) {
+    for (uint64_t j = last_finish_ + 1; j < table_.size(); ++j) {
         if (not table_[j]) {
             SERVER_LOG_WARNING << "table[" << j << "] is nullptr";
         }
@@ -186,6 +187,7 @@ TaskTable::PickToLoad(uint64_t limit) {
 
 std::vector<uint64_t>
 TaskTable::PickToExecute(uint64_t limit) {
+    std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> indexes;
     bool cross = false;
     for (uint64_t i = last_finish_ + 1, count = 0; i < table_.size() && count < limit; ++i) {
@@ -202,7 +204,7 @@ TaskTable::PickToExecute(uint64_t limit) {
 
 void
 TaskTable::Put(TaskPtr task) {
-    std::lock_guard<std::mutex> lock(id_mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     auto item = std::make_shared<TaskTableItem>();
     item->id = id_++;
     item->task = std::move(task);
@@ -216,7 +218,7 @@ TaskTable::Put(TaskPtr task) {
 
 void
 TaskTable::Put(std::vector<TaskPtr>& tasks) {
-    std::lock_guard<std::mutex> lock(id_mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     for (auto& task : tasks) {
         auto item = std::make_shared<TaskTableItem>();
         item->id = id_++;
@@ -232,6 +234,7 @@ TaskTable::Put(std::vector<TaskPtr>& tasks) {
 
 TaskTableItemPtr
 TaskTable::Get(uint64_t index) {
+    std::lock_guard<std::mutex> lock(mutex_);
     return table_[index];
 }
 
