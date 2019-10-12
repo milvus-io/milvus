@@ -149,7 +149,6 @@ class TaskTable {
     }
 
  public:
-
     std::deque<TaskTableItemPtr>::iterator
     begin() {
         return table_.begin();
