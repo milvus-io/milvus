@@ -87,6 +87,9 @@ class VecIndex : public cache::DataObj {
     int64_t
     Size() override;
 
+    void
+    set_size(int64_t size);
+
     virtual knowhere::BinarySet
     Serialize() = 0;
 
@@ -115,6 +118,8 @@ class VecIndex : public cache::DataObj {
         return Status::OK();
     }
     ////////////////
+ private:
+    int64_t size_ = 0;
 };
 
 extern Status
@@ -127,7 +132,7 @@ extern VecIndexPtr
 GetVecIndexFactory(const IndexType& type, const Config& cfg = Config());
 
 extern VecIndexPtr
-LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binary);
+LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binary, int64_t size);
 
 extern IndexType
 ConvertToCpuIndexType(const IndexType& type);
