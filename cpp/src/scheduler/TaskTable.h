@@ -150,6 +150,7 @@ class TaskTable {
 
  public:
     TaskTableItemPtr& operator[](uint64_t index) {
+        std::lock_guard<std::mutex> lock(mutex_);
         return table_[index];
     }
 
@@ -244,7 +245,7 @@ class TaskTable {
 
  private:
     std::uint64_t id_ = 0;
-    mutable std::mutex id_mutex_;
+    mutable std::mutex mutex_;
     std::deque<TaskTableItemPtr> table_;
     std::function<void(void)> subscriber_ = nullptr;
 
