@@ -149,6 +149,11 @@ class TaskTable {
     }
 
  public:
+    TaskTableItemPtr& operator[](uint64_t index) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return table_[index];
+    }
+
     std::deque<TaskTableItemPtr>::iterator
     begin() {
         return table_.begin();
