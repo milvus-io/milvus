@@ -13,6 +13,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-601 - Docker logs error caused by get CPUTemperature error
 - MS-622 - Delete vectors should be failed if date range is invalid
 - MS-620 - Get table row counts display wrong error code
+- MS-640 - Cache object size calculate incorrect
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
