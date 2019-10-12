@@ -110,11 +110,15 @@ Scheduler::OnLoadCompleted(const EventPtr& event) {
                 break;
             }
             case TaskLabelType::BROADCAST: {
+                if (resource->HasExecutor() == false) {
+                    load_completed_event->task_table_item_->Move();
+                }
                 Action::PushTaskToAllNeighbour(load_completed_event->task_table_item_->task, resource);
                 break;
             }
             default: { break; }
         }
+        resource->WakeupLoader();
     }
 }
 
@@ -127,6 +131,9 @@ Scheduler::OnStartUp(const EventPtr& event) {
 
 void
 Scheduler::OnFinishTask(const EventPtr& event) {
+    if (auto resource = event->resource_.lock()) {
+        resource->WakeupLoader();
+    }
 }
 
 void

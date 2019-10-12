@@ -13,6 +13,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-601 - Docker logs error caused by get CPUTemperature error
 - MS-622 - Delete vectors should be failed if date range is invalid
 - MS-620 - Get table row counts display wrong error code
+- MS-637 - out of memory when load too many tasks
 - MS-640 - Cache object size calculate incorrect
 
 ## Improvement
@@ -38,6 +39,7 @@ Please mark all change in change log and use the ticket from JIRA.
 ## New Feature
 - MS-627 - Integrate new index: IVFSQHybrid
 - MS-631 - IVFSQ8H Index support
+- MS-636 - Add optimizer in scheduler for FAISS_IVFSQ8H
 
 ## Task
 - MS-554 - Change license to Apache 2.0
@@ -50,6 +52,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-600 - Reconstruct unittest code
 - MS-602 - Remove zilliz namespace
 - MS-610 - Change error code base value from hex to decimal
+- MS-635 - Add compile option to support customized faiss
 
 # Milvus 0.4.0 (2019-09-12)
 

@@ -16,7 +16,9 @@
 // under the License.
 
 #include "scheduler/JobMgr.h"
+#include "SchedInst.h"
 #include "TaskCreator.h"
+#include "optimizer/Optimizer.h"
 #include "task/Task.h"
 
 #include <src/scheduler/optimizer/Optimizer.h>
@@ -67,8 +69,9 @@ JobMgr::worker_function() {
         }
 
         auto tasks = build_task(job);
-
-        // TODO: optimizer all task
+        for (auto& task : tasks) {
+            OptimizerInst::GetInstance()->Run(task);
+        }
 
         // disk resources NEVER be empty.
         if (auto disk = res_mgr_->GetDiskResources()[0].lock()) {

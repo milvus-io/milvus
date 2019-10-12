@@ -26,12 +26,6 @@
 
 #include "unittest/utils.h"
 
-namespace {
-
-namespace kn = knowhere;
-
-}  // namespace
-
 using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
@@ -43,11 +37,11 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
     void
     SetUp() override {
         // Init_with_default();
-        kn::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, 1024 * 1024 * 200, 1024 * 1024 * 600, 2);
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, 1024 * 1024 * 200, 1024 * 1024 * 600, 2);
         Generate(256, 1000000, 1);
-        index_ = std::make_shared<kn::NSG>();
+        index_ = std::make_shared<knowhere::NSG>();
 
-        auto tmp_conf = std::make_shared<kn::NSGCfg>();
+        auto tmp_conf = std::make_shared<knowhere::NSGCfg>();
         tmp_conf->gpu_id = DEVICE_ID;
         tmp_conf->knng = 100;
         tmp_conf->nprobe = 32;
@@ -55,10 +49,10 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
         tmp_conf->search_length = 60;
         tmp_conf->out_degree = 70;
         tmp_conf->candidate_pool_size = 500;
-        tmp_conf->metric_type = kn::METRICTYPE::L2;
+        tmp_conf->metric_type = knowhere::METRICTYPE::L2;
         train_conf = tmp_conf;
 
-        auto tmp2_conf = std::make_shared<kn::NSGCfg>();
+        auto tmp2_conf = std::make_shared<knowhere::NSGCfg>();
         tmp2_conf->k = k;
         tmp2_conf->search_length = 30;
         search_conf = tmp2_conf;
@@ -66,17 +60,17 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
 
     void
     TearDown() override {
-        kn::FaissGpuResourceMgr::GetInstance().Free();
+        knowhere::FaissGpuResourceMgr::GetInstance().Free();
     }
 
  protected:
-    std::shared_ptr<kn::NSG> index_;
-    kn::Config train_conf;
-    kn::Config search_conf;
+    std::shared_ptr<knowhere::NSG> index_;
+    knowhere::Config train_conf;
+    knowhere::Config search_conf;
 };
 
 void
-AssertAnns(const kn::DatasetPtr& result, const int& nq, const int& k) {
+AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     for (auto i = 0; i < nq; i++) {
         EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
@@ -91,7 +85,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     AssertAnns(result, nq, k);
 
     auto binaryset = index_->Serialize();
-    auto new_index = std::make_shared<kn::NSG>();
+    auto new_index = std::make_shared<knowhere::NSG>();
     new_index->Load(binaryset);
     auto new_result = new_index->Search(query_dataset, search_conf);
     AssertAnns(result, nq, k);
@@ -100,7 +94,7 @@ TEST_F(NSGInterfaceTest, basic_test) {
     ASSERT_EQ(index_->Dimension(), dim);
     ASSERT_THROW({ index_->Clone(); }, knowhere::KnowhereException);
     ASSERT_NO_THROW({
-        index_->Add(base_dataset, kn::Config());
+        index_->Add(base_dataset, knowhere::Config());
         index_->Seal();
     });
 

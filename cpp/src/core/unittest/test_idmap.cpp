@@ -25,33 +25,27 @@
 
 #include "unittest/utils.h"
 
-namespace {
-
-namespace kn = knowhere;
-
-}  // namespace
-
 static int device_id = 0;
 class IDMAPTest : public DataGen, public ::testing::Test {
  protected:
     void
     SetUp() override {
-        kn::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024 * 1024 * 200, 1024 * 1024 * 300, 2);
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(device_id, 1024 * 1024 * 200, 1024 * 1024 * 300, 2);
         Init_with_default();
-        index_ = std::make_shared<kn::IDMAP>();
+        index_ = std::make_shared<knowhere::IDMAP>();
     }
 
     void
     TearDown() override {
-        kn::FaissGpuResourceMgr::GetInstance().Free();
+        knowhere::FaissGpuResourceMgr::GetInstance().Free();
     }
 
  protected:
-    kn::IDMAPPtr index_ = nullptr;
+    knowhere::IDMAPPtr index_ = nullptr;
 };
 
 void
-AssertAnns(const kn::DatasetPtr& result, const int& nq, const int& k) {
+AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     for (auto i = 0; i < nq; i++) {
         EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
@@ -59,7 +53,7 @@ AssertAnns(const kn::DatasetPtr& result, const int& nq, const int& k) {
 }
 
 void
-PrintResult(const kn::DatasetPtr& result, const int& nq, const int& k) {
+PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
     auto ids = result->array()[0];
     auto dists = result->array()[1];
 
@@ -80,10 +74,10 @@ PrintResult(const kn::DatasetPtr& result, const int& nq, const int& k) {
 TEST_F(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(!xb.empty());
 
-    auto conf = std::make_shared<kn::Cfg>();
+    auto conf = std::make_shared<knowhere::Cfg>();
     conf->d = dim;
     conf->k = k;
-    conf->metric_type = kn::METRICTYPE::L2;
+    conf->metric_type = knowhere::METRICTYPE::L2;
 
     index_->Train(conf);
     index_->Add(base_dataset, conf);
@@ -97,7 +91,7 @@ TEST_F(IDMAPTest, idmap_basic) {
 
     index_->Seal();
     auto binaryset = index_->Serialize();
-    auto new_index = std::make_shared<kn::IDMAP>();
+    auto new_index = std::make_shared<knowhere::IDMAP>();
     new_index->Load(binaryset);
     auto re_result = index_->Search(query_dataset, conf);
     AssertAnns(re_result, nq, k);
@@ -105,7 +99,7 @@ TEST_F(IDMAPTest, idmap_basic) {
 }
 
 TEST_F(IDMAPTest, idmap_serialize) {
-    auto serialize = [](const std::string& filename, kn::BinaryPtr& bin, uint8_t* ret) {
+    auto serialize = [](const std::string& filename, knowhere::BinaryPtr& bin, uint8_t* ret) {
         FileIOWriter writer(filename);
         writer(static_cast<void*>(bin->data.get()), bin->size);
 
@@ -113,15 +107,15 @@ TEST_F(IDMAPTest, idmap_serialize) {
         reader(ret, bin->size);
     };
 
-    auto conf = std::make_shared<kn::Cfg>();
+    auto conf = std::make_shared<knowhere::Cfg>();
     conf->d = dim;
     conf->k = k;
-    conf->metric_type = kn::METRICTYPE::L2;
+    conf->metric_type = knowhere::METRICTYPE::L2;
 
     {
         // serialize index
         index_->Train(conf);
-        index_->Add(base_dataset, kn::Config());
+        index_->Add(base_dataset, knowhere::Config());
         auto re_result = index_->Search(query_dataset, conf);
         AssertAnns(re_result, nq, k);
         PrintResult(re_result, nq, k);
@@ -151,10 +145,10 @@ TEST_F(IDMAPTest, idmap_serialize) {
 TEST_F(IDMAPTest, copy_test) {
     ASSERT_TRUE(!xb.empty());
 
-    auto conf = std::make_shared<kn::Cfg>();
+    auto conf = std::make_shared<knowhere::Cfg>();
     conf->d = dim;
     conf->k = k;
-    conf->metric_type = kn::METRICTYPE::L2;
+    conf->metric_type = knowhere::METRICTYPE::L2;
 
     index_->Train(conf);
     index_->Add(base_dataset, conf);
@@ -175,12 +169,12 @@ TEST_F(IDMAPTest, copy_test) {
 
     {
         // cpu to gpu
-        auto clone_index = kn::cloner::CopyCpuToGpu(index_, device_id, conf);
+        auto clone_index = knowhere::cloner::CopyCpuToGpu(index_, device_id, conf);
         auto clone_result = clone_index->Search(query_dataset, conf);
         AssertAnns(clone_result, nq, k);
-        ASSERT_THROW({ std::static_pointer_cast<kn::GPUIDMAP>(clone_index)->GetRawVectors(); },
+        ASSERT_THROW({ std::static_pointer_cast<knowhere::GPUIDMAP>(clone_index)->GetRawVectors(); },
                      knowhere::KnowhereException);
-        ASSERT_THROW({ std::static_pointer_cast<kn::GPUIDMAP>(clone_index)->GetRawIds(); },
+        ASSERT_THROW({ std::static_pointer_cast<knowhere::GPUIDMAP>(clone_index)->GetRawIds(); },
                      knowhere::KnowhereException);
 
         auto binary = clone_index->Serialize();
@@ -193,15 +187,16 @@ TEST_F(IDMAPTest, copy_test) {
         AssertAnns(clone_gpu_res, nq, k);
 
         // gpu to cpu
-        auto host_index = kn::cloner::CopyGpuToCpu(clone_index, conf);
+        auto host_index = knowhere::cloner::CopyGpuToCpu(clone_index, conf);
         auto host_result = host_index->Search(query_dataset, conf);
         AssertAnns(host_result, nq, k);
-        ASSERT_TRUE(std::static_pointer_cast<kn::IDMAP>(host_index)->GetRawVectors() != nullptr);
-        ASSERT_TRUE(std::static_pointer_cast<kn::IDMAP>(host_index)->GetRawIds() != nullptr);
+        ASSERT_TRUE(std::static_pointer_cast<knowhere::IDMAP>(host_index)->GetRawVectors() != nullptr);
+        ASSERT_TRUE(std::static_pointer_cast<knowhere::IDMAP>(host_index)->GetRawIds() != nullptr);
 
         // gpu to gpu
-        auto device_index = kn::cloner::CopyCpuToGpu(index_, device_id, conf);
-        auto new_device_index = std::static_pointer_cast<kn::GPUIDMAP>(device_index)->CopyGpuToGpu(device_id, conf);
+        auto device_index = knowhere::cloner::CopyCpuToGpu(index_, device_id, conf);
+        auto new_device_index =
+            std::static_pointer_cast<knowhere::GPUIDMAP>(device_index)->CopyGpuToGpu(device_id, conf);
         auto device_result = new_device_index->Search(query_dataset, conf);
         AssertAnns(device_result, nq, k);
     }
