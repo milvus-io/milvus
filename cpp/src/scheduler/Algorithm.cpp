@@ -29,8 +29,6 @@ constexpr uint64_t MAXINT = std::numeric_limits<uint32_t>::max();
 uint64_t
 ShortestPath(const ResourcePtr& src, const ResourcePtr& dest, const ResourceMgrPtr& res_mgr,
              std::vector<std::string>& path) {
-    std::vector<std::vector<std::string>> paths;
-
     uint64_t num_of_resources = res_mgr->GetAllResources().size();
     std::unordered_map<uint64_t, std::string> id_name_map;
     std::unordered_map<std::string, uint64_t> name_id_map;

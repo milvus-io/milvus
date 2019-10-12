@@ -26,16 +26,10 @@
 #include <stdlib.h>
 #include <time.h>
 
-namespace {
-
-namespace ms = milvus;
-
-} // namespace
-
 TEST_F(MetaTest, TABLE_TEST) {
     auto table_id = "meta_test_table";
 
-    ms::engine::meta::TableSchema table;
+    milvus::engine::meta::TableSchema table;
     table.table_id_ = table_id;
     auto status = impl_->CreateTable(table);
     ASSERT_TRUE(status.ok());
@@ -53,7 +47,7 @@ TEST_F(MetaTest, TABLE_TEST) {
 
     table.table_id_ = table_id;
     status = impl_->CreateTable(table);
-    ASSERT_EQ(status.code(), ms::DB_ALREADY_EXIST);
+    ASSERT_EQ(status.code(), milvus::DB_ALREADY_EXIST);
 
     table.table_id_ = "";
     status = impl_->CreateTable(table);
@@ -63,16 +57,16 @@ TEST_F(MetaTest, TABLE_TEST) {
 TEST_F(MetaTest, TABLE_FILE_TEST) {
     auto table_id = "meta_test_table";
 
-    ms::engine::meta::TableSchema table;
+    milvus::engine::meta::TableSchema table;
     table.table_id_ = table_id;
     table.dimension_ = 256;
     auto status = impl_->CreateTable(table);
 
-    ms::engine::meta::TableFileSchema table_file;
+    milvus::engine::meta::TableFileSchema table_file;
     table_file.table_id_ = table.table_id_;
     status = impl_->CreateTableFile(table_file);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(table_file.file_type_, ms::engine::meta::TableFileSchema::NEW);
+    ASSERT_EQ(table_file.file_type_, milvus::engine::meta::TableFileSchema::NEW);
 
     uint64_t cnt = 0;
     status = impl_->Count(table_id, cnt);
@@ -81,30 +75,30 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
 
     auto file_id = table_file.file_id_;
 
-    auto new_file_type = ms::engine::meta::TableFileSchema::INDEX;
+    auto new_file_type = milvus::engine::meta::TableFileSchema::INDEX;
     table_file.file_type_ = new_file_type;
 
     status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(table_file.file_type_, new_file_type);
 
-    ms::engine::meta::DatesT dates;
-    dates.push_back(ms::engine::utils::GetDate());
+    milvus::engine::meta::DatesT dates;
+    dates.push_back(milvus::engine::utils::GetDate());
     status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
 
     dates.clear();
     for (auto i = 2; i < 10; ++i) {
-        dates.push_back(ms::engine::utils::GetDateWithDelta(-1 * i));
+        dates.push_back(milvus::engine::utils::GetDateWithDelta(-1 * i));
     }
     status = impl_->DropPartitionsByDates(table_file.table_id_, dates);
     ASSERT_TRUE(status.ok());
 
-    table_file.date_ = ms::engine::utils::GetDateWithDelta(-2);
+    table_file.date_ = milvus::engine::utils::GetDateWithDelta(-2);
     status = impl_->UpdateTableFile(table_file);
     ASSERT_TRUE(status.ok());
-    ASSERT_EQ(table_file.date_, ms::engine::utils::GetDateWithDelta(-2));
-    ASSERT_FALSE(table_file.file_type_ == ms::engine::meta::TableFileSchema::TO_DELETE);
+    ASSERT_EQ(table_file.date_, milvus::engine::utils::GetDateWithDelta(-2));
+    ASSERT_FALSE(table_file.file_type_ == milvus::engine::meta::TableFileSchema::TO_DELETE);
 
     dates.clear();
     dates.push_back(table_file.date_);
@@ -112,7 +106,7 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
     ASSERT_TRUE(status.ok());
 
     std::vector<size_t> ids = {table_file.id_};
-    ms::engine::meta::TableFilesSchema files;
+    milvus::engine::meta::TableFilesSchema files;
     status = impl_->GetTableFiles(table_file.table_id_, ids, files);
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(files.size(), 0UL);
@@ -120,34 +114,34 @@ TEST_F(MetaTest, TABLE_FILE_TEST) {
 
 TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     srand(time(0));
-    ms::engine::DBMetaOptions options;
+    milvus::engine::DBMetaOptions options;
     options.path_ = "/tmp/milvus_test";
     unsigned int seed = 1;
     int days_num = rand_r(&seed) % 100;
     std::stringstream ss;
     ss << "days:" << days_num;
-    options.archive_conf_ = ms::engine::ArchiveConf("delete", ss.str());
+    options.archive_conf_ = milvus::engine::ArchiveConf("delete", ss.str());
 
-    ms::engine::meta::SqliteMetaImpl impl(options);
+    milvus::engine::meta::SqliteMetaImpl impl(options);
     auto table_id = "meta_test_table";
 
-    ms::engine::meta::TableSchema table;
+    milvus::engine::meta::TableSchema table;
     table.table_id_ = table_id;
     auto status = impl.CreateTable(table);
 
-    ms::engine::meta::TableFilesSchema files;
-    ms::engine::meta::TableFileSchema table_file;
+    milvus::engine::meta::TableFilesSchema files;
+    milvus::engine::meta::TableFileSchema table_file;
     table_file.table_id_ = table.table_id_;
 
     auto cnt = 100;
-    int64_t ts = ms::engine::utils::GetMicroSecTimeStamp();
+    int64_t ts = milvus::engine::utils::GetMicroSecTimeStamp();
     std::vector<int> days;
     std::vector<size_t> ids;
     for (auto i = 0; i < cnt; ++i) {
         status = impl.CreateTableFile(table_file);
-        table_file.file_type_ = ms::engine::meta::TableFileSchema::NEW;
+        table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW;
         int day = rand_r(&seed) % (days_num * 2);
-        table_file.created_on_ = ts - day * ms::engine::meta::D_SEC * ms::engine::meta::US_PS - 10000;
+        table_file.created_on_ = ts - day * milvus::engine::meta::D_SEC * milvus::engine::meta::US_PS - 10000;
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
         days.push_back(day);
@@ -157,13 +151,13 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
     impl.Archive();
     int i = 0;
 
-    ms::engine::meta::TableFilesSchema files_get;
+    milvus::engine::meta::TableFilesSchema files_get;
     status = impl.GetTableFiles(table_file.table_id_, ids, files_get);
     ASSERT_TRUE(status.ok());
 
     for (auto &file : files_get) {
         if (days[i] < days_num) {
-            ASSERT_EQ(file.file_type_, ms::engine::meta::TableFileSchema::NEW);
+            ASSERT_EQ(file.file_type_, milvus::engine::meta::TableFileSchema::NEW);
         }
         i++;
     }
@@ -172,19 +166,19 @@ TEST_F(MetaTest, ARCHIVE_TEST_DAYS) {
 }
 
 TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
-    ms::engine::DBMetaOptions options;
+    milvus::engine::DBMetaOptions options;
     options.path_ = "/tmp/milvus_test";
-    options.archive_conf_ = ms::engine::ArchiveConf("delete", "disk:11");
+    options.archive_conf_ = milvus::engine::ArchiveConf("delete", "disk:11");
 
-    ms::engine::meta::SqliteMetaImpl impl(options);
+    milvus::engine::meta::SqliteMetaImpl impl(options);
     auto table_id = "meta_test_group";
 
-    ms::engine::meta::TableSchema table;
+    milvus::engine::meta::TableSchema table;
     table.table_id_ = table_id;
     auto status = impl.CreateTable(table);
 
-    ms::engine::meta::TableFilesSchema files;
-    ms::engine::meta::TableFileSchema table_file;
+    milvus::engine::meta::TableFilesSchema files;
+    milvus::engine::meta::TableFileSchema table_file;
     table_file.table_id_ = table.table_id_;
 
     auto cnt = 10;
@@ -192,8 +186,8 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     std::vector<size_t> ids;
     for (auto i = 0; i < cnt; ++i) {
         status = impl.CreateTableFile(table_file);
-        table_file.file_type_ = ms::engine::meta::TableFileSchema::NEW;
-        table_file.file_size_ = each_size * ms::engine::G;
+        table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW;
+        table_file.file_size_ = each_size * milvus::engine::G;
         status = impl.UpdateTableFile(table_file);
         files.push_back(table_file);
         ids.push_back(table_file.id_);
@@ -202,13 +196,13 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
     impl.Archive();
     int i = 0;
 
-    ms::engine::meta::TableFilesSchema files_get;
+    milvus::engine::meta::TableFilesSchema files_get;
     status = impl.GetTableFiles(table_file.table_id_, ids, files_get);
     ASSERT_TRUE(status.ok());
 
     for (auto &file : files_get) {
         if (i >= 5) {
-            ASSERT_EQ(file.file_type_, ms::engine::meta::TableFileSchema::NEW);
+            ASSERT_EQ(file.file_type_, milvus::engine::meta::TableFileSchema::NEW);
         }
         ++i;
     }
@@ -219,7 +213,7 @@ TEST_F(MetaTest, ARCHIVE_TEST_DISK) {
 TEST_F(MetaTest, TABLE_FILES_TEST) {
     auto table_id = "meta_test_group";
 
-    ms::engine::meta::TableSchema table;
+    milvus::engine::meta::TableSchema table;
     table.table_id_ = table_id;
     auto status = impl_->CreateTable(table);
 
@@ -231,51 +225,51 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     uint64_t to_index_files_cnt = 6;
     uint64_t index_files_cnt = 7;
 
-    ms::engine::meta::TableFileSchema table_file;
+    milvus::engine::meta::TableFileSchema table_file;
     table_file.table_id_ = table.table_id_;
 
     for (auto i = 0; i < new_merge_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = ms::engine::meta::TableFileSchema::NEW_MERGE;
+        table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW_MERGE;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < new_index_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = ms::engine::meta::TableFileSchema::NEW_INDEX;
+        table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW_INDEX;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < backup_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = ms::engine::meta::TableFileSchema::BACKUP;
+        table_file.file_type_ = milvus::engine::meta::TableFileSchema::BACKUP;
         table_file.row_count_ = 1;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < new_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = ms::engine::meta::TableFileSchema::NEW;
+        table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < raw_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = ms::engine::meta::TableFileSchema::RAW;
+        table_file.file_type_ = milvus::engine::meta::TableFileSchema::RAW;
         table_file.row_count_ = 1;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < to_index_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = ms::engine::meta::TableFileSchema::TO_INDEX;
+        table_file.file_type_ = milvus::engine::meta::TableFileSchema::TO_INDEX;
         table_file.row_count_ = 1;
         status = impl_->UpdateTableFile(table_file);
     }
 
     for (auto i = 0; i < index_files_cnt; ++i) {
         status = impl_->CreateTableFile(table_file);
-        table_file.file_type_ = ms::engine::meta::TableFileSchema::INDEX;
+        table_file.file_type_ = milvus::engine::meta::TableFileSchema::INDEX;
         table_file.row_count_ = 1;
         status = impl_->UpdateTableFile(table_file);
     }
@@ -285,28 +279,28 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(total_row_count, raw_files_cnt + to_index_files_cnt + index_files_cnt);
 
-    ms::engine::meta::TableFilesSchema files;
+    milvus::engine::meta::TableFilesSchema files;
     status = impl_->FilesToIndex(files);
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
-    ms::engine::meta::DatePartionedTableFilesSchema dated_files;
+    milvus::engine::meta::DatePartionedTableFilesSchema dated_files;
     status = impl_->FilesToMerge(table.table_id_, dated_files);
     ASSERT_EQ(dated_files[table_file.date_].size(), raw_files_cnt);
 
     status = impl_->FilesToIndex(files);
     ASSERT_EQ(files.size(), to_index_files_cnt);
 
-    ms::engine::meta::DatesT dates = {table_file.date_};
+    milvus::engine::meta::DatesT dates = {table_file.date_};
     std::vector<size_t> ids;
     status = impl_->FilesToSearch(table_id, ids, dates, dated_files);
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
-    status = impl_->FilesToSearch(table_id, ids, ms::engine::meta::DatesT(), dated_files);
+    status = impl_->FilesToSearch(table_id, ids, milvus::engine::meta::DatesT(), dated_files);
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
-    status = impl_->FilesToSearch(table_id, ids, ms::engine::meta::DatesT(), dated_files);
+    status = impl_->FilesToSearch(table_id, ids, milvus::engine::meta::DatesT(), dated_files);
     ASSERT_EQ(dated_files[table_file.date_].size(),
               to_index_files_cnt + raw_files_cnt + index_files_cnt);
 
@@ -321,13 +315,13 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_FALSE(status.ok());
 
     file_types = {
-        ms::engine::meta::TableFileSchema::NEW,
-        ms::engine::meta::TableFileSchema::NEW_MERGE,
-        ms::engine::meta::TableFileSchema::NEW_INDEX,
-        ms::engine::meta::TableFileSchema::TO_INDEX,
-        ms::engine::meta::TableFileSchema::INDEX,
-        ms::engine::meta::TableFileSchema::RAW,
-        ms::engine::meta::TableFileSchema::BACKUP,
+        milvus::engine::meta::TableFileSchema::NEW,
+        milvus::engine::meta::TableFileSchema::NEW_MERGE,
+        milvus::engine::meta::TableFileSchema::NEW_INDEX,
+        milvus::engine::meta::TableFileSchema::TO_INDEX,
+        milvus::engine::meta::TableFileSchema::INDEX,
+        milvus::engine::meta::TableFileSchema::RAW,
+        milvus::engine::meta::TableFileSchema::BACKUP,
     };
     status = impl_->FilesByType(table.table_id_, file_types, file_ids);
     ASSERT_TRUE(status.ok());
@@ -340,7 +334,7 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
     ASSERT_TRUE(status.ok());
 
     status = impl_->CreateTableFile(table_file);
-    table_file.file_type_ = ms::engine::meta::TableFileSchema::NEW;
+    table_file.file_type_ = milvus::engine::meta::TableFileSchema::NEW;
     status = impl_->UpdateTableFile(table_file);
     status = impl_->CleanUp();
     ASSERT_TRUE(status.ok());
@@ -355,11 +349,11 @@ TEST_F(MetaTest, TABLE_FILES_TEST) {
 TEST_F(MetaTest, INDEX_TEST) {
     auto table_id = "index_test";
 
-    ms::engine::meta::TableSchema table;
+    milvus::engine::meta::TableSchema table;
     table.table_id_ = table_id;
     auto status = impl_->CreateTable(table);
 
-    ms::engine::TableIndex index;
+    milvus::engine::TableIndex index;
     index.metric_type_ = 2;
     index.nlist_ = 1234;
     index.engine_type_ = 3;
@@ -370,12 +364,12 @@ TEST_F(MetaTest, INDEX_TEST) {
     status = impl_->UpdateTableFlag(table_id, flag);
     ASSERT_TRUE(status.ok());
 
-    ms::engine::meta::TableSchema table_info;
+    milvus::engine::meta::TableSchema table_info;
     table_info.table_id_ = table_id;
     status = impl_->DescribeTable(table_info);
     ASSERT_EQ(table_info.flag_, flag);
 
-    ms::engine::TableIndex index_out;
+    milvus::engine::TableIndex index_out;
     status = impl_->DescribeTableIndex(table_id, index_out);
     ASSERT_EQ(index_out.metric_type_, index.metric_type_);
     ASSERT_EQ(index_out.nlist_, index.nlist_);

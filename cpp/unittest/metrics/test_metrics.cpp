@@ -29,22 +29,16 @@
 #include "db/DB.h"
 #include "db/meta/SqliteMetaImpl.h"
 
-namespace {
-
-namespace ms = milvus;
-
-} // namespace
-
 TEST_F(MetricTest, METRIC_TEST) {
-    ms::server::Config::GetInstance().SetMetricConfigCollector("zabbix");
-    ms::server::Metrics::GetInstance();
-    ms::server::Config::GetInstance().SetMetricConfigCollector("prometheus");
-    ms::server::Metrics::GetInstance();
+    milvus::server::Config::GetInstance().SetMetricConfigCollector("zabbix");
+    milvus::server::Metrics::GetInstance();
+    milvus::server::Config::GetInstance().SetMetricConfigCollector("prometheus");
+    milvus::server::Metrics::GetInstance();
 
-    ms::server::SystemInfo::GetInstance().Init();
+    milvus::server::SystemInfo::GetInstance().Init();
 //    server::Metrics::GetInstance().Init();
 //    server::Metrics::GetInstance().exposer_ptr()->RegisterCollectable(server::Metrics::GetInstance().registry_ptr());
-    ms::server::Metrics::GetInstance().Init();
+    milvus::server::Metrics::GetInstance().Init();
 
 //    server::PrometheusMetrics::GetInstance().exposer_ptr()->RegisterCollectable(server::PrometheusMetrics::GetInstance().registry_ptr());
     milvus::cache::CpuCacheMgr::GetInstance()->SetCapacity(1UL * 1024 * 1024 * 1024);
@@ -53,17 +47,17 @@ TEST_F(MetricTest, METRIC_TEST) {
     static const char *group_name = "test_group";
     static const int group_dim = 256;
 
-    ms::engine::meta::TableSchema group_info;
+    milvus::engine::meta::TableSchema group_info;
     group_info.dimension_ = group_dim;
     group_info.table_id_ = group_name;
     auto stat = db_->CreateTable(group_info);
 
-    ms::engine::meta::TableSchema group_info_get;
+    milvus::engine::meta::TableSchema group_info_get;
     group_info_get.table_id_ = group_name;
     stat = db_->DescribeTable(group_info_get);
 
-    ms::engine::IDNumbers vector_ids;
-    ms::engine::IDNumbers target_ids;
+    milvus::engine::IDNumbers vector_ids;
+    milvus::engine::IDNumbers target_ids;
 
     int d = 256;
     int nb = 50;
@@ -81,7 +75,7 @@ TEST_F(MetricTest, METRIC_TEST) {
     }
 
     std::thread search([&]() {
-        ms::engine::QueryResults results;
+        milvus::engine::QueryResults results;
         int k = 10;
         std::this_thread::sleep_for(std::chrono::seconds(2));
 
@@ -132,32 +126,32 @@ TEST_F(MetricTest, METRIC_TEST) {
 }
 
 TEST_F(MetricTest, COLLECTOR_METRICS_TEST) {
-    auto status = ms::Status::OK();
-    ms::server::CollectInsertMetrics insert_metrics0(0, status);
-    status = ms::Status(ms::DB_ERROR, "error");
-    ms::server::CollectInsertMetrics insert_metrics1(0, status);
+    auto status = milvus::Status::OK();
+    milvus::server::CollectInsertMetrics insert_metrics0(0, status);
+    status = milvus::Status(milvus::DB_ERROR, "error");
+    milvus::server::CollectInsertMetrics insert_metrics1(0, status);
 
-    ms::server::CollectQueryMetrics query_metrics(10);
+    milvus::server::CollectQueryMetrics query_metrics(10);
 
-    ms::server::CollectMergeFilesMetrics merge_metrics();
+    milvus::server::CollectMergeFilesMetrics merge_metrics();
 
-    ms::server::CollectBuildIndexMetrics build_index_metrics();
+    milvus::server::CollectBuildIndexMetrics build_index_metrics();
 
-    ms::server::CollectExecutionEngineMetrics execution_metrics(10);
+    milvus::server::CollectExecutionEngineMetrics execution_metrics(10);
 
-    ms::server::CollectSerializeMetrics serialize_metrics(10);
+    milvus::server::CollectSerializeMetrics serialize_metrics(10);
 
-    ms::server::CollectAddMetrics add_metrics(10, 128);
+    milvus::server::CollectAddMetrics add_metrics(10, 128);
 
-    ms::server::CollectDurationMetrics duration_metrics_raw(ms::engine::meta::TableFileSchema::RAW);
-    ms::server::CollectDurationMetrics duration_metrics_index(ms::engine::meta::TableFileSchema::TO_INDEX);
-    ms::server::CollectDurationMetrics duration_metrics_delete(ms::engine::meta::TableFileSchema::TO_DELETE);
+    milvus::server::CollectDurationMetrics duration_metrics_raw(milvus::engine::meta::TableFileSchema::RAW);
+    milvus::server::CollectDurationMetrics duration_metrics_index(milvus::engine::meta::TableFileSchema::TO_INDEX);
+    milvus::server::CollectDurationMetrics duration_metrics_delete(milvus::engine::meta::TableFileSchema::TO_DELETE);
 
-    ms::server::CollectSearchTaskMetrics search_metrics_raw(ms::engine::meta::TableFileSchema::RAW);
-    ms::server::CollectSearchTaskMetrics search_metrics_index(ms::engine::meta::TableFileSchema::TO_INDEX);
-    ms::server::CollectSearchTaskMetrics search_metrics_delete(ms::engine::meta::TableFileSchema::TO_DELETE);
+    milvus::server::CollectSearchTaskMetrics search_metrics_raw(milvus::engine::meta::TableFileSchema::RAW);
+    milvus::server::CollectSearchTaskMetrics search_metrics_index(milvus::engine::meta::TableFileSchema::TO_INDEX);
+    milvus::server::CollectSearchTaskMetrics search_metrics_delete(milvus::engine::meta::TableFileSchema::TO_DELETE);
 
-    ms::server::MetricCollector metric_collector();
+    milvus::server::MetricCollector metric_collector();
 }
 
 

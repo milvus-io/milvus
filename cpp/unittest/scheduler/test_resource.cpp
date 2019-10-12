@@ -31,6 +31,8 @@
 namespace milvus {
 namespace scheduler {
 
+constexpr uint64_t max_once_load = 2;
+
 /************ ResourceBaseTest ************/
 class ResourceBaseTest : public testing::Test {
  protected:
@@ -182,7 +184,7 @@ class ResourceAdvanceTest : public testing::Test {
 };
 
 TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
-    const uint64_t NUM = 100;
+    const uint64_t NUM = 10;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
@@ -208,7 +210,7 @@ TEST_F(ResourceAdvanceTest, DISK_RESOURCE_TEST) {
 }
 
 TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
-    const uint64_t NUM = 100;
+    const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
@@ -234,7 +236,7 @@ TEST_F(ResourceAdvanceTest, CPU_RESOURCE_TEST) {
 }
 
 TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
-    const uint64_t NUM = 100;
+    const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {
@@ -260,7 +262,7 @@ TEST_F(ResourceAdvanceTest, GPU_RESOURCE_TEST) {
 }
 
 TEST_F(ResourceAdvanceTest, TEST_RESOURCE_TEST) {
-    const uint64_t NUM = 100;
+    const uint64_t NUM = max_once_load;
     std::vector<std::shared_ptr<TestTask>> tasks;
     TableFileSchemaPtr dummy = nullptr;
     for (uint64_t i = 0; i < NUM; ++i) {

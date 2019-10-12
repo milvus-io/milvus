@@ -228,17 +228,24 @@ foreach(_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
     set(${_LIB_NAME} "${_LIB_VERSION}")
 endforeach()
 
-if(DEFINED ENV{KNOWHERE_FAISS_URL})
-    set(FAISS_SOURCE_URL "$ENV{KNOWHERE_FAISS_URL}")
-else()
+if(CUSTOMIZATION)
     set(FAISS_SOURCE_URL "http://192.168.1.105:6060/jinhai/faiss/-/archive/${FAISS_VERSION}/faiss-${FAISS_VERSION}.tar.gz")
-    message(STATUS "FAISS URL = ${FAISS_SOURCE_URL}")
+    # set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
+    # set(FAISS_MD5 "57da9c4f599cc8fa4260488b1c96e1cc") # commit-id 6dbdf75987c34a2c853bd172ea0d384feea8358c branch-0.2.0
+    # set(FAISS_MD5 "21deb1c708490ca40ecb899122c01403") # commit-id 643e48f479637fd947e7b93fa4ca72b38ecc9a39 branch-0.2.0
+    # set(FAISS_MD5 "072db398351cca6e88f52d743bbb9fa0") # commit-id 3a2344d04744166af41ef1a74449d68a315bfe17 branch-0.2.1
+    set(FAISS_MD5 "94988b7bdac4eb82a9575c702a3f2df3") # commit-id 1407526b31cad26f98ceca8dddaface8f18c4c19 branch-0.2.1
+
+    execute_process(COMMAND wget -q --method HEAD ${FAISS_SOURCE_URL} RESULT_VARIABLE return_code)
+    message(STATUS "Check the remote cache file ${FAISS_SOURCE_URL}. return code = ${return_code}")
+    if (NOT return_code EQUAL 0)
+        set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/v1.5.3.tar.gz")
+    endif()
+else()
+    set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/v1.5.3.tar.gz")
+    set(FAISS_MD5 "0bc12737b23def156f6a1eb782050135")
 endif()
-# set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
-# set(FAISS_MD5 "57da9c4f599cc8fa4260488b1c96e1cc") # commit-id 6dbdf75987c34a2c853bd172ea0d384feea8358c branch-0.2.0
-# set(FAISS_MD5 "21deb1c708490ca40ecb899122c01403") # commit-id 643e48f479637fd947e7b93fa4ca72b38ecc9a39 branch-0.2.0
-# set(FAISS_MD5 "072db398351cca6e88f52d743bbb9fa0") # commit-id 3a2344d04744166af41ef1a74449d68a315bfe17 branch-0.2.1
-set(FAISS_MD5 "5af237d77947ee632f169bcb36feee2b") # commit-id 2c8affd0da60354e4322fa4c0224519e7912b9c4 branch-0.2.1
+message(STATUS "FAISS URL = ${FAISS_SOURCE_URL}")
 
 if(DEFINED ENV{KNOWHERE_ARROW_URL})
     set(ARROW_SOURCE_URL "$ENV{KNOWHERE_ARROW_URL}")

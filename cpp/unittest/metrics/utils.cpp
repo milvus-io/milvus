@@ -28,8 +28,6 @@ INITIALIZE_EASYLOGGINGPP
 
 namespace {
 
-namespace ms = milvus;
-
 class DBTestEnvironment : public ::testing::Environment {
  public:
     explicit DBTestEnvironment(const std::string& uri) : uri_(uri) {}
@@ -58,8 +56,8 @@ void MetricTest::InitLog() {
     el::Loggers::reconfigureLogger("default", defaultConf);
 }
 
-ms::engine::DBOptions MetricTest::GetOptions() {
-    auto options = ms::engine::DBFactory::BuildOption();
+milvus::engine::DBOptions MetricTest::GetOptions() {
+    auto options = milvus::engine::DBFactory::BuildOption();
     options.meta_.path_ = "/tmp/milvus_test";
     options.meta_.backend_uri_ = "sqlite://:@:/";
     return options;
@@ -69,7 +67,7 @@ void MetricTest::SetUp() {
     boost::filesystem::remove_all("/tmp/milvus_test");
     InitLog();
     auto options = GetOptions();
-    db_ = ms::engine::DBFactory::Build(options);
+    db_ = milvus::engine::DBFactory::Build(options);
 }
 
 void MetricTest::TearDown() {
