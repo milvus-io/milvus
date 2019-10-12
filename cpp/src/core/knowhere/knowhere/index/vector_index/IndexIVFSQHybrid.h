@@ -60,6 +60,7 @@ class IVFSQHybrid : public GPUIVFSQ {
     void
     UnsetQuantizer();
 
+    // todo(xiaojun): return void => VecIndex
     void
     LoadData(const knowhere::QuantizerPtr& q, const Config& conf);
 
