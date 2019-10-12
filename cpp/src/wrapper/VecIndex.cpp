@@ -37,7 +37,15 @@ namespace engine {
 
 int64_t
 VecIndex::Size() {
+    if (size_ != 0) {
+        return size_;
+    }
     return Count() * Dimension() * sizeof(float);
+}
+
+void
+VecIndex::set_size(int64_t size) {
+    size_ = size;
 }
 
 struct FileIOReader {
@@ -159,12 +167,13 @@ GetVecIndexFactory(const IndexType& type, const Config& cfg) {
 }
 
 VecIndexPtr
-LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binary) {
+LoadVecIndex(const IndexType& index_type, const knowhere::BinarySet& index_binary, int64_t size) {
     auto index = GetVecIndexFactory(index_type);
     if (index == nullptr)
         return nullptr;
     // else
     index->Load(index_binary);
+    index->set_size(size);
     return index;
 }
 
@@ -210,7 +219,7 @@ read_index(const std::string& location) {
         delete[] meta;
     }
 
-    return LoadVecIndex(current_type, load_data_list);
+    return LoadVecIndex(current_type, load_data_list, length);
 }
 
 Status
