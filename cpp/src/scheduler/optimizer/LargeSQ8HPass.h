@@ -27,50 +27,21 @@
 #include <unordered_map>
 #include <vector>
 
-#include "ResourceMgr.h"
-#include "job/Job.h"
-#include "task/Task.h"
+#include "Pass.h"
 
 namespace milvus {
 namespace scheduler {
 
-class JobMgr {
+class LargeSQ8HPass : public Pass {
  public:
-    explicit JobMgr(ResourceMgrPtr res_mgr);
-
-    void
-    Start();
-
-    void
-    Stop();
+    LargeSQ8HPass() = default;
 
  public:
-    void
-    Put(const JobPtr& job);
-
- private:
-    void
-    worker_function();
-
-    static std::vector<TaskPtr>
-    build_task(const JobPtr& job);
-
-    void
-    calculate_path(const TaskPtr& task);
-
- private:
-    bool running_ = false;
-    std::queue<JobPtr> queue_;
-
-    std::thread worker_thread_;
-
-    std::mutex mutex_;
-    std::condition_variable cv_;
-
-    ResourceMgrPtr res_mgr_ = nullptr;
+    bool
+    Run(const TaskPtr& task) override;
 };
 
-using JobMgrPtr = std::shared_ptr<JobMgr>;
+using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
 
 }  // namespace scheduler
 }  // namespace milvus
