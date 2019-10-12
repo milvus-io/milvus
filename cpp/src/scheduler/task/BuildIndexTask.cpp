@@ -124,6 +124,7 @@ XBuildIndexTask::Execute() {
             ENGINE_LOG_ERROR << "Failed to create table file: " << status.ToString();
             build_index_job->BuildIndexDone(to_index_id_);
             build_index_job->GetStatus() = status;
+            to_index_engine_ = nullptr;
             return;
         }
 
@@ -136,6 +137,7 @@ XBuildIndexTask::Execute() {
                 ENGINE_LOG_DEBUG << "Failed to update file to index, mark file: " << table_file.file_id_
                                  << " to to_delete";
 
+                to_index_engine_ = nullptr;
                 return;
             }
         } catch (std::exception& ex) {
@@ -150,6 +152,7 @@ XBuildIndexTask::Execute() {
                       << std::endl;
 
             build_index_job->GetStatus() = Status(DB_ERROR, msg);
+            to_index_engine_ = nullptr;
             return;
         }
 
@@ -158,6 +161,7 @@ XBuildIndexTask::Execute() {
         meta_ptr->HasTable(file_->table_id_, has_table);
         if (!has_table) {
             meta_ptr->DeleteTableFiles(file_->table_id_);
+            to_index_engine_ = nullptr;
             return;
         }
 
@@ -177,6 +181,7 @@ XBuildIndexTask::Execute() {
                       << ", possible out of disk space" << std::endl;
 
             build_index_job->GetStatus() = Status(DB_ERROR, msg);
+            to_index_engine_ = nullptr;
             return;
         }
 

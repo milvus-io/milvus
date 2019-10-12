@@ -27,47 +27,41 @@
 #include <boost/filesystem.hpp>
 #include <vector>
 
-namespace {
-
-namespace ms = milvus;
-
-} // namespace
-
 TEST(DBMiscTest, EXCEPTION_TEST) {
-    ms::Exception ex1(100, "error");
+    milvus::Exception ex1(100, "error");
     std::string what = ex1.what();
     ASSERT_EQ(what, "error");
     ASSERT_EQ(ex1.code(), 100);
 
-    ms::InvalidArgumentException ex2;
-    ASSERT_EQ(ex2.code(), ms::SERVER_INVALID_ARGUMENT);
+    milvus::InvalidArgumentException ex2;
+    ASSERT_EQ(ex2.code(), milvus::SERVER_INVALID_ARGUMENT);
 }
 
 TEST(DBMiscTest, OPTIONS_TEST) {
     try {
-        ms::engine::ArchiveConf archive("$$##");
+        milvus::engine::ArchiveConf archive("$$##");
     } catch (std::exception &ex) {
         ASSERT_TRUE(true);
     }
 
     {
-        ms::engine::ArchiveConf archive("delete", "no");
+        milvus::engine::ArchiveConf archive("delete", "no");
         ASSERT_TRUE(archive.GetCriterias().empty());
     }
 
     {
-        ms::engine::ArchiveConf archive("delete", "1:2");
+        milvus::engine::ArchiveConf archive("delete", "1:2");
         ASSERT_TRUE(archive.GetCriterias().empty());
     }
 
     {
-        ms::engine::ArchiveConf archive("delete", "1:2:3");
+        milvus::engine::ArchiveConf archive("delete", "1:2:3");
         ASSERT_TRUE(archive.GetCriterias().empty());
     }
 
     {
-        ms::engine::ArchiveConf archive("delete");
-        ms::engine::ArchiveConf::CriteriaT criterial = {
+        milvus::engine::ArchiveConf archive("delete");
+        milvus::engine::ArchiveConf::CriteriaT criterial = {
             {"disk", 1024},
             {"days", 100}
         };
@@ -80,25 +74,25 @@ TEST(DBMiscTest, OPTIONS_TEST) {
 }
 
 TEST(DBMiscTest, META_TEST) {
-    ms::engine::DBMetaOptions options;
+    milvus::engine::DBMetaOptions options;
     options.path_ = "/tmp/milvus_test";
-    ms::engine::meta::SqliteMetaImpl impl(options);
+    milvus::engine::meta::SqliteMetaImpl impl(options);
 
     time_t tt;
     time(&tt);
     int delta = 10;
-    ms::engine::meta::DateT dt = ms::engine::utils::GetDate(tt, delta);
+    milvus::engine::meta::DateT dt = milvus::engine::utils::GetDate(tt, delta);
     ASSERT_GT(dt, 0);
 }
 
 TEST(DBMiscTest, UTILS_TEST) {
-    ms::engine::DBMetaOptions options;
+    milvus::engine::DBMetaOptions options;
     options.path_ = "/tmp/milvus_test/main";
     options.slave_paths_.push_back("/tmp/milvus_test/slave_1");
     options.slave_paths_.push_back("/tmp/milvus_test/slave_2");
 
     const std::string TABLE_NAME = "test_tbl";
-    auto status = ms::engine::utils::CreateTablePath(options, TABLE_NAME);
+    auto status = milvus::engine::utils::CreateTablePath(options, TABLE_NAME);
     ASSERT_TRUE(status.ok());
     ASSERT_TRUE(boost::filesystem::exists(options.path_));
     for (auto &path : options.slave_paths_) {
@@ -113,18 +107,18 @@ TEST(DBMiscTest, UTILS_TEST) {
 //    status =  engine::utils::CreateTablePath(options, TABLE_NAME);
 //    ASSERT_FALSE(status.ok());
 
-    ms::engine::meta::TableFileSchema file;
+    milvus::engine::meta::TableFileSchema file;
     file.id_ = 50;
     file.table_id_ = TABLE_NAME;
     file.file_type_ = 3;
     file.date_ = 155000;
-    status = ms::engine::utils::GetTableFilePath(options, file);
+    status = milvus::engine::utils::GetTableFilePath(options, file);
     ASSERT_FALSE(status.ok());
     ASSERT_TRUE(file.location_.empty());
 
-    status = ms::engine::utils::DeleteTablePath(options, TABLE_NAME);
+    status = milvus::engine::utils::DeleteTablePath(options, TABLE_NAME);
     ASSERT_TRUE(status.ok());
 
-    status = ms::engine::utils::DeleteTableFilePath(options, file);
+    status = milvus::engine::utils::DeleteTableFilePath(options, file);
     ASSERT_TRUE(status.ok());
 }

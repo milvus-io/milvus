@@ -900,20 +900,21 @@ DBImpl::BackgroundBuildIndex() {
     meta_ptr_->FilesToIndex(to_index_files);
     Status status;
 
-    scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(0, meta_ptr_, options_);
+    if (!to_index_files.empty()) {
+        scheduler::BuildIndexJobPtr job = std::make_shared<scheduler::BuildIndexJob>(0, meta_ptr_, options_);
 
-    // step 2: put build index task to scheduler
-    for (auto& file : to_index_files) {
-        scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
-        job->AddToIndexFiles(file_ptr);
+        // step 2: put build index task to scheduler
+        for (auto& file : to_index_files) {
+            scheduler::TableFileSchemaPtr file_ptr = std::make_shared<meta::TableFileSchema>(file);
+            job->AddToIndexFiles(file_ptr);
+        }
+        scheduler::JobMgrInst::GetInstance()->Put(job);
+        job->WaitBuildIndexFinish();
+        if (!job->GetStatus().ok()) {
+            Status status = job->GetStatus();
+            ENGINE_LOG_ERROR << "Building index failed: " << status.ToString();
+        }
     }
-    scheduler::JobMgrInst::GetInstance()->Put(job);
-    job->WaitBuildIndexFinish();
-    if (!job->GetStatus().ok()) {
-        Status status = job->GetStatus();
-        ENGINE_LOG_ERROR << "Building index failed: " << status.ToString();
-    }
-
     //    for (auto &file : to_index_files) {
     //        status = BuildIndex(file);
     //        if (!status.ok()) {

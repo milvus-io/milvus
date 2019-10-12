@@ -38,6 +38,9 @@ std::mutex SchedInst::mutex_;
 scheduler::JobMgrPtr JobMgrInst::instance = nullptr;
 std::mutex JobMgrInst::mutex_;
 
+OptimizerPtr OptimizerInst::instance = nullptr;
+std::mutex OptimizerInst::mutex_;
+
 void
 load_simple_config() {
     server::Config& config = server::Config::GetInstance();
@@ -46,40 +49,27 @@ load_simple_config() {
     std::vector<std::string> pool;
     config.GetResourceConfigPool(pool);
 
-    bool cpu = false;
-    std::set<uint64_t> gpu_ids;
+    // get resources
+    bool use_cpu_to_compute = false;
     for (auto& resource : pool) {
         if (resource == "cpu") {
-            cpu = true;
+            use_cpu_to_compute = true;
             break;
-        } else {
-            if (resource.length() < 4 || resource.substr(0, 3) != "gpu") {
-                // error
-                exit(-1);
-            }
-            auto gpu_id = std::stoi(resource.substr(3));
-            if (gpu_id >= get_num_gpu()) {
-                // error
-                exit(-1);
-            }
-            gpu_ids.insert(gpu_id);
         }
     }
+    auto gpu_ids = get_gpu_pool();
 
+    // create and connect
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("disk", "DISK", 0, true, false));
-    auto io = Connection("io", 500);
-    if (cpu) {
-        ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0, true, true));
-        ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
-    } else {
-        ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0, true, false));
-        ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
 
-        auto pcie = Connection("pcie", 12000);
-        for (auto& gpu_id : gpu_ids) {
-            ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
-            ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), io);
-        }
+    auto io = Connection("io", 500);
+    ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0, true, use_cpu_to_compute));
+    ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
+
+    auto pcie = Connection("pcie", 12000);
+    for (auto& gpu_id : gpu_ids) {
+        ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
+        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
     }
 }
 
