@@ -155,8 +155,8 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 
     size_t file_size = index_engine_->PhysicalSize();
 
-    std::string info = "Load file id:" + std::to_string(file_->id_) +
-                       " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
+    std::string info = "Load file id:" + std::to_string(file_->id_) + " file type:" +
+                       std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
                        " bytes from location: " + file_->location_ + " totally cost";
     double span = rc.ElapseFromBegin(info);
     //    for (auto &context : search_contexts_) {
@@ -209,7 +209,8 @@ XSearchTask::Execute() {
 
             // step 3: pick up topk result
             auto spec_k = index_engine_->Count() < topk ? index_engine_->Count() : topk;
-            XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, metric_l2, search_job->GetResult());
+            XSearchTask::MergeTopkToResultSet(output_ids, output_distance, spec_k, nq, topk, metric_l2,
+                                              search_job->GetResult());
 
             span = rc.RecordSection(hdr + ", reduce topk");
             //            search_job->AccumReduceCost(span);
@@ -229,12 +230,8 @@ XSearchTask::Execute() {
 }
 
 void
-XSearchTask::MergeTopkToResultSet(const std::vector<int64_t>& input_ids,
-                                  const std::vector<float>& input_distance,
-                                  uint64_t input_k,
-                                  uint64_t nq,
-                                  uint64_t topk,
-                                  bool ascending,
+XSearchTask::MergeTopkToResultSet(const std::vector<int64_t>& input_ids, const std::vector<float>& input_distance,
+                                  uint64_t input_k, uint64_t nq, uint64_t topk, bool ascending,
                                   scheduler::ResultSet& result) {
     if (result.empty()) {
         result.resize(nq);
@@ -242,14 +239,14 @@ XSearchTask::MergeTopkToResultSet(const std::vector<int64_t>& input_ids,
 
     for (uint64_t i = 0; i < nq; i++) {
         scheduler::Id2DistVec result_buf;
-        auto &result_i = result[i];
+        auto& result_i = result[i];
 
         if (result[i].empty()) {
             result_buf.resize(input_k, scheduler::IdDistPair(-1, 0.0));
             uint64_t input_k_multi_i = input_k * i;
             for (auto k = 0; k < input_k; ++k) {
                 uint64_t idx = input_k_multi_i + k;
-                auto &result_buf_item = result_buf[k];
+                auto& result_buf_item = result_buf[k];
                 result_buf_item.first = input_ids[idx];
                 result_buf_item.second = input_distance[idx];
             }
@@ -262,8 +259,8 @@ XSearchTask::MergeTopkToResultSet(const std::vector<int64_t>& input_ids,
             uint64_t input_k_multi_i = input_k * i;
             while (buf_k < output_k && src_k < input_k && tar_k < tar_size) {
                 src_idx = input_k_multi_i + src_k;
-                auto &result_buf_item = result_buf[buf_k];
-                auto &result_item = result_i[tar_k];
+                auto& result_buf_item = result_buf[buf_k];
+                auto& result_item = result_i[tar_k];
                 if ((ascending && input_distance[src_idx] < result_item.second) ||
                     (!ascending && input_distance[src_idx] > result_item.second)) {
                     result_buf_item.first = input_ids[src_idx];
@@ -280,7 +277,7 @@ XSearchTask::MergeTopkToResultSet(const std::vector<int64_t>& input_ids,
                 if (src_k < input_k) {
                     while (buf_k < output_k && src_k < input_k) {
                         src_idx = input_k_multi_i + src_k;
-                        auto &result_buf_item = result_buf[buf_k];
+                        auto& result_buf_item = result_buf[buf_k];
                         result_buf_item.first = input_ids[src_idx];
                         result_buf_item.second = input_distance[src_idx];
                         src_k++;
@@ -301,19 +298,15 @@ XSearchTask::MergeTopkToResultSet(const std::vector<int64_t>& input_ids,
 }
 
 void
-XSearchTask::MergeTopkArray(std::vector<int64_t>& tar_ids,
-                            std::vector<float>& tar_distance,
-                            uint64_t& tar_input_k,
-                            const std::vector<int64_t>& src_ids,
-                            const std::vector<float>& src_distance,
-                            uint64_t src_input_k,
-                            uint64_t nq,
-                            uint64_t topk,
-                            bool ascending) {
-    if (src_ids.empty() || src_distance.empty()) return;
+XSearchTask::MergeTopkArray(std::vector<int64_t>& tar_ids, std::vector<float>& tar_distance, uint64_t& tar_input_k,
+                            const std::vector<int64_t>& src_ids, const std::vector<float>& src_distance,
+                            uint64_t src_input_k, uint64_t nq, uint64_t topk, bool ascending) {
+    if (src_ids.empty() || src_distance.empty()) {
+        return;
+    }
 
-    std::vector<int64_t> id_buf(nq*topk, -1);
-    std::vector<float> dist_buf(nq*topk, 0.0);
+    std::vector<int64_t> id_buf(nq * topk, -1);
+    std::vector<float> dist_buf(nq * topk, 0.0);
 
     uint64_t output_k = std::min(topk, tar_input_k + src_input_k);
     uint64_t buf_k, src_k, tar_k;
