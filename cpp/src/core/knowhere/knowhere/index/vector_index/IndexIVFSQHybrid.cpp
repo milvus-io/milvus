@@ -79,20 +79,8 @@ IVFSQHybrid::CopyGpuToCpu(const Config& config) {
 VectorIndexPtr
 IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
-        ResScope rs(res, device_id, false);
-        faiss::gpu::GpuClonerOptions option;
-        option.allInGpu = true;
-
-        faiss::IndexComposition index_composition;
-        index_composition.index = index_.get();
-        index_composition.quantizer = nullptr;
-        index_composition.mode = 0;  // copy all
-
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, &index_composition, &option);
-
-        std::shared_ptr<faiss::Index> device_index;
-        device_index.reset(gpu_index);
-        return std::make_shared<IVFSQHybrid>(device_index, device_id, res);
+        auto p = CopyCpuToGpuWithQuantizer(device_id, config);
+        return p.first;
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }
@@ -188,9 +176,10 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
             KNOWHERE_THROW_MSG("mode only support 2 in this func");
         }
     }
-    if (quantizer_conf->gpu_id != gpu_id_) {
-        KNOWHERE_THROW_MSG("quantizer and data must on the same gpu card");
-    }
+//    if (quantizer_conf->gpu_id != gpu_id_) {
+//        KNOWHERE_THROW_MSG("quantizer and data must on the same gpu card");
+//    }
+    gpu_id_ = quantizer_conf->gpu_id;
 
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_)) {
         ResScope rs(res, gpu_id_, false);
@@ -211,6 +200,34 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
         new_idx.reset(gpu_index);
         auto sq_idx = std::make_shared<IVFSQHybrid>(new_idx, gpu_id_, res);
         return sq_idx;
+    } else {
+        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
+    }
+}
+
+std::pair<VectorIndexPtr, QuantizerPtr>
+IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& config) {
+    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
+
+        ResScope rs(res, device_id, false);
+        faiss::gpu::GpuClonerOptions option;
+        option.allInGpu = true;
+
+        faiss::IndexComposition index_composition;
+        index_composition.index = index_.get();
+        index_composition.quantizer = nullptr;
+        index_composition.mode = 0;  // copy all
+
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, &index_composition, &option);
+
+        std::shared_ptr<faiss::Index> device_index;
+        device_index.reset(gpu_index);
+                auto new_idx = std::make_shared<IVFSQHybrid>(device_index, device_id, res);
+
+        auto q = std::make_shared<FaissIVFQuantizer>();
+        q->quantizer = index_composition.quantizer;
+        q->size = index_composition.quantizer->d * index_composition.quantizer->getNumVecs() * sizeof(float);
+        return std::make_pair(new_idx, q);
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }
