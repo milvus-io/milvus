@@ -180,7 +180,7 @@ IVFSQHybrid::UnsetQuantizer() {
     ivf_index->quantizer = nullptr;
 }
 
-void
+VectorIndexPtr
 IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
     auto quantizer_conf = std::dynamic_pointer_cast<QuantizerCfg>(conf);
     if (quantizer_conf != nullptr) {
@@ -207,8 +207,10 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
         index_composition->mode = quantizer_conf->mode;  // only 2
 
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), gpu_id_, index_composition, &option);
-        index_.reset(gpu_index);
-        gpu_mode = 2;  // all in gpu
+        std::shared_ptr<faiss::Index> new_idx;
+        new_idx.reset(gpu_index);
+        auto sq_idx = std::make_shared<IVFSQHybrid>(new_idx, gpu_id_, res);
+        return sq_idx;
     } else {
         KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
     }

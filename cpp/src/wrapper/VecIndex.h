@@ -103,9 +103,9 @@ class VecIndex : public cache::DataObj {
         return nullptr;
     }
 
-    virtual Status
+    virtual VecIndexPtr
     LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
-        return Status::OK();
+        return nullptr;
     }
 
     virtual Status
