@@ -22,6 +22,7 @@
 #include "ResourceMgr.h"
 #include "Scheduler.h"
 #include "optimizer/HybridPass.h"
+#include "optimizer/LargeSQ8HPass.h"
 #include "optimizer/Optimizer.h"
 
 #include <memory>
@@ -92,9 +93,9 @@ class OptimizerInst {
         if (instance == nullptr) {
             std::lock_guard<std::mutex> lock(mutex_);
             if (instance == nullptr) {
-                HybridPassPtr pass_ptr = std::make_shared<HybridPass>();
                 std::vector<PassPtr> pass_list;
-                pass_list.push_back(pass_ptr);
+                pass_list.push_back(std::make_shared<LargeSQ8HPass>());
+                pass_list.push_back(std::make_shared<HybridPass>());
                 instance = std::make_shared<Optimizer>(pass_list);
             }
         }

@@ -36,6 +36,7 @@ class KDTTest : public DataGen, public ::testing::Test {
  protected:
     void
     SetUp() override {
+        Generate(96, 1000, 10);
         index_ = std::make_shared<knowhere::CPUKDTRNG>();
 
         auto tempconf = std::make_shared<knowhere::KDTCfg>();

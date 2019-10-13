@@ -154,8 +154,8 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
 INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                         Values(std::make_tuple("IVF", ParameterType::ivf),
                                std::make_tuple("GPUIVF", ParameterType::ivf),
-                               //                            std::make_tuple("IVFPQ", ParameterType::ivfpq),
-                               //                            std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
+                               std::make_tuple("IVFPQ", ParameterType::ivfpq),
+                               std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
                                std::make_tuple("IVFSQ", ParameterType::ivfsq),
 #ifdef CUSTOMIZATION
                                std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
@@ -240,6 +240,7 @@ TEST_P(IVFTest, hybrid) {
         auto result = hybrid_1_idx->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
         PrintResult(result, nq, k);
+        hybrid_1_idx->UnsetQuantizer();
     }
 
     {
@@ -253,9 +254,9 @@ TEST_P(IVFTest, hybrid) {
         quantizer_conf->gpu_id = device_id;
         auto q = hybrid_2_idx->LoadQuantizer(quantizer_conf);
         quantizer_conf->mode = 2;
-        hybrid_2_idx->LoadData(q, quantizer_conf);
+        auto gpu_idx = hybrid_2_idx->LoadData(q, quantizer_conf);
 
-        auto result = hybrid_2_idx->Search(query_dataset, conf);
+        auto result = gpu_idx->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
         PrintResult(result, nq, k);
     }
@@ -438,6 +439,7 @@ TEST_P(IVFTest, clone_test) {
     }
 }
 
+#ifdef CUSTOMIZATION
 TEST_P(IVFTest, seal_test) {
     // FaissGpuResourceMgr::GetInstance().InitDevice(device_id);
 
@@ -472,6 +474,7 @@ TEST_P(IVFTest, seal_test) {
     auto with_seal = tc.RecordSection("With seal");
     ASSERT_GE(without_seal, with_seal);
 }
+#endif
 
 class GPURESTEST : public DataGen, public ::testing::Test {
  protected:
@@ -637,7 +640,7 @@ TEST_F(GPURESTEST, copyandsearch) {
     // search and copy at the same time
     printf("==================\n");
 
-    index_type = "GPUIVFSQ";
+    index_type = "GPUIVF";
     index_ = IndexFactory(index_type);
 
     auto conf = std::make_shared<knowhere::IVFSQCfg>();
@@ -699,7 +702,7 @@ TEST_F(GPURESTEST, copyandsearch) {
 }
 
 TEST_F(GPURESTEST, TrainAndSearch) {
-    index_type = "GPUIVFSQ";
+    index_type = "GPUIVF";
     index_ = IndexFactory(index_type);
 
     auto conf = std::make_shared<knowhere::IVFSQCfg>();

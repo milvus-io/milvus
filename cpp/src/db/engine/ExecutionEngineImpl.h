@@ -56,7 +56,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Load(bool to_cache) override;
 
     Status
-    CopyToGpu(uint64_t device_id) override;
+    CopyToGpu(uint64_t device_id, bool hybrid = false) override;
 
     Status
     CopyToIndexFileToGpu(uint64_t device_id) override;
@@ -71,7 +71,8 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Merge(const std::string& location) override;
 
     Status
-    Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels) const override;
+    Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+           bool hybrid = false) const override;
 
     ExecutionEnginePtr
     BuildIndex(const std::string& location, EngineType engine_type) override;
