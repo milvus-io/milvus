@@ -37,6 +37,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-619 - Add optimizer class in scheduler
 - MS-614 - Preload table at startup
 - MS-626 - Refactor DataObj to support cache any type data
+- MS-648 - Improve unittest
 
 ## New Feature
 - MS-627 - Integrate new index: IVFSQHybrid

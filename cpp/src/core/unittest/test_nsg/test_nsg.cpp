@@ -38,17 +38,17 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
     SetUp() override {
         // Init_with_default();
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, 1024 * 1024 * 200, 1024 * 1024 * 600, 2);
-        Generate(256, 1000000, 1);
+        Generate(256, 1000000 / 100, 1);
         index_ = std::make_shared<knowhere::NSG>();
 
         auto tmp_conf = std::make_shared<knowhere::NSGCfg>();
         tmp_conf->gpu_id = DEVICE_ID;
-        tmp_conf->knng = 100;
-        tmp_conf->nprobe = 32;
-        tmp_conf->nlist = 16384;
-        tmp_conf->search_length = 60;
-        tmp_conf->out_degree = 70;
-        tmp_conf->candidate_pool_size = 500;
+        tmp_conf->knng = 20;
+        tmp_conf->nprobe = 8;
+        tmp_conf->nlist = 163;
+        tmp_conf->search_length = 40;
+        tmp_conf->out_degree = 30;
+        tmp_conf->candidate_pool_size = 100;
         tmp_conf->metric_type = knowhere::METRICTYPE::L2;
         train_conf = tmp_conf;
 

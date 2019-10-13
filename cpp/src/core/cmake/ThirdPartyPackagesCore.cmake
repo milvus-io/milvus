@@ -123,7 +123,7 @@ if(NOT DEFINED USE_JFROG_CACHE)
     set(USE_JFROG_CACHE "OFF")
 endif()
 if(USE_JFROG_CACHE STREQUAL "ON")
-    set(JFROG_ARTFACTORY_CACHE_URL "${JFROG_ARTFACTORY_URL}/generic-local/milvus/thirdparty/cache/${CMAKE_OS_NAME}/${KNOWHERE_BUILD_ARCH}/${BUILD_TYPE}")
+    set(JFROG_ARTFACTORY_CACHE_URL "${JFROG_ARTFACTORY_URL}/milvus/thirdparty/cache/${CMAKE_OS_NAME}/${KNOWHERE_BUILD_ARCH}/${BUILD_TYPE}")
     set(THIRDPARTY_PACKAGE_CACHE "${THIRDPARTY_DIR}/cache")
 endif()
 
@@ -234,7 +234,7 @@ if(CUSTOMIZATION)
     # set(FAISS_MD5 "57da9c4f599cc8fa4260488b1c96e1cc") # commit-id 6dbdf75987c34a2c853bd172ea0d384feea8358c branch-0.2.0
     # set(FAISS_MD5 "21deb1c708490ca40ecb899122c01403") # commit-id 643e48f479637fd947e7b93fa4ca72b38ecc9a39 branch-0.2.0
     # set(FAISS_MD5 "072db398351cca6e88f52d743bbb9fa0") # commit-id 3a2344d04744166af41ef1a74449d68a315bfe17 branch-0.2.1
-    set(FAISS_MD5 "94988b7bdac4eb82a9575c702a3f2df3") # commit-id 1407526b31cad26f98ceca8dddaface8f18c4c19 branch-0.2.1
+    set(FAISS_MD5 "c89ea8e655f5cdf58f42486f13614714") # commit-id 9c28a1cbb88f41fa03b03d7204106201ad33276b branch-0.2.1
 
     execute_process(COMMAND wget -q --method HEAD ${FAISS_SOURCE_URL} RESULT_VARIABLE return_code)
     message(STATUS "Check the remote cache file ${FAISS_SOURCE_URL}. return code = ${return_code}")
