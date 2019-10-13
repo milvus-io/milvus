@@ -165,7 +165,9 @@ class ResourceMgrAdvanceTest : public testing::Test {
     SetUp() override {
         mgr1_ = std::make_shared<ResourceMgr>();
         disk_res = std::make_shared<DiskResource>("disk", 0, true, false);
+        cpu_res = std::make_shared<CpuResource>("cpu", 0, true, true);
         mgr1_->Add(ResourcePtr(disk_res));
+        mgr1_->Add(ResourcePtr(cpu_res));
         mgr1_->Start();
     }
 
@@ -176,6 +178,7 @@ class ResourceMgrAdvanceTest : public testing::Test {
 
     ResourceMgrPtr mgr1_;
     ResourcePtr disk_res;
+    ResourcePtr cpu_res;
 };
 
 TEST_F(ResourceMgrAdvanceTest, REGISTER_SUBSCRIBER) {
