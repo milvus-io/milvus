@@ -14,34 +14,34 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
 #pragma once
 
+#include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
-#include <utility>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
-#include "IndexGPUIVF.h"
+#include "Pass.h"
 
-namespace knowhere {
+namespace milvus {
+namespace scheduler {
 
-class GPUIVFSQ : public GPUIVF {
+class LargeSQ8HPass : public Pass {
  public:
-    explicit GPUIVFSQ(const int& device_id) : GPUIVF(device_id) {
-    }
+    LargeSQ8HPass() = default;
 
-    explicit GPUIVFSQ(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
-        : GPUIVF(std::move(index), device_id, resource) {
-    }
-
-    IndexModelPtr
-    Train(const DatasetPtr& dataset, const Config& config) override;
-
-    VectorIndexPtr
-    CopyGpuToCpu(const Config& config) override;
-
- protected:
-    void
-    search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) override;
+ public:
+    bool
+    Run(const TaskPtr& task) override;
 };
 
-}  // namespace knowhere
+using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
+
+}  // namespace scheduler
+}  // namespace milvus

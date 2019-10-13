@@ -52,8 +52,11 @@ class JobMgr {
     void
     worker_function();
 
-    std::vector<TaskPtr>
+    static std::vector<TaskPtr>
     build_task(const JobPtr& job);
+
+    void
+    calculate_path(const TaskPtr& task);
 
  private:
     bool running_ = false;
