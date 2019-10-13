@@ -41,6 +41,9 @@ std::mutex JobMgrInst::mutex_;
 OptimizerPtr OptimizerInst::instance = nullptr;
 std::mutex OptimizerInst::mutex_;
 
+BuildMgrPtr BuildMgrInst::instance = nullptr;
+std::mutex BuildMgrInst::mutex_;
+
 void
 load_simple_config() {
     server::Config& config = server::Config::GetInstance();
