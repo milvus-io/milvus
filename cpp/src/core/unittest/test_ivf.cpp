@@ -243,23 +243,23 @@ TEST_P(IVFTest, hybrid) {
         hybrid_1_idx->UnsetQuantizer();
     }
 
-//    {
-//        auto hybrid_2_idx = std::make_shared<knowhere::IVFSQHybrid>(device_id);
-//
-//        auto binaryset = index_->Serialize();
-//        hybrid_2_idx->Load(binaryset);
-//
-//        auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
-//        quantizer_conf->mode = 1;
-//        quantizer_conf->gpu_id = device_id;
-//        auto q = hybrid_2_idx->LoadQuantizer(quantizer_conf);
-//        quantizer_conf->mode = 2;
-//        hybrid_2_idx->LoadData(q, quantizer_conf);
-//
-//        auto result = hybrid_2_idx->Search(query_dataset, conf);
-//        AssertAnns(result, nq, conf->k);
-//        PrintResult(result, nq, k);
-//    }
+    //    {
+    //        auto hybrid_2_idx = std::make_shared<knowhere::IVFSQHybrid>(device_id);
+    //
+    //        auto binaryset = index_->Serialize();
+    //        hybrid_2_idx->Load(binaryset);
+    //
+    //        auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
+    //        quantizer_conf->mode = 1;
+    //        quantizer_conf->gpu_id = device_id;
+    //        auto q = hybrid_2_idx->LoadQuantizer(quantizer_conf);
+    //        quantizer_conf->mode = 2;
+    //        hybrid_2_idx->LoadData(q, quantizer_conf);
+    //
+    //        auto result = hybrid_2_idx->Search(query_dataset, conf);
+    //        AssertAnns(result, nq, conf->k);
+    //        PrintResult(result, nq, k);
+    //    }
 }
 
 // TEST_P(IVFTest, gpu_to_cpu) {

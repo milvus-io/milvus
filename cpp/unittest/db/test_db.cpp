@@ -315,7 +315,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
         ASSERT_TRUE(stat.ok());
     }
-#endif-
+#endif
 }
 
 TEST_F(DBTest, PRELOADTABLE_TEST) {
