@@ -1,45 +1,58 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
 #include "Event.h"
-#include "StartUpEvent.h"
-#include "LoadCompletedEvent.h"
 #include "FinishTaskEvent.h"
+#include "LoadCompletedEvent.h"
+#include "StartUpEvent.h"
 #include "TaskTableUpdatedEvent.h"
 
-
-namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
-std::ostream &operator<<(std::ostream &out, const Event &event) {
+std::ostream&
+operator<<(std::ostream& out, const Event& event) {
     out << event.Dump();
     return out;
 }
 
-std::ostream &operator<<(std::ostream &out, const StartUpEvent &event) {
+std::ostream&
+operator<<(std::ostream& out, const StartUpEvent& event) {
     out << event.Dump();
     return out;
 }
 
-std::ostream &operator<<(std::ostream &out, const LoadCompletedEvent &event) {
+std::ostream&
+operator<<(std::ostream& out, const LoadCompletedEvent& event) {
     out << event.Dump();
     return out;
 }
 
-std::ostream &operator<<(std::ostream &out, const FinishTaskEvent &event) {
+std::ostream&
+operator<<(std::ostream& out, const FinishTaskEvent& event) {
     out << event.Dump();
     return out;
 }
 
-std::ostream &operator<<(std::ostream &out, const TaskTableUpdatedEvent &event) {
+std::ostream&
+operator<<(std::ostream& out, const TaskTableUpdatedEvent& event) {
     out << event.Dump();
     return out;
 }
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

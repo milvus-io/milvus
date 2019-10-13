@@ -1,15 +1,27 @@
-////////////////////////////////////////////////////////////////////////////////
-// Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
-// Unauthorized copying of this file, via any medium is strictly prohibited.
-// Proprietary and confidential.
-////////////////////////////////////////////////////////////////////////////////
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+#include "cache/GpuCacheMgr.h"
+#include "server/Config.h"
+#include "utils/Log.h"
 
 #include <sstream>
-#include "utils/Log.h"
-#include "GpuCacheMgr.h"
-#include "server/ServerConfig.h"
+#include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace cache {
 
@@ -17,26 +29,36 @@ std::mutex GpuCacheMgr::mutex_;
 std::unordered_map<uint64_t, GpuCacheMgrPtr> GpuCacheMgr::instance_;
 
 namespace {
-    constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
+constexpr int64_t G_BYTE = 1024 * 1024 * 1024;
 }
 
 GpuCacheMgr::GpuCacheMgr() {
-    server::ConfigNode& config = server::ServerConfig::GetInstance().GetConfig(server::CONFIG_CACHE);
+    server::Config& config = server::Config::GetInstance();
+    Status s;
 
-    int64_t cap = config.GetInt64Value(server::CONFIG_GPU_CACHE_CAPACITY, 0);
-    cap *= G_BYTE;
-    cache_ = std::make_shared<Cache>(cap, 1UL<<32);
+    int64_t gpu_cache_cap;
+    s = config.GetCacheConfigGpuCacheCapacity(gpu_cache_cap);
+    if (!s.ok()) {
+        SERVER_LOG_ERROR << s.message();
+    }
+    int64_t cap = gpu_cache_cap * G_BYTE;
+    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
 
-    double free_percent = config.GetDoubleValue(server::GPU_CACHE_FREE_PERCENT, 0.85);
-    if (free_percent > 0.0 && free_percent <= 1.0) {
-        cache_->set_freemem_percent(free_percent);
+    float gpu_mem_threshold;
+    s = config.GetCacheConfigGpuCacheThreshold(gpu_mem_threshold);
+    if (!s.ok()) {
+        SERVER_LOG_ERROR << s.message();
+    }
+    if (gpu_mem_threshold > 0.0 && gpu_mem_threshold <= 1.0) {
+        cache_->set_freemem_percent(gpu_mem_threshold);
     } else {
-        SERVER_LOG_ERROR << "Invalid gpu_cache_free_percent: " << free_percent <<
-                         ", defaultly set to " << cache_->freemem_percent();
+        SERVER_LOG_ERROR << "Invalid gpu_mem_threshold: " << gpu_mem_threshold << ", by default set to "
+                         << cache_->freemem_percent();
     }
 }
 
-CacheMgr* GpuCacheMgr::GetInstance(uint64_t gpu_id) {
+GpuCacheMgr*
+GpuCacheMgr::GetInstance(uint64_t gpu_id) {
     if (instance_.find(gpu_id) == instance_.end()) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (instance_.find(gpu_id) == instance_.end()) {
@@ -49,16 +71,11 @@ CacheMgr* GpuCacheMgr::GetInstance(uint64_t gpu_id) {
     }
 }
 
-void GpuCacheMgr::InsertItem(const std::string& key, const DataObjPtr& data) {
-    //TODO: copy data to gpu
-    if (cache_ == nullptr) {
-        SERVER_LOG_ERROR << "Cache doesn't exist";
-        return;
-    }
-
-    cache_->insert(key, data);
+DataObjPtr
+GpuCacheMgr::GetIndex(const std::string& key) {
+    DataObjPtr obj = GetItem(key);
+    return obj;
 }
 
-}
-}
-}
+}  // namespace cache
+}  // namespace milvus

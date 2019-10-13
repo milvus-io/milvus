@@ -1,34 +1,43 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 #pragma once
 
 #include <memory>
-#include <string>
 #include <mutex>
-#include <thread>
 #include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
 
-#include "resource/Resource.h"
 #include "ResourceMgr.h"
+#include "resource/Resource.h"
 #include "utils/Log.h"
 
-
-namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
-
-// TODO: refactor, not friendly to unittest, logical in framework code
+// TODO(wxyu): refactor, not friendly to unittest, logical in framework code
 class Scheduler {
-public:
-    explicit
-    Scheduler(ResourceMgrWPtr res_mgr);
+ public:
+    explicit Scheduler(ResourceMgrWPtr res_mgr);
 
-    Scheduler(const Scheduler &) = delete;
-    Scheduler(Scheduler &&) = delete;
+    Scheduler(const Scheduler&) = delete;
+    Scheduler(Scheduler&&) = delete;
 
     /*
      * Start worker thread;
@@ -46,7 +55,7 @@ public:
      * Post event to scheduler event queue;
      */
     void
-    PostEvent(const EventPtr &event);
+    PostEvent(const EventPtr& event);
 
     /*
      * Dump as string;
@@ -54,7 +63,7 @@ public:
     std::string
     Dump();
 
-private:
+ private:
     /******** Events ********/
 
     /*
@@ -64,7 +73,7 @@ private:
      * Pull task from neighbours;
      */
     void
-    OnStartUp(const EventPtr &event);
+    OnStartUp(const EventPtr& event);
 
     /*
      * Process finish task events;
@@ -73,7 +82,7 @@ private:
      * Pull task from neighbours;
      */
     void
-    OnFinishTask(const EventPtr &event);
+    OnFinishTask(const EventPtr& event);
 
     /*
      * Process copy completed events;
@@ -83,7 +92,7 @@ private:
      * Pull task from neighbours;
      */
     void
-    OnLoadCompleted(const EventPtr &event);
+    OnLoadCompleted(const EventPtr& event);
 
     /*
      * Process task table updated events, which happened on task_table->put;
@@ -92,14 +101,14 @@ private:
      * Push task to neighbours;
      */
     void
-    OnTaskTableUpdated(const EventPtr &event);
+    OnTaskTableUpdated(const EventPtr& event);
 
-private:
+ private:
     /*
      * Dispatch event to event handler;
      */
     void
-    Process(const EventPtr &event);
+    Process(const EventPtr& event);
 
     /*
      * Called by worker_thread_;
@@ -107,8 +116,10 @@ private:
     void
     worker_function();
 
-private:
+ private:
     bool running_;
+
+    std::unordered_map<uint64_t, std::function<void(EventPtr)>> event_register_;
 
     ResourceMgrWPtr res_mgr_;
     std::queue<EventPtr> event_queue_;
@@ -119,7 +130,5 @@ private:
 
 using SchedulerPtr = std::shared_ptr<Scheduler>;
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus

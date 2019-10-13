@@ -1,22 +1,33 @@
-/*******************************************************************************
-* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
-* Unauthorized copying of this file, via any medium is strictly prohibited.
-* Proprietary and confidential.
-******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 #pragma once
 
 #include <cstdint>
 #include <string>
 
-#include "milvus.grpc.pb.h"
-#include "status.pb.h"
+#include "grpc/gen-milvus/milvus.grpc.pb.h"
+#include "grpc/gen-status/status.pb.h"
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
 class GrpcRequestHandler final : public ::milvus::grpc::MilvusService::Service {
-public:
+ public:
     /**
      * @brief Create table method
      *
@@ -33,8 +44,8 @@ public:
      * @param context
      */
     ::grpc::Status
-    CreateTable(::grpc::ServerContext *context,
-                const ::milvus::grpc::TableSchema *request, ::milvus::grpc::Status *response) override;
+    CreateTable(::grpc::ServerContext* context, const ::milvus::grpc::TableSchema* request,
+                ::milvus::grpc::Status* response) override;
 
     /**
      * @brief Test table existence method
@@ -52,8 +63,8 @@ public:
      * @param context
      */
     ::grpc::Status
-    HasTable(::grpc::ServerContext *context,
-             const ::milvus::grpc::TableName *request, ::milvus::grpc::BoolReply *response) override;
+    HasTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+             ::milvus::grpc::BoolReply* response) override;
 
     /**
      * @brief Drop table method
@@ -71,8 +82,8 @@ public:
      * @param context
      */
     ::grpc::Status
-    DropTable(::grpc::ServerContext *context,
-              const ::milvus::grpc::TableName *request, ::milvus::grpc::Status *response) override;
+    DropTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+              ::milvus::grpc::Status* response) override;
 
     /**
      * @brief build index by table method
@@ -90,9 +101,8 @@ public:
      * @param context
      */
     ::grpc::Status
-    CreateIndex(::grpc::ServerContext *context,
-               const ::milvus::grpc::IndexParam *request, ::milvus::grpc::Status *response) override;
-
+    CreateIndex(::grpc::ServerContext* context, const ::milvus::grpc::IndexParam* request,
+                ::milvus::grpc::Status* response) override;
 
     /**
      * @brief Insert vector array to table
@@ -110,9 +120,8 @@ public:
      * @param response
      */
     ::grpc::Status
-    Insert(::grpc::ServerContext *context,
-                 const ::milvus::grpc::InsertParam *request,
-                 ::milvus::grpc::VectorIds *response) override;
+    Insert(::grpc::ServerContext* context, const ::milvus::grpc::InsertParam* request,
+           ::milvus::grpc::VectorIds* response) override;
 
     /**
      * @brief Query vector
@@ -135,34 +144,32 @@ public:
      * @param writer
      */
     ::grpc::Status
-    Search(::grpc::ServerContext *context,
-           const ::milvus::grpc::SearchParam *request,
-           ::milvus::grpc::TopKQueryResultList *response) override;
+    Search(::grpc::ServerContext* context, const ::milvus::grpc::SearchParam* request,
+           ::milvus::grpc::TopKQueryResultList* response) override;
 
     /**
-   * @brief Internal use query interface
-   *
-   * This method is used to query vector in specified files.
-   *
-   * @param context, add context for every RPC
-   * @param request:
-   *                file_id_array, specified files id array, queried.
-   *                query_record_array, all vector are going to be queried.
-   *                query_range_array, optional ranges for conditional search. If not specified, search whole table
-   *                topk, how many similarity vectors will be searched.
-   *
-   * @param writer, write query result array.
-   *
-   * @return status
-   *
-   * @param context
-   * @param request
-   * @param writer
-   */
+     * @brief Internal use query interface
+     *
+     * This method is used to query vector in specified files.
+     *
+     * @param context, add context for every RPC
+     * @param request:
+     *                file_id_array, specified files id array, queried.
+     *                query_record_array, all vector are going to be queried.
+     *                query_range_array, optional ranges for conditional search. If not specified, search whole table
+     *                topk, how many similarity vectors will be searched.
+     *
+     * @param writer, write query result array.
+     *
+     * @return status
+     *
+     * @param context
+     * @param request
+     * @param writer
+     */
     ::grpc::Status
-    SearchInFiles(::grpc::ServerContext *context,
-                  const ::milvus::grpc::SearchInFilesParam *request,
-                  ::milvus::grpc::TopKQueryResultList *response) override;
+    SearchInFiles(::grpc::ServerContext* context, const ::milvus::grpc::SearchInFilesParam* request,
+                  ::milvus::grpc::TopKQueryResultList* response) override;
 
     /**
      * @brief Get table schema
@@ -180,9 +187,8 @@ public:
      * @param response
      */
     ::grpc::Status
-    DescribeTable(::grpc::ServerContext *context,
-                  const ::milvus::grpc::TableName *request,
-                  ::milvus::grpc::TableSchema *response) override;
+    DescribeTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                  ::milvus::grpc::TableSchema* response) override;
 
     /**
      * @brief Get table row count
@@ -200,9 +206,8 @@ public:
      * @param context
      */
     ::grpc::Status
-    CountTable(::grpc::ServerContext *context,
-                     const ::milvus::grpc::TableName *request,
-                     ::milvus::grpc::TableRowCount *response) override;
+    CountTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+               ::milvus::grpc::TableRowCount* response) override;
 
     /**
      * @brief List all tables in database
@@ -220,9 +225,8 @@ public:
      * @param writer
      */
     ::grpc::Status
-    ShowTables(::grpc::ServerContext *context,
-               const ::milvus::grpc::Command *request,
-               ::grpc::ServerWriter<::milvus::grpc::TableName> *writer) override;
+    ShowTables(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
+               ::milvus::grpc::TableNameList* response) override;
 
     /**
      * @brief Give the server status
@@ -240,9 +244,8 @@ public:
      * @param response
      */
     ::grpc::Status
-    Cmd(::grpc::ServerContext *context,
-         const ::milvus::grpc::Command *request,
-         ::milvus::grpc::StringReply *response) override;
+    Cmd(::grpc::ServerContext* context, const ::milvus::grpc::Command* request,
+        ::milvus::grpc::StringReply* response) override;
 
     /**
      * @brief delete table by range
@@ -259,9 +262,8 @@ public:
      * @param response
      */
     ::grpc::Status
-    DeleteByRange(::grpc::ServerContext *context,
-                  const ::milvus::grpc::DeleteByRangeParam *request,
-                  ::milvus::grpc::Status *response) override;
+    DeleteByRange(::grpc::ServerContext* context, const ::milvus::grpc::DeleteByRangeParam* request,
+                  ::milvus::grpc::Status* response) override;
 
     /**
      * @brief preload table
@@ -278,9 +280,8 @@ public:
      * @param response
      */
     ::grpc::Status
-    PreloadTable(::grpc::ServerContext *context,
-                  const ::milvus::grpc::TableName *request,
-                  ::milvus::grpc::Status *response) override;
+    PreloadTable(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                 ::milvus::grpc::Status* response) override;
 
     /**
      * @brief Describe index
@@ -297,9 +298,8 @@ public:
      * @param response
      */
     ::grpc::Status
-    DescribeIndex(::grpc::ServerContext *context,
-                 const ::milvus::grpc::TableName *request,
-                 ::milvus::grpc::IndexParam *response) override;
+    DescribeIndex(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+                  ::milvus::grpc::IndexParam* response) override;
 
     /**
      * @brief Drop index
@@ -316,13 +316,10 @@ public:
      * @param response
      */
     ::grpc::Status
-    DropIndex(::grpc::ServerContext *context,
-                 const ::milvus::grpc::TableName *request,
-                 ::milvus::grpc::Status *response) override;
-
+    DropIndex(::grpc::ServerContext* context, const ::milvus::grpc::TableName* request,
+              ::milvus::grpc::Status* response) override;
 };
-}
-}
-}
-}
 
+}  // namespace grpc
+}  // namespace server
+}  // namespace milvus

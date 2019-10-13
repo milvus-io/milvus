@@ -1,15 +1,29 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
-#include "StringHelpFunctions.h"
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
-namespace zilliz {
+#include "utils/StringHelpFunctions.h"
+
+#include <string>
+
 namespace milvus {
 namespace server {
 
-void StringHelpFunctions::TrimStringBlank(std::string &string) {
+void
+StringHelpFunctions::TrimStringBlank(std::string& string) {
     if (!string.empty()) {
         static std::string s_format(" \n\r\t");
         string.erase(0, string.find_first_not_of(s_format));
@@ -17,18 +31,19 @@ void StringHelpFunctions::TrimStringBlank(std::string &string) {
     }
 }
 
-void StringHelpFunctions::TrimStringQuote(std::string &string, const std::string &qoute) {
+void
+StringHelpFunctions::TrimStringQuote(std::string& string, const std::string& qoute) {
     if (!string.empty()) {
         string.erase(0, string.find_first_not_of(qoute));
         string.erase(string.find_last_not_of(qoute) + 1);
     }
 }
 
-ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
-                                                      const std::string &delimeter,
-                                                      std::vector<std::string> &result) {
-    if(str.empty()) {
-        return SERVER_SUCCESS;
+Status
+StringHelpFunctions::SplitStringByDelimeter(const std::string& str, const std::string& delimeter,
+                                            std::vector<std::string>& result) {
+    if (str.empty()) {
+        return Status::OK();
     }
 
     size_t last = 0;
@@ -43,13 +58,12 @@ ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
         result.emplace_back(temp);
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
-    ErrorCode StringHelpFunctions::SplitStringByQuote(const std::string &str,
-                                                      const std::string &delimeter,
-                                                      const std::string &quote,
-                                                      std::vector<std::string> &result) {
+Status
+StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::string& delimeter, const std::string& quote,
+                                        std::vector<std::string>& result) {
     if (quote.empty()) {
         return SplitStringByDelimeter(str, delimeter, result);
     }
@@ -76,7 +90,7 @@ ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
         std::string postfix = process_str.substr(last);
         index = postfix.find_first_of(quote, 0);
         if (index == std::string::npos) {
-            return SERVER_UNEXPECTED_ERROR;
+            return Status(SERVER_UNEXPECTED_ERROR, "");
         }
         std::string quoted_text = postfix.substr(0, index);
         append_prefix += quoted_text;
@@ -93,7 +107,7 @@ ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
         result.emplace_back(append_prefix);
 
         if (last == postfix.length()) {
-            return SERVER_SUCCESS;
+            return Status::OK();
         }
 
         process_str = postfix.substr(index + 1);
@@ -105,9 +119,8 @@ ErrorCode StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
         return SplitStringByDelimeter(process_str, delimeter, result);
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
-}
-}
-}
+}  // namespace server
+}  // namespace milvus

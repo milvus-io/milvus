@@ -1,22 +1,33 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 #pragma once
 
-#include "db/scheduler/context/SearchContext.h"
-#include "db/scheduler/task/IScheduleTask.h"
-#include "scheduler/tasklabel/TaskLabel.h"
 #include "Path.h"
+#include "scheduler/job/Job.h"
+#include "scheduler/tasklabel/TaskLabel.h"
+#include "utils/Status.h"
 
-#include <string>
 #include <memory>
+#include <string>
+#include <utility>
 
-
-namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 enum class LoadType {
     DISK2CPU,
@@ -28,6 +39,7 @@ enum class LoadType {
 enum class TaskType {
     SearchTask,
     DeleteTask,
+    BuildIndexTask,
     TestTask,
 };
 
@@ -37,15 +49,17 @@ using TaskPtr = std::shared_ptr<Task>;
 
 // TODO: re-design
 class Task {
-public:
-    explicit
-    Task(TaskType type) : type_(type) {}
+ public:
+    explicit Task(TaskType type, TaskLabelPtr label) : type_(type), label_(std::move(label)) {
+    }
 
     /*
      * Just Getter;
      */
     inline TaskType
-    Type() const { return type_; }
+    Type() const {
+        return type_;
+    }
 
     /*
      * Transport path;
@@ -58,26 +72,24 @@ public:
     /*
      * Getter and Setter;
      */
-    inline TaskLabelPtr &
+    inline TaskLabelPtr&
     label() {
         return label_;
     }
 
-public:
+ public:
     virtual void
     Load(LoadType type, uint8_t device_id) = 0;
 
     virtual void
     Execute() = 0;
 
-public:
+ public:
     Path task_path_;
-    std::vector<SearchContextPtr> search_contexts_;
+    scheduler::JobWPtr job_;
     TaskType type_;
     TaskLabelPtr label_ = nullptr;
 };
 
-
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

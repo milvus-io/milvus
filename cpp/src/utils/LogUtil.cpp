@@ -1,19 +1,26 @@
-////////////////////////////////////////////////////////////////////////////////
-// Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
-// Unauthorized copying of this file, via any medium is strictly prohibited.
-// Proprietary and confidential.
-////////////////////////////////////////////////////////////////////////////////
-#include "LogUtil.h"
-#include "server/ServerConfig.h"
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
-#include <easylogging++.h>
+#include "utils/LogUtil.h"
+
 #include <ctype.h>
-
-#include <string>
 #include <libgen.h>
+#include <string>
 
-
-namespace zilliz {
 namespace milvus {
 namespace server {
 
@@ -24,19 +31,20 @@ static int warning_idx = 0;
 static int trace_idx = 0;
 static int error_idx = 0;
 static int fatal_idx = 0;
-}
+}  // namespace
 
 // TODO(yzb) : change the easylogging library to get the log level from parameter rather than filename
-void RolloutHandler(const char *filename, std::size_t size) {
-    char *dirc = strdup(filename);
-    char *basec = strdup(filename);
-    char *dir = dirname(dirc);
-    char *base = basename(basec);
+void
+RolloutHandler(const char* filename, std::size_t size, el::Level level) {
+    char* dirc = strdup(filename);
+    char* basec = strdup(filename);
+    char* dir = dirname(dirc);
+    char* base = basename(basec);
 
     std::string s(base);
     std::stringstream ss;
-    std::string
-        list[] = {"\\", " ", "\'", "\"", "*", "\?", "{", "}", ";", "<", ">", "|", "^", "&", "$", "#", "!", "`", "~"};
+    std::string list[] = {"\\", " ", "\'", "\"", "*", "\?", "{", "}", ";", "<",
+                          ">",  "|", "^",  "&",  "$", "#",  "!", "`", "~"};
     std::string::size_type position;
     for (auto substr : list) {
         position = 0;
@@ -48,22 +56,22 @@ void RolloutHandler(const char *filename, std::size_t size) {
     int ret;
     std::string m(std::string(dir) + "/" + s);
     s = m;
-    if ((position = s.find("global")) != std::string::npos) {
+    if (level == el::Level::Global) {
         s.append("." + std::to_string(++global_idx));
         ret = rename(m.c_str(), s.c_str());
-    } else if ((position = s.find("debug")) != std::string::npos) {
+    } else if (level == el::Level::Debug) {
         s.append("." + std::to_string(++debug_idx));
         ret = rename(m.c_str(), s.c_str());
-    } else if ((position = s.find("warning")) != std::string::npos) {
+    } else if (level == el::Level::Warning) {
         s.append("." + std::to_string(++warning_idx));
         ret = rename(m.c_str(), s.c_str());
-    } else if ((position = s.find("trace")) != std::string::npos) {
+    } else if (level == el::Level::Trace) {
         s.append("." + std::to_string(++trace_idx));
         ret = rename(m.c_str(), s.c_str());
-    } else if ((position = s.find("error")) != std::string::npos) {
+    } else if (level == el::Level::Error) {
         s.append("." + std::to_string(++error_idx));
         ret = rename(m.c_str(), s.c_str());
-    } else if ((position = s.find("fatal")) != std::string::npos) {
+    } else if (level == el::Level::Fatal) {
         s.append("." + std::to_string(++fatal_idx));
         ret = rename(m.c_str(), s.c_str());
     } else {
@@ -72,51 +80,17 @@ void RolloutHandler(const char *filename, std::size_t size) {
     }
 }
 
-int32_t InitLog(const std::string &log_config_file) {
-#if 0
-    ServerConfig &config = ServerConfig::GetInstance();
-    ConfigNode log_config = config.GetConfig(CONFIG_LOG);
-    const std::map<std::string, ConfigNode>& settings = log_config.GetChildren();
-
-    std::string str_config;
-    for(auto iter : settings) {
-        str_config += "* ";
-        str_config += iter.first;
-        str_config += ":";
-        str_config.append("\n");
-
-        auto sub_configs = iter.second.GetConfig();
-        for(auto it_sub : sub_configs) {
-            str_config += "    ";
-            str_config += it_sub.first;
-            str_config += " = ";
-            std::string temp = it_sub.first;
-            std::transform(temp.begin(), temp.end(), temp.begin(), ::tolower);
-            bool is_text = (temp == "format" || temp == "filename");
-            if(is_text){
-                str_config += "\"";
-            }
-            str_config += it_sub.second;
-            if(is_text){
-                str_config += "\"";
-            }
-            str_config.append("\n");
-        }
-    }
-
-    el::Configurations conf;
-    conf.parseFromText(str_config);
-#else
+Status
+InitLog(const std::string& log_config_file) {
     el::Configurations conf(log_config_file);
-#endif
     el::Loggers::reconfigureAllLoggers(conf);
 
     el::Loggers::addFlag(el::LoggingFlag::StrictLogFileSizeCheck);
     el::Helpers::installPreRollOutCallback(RolloutHandler);
-    return 0;
+    el::Loggers::addFlag(el::LoggingFlag::DisableApplicationAbortOnFatalLog);
+
+    return Status::OK();
 }
 
-
-}   // server
-}   // milvus
-}   // zilliz
+}  // namespace server
+}  // namespace milvus
