@@ -154,8 +154,8 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
 INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
                         Values(std::make_tuple("IVF", ParameterType::ivf),
                                std::make_tuple("GPUIVF", ParameterType::ivf),
-                               //                            std::make_tuple("IVFPQ", ParameterType::ivfpq),
-                               //                            std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
+                               std::make_tuple("IVFPQ", ParameterType::ivfpq),
+                               std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
                                std::make_tuple("IVFSQ", ParameterType::ivfsq),
 #ifdef CUSTOMIZATION
                                std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
@@ -240,25 +240,26 @@ TEST_P(IVFTest, hybrid) {
         auto result = hybrid_1_idx->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
         PrintResult(result, nq, k);
+        hybrid_1_idx->UnsetQuantizer();
     }
 
-    {
-        auto hybrid_2_idx = std::make_shared<knowhere::IVFSQHybrid>(device_id);
-
-        auto binaryset = index_->Serialize();
-        hybrid_2_idx->Load(binaryset);
-
-        auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
-        quantizer_conf->mode = 1;
-        quantizer_conf->gpu_id = device_id;
-        auto q = hybrid_2_idx->LoadQuantizer(quantizer_conf);
-        quantizer_conf->mode = 2;
-        hybrid_2_idx->LoadData(q, quantizer_conf);
-
-        auto result = hybrid_2_idx->Search(query_dataset, conf);
-        AssertAnns(result, nq, conf->k);
-        PrintResult(result, nq, k);
-    }
+//    {
+//        auto hybrid_2_idx = std::make_shared<knowhere::IVFSQHybrid>(device_id);
+//
+//        auto binaryset = index_->Serialize();
+//        hybrid_2_idx->Load(binaryset);
+//
+//        auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
+//        quantizer_conf->mode = 1;
+//        quantizer_conf->gpu_id = device_id;
+//        auto q = hybrid_2_idx->LoadQuantizer(quantizer_conf);
+//        quantizer_conf->mode = 2;
+//        hybrid_2_idx->LoadData(q, quantizer_conf);
+//
+//        auto result = hybrid_2_idx->Search(query_dataset, conf);
+//        AssertAnns(result, nq, conf->k);
+//        PrintResult(result, nq, k);
+//    }
 }
 
 // TEST_P(IVFTest, gpu_to_cpu) {
@@ -438,6 +439,7 @@ TEST_P(IVFTest, clone_test) {
     }
 }
 
+#ifdef CUSTOMIZATION
 TEST_P(IVFTest, seal_test) {
     // FaissGpuResourceMgr::GetInstance().InitDevice(device_id);
 
@@ -472,6 +474,7 @@ TEST_P(IVFTest, seal_test) {
     auto with_seal = tc.RecordSection("With seal");
     ASSERT_GE(without_seal, with_seal);
 }
+#endif
 
 class GPURESTEST : public DataGen, public ::testing::Test {
  protected:
@@ -637,7 +640,7 @@ TEST_F(GPURESTEST, copyandsearch) {
     // search and copy at the same time
     printf("==================\n");
 
-    index_type = "GPUIVFSQ";
+    index_type = "GPUIVF";
     index_ = IndexFactory(index_type);
 
     auto conf = std::make_shared<knowhere::IVFSQCfg>();
@@ -693,54 +696,6 @@ TEST_F(GPURESTEST, copyandsearch) {
 
     std::thread search_thread(search_func);
     std::thread load_thread(load_func);
-    search_thread.join();
-    load_thread.join();
-    tc.RecordSection("Copy&search total");
-}
-
-TEST_F(GPURESTEST, TrainAndSearch) {
-    index_type = "GPUIVFSQ";
-    index_ = IndexFactory(index_type);
-
-    auto conf = std::make_shared<knowhere::IVFSQCfg>();
-    conf->nlist = 1638;
-    conf->d = dim;
-    conf->gpu_id = device_id;
-    conf->metric_type = knowhere::METRICTYPE::L2;
-    conf->k = k;
-    conf->nbits = 8;
-    conf->nprobe = 1;
-
-    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
-    index_->set_preprocessor(preprocessor);
-    auto model = index_->Train(base_dataset, conf);
-    auto new_index = IndexFactory(index_type);
-    new_index->set_index_model(model);
-    new_index->Add(base_dataset, conf);
-    auto cpu_idx = knowhere::cloner::CopyGpuToCpu(new_index, knowhere::Config());
-    cpu_idx->Seal();
-    auto search_idx = knowhere::cloner::CopyCpuToGpu(cpu_idx, device_id, knowhere::Config());
-
-    constexpr int train_count = 1;
-    constexpr int search_count = 5000;
-    auto train_stage = [&] {
-        for (int i = 0; i < train_count; ++i) {
-            auto model = index_->Train(base_dataset, conf);
-            auto test_idx = IndexFactory(index_type);
-            test_idx->set_index_model(model);
-            test_idx->Add(base_dataset, conf);
-        }
-    };
-    auto search_stage = [&](knowhere::VectorIndexPtr& search_idx) {
-        for (int i = 0; i < search_count; ++i) {
-            auto result = search_idx->Search(query_dataset, conf);
-            AssertAnns(result, nq, k);
-        }
-    };
-
-    // TimeRecorder tc("record");
-    // train_stage();
-    // tc.RecordSection("train cost");
     // search_stage(search_idx);
     // tc.RecordSection("search cost");
 
