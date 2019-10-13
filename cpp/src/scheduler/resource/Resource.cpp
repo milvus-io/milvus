@@ -115,7 +115,13 @@ Resource::pick_task_execute() {
     auto indexes = task_table_.PickToExecute(std::numeric_limits<uint64_t>::max());
     for (auto index : indexes) {
         // try to set one task executing, then return
-        if (task_table_[index]->task->path().Last() == name() && task_table_.Execute(index)) {
+        if (task_table_[index]->task->label()->Type() == TaskLabelType::SPECIFIED_RESOURCE) {
+            if (task_table_[index]->task->path().Last() != name()) {
+                continue;
+            }
+        }
+
+        if (task_table_.Execute(index)) {
             return task_table_.Get(index);
         }
         // else try next
@@ -127,7 +133,9 @@ void
 Resource::loader_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(load_mutex_);
-        load_cv_.wait(lock, [&] { return load_flag_; });
+        load_cv_.wait(lock, [&] {
+            return load_flag_;
+        });
         load_flag_ = false;
         lock.unlock();
         while (true) {
@@ -153,7 +161,9 @@ Resource::executor_function() {
     }
     while (running_) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
-        exec_cv_.wait(lock, [&] { return exec_flag_; });
+        exec_cv_.wait(lock, [&] {
+            return exec_flag_;
+        });
         exec_flag_ = false;
         lock.unlock();
         while (true) {
