@@ -256,11 +256,14 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         conf->gpu_id = device_id;
 
         if (quantizer) {
+            std::cout << "cache hit" << std::endl;
             // cache hit
             conf->mode = 2;
-            index_->SetQuantizer(quantizer->Data());
-            index_->LoadData(quantizer->Data(), conf);
+            auto new_index = index_->LoadData(quantizer->Data(), conf);
+            index_ = new_index;
         } else {
+            std::cout << "cache miss" << std::endl;
+            // cache hit
             // cache miss
             if (index_ == nullptr) {
                 ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to gpu";
@@ -268,9 +271,9 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
             }
             conf->mode = 1;
             auto q = index_->LoadQuantizer(conf);
-            index_->SetQuantizer(q);
             conf->mode = 2;
-            index_->LoadData(q, conf);
+            auto new_index = index_->LoadData(q, conf);
+            index_ = new_index;
 
             // cache
             auto cached_quantizer = std::make_shared<CachedQuantizer>(q);
@@ -445,7 +448,9 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
 
     auto status = index_->Search(n, data, distances, labels, conf);
 
-    HybridUnset();
+    if (hybrid) {
+        HybridUnset();
+    }
 
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Search error";
