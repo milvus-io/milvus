@@ -1,18 +1,30 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 #pragma once
 
-#include "db/engine/ExecutionEngine.h"
 #include "db/Constants.h"
+#include "db/engine/ExecutionEngine.h"
 
-#include <vector>
 #include <map>
+#include <memory>
 #include <string>
+#include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -23,11 +35,11 @@ constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
 constexpr int32_t DEFAULT_INDEX_FILE_SIZE = ONE_GB;
 
 constexpr int64_t FLAG_MASK_NO_USERID = 0x1;
-constexpr int64_t FLAG_MASK_HAS_USERID = 0x1<<1;
+constexpr int64_t FLAG_MASK_HAS_USERID = 0x1 << 1;
 
-typedef int DateT;
+using DateT = int;
 const DateT EmptyDate = -1;
-typedef std::vector<DateT> DatesT;
+using DatesT = std::vector<DateT>;
 
 struct TableSchema {
     typedef enum {
@@ -45,7 +57,7 @@ struct TableSchema {
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     int32_t nlist_ = DEFAULT_NLIST;
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;
-}; // TableSchema
+};  // TableSchema
 
 struct TableFileSchema {
     typedef enum {
@@ -70,16 +82,16 @@ struct TableFileSchema {
     std::string location_;
     int64_t updated_time_ = 0;
     int64_t created_on_ = 0;
-    int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE; //not persist to meta
+    int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;  // not persist to meta
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
-    int32_t nlist_ = DEFAULT_NLIST; //not persist to meta
-    int32_t metric_type_ = DEFAULT_METRIC_TYPE; //not persist to meta
-}; // TableFileSchema
+    int32_t nlist_ = DEFAULT_NLIST;              // not persist to meta
+    int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
+};                                               // TableFileSchema
 
-typedef std::vector<TableFileSchema> TableFilesSchema;
-typedef std::map<DateT, TableFilesSchema> DatePartionedTableFilesSchema;
+using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
+using TableFilesSchema = std::vector<TableFileSchema>;
+using DatePartionedTableFilesSchema = std::map<DateT, TableFilesSchema>;
 
-} // namespace meta
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace meta
+}  // namespace engine
+}  // namespace milvus

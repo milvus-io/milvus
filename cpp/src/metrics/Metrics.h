@@ -1,61 +1,70 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 #pragma once
 
 #include "MetricBase.h"
 #include "db/meta/MetaTypes.h"
 
-
-namespace zilliz {
 namespace milvus {
 namespace server {
 
 #define METRICS_NOW_TIME std::chrono::system_clock::now()
-#define METRICS_MICROSECONDS(a, b) (std::chrono::duration_cast<std::chrono::microseconds> (b-a)).count();
+#define METRICS_MICROSECONDS(a, b) (std::chrono::duration_cast<std::chrono::microseconds>(b - a)).count();
 
-enum class MetricCollectorType {
-    INVALID,
-    PROMETHEUS,
-    ZABBIX
-};
+enum class MetricCollectorType { INVALID, PROMETHEUS, ZABBIX };
 
 class Metrics {
  public:
-    static MetricsBase &GetInstance();
+    static MetricsBase&
+    GetInstance();
 
  private:
-    static MetricsBase &CreateMetricsCollector();
+    static MetricsBase&
+    CreateMetricsCollector();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectMetricsBase {
-protected:
+ protected:
     CollectMetricsBase() {
         start_time_ = METRICS_NOW_TIME;
     }
 
     virtual ~CollectMetricsBase() = default;
 
-    double TimeFromBegine() {
+    double
+    TimeFromBegine() {
         auto end_time = METRICS_NOW_TIME;
         return METRICS_MICROSECONDS(start_time_, end_time);
     }
 
-protected:
+ protected:
     using TIME_POINT = std::chrono::system_clock::time_point;
     TIME_POINT start_time_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectInsertMetrics : CollectMetricsBase {
-public:
-    CollectInsertMetrics(size_t n, engine::Status& status) : n_(n), status_(status) {
+ public:
+    CollectInsertMetrics(size_t n, Status& status) : n_(n), status_(status) {
     }
 
     ~CollectInsertMetrics() {
-        if(n_ > 0) {
+        if (n_ > 0) {
             auto total_time = TimeFromBegine();
             double avg_time = total_time / n_;
             for (int i = 0; i < n_; ++i) {
@@ -73,19 +82,19 @@ public:
         }
     }
 
-private:
+ private:
     size_t n_;
-    engine::Status& status_;
+    Status& status_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectQueryMetrics : CollectMetricsBase {
-public:
-    CollectQueryMetrics(size_t nq) : nq_(nq) {
+ public:
+    explicit CollectQueryMetrics(size_t nq) : nq_(nq) {
     }
 
     ~CollectQueryMetrics() {
-        if(nq_ > 0) {
+        if (nq_ > 0) {
             auto total_time = TimeFromBegine();
             for (int i = 0; i < nq_; ++i) {
                 server::Metrics::GetInstance().QueryResponseSummaryObserve(total_time);
@@ -96,13 +105,13 @@ public:
         }
     }
 
-private:
+ private:
     size_t nq_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectMergeFilesMetrics : CollectMetricsBase {
-public:
+ public:
     CollectMergeFilesMetrics() {
     }
 
@@ -114,7 +123,7 @@ public:
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectBuildIndexMetrics : CollectMetricsBase {
-public:
+ public:
     CollectBuildIndexMetrics() {
     }
 
@@ -126,8 +135,8 @@ public:
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectExecutionEngineMetrics : CollectMetricsBase {
-public:
-    CollectExecutionEngineMetrics(double physical_size) : physical_size_(physical_size) {
+ public:
+    explicit CollectExecutionEngineMetrics(double physical_size) : physical_size_(physical_size) {
     }
 
     ~CollectExecutionEngineMetrics() {
@@ -138,45 +147,46 @@ public:
         server::Metrics::GetInstance().FaissDiskLoadIOSpeedGaugeSet(physical_size_ / double(total_time));
     }
 
-private:
+ private:
     double physical_size_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectSerializeMetrics : CollectMetricsBase {
-public:
-    CollectSerializeMetrics(size_t size) : size_(size) {
+ public:
+    explicit CollectSerializeMetrics(size_t size) : size_(size) {
     }
 
     ~CollectSerializeMetrics() {
         auto total_time = TimeFromBegine();
-        server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double) size_ / total_time);
+        server::Metrics::GetInstance().DiskStoreIOSpeedGaugeSet((double)size_ / total_time);
     }
-private:
+
+ private:
     size_t size_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectAddMetrics : CollectMetricsBase {
-public:
+ public:
     CollectAddMetrics(size_t n, uint16_t dimension) : n_(n), dimension_(dimension) {
     }
 
     ~CollectAddMetrics() {
         auto total_time = TimeFromBegine();
-        server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_),
-                                                                   static_cast<int>(dimension_),
+        server::Metrics::GetInstance().AddVectorsPerSecondGaugeSet(static_cast<int>(n_), static_cast<int>(dimension_),
                                                                    total_time);
     }
-private:
+
+ private:
     size_t n_;
     uint16_t dimension_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectDurationMetrics : CollectMetricsBase {
-public:
-    CollectDurationMetrics(int index_type) : index_type_(index_type) {
+ public:
+    explicit CollectDurationMetrics(int index_type) : index_type_(index_type) {
     }
 
     ~CollectDurationMetrics() {
@@ -196,19 +206,20 @@ public:
             }
         }
     }
-private:
+
+ private:
     int index_type_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CollectSearchTaskMetrics : CollectMetricsBase {
-public:
-    CollectSearchTaskMetrics(int index_type) : index_type_(index_type) {
+ public:
+    explicit CollectSearchTaskMetrics(int index_type) : index_type_(index_type) {
     }
 
     ~CollectSearchTaskMetrics() {
         auto total_time = TimeFromBegine();
-        switch(index_type_) {
+        switch (index_type_) {
             case engine::meta::TableFileSchema::RAW: {
                 server::Metrics::GetInstance().SearchRawDataDurationSecondsHistogramObserve(total_time);
                 break;
@@ -224,13 +235,13 @@ public:
         }
     }
 
-private:
+ private:
     int index_type_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class MetricCollector : CollectMetricsBase {
-public:
+ public:
     MetricCollector() {
         server::Metrics::GetInstance().MetaAccessTotalIncrement();
     }
@@ -241,11 +252,5 @@ public:
     }
 };
 
-
-
-}
-}
-}
-
-
-
+}  // namespace server
+}  // namespace milvus

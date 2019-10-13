@@ -1,38 +1,50 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
-#include "ConfigNode.h"
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+#include "config/ConfigNode.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
 
+#include <algorithm>
 #include <sstream>
 #include <string>
-#include <algorithm>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
-void ConfigNode::Combine(const ConfigNode& target) {
+void
+ConfigNode::Combine(const ConfigNode& target) {
     const std::map<std::string, std::string>& kv = target.GetConfig();
-    for(auto itr = kv.begin(); itr != kv.end(); ++itr){
+    for (auto itr = kv.begin(); itr != kv.end(); ++itr) {
         config_[itr->first] = itr->second;
     }
 
     const std::map<std::string, std::vector<std::string> >& sequences = target.GetSequences();
-    for(auto itr = sequences.begin(); itr != sequences.end(); ++itr){
+    for (auto itr = sequences.begin(); itr != sequences.end(); ++itr) {
         sequences_[itr->first] = itr->second;
     }
 
     const std::map<std::string, ConfigNode>& children = target.GetChildren();
-    for(auto itr = children.begin(); itr != children.end(); ++itr){
+    for (auto itr = children.begin(); itr != children.end(); ++itr) {
         children_[itr->first] = itr->second;
     }
 }
 
-//key/value pair config
+// key/value pair config
 void
 ConfigNode::SetValue(const std::string& key, const std::string& value) {
     config_[key] = value;
@@ -41,16 +53,16 @@ ConfigNode::SetValue(const std::string& key, const std::string& value) {
 std::string
 ConfigNode::GetValue(const std::string& param_key, const std::string& default_val) const {
     auto ref = config_.find(param_key);
-    if(ref != config_.end()) {
+    if (ref != config_.end()) {
         return ref->second;
     }
 
-    //THROW_UNEXPECTED_ERROR("Can't find parameter key: " + param_key);
+    // THROW_UNEXPECTED_ERROR("Can't find parameter key: " + param_key);
     return default_val;
 }
 
 bool
-ConfigNode::GetBoolValue(const std::string &param_key, bool default_val) const {
+ConfigNode::GetBoolValue(const std::string& param_key, bool default_val) const {
     std::string val = GetValue(param_key);
     if (!val.empty()) {
         std::transform(val.begin(), val.end(), val.begin(), ::tolower);
@@ -61,7 +73,7 @@ ConfigNode::GetBoolValue(const std::string &param_key, bool default_val) const {
 }
 
 int32_t
-ConfigNode::GetInt32Value(const std::string &param_key, int32_t default_val) const {
+ConfigNode::GetInt32Value(const std::string& param_key, int32_t default_val) const {
     std::string val = GetValue(param_key);
     if (!val.empty()) {
         return (int32_t)std::strtol(val.c_str(), nullptr, 10);
@@ -71,7 +83,7 @@ ConfigNode::GetInt32Value(const std::string &param_key, int32_t default_val) con
 }
 
 int64_t
-ConfigNode::GetInt64Value(const std::string &param_key, int64_t default_val) const {
+ConfigNode::GetInt64Value(const std::string& param_key, int64_t default_val) const {
     std::string val = GetValue(param_key);
     if (!val.empty()) {
         return std::strtol(val.c_str(), nullptr, 10);
@@ -81,7 +93,7 @@ ConfigNode::GetInt64Value(const std::string &param_key, int64_t default_val) con
 }
 
 float
-ConfigNode::GetFloatValue(const std::string &param_key, float default_val) const {
+ConfigNode::GetFloatValue(const std::string& param_key, float default_val) const {
     std::string val = GetValue(param_key);
     if (!val.empty()) {
         return std::strtof(val.c_str(), nullptr);
@@ -91,7 +103,7 @@ ConfigNode::GetFloatValue(const std::string &param_key, float default_val) const
 }
 
 double
-ConfigNode::GetDoubleValue(const std::string &param_key, double default_val) const {
+ConfigNode::GetDoubleValue(const std::string& param_key, double default_val) const {
     std::string val = GetValue(param_key);
     if (!val.empty()) {
         return std::strtod(val.c_str(), nullptr);
@@ -103,13 +115,14 @@ ConfigNode::GetDoubleValue(const std::string &param_key, double default_val) con
 const std::map<std::string, std::string>&
 ConfigNode::GetConfig() const {
     return config_;
-};
+}
 
-void ConfigNode::ClearConfig() {
+void
+ConfigNode::ClearConfig() {
     config_.clear();
 }
 
-//key/object config
+// key/object config
 void
 ConfigNode::AddChild(const std::string& type_name, const ConfigNode& config) {
     children_[type_name] = config;
@@ -118,7 +131,7 @@ ConfigNode::AddChild(const std::string& type_name, const ConfigNode& config) {
 ConfigNode
 ConfigNode::GetChild(const std::string& type_name) const {
     auto ref = children_.find(type_name);
-    if(ref != children_.end()) {
+    if (ref != children_.end()) {
         return ref->second;
     }
 
@@ -127,14 +140,14 @@ ConfigNode::GetChild(const std::string& type_name) const {
 }
 
 ConfigNode&
-ConfigNode::GetChild(const std::string &type_name) {
+ConfigNode::GetChild(const std::string& type_name) {
     return children_[type_name];
 }
 
 void
 ConfigNode::GetChildren(ConfigNodeArr& arr) const {
     arr.clear();
-    for(auto ref : children_){
+    for (auto ref : children_) {
         arr.push_back(ref.second);
     }
 }
@@ -144,20 +157,21 @@ ConfigNode::GetChildren() const {
     return children_;
 }
 
-void ConfigNode::ClearChildren() {
+void
+ConfigNode::ClearChildren() {
     children_.clear();
 }
 
-//key/sequence config
+// key/sequence config
 void
-ConfigNode::AddSequenceItem(const std::string &key, const std::string &item) {
+ConfigNode::AddSequenceItem(const std::string& key, const std::string& item) {
     sequences_[key].push_back(item);
 }
 
 std::vector<std::string>
-ConfigNode::GetSequence(const std::string &key) const {
+ConfigNode::GetSequence(const std::string& key) const {
     auto itr = sequences_.find(key);
-    if(itr != sequences_.end()) {
+    if (itr != sequences_.end()) {
         return itr->second;
     } else {
         std::vector<std::string> temp;
@@ -170,45 +184,46 @@ ConfigNode::GetSequences() const {
     return sequences_;
 }
 
-void ConfigNode::ClearSequences() {
+void
+ConfigNode::ClearSequences() {
     sequences_.clear();
 }
 
 void
 ConfigNode::PrintAll(const std::string& prefix) const {
-    for(auto& elem : config_) {
+    for (auto& elem : config_) {
         SERVER_LOG_INFO << prefix << elem.first + ": " << elem.second;
     }
 
-    for(auto& elem : sequences_) {
+    for (auto& elem : sequences_) {
         SERVER_LOG_INFO << prefix << elem.first << ": ";
-        for(auto& str : elem.second) {
+        for (auto& str : elem.second) {
             SERVER_LOG_INFO << prefix << "    - " << str;
         }
     }
 
-    for(auto& elem : children_) {
+    for (auto& elem : children_) {
         SERVER_LOG_INFO << prefix << elem.first << ": ";
         elem.second.PrintAll(prefix + "    ");
     }
 }
 
 std::string
-ConfigNode::DumpString(const std::string &prefix) const {
+ConfigNode::DumpString(const std::string& prefix) const {
     std::stringstream str_buffer;
     const std::string endl = "\n";
-    for(auto& elem : config_) {
+    for (auto& elem : config_) {
         str_buffer << prefix << elem.first << ": " << elem.second << endl;
     }
 
-    for(auto& elem : sequences_) {
+    for (auto& elem : sequences_) {
         str_buffer << prefix << elem.first << ": " << endl;
-        for(auto& str : elem.second) {
+        for (auto& str : elem.second) {
             str_buffer << prefix + "    - " << str << endl;
         }
     }
 
-    for(auto& elem : children_) {
+    for (auto& elem : children_) {
         str_buffer << prefix << elem.first << ": " << endl;
         str_buffer << elem.second.DumpString(prefix + "    ") << endl;
     }
@@ -216,6 +231,5 @@ ConfigNode::DumpString(const std::string &prefix) const {
     return str_buffer.str();
 }
 
-}
-}
-}
+}  // namespace server
+}  // namespace milvus

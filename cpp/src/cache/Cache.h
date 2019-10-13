@@ -1,73 +1,91 @@
-////////////////////////////////////////////////////////////////////////////////
-// Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
-// Unauthorized copying of this file, via any medium is strictly prohibited.
-// Proprietary and confidential.
-////////////////////////////////////////////////////////////////////////////////
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
 #pragma once
 
-#include <string>
-#include <mutex>
-#include <atomic>
-
 #include "LRU.h"
-#include "DataObj.h"
+#include "utils/Log.h"
 
-namespace zilliz {
+#include <atomic>
+#include <mutex>
+#include <set>
+#include <string>
+
 namespace milvus {
 namespace cache {
 
-const std::string SWAP_DIR = ".CACHE";
-
+template <typename ItemObj>
 class Cache {
-private:
-    class CacheObj {
-    public:
-        CacheObj() = delete;
-
-        CacheObj(const DataObjPtr& data)
-        : data_(data) {
-        }
-
-    public:
-        DataObjPtr data_ = nullptr;
-    };
-
-    using CacheObjPtr = std::shared_ptr<CacheObj>;
-
-public:
-    //mem_capacity, units:GB
+ public:
+    // mem_capacity, units:GB
     Cache(int64_t capacity_gb, uint64_t cache_max_count);
     ~Cache() = default;
 
-    int64_t usage() const { return usage_; }
-    int64_t capacity() const { return capacity_; } //unit: BYTE
-    void set_capacity(int64_t capacity); //unit: BYTE
+    int64_t
+    usage() const {
+        return usage_;
+    }
 
-    double freemem_percent() const { return freemem_percent_; };
-    void set_freemem_percent(double percent) { freemem_percent_ = percent; }
+    int64_t
+    capacity() const {
+        return capacity_;
+    }  // unit: BYTE
+    void
+    set_capacity(int64_t capacity);  // unit: BYTE
 
-    size_t size() const;
-    bool exists(const std::string& key);
-    DataObjPtr get(const std::string& key);
-    void insert(const std::string& key, const DataObjPtr& data);
-    void erase(const std::string& key);
-    void print();
-    void clear();
-    void free_memory();
+    double
+    freemem_percent() const {
+        return freemem_percent_;
+    }
 
-private:
+    void
+    set_freemem_percent(double percent) {
+        freemem_percent_ = percent;
+    }
+
+    size_t
+    size() const;
+    bool
+    exists(const std::string& key);
+    ItemObj
+    get(const std::string& key);
+    void
+    insert(const std::string& key, const ItemObj& item);
+    void
+    erase(const std::string& key);
+    void
+    print();
+    void
+    clear();
+
+ private:
+    void
+    free_memory();
+
+ private:
     int64_t usage_;
     int64_t capacity_;
     double freemem_percent_;
 
-    LRU<std::string, CacheObjPtr> lru_;
+    LRU<std::string, ItemObj> lru_;
     mutable std::mutex mutex_;
 };
 
-using CachePtr = std::shared_ptr<Cache>;
+}  // namespace cache
+}  // namespace milvus
 
-}   // cache
-}   // milvus
-}   // zilliz
-
+#include "cache/Cache.inl"

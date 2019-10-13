@@ -1,31 +1,42 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 #pragma once
 
-#include <string>
-#include <vector>
-#include <memory>
-#include <thread>
-#include <functional>
 #include <condition_variable>
+#include <functional>
+#include <memory>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
-#include "../event/Event.h"
-#include "../event/StartUpEvent.h"
-#include "../event/LoadCompletedEvent.h"
-#include "../event/FinishTaskEvent.h"
-#include "../event/TaskTableUpdatedEvent.h"
 #include "../TaskTable.h"
+#include "../event/Event.h"
+#include "../event/FinishTaskEvent.h"
+#include "../event/LoadCompletedEvent.h"
+#include "../event/StartUpEvent.h"
+#include "../event/TaskTableUpdatedEvent.h"
 #include "../task/Task.h"
 #include "Connection.h"
 #include "Node.h"
 
-
-namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 // TODO(wxyu): Storage, Route, Executor
 enum class ResourceType {
@@ -87,12 +98,12 @@ class Resource : public Node, public std::enable_shared_from_this<Resource> {
         return device_id_;
     }
 
-    TaskTable &
+    TaskTable&
     task_table() {
         return task_table_;
     }
 
-public:
+ public:
     inline bool
     HasLoader() const {
         return enable_loader_;
@@ -103,11 +114,11 @@ public:
         return enable_executor_;
     }
 
-    // TODO: const
+    // TODO(wxyu): const
     uint64_t
     NumOfTaskToExec();
 
-    // TODO: need double ?
+    // TODO(wxyu): need double ?
     inline uint64_t
     TaskAvgCost() const {
         return total_cost_ / total_task_;
@@ -118,14 +129,11 @@ public:
         return total_task_;
     }
 
-    friend std::ostream &operator<<(std::ostream &out, const Resource &resource);
+    friend std::ostream&
+    operator<<(std::ostream& out, const Resource& resource);
 
  protected:
-    Resource(std::string name,
-             ResourceType type,
-             uint64_t device_id,
-             bool enable_loader,
-             bool enable_executor);
+    Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_loader, bool enable_executor);
 
     /*
      * Implementation by inherit class;
@@ -200,7 +208,5 @@ public:
 using ResourcePtr = std::shared_ptr<Resource>;
 using ResourceWPtr = std::weak_ptr<Resource>;
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus

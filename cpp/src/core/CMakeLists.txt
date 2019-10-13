@@ -1,8 +1,22 @@
 #-------------------------------------------------------------------------------
-# Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
-# Unauthorized copying of this file, via any medium is strictly prohibited.
-# Proprietary and confidential.
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http:#www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 #-------------------------------------------------------------------------------
+
 
 cmake_minimum_required(VERSION 3.14)
 message(STATUS "---------------core--------------")
@@ -32,9 +46,11 @@ if(NOT CMAKE_BUILD_TYPE)
 endif(NOT CMAKE_BUILD_TYPE)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -fopenmp")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
 else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -fopenmp")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g -fPIC -DELPP_THREAD_SAFE -fopenmp")
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O0 -g")
 endif()
 MESSAGE(STATUS "CMAKE_CXX_FLAGS" ${CMAKE_CXX_FLAGS})
 
@@ -70,7 +86,7 @@ include(DefineOptionsCore)
 include(BuildUtilsCore)
 include(ThirdPartyPackagesCore)
 
-add_subdirectory(src)
+add_subdirectory(knowhere)
 
 if (BUILD_COVERAGE STREQUAL "ON")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
@@ -79,7 +95,7 @@ endif()
 set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
 
 if(BUILD_UNIT_TEST STREQUAL "ON")
-    add_subdirectory(test)
+    add_subdirectory(unittest)
 endif()
 
 config_summary()
