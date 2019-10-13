@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "BuildMgr.h"
 #include "JobMgr.h"
 #include "ResourceMgr.h"
 #include "Scheduler.h"
@@ -102,6 +103,24 @@ class OptimizerInst {
 
  private:
     static scheduler::OptimizerPtr instance;
+    static std::mutex mutex_;
+};
+
+class BuildMgrInst {
+ public:
+    static BuildMgrPtr
+    GetInstance() {
+        if (instance == nullptr) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (instance == nullptr) {
+                instance = std::make_shared<BuildMgr>(4);
+            }
+        }
+        return instance;
+    }
+
+ private:
+    static BuildMgrPtr instance;
     static std::mutex mutex_;
 };
 
