@@ -133,9 +133,7 @@ void
 Resource::loader_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(load_mutex_);
-        load_cv_.wait(lock, [&] {
-            return load_flag_;
-        });
+        load_cv_.wait(lock, [&] { return load_flag_; });
         load_flag_ = false;
         lock.unlock();
         while (true) {
@@ -161,9 +159,7 @@ Resource::executor_function() {
     }
     while (running_) {
         std::unique_lock<std::mutex> lock(exec_mutex_);
-        exec_cv_.wait(lock, [&] {
-            return exec_flag_;
-        });
+        exec_cv_.wait(lock, [&] { return exec_flag_; });
         exec_flag_ = false;
         lock.unlock();
         while (true) {
