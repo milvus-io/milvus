@@ -16,6 +16,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-637 - out of memory when load too many tasks
 - MS-640 - Cache object size calculate incorrect
 - MS-641 - Segment fault(signal 11) in PickToLoad
+- MS-639 - SQ8H index created failed and server hang
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
