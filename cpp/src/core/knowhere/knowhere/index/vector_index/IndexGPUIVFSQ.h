@@ -38,6 +38,10 @@ class GPUIVFSQ : public GPUIVF {
 
     VectorIndexPtr
     CopyGpuToCpu(const Config& config) override;
+
+ protected:
+    void
+    search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) override;
 };
 
 }  // namespace knowhere
