@@ -71,4 +71,13 @@ GPUIVFSQ::CopyGpuToCpu(const Config& config) {
     return std::make_shared<IVFSQ>(new_index);
 }
 
+void
+GPUIVFSQ::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) {
+#ifdef CUSTOMIZATION
+    GPUIVF::search_impl(n, data, k, distances, labels, cfg);
+#else
+    IVF::search_impl(n, data, k, distances, labels, cfg);
+#endif
+}
+
 }  // namespace knowhere
