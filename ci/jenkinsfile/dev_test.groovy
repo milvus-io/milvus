@@ -2,10 +2,9 @@ timeout(time: 30, unit: 'MINUTES') {
     try {
         dir ("${PROJECT_NAME}_test") {
             checkout([$class: 'GitSCM', branches: [[name: "${SEMVER}"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: "${params.GIT_USER}", url: "git@192.168.1.105:Test/milvus_test.git", name: 'origin', refspec: "+refs/heads/${SEMVER}:refs/remotes/origin/${SEMVER}"]]])
-            sh 'python3 -m pip install -r requirements.txt'
+            sh 'python3 -m pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com'
             sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --level=1 --ip ${env.JOB_NAME}-${env.BUILD_NUMBER}-milvus-gpu-engine.milvus-1.svc.cluster.local"
         }
-
         // mysql database backend test
         load "${env.WORKSPACE}/ci/jenkinsfile/cleanup_dev.groovy"
 
