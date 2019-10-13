@@ -256,27 +256,16 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
         conf->gpu_id = device_id;
 
         if (quantizer) {
-            std::cout << "cache hit" << std::endl;
             // cache hit
             conf->mode = 2;
             auto new_index = index_->LoadData(quantizer->Data(), conf);
             index_ = new_index;
         } else {
-            std::cout << "cache miss" << std::endl;
-            // cache hit
-            // cache miss
-            if (index_ == nullptr) {
-                ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to gpu";
-                return Status(DB_ERROR, "index is null");
-            }
-            conf->mode = 1;
-            auto q = index_->LoadQuantizer(conf);
-            conf->mode = 2;
-            auto new_index = index_->LoadData(q, conf);
-            index_ = new_index;
+            auto pair = index_->CopyToGpuWithQuantizer(device_id);
+            index_ = pair.first;
 
             // cache
-            auto cached_quantizer = std::make_shared<CachedQuantizer>(q);
+            auto cached_quantizer = std::make_shared<CachedQuantizer>(pair.second);
             cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(key, cached_quantizer);
         }
         return Status::OK();

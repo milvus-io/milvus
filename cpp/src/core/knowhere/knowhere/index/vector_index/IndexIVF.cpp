@@ -115,6 +115,20 @@ IVF::Search(const DatasetPtr& dataset, const Config& config) {
 
     search_impl(rows, (float*)p_data, search_cfg->k, res_dis, res_ids, config);
 
+//    std::stringstream ss_res_id, ss_res_dist;
+//    for (int i = 0; i < 10; ++i) {
+//        printf("%llu", res_ids[i]);
+//        printf("\n");
+//        printf("%.6f", res_dis[i]);
+//        printf("\n");
+//        ss_res_id << res_ids[i] << " ";
+//        ss_res_dist << res_dis[i] << " ";
+//    }
+//    std::cout << std::endl << "after search: " << std::endl;
+//    std::cout << ss_res_id.str() << std::endl;
+//    std::cout << ss_res_dist.str() << std::endl << std::endl;
+
+
     auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
     auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
 

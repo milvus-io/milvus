@@ -117,6 +117,11 @@ class VecIndex : public cache::DataObj {
     UnsetQuantizer() {
         return Status::OK();
     }
+
+    virtual std::pair<VecIndexPtr, knowhere::QuantizerPtr>
+    CopyToGpuWithQuantizer(const int64_t& device_id, const Config& cfg = Config()) {
+        return std::make_pair(nullptr, nullptr);
+    }
     ////////////////
  private:
     int64_t size_ = 0;
