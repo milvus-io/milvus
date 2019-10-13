@@ -702,7 +702,7 @@ TEST_F(GPURESTEST, copyandsearch) {
 }
 
 TEST_F(GPURESTEST, TrainAndSearch) {
-    index_type = "GPUIVFSQ";
+    index_type = "GPUIVF";
     index_ = IndexFactory(index_type);
 
     auto conf = std::make_shared<knowhere::IVFSQCfg>();
