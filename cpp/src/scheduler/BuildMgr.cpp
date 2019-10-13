@@ -15,11 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "BuildMgr.h"
+#include "scheduler/BuildMgr.h"
 
 namespace milvus {
-namespace scheduler {
-
-}  // namespace scheduler
+namespace scheduler {}  // namespace scheduler
 }  // namespace milvus
