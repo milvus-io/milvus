@@ -19,6 +19,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "cache/DataObj.h"
 #include "knowhere/common/BinarySet.h"
@@ -103,9 +104,9 @@ class VecIndex : public cache::DataObj {
         return nullptr;
     }
 
-    virtual Status
+    virtual VecIndexPtr
     LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
-        return Status::OK();
+        return nullptr;
     }
 
     virtual Status
@@ -116,6 +117,11 @@ class VecIndex : public cache::DataObj {
     virtual Status
     UnsetQuantizer() {
         return Status::OK();
+    }
+
+    virtual std::pair<VecIndexPtr, knowhere::QuantizerPtr>
+    CopyToGpuWithQuantizer(const int64_t& device_id, const Config& cfg = Config()) {
+        return std::make_pair(nullptr, nullptr);
     }
     ////////////////
  private:

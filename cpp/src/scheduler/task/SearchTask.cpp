@@ -22,6 +22,7 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
+#include <src/scheduler/SchedInst.h>
 #include <algorithm>
 #include <string>
 #include <thread>
@@ -121,7 +122,11 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
             stat = index_engine_->Load();
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
-            stat = index_engine_->CopyToGpu(device_id);
+            bool hybrid = false;
+            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H) {
+                hybrid = true;
+            }
+            stat = index_engine_->CopyToGpu(device_id, hybrid);
             type_str = "CPU2GPU";
         } else if (type == LoadType::GPU2CPU) {
             stat = index_engine_->CopyToCpu();
@@ -204,7 +209,12 @@ XSearchTask::Execute() {
 
         try {
             // step 2: search
-            index_engine_->Search(nq, vectors, topk, nprobe, output_distance.data(), output_ids.data());
+            bool hybrid = false;
+            if (index_engine_->IndexEngineType() == engine::EngineType::FAISS_IVFSQ8H &&
+                ResMgrInst::GetInstance()->GetResource(path().Last())->type() == ResourceType::CPU) {
+                hybrid = true;
+            }
+            index_engine_->Search(nq, vectors, topk, nprobe, output_distance.data(), output_ids.data(), hybrid);
 
             double span = rc.RecordSection(hdr + ", do search");
             //            search_job->AccumSearchCost(span);

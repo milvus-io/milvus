@@ -19,6 +19,7 @@
 #include "scheduler/Utils.h"
 
 #include <iostream>
+#include <limits>
 #include <utility>
 
 namespace milvus {
@@ -111,11 +112,18 @@ Resource::pick_task_load() {
 
 TaskTableItemPtr
 Resource::pick_task_execute() {
-    auto indexes = task_table_.PickToExecute(3);
+    auto indexes = task_table_.PickToExecute(std::numeric_limits<uint64_t>::max());
     for (auto index : indexes) {
         // try to set one task executing, then return
-        if (task_table_.Execute(index))
+        if (task_table_[index]->task->label()->Type() == TaskLabelType::SPECIFIED_RESOURCE) {
+            if (task_table_[index]->task->path().Last() != name()) {
+                continue;
+            }
+        }
+
+        if (task_table_.Execute(index)) {
             return task_table_.Get(index);
+        }
         // else try next
     }
     return nullptr;
