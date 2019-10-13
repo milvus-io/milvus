@@ -16,6 +16,7 @@
 // under the License.
 
 #include "scheduler/resource/Resource.h"
+#include "scheduler/SchedInst.h"
 #include "scheduler/Utils.h"
 
 #include <iostream>
@@ -175,6 +176,12 @@ Resource::executor_function() {
             total_cost_ += finish - start;
 
             task_item->Executed();
+
+            if (task_item->task->Type() == TaskType::BuildIndexTask) {
+                BuildMgrInst::GetInstance()->Put();
+                ResMgrInst::GetInstance()->GetResource("cpu")->WakeupLoader();
+            }
+
             if (subscriber_) {
                 auto event = std::make_shared<FinishTaskEvent>(shared_from_this(), task_item);
                 subscriber_(std::static_pointer_cast<Event>(event));
