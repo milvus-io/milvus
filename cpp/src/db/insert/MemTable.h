@@ -1,13 +1,31 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 #pragma once
 
-#include "db/Status.h"
 #include "MemTableFile.h"
 #include "VectorSource.h"
+#include "utils/Status.h"
 
+#include <memory>
 #include <mutex>
+#include <string>
+#include <vector>
 
-
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -15,21 +33,28 @@ class MemTable {
  public:
     using MemTableFileList = std::vector<MemTableFilePtr>;
 
-    MemTable(const std::string &table_id, const meta::MetaPtr &meta, const Options &options);
+    MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
 
-    Status Add(VectorSourcePtr &source, IDNumbers &vector_ids);
+    Status
+    Add(VectorSourcePtr& source, IDNumbers& vector_ids);
 
-    void GetCurrentMemTableFile(MemTableFilePtr &mem_table_file);
+    void
+    GetCurrentMemTableFile(MemTableFilePtr& mem_table_file);
 
-    size_t GetTableFileCount();
+    size_t
+    GetTableFileCount();
 
-    Status Serialize();
+    Status
+    Serialize();
 
-    bool Empty();
+    bool
+    Empty();
 
-    const std::string &GetTableId() const;
+    const std::string&
+    GetTableId() const;
 
-    size_t GetCurrentMem();
+    size_t
+    GetCurrentMem();
 
  private:
     const std::string table_id_;
@@ -38,14 +63,12 @@ class MemTable {
 
     meta::MetaPtr meta_;
 
-    Options options_;
+    DBOptions options_;
 
     std::mutex mutex_;
-
-}; //MemTable
+};  // MemTable
 
 using MemTablePtr = std::shared_ptr<MemTable>;
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

@@ -1,25 +1,34 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
-#include "Algorithm.h"
+#include "scheduler/Algorithm.h"
 
-namespace zilliz {
+#include <limits>
+#include <unordered_map>
+#include <utility>
+
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
-constexpr uint64_t MAXINT = std::numeric_limits<uint32_t >::max();
+constexpr uint64_t MAXINT = std::numeric_limits<uint32_t>::max();
 
 uint64_t
-ShortestPath(const ResourcePtr &src,
-             const ResourcePtr &dest,
-             const ResourceMgrPtr &res_mgr,
-             std::vector<std::string> &path) {
-
-    std::vector<std::vector<std::string>> paths;
-
+ShortestPath(const ResourcePtr& src, const ResourcePtr& dest, const ResourceMgrPtr& res_mgr,
+             std::vector<std::string>& path) {
     uint64_t num_of_resources = res_mgr->GetAllResources().size();
     std::unordered_map<uint64_t, std::string> id_name_map;
     std::unordered_map<std::string, uint64_t> name_id_map;
@@ -28,7 +37,7 @@ ShortestPath(const ResourcePtr &src,
         name_id_map.insert(std::make_pair(res_mgr->GetAllResources().at(i)->name(), i));
     }
 
-    std::vector<std::vector<uint64_t> > dis_matrix;
+    std::vector<std::vector<uint64_t>> dis_matrix;
     dis_matrix.resize(num_of_resources);
     for (uint64_t i = 0; i < num_of_resources; ++i) {
         dis_matrix[i].resize(num_of_resources);
@@ -40,12 +49,11 @@ ShortestPath(const ResourcePtr &src,
 
     std::vector<bool> vis(num_of_resources, false);
     std::vector<uint64_t> dis(num_of_resources, MAXINT);
-    for (auto &res : res_mgr->GetAllResources()) {
-
+    for (auto& res : res_mgr->GetAllResources()) {
         auto cur_node = std::static_pointer_cast<Node>(res);
         auto cur_neighbours = cur_node->GetNeighbours();
 
-        for (auto &neighbour : cur_neighbours) {
+        for (auto& neighbour : cur_neighbours) {
             auto neighbour_res = std::static_pointer_cast<Resource>(neighbour.neighbour_node.lock());
             dis_matrix[name_id_map.at(res->name())][name_id_map.at(neighbour_res->name())] =
                 neighbour.connection.transport_cost();
@@ -93,6 +101,5 @@ ShortestPath(const ResourcePtr &src,
     return dis[name_id_map.at(dest->name())];
 }
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

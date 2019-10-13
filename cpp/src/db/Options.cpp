@@ -1,36 +1,45 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
-#include <stdlib.h>
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+#include "db/Options.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
+
 #include <assert.h>
-#include <easylogging++.h>
+#include <stdlib.h>
 #include <boost/algorithm/string.hpp>
 
-#include "Options.h"
-#include "db/meta/SqliteMetaImpl.h"
-#include "Exception.h"
-
-namespace zilliz {
 namespace milvus {
 namespace engine {
-
-Options::Options() {
-}
 
 ArchiveConf::ArchiveConf(const std::string& type, const std::string& criterias) {
     ParseType(type);
     ParseCritirias(criterias);
 }
 
-void ArchiveConf::SetCriterias(const ArchiveConf::CriteriaT& criterial) {
-    for(auto& pair : criterial) {
+void
+ArchiveConf::SetCriterias(const ArchiveConf::CriteriaT& criterial) {
+    for (auto& pair : criterial) {
         criterias_[pair.first] = pair.second;
     }
 }
 
-void ArchiveConf::ParseCritirias(const std::string& criterias) {
+void
+ArchiveConf::ParseCritirias(const std::string& criterias) {
     std::stringstream ss(criterias);
     std::vector<std::string> tokens;
 
@@ -41,43 +50,43 @@ void ArchiveConf::ParseCritirias(const std::string& criterias) {
     }
 
     for (auto& token : tokens) {
-        if(token.empty()) {
+        if (token.empty()) {
             continue;
         }
 
         std::vector<std::string> kv;
         boost::algorithm::split(kv, token, boost::is_any_of(":"));
         if (kv.size() != 2) {
-            LOG(WARNING) << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
+            ENGINE_LOG_WARNING << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
             continue;
         }
         if (kv[0] != "disk" && kv[0] != "days") {
-            LOG(WARNING) << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
+            ENGINE_LOG_WARNING << "Invalid ArchiveConf Criterias: " << token << " Ignore!";
             continue;
         }
         try {
             auto value = std::stoi(kv[1]);
             criterias_[kv[0]] = value;
-        }
-        catch (std::out_of_range&){
-            LOG(ERROR) << "Out of range: '" << kv[1] << "'";
-            throw OutOfRangeException();
-        }
-        catch (...){
-            LOG(ERROR) << "Invalid argument: '" << kv[1] << "'";
-            throw InvalidArgumentException();
+        } catch (std::out_of_range&) {
+            std::string msg = "Out of range: '" + kv[1] + "'";
+            ENGINE_LOG_ERROR << msg;
+            throw InvalidArgumentException(msg);
+        } catch (...) {
+            std::string msg = "Invalid argument: '" + kv[1] + "'";
+            ENGINE_LOG_ERROR << msg;
+            throw InvalidArgumentException(msg);
         }
     }
 }
 
-void ArchiveConf::ParseType(const std::string& type) {
+void
+ArchiveConf::ParseType(const std::string& type) {
     if (type != "delete" && type != "swap") {
-        LOG(ERROR) << "Invalid argument: type='" << type << "'";
-        throw InvalidArgumentException();
+        std::string msg = "Invalid argument: type='" + type + "'";
+        throw InvalidArgumentException(msg);
     }
     type_ = type;
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

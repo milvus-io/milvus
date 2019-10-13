@@ -1,29 +1,43 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
-#include "src/metrics/Metrics.h"
-#include "src/utils/TimeRecorder.h"
-#include "src/db/engine/EngineFactory.h"
-#include "src/db/Log.h"
-#include "SearchTask.h"
+#include "scheduler/task/SearchTask.h"
+#include "db/engine/EngineFactory.h"
+#include "metrics/Metrics.h"
+#include "scheduler/job/SearchJob.h"
+#include "utils/Log.h"
+#include "utils/TimeRecorder.h"
 
+#include <algorithm>
+#include <string>
 #include <thread>
+#include <utility>
 
-
-namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 static constexpr size_t PARALLEL_REDUCE_THRESHOLD = 10000;
 static constexpr size_t PARALLEL_REDUCE_BATCH = 1000;
 
 std::mutex XSearchTask::merge_mutex_;
 
-//bool
-//NeedParallelReduce(uint64_t nq, uint64_t topk) {
+// TODO(wxyu): remove unused code
+// bool
+// NeedParallelReduce(uint64_t nq, uint64_t topk) {
 //    server::ServerConfig &config = server::ServerConfig::GetInstance();
 //    server::ConfigNode &db_config = config.GetConfig(server::CONFIG_DB);
 //    bool need_parallel = db_config.GetBoolValue(server::CONFIG_DB_PARALLEL_REDUCE, false);
@@ -34,8 +48,8 @@ std::mutex XSearchTask::merge_mutex_;
 //    return nq * topk >= PARALLEL_REDUCE_THRESHOLD;
 //}
 //
-//void
-//ParallelReduce(std::function<void(size_t, size_t)> &reduce_function, size_t max_index) {
+// void
+// ParallelReduce(std::function<void(size_t, size_t)> &reduce_function, size_t max_index) {
 //    size_t reduce_batch = PARALLEL_REDUCE_BATCH;
 //
 //    auto thread_count = std::thread::hardware_concurrency() - 1; //not all core do this work
@@ -66,38 +80,38 @@ std::mutex XSearchTask::merge_mutex_;
 
 void
 CollectFileMetrics(int file_type, size_t file_size) {
+    server::MetricsBase& inst = server::Metrics::GetInstance();
     switch (file_type) {
-        case meta::TableFileSchema::RAW:
-        case meta::TableFileSchema::TO_INDEX: {
-            server::Metrics::GetInstance().RawFileSizeHistogramObserve(file_size);
-            server::Metrics::GetInstance().RawFileSizeTotalIncrement(file_size);
-            server::Metrics::GetInstance().RawFileSizeGaugeSet(file_size);
+        case TableFileSchema::RAW:
+        case TableFileSchema::TO_INDEX: {
+            inst.RawFileSizeHistogramObserve(file_size);
+            inst.RawFileSizeTotalIncrement(file_size);
+            inst.RawFileSizeGaugeSet(file_size);
             break;
         }
         default: {
-            server::Metrics::GetInstance().IndexFileSizeHistogramObserve(file_size);
-            server::Metrics::GetInstance().IndexFileSizeTotalIncrement(file_size);
-            server::Metrics::GetInstance().IndexFileSizeGaugeSet(file_size);
+            inst.IndexFileSizeHistogramObserve(file_size);
+            inst.IndexFileSizeTotalIncrement(file_size);
+            inst.IndexFileSizeGaugeSet(file_size);
             break;
         }
     }
 }
 
-XSearchTask::XSearchTask(TableFileSchemaPtr file)
-    : Task(TaskType::SearchTask), file_(file) {
+XSearchTask::XSearchTask(TableFileSchemaPtr file, TaskLabelPtr label)
+    : Task(TaskType::SearchTask, std::move(label)), file_(file) {
     if (file_) {
-        index_engine_ = EngineFactory::Build(file_->dimension_,
-                                             file_->location_,
-                                             (EngineType) file_->engine_type_,
-                                             (MetricType) file_->metric_type_,
-                                             file_->nlist_);
+        if (file_->metric_type_ != static_cast<int>(MetricType::L2)) {
+            metric_l2 = false;
+        }
+        index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, (EngineType)file_->engine_type_,
+                                             (MetricType)file_->metric_type_, file_->nlist_);
     }
-
 }
 
 void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
-    server::TimeRecorder rc("");
+    TimeRecorder rc("");
     Status stat = Status::OK();
     std::string error_msg;
     std::string type_str;
@@ -116,8 +130,8 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
             error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
-    } catch (std::exception &ex) {
-        //typical error: out of disk space or permition denied
+    } catch (std::exception& ex) {
+        // typical error: out of disk space or permition denied
         error_msg = "Failed to load index file: " + std::string(ex.what());
         stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
     }
@@ -132,9 +146,10 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
             s = Status(SERVER_UNEXPECTED_ERROR, error_msg);
         }
 
-        for (auto &context : search_contexts_) {
-            context->IndexSearchDone(file_->id_);//mark as done avoid dead lock, even failed
-            context->GetStatus() = s;
+        if (auto job = job_.lock()) {
+            auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
+            search_job->SearchDone(file_->id_);
+            search_job->GetStatus() = s;
         }
 
         return;
@@ -142,19 +157,20 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 
     size_t file_size = index_engine_->PhysicalSize();
 
-    std::string info = "Load file id:" + std::to_string(file_->id_) + " file type:" + std::to_string(file_->file_type_)
-        + " size:" + std::to_string(file_size) + " bytes from location: " + file_->location_ + " totally cost";
+    std::string info = "Load file id:" + std::to_string(file_->id_) +
+                       " file type:" + std::to_string(file_->file_type_) + " size:" + std::to_string(file_size) +
+                       " bytes from location: " + file_->location_ + " totally cost";
     double span = rc.ElapseFromBegin(info);
-    for (auto &context : search_contexts_) {
-        context->AccumLoadCost(span);
-    }
+    //    for (auto &context : search_contexts_) {
+    //        context->AccumLoadCost(span);
+    //    }
 
     CollectFileMetrics(file_->file_type_, file_size);
 
-    //step 2: return search task for later execution
+    // step 2: return search task for later execution
     index_id_ = file_->id_;
     index_type_ = file_->file_type_;
-    search_contexts_.swap(search_contexts_);
+    //    search_contexts_.swap(search_contexts_);
 }
 
 void
@@ -163,57 +179,49 @@ XSearchTask::Execute() {
         return;
     }
 
-    ENGINE_LOG_DEBUG << "Searching in file id:" << index_id_ << " with "
-                     << search_contexts_.size() << " tasks";
+    //    ENGINE_LOG_DEBUG << "Searching in file id:" << index_id_ << " with "
+    //                     << search_contexts_.size() << " tasks";
 
-    server::TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
+    TimeRecorder rc("DoSearch file id:" + std::to_string(index_id_));
 
     server::CollectDurationMetrics metrics(index_type_);
 
-    std::vector<long> output_ids;
+    std::vector<int64_t> output_ids;
     std::vector<float> output_distance;
-    for (auto &context : search_contexts_) {
-        //step 1: allocate memory
-        uint64_t nq = context->nq();
-        uint64_t topk = context->topk();
-        uint64_t nprobe = context->nprobe();
-        const float* vectors = context->vectors();
+
+    if (auto job = job_.lock()) {
+        auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
+        // step 1: allocate memory
+        uint64_t nq = search_job->nq();
+        uint64_t topk = search_job->topk();
+        uint64_t nprobe = search_job->nprobe();
+        const float* vectors = search_job->vectors();
 
         output_ids.resize(topk * nq);
         output_distance.resize(topk * nq);
-        std::string hdr = "context " + context->Identity() +
-            " nq " + std::to_string(nq) +
-            " topk " + std::to_string(topk);
+        std::string hdr =
+            "job " + std::to_string(search_job->id()) + " nq " + std::to_string(nq) + " topk " + std::to_string(topk);
 
         try {
-            //step 2: search
+            // step 2: search
             index_engine_->Search(nq, vectors, topk, nprobe, output_distance.data(), output_ids.data());
 
             double span = rc.RecordSection(hdr + ", do search");
-            context->AccumSearchCost(span);
+            //            search_job->AccumSearchCost(span);
 
-
-            //step 3: cluster result
-            SearchContext::ResultSet result_set;
+            // step 3: pick up topk result
             auto spec_k = index_engine_->Count() < topk ? index_engine_->Count() : topk;
-            XSearchTask::ClusterResult(output_ids, output_distance, nq, spec_k, result_set);
-
-            span = rc.RecordSection(hdr + ", cluster result");
-            context->AccumReduceCost(span);
-
-            // step 4: pick up topk result
-            XSearchTask::TopkResult(result_set, topk, metric_l2, context->GetResult());
+            XSearchTask::TopkResult(output_ids, output_distance, spec_k, nq, topk, metric_l2, search_job->GetResult());
 
             span = rc.RecordSection(hdr + ", reduce topk");
-            context->AccumReduceCost(span);
-        } catch (std::exception &ex) {
+            //            search_job->AccumReduceCost(span);
+        } catch (std::exception& ex) {
             ENGINE_LOG_ERROR << "SearchTask encounter exception: " << ex.what();
-            context->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
-            continue;
+            //            search_job->IndexSearchDone(index_id_);//mark as done avoid dead lock, even search failed
         }
 
-        //step 5: notify to send result to client
-        context->IndexSearchDone(index_id_);
+        // step 5: notify to send result to client
+        search_job->SearchDone(index_id_);
     }
 
     rc.ElapseFromBegin("totally cost");
@@ -222,152 +230,74 @@ XSearchTask::Execute() {
     index_engine_ = nullptr;
 }
 
-Status XSearchTask::ClusterResult(const std::vector<long> &output_ids,
-                                  const std::vector<float> &output_distance,
-                                  uint64_t nq,
-                                  uint64_t topk,
-                                  SearchContext::ResultSet &result_set) {
-    if (output_ids.size() < nq * topk || output_distance.size() < nq * topk) {
-        std::string msg = "Invalid id array size: " + std::to_string(output_ids.size()) +
-            " distance array size: " + std::to_string(output_distance.size());
-        ENGINE_LOG_ERROR << msg;
-        return Status(DB_ERROR, msg);
-    }
+Status
+XSearchTask::TopkResult(const std::vector<int64_t>& input_ids, const std::vector<float>& input_distance,
+                        uint64_t input_k, uint64_t nq, uint64_t topk, bool ascending, scheduler::ResultSet& result) {
+    scheduler::ResultSet result_buf;
 
-    result_set.clear();
-    result_set.resize(nq);
-
-    std::function<void(size_t, size_t)> reduce_worker = [&](size_t from_index, size_t to_index) {
-        for (auto i = from_index; i < to_index; i++) {
-            SearchContext::Id2DistanceMap id_distance;
-            id_distance.reserve(topk);
-            for (auto k = 0; k < topk; k++) {
-                uint64_t index = i * topk + k;
-                if (output_ids[index] < 0) {
-                    continue;
+    if (result.empty()) {
+        result_buf.resize(nq, scheduler::Id2DistVec(input_k, scheduler::IdDistPair(-1, 0.0)));
+        for (auto i = 0; i < nq; ++i) {
+            auto& result_buf_i = result_buf[i];
+            uint64_t input_k_multi_i = input_k * i;
+            for (auto k = 0; k < input_k; ++k) {
+                uint64_t idx = input_k_multi_i + k;
+                auto& result_buf_item = result_buf_i[k];
+                result_buf_item.first = input_ids[idx];
+                result_buf_item.second = input_distance[idx];
+            }
+        }
+    } else {
+        size_t tar_size = result[0].size();
+        uint64_t output_k = std::min(topk, input_k + tar_size);
+        result_buf.resize(nq, scheduler::Id2DistVec(output_k, scheduler::IdDistPair(-1, 0.0)));
+        for (auto i = 0; i < nq; ++i) {
+            size_t buf_k = 0, src_k = 0, tar_k = 0;
+            uint64_t src_idx;
+            auto& result_i = result[i];
+            auto& result_buf_i = result_buf[i];
+            uint64_t input_k_multi_i = input_k * i;
+            while (buf_k < output_k && src_k < input_k && tar_k < tar_size) {
+                src_idx = input_k_multi_i + src_k;
+                auto& result_buf_item = result_buf_i[buf_k];
+                auto& result_item = result_i[tar_k];
+                if ((ascending && input_distance[src_idx] < result_item.second) ||
+                    (!ascending && input_distance[src_idx] > result_item.second)) {
+                    result_buf_item.first = input_ids[src_idx];
+                    result_buf_item.second = input_distance[src_idx];
+                    src_k++;
+                } else {
+                    result_buf_item = result_item;
+                    tar_k++;
                 }
-                id_distance.push_back(std::make_pair(output_ids[index], output_distance[index]));
+                buf_k++;
             }
-            result_set[i] = id_distance;
-        }
-    };
 
-//    if (NeedParallelReduce(nq, topk)) {
-//        ParallelReduce(reduce_worker, nq);
-//    } else {
-    reduce_worker(0, nq);
-//    }
+            if (buf_k < topk) {
+                if (src_k < input_k) {
+                    while (buf_k < output_k && src_k < input_k) {
+                        src_idx = input_k_multi_i + src_k;
+                        auto& result_buf_item = result_buf_i[buf_k];
+                        result_buf_item.first = input_ids[src_idx];
+                        result_buf_item.second = input_distance[src_idx];
+                        src_k++;
+                        buf_k++;
+                    }
+                } else {
+                    while (buf_k < output_k && tar_k < tar_size) {
+                        result_buf_i[buf_k] = result_i[tar_k];
+                        tar_k++;
+                        buf_k++;
+                    }
+                }
+            }
+        }
+    }
+
+    result.swap(result_buf);
 
     return Status::OK();
 }
 
-Status XSearchTask::MergeResult(SearchContext::Id2DistanceMap &distance_src,
-                                SearchContext::Id2DistanceMap &distance_target,
-                                uint64_t topk,
-                                bool ascending) {
-    //Note: the score_src and score_target are already arranged by score in ascending order
-    if (distance_src.empty()) {
-        ENGINE_LOG_WARNING << "Empty distance source array";
-        return Status::OK();
-    }
-
-    std::unique_lock<std::mutex> lock(merge_mutex_);
-    if (distance_target.empty()) {
-        distance_target.swap(distance_src);
-        return Status::OK();
-    }
-
-    size_t src_count = distance_src.size();
-    size_t target_count = distance_target.size();
-    SearchContext::Id2DistanceMap distance_merged;
-    distance_merged.reserve(topk);
-    size_t src_index = 0, target_index = 0;
-    while (true) {
-        //all score_src items are merged, if score_merged.size() still less than topk
-        //move items from score_target to score_merged until score_merged.size() equal topk
-        if (src_index >= src_count) {
-            for (size_t i = target_index; i < target_count && distance_merged.size() < topk; ++i) {
-                distance_merged.push_back(distance_target[i]);
-            }
-            break;
-        }
-
-        //all score_target items are merged, if score_merged.size() still less than topk
-        //move items from score_src to score_merged until score_merged.size() equal topk
-        if (target_index >= target_count) {
-            for (size_t i = src_index; i < src_count && distance_merged.size() < topk; ++i) {
-                distance_merged.push_back(distance_src[i]);
-            }
-            break;
-        }
-
-        //compare score,
-        // if ascending = true, put smallest score to score_merged one by one
-        // else, put largest score to score_merged one by one
-        auto &src_pair = distance_src[src_index];
-        auto &target_pair = distance_target[target_index];
-        if (ascending) {
-            if (src_pair.second > target_pair.second) {
-                distance_merged.push_back(target_pair);
-                target_index++;
-            } else {
-                distance_merged.push_back(src_pair);
-                src_index++;
-            }
-        } else {
-            if (src_pair.second < target_pair.second) {
-                distance_merged.push_back(target_pair);
-                target_index++;
-            } else {
-                distance_merged.push_back(src_pair);
-                src_index++;
-            }
-        }
-
-        //score_merged.size() already equal topk
-        if (distance_merged.size() >= topk) {
-            break;
-        }
-    }
-
-    distance_target.swap(distance_merged);
-
-    return Status::OK();
-}
-
-Status XSearchTask::TopkResult(SearchContext::ResultSet &result_src,
-                               uint64_t topk,
-                               bool ascending,
-                               SearchContext::ResultSet &result_target) {
-    if (result_target.empty()) {
-        result_target.swap(result_src);
-        return Status::OK();
-    }
-
-    if (result_src.size() != result_target.size()) {
-        std::string msg = "Invalid result set size";
-        ENGINE_LOG_ERROR << msg;
-        return Status(DB_ERROR, msg);
-    }
-
-    std::function<void(size_t, size_t)> ReduceWorker = [&](size_t from_index, size_t to_index) {
-        for (size_t i = from_index; i < to_index; i++) {
-            SearchContext::Id2DistanceMap &score_src = result_src[i];
-            SearchContext::Id2DistanceMap &score_target = result_target[i];
-            XSearchTask::MergeResult(score_src, score_target, topk, ascending);
-        }
-    };
-
-//    if (NeedParallelReduce(result_src.size(), topk)) {
-//        ParallelReduce(ReduceWorker, result_src.size());
-//    } else {
-    ReduceWorker(0, result_src.size());
-//    }
-
-    return Status::OK();
-}
-
-
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

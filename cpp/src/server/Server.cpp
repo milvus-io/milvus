@@ -1,53 +1,54 @@
-////////////////////////////////////////////////////////////////////////////////
-// Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
-// Unauthorized copying of this file, via any medium is strictly prohibited.
-// Proprietary and confidential.
-////////////////////////////////////////////////////////////////////////////////
-#include <thread>
-#include "Server.h"
-#include "server/grpc_impl/GrpcMilvusServer.h"
-#include "utils/Log.h"
-#include "utils/LogUtil.h"
-#include "utils/SignalUtil.h"
-#include "utils/TimeRecorder.h"
-#include "metrics/Metrics.h"
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+#include "server/Server.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <csignal>
+#include <thread>
 //#include <numaif.h>
-#include <unistd.h>
 #include <string.h>
-#include <src/scheduler/SchedInst.h>
-#include "wrapper/knowhere/KnowhereResource.h"
+#include <unistd.h>
 
-#include "metrics/Metrics.h"
 #include "DBWrapper.h"
+#include "metrics/Metrics.h"
+#include "scheduler/SchedInst.h"
+#include "server/Config.h"
+#include "server/grpc_impl/GrpcServer.h"
+#include "utils/Log.h"
+#include "utils/LogUtil.h"
+#include "utils/SignalUtil.h"
+#include "utils/TimeRecorder.h"
+#include "wrapper/KnowhereResource.h"
 
-
-namespace zilliz {
 namespace milvus {
 namespace server {
 
-Server *
-Server::Instance() {
+Server&
+Server::GetInstance() {
     static Server server;
-    return &server;
-}
-
-Server::Server() {
-
-}
-Server::~Server() {
-
+    return server;
 }
 
 void
-Server::Init(int64_t daemonized,
-             const std::string &pid_filename,
-             const std::string &config_filename,
-             const std::string &log_config_file) {
+Server::Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename,
+             const std::string& log_config_file) {
     daemonized_ = daemonized;
     pid_filename_ = pid_filename;
     config_filename_ = config_filename;
@@ -62,9 +63,9 @@ Server::Daemonize() {
 
     std::cout << "Milvus server run in daemonize mode";
 
-//    std::string log_path(GetLogDirFullPath());
-//    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
-//    SERVER_LOG_INFO << "Log will be exported to: " + log_path);
+    //    std::string log_path(GetLogDirFullPath());
+    //    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
+    //    SERVER_LOG_INFO << "Log will be exported to: " + log_path);
 
     pid_t pid = 0;
 
@@ -112,7 +113,7 @@ Server::Daemonize() {
     }
 
     // Close all open fd
-    for (long fd = sysconf(_SC_OPEN_MAX); fd > 0; fd--) {
+    for (int64_t fd = sysconf(_SC_OPEN_MAX); fd > 0; fd--) {
         close(fd);
     }
 
@@ -124,146 +125,141 @@ Server::Daemonize() {
     stderr = fopen("/dev/null", "w+");
     // Try to write PID of daemon to lockfile
     if (!pid_filename_.empty()) {
-        pid_fd = open(pid_filename_.c_str(), O_RDWR | O_CREAT, 0640);
-        if (pid_fd < 0) {
-            std::cout << "Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno);
+        pid_fd_ = open(pid_filename_.c_str(), O_RDWR | O_CREAT, 0640);
+        if (pid_fd_ < 0) {
+            std::cerr << "Can't open filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
-        if (lockf(pid_fd, F_TLOCK, 0) < 0) {
-            std::cout << "Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno);
+        if (lockf(pid_fd_, F_TLOCK, 0) < 0) {
+            std::cerr << "Can't lock filename: " + pid_filename_ + ", Error: " + strerror(errno);
             exit(EXIT_FAILURE);
         }
 
         std::string pid_file_context = std::to_string(getpid());
-        ssize_t res = write(pid_fd, pid_file_context.c_str(), pid_file_context.size());
+        ssize_t res = write(pid_fd_, pid_file_context.c_str(), pid_file_context.size());
         if (res != 0) {
             return;
         }
     }
 }
 
-int
+void
 Server::Start() {
-
-    if (daemonized_) {
+    if (daemonized_ != 0) {
         Daemonize();
     }
 
-    do {
-        try {
-            // Read config file
-            if (LoadConfig() != SERVER_SUCCESS) {
-                return 1;
-            }
-
-            //log path is defined by LoadConfig, so InitLog must be called after LoadConfig
-            ServerConfig &config = ServerConfig::GetInstance();
-            ConfigNode server_config = config.GetConfig(CONFIG_SERVER);
-
-            std::string time_zone = server_config.GetValue(CONFIG_TIME_ZONE, "UTC+8");
-            if (time_zone.length() == 3) {
-                time_zone = "CUT";
-            } else {
-                int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
-                if (time_bias == 0)
-                    time_zone = "CUT";
-                else if (time_bias > 0) {
-                    time_zone = "CUT" + std::to_string(-time_bias);
-                } else {
-                    time_zone = "CUT+" + std::to_string(-time_bias);
-                }
-            }
-
-            if (setenv("TZ", time_zone.c_str(), 1) != 0) {
-                return -1;
-            }
-            tzset();
-
-            InitLog(log_config_file_);
-
-            // Handle Signal
-            signal(SIGINT, SignalUtil::HandleSignal);
-            signal(SIGHUP, SignalUtil::HandleSignal);
-            signal(SIGTERM, SignalUtil::HandleSignal);
-            server::Metrics::GetInstance().Init();
-            server::SystemInfo::GetInstance().Init();
-
-            std::cout << "Milvus server start successfully." << std::endl;
-            StartService();
-
-        } catch (std::exception &ex) {
-            std::cerr << "Milvus server encounter exception: " << std::string(ex.what())
-                      << "Is another server instance running?";
-            break;
+    try {
+        /* Read config file */
+        if (LoadConfig() != SERVER_SUCCESS) {
+            std::cerr << "Milvus server fail to load config file" << std::endl;
+            return;
         }
-    } while (false);
 
-    Stop();
-    return 0;
+        /* log path is defined in Config file, so InitLog must be called after LoadConfig */
+        Config& config = Config::GetInstance();
+        std::string time_zone;
+        Status s = config.GetServerConfigTimeZone(time_zone);
+        if (!s.ok()) {
+            std::cerr << "Fail to get server config timezone" << std::endl;
+            return;
+        }
+
+        if (time_zone.length() == 3) {
+            time_zone = "CUT";
+        } else {
+            int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
+            if (time_bias == 0) {
+                time_zone = "CUT";
+            } else if (time_bias > 0) {
+                time_zone = "CUT" + std::to_string(-time_bias);
+            } else {
+                time_zone = "CUT+" + std::to_string(-time_bias);
+            }
+        }
+
+        if (setenv("TZ", time_zone.c_str(), 1) != 0) {
+            std::cerr << "Fail to setenv" << std::endl;
+            return;
+        }
+        tzset();
+
+        InitLog(log_config_file_);
+
+        server::Metrics::GetInstance().Init();
+        server::SystemInfo::GetInstance().Init();
+
+        StartService();
+        std::cout << "Milvus server start successfully." << std::endl;
+    } catch (std::exception& ex) {
+        std::cerr << "Milvus server encounter exception: " << ex.what();
+    }
 }
 
 void
 Server::Stop() {
-    std::cout << "Milvus server is going to shutdown ..." << std::endl;
+    std::cerr << "Milvus server is going to shutdown ..." << std::endl;
 
-    // Unlock and close lockfile
-    if (pid_fd != -1) {
-        int ret = lockf(pid_fd, F_ULOCK, 0);
+    /* Unlock and close lockfile */
+    if (pid_fd_ != -1) {
+        int ret = lockf(pid_fd_, F_ULOCK, 0);
         if (ret != 0) {
-            std::cout << "Can't lock file: " << strerror(errno) << std::endl;
+            std::cerr << "Can't lock file: " << strerror(errno) << std::endl;
             exit(0);
         }
-        ret = close(pid_fd);
+        ret = close(pid_fd_);
         if (ret != 0) {
-            std::cout << "Can't close file: " << strerror(errno) << std::endl;
+            std::cerr << "Can't close file: " << strerror(errno) << std::endl;
             exit(0);
         }
     }
 
-    // Try to delete lockfile
+    /* delete lockfile */
     if (!pid_filename_.empty()) {
         int ret = unlink(pid_filename_.c_str());
         if (ret != 0) {
-            std::cout << "Can't unlink file: " << strerror(errno) << std::endl;
+            std::cerr << "Can't unlink file: " << strerror(errno) << std::endl;
             exit(0);
         }
     }
 
-    running_ = 0;
-
     StopService();
 
-    std::cout << "Milvus server is closed!" << std::endl;
+    std::cerr << "Milvus server is closed!" << std::endl;
 }
-
 
 ErrorCode
 Server::LoadConfig() {
-    ServerConfig::GetInstance().LoadConfigFile(config_filename_);
-    ErrorCode err = ServerConfig::GetInstance().ValidateConfig();
-    if (err != SERVER_SUCCESS) {
+    Config& config = Config::GetInstance();
+    Status s = config.LoadConfigFile(config_filename_);
+    if (!s.ok()) {
+        std::cerr << "Failed to load config file: " << config_filename_ << std::endl;
         exit(0);
     }
 
+    s = config.ValidateConfig();
+    if (!s.ok()) {
+        std::cerr << "Config check fail: " << s.message() << std::endl;
+        exit(0);
+    }
     return SERVER_SUCCESS;
 }
 
 void
 Server::StartService() {
     engine::KnowhereResource::Initialize();
-    engine::StartSchedulerService();
+    scheduler::StartSchedulerService();
     DBWrapper::GetInstance().StartService();
-    grpc::GrpcMilvusServer::StartService();
+    grpc::GrpcServer::GetInstance().Start();
 }
 
 void
 Server::StopService() {
-    grpc::GrpcMilvusServer::StopService();
+    grpc::GrpcServer::GetInstance().Stop();
     DBWrapper::GetInstance().StopService();
-    engine::StopSchedulerService();
+    scheduler::StopSchedulerService();
     engine::KnowhereResource::Finalize();
 }
 
-}
-}
-}
+}  // namespace server
+}  // namespace milvus

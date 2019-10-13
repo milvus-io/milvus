@@ -1,39 +1,58 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
-#include "TaskTable.h"
-#include "event/TaskTableUpdatedEvent.h"
+#include "scheduler/TaskTable.h"
 #include "Utils.h"
+#include "event/TaskTableUpdatedEvent.h"
+#include "utils/Log.h"
 
-#include <vector>
-#include <sstream>
 #include <ctime>
+#include <sstream>
+#include <vector>
 
-
-namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
 std::string
 ToString(TaskTableItemState state) {
     switch (state) {
-        case TaskTableItemState::INVALID: return "INVALID";
-        case TaskTableItemState::START: return "START";
-        case TaskTableItemState::LOADING: return "LOADING";
-        case TaskTableItemState::LOADED: return "LOADED";
-        case TaskTableItemState::EXECUTING: return "EXECUTING";
-        case TaskTableItemState::EXECUTED: return "EXECUTED";
-        case TaskTableItemState::MOVING: return "MOVING";
-        case TaskTableItemState::MOVED: return "MOVED";
-        default: return "";
+        case TaskTableItemState::INVALID:
+            return "INVALID";
+        case TaskTableItemState::START:
+            return "START";
+        case TaskTableItemState::LOADING:
+            return "LOADING";
+        case TaskTableItemState::LOADED:
+            return "LOADED";
+        case TaskTableItemState::EXECUTING:
+            return "EXECUTING";
+        case TaskTableItemState::EXECUTED:
+            return "EXECUTED";
+        case TaskTableItemState::MOVING:
+            return "MOVING";
+        case TaskTableItemState::MOVED:
+            return "MOVED";
+        default:
+            return "";
     }
 }
 
 std::string
-ToString(const TaskTimestamp &timestamp) {
+ToString(const TaskTimestamp& timestamp) {
     std::stringstream ss;
     ss << "<start=" << timestamp.start;
     ss << ", load=" << timestamp.load;
@@ -63,6 +82,7 @@ TaskTableItem::Load() {
     }
     return false;
 }
+
 bool
 TaskTableItem::Loaded() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -74,6 +94,7 @@ TaskTableItem::Loaded() {
     }
     return false;
 }
+
 bool
 TaskTableItem::Execute() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -85,6 +106,7 @@ TaskTableItem::Execute() {
     }
     return false;
 }
+
 bool
 TaskTableItem::Executed() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -97,6 +119,7 @@ TaskTableItem::Executed() {
     }
     return false;
 }
+
 bool
 TaskTableItem::Move() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -108,6 +131,7 @@ TaskTableItem::Move() {
     }
     return false;
 }
+
 bool
 TaskTableItem::Moved() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -134,6 +158,19 @@ TaskTableItem::Dump() {
 
 std::vector<uint64_t>
 TaskTable::PickToLoad(uint64_t limit) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    size_t count = 0;
+    for (uint64_t j = last_finish_ + 1; j < table_.size(); ++j) {
+        if (not table_[j]) {
+            SERVER_LOG_WARNING << "table[" << j << "] is nullptr";
+        }
+        if (table_[j]->state == TaskTableItemState::LOADED) {
+            ++count;
+            if (count > 2)
+                return std::vector<uint64_t>();
+        }
+    }
+
     std::vector<uint64_t> indexes;
     bool cross = false;
     for (uint64_t i = last_finish_ + 1, count = 0; i < table_.size() && count < limit; ++i) {
@@ -150,6 +187,7 @@ TaskTable::PickToLoad(uint64_t limit) {
 
 std::vector<uint64_t>
 TaskTable::PickToExecute(uint64_t limit) {
+    std::lock_guard<std::mutex> lock(mutex_);
     std::vector<uint64_t> indexes;
     bool cross = false;
     for (uint64_t i = last_finish_ + 1, count = 0; i < table_.size() && count < limit; ++i) {
@@ -166,7 +204,7 @@ TaskTable::PickToExecute(uint64_t limit) {
 
 void
 TaskTable::Put(TaskPtr task) {
-    std::lock_guard<std::mutex> lock(id_mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     auto item = std::make_shared<TaskTableItem>();
     item->id = id_++;
     item->task = std::move(task);
@@ -179,9 +217,9 @@ TaskTable::Put(TaskPtr task) {
 }
 
 void
-TaskTable::Put(std::vector<TaskPtr> &tasks) {
-    std::lock_guard<std::mutex> lock(id_mutex_);
-    for (auto &task : tasks) {
+TaskTable::Put(std::vector<TaskPtr>& tasks) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& task : tasks) {
         auto item = std::make_shared<TaskTableItem>();
         item->id = id_++;
         item->task = std::move(task);
@@ -194,14 +232,14 @@ TaskTable::Put(std::vector<TaskPtr> &tasks) {
     }
 }
 
-
 TaskTableItemPtr
 TaskTable::Get(uint64_t index) {
+    std::lock_guard<std::mutex> lock(mutex_);
     return table_[index];
 }
 
-//void
-//TaskTable::Clear() {
+// void
+// TaskTable::Clear() {
 //// find first task is NOT (done or moved), erase from begin to it;
 ////        auto iterator = table_.begin();
 ////        while (iterator->state == TaskTableItemState::EXECUTED or
@@ -210,16 +248,14 @@ TaskTable::Get(uint64_t index) {
 ////        table_.erase(table_.begin(), iterator);
 //}
 
-
 std::string
 TaskTable::Dump() {
     std::stringstream ss;
-    for (auto &item : table_) {
+    for (auto& item : table_) {
         ss << item->Dump() << std::endl;
     }
     return ss.str();
 }
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

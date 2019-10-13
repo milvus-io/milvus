@@ -1,15 +1,31 @@
-/*******************************************************************************
-* Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
-* Unauthorized copying of this file, via any medium is strictly prohibited.
-* Proprietary and confidential.
-******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+#include "sdk/grpc/GrpcClient.h"
+
 #include <grpc/grpc.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
 
-#include "GrpcClient.h"
+#include <memory>
+#include <string>
+#include <vector>
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -20,8 +36,7 @@ using grpc::Status;
 
 namespace milvus {
 GrpcClient::GrpcClient(std::shared_ptr<::grpc::Channel>& channel)
-        : stub_(::milvus::grpc::MilvusService::NewStub(channel)) {
-
+    : stub_(::milvus::grpc::MilvusService::NewStub(channel)) {
 }
 
 GrpcClient::~GrpcClient() = default;
@@ -45,8 +60,7 @@ GrpcClient::CreateTable(const ::milvus::grpc::TableSchema& table_schema) {
 }
 
 bool
-GrpcClient::HasTable(const ::milvus::grpc::TableName& table_name,
-                     Status& status) {
+GrpcClient::HasTable(const ::milvus::grpc::TableName& table_name, Status& status) {
     ClientContext context;
     ::milvus::grpc::BoolReply response;
     ::grpc::Status grpc_status = stub_->HasTable(&context, table_name, &response);
@@ -100,9 +114,8 @@ GrpcClient::CreateIndex(const ::milvus::grpc::IndexParam& index_param) {
 }
 
 void
-GrpcClient::Insert(::milvus::grpc::VectorIds& vector_ids,
-                         const ::milvus::grpc::InsertParam& insert_param,
-                         Status& status) {
+GrpcClient::Insert(::milvus::grpc::VectorIds& vector_ids, const ::milvus::grpc::InsertParam& insert_param,
+                   Status& status) {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->Insert(&context, insert_param, &vector_ids);
 
@@ -122,7 +135,7 @@ GrpcClient::Insert(::milvus::grpc::VectorIds& vector_ids,
 
 Status
 GrpcClient::Search(::milvus::grpc::TopKQueryResultList& topk_query_result_list,
-                   const ::milvus::grpc::SearchParam &search_param) {
+                   const ::milvus::grpc::SearchParam& search_param) {
     ::milvus::grpc::TopKQueryResult query_result;
     ClientContext context;
     ::grpc::Status grpc_status = stub_->Search(&context, search_param, &topk_query_result_list);
@@ -134,16 +147,14 @@ GrpcClient::Search(::milvus::grpc::TopKQueryResultList& topk_query_result_list,
     }
     if (topk_query_result_list.status().error_code() != grpc::SUCCESS) {
         std::cerr << topk_query_result_list.status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed,
-                      topk_query_result_list.status().reason());
+        return Status(StatusCode::ServerFailed, topk_query_result_list.status().reason());
     }
 
     return Status::OK();
 }
 
 Status
-GrpcClient::DescribeTable(::milvus::grpc::TableSchema& grpc_schema,
-                          const std::string& table_name) {
+GrpcClient::DescribeTable(::milvus::grpc::TableSchema& grpc_schema, const std::string& table_name) {
     ClientContext context;
     ::milvus::grpc::TableName grpc_tablename;
     grpc_tablename.set_table_name(table_name);
@@ -155,10 +166,9 @@ GrpcClient::DescribeTable(::milvus::grpc::TableSchema& grpc_schema,
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
 
-    if (grpc_schema.table_name().status().error_code() != grpc::SUCCESS) {
-        std::cerr << grpc_schema.table_name().status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed,
-            grpc_schema.table_name().status().reason());
+    if (grpc_schema.status().error_code() != grpc::SUCCESS) {
+        std::cerr << grpc_schema.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, grpc_schema.status().reason());
     }
 
     return Status::OK();
@@ -174,7 +184,7 @@ GrpcClient::CountTable(const std::string& table_name, Status& status) {
 
     if (!grpc_status.ok()) {
         std::cerr << "DescribeTable rpc failed!" << std::endl;
-        status = Status(StatusCode::RPCFailed,  grpc_status.error_message());
+        status = Status(StatusCode::RPCFailed, grpc_status.error_message());
         return -1;
     }
 
@@ -189,17 +199,10 @@ GrpcClient::CountTable(const std::string& table_name, Status& status) {
 }
 
 Status
-GrpcClient::ShowTables(std::vector<std::string> &table_array) {
+GrpcClient::ShowTables(milvus::grpc::TableNameList& table_name_list) {
     ClientContext context;
     ::milvus::grpc::Command command;
-    std::unique_ptr<ClientReader<::milvus::grpc::TableName> > reader(
-            stub_->ShowTables(&context, command));
-
-    ::milvus::grpc::TableName table_name;
-    while (reader->Read(&table_name)) {
-        table_array.emplace_back(table_name.table_name());
-    }
-    ::grpc::Status grpc_status = reader->Finish();
+    ::grpc::Status grpc_status = stub_->ShowTables(&context, command, &table_name_list);
 
     if (!grpc_status.ok()) {
         std::cerr << "ShowTables gRPC failed!" << std::endl;
@@ -207,18 +210,16 @@ GrpcClient::ShowTables(std::vector<std::string> &table_array) {
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
 
-    if (table_name.status().error_code() != grpc::SUCCESS) {
-        std::cerr << table_name.status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed,
-            table_name.status().reason());
+    if (table_name_list.status().error_code() != grpc::SUCCESS) {
+        std::cerr << table_name_list.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, table_name_list.status().reason());
     }
 
     return Status::OK();
 }
 
 Status
-GrpcClient::Cmd(std::string &result,
-                 const std::string& cmd) {
+GrpcClient::Cmd(std::string& result, const std::string& cmd) {
     ClientContext context;
     ::milvus::grpc::StringReply response;
     ::milvus::grpc::Command command;
@@ -240,7 +241,7 @@ GrpcClient::Cmd(std::string &result,
 }
 
 Status
-GrpcClient::PreloadTable(milvus::grpc::TableName &table_name) {
+GrpcClient::PreloadTable(milvus::grpc::TableName& table_name) {
     ClientContext context;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = stub_->PreloadTable(&context, table_name, &response);
@@ -258,7 +259,7 @@ GrpcClient::PreloadTable(milvus::grpc::TableName &table_name) {
 }
 
 Status
-GrpcClient::DeleteByRange(grpc::DeleteByRangeParam &delete_by_range_param) {
+GrpcClient::DeleteByRange(grpc::DeleteByRangeParam& delete_by_range_param) {
     ClientContext context;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = stub_->DeleteByRange(&context, delete_by_range_param, &response);
@@ -282,7 +283,7 @@ GrpcClient::Disconnect() {
 }
 
 Status
-GrpcClient::DescribeIndex(grpc::TableName &table_name, grpc::IndexParam &index_param) {
+GrpcClient::DescribeIndex(grpc::TableName& table_name, grpc::IndexParam& index_param) {
     ClientContext context;
     ::grpc::Status grpc_status = stub_->DescribeIndex(&context, table_name, &index_param);
 
@@ -290,16 +291,16 @@ GrpcClient::DescribeIndex(grpc::TableName &table_name, grpc::IndexParam &index_p
         std::cerr << "DescribeIndex rpc failed!" << std::endl;
         return Status(StatusCode::RPCFailed, grpc_status.error_message());
     }
-    if (index_param.mutable_table_name()->status().error_code() != grpc::SUCCESS) {
-        std::cerr << index_param.mutable_table_name()->status().reason() << std::endl;
-        return Status(StatusCode::ServerFailed, index_param.mutable_table_name()->status().reason());
+    if (index_param.status().error_code() != grpc::SUCCESS) {
+        std::cerr << index_param.status().reason() << std::endl;
+        return Status(StatusCode::ServerFailed, index_param.status().reason());
     }
 
     return Status::OK();
 }
 
 Status
-GrpcClient::DropIndex(grpc::TableName &table_name) {
+GrpcClient::DropIndex(grpc::TableName& table_name) {
     ClientContext context;
     ::milvus::grpc::Status response;
     ::grpc::Status grpc_status = stub_->DropIndex(&context, table_name, &response);
@@ -316,4 +317,4 @@ GrpcClient::DropIndex(grpc::TableName &table_name) {
     return Status::OK();
 }
 
-}
+}  // namespace milvus

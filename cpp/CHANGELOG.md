@@ -5,12 +5,55 @@ Please mark all change in change log and use the ticket from JIRA.
 # Milvus 0.5.0 (TODO)
 
 ## Bug
+- MS-568 - Fix gpuresource free error
+- MS-572 - Milvus crash when get SIGINT
+- MS-577 - Unittest Query randomly hung
+- MS-587 - Count get wrong result after adding vectors and index built immediately
+- MS-599 - search wrong result when table created with metric_type: IP
+- MS-601 - Docker logs error caused by get CPUTemperature error
+- MS-622 - Delete vectors should be failed if date range is invalid
+- MS-620 - Get table row counts display wrong error code
+- MS-637 - out of memory when load too many tasks
+- MS-640 - Cache object size calculate incorrect
+- MS-641 - Segment fault(signal 11) in PickToLoad
 
 ## Improvement
+- MS-552 - Add and change the easylogging library
+- MS-553 - Refine cache code
+- MS-555 - Remove old scheduler
+- MS-556 - Add Job Definition in Scheduler
+- MS-557 - Merge Log.h
+- MS-558 - Refine status code
+- MS-562 - Add JobMgr and TaskCreator in Scheduler
+- MS-566 - Refactor cmake
+- MS-574 - Milvus configuration refactor
+- MS-578 - Make sure milvus5.0 don't crack 0.3.1 data
+- MS-585 - Update namespace in scheduler
+- MS-606 - Speed up result reduce
+- MS-608 - Update TODO names
+- MS-609 - Update task construct function
+- MS-611 - Add resources validity check in ResourceMgr
+- MS-619 - Add optimizer class in scheduler
+- MS-614 - Preload table at startup
+- MS-626 - Refactor DataObj to support cache any type data
 
 ## New Feature
+- MS-627 - Integrate new index: IVFSQHybrid
+- MS-631 - IVFSQ8H Index support
+- MS-636 - Add optimizer in scheduler for FAISS_IVFSQ8H
 
 ## Task
+- MS-554 - Change license to Apache 2.0
+- MS-561 - Add contributing guidelines, code of conduct and README docs
+- MS-567 - Add NOTICE.md
+- MS-569 - Complete the NOTICE.md
+- MS-575 - Add Clang-format & Clang-tidy & Cpplint
+- MS-586 - Remove BUILD_FAISS_WITH_MKL option
+- MS-590 - Refine cmake code to support cpplint
+- MS-600 - Reconstruct unittest code
+- MS-602 - Remove zilliz namespace
+- MS-610 - Change error code base value from hex to decimal
+- MS-635 - Add compile option to support customized faiss
 
 # Milvus 0.4.0 (2019-09-12)
 
@@ -45,6 +88,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-510 - unittest out of memory and crashed
 - MS-507 - Dataset 10m-512, index type sq8，performance in-normal when set CPU_CACHE to 16 or 64
 - MS-543 - SearchTask fail without exception
+- MS-582 - grafana displays changes frequently
 
 ## Improvement
 - MS-327 - Clean code for milvus
@@ -129,6 +173,9 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-523 - Config file validation
 - MS-539 - Remove old task code
 - MS-546 - Add simple mode resource_config
+- MS-570 - Add prometheus docker-compose file
+- MS-576 - Scheduler refactor
+- MS-592 - Change showtables stream transport to unary
 
 ## New Feature
 - MS-343 - Implement ResourceMgr

@@ -1,22 +1,35 @@
-/*******************************************************************************
- * Copyright 上海赜睿信息科技有限公司(Zilliz) - All Rights Reserved
- * Unauthorized copying of this file, via any medium is strictly prohibited.
- * Proprietary and confidential.
- ******************************************************************************/
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 #pragma once
 
 #include "Task.h"
+#include "scheduler/Definition.h"
+#include "scheduler/job/SearchJob.h"
 
+#include <vector>
 
-namespace zilliz {
 namespace milvus {
-namespace engine {
+namespace scheduler {
 
-// TODO: rewrite
+// TODO(wxyu): rewrite
 class XSearchTask : public Task {
-public:
-    explicit
-    XSearchTask(TableFileSchemaPtr file);
+ public:
+    explicit XSearchTask(TableFileSchemaPtr file, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -24,24 +37,12 @@ public:
     void
     Execute() override;
 
-public:
-    static Status ClusterResult(const std::vector<long> &output_ids,
-                                const std::vector<float> &output_distence,
-                                uint64_t nq,
-                                uint64_t topk,
-                                SearchContext::ResultSet &result_set);
+ public:
+    static Status
+    TopkResult(const std::vector<int64_t>& input_ids, const std::vector<float>& input_distance, uint64_t input_k,
+               uint64_t nq, uint64_t topk, bool ascending, scheduler::ResultSet& result);
 
-    static Status MergeResult(SearchContext::Id2DistanceMap &distance_src,
-                              SearchContext::Id2DistanceMap &distance_target,
-                              uint64_t topk,
-                              bool ascending);
-
-    static Status TopkResult(SearchContext::ResultSet &result_src,
-                             uint64_t topk,
-                             bool ascending,
-                             SearchContext::ResultSet &result_target);
-
-public:
+ public:
     TableFileSchemaPtr file_;
 
     size_t index_id_ = 0;
@@ -52,6 +53,5 @@ public:
     static std::mutex merge_mutex_;
 };
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus
