@@ -31,11 +31,11 @@
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 
+#include <src/core/knowhere/knowhere/index/vector_index/IndexIVFSQHybrid.h>
 #include <src/scheduler/Utils.h>
 #include <stdexcept>
 #include <utility>
 #include <vector>
-#include <src/core/knowhere/knowhere/index/vector_index/IndexIVFSQHybrid.h>
 
 namespace milvus {
 namespace engine {
@@ -414,8 +414,8 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances,
-                            int64_t* labels, bool hybrid) const {
+ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+                            bool hybrid) const {
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");

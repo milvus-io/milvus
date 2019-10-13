@@ -15,10 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "cache/GpuCacheMgr.h"
-#include "scheduler/Utils.h"
 #include "scheduler/optimizer/LargeSQ8HPass.h"
+#include "cache/GpuCacheMgr.h"
 #include "scheduler/SchedInst.h"
+#include "scheduler/Utils.h"
 #include "scheduler/task/SearchTask.h"
 #include "scheduler/tasklabel/SpecResLabel.h"
 #include "utils/Log.h"
