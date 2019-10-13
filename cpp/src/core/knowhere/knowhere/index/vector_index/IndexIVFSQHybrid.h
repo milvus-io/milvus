@@ -19,6 +19,7 @@
 
 #include <faiss/index_io.h>
 #include <memory>
+#include <utility>
 
 #include "IndexGPUIVFSQ.h"
 #include "Quantizer.h"

@@ -105,8 +105,8 @@ class IVFHybridIndex : public IVFMixIndex {
 
     Status
     UnsetQuantizer() override;
-    std::pair<VecIndexPtr, knowhere::QuantizerPtr> CopyToGpuWithQuantizer(const int64_t& device_id,
-                                                                          const Config& cfg) override;
+    std::pair<VecIndexPtr, knowhere::QuantizerPtr>
+    CopyToGpuWithQuantizer(const int64_t& device_id, const Config& cfg) override;
 
     VecIndexPtr
     LoadData(const knowhere::QuantizerPtr& q, const Config& conf) override;

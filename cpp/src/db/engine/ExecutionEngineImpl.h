@@ -71,12 +71,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Merge(const std::string& location) override;
 
     Status
-    Search(int64_t n,
-           const float* data,
-           int64_t k,
-           int64_t nprobe,
-           float* distances,
-           int64_t* labels,
+    Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
            bool hybrid = false) const override;
 
     ExecutionEnginePtr
