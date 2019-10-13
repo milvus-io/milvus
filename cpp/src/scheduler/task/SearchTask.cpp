@@ -22,11 +22,11 @@
 #include "utils/Log.h"
 #include "utils/TimeRecorder.h"
 
+#include <src/scheduler/SchedInst.h>
 #include <algorithm>
 #include <string>
 #include <thread>
 #include <utility>
-#include <src/scheduler/SchedInst.h>
 
 namespace milvus {
 namespace scheduler {

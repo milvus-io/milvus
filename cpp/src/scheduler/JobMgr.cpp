@@ -19,10 +19,10 @@
 #include "SchedInst.h"
 #include "TaskCreator.h"
 #include "optimizer/Optimizer.h"
-#include "task/Task.h"
-#include "scheduler/tasklabel/SpecResLabel.h"
-#include "scheduler/optimizer/Optimizer.h"
 #include "scheduler/Algorithm.h"
+#include "scheduler/optimizer/Optimizer.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
+#include "task/Task.h"
 
 #include <utility>
 
@@ -62,9 +62,7 @@ void
 JobMgr::worker_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [this] {
-            return !queue_.empty();
-        });
+        cv_.wait(lock, [this] { return !queue_.empty(); });
         auto job = queue_.front();
         queue_.pop();
         lock.unlock();
@@ -77,7 +75,7 @@ JobMgr::worker_function() {
             OptimizerInst::GetInstance()->Run(task);
         }
 
-        for (auto& task: tasks) {
+        for (auto& task : tasks) {
             calculate_path(task);
         }
 

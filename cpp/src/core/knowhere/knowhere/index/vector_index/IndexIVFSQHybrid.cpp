@@ -17,6 +17,7 @@
 // under the License.
 
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
+#include <utility>
 #include "faiss/AutoTune.h"
 #include "faiss/gpu/GpuAutoTune.h"
 #include "faiss/gpu/GpuIndexIVF.h"
@@ -176,9 +177,9 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
             KNOWHERE_THROW_MSG("mode only support 2 in this func");
         }
     }
-//    if (quantizer_conf->gpu_id != gpu_id_) {
-//        KNOWHERE_THROW_MSG("quantizer and data must on the same gpu card");
-//    }
+    //    if (quantizer_conf->gpu_id != gpu_id_) {
+    //        KNOWHERE_THROW_MSG("quantizer and data must on the same gpu card");
+    //    }
     gpu_id_ = quantizer_conf->gpu_id;
 
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_)) {
@@ -208,7 +209,6 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
 std::pair<VectorIndexPtr, QuantizerPtr>
 IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
-
         ResScope rs(res, device_id, false);
         faiss::gpu::GpuClonerOptions option;
         option.allInGpu = true;
@@ -222,7 +222,7 @@ IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& c
 
         std::shared_ptr<faiss::Index> device_index;
         device_index.reset(gpu_index);
-                auto new_idx = std::make_shared<IVFSQHybrid>(device_index, device_id, res);
+        auto new_idx = std::make_shared<IVFSQHybrid>(device_index, device_id, res);
 
         auto q = std::make_shared<FaissIVFQuantizer>();
         q->quantizer = index_composition.quantizer;

@@ -19,6 +19,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "cache/DataObj.h"
 #include "knowhere/common/BinarySet.h"
