@@ -63,6 +63,9 @@ class IVFSQHybrid : public GPUIVFSQ {
     VectorIndexPtr
     LoadData(const knowhere::QuantizerPtr& q, const Config& conf);
 
+    std::pair<VectorIndexPtr, QuantizerPtr>
+    CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& config);
+
     IndexModelPtr
     Train(const DatasetPtr& dataset, const Config& config) override;
 
