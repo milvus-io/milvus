@@ -253,9 +253,9 @@ TEST_P(IVFTest, hybrid) {
         quantizer_conf->gpu_id = device_id;
         auto q = hybrid_2_idx->LoadQuantizer(quantizer_conf);
         quantizer_conf->mode = 2;
-        hybrid_2_idx->LoadData(q, quantizer_conf);
+        auto gpu_idx = hybrid_2_idx->LoadData(q, quantizer_conf);
 
-        auto result = hybrid_2_idx->Search(query_dataset, conf);
+        auto result = gpu_idx->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
         PrintResult(result, nq, k);
     }
