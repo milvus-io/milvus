@@ -324,7 +324,8 @@ if(DEFINED ENV{MILVUS_SQLITE_ORM_URL})
     set(SQLITE_ORM_SOURCE_URL "$ENV{MILVUS_SQLITE_ORM_URL}")
 else()
     set(SQLITE_ORM_SOURCE_URL
-            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
+            "http://192.168.1.105:6060/Test/sqlite-orm/-/archive/master/sqlite-orm-master.zip")
+#            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
 endif()
 set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
 
