@@ -222,10 +222,19 @@ PrometheusMetrics::CPUTemperature() {
 
     std::vector<float> CPU_temperatures = server::SystemInfo::GetInstance().CPUTemperature();
 
+    float avg_cpu_temp = 0;
     for (int i = 0; i < CPU_temperatures.size(); ++i) {
-        prometheus::Gauge& cpu_temp = CPU_temperature_.Add({{"CPU", std::to_string(i)}});
-        cpu_temp.Set(CPU_temperatures[i]);
+        avg_cpu_temp += CPU_temperatures[i];
     }
+    avg_cpu_temp /= CPU_temperatures.size();
+
+    prometheus::Gauge& cpu_temp = CPU_temperature_.Add({{"CPU", std::to_string(0)}});
+    cpu_temp.Set(avg_cpu_temp);
+
+//    for (int i = 0; i < CPU_temperatures.size(); ++i) {
+//        prometheus::Gauge& cpu_temp = CPU_temperature_.Add({{"CPU", std::to_string(i)}});
+//        cpu_temp.Set(CPU_temperatures[i]);
+//    }
 }
 
 void
