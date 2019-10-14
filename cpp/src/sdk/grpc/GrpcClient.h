@@ -16,6 +16,11 @@
 // under the License.
 
 #pragma once
+
+#include "MilvusApi.h"
+#include "grpc/gen-milvus/milvus.grpc.pb.h"
+//#include "grpc/gen-status/status.grpc.pb.h"
+
 #include <chrono>
 #include <iostream>
 #include <memory>
@@ -28,21 +33,13 @@
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
-#include "MilvusApi.h"
-
-#include "milvus.grpc.pb.h"
-//#include "status.grpc.pb.h"
-
-#include <memory>
 
 namespace milvus {
 class GrpcClient {
-public:
-    explicit
-    GrpcClient(std::shared_ptr<::grpc::Channel>& channel);
+ public:
+    explicit GrpcClient(std::shared_ptr<::grpc::Channel>& channel);
 
-    virtual
-    ~GrpcClient();
+    virtual ~GrpcClient();
 
     Status
     CreateTable(const grpc::TableSchema& table_schema);
@@ -57,44 +54,40 @@ public:
     CreateIndex(const grpc::IndexParam& index_param);
 
     void
-    Insert(grpc::VectorIds& vector_ids,
-                      const grpc::InsertParam& insert_param,
-                      Status& status);
+    Insert(grpc::VectorIds& vector_ids, const grpc::InsertParam& insert_param, Status& status);
 
     Status
-    Search(::milvus::grpc::TopKQueryResultList& topk_query_result_list,
-           const grpc::SearchParam &search_param);
+    Search(::milvus::grpc::TopKQueryResultList& topk_query_result_list, const grpc::SearchParam& search_param);
 
     Status
-    DescribeTable(grpc::TableSchema& grpc_schema,
-                        const std::string& table_name);
+    DescribeTable(grpc::TableSchema& grpc_schema, const std::string& table_name);
 
     int64_t
     CountTable(const std::string& table_name, Status& status);
 
     Status
-    ShowTables(milvus::grpc::TableNameList &table_name_list);
+    ShowTables(milvus::grpc::TableNameList& table_name_list);
 
     Status
-    Cmd(std::string &result, const std::string& cmd);
+    Cmd(std::string& result, const std::string& cmd);
 
     Status
-    DeleteByRange(grpc::DeleteByRangeParam &delete_by_range_param);
+    DeleteByRange(grpc::DeleteByRangeParam& delete_by_range_param);
 
     Status
-    PreloadTable(grpc::TableName &table_name);
+    PreloadTable(grpc::TableName& table_name);
 
     Status
-    DescribeIndex(grpc::TableName &table_name, grpc::IndexParam &index_param);
+    DescribeIndex(grpc::TableName& table_name, grpc::IndexParam& index_param);
 
     Status
-    DropIndex(grpc::TableName &table_name);
+    DropIndex(grpc::TableName& table_name);
 
     Status
     Disconnect();
 
-private:
+ private:
     std::unique_ptr<grpc::MilvusService::Stub> stub_;
 };
 
-}
+}  // namespace milvus

@@ -15,43 +15,40 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <thread>
+#include "server/Server.h"
+
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <csignal>
+#include <thread>
 //#include <numaif.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "Server.h"
-#include "server/grpc_impl/GrpcServer.h"
+#include "DBWrapper.h"
+#include "metrics/Metrics.h"
+#include "scheduler/SchedInst.h"
 #include "server/Config.h"
+#include "server/grpc_impl/GrpcServer.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
 #include "utils/SignalUtil.h"
 #include "utils/TimeRecorder.h"
-#include "metrics/Metrics.h"
-#include "scheduler/SchedInst.h"
 #include "wrapper/KnowhereResource.h"
-#include "DBWrapper.h"
 
-
-namespace zilliz {
 namespace milvus {
 namespace server {
 
-Server &
+Server&
 Server::GetInstance() {
     static Server server;
     return server;
 }
 
 void
-Server::Init(int64_t daemonized,
-             const std::string &pid_filename,
-             const std::string &config_filename,
-             const std::string &log_config_file) {
+Server::Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename,
+             const std::string& log_config_file) {
     daemonized_ = daemonized;
     pid_filename_ = pid_filename;
     config_filename_ = config_filename;
@@ -66,9 +63,9 @@ Server::Daemonize() {
 
     std::cout << "Milvus server run in daemonize mode";
 
-//    std::string log_path(GetLogDirFullPath());
-//    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
-//    SERVER_LOG_INFO << "Log will be exported to: " + log_path);
+    //    std::string log_path(GetLogDirFullPath());
+    //    log_path += "zdb_server.(INFO/WARNNING/ERROR/CRITICAL)";
+    //    SERVER_LOG_INFO << "Log will be exported to: " + log_path);
 
     pid_t pid = 0;
 
@@ -116,7 +113,7 @@ Server::Daemonize() {
     }
 
     // Close all open fd
-    for (long fd = sysconf(_SC_OPEN_MAX); fd > 0; fd--) {
+    for (int64_t fd = sysconf(_SC_OPEN_MAX); fd > 0; fd--) {
         close(fd);
     }
 
@@ -148,7 +145,7 @@ Server::Daemonize() {
 
 void
 Server::Start() {
-    if (daemonized_) {
+    if (daemonized_ != 0) {
         Daemonize();
     }
 
@@ -160,7 +157,7 @@ Server::Start() {
         }
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
-        Config &config = Config::GetInstance();
+        Config& config = Config::GetInstance();
         std::string time_zone;
         Status s = config.GetServerConfigTimeZone(time_zone);
         if (!s.ok()) {
@@ -172,9 +169,9 @@ Server::Start() {
             time_zone = "CUT";
         } else {
             int time_bias = std::stoi(time_zone.substr(3, std::string::npos));
-            if (time_bias == 0)
+            if (time_bias == 0) {
                 time_zone = "CUT";
-            else if (time_bias > 0) {
+            } else if (time_bias > 0) {
                 time_zone = "CUT" + std::to_string(-time_bias);
             } else {
                 time_zone = "CUT+" + std::to_string(-time_bias);
@@ -194,8 +191,7 @@ Server::Start() {
 
         StartService();
         std::cout << "Milvus server start successfully." << std::endl;
-
-    } catch (std::exception &ex) {
+    } catch (std::exception& ex) {
         std::cerr << "Milvus server encounter exception: " << ex.what();
     }
 }
@@ -232,7 +228,6 @@ Server::Stop() {
     std::cerr << "Milvus server is closed!" << std::endl;
 }
 
-
 ErrorCode
 Server::LoadConfig() {
     Config& config = Config::GetInstance();
@@ -266,6 +261,5 @@ Server::StopService() {
     engine::KnowhereResource::Finalize();
 }
 
-}
-}
-}
+}  // namespace server
+}  // namespace milvus

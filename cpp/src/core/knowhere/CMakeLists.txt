@@ -8,7 +8,6 @@ link_directories(${CUDA_TOOLKIT_ROOT_DIR}/lib64)
 include_directories(${CORE_SOURCE_DIR}/knowhere)
 include_directories(${CORE_SOURCE_DIR}/thirdparty)
 include_directories(${CORE_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
-include_directories(${CORE_SOURCE_DIR}/thirdparty/jsoncons-0.126.0/include)
 
 set(SPTAG_SOURCE_DIR ${CORE_SOURCE_DIR}/thirdparty/SPTAG)
 file(GLOB HDR_FILES
@@ -51,10 +50,12 @@ set(index_srcs
         knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
         knowhere/index/vector_index/IndexIVFSQ.cpp
         knowhere/index/vector_index/IndexGPUIVFSQ.cpp
+        knowhere/index/vector_index/IndexIVFSQHybrid.cpp
         knowhere/index/vector_index/IndexIVFPQ.cpp
         knowhere/index/vector_index/IndexGPUIVFPQ.cpp
         knowhere/index/vector_index/FaissBaseIndex.cpp
         knowhere/index/vector_index/helpers/FaissIO.cpp
+        knowhere/index/vector_index/helpers/IndexParameter.cpp
         )
 
 set(depend_libs
@@ -117,7 +118,6 @@ set(CORE_INCLUDE_DIRS
         ${CORE_SOURCE_DIR}/knowhere
         ${CORE_SOURCE_DIR}/thirdparty
         ${CORE_SOURCE_DIR}/thirdparty/SPTAG/AnnService
-        ${CORE_SOURCE_DIR}/thirdparty/jsoncons-0.126.0/include
         ${ARROW_INCLUDE_DIR}
         ${FAISS_INCLUDE_DIR}
         ${OPENBLAS_INCLUDE_DIR}
@@ -129,8 +129,6 @@ set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
 
 #INSTALL(DIRECTORY
 #        ${CORE_SOURCE_DIR}/include/knowhere
-#        ${CORE_SOURCE_DIR}/thirdparty/jsoncons-0.126.0/include/jsoncons
-#        ${CORE_SOURCE_DIR}/thirdparty/jsoncons-0.126.0/include/jsoncons_ext
 #        ${ARROW_INCLUDE_DIR}/arrow
 #        ${FAISS_PREFIX}/include/faiss
 #        ${OPENBLAS_INCLUDE_DIR}/

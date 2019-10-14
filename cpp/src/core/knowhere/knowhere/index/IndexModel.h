@@ -15,15 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <memory>
 #include "knowhere/common/BinarySet.h"
 
-namespace zilliz {
 namespace knowhere {
-
 
 class IndexModel {
  public:
@@ -31,12 +28,9 @@ class IndexModel {
     Serialize() = 0;
 
     virtual void
-    Load(const BinarySet &binary) = 0;
+    Load(const BinarySet& binary) = 0;
 };
 
 using IndexModelPtr = std::shared_ptr<IndexModel>;
 
-
-
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere

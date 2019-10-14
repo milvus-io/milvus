@@ -15,23 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "scheduler/Algorithm.h"
 
-#include "Algorithm.h"
+#include <limits>
+#include <unordered_map>
+#include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-constexpr uint64_t MAXINT = std::numeric_limits<uint32_t >::max();
+constexpr uint64_t MAXINT = std::numeric_limits<uint32_t>::max();
 
 uint64_t
-ShortestPath(const ResourcePtr &src,
-             const ResourcePtr &dest,
-             const ResourceMgrPtr &res_mgr,
-             std::vector<std::string> &path) {
-
-    std::vector<std::vector<std::string>> paths;
-
+ShortestPath(const ResourcePtr& src, const ResourcePtr& dest, const ResourceMgrPtr& res_mgr,
+             std::vector<std::string>& path) {
     uint64_t num_of_resources = res_mgr->GetAllResources().size();
     std::unordered_map<uint64_t, std::string> id_name_map;
     std::unordered_map<std::string, uint64_t> name_id_map;
@@ -40,7 +37,7 @@ ShortestPath(const ResourcePtr &src,
         name_id_map.insert(std::make_pair(res_mgr->GetAllResources().at(i)->name(), i));
     }
 
-    std::vector<std::vector<uint64_t> > dis_matrix;
+    std::vector<std::vector<uint64_t>> dis_matrix;
     dis_matrix.resize(num_of_resources);
     for (uint64_t i = 0; i < num_of_resources; ++i) {
         dis_matrix[i].resize(num_of_resources);
@@ -52,12 +49,11 @@ ShortestPath(const ResourcePtr &src,
 
     std::vector<bool> vis(num_of_resources, false);
     std::vector<uint64_t> dis(num_of_resources, MAXINT);
-    for (auto &res : res_mgr->GetAllResources()) {
-
+    for (auto& res : res_mgr->GetAllResources()) {
         auto cur_node = std::static_pointer_cast<Node>(res);
         auto cur_neighbours = cur_node->GetNeighbours();
 
-        for (auto &neighbour : cur_neighbours) {
+        for (auto& neighbour : cur_neighbours) {
             auto neighbour_res = std::static_pointer_cast<Resource>(neighbour.neighbour_node.lock());
             dis_matrix[name_id_map.at(res->name())][name_id_map.at(neighbour_res->name())] =
                 neighbour.connection.transport_cost();
@@ -105,6 +101,5 @@ ShortestPath(const ResourcePtr &src,
     return dis[name_id_map.at(dest->name())];
 }
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

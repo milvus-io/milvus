@@ -16,30 +16,27 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
+#include "ResourceMgr.h"
 #include "job/Job.h"
 #include "task/Task.h"
-#include "ResourceMgr.h"
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class JobMgr {
-public:
-    explicit
-    JobMgr(ResourceMgrPtr res_mgr);
+ public:
+    explicit JobMgr(ResourceMgrPtr res_mgr);
 
     void
     Start();
@@ -47,18 +44,21 @@ public:
     void
     Stop();
 
-public:
+ public:
     void
-    Put(const JobPtr &job);
+    Put(const JobPtr& job);
 
-private:
+ private:
     void
     worker_function();
 
-    std::vector<TaskPtr>
-    build_task(const JobPtr &job);
+    static std::vector<TaskPtr>
+    build_task(const JobPtr& job);
 
-private:
+    void
+    calculate_path(const TaskPtr& task);
+
+ private:
     bool running_ = false;
     std::queue<JobPtr> queue_;
 
@@ -72,6 +72,5 @@ private:
 
 using JobMgrPtr = std::shared_ptr<JobMgr>;
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

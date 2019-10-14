@@ -15,20 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "scheduler/task/DeleteTask.h"
 
-#include "DeleteTask.h"
+#include <utility>
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-XDeleteTask::XDeleteTask(const scheduler::DeleteJobPtr &delete_job)
-    : Task(TaskType::DeleteTask), delete_job_(delete_job) {}
+XDeleteTask::XDeleteTask(const scheduler::DeleteJobPtr& delete_job, TaskLabelPtr label)
+    : Task(TaskType::DeleteTask, std::move(label)), delete_job_(delete_job) {
+}
 
 void
 XDeleteTask::Load(LoadType type, uint8_t device_id) {
-
 }
 
 void
@@ -36,6 +35,5 @@ XDeleteTask::Execute() {
     delete_job_->ResourceDone();
 }
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

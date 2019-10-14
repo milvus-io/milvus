@@ -15,35 +15,34 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "DBFactory.h"
+#include "db/DBFactory.h"
 #include "DBImpl.h"
-#include "utils/Exception.h"
 #include "meta/MetaFactory.h"
-#include "meta/SqliteMetaImpl.h"
 #include "meta/MySQLMetaImpl.h"
+#include "meta/SqliteMetaImpl.h"
+#include "utils/Exception.h"
 
 #include <stdlib.h>
 #include <time.h>
-#include <sstream>
 #include <cstdlib>
+#include <sstream>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
-DBOptions DBFactory::BuildOption() {
+DBOptions
+DBFactory::BuildOption() {
     auto meta = MetaFactory::BuildOption();
-        DBOptions options;
+    DBOptions options;
     options.meta_ = meta;
     return options;
 }
 
-DBPtr DBFactory::Build(const DBOptions& options) {
+DBPtr
+DBFactory::Build(const DBOptions& options) {
     return std::make_shared<DBImpl>(options);
 }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

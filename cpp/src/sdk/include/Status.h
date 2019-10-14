@@ -15,20 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include <string>
 
 /** \brief Milvus SDK namespace
-*/
+ */
 namespace milvus {
 
 /**
-* @brief Status Code for SDK interface return
-*/
+ * @brief Status Code for SDK interface return
+ */
 enum class StatusCode {
     OK = 0,
+
     // system error section
     UnknownError = 1,
     NotSupported,
@@ -41,29 +41,33 @@ enum class StatusCode {
 };
 
 /**
-* @brief Status for SDK interface return
-*/
+ * @brief Status for SDK interface return
+ */
 class Status {
-public:
-    Status(StatusCode code, const std::string &msg);
+ public:
+    Status(StatusCode code, const std::string& msg);
     Status();
     ~Status();
 
-    Status(const Status &s);
+    Status(const Status& s);
 
-    Status &
-    operator=(const Status &s);
+    Status&
+    operator=(const Status& s);
 
-    Status(Status &&s);
+    Status(Status&& s);
 
-    Status &
-    operator=(Status &&s);
+    Status&
+    operator=(Status&& s);
 
     static Status
-    OK() { return Status(); }
+    OK() {
+        return Status();
+    }
 
     bool
-    ok() const { return state_ == nullptr || code() == StatusCode::OK; }
+    ok() const {
+        return state_ == nullptr || code() == StatusCode::OK;
+    }
 
     StatusCode
     code() const {
@@ -73,15 +77,15 @@ public:
     std::string
     message() const;
 
-private:
+ private:
     inline void
-    CopyFrom(const Status &s);
+    CopyFrom(const Status& s);
 
     inline void
-    MoveFrom(Status &s);
+    MoveFrom(Status& s);
 
-private:
-    const char *state_ = nullptr;
-}; // Status
+ private:
+    char* state_ = nullptr;
+};  // Status
 
-} //Milvus
+}  // namespace milvus

@@ -17,11 +17,9 @@
 # under the License.
 #-------------------------------------------------------------------------------
 
-
-aux_source_directory(interface interface_files)
-
 include_directories(include)
 
+aux_source_directory(interface interface_files)
 aux_source_directory(grpc grpc_client_files)
 
 add_library(milvus_sdk STATIC

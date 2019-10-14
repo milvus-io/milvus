@@ -15,21 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
-#include <vector>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "Array.h"
 #include "Buffer.h"
-#include "Tensor.h"
-#include "Schema.h"
 #include "Config.h"
+#include "Schema.h"
+#include "Tensor.h"
 #include "knowhere/adapter/ArrowAdapter.h"
 
-
-namespace zilliz {
 namespace knowhere {
 
 class Dataset;
@@ -40,34 +38,38 @@ class Dataset {
  public:
     Dataset() = default;
 
-    Dataset(std::vector<ArrayPtr> &&array, SchemaPtr array_schema,
-            std::vector<TensorPtr> &&tensor, SchemaPtr tensor_schema)
+    Dataset(std::vector<ArrayPtr>&& array, SchemaPtr array_schema, std::vector<TensorPtr>&& tensor,
+            SchemaPtr tensor_schema)
         : array_(std::move(array)),
           array_schema_(std::move(array_schema)),
           tensor_(std::move(tensor)),
-          tensor_schema_(std::move(tensor_schema)) {}
+          tensor_schema_(std::move(tensor_schema)) {
+    }
 
     Dataset(std::vector<ArrayPtr> array, SchemaPtr array_schema)
-        : array_(std::move(array)), array_schema_(std::move(array_schema)) {}
+        : array_(std::move(array)), array_schema_(std::move(array_schema)) {
+    }
 
     Dataset(std::vector<TensorPtr> tensor, SchemaPtr tensor_schema)
-        : tensor_(std::move(tensor)), tensor_schema_(std::move(tensor_schema)) {}
+        : tensor_(std::move(tensor)), tensor_schema_(std::move(tensor_schema)) {
+    }
 
-    Dataset(const Dataset &) = delete;
-    Dataset &operator=(const Dataset &) = delete;
+    Dataset(const Dataset&) = delete;
+    Dataset&
+    operator=(const Dataset&) = delete;
 
     DatasetPtr
     Clone() {
         auto dataset = std::make_shared<Dataset>();
 
         std::vector<ArrayPtr> clone_array;
-        for (auto &array : array_) {
+        for (auto& array : array_) {
             clone_array.emplace_back(CopyArray(array));
         }
         dataset->set_array(clone_array);
 
         std::vector<TensorPtr> clone_tensor;
-        for (auto &tensor : tensor_) {
+        for (auto& tensor : tensor_) {
             auto buffer = tensor->data();
             std::shared_ptr<Buffer> copy_buffer;
             // TODO: checkout copy success;
@@ -86,16 +88,20 @@ class Dataset {
     }
 
  public:
-    const std::vector<ArrayPtr> &
-    array() const { return array_; }
+    const std::vector<ArrayPtr>&
+    array() const {
+        return array_;
+    }
 
     void
     set_array(std::vector<ArrayPtr> array) {
         array_ = std::move(array);
     }
 
-    const std::vector<TensorPtr> &
-    tensor() const { return tensor_; }
+    const std::vector<TensorPtr>&
+    tensor() const {
+        return tensor_;
+    }
 
     void
     set_tensor(std::vector<TensorPtr> tensor) {
@@ -103,7 +109,9 @@ class Dataset {
     }
 
     SchemaConstPtr
-    array_schema() const { return array_schema_; }
+    array_schema() const {
+        return array_schema_;
+    }
 
     void
     set_array_schema(SchemaPtr array_schema) {
@@ -111,31 +119,31 @@ class Dataset {
     }
 
     SchemaConstPtr
-    tensor_schema() const { return tensor_schema_; }
+    tensor_schema() const {
+        return tensor_schema_;
+    }
 
     void
     set_tensor_schema(SchemaPtr tensor_schema) {
         tensor_schema_ = std::move(tensor_schema);
     }
 
-    //const Config &
-    //meta() const { return meta_; }
+    // const Config &
+    // meta() const { return meta_; }
 
-    //void
-    //set_meta(Config meta) {
+    // void
+    // set_meta(Config meta) {
     //    meta_ = std::move(meta);
     //}
 
  private:
-    SchemaPtr array_schema_;
-    SchemaPtr tensor_schema_;
     std::vector<ArrayPtr> array_;
+    SchemaPtr array_schema_;
     std::vector<TensorPtr> tensor_;
-    //Config meta_;
+    SchemaPtr tensor_schema_;
+    // Config meta_;
 };
 
 using DatasetPtr = std::shared_ptr<Dataset>;
 
-
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere

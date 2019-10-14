@@ -15,13 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "StringHelpFunctions.h"
+#include "utils/StringHelpFunctions.h"
 
-namespace zilliz {
+#include <string>
+
 namespace milvus {
 namespace server {
 
-void StringHelpFunctions::TrimStringBlank(std::string &string) {
+void
+StringHelpFunctions::TrimStringBlank(std::string& string) {
     if (!string.empty()) {
         static std::string s_format(" \n\r\t");
         string.erase(0, string.find_first_not_of(s_format));
@@ -29,17 +31,18 @@ void StringHelpFunctions::TrimStringBlank(std::string &string) {
     }
 }
 
-void StringHelpFunctions::TrimStringQuote(std::string &string, const std::string &qoute) {
+void
+StringHelpFunctions::TrimStringQuote(std::string& string, const std::string& qoute) {
     if (!string.empty()) {
         string.erase(0, string.find_first_not_of(qoute));
         string.erase(string.find_last_not_of(qoute) + 1);
     }
 }
 
-Status StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
-                                                   const std::string &delimeter,
-                                                   std::vector<std::string> &result) {
-    if(str.empty()) {
+Status
+StringHelpFunctions::SplitStringByDelimeter(const std::string& str, const std::string& delimeter,
+                                            std::vector<std::string>& result) {
+    if (str.empty()) {
         return Status::OK();
     }
 
@@ -58,10 +61,9 @@ Status StringHelpFunctions::SplitStringByDelimeter(const std::string &str,
     return Status::OK();
 }
 
-Status StringHelpFunctions::SplitStringByQuote(const std::string &str,
-                                               const std::string &delimeter,
-                                               const std::string &quote,
-                                               std::vector<std::string> &result) {
+Status
+StringHelpFunctions::SplitStringByQuote(const std::string& str, const std::string& delimeter, const std::string& quote,
+                                        std::vector<std::string>& result) {
     if (quote.empty()) {
         return SplitStringByDelimeter(str, delimeter, result);
     }
@@ -120,6 +122,5 @@ Status StringHelpFunctions::SplitStringByQuote(const std::string &str,
     return Status::OK();
 }
 
-}
-}
-}
+}  // namespace server
+}  // namespace milvus

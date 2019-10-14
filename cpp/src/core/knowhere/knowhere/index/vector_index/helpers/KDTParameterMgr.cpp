@@ -15,16 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <mutex>
 
-#include "KDTParameterMgr.h"
+#include "knowhere/index/vector_index/helpers/KDTParameterMgr.h"
 
-
-namespace zilliz {
 namespace knowhere {
 
-const std::vector<KDTParameter> &
+const std::vector<KDTParameter>&
 KDTParameterMgr::GetKDTParameters() {
     return kdt_parameters_;
 }
@@ -35,7 +32,7 @@ KDTParameterMgr::KDTParameterMgr() {
         {"NumTopDimensionKDTSplit", "5"},
         {"NumSamplesKDTSplitConsideration", "100"},
 
-        {"TPTNumber", "32"},
+        {"TPTNumber", "1"},
         {"TPTLeafSize", "2000"},
         {"NumTopDimensionTPTSplit", "5"},
 
@@ -55,5 +52,4 @@ KDTParameterMgr::KDTParameterMgr() {
     };
 }
 
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere

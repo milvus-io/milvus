@@ -19,34 +19,31 @@
 
 #include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 enum class TaskLabelType {
-    DEFAULT, // means can be executed in any resource
-    SPECIFIED_RESOURCE, // means must executing in special resource
-    BROADCAST, // means all enable-executor resource must execute task
+    DEFAULT,             // means can be executed in any resource
+    SPECIFIED_RESOURCE,  // means must executing in special resource
+    BROADCAST,           // means all enable-executor resource must execute task
 };
 
 class TaskLabel {
-public:
+ public:
     inline TaskLabelType
     Type() const {
         return type_;
     }
 
-protected:
-    explicit
-    TaskLabel(TaskLabelType type) : type_(type) {}
+ protected:
+    explicit TaskLabel(TaskLabelType type) : type_(type) {
+    }
 
-private:
+ private:
     TaskLabelType type_;
 };
 
 using TaskLabelPtr = std::shared_ptr<TaskLabel>;
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus

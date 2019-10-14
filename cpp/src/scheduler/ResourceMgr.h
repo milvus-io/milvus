@@ -17,26 +17,25 @@
 
 #pragma once
 
-#include <string>
-#include <vector>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <queue>
-#include <condition_variable>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "resource/Resource.h"
 #include "utils/Log.h"
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class ResourceMgr {
-public:
+ public:
     ResourceMgr() = default;
 
-public:
+ public:
     /******** Management Interface ********/
     void
     Start();
@@ -45,10 +44,10 @@ public:
     Stop();
 
     ResourceWPtr
-    Add(ResourcePtr &&resource);
+    Add(ResourcePtr&& resource);
 
     bool
-    Connect(const std::string &res1, const std::string &res2, Connection &connection);
+    Connect(const std::string& name1, const std::string& name2, Connection& connection);
 
     void
     Clear();
@@ -58,14 +57,24 @@ public:
         subscriber_ = std::move(subscriber);
     }
 
-public:
+ public:
     /******** Management Interface ********/
-    inline std::vector<ResourceWPtr> &
+    inline std::vector<ResourceWPtr>&
     GetDiskResources() {
         return disk_resources_;
     }
 
-    // TODO: why return shared pointer
+    inline std::vector<ResourceWPtr>&
+    GetCpuResources() {
+        return cpu_resources_;
+    }
+
+    inline std::vector<ResourceWPtr>&
+    GetGpuResources() {
+        return gpu_resources_;
+    }
+
+    // TODO(wxyu): why return shared pointer
     inline std::vector<ResourcePtr>
     GetAllResources() {
         return resources_;
@@ -78,7 +87,7 @@ public:
     GetResource(ResourceType type, uint64_t device_id);
 
     ResourcePtr
-    GetResource(const std::string &name);
+    GetResource(const std::string& name);
 
     uint64_t
     GetNumOfResource() const;
@@ -89,10 +98,10 @@ public:
     uint64_t
     GetNumGpuResource() const;
 
-public:
-    // TODO: add stats interface(low)
+ public:
+    // TODO(wxyu): add stats interface(low)
 
-public:
+ public:
     /******** Utility Functions ********/
     std::string
     Dump();
@@ -100,17 +109,22 @@ public:
     std::string
     DumpTaskTables();
 
-private:
+ private:
+    bool
+    check_resource_valid();
+
     void
-    post_event(const EventPtr &event);
+    post_event(const EventPtr& event);
 
     void
     event_process();
 
-private:
+ private:
     bool running_ = false;
 
     std::vector<ResourceWPtr> disk_resources_;
+    std::vector<ResourceWPtr> cpu_resources_;
+    std::vector<ResourceWPtr> gpu_resources_;
     std::vector<ResourcePtr> resources_;
     mutable std::mutex resources_mutex_;
 
@@ -120,13 +134,10 @@ private:
     std::condition_variable event_cv_;
 
     std::thread worker_thread_;
-
 };
 
 using ResourceMgrPtr = std::shared_ptr<ResourceMgr>;
 using ResourceMgrWPtr = std::weak_ptr<ResourceMgr>;
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus

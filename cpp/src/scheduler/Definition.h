@@ -15,23 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
-#include "db/meta/MetaTypes.h"
 #include "db/engine/EngineFactory.h"
 #include "db/engine/ExecutionEngine.h"
+#include "db/meta/MetaTypes.h"
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -43,6 +41,5 @@ using EngineFactory = engine::EngineFactory;
 using EngineType = engine::EngineType;
 using MetricType = engine::MetricType;
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus
