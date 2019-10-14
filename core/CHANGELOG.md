@@ -20,6 +20,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-647 - [monitor] grafana display average cpu-temp
 - MS-644 - Search crashed with index-type: flat
 - MS-624 - Search vectors failed if time ranges long enough
+- MS-652 - IVFSQH quantization double free
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
