@@ -21,12 +21,17 @@ function build_image() {
 case "$1" in
 
 all)
+    [[ -z $MISHARDS_REGISTRY ]] && {
+        echo -e "${YELLOW}Error: Please set docker registry first:${ENDC}\n\t${BOLD}export MISHARDS_REGISTRY=xxxx\n${ENDC}"
+        exit 1
+    }
+
     version=""
     [[ ! -z $2 ]] && version=":${2}"
-    build_image "Dockerfile" "registry.zilliz.com/milvus/mishards${version}" "registry.zilliz.com/milvus/mishards"
+    build_image "Dockerfile" "${MISHARDS_REGISTRY}${version}" "${MISHARDS_REGISTRY}"
     ;;
 *)
     echo "Usage: [option...] {base | apps}"
-    echo "all,      Usage: build.sh all [tagname|] => registry.zilliz.com/milvus/mishards:\${tagname}"
+    echo "all,      Usage: build.sh all [tagname|] => {docker_registry}:\${tagname}"
     ;;
 esac
