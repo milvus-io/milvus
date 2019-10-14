@@ -1,12 +1,15 @@
 import sys
 import os
 
-from dotenv import load_dotenv
-load_dotenv('./mishards/.env.example')
-
 from environs import Env
 env = Env()
-env.read_env(override=True)
+
+FROM_EXAMPLE = env.bool('FROM_EXAMPLE', False)
+if FROM_EXAMPLE:
+    from dotenv import load_dotenv
+    load_dotenv('./mishards/.env.example')
+else:
+    env.read_env()
 
 DEBUG = env.bool('DEBUG', False)
 
@@ -34,13 +37,11 @@ if SD_PROVIDER == 'Kubernetes':
         in_cluster=env.bool('SD_IN_CLUSTER', False),
         poll_interval=env.int('SD_POLL_INTERVAL', 5),
         pod_patt=env.str('SD_ROSERVER_POD_PATT', ''),
-        label_selector=env.str('SD_LABEL_SELECTOR', '')
-    )
+        label_selector=env.str('SD_LABEL_SELECTOR', ''))
 elif SD_PROVIDER == 'Static':
     from sd.static_provider import StaticProviderSettings
     SD_PROVIDER_SETTINGS = StaticProviderSettings(
-        hosts=env.list('SD_STATIC_HOSTS', [])
-    )
+        hosts=env.list('SD_STATIC_HOSTS', []))
 
 TESTING = env.bool('TESTING', False)
 TESTING_WOSERVER = env.str('TESTING_WOSERVER', 'tcp://127.0.0.1:19530')
@@ -72,6 +73,7 @@ class DefaultConfig:
 
 TESTING = env.bool('TESTING', False)
 if TESTING:
+
     class TestingConfig(DefaultConfig):
         SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_TEST_URI')
         SQL_ECHO = env.bool('SQL_TEST_ECHO', False)

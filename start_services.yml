@@ -30,6 +30,7 @@ services:
             # - /tmp/mishards_env:/source/mishards/.env
         command: ["python", "mishards/main.py"]
         environment:
+            FROM_EXAMPLE: 'true'
             DEBUG: 'true'
             SERVER_PORT: 19531
             WOSERVER: tcp://milvus:19530
