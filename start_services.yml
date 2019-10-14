@@ -3,7 +3,7 @@ services:
     milvus:
         runtime: nvidia
         restart: always
-        image: registry.zilliz.com/milvus/engine:branch-0.4.0-release-c58ca6
+        image: registry.zilliz.com/milvus/engine:branch-0.5.0-release-4316de
         # ports:
         #     - "0.0.0.0:19530:19530"
         volumes:
@@ -21,13 +21,13 @@ services:
 
     mishards:
         restart: always
-        image: registry.zilliz.com/milvus/mishards:v0.0.2
+        image: registry.zilliz.com/milvus/mishards:v0.0.3
         ports:
             - "0.0.0.0:19530:19531"
             - "0.0.0.0:19532:19532"
         volumes:
             - /tmp/milvus/db:/tmp/milvus/db
-            - /tmp/mishards_env:/source/mishards/.env
+            # - /tmp/mishards_env:/source/mishards/.env
         command: ["python", "mishards/main.py"]
         environment:
             DEBUG: 'true'
