@@ -81,7 +81,7 @@ class Meta {
     UpdateTableFiles(TableFilesSchema& files) = 0;
 
     virtual Status
-    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& partition,
+    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
                   DatePartionedTableFilesSchema& files) = 0;
 
     virtual Status

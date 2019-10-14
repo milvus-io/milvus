@@ -9,14 +9,17 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-572 - Milvus crash when get SIGINT
 - MS-577 - Unittest Query randomly hung
 - MS-587 - Count get wrong result after adding vectors and index built immediately
-- MS-599 - search wrong result when table created with metric_type: IP
+- MS-599 - Search wrong result when table created with metric_type: IP
 - MS-601 - Docker logs error caused by get CPUTemperature error
 - MS-622 - Delete vectors should be failed if date range is invalid
 - MS-620 - Get table row counts display wrong error code
-- MS-637 - out of memory when load too many tasks
+- MS-637 - Out of memory when load too many tasks
 - MS-640 - Cache object size calculate incorrect
 - MS-641 - Segment fault(signal 11) in PickToLoad
 - MS-639 - SQ8H index created failed and server hang
+- MS-647 - [monitor] grafana display average cpu-temp
+- MS-644 - Search crashed with index-type: flat
+- MS-624 - Search vectors failed if time ranges long enough
 - MS-652 - IVFSQH quantization double free
 
 ## Improvement
