@@ -751,7 +751,7 @@ SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                 auto match_date = in(&TableFileSchema::date_, batch_dates);
                 auto filter = where(match_tableid and match_date and match_type);
                 auto batch_selected = ConnectorPtr->select(select_columns, filter);
-                for (auto &file : selected) {
+                for (auto &file : batch_selected) {
                     selected.push_back(file);
                 }
             }
@@ -765,7 +765,7 @@ SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                 auto match_date = in(&TableFileSchema::date_, batch_dates);
                 auto filter = where(match_tableid and match_fileid and match_date and match_type);
                 auto batch_selected = ConnectorPtr->select(select_columns, filter);
-                for (auto &file : selected) {
+                for (auto &file : batch_selected) {
                     selected.push_back(file);
                 }
             }
