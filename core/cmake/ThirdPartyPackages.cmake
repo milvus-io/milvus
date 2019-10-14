@@ -158,6 +158,10 @@ if(USE_JFROG_CACHE STREQUAL "ON")
     endif()
 
     set(THIRDPARTY_PACKAGE_CACHE "${THIRDPARTY_DIR}/cache")
+    if(NOT EXISTS ${THIRDPARTY_PACKAGE_CACHE})
+        message(STATUS "Will create cached directory: ${THIRDPARTY_PACKAGE_CACHE}")
+        file(MAKE_DIRECTORY ${THIRDPARTY_PACKAGE_CACHE})
+    endif()
 endif()
 
 macro(resolve_dependency DEPENDENCY_NAME)
@@ -324,8 +328,8 @@ if(DEFINED ENV{MILVUS_SQLITE_ORM_URL})
     set(SQLITE_ORM_SOURCE_URL "$ENV{MILVUS_SQLITE_ORM_URL}")
 else()
     set(SQLITE_ORM_SOURCE_URL
-            "http://192.168.1.105:6060/Test/sqlite_orm/-/archive/master/sqlite_orm-master.zip")
-#            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
+#            "http://192.168.1.105:6060/Test/sqlite_orm/-/archive/master/sqlite_orm-master.zip")
+            "https://github.com/fnc12/sqlite_orm/archive/${SQLITE_ORM_VERSION}.zip")
 endif()
 set(SQLITE_ORM_MD5 "ba9a405a8a1421c093aa8ce988ff8598")
 
@@ -370,9 +374,9 @@ if(DEFINED ENV{MILVUS_GRPC_URL})
     set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
 else()
     set(GRPC_SOURCE_URL
-            "http://git.zilliz.tech/kun.yu/grpc/-/archive/master/grpc-master.tar.gz")
+            "https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip")
 endif()
-set(GRPC_MD5 "7ec59ad54c85a12dcbbfede09bf413a9")
+set(GRPC_MD5 "0362ba219f59432c530070b5f5c3df73")
 
 
 # ----------------------------------------------------------------------

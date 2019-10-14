@@ -1,5 +1,5 @@
 container('milvus-build-env') {
-    timeout(time: 40, unit: 'MINUTES') {
+    timeout(time: 120, unit: 'MINUTES') {
         gitlabCommitStatus(name: 'Build Engine') {
             dir ("milvus_engine") {
                 try {

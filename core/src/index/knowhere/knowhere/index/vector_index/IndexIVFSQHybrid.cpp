@@ -27,6 +27,7 @@
 namespace knowhere {
 
 #ifdef CUSTOMIZATION
+
 IndexModelPtr
 IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
@@ -79,8 +80,24 @@ IVFSQHybrid::CopyGpuToCpu(const Config& config) {
 
 VectorIndexPtr
 IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
-    auto p = CopyCpuToGpuWithQuantizer(device_id, config);
-    return p.first;
+    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
+        ResScope rs(res, device_id, false);
+        faiss::gpu::GpuClonerOptions option;
+        option.allInGpu = true;
+
+        faiss::IndexComposition index_composition;
+        index_composition.index = index_.get();
+        index_composition.quantizer = nullptr;
+        index_composition.mode = 0;  // copy all
+
+        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, &index_composition, &option);
+
+        std::shared_ptr<faiss::Index> device_index = std::shared_ptr<faiss::Index>(gpu_index);
+        auto new_idx = std::make_shared<IVFSQHybrid>(device_index, device_id, res);
+        return new_idx;
+    } else {
+        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
+    }
 }
 
 void
