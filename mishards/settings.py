@@ -1,10 +1,12 @@
 import sys
 import os
 
-from environs import Env
+from dotenv import load_dotenv
+load_dotenv('./mishards/.env.example')
 
+from environs import Env
 env = Env()
-env.read_env()
+env.read_env(override=True)
 
 DEBUG = env.bool('DEBUG', False)
 
