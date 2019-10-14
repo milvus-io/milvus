@@ -370,9 +370,9 @@ if(DEFINED ENV{MILVUS_GRPC_URL})
     set(GRPC_SOURCE_URL "$ENV{MILVUS_GRPC_URL}")
 else()
     set(GRPC_SOURCE_URL
-            "https://github.com/youny626/grpc-milvus/archive/master.zip")
+            "https://github.com/youny626/grpc-milvus/archive/${GRPC_VERSION}.zip")
 endif()
-set(GRPC_MD5 "7ec59ad54c85a12dcbbfede09bf413a9")
+set(GRPC_MD5 "fdd2656424c0e0e046b21354513fc70f")
 
 
 # ----------------------------------------------------------------------
