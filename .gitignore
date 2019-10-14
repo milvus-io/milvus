@@ -1,3 +1,5 @@
 .env
+.coverage
+cov_html/
 
 __pycache__/

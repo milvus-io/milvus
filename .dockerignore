@@ -1,5 +1,7 @@
 .git
 .gitignore
 .env
+.coverage
+cov_html/
 
 mishards/.env
