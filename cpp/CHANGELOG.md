@@ -17,6 +17,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-640 - Cache object size calculate incorrect
 - MS-641 - Segment fault(signal 11) in PickToLoad
 - MS-639 - SQ8H index created failed and server hang
+- MS-647 - [monitor] grafana display average cpu-temp
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
