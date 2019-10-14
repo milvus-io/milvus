@@ -158,6 +158,10 @@ if(USE_JFROG_CACHE STREQUAL "ON")
     endif()
 
     set(THIRDPARTY_PACKAGE_CACHE "${THIRDPARTY_DIR}/cache")
+    if(NOT EXISTS ${THIRDPARTY_PACKAGE_CACHE})
+        message(STATUS "Will create cached directory: ${THIRDPARTY_PACKAGE_CACHE}")
+        file(MAKE_DIRECTORY ${THIRDPARTY_PACKAGE_CACHE})
+    endif()
 endif()
 
 macro(resolve_dependency DEPENDENCY_NAME)
