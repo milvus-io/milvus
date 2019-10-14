@@ -315,10 +315,10 @@ XSearchTask::MergeTopkArray(std::vector<int64_t>& tar_ids, std::vector<float>& t
         return;
     }
 
-    std::vector<int64_t> id_buf(nq * topk, -1);
-    std::vector<float> dist_buf(nq * topk, 0.0);
-
     uint64_t output_k = std::min(topk, tar_input_k + src_input_k);
+    std::vector<int64_t> id_buf(nq * output_k, -1);
+    std::vector<float> dist_buf(nq * output_k, 0.0);
+
     uint64_t buf_k, src_k, tar_k;
     uint64_t src_idx, tar_idx, buf_idx;
     uint64_t src_input_k_multi_i, tar_input_k_multi_i, buf_k_multi_i;
@@ -349,6 +349,7 @@ XSearchTask::MergeTopkArray(std::vector<int64_t>& tar_ids, std::vector<float>& t
             if (src_k < src_input_k) {
                 while (buf_k < output_k && src_k < src_input_k) {
                     src_idx = src_input_k_multi_i + src_k;
+                    buf_idx = buf_k_multi_i + buf_k;
                     id_buf[buf_idx] = src_ids[src_idx];
                     dist_buf[buf_idx] = src_distance[src_idx];
                     src_k++;
@@ -356,6 +357,8 @@ XSearchTask::MergeTopkArray(std::vector<int64_t>& tar_ids, std::vector<float>& t
                 }
             } else {
                 while (buf_k < output_k && tar_k < tar_input_k) {
+                    tar_idx = tar_input_k_multi_i + tar_k;
+                    buf_idx = buf_k_multi_i + buf_k;
                     id_buf[buf_idx] = tar_ids[tar_idx];
                     dist_buf[buf_idx] = tar_distance[tar_idx];
                     tar_k++;
