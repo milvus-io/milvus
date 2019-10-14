@@ -10,6 +10,7 @@ from utils import singleton
 
 logger = logging.getLogger(__name__)
 
+
 class Connection:
     def __init__(self, name, uri, max_retry=1, error_handlers=None, **kwargs):
         self.name = name
@@ -55,7 +56,7 @@ class Connection:
 
         if not self.can_retry and not self.connected:
             raise exceptions.ConnectionConnectError(message='Max retry {} reached!'.format(self.max_retry,
-                metadata=metadata))
+                                                                                           metadata=metadata))
 
         self.retried = 0
 
@@ -71,6 +72,7 @@ class Connection:
                 else:
                     raise e
         return inner
+
 
 @singleton
 class ConnectionMgr:
@@ -90,10 +92,10 @@ class ConnectionMgr:
                 if not throw:
                     return None
                 raise exceptions.ConnectionNotFoundError(message='Connection {} not found'.format(name),
-                        metadata=metadata)
+                                                         metadata=metadata)
             this_conn = Connection(name=name, uri=url, max_retry=settings.MAX_RETRY)
             threaded = {
-                    threading.get_ident() : this_conn
+                threading.get_ident(): this_conn
             }
             self.conns[name] = threaded
             return this_conn
@@ -106,7 +108,7 @@ class ConnectionMgr:
                 if not throw:
                     return None
                 raise exceptions.ConnectionNotFoundError('Connection {} not found'.format(name),
-                        metadata=metadata)
+                                                         metadata=metadata)
             this_conn = Connection(name=name, uri=url, max_retry=settings.MAX_RETRY)
             c[tid] = this_conn
             return this_conn

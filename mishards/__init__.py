@@ -1,4 +1,4 @@
-import  logging
+import logging
 from mishards import settings
 logger = logging.getLogger()
 
@@ -7,6 +7,7 @@ db = DB()
 
 from mishards.server import Server
 grpc_server = Server()
+
 
 def create_app(testing_config=None):
     config = testing_config if testing_config else settings.DefaultConfig
@@ -24,7 +25,7 @@ def create_app(testing_config=None):
     from tracing.factory import TracerFactory
     from mishards.grpc_utils import GrpcSpanDecorator
     tracer = TracerFactory.new_tracer(settings.TRACING_TYPE, settings.TracingConfig,
-        span_decorator=GrpcSpanDecorator())
+                                      span_decorator=GrpcSpanDecorator())
 
     grpc_server.init_app(conn_mgr=connect_mgr, tracer=tracer, discover=discover)
 

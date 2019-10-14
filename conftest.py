@@ -4,6 +4,7 @@ from mishards import settings, db, create_app
 
 logger = logging.getLogger(__name__)
 
+
 @pytest.fixture
 def app(request):
     app = create_app(settings.TestingConfig)

@@ -14,8 +14,10 @@ class LocalSession(SessionBase):
         bind = options.pop('bind', None) or db.engine
         SessionBase.__init__(self, autocommit=autocommit, autoflush=autoflush, bind=bind, **options)
 
+
 class DB:
     Model = declarative_base()
+
     def __init__(self, uri=None, echo=False):
         self.echo = echo
         uri and self.init_db(uri, echo)
@@ -27,9 +29,9 @@ class DB:
             self.engine = create_engine(url)
         else:
             self.engine = create_engine(uri, pool_size=100, pool_recycle=5, pool_timeout=30,
-                pool_pre_ping=True,
-                echo=echo,
-                max_overflow=0)
+                                        pool_pre_ping=True,
+                                        echo=echo,
+                                        max_overflow=0)
         self.uri = uri
         self.url = url
 

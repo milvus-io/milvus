@@ -1,5 +1,6 @@
 from functools import wraps
 
+
 def singleton(cls):
     instances = {}
     @wraps(cls)

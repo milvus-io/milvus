@@ -9,8 +9,8 @@ else:
     import md5
     md5_constructor = md5.new
 
-class HashRing(object):
 
+class HashRing(object):
     def __init__(self, nodes=None, weights=None):
         """`nodes` is a list of objects that have a proper __str__ representation.
         `weights` is dictionary that sets weights to the nodes.  The default
@@ -40,13 +40,13 @@ class HashRing(object):
             if node in self.weights:
                 weight = self.weights.get(node)
 
-            factor = math.floor((40*len(self.nodes)*weight) / total_weight);
+            factor = math.floor((40 * len(self.nodes) * weight) / total_weight)
 
             for j in range(0, int(factor)):
-                b_key = self._hash_digest( '%s-%s' % (node, j) )
+                b_key = self._hash_digest('%s-%s' % (node, j))
 
                 for i in range(0, 3):
-                    key = self._hash_val(b_key, lambda x: x+i*4)
+                    key = self._hash_val(b_key, lambda x: x + i * 4)
                     self.ring[key] = node
                     self._sorted_keys.append(key)
 
@@ -60,7 +60,7 @@ class HashRing(object):
         pos = self.get_node_pos(string_key)
         if pos is None:
             return None
-        return self.ring[ self._sorted_keys[pos] ]
+        return self.ring[self._sorted_keys[pos]]
 
     def get_node_pos(self, string_key):
         """Given a string key a corresponding node in the hash ring is returned
@@ -94,6 +94,7 @@ class HashRing(object):
             yield None, None
 
         returned_values = set()
+
         def distinct_filter(value):
             if str(value) not in returned_values:
                 returned_values.add(str(value))
@@ -121,10 +122,8 @@ class HashRing(object):
         return self._hash_val(b_key, lambda x: x)
 
     def _hash_val(self, b_key, entry_fn):
-        return (( b_key[entry_fn(3)] << 24)
-                |(b_key[entry_fn(2)] << 16)
-                |(b_key[entry_fn(1)] << 8)
-                | b_key[entry_fn(0)] )
+        return (b_key[entry_fn(3)] << 24) | (b_key[entry_fn(2)] << 16) | (
+            b_key[entry_fn(1)] << 8) | b_key[entry_fn(0)]
 
     def _hash_digest(self, key):
         m = md5_constructor()
@@ -132,12 +131,13 @@ class HashRing(object):
         m.update(key)
         return m.digest()
 
+
 if __name__ == '__main__':
     from collections import defaultdict
-    servers = ['192.168.0.246:11212',
-            '192.168.0.247:11212',
-            '192.168.0.248:11212',
-            '192.168.0.249:11212']
+    servers = [
+        '192.168.0.246:11212', '192.168.0.247:11212', '192.168.0.248:11212',
+        '192.168.0.249:11212'
+    ]
 
     ring = HashRing(servers)
     keys = ['{}'.format(i) for i in range(100)]
@@ -146,5 +146,5 @@ if __name__ == '__main__':
         server = ring.get_node(k)
         mapped[server].append(k)
 
-    for k,v in mapped.items():
+    for k, v in mapped.items():
         print(k, v)

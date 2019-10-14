@@ -6,6 +6,7 @@ from mishards import exceptions
 
 logger = logging.getLogger(__name__)
 
+
 @pytest.mark.usefixtures('app')
 class TestConnection:
     def test_manager(self):
@@ -30,8 +31,10 @@ class TestConnection:
         class Conn:
             def __init__(self, state):
                 self.state = state
+
             def connect(self, uri):
                 return self.state
+
             def connected(self):
                 return self.state
         FAIL_CONN = Conn(False)
@@ -48,6 +51,7 @@ class TestConnection:
         class Func():
             def __init__(self):
                 self.executed = False
+
             def __call__(self):
                 self.executed = True
 
@@ -55,8 +59,8 @@ class TestConnection:
 
         RetryObj = Retry()
         c = Connection('client', uri='',
-                max_retry=max_retry,
-                on_retry_func=RetryObj)
+                       max_retry=max_retry,
+                       on_retry_func=RetryObj)
         c.conn = FAIL_CONN
         ff = Func()
         this_connect = c.connect(func=ff)

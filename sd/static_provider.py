@@ -1,4 +1,5 @@
-import os, sys
+import os
+import sys
 if __name__ == '__main__':
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -6,14 +7,17 @@ import socket
 from utils import singleton
 from sd import ProviderManager
 
+
 class StaticProviderSettings:
     def __init__(self, hosts):
         self.hosts = hosts
+
 
 @singleton
 @ProviderManager.register_service_provider
 class KubernetesProvider(object):
     NAME = 'Static'
+
     def __init__(self, settings, conn_mgr, **kwargs):
         self.conn_mgr = conn_mgr
         self.hosts = [socket.gethostbyname(host) for host in settings.hosts]

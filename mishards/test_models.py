@@ -3,11 +3,12 @@ import pytest
 from mishards.factories import TableFiles, Tables, TableFilesFactory, TablesFactory
 from mishards import db, create_app, settings
 from mishards.factories import (
-            Tables, TableFiles,
-            TablesFactory, TableFilesFactory
-        )
+    Tables, TableFiles,
+    TablesFactory, TableFilesFactory
+)
 
 logger = logging.getLogger(__name__)
+
 
 @pytest.mark.usefixtures('app')
 class TestModels:

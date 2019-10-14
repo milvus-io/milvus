@@ -39,13 +39,15 @@ if SD_PROVIDER == 'Kubernetes':
 elif SD_PROVIDER == 'Static':
     from sd.static_provider import StaticProviderSettings
     SD_PROVIDER_SETTINGS = StaticProviderSettings(
-            hosts=env.list('SD_STATIC_HOSTS', [])
-            )
+        hosts=env.list('SD_STATIC_HOSTS', [])
+    )
 
 TESTING = env.bool('TESTING', False)
 TESTING_WOSERVER = env.str('TESTING_WOSERVER', 'tcp://127.0.0.1:19530')
 
 TRACING_TYPE = env.str('TRACING_TYPE', '')
+
+
 class TracingConfig:
     TRACING_SERVICE_NAME = env.str('TRACING_SERVICE_NAME', 'mishards')
     TRACING_VALIDATE = env.bool('TRACING_VALIDATE', True)
@@ -54,7 +56,7 @@ class TracingConfig:
         'sampler': {
             'type': env.str('TRACING_SAMPLER_TYPE', 'const'),
             'param': env.str('TRACING_SAMPLER_PARAM', "1"),
-            },
+        },
         'local_agent': {
             'reporting_host': env.str('TRACING_REPORTING_HOST', '127.0.0.1'),
             'reporting_port': env.str('TRACING_REPORTING_PORT', '5775')
@@ -62,9 +64,11 @@ class TracingConfig:
         'logging': env.bool('TRACING_LOGGING', True)
     }
 
+
 class DefaultConfig:
     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
     SQL_ECHO = env.bool('SQL_ECHO', False)
+
 
 TESTING = env.bool('TESTING', False)
 if TESTING:

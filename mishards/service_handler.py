@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from milvus.grpc_gen import milvus_pb2, milvus_pb2_grpc, status_pb2
 from milvus.grpc_gen.milvus_pb2 import TopKQueryResult
 from milvus.client.Abstract import Range
-from milvus.client import types
+from milvus.client import types as Types
 
 from mishards import (db, settings, exceptions)
 from mishards.grpc_utils import mark_grpc_method
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     MAX_NPROBE = 2048
+
     def __init__(self, conn_mgr, tracer, *args, **kwargs):
         self.conn_mgr = conn_mgr
         self.table_meta = {}
@@ -44,8 +45,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         return conn.conn
 
     def _format_date(self, start, end):
-        return ((start.year-1900)*10000 + (start.month-1)*100 + start.day
-                , (end.year-1900)*10000 + (end.month-1)*100 + end.day)
+        return ((start.year - 1900) * 10000 + (start.month - 1) * 100 + start.day, (end.year - 1900) * 10000 + (end.month - 1) * 100 + end.day)
 
     def _range_to_date(self, range_obj, metadata=None):
         try:
@@ -54,8 +54,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             assert start < end
         except (ValueError, AssertionError):
             raise exceptions.InvalidRangeError('Invalid time range: {} {}'.format(
-                    range_obj.start_date, range_obj.end_date
-                ), metadata=metadata)
+                range_obj.start_date, range_obj.end_date
+            ), metadata=metadata)
 
         return self._format_date(start, end)
 
@@ -63,9 +63,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         # PXU TODO: Implement Thread-local Context
         try:
             table = db.Session.query(Tables).filter(and_(
-                    Tables.table_id==table_id,
-                    Tables.state!=Tables.TO_DELETE
-                )).first()
+                Tables.table_id == table_id,
+                Tables.state != Tables.TO_DELETE
+            )).first()
         except sqlalchemy_exc.SQLAlchemyError as e:
             raise exceptions.DBError(message=str(e), metadata=metadata)
 
@@ -93,7 +93,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         return routing
 
     def _do_merge(self, files_n_topk_results, topk, reverse=False, **kwargs):
-        status=status_pb2.Status(error_code=status_pb2.SUCCESS, reason="Success")
+        status = status_pb2.Status(error_code=status_pb2.SUCCESS, reason="Success")
         if not files_n_topk_results:
             return status, []
 
@@ -107,7 +107,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             for request_pos, each_request_results in enumerate(files_collection.topk_query_result):
                 request_results[request_pos].extend(each_request_results.query_result_arrays)
                 request_results[request_pos] = sorted(request_results[request_pos], key=lambda x: x.distance,
-                        reverse=reverse)[:topk]
+                                                      reverse=reverse)[:topk]
 
         calc_time = time.time() - calc_time
         logger.info('Merge takes {}'.format(calc_time))
@@ -127,7 +127,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         routing = {}
         with self.tracer.start_span('get_routing',
-                child_of=context.get_active_span().context):
+                                    child_of=context.get_active_span().context):
             routing = self._get_routing_file_ids(table_id, range_array, metadata=metadata)
         logger.info('Routing: {}'.format(routing))
 
@@ -140,28 +140,28 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         def search(addr, query_params, vectors, topk, nprobe, **kwargs):
             logger.info('Send Search Request: addr={};params={};nq={};topk={};nprobe={}'.format(
-                    addr, query_params, len(vectors), topk, nprobe
-                ))
+                addr, query_params, len(vectors), topk, nprobe
+            ))
 
             conn = self.query_conn(addr, metadata=metadata)
             start = time.time()
             span = kwargs.get('span', None)
             span = span if span else context.get_active_span().context
             with self.tracer.start_span('search_{}'.format(addr),
-                    child_of=context.get_active_span().context):
+                                        child_of=context.get_active_span().context):
                 ret = conn.search_vectors_in_files(table_name=query_params['table_id'],
-                        file_ids=query_params['file_ids'],
-                        query_records=vectors,
-                        top_k=topk,
-                        nprobe=nprobe,
-                        lazy=True)
+                                                   file_ids=query_params['file_ids'],
+                                                   query_records=vectors,
+                                                   top_k=topk,
+                                                   nprobe=nprobe,
+                                                   lazy=True)
                 end = time.time()
                 logger.info('search_vectors_in_files takes: {}'.format(end - start))
 
                 all_topk_results.append(ret)
 
         with self.tracer.start_span('do_search',
-                    child_of=context.get_active_span().context) as span:
+                                    child_of=context.get_active_span().context) as span:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 for addr, params in routing.items():
                     res = pool.submit(search, addr, params, vectors, topk, nprobe, span=span)
@@ -170,9 +170,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 for res in rs:
                     res.result()
 
-        reverse = table_meta.metric_type == types.MetricType.IP
+        reverse = table_meta.metric_type == Types.MetricType.IP
         with self.tracer.start_span('do_merge',
-                child_of=context.get_active_span().context):
+                                    child_of=context.get_active_span().context):
             return self._do_merge(all_topk_results, topk, reverse=reverse, metadata=metadata)
 
     @mark_grpc_method
@@ -201,8 +201,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         logger.info('HasTable {}'.format(_table_name))
 
         _bool = self.connection(metadata={
-                'resp_class': milvus_pb2.BoolReply
-            }).has_table(_table_name)
+            'resp_class': milvus_pb2.BoolReply
+        }).has_table(_table_name)
 
         return milvus_pb2.BoolReply(
             status=status_pb2.Status(error_code=status_pb2.SUCCESS, reason="OK"),
@@ -244,7 +244,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         # TODO: Ths SDK interface add_vectors() could update, add a key 'row_id_array'
         _status, _ids = self.connection(metadata={
             'resp_class': milvus_pb2.VectorIds
-            }).add_vectors(None, None, insert_param=request)
+        }).add_vectors(None, None, insert_param=request)
         return milvus_pb2.VectorIds(
             status=status_pb2.Status(error_code=_status.code, reason=_status.message),
             vector_id_array=_ids
@@ -266,7 +266,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         if nprobe > self.MAX_NPROBE or nprobe <= 0:
             raise exceptions.InvalidArgumentError(message='Invalid nprobe: {}'.format(nprobe),
-                    metadata=metadata)
+                                                  metadata=metadata)
 
         table_meta = self.table_meta.get(table_name, None)
 
@@ -332,8 +332,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             )
 
         return milvus_pb2.TableSchema(
-                table_name=_table_name,
-                status=status_pb2.Status(error_code=_status.code, reason=_status.message),
+            table_name=_table_name,
+            status=status_pb2.Status(error_code=_status.code, reason=_status.message),
         )
 
     @mark_grpc_method
@@ -391,8 +391,8 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _status, _results = self.connection(metadata=metadata).show_tables()
 
         return milvus_pb2.TableNameList(
-                status=status_pb2.Status(error_code=_status.code, reason=_status.message),
-                table_names=_results
+            status=status_pb2.Status(error_code=_status.code, reason=_status.message),
+            table_names=_results
         )
 
     @mark_grpc_method
@@ -426,7 +426,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         if not _status.OK():
             return milvus_pb2.IndexParam(
-                    status=status_pb2.Status(error_code=_status.code, reason=_status.message)
+                status=status_pb2.Status(error_code=_status.code, reason=_status.message)
             )
 
         metadata = {
@@ -439,7 +439,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _index = milvus_pb2.Index(index_type=_index_param._index_type, nlist=_index_param._nlist)
 
         return milvus_pb2.IndexParam(status=status_pb2.Status(error_code=_status.code, reason=_status.message),
-                table_name=_table_name, index=_index)
+                                     table_name=_table_name, index=_index)
 
     @mark_grpc_method
     def DropIndex(self, request, context):

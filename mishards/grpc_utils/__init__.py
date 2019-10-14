@@ -14,20 +14,22 @@ class GrpcSpanDecorator(SpanDecorator):
                 status = rpc_info.response.status
             except Exception as e:
                 status = status_pb2.Status(error_code=status_pb2.UNEXPECTED_ERROR,
-                        reason='Should not happen')
+                                           reason='Should not happen')
 
         if status.error_code == 0:
             return
         error_log = {'event': 'error',
-                'request': rpc_info.request,
-                'response': rpc_info.response
-        }
+                     'request': rpc_info.request,
+                     'response': rpc_info.response
+                     }
         span.set_tag('error', True)
         span.log_kv(error_log)
+
 
 def mark_grpc_method(func):
     setattr(func, 'grpc_method', True)
     return func
+
 
 def is_grpc_method(func):
     if not func:

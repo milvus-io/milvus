@@ -4,7 +4,7 @@ from grpc_opentracing.grpcext import intercept_server
 from grpc_opentracing import open_tracing_server_interceptor
 
 from tracing import (Tracer,
-        empty_server_interceptor_decorator)
+                     empty_server_interceptor_decorator)
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +17,14 @@ class TracerFactory:
 
         if tracer_type.lower() == 'jaeger':
             config = Config(config=tracer_config.TRACING_CONFIG,
-                    service_name=tracer_config.TRACING_SERVICE_NAME,
-                    validate=tracer_config.TRACING_VALIDATE
-            )
+                            service_name=tracer_config.TRACING_SERVICE_NAME,
+                            validate=tracer_config.TRACING_VALIDATE
+                            )
 
             tracer = config.initialize_tracer()
             tracer_interceptor = open_tracing_server_interceptor(tracer,
-                    log_payloads=tracer_config.TRACING_LOG_PAYLOAD,
-                    span_decorator=span_decorator)
+                                                                 log_payloads=tracer_config.TRACING_LOG_PAYLOAD,
+                                                                 span_decorator=span_decorator)
 
             return Tracer(tracer, tracer_interceptor, intercept_server)
 

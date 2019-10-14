@@ -1,12 +1,13 @@
 import logging
 from sqlalchemy import (Integer, Boolean, Text,
-        String, BigInteger, func, and_, or_,
-        Column)
+                        String, BigInteger, func, and_, or_,
+                        Column)
 from sqlalchemy.orm import relationship, backref
 
 from mishards import db
 
 logger = logging.getLogger(__name__)
+
 
 class TableFiles(db.Model):
     FILE_TYPE_NEW = 0
@@ -57,16 +58,16 @@ class Tables(db.Model):
 
     def files_to_search(self, date_range=None):
         cond = or_(
-                TableFiles.file_type==TableFiles.FILE_TYPE_RAW,
-                TableFiles.file_type==TableFiles.FILE_TYPE_TO_INDEX,
-                TableFiles.file_type==TableFiles.FILE_TYPE_INDEX,
+            TableFiles.file_type == TableFiles.FILE_TYPE_RAW,
+            TableFiles.file_type == TableFiles.FILE_TYPE_TO_INDEX,
+            TableFiles.file_type == TableFiles.FILE_TYPE_INDEX,
         )
         if date_range:
             cond = and_(
                 cond,
                 or_(
-                    and_(TableFiles.date>=d[0], TableFiles.date<d[1]) for d in date_range
-                    )
+                    and_(TableFiles.date >= d[0], TableFiles.date < d[1]) for d in date_range
+                )
             )
 
         files = self.files.filter(cond)

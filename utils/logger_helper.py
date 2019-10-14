@@ -9,17 +9,21 @@ class InfoFilter(logging.Filter):
     def filter(self, rec):
         return rec.levelno == logging.INFO
 
+
 class DebugFilter(logging.Filter):
     def filter(self, rec):
         return rec.levelno == logging.DEBUG
+
 
 class WarnFilter(logging.Filter):
     def filter(self, rec):
         return rec.levelno == logging.WARN
 
+
 class ErrorFilter(logging.Filter):
     def filter(self, rec):
         return rec.levelno == logging.ERROR
+
 
 class CriticalFilter(logging.Filter):
     def filter(self, rec):
@@ -36,6 +40,7 @@ COLORS = {
     'ENDC': '\033[0m',
 }
 
+
 class ColorFulFormatColMixin:
     def format_col(self, message_str, level_name):
         if level_name in COLORS.keys():
@@ -43,11 +48,13 @@ class ColorFulFormatColMixin:
                 'ENDC')
         return message_str
 
+
 class ColorfulFormatter(logging.Formatter, ColorFulFormatColMixin):
     def format(self, record):
         message_str = super(ColorfulFormatter, self).format(record)
 
         return self.format_col(message_str, level_name=record.levelname)
+
 
 def config(log_level, log_path, name, tz='UTC'):
     def build_log_file(level, log_path, name, tz):
@@ -56,7 +63,7 @@ def config(log_level, log_path, name, tz='UTC'):
         local_tz = timezone(tz)
         tznow = utc_now.replace(tzinfo=utc_tz).astimezone(local_tz)
         return '{}-{}-{}.log'.format(os.path.join(log_path, name), tznow.strftime("%m-%d-%Y-%H:%M:%S"),
-                level)
+                                     level)
 
     if not os.path.exists(log_path):
         os.makedirs(log_path)
@@ -66,10 +73,10 @@ def config(log_level, log_path, name, tz='UTC'):
         'disable_existing_loggers': False,
         'formatters': {
             'default': {
-               'format': '[%(asctime)s-%(levelname)s-%(name)s]: %(message)s (%(filename)s:%(lineno)s)'
+                'format': '[%(asctime)s-%(levelname)s-%(name)s]: %(message)s (%(filename)s:%(lineno)s)'
             },
             'colorful_console': {
-               'format': '[%(asctime)s-%(levelname)s-%(name)s]: %(message)s (%(filename)s:%(lineno)s)',
+                'format': '[%(asctime)s-%(levelname)s-%(name)s]: %(message)s (%(filename)s:%(lineno)s)',
                 '()': ColorfulFormatter,
             },
         },
@@ -133,8 +140,8 @@ def config(log_level, log_path, name, tz='UTC'):
         },
         'loggers': {
             '': {
-                'handlers': ['milvus_celery_console', 'milvus_info_file', 'milvus_debug_file', 'milvus_warn_file', \
-                        'milvus_error_file', 'milvus_critical_file'],
+                'handlers': ['milvus_celery_console', 'milvus_info_file', 'milvus_debug_file', 'milvus_warn_file',
+                             'milvus_error_file', 'milvus_critical_file'],
                 'level': log_level,
                 'propagate': False
             },

@@ -4,6 +4,7 @@ from mishards import grpc_server as server, exceptions
 
 logger = logging.getLogger(__name__)
 
+
 def resp_handler(err, error_code):
     if not isinstance(err, exceptions.BaseException):
         return status_pb2.Status(error_code=error_code, reason=str(err))
@@ -50,20 +51,24 @@ def resp_handler(err, error_code):
     status.error_code = status_pb2.UNEXPECTED_ERROR
     return status
 
+
 @server.errorhandler(exceptions.TableNotFoundError)
 def TableNotFoundErrorHandler(err):
     logger.error(err)
     return resp_handler(err, status_pb2.TABLE_NOT_EXISTS)
+
 
 @server.errorhandler(exceptions.InvalidArgumentError)
 def InvalidArgumentErrorHandler(err):
     logger.error(err)
     return resp_handler(err, status_pb2.ILLEGAL_ARGUMENT)
 
+
 @server.errorhandler(exceptions.DBError)
 def DBErrorHandler(err):
     logger.error(err)
     return resp_handler(err, status_pb2.UNEXPECTED_ERROR)
+
 
 @server.errorhandler(exceptions.InvalidRangeError)
 def InvalidArgumentErrorHandler(err):

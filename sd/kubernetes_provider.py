@@ -1,4 +1,5 @@
-import os, sys
+import os
+import sys
 if __name__ == '__main__':
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -71,7 +72,6 @@ class K8SHeartbeatHandler(threading.Thread, K8SMixin):
 
                 self.queue.put(event_message)
 
-
             except Exception as exc:
                 logger.error(exc)
 
@@ -98,18 +98,18 @@ class K8SEventListener(threading.Thread, K8SMixin):
         resource_version = ''
         w = watch.Watch()
         for event in w.stream(self.v1.list_namespaced_event, namespace=self.namespace,
-                field_selector='involvedObject.kind=Pod'):
+                              field_selector='involvedObject.kind=Pod'):
             if self.terminate:
                 break
 
             resource_version = int(event['object'].metadata.resource_version)
 
             info = dict(
-                    eType='WatchEvent',
-                    pod=event['object'].involved_object.name,
-                    reason=event['object'].reason,
-                    message=event['object'].message,
-                    start_up=self.at_start_up,
+                eType='WatchEvent',
+                pod=event['object'].involved_object.name,
+                reason=event['object'].reason,
+                message=event['object'].message,
+                start_up=self.at_start_up,
             )
             self.at_start_up = False
             # logger.info('Received event: {}'.format(info))
@@ -135,7 +135,7 @@ class EventHandler(threading.Thread):
     def on_pod_started(self, event, **kwargs):
         try_cnt = 3
         pod = None
-        while  try_cnt > 0:
+        while try_cnt > 0:
             try_cnt -= 1
             try:
                 pod = self.mgr.v1.read_namespaced_pod(name=event['pod'], namespace=self.namespace)
@@ -203,6 +203,7 @@ class EventHandler(threading.Thread):
             except queue.Empty:
                 continue
 
+
 class KubernetesProviderSettings:
     def __init__(self, namespace, pod_patt, label_selector, in_cluster, poll_interval, **kwargs):
         self.namespace = namespace
@@ -211,10 +212,12 @@ class KubernetesProviderSettings:
         self.in_cluster = in_cluster
         self.poll_interval = poll_interval
 
+
 @singleton
 @ProviderManager.register_service_provider
 class KubernetesProvider(object):
     NAME = 'Kubernetes'
+
     def __init__(self, settings, conn_mgr, **kwargs):
         self.namespace = settings.namespace
         self.pod_patt = settings.pod_patt
@@ -233,27 +236,27 @@ class KubernetesProvider(object):
         self.v1 = client.CoreV1Api()
 
         self.listener = K8SEventListener(
-                message_queue=self.queue,
-                namespace=self.namespace,
-                in_cluster=self.in_cluster,
-                v1=self.v1,
-                **kwargs
-                )
+            message_queue=self.queue,
+            namespace=self.namespace,
+            in_cluster=self.in_cluster,
+            v1=self.v1,
+            **kwargs
+        )
 
         self.pod_heartbeater = K8SHeartbeatHandler(
-                message_queue=self.queue,
-                namespace=self.namespace,
-                label_selector=self.label_selector,
-                in_cluster=self.in_cluster,
-                v1=self.v1,
-                poll_interval=self.poll_interval,
-                **kwargs
-                )
+            message_queue=self.queue,
+            namespace=self.namespace,
+            label_selector=self.label_selector,
+            in_cluster=self.in_cluster,
+            v1=self.v1,
+            poll_interval=self.poll_interval,
+            **kwargs
+        )
 
         self.event_handler = EventHandler(mgr=self,
-                message_queue=self.queue,
-                namespace=self.namespace,
-                pod_patt=self.pod_patt, **kwargs)
+                                          message_queue=self.queue,
+                                          namespace=self.namespace,
+                                          pod_patt=self.pod_patt, **kwargs)
 
     def add_pod(self, name, ip):
         self.conn_mgr.register(name, 'tcp://{}:19530'.format(ip))
@@ -276,9 +279,11 @@ class KubernetesProvider(object):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
+
     class Connect:
         def register(self, name, value):
             logger.error('Register: {} - {}'.format(name, value))
+
         def unregister(self, name):
             logger.error('Unregister: {}'.format(name))
 
@@ -289,16 +294,16 @@ if __name__ == '__main__':
     connect_mgr = Connect()
 
     settings = KubernetesProviderSettings(
-            namespace='xp',
-            pod_patt=".*-ro-servers-.*",
-            label_selector='tier=ro-servers',
-            poll_interval=5,
-            in_cluster=False)
+        namespace='xp',
+        pod_patt=".*-ro-servers-.*",
+        label_selector='tier=ro-servers',
+        poll_interval=5,
+        in_cluster=False)
 
     provider_class = ProviderManager.get_provider('Kubernetes')
     t = provider_class(conn_mgr=connect_mgr,
-            settings=settings
-            )
+                       settings=settings
+                       )
     t.start()
     cnt = 100
     while cnt > 0:
