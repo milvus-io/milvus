@@ -110,16 +110,18 @@ Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
         bool moved = false;
 
         // to support test task, REFACTOR
-        if (auto index_engine = search_task->index_engine_) {
-            auto location = index_engine->GetLocation();
+        if (resource->type() == ResourceType::CPU) {
+            if (auto index_engine = search_task->index_engine_) {
+                auto location = index_engine->GetLocation();
 
-            for (auto i = 0; i < res_mgr.lock()->GetNumGpuResource(); ++i) {
-                auto index = milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
-                if (index != nullptr) {
-                    moved = true;
-                    auto dest_resource = res_mgr.lock()->GetResource(ResourceType::GPU, i);
-                    PushTaskToResource(event->task_table_item_->task, dest_resource);
-                    break;
+                for (auto i = 0; i < res_mgr.lock()->GetNumGpuResource(); ++i) {
+                    auto index = milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
+                    if (index != nullptr) {
+                        moved = true;
+                        auto dest_resource = res_mgr.lock()->GetResource(ResourceType::GPU, i);
+                        PushTaskToResource(event->task_table_item_->task, dest_resource);
+                        break;
+                    }
                 }
             }
         }
