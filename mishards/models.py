@@ -1,6 +1,6 @@
 import logging
 from sqlalchemy import (Integer, Boolean, Text,
-                        String, BigInteger, func, and_, or_,
+                        String, BigInteger, and_, or_,
                         Column)
 from sqlalchemy.orm import relationship, backref
 

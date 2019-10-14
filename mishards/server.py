@@ -7,8 +7,6 @@ from urllib.parse import urlparse
 from functools import wraps
 from concurrent import futures
 from grpc._cython import cygrpc
-from grpc._channel import _Rendezvous, _UnaryUnaryMultiCallable
-from jaeger_client import Config
 from milvus.grpc_gen.milvus_pb2_grpc import add_MilvusServiceServicer_to_server
 from mishards.grpc_utils import is_grpc_method
 from mishards.service_handler import ServiceHandler

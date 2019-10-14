@@ -1,8 +1,6 @@
 import logging
 import threading
-import socket
 from functools import wraps
-from contextlib import contextmanager
 from milvus import Milvus
 
 from mishards import (settings, exceptions)

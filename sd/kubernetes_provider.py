@@ -9,7 +9,6 @@ import time
 import copy
 import threading
 import queue
-from functools import wraps
 from kubernetes import client, config, watch
 
 from utils import singleton
@@ -17,7 +16,7 @@ from sd import ProviderManager
 
 logger = logging.getLogger(__name__)
 
-incluster_namespace_path = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
+INCLUSTER_NAMESPACE_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
 
 
 class K8SMixin:
@@ -27,7 +26,7 @@ class K8SMixin:
         self.kwargs = kwargs
         self.v1 = kwargs.get('v1', None)
         if not self.namespace:
-            self.namespace = open(incluster_namespace_path).read()
+            self.namespace = open(INCLUSTER_NAMESPACE_PATH).read()
 
         if not self.v1:
             config.load_incluster_config() if self.in_cluster else config.load_kube_config()

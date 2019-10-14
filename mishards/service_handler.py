@@ -1,7 +1,6 @@
 import logging
 import time
 import datetime
-from contextlib import contextmanager
 from collections import defaultdict
 
 from sqlalchemy import and_
