@@ -22,21 +22,20 @@
 #include <exception>
 #include <string>
 
-namespace zilliz {
 namespace milvus {
 
 class Exception : public std::exception {
-public:
-    Exception(ErrorCode code, const std::string& message)
-        : code_(code),
-          message_(message) {
-        }
+ public:
+    Exception(ErrorCode code, const std::string& message) : code_(code), message_(message) {
+    }
 
-    ErrorCode code() const throw() {
+    ErrorCode
+    code() const throw() {
         return code_;
     }
 
-    virtual const char* what() const throw() {
+    virtual const char*
+    what() const throw() {
         if (message_.empty()) {
             return "Default Exception.";
         } else {
@@ -44,25 +43,21 @@ public:
         }
     }
 
-    virtual ~Exception() throw() {};
+    virtual ~Exception() throw() {
+    }
 
-protected:
+ protected:
     ErrorCode code_;
     std::string message_;
 };
 
 class InvalidArgumentException : public Exception {
-public:
-    InvalidArgumentException()
-        : Exception(SERVER_INVALID_ARGUMENT, "Invalid Argument") {
+ public:
+    InvalidArgumentException() : Exception(SERVER_INVALID_ARGUMENT, "Invalid Argument") {
+    }
 
-    };
-    InvalidArgumentException(const std::string& message)
-        : Exception(SERVER_INVALID_ARGUMENT, message) {
-
-    };
-
+    explicit InvalidArgumentException(const std::string& message) : Exception(SERVER_INVALID_ARGUMENT, message) {
+    }
 };
 
-} // namespace milvus
-} // namespace zilliz
+}  // namespace milvus

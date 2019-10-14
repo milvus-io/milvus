@@ -17,45 +17,60 @@
 
 #pragma once
 
-#include "utils/Status.h"
+#include "grpc/gen-status/status.grpc.pb.h"
+#include "grpc/gen-status/status.pb.h"
 #include "utils/BlockingQueue.h"
-#include "status.grpc.pb.h"
-#include "status.pb.h"
+#include "utils/Status.h"
 
 #include <map>
-#include <vector>
+#include <memory>
+#include <string>
 #include <thread>
+#include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 namespace grpc {
 
 class GrpcBaseTask {
-protected:
-    GrpcBaseTask(const std::string &task_group, bool async = false);
+ protected:
+    explicit GrpcBaseTask(const std::string& task_group, bool async = false);
 
     virtual ~GrpcBaseTask();
 
-public:
-    Status Execute();
+ public:
+    Status
+    Execute();
 
-    void Done();
+    void
+    Done();
 
-    Status WaitToFinish();
+    Status
+    WaitToFinish();
 
-    std::string TaskGroup() const { return task_group_; }
+    std::string
+    TaskGroup() const {
+        return task_group_;
+    }
 
-    const Status& status() const { return status_; }
+    const Status&
+    status() const {
+        return status_;
+    }
 
-    bool IsAsync() const { return async_; }
+    bool
+    IsAsync() const {
+        return async_;
+    }
 
-protected:
-    virtual Status OnExecute() = 0;
+ protected:
+    virtual Status
+    OnExecute() = 0;
 
-    Status SetStatus(ErrorCode error_code, const std::string &msg);
+    Status
+    SetStatus(ErrorCode error_code, const std::string& error_msg);
 
-protected:
+ protected:
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
 
@@ -71,30 +86,37 @@ using TaskQueuePtr = std::shared_ptr<TaskQueue>;
 using ThreadPtr = std::shared_ptr<std::thread>;
 
 class GrpcRequestScheduler {
-public:
-    static GrpcRequestScheduler &GetInstance() {
+ public:
+    static GrpcRequestScheduler&
+    GetInstance() {
         static GrpcRequestScheduler scheduler;
         return scheduler;
     }
 
-    void Start();
+    void
+    Start();
 
-    void Stop();
+    void
+    Stop();
 
-    Status ExecuteTask(const BaseTaskPtr &task_ptr);
+    Status
+    ExecuteTask(const BaseTaskPtr& task_ptr);
 
-    static void ExecTask(BaseTaskPtr &task_ptr, ::milvus::grpc::Status *grpc_status);
+    static void
+    ExecTask(BaseTaskPtr& task_ptr, ::milvus::grpc::Status* grpc_status);
 
-protected:
+ protected:
     GrpcRequestScheduler();
 
     virtual ~GrpcRequestScheduler();
 
-    void TakeTaskToExecute(TaskQueuePtr task_queue);
+    void
+    TakeTaskToExecute(TaskQueuePtr task_queue);
 
-    Status PutTaskToQueue(const BaseTaskPtr &task_ptr);
+    Status
+    PutTaskToQueue(const BaseTaskPtr& task_ptr);
 
-private:
+ private:
     mutable std::mutex queue_mtx_;
 
     std::map<std::string, TaskQueuePtr> task_groups_;
@@ -104,7 +126,6 @@ private:
     bool stopped_;
 };
 
-}
-}
-}
-}
+}  // namespace grpc
+}  // namespace server
+}  // namespace milvus

@@ -20,21 +20,24 @@
 #include "CacheMgr.h"
 #include "DataObj.h"
 
-namespace zilliz {
+#include <memory>
+#include <string>
+
 namespace milvus {
 namespace cache {
 
 class CpuCacheMgr : public CacheMgr<DataObjPtr> {
-private:
+ private:
     CpuCacheMgr();
 
-public:
-    //TODO: use smart pointer instead
-    static CpuCacheMgr* GetInstance();
+ public:
+    // TODO(myh): use smart pointer instead
+    static CpuCacheMgr*
+    GetInstance();
 
-    engine::VecIndexPtr GetIndex(const std::string& key);
+    DataObjPtr
+    GetIndex(const std::string& key);
 };
 
-}
-}
-}
+}  // namespace cache
+}  // namespace milvus

@@ -15,64 +15,78 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ExecutionEngineImpl.h"
-#include "cache/GpuCacheMgr.h"
+#include "db/engine/ExecutionEngineImpl.h"
 #include "cache/CpuCacheMgr.h"
+#include "cache/GpuCacheMgr.h"
 #include "metrics/Metrics.h"
-#include "utils/Log.h"
 #include "utils/CommonUtil.h"
 #include "utils/Exception.h"
+#include "utils/Log.h"
 
-#include "src/wrapper/VecIndex.h"
-#include "src/wrapper/VecImpl.h"
+#include "knowhere/common/Config.h"
 #include "knowhere/common/Exception.h"
 #include "server/Config.h"
+#include "src/wrapper/VecImpl.h"
+#include "src/wrapper/VecIndex.h"
+#include "wrapper/ConfAdapter.h"
+#include "wrapper/ConfAdapterMgr.h"
 
+#include <src/core/knowhere/knowhere/index/vector_index/IndexIVFSQHybrid.h>
+#include <src/scheduler/Utils.h>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
-ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension,
-                                         const std::string &location,
-                                         EngineType index_type,
-                                         MetricType metric_type,
-                                         int32_t nlist)
-    : location_(location),
-      dim_(dimension),
-      index_type_(index_type),
-      metric_type_(metric_type),
-      nlist_(nlist) {
+class CachedQuantizer : public cache::DataObj {
+ public:
+    explicit CachedQuantizer(knowhere::QuantizerPtr data) : data_(std::move(data)) {
+    }
 
+    knowhere::QuantizerPtr
+    Data() {
+        return data_;
+    }
+
+    int64_t
+    Size() override {
+        return data_->size;
+    }
+
+ private:
+    knowhere::QuantizerPtr data_;
+};
+
+ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
+                                         MetricType metric_type, int32_t nlist)
+    : location_(location), dim_(dimension), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
     index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
     if (!index_) {
         throw Exception(DB_ERROR, "Could not create VecIndex");
     }
 
-    Config build_cfg;
-    build_cfg["dim"] = dimension;
-    build_cfg["metric_type"] = (metric_type_ == MetricType::IP) ? "IP" : "L2";
-    AutoGenParams(index_->GetType(), 0, build_cfg);
-    auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(build_cfg);
+    TempMetaConf temp_conf;
+    temp_conf.gpu_id = gpu_num_;
+    temp_conf.dim = dimension;
+    temp_conf.metric_type = (metric_type_ == MetricType::IP) ? knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto conf = adapter->Match(temp_conf);
+
+    auto ec = std::static_pointer_cast<BFIndex>(index_)->Build(conf);
     if (ec != KNOWHERE_SUCCESS) {
         throw Exception(DB_ERROR, "Build index error");
     }
 }
 
-ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index,
-                                         const std::string &location,
-                                         EngineType index_type,
-                                         MetricType metric_type,
-                                         int32_t nlist)
-    : index_(std::move(index)),
-      location_(location),
-      index_type_(index_type),
-      metric_type_(metric_type),
-      nlist_(nlist) {
+ExecutionEngineImpl::ExecutionEngineImpl(VecIndexPtr index, const std::string& location, EngineType index_type,
+                                         MetricType metric_type, int32_t nlist)
+    : index_(std::move(index)), location_(location), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
 }
 
-VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
+VecIndexPtr
+ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     std::shared_ptr<VecIndex> index;
     switch (type) {
         case EngineType::FAISS_IDMAP: {
@@ -91,6 +105,10 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             index = GetVecIndexFactory(IndexType::NSG_MIX);
             break;
         }
+        case EngineType::FAISS_IVFSQ8H: {
+            index = GetVecIndexFactory(IndexType::FAISS_IVFSQ8_HYBRID);
+            break;
+        }
         default: {
             ENGINE_LOG_ERROR << "Invalid engine type";
             return nullptr;
@@ -99,56 +117,123 @@ VecIndexPtr ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
     return index;
 }
 
-Status ExecutionEngineImpl::AddWithIds(long n, const float *xdata, const long *xids) {
+void
+ExecutionEngineImpl::HybridLoad() const {
+    if (index_type_ != EngineType::FAISS_IVFSQ8H) {
+        return;
+    }
+
+    const std::string key = location_ + ".quantizer";
+    std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+
+    // cache hit
+    {
+        const int64_t NOT_FOUND = -1;
+        int64_t device_id = NOT_FOUND;
+        knowhere::QuantizerPtr quantizer = nullptr;
+
+        for (auto& gpu : gpus) {
+            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+            if (auto cached_quantizer = cache->GetIndex(key)) {
+                device_id = gpu;
+                quantizer = std::static_pointer_cast<CachedQuantizer>(cached_quantizer)->Data();
+            }
+        }
+
+        if (device_id != NOT_FOUND) {
+            index_->SetQuantizer(quantizer);
+            return;
+        }
+    }
+
+    // cache miss
+    {
+        std::vector<int64_t> all_free_mem;
+        for (auto& gpu : gpus) {
+            auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+            auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
+            all_free_mem.push_back(free_mem);
+        }
+
+        auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
+        auto best_index = std::distance(all_free_mem.begin(), max_e);
+        auto best_device_id = gpus[best_index];
+
+        auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
+        quantizer_conf->mode = 1;
+        quantizer_conf->gpu_id = best_device_id;
+        auto quantizer = index_->LoadQuantizer(quantizer_conf);
+        index_->SetQuantizer(quantizer);
+        auto cache_quantizer = std::make_shared<CachedQuantizer>(quantizer);
+        cache::GpuCacheMgr::GetInstance(best_device_id)->InsertItem(key, cache_quantizer);
+    }
+}
+
+void
+ExecutionEngineImpl::HybridUnset() const {
+    if (index_type_ != EngineType::FAISS_IVFSQ8H) {
+        return;
+    }
+    index_->UnsetQuantizer();
+}
+
+Status
+ExecutionEngineImpl::AddWithIds(int64_t n, const float* xdata, const int64_t* xids) {
     auto status = index_->Add(n, xdata, xids);
     return status;
 }
 
-size_t ExecutionEngineImpl::Count() const {
-    if(index_ == nullptr) {
+size_t
+ExecutionEngineImpl::Count() const {
+    if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return count 0";
         return 0;
     }
     return index_->Count();
 }
 
-size_t ExecutionEngineImpl::Size() const {
-    return (size_t) (Count() * Dimension()) * sizeof(float);
+size_t
+ExecutionEngineImpl::Size() const {
+    return (size_t)(Count() * Dimension()) * sizeof(float);
 }
 
-size_t ExecutionEngineImpl::Dimension() const {
-    if(index_ == nullptr) {
+size_t
+ExecutionEngineImpl::Dimension() const {
+    if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, return dimension " << dim_;
         return dim_;
     }
     return index_->Dimension();
 }
 
-size_t ExecutionEngineImpl::PhysicalSize() const {
+size_t
+ExecutionEngineImpl::PhysicalSize() const {
     return server::CommonUtil::GetFileSize(location_);
 }
 
-Status ExecutionEngineImpl::Serialize() {
+Status
+ExecutionEngineImpl::Serialize() {
     auto status = write_index(index_, location_);
     return status;
 }
 
-Status ExecutionEngineImpl::Load(bool to_cache) {
-    index_ = cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+Status
+ExecutionEngineImpl::Load(bool to_cache) {
+    index_ = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index_ != nullptr);
     if (!already_in_cache) {
         try {
             double physical_size = PhysicalSize();
             server::CollectExecutionEngineMetrics metrics(physical_size);
             index_ = read_index(location_);
-            if(index_ == nullptr) {
+            if (index_ == nullptr) {
                 std::string msg = "Failed to load index from " + location_;
                 ENGINE_LOG_ERROR << msg;
                 return Status(DB_ERROR, msg);
             } else {
                 ENGINE_LOG_DEBUG << "Disk io from: " << location_;
             }
-        } catch (std::exception &e) {
+        } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
@@ -160,13 +245,38 @@ Status ExecutionEngineImpl::Load(bool to_cache) {
     return Status::OK();
 }
 
-Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
-    auto index = cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_);
+Status
+ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
+    if (hybrid) {
+        auto key = location_ + ".quantizer";
+        auto quantizer =
+            std::static_pointer_cast<CachedQuantizer>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(key));
+
+        auto conf = std::make_shared<knowhere::QuantizerCfg>();
+        conf->gpu_id = device_id;
+
+        if (quantizer) {
+            // cache hit
+            conf->mode = 2;
+            auto new_index = index_->LoadData(quantizer->Data(), conf);
+            index_ = new_index;
+        } else {
+            auto pair = index_->CopyToGpuWithQuantizer(device_id);
+            index_ = pair.first;
+
+            // cache
+            auto cached_quantizer = std::make_shared<CachedQuantizer>(pair.second);
+            cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(key, cached_quantizer);
+        }
+        return Status::OK();
+    }
+
+    auto index = std::static_pointer_cast<VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
     } else {
-        if(index_ == nullptr) {
+        if (index_ == nullptr) {
             ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to gpu";
             return Status(DB_ERROR, "index is null");
         }
@@ -174,7 +284,7 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
         try {
             index_ = index_->CopyToGpu(device_id);
             ENGINE_LOG_DEBUG << "CPU to GPU" << device_id;
-        } catch (std::exception &e) {
+        } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
@@ -187,13 +297,22 @@ Status ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
     return Status::OK();
 }
 
-Status ExecutionEngineImpl::CopyToCpu() {
-    auto index = cache::CpuCacheMgr::GetInstance()->GetIndex(location_);
+Status
+ExecutionEngineImpl::CopyToIndexFileToGpu(uint64_t device_id) {
+    auto to_index_data = std::make_shared<ToIndexData>(PhysicalSize());
+    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(to_index_data);
+    milvus::cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(location_, obj);
+    return Status::OK();
+}
+
+Status
+ExecutionEngineImpl::CopyToCpu() {
+    auto index = std::static_pointer_cast<VecIndex>(cache::CpuCacheMgr::GetInstance()->GetIndex(location_));
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
         index_ = index;
     } else {
-        if(index_ == nullptr) {
+        if (index_ == nullptr) {
             ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to copy to cpu";
             return Status(DB_ERROR, "index is null");
         }
@@ -201,7 +320,7 @@ Status ExecutionEngineImpl::CopyToCpu() {
         try {
             index_ = index_->CopyToCpu();
             ENGINE_LOG_DEBUG << "GPU to CPU";
-        } catch (std::exception &e) {
+        } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
@@ -213,8 +332,9 @@ Status ExecutionEngineImpl::CopyToCpu() {
     return Status::OK();
 }
 
-ExecutionEnginePtr ExecutionEngineImpl::Clone() {
-    if(index_ == nullptr) {
+ExecutionEnginePtr
+ExecutionEngineImpl::Clone() {
+    if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to clone";
         return nullptr;
     }
@@ -225,7 +345,8 @@ ExecutionEnginePtr ExecutionEngineImpl::Clone() {
     return ret;
 }
 
-Status ExecutionEngineImpl::Merge(const std::string &location) {
+Status
+ExecutionEngineImpl::Merge(const std::string& location) {
     if (location == location_) {
         return Status(DB_ERROR, "Cannot Merge Self");
     }
@@ -237,13 +358,13 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
             double physical_size = server::CommonUtil::GetFileSize(location);
             server::CollectExecutionEngineMetrics metrics(physical_size);
             to_merge = read_index(location);
-        } catch (std::exception &e) {
+        } catch (std::exception& e) {
             ENGINE_LOG_ERROR << e.what();
             return Status(DB_ERROR, e.what());
         }
     }
 
-    if(index_ == nullptr) {
+    if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to merge";
         return Status(DB_ERROR, "index is null");
     }
@@ -260,11 +381,11 @@ Status ExecutionEngineImpl::Merge(const std::string &location) {
 }
 
 ExecutionEnginePtr
-ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_type) {
+ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
     ENGINE_LOG_DEBUG << "Build index file: " << location << " from: " << location_;
 
     auto from_index = std::dynamic_pointer_cast<BFIndex>(index_);
-    if(from_index == nullptr) {
+    if (from_index == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: from_index is null, failed to build index";
         return nullptr;
     }
@@ -274,67 +395,85 @@ ExecutionEngineImpl::BuildIndex(const std::string &location, EngineType engine_t
         throw Exception(DB_ERROR, "Could not create VecIndex");
     }
 
-    Config build_cfg;
-    build_cfg["dim"] = Dimension();
-    build_cfg["metric_type"] = (metric_type_ == MetricType::IP) ? "IP" : "L2";
-    build_cfg["gpu_id"] = gpu_num_;
-    build_cfg["nlist"] = nlist_;
-    AutoGenParams(to_index->GetType(), Count(), build_cfg);
+    TempMetaConf temp_conf;
+    temp_conf.gpu_id = gpu_num_;
+    temp_conf.dim = Dimension();
+    temp_conf.nlist = nlist_;
+    temp_conf.metric_type = (metric_type_ == MetricType::IP) ? knowhere::METRICTYPE::IP : knowhere::METRICTYPE::L2;
+    temp_conf.size = Count();
 
-    auto status = to_index->BuildAll(Count(),
-                                 from_index->GetRawVectors(),
-                                 from_index->GetRawIds(),
-                                 build_cfg);
-    if (!status.ok()) { throw Exception(DB_ERROR, status.message()); }
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(to_index->GetType());
+    auto conf = adapter->Match(temp_conf);
+
+    auto status = to_index->BuildAll(Count(), from_index->GetRawVectors(), from_index->GetRawIds(), conf);
+    if (!status.ok()) {
+        throw Exception(DB_ERROR, status.message());
+    }
 
     return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, nlist_);
 }
 
-Status ExecutionEngineImpl::Search(long n,
-                                   const float *data,
-                                   long k,
-                                   long nprobe,
-                                   float *distances,
-                                   long *labels) const {
-    if(index_ == nullptr) {
+Status
+ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+                            bool hybrid) const {
+    if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
     }
 
     ENGINE_LOG_DEBUG << "Search Params: [k]  " << k << " [nprobe] " << nprobe;
-    auto cfg = Config::object{{"k", k}, {"nprobe", nprobe}};
-    auto status = index_->Search(n, data, distances, labels, cfg);
+
+    // TODO(linxj): remove here. Get conf from function
+    TempMetaConf temp_conf;
+    temp_conf.k = k;
+    temp_conf.nprobe = nprobe;
+
+    auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
+    auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
+
+    if (hybrid) {
+        HybridLoad();
+    }
+
+    auto status = index_->Search(n, data, distances, labels, conf);
+
+    if (hybrid) {
+        HybridUnset();
+    }
+
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Search error";
     }
     return status;
 }
 
-Status ExecutionEngineImpl::Cache() {
-    cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index_, PhysicalSize());
-    zilliz::milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, obj);
+Status
+ExecutionEngineImpl::Cache() {
+    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
+    milvus::cache::CpuCacheMgr::GetInstance()->InsertItem(location_, obj);
 
     return Status::OK();
 }
 
-Status ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
-    cache::DataObjPtr obj = std::make_shared<cache::DataObj>(index_, PhysicalSize());
-    zilliz::milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, obj);
+Status
+ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
+    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
+    milvus::cache::GpuCacheMgr::GetInstance(gpu_id)->InsertItem(location_, obj);
 
     return Status::OK();
 }
 
 // TODO(linxj): remove.
-Status ExecutionEngineImpl::Init() {
-    using namespace zilliz::milvus::server;
-    server::Config &config = server::Config::GetInstance();
+Status
+ExecutionEngineImpl::Init() {
+    server::Config& config = server::Config::GetInstance();
     Status s = config.GetDBConfigBuildIndexGPU(gpu_num_);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     return Status::OK();
 }
 
-
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

@@ -15,50 +15,59 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "Cache.h"
-#include "utils/Log.h"
 #include "metrics/Metrics.h"
+#include "utils/Log.h"
 
-namespace zilliz {
+#include <memory>
+#include <string>
+
 namespace milvus {
 namespace cache {
 
-template<typename ItemObj>
+template <typename ItemObj>
 class CacheMgr {
-public:
-    virtual uint64_t ItemCount() const;
+ public:
+    virtual uint64_t
+    ItemCount() const;
 
-    virtual bool ItemExists(const std::string& key);
+    virtual bool
+    ItemExists(const std::string& key);
 
-    virtual ItemObj GetItem(const std::string& key);
+    virtual ItemObj
+    GetItem(const std::string& key);
 
-    virtual void InsertItem(const std::string& key, const ItemObj& data);
+    virtual void
+    InsertItem(const std::string& key, const ItemObj& data);
 
-    virtual void EraseItem(const std::string& key);
+    virtual void
+    EraseItem(const std::string& key);
 
-    virtual void PrintInfo();
+    virtual void
+    PrintInfo();
 
-    virtual void ClearCache();
+    virtual void
+    ClearCache();
 
-    int64_t CacheUsage() const;
-    int64_t CacheCapacity() const;
-    void SetCapacity(int64_t capacity);
+    int64_t
+    CacheUsage() const;
+    int64_t
+    CacheCapacity() const;
+    void
+    SetCapacity(int64_t capacity);
 
-protected:
+ protected:
     CacheMgr();
     virtual ~CacheMgr();
 
-protected:
+ protected:
     using CachePtr = std::shared_ptr<Cache<ItemObj>>;
     CachePtr cache_;
 };
 
-
-}
-}
-}
+}  // namespace cache
+}  // namespace milvus
 
 #include "cache/CacheMgr.inl"

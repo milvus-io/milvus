@@ -15,141 +15,202 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "DBWrapper.h"
+#include "server/DBWrapper.h"
 #include "Config.h"
 #include "db/DBFactory.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 
-#include <omp.h>
 #include <faiss/utils.h>
+#include <omp.h>
+#include <cmath>
+#include <string>
+#include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
-DBWrapper::DBWrapper() {
-
-}
-
-Status DBWrapper::StartService() {
+Status
+DBWrapper::StartService() {
     Config& config = Config::GetInstance();
     Status s;
-    //db config
+    // db config
     engine::DBOptions opt;
 
     s = config.GetDBConfigBackendUrl(opt.meta_.backend_uri_);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     std::string path;
     s = config.GetDBConfigPrimaryPath(path);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     opt.meta_.path_ = path + "/db";
 
     std::string db_slave_path;
     s = config.GetDBConfigSecondaryPath(db_slave_path);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     StringHelpFunctions::SplitStringByDelimeter(db_slave_path, ";", opt.meta_.slave_paths_);
 
     // cache config
     s = config.GetCacheConfigCacheInsertData(opt.insert_cache_immediately_);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     std::string mode;
     s = config.GetServerConfigDeployMode(mode);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
 
     if (mode == "single") {
         opt.mode_ = engine::DBOptions::MODE::SINGLE;
-    }
-    else if (mode == "cluster_readonly") {
+    } else if (mode == "cluster_readonly") {
         opt.mode_ = engine::DBOptions::MODE::CLUSTER_READONLY;
-    }
-    else if (mode == "cluster_writable") {
+    } else if (mode == "cluster_writable") {
         opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
-    }
-    else {
-        std::cerr << "ERROR: mode specified in server_config must be ['single', 'cluster_readonly', 'cluster_writable']" << std::endl;
+    } else {
+        std::cerr << "ERROR: mode specified in server_config must be ['single', 'cluster_readonly', 'cluster_writable']"
+                  << std::endl;
         kill(0, SIGUSR1);
     }
 
     // engine config
     int32_t omp_thread;
     s = config.GetEngineConfigOmpThreadNum(omp_thread);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
+
     if (omp_thread > 0) {
         omp_set_num_threads(omp_thread);
         SERVER_LOG_DEBUG << "Specify openmp thread number: " << omp_thread;
     } else {
         uint32_t sys_thread_cnt = 8;
-        if(CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
-            omp_thread = (int32_t)ceil(sys_thread_cnt*0.5);
+        if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
+            omp_thread = static_cast<int32_t>(ceil(sys_thread_cnt * 0.5));
             omp_set_num_threads(omp_thread);
         }
     }
 
-    //init faiss global variable
-    int32_t blas_threshold;
-    s = config.GetEngineConfigBlasThreshold(blas_threshold);
-    if (!s.ok()) return s;
-    faiss::distance_compute_blas_threshold = blas_threshold;
+    // init faiss global variable
+    int32_t use_blas_threshold;
+    s = config.GetEngineConfigUseBlasThreshold(use_blas_threshold);
+    if (!s.ok()) {
+        return s;
+    }
 
-    //set archive config
+    faiss::distance_compute_blas_threshold = use_blas_threshold;
+
+    // set archive config
     engine::ArchiveConf::CriteriaT criterial;
     int32_t disk, days;
     s = config.GetDBConfigArchiveDiskThreshold(disk);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
+
     if (disk > 0) {
         criterial[engine::ARCHIVE_CONF_DISK] = disk;
     }
 
     s = config.GetDBConfigArchiveDaysThreshold(days);
-    if (!s.ok()) return s;
+    if (!s.ok()) {
+        return s;
+    }
+
     if (days > 0) {
         criterial[engine::ARCHIVE_CONF_DAYS] = days;
     }
     opt.meta_.archive_conf_.SetCriterias(criterial);
 
-    //create db root folder
+    // create db root folder
     Status status = CommonUtil::CreateDirectory(opt.meta_.path_);
-    if(!status.ok()) {
+    if (!status.ok()) {
         std::cerr << "ERROR! Failed to create database root path: " << opt.meta_.path_ << std::endl;
         kill(0, SIGUSR1);
     }
 
-    for(auto& path : opt.meta_.slave_paths_) {
+    for (auto& path : opt.meta_.slave_paths_) {
         status = CommonUtil::CreateDirectory(path);
-        if(!status.ok()) {
+        if (!status.ok()) {
             std::cerr << "ERROR! Failed to create database slave path: " << path << std::endl;
             kill(0, SIGUSR1);
         }
     }
 
-    //create db instance
+    // create db instance
     try {
         db_ = engine::DBFactory::Build(opt);
-    } catch(std::exception& ex) {
+    } catch (std::exception& ex) {
         std::cerr << "ERROR! Failed to open database: " << ex.what() << std::endl;
         kill(0, SIGUSR1);
     }
 
     db_->Start();
 
+    // preload table
+    std::string preload_tables;
+    s = config.GetDBConfigPreloadTable(preload_tables);
+    if (!s.ok()) {
+        return s;
+    }
+
+    s = PreloadTables(preload_tables);
+    if (!s.ok()) {
+        std::cerr << "ERROR! Failed to preload tables: " << preload_tables << std::endl;
+        std::cerr << s.ToString() << std::endl;
+        kill(0, SIGUSR1);
+    }
+
     return Status::OK();
 }
 
-Status DBWrapper::StopService() {
-    if(db_) {
+Status
+DBWrapper::StopService() {
+    if (db_) {
         db_->Stop();
     }
 
     return Status::OK();
 }
 
+Status
+DBWrapper::PreloadTables(const std::string& preload_tables) {
+    if (preload_tables.empty()) {
+        // do nothing
+    } else if (preload_tables == "*") {
+        // load all tables
+        std::vector<engine::meta::TableSchema> table_schema_array;
+        db_->AllTables(table_schema_array);
+
+        for (auto& schema : table_schema_array) {
+            auto status = db_->PreloadTable(schema.table_id_);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+    } else {
+        std::vector<std::string> table_names;
+        StringHelpFunctions::SplitStringByDelimeter(preload_tables, ",", table_names);
+        for (auto& name : table_names) {
+            auto status = db_->PreloadTable(name);
+            if (!status.ok()) {
+                return status;
+            }
+        }
+    }
+
+    return Status::OK();
 }
-}
-}
+
+}  // namespace server
+}  // namespace milvus

@@ -16,7 +16,7 @@
 // under the License.
 
 
-namespace zilliz {
+
 namespace milvus {
 namespace cache {
 
@@ -30,18 +30,20 @@ CacheMgr<ItemObj>::~CacheMgr() {
 }
 
 template<typename ItemObj>
-uint64_t CacheMgr<ItemObj>::ItemCount() const {
-    if(cache_ == nullptr) {
+uint64_t
+CacheMgr<ItemObj>::ItemCount() const {
+    if (cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
     }
 
-    return (uint64_t)(cache_->size());
+    return (uint64_t) (cache_->size());
 }
 
 template<typename ItemObj>
-bool CacheMgr<ItemObj>::ItemExists(const std::string& key) {
-    if(cache_ == nullptr) {
+bool
+CacheMgr<ItemObj>::ItemExists(const std::string &key) {
+    if (cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return false;
     }
@@ -50,8 +52,9 @@ bool CacheMgr<ItemObj>::ItemExists(const std::string& key) {
 }
 
 template<typename ItemObj>
-ItemObj CacheMgr<ItemObj>::GetItem(const std::string& key) {
-    if(cache_ == nullptr) {
+ItemObj
+CacheMgr<ItemObj>::GetItem(const std::string &key) {
+    if (cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return nullptr;
     }
@@ -60,8 +63,9 @@ ItemObj CacheMgr<ItemObj>::GetItem(const std::string& key) {
 }
 
 template<typename ItemObj>
-void CacheMgr<ItemObj>::InsertItem(const std::string& key, const ItemObj& data) {
-    if(cache_ == nullptr) {
+void
+CacheMgr<ItemObj>::InsertItem(const std::string &key, const ItemObj &data) {
+    if (cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
@@ -71,8 +75,9 @@ void CacheMgr<ItemObj>::InsertItem(const std::string& key, const ItemObj& data) 
 }
 
 template<typename ItemObj>
-void CacheMgr<ItemObj>::EraseItem(const std::string& key) {
-    if(cache_ == nullptr) {
+void
+CacheMgr<ItemObj>::EraseItem(const std::string &key) {
+    if (cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
@@ -82,8 +87,9 @@ void CacheMgr<ItemObj>::EraseItem(const std::string& key) {
 }
 
 template<typename ItemObj>
-void CacheMgr<ItemObj>::PrintInfo() {
-    if(cache_ == nullptr) {
+void
+CacheMgr<ItemObj>::PrintInfo() {
+    if (cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
@@ -92,8 +98,9 @@ void CacheMgr<ItemObj>::PrintInfo() {
 }
 
 template<typename ItemObj>
-void CacheMgr<ItemObj>::ClearCache() {
-    if(cache_ == nullptr) {
+void
+CacheMgr<ItemObj>::ClearCache() {
+    if (cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
@@ -102,8 +109,9 @@ void CacheMgr<ItemObj>::ClearCache() {
 }
 
 template<typename ItemObj>
-int64_t CacheMgr<ItemObj>::CacheUsage() const {
-    if(cache_ == nullptr) {
+int64_t
+CacheMgr<ItemObj>::CacheUsage() const {
+    if (cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
     }
@@ -112,8 +120,9 @@ int64_t CacheMgr<ItemObj>::CacheUsage() const {
 }
 
 template<typename ItemObj>
-int64_t CacheMgr<ItemObj>::CacheCapacity() const {
-    if(cache_ == nullptr) {
+int64_t
+CacheMgr<ItemObj>::CacheCapacity() const {
+    if (cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return 0;
     }
@@ -122,14 +131,15 @@ int64_t CacheMgr<ItemObj>::CacheCapacity() const {
 }
 
 template<typename ItemObj>
-void CacheMgr<ItemObj>::SetCapacity(int64_t capacity) {
-    if(cache_ == nullptr) {
+void
+CacheMgr<ItemObj>::SetCapacity(int64_t capacity) {
+    if (cache_ == nullptr) {
         SERVER_LOG_ERROR << "Cache doesn't exist";
         return;
     }
     cache_->set_capacity(capacity);
 }
 
-}
-}
-}
+} // namespace cache
+} // namespace milvus
+

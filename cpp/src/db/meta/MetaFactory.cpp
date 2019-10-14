@@ -15,60 +15,62 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "MetaFactory.h"
-#include "SqliteMetaImpl.h"
+#include "db/meta/MetaFactory.h"
 #include "MySQLMetaImpl.h"
-#include "utils/Log.h"
-#include "utils/Exception.h"
+#include "SqliteMetaImpl.h"
 #include "db/Utils.h"
+#include "utils/Exception.h"
+#include "utils/Log.h"
 
 #include <stdlib.h>
-#include <time.h>
-#include <sstream>
-#include <cstdlib>
-#include <string>
 #include <string.h>
+#include <time.h>
+#include <cstdlib>
+#include <memory>
+#include <sstream>
+#include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
-    DBMetaOptions MetaFactory::BuildOption(const std::string &path) {
-        auto p = path;
-        if(p == "") {
-            srand(time(nullptr));
-            std::stringstream ss;
-            ss << "/tmp/" << rand();
-            p = ss.str();
-        }
-
-        DBMetaOptions meta;
-        meta.path_ = p;
-        return meta;
+DBMetaOptions
+MetaFactory::BuildOption(const std::string& path) {
+    auto p = path;
+    if (p == "") {
+        srand(time(nullptr));
+        std::stringstream ss;
+        uint32_t seed = 1;
+        ss << "/tmp/" << rand_r(&seed);
+        p = ss.str();
     }
 
-    meta::MetaPtr MetaFactory::Build(const DBMetaOptions &metaOptions, const int &mode) {
-        std::string uri = metaOptions.backend_uri_;
+    DBMetaOptions meta;
+    meta.path_ = p;
+    return meta;
+}
 
-        utils::MetaUriInfo uri_info;
-        auto status = utils::ParseMetaUri(uri, uri_info);
-        if(!status.ok()) {
-            ENGINE_LOG_ERROR << "Wrong URI format: URI = " << uri;
-            throw InvalidArgumentException("Wrong URI format ");
-        }
+meta::MetaPtr
+MetaFactory::Build(const DBMetaOptions& metaOptions, const int& mode) {
+    std::string uri = metaOptions.backend_uri_;
 
-        if (strcasecmp(uri_info.dialect_.c_str(), "mysql") == 0) {
-            ENGINE_LOG_INFO << "Using MySQL";
-            return std::make_shared<meta::MySQLMetaImpl>(metaOptions, mode);
-        } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
-            ENGINE_LOG_INFO << "Using SQLite";
-            return std::make_shared<meta::SqliteMetaImpl>(metaOptions);
-        } else {
-            ENGINE_LOG_ERROR << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
-            throw InvalidArgumentException("URI dialect is not mysql / sqlite");
-        }
+    utils::MetaUriInfo uri_info;
+    auto status = utils::ParseMetaUri(uri, uri_info);
+    if (!status.ok()) {
+        ENGINE_LOG_ERROR << "Wrong URI format: URI = " << uri;
+        throw InvalidArgumentException("Wrong URI format ");
     }
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+    if (strcasecmp(uri_info.dialect_.c_str(), "mysql") == 0) {
+        ENGINE_LOG_INFO << "Using MySQL";
+        return std::make_shared<meta::MySQLMetaImpl>(metaOptions, mode);
+    } else if (strcasecmp(uri_info.dialect_.c_str(), "sqlite") == 0) {
+        ENGINE_LOG_INFO << "Using SQLite";
+        return std::make_shared<meta::SqliteMetaImpl>(metaOptions);
+    } else {
+        ENGINE_LOG_ERROR << "Invalid dialect in URI: dialect = " << uri_info.dialect_;
+        throw InvalidArgumentException("URI dialect is not mysql / sqlite");
+    }
+}
+
+}  // namespace engine
+}  // namespace milvus

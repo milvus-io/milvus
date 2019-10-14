@@ -15,58 +15,55 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include "CpuCacheMgr.h"
+#include "cache/CpuCacheMgr.h"
 #include "server/Config.h"
 #include "utils/Log.h"
 
-namespace zilliz {
+#include <utility>
+
 namespace milvus {
 namespace cache {
 
 namespace {
-    constexpr int64_t unit = 1024 * 1024 * 1024;
+constexpr int64_t unit = 1024 * 1024 * 1024;
 }
 
 CpuCacheMgr::CpuCacheMgr() {
     server::Config& config = server::Config::GetInstance();
     Status s;
 
-    int32_t cpu_mem_cap;
-    s = config.GetCacheConfigCpuMemCapacity(cpu_mem_cap);
+    int64_t cpu_cache_cap;
+    s = config.GetCacheConfigCpuCacheCapacity(cpu_cache_cap);
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
     }
-    int64_t cap = cpu_mem_cap * unit;
-    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL<<32);
+    int64_t cap = cpu_cache_cap * unit;
+    cache_ = std::make_shared<Cache<DataObjPtr>>(cap, 1UL << 32);
 
-    float cpu_mem_threshold;
-    s = config.GetCacheConfigCpuMemThreshold(cpu_mem_threshold);
+    float cpu_cache_threshold;
+    s = config.GetCacheConfigCpuCacheThreshold(cpu_cache_threshold);
     if (!s.ok()) {
         SERVER_LOG_ERROR << s.message();
     }
-    if (cpu_mem_threshold > 0.0 && cpu_mem_threshold <= 1.0) {
-        cache_->set_freemem_percent(cpu_mem_threshold);
+    if (cpu_cache_threshold > 0.0 && cpu_cache_threshold <= 1.0) {
+        cache_->set_freemem_percent(cpu_cache_threshold);
     } else {
-        SERVER_LOG_ERROR << "Invalid cpu_mem_threshold: " << cpu_mem_threshold
-                         << ", by default set to " << cache_->freemem_percent();
+        SERVER_LOG_ERROR << "Invalid cpu_cache_threshold: " << cpu_cache_threshold << ", by default set to "
+                         << cache_->freemem_percent();
     }
 }
 
-CpuCacheMgr* CpuCacheMgr::GetInstance() {
+CpuCacheMgr*
+CpuCacheMgr::GetInstance() {
     static CpuCacheMgr s_mgr;
     return &s_mgr;
 }
 
-engine::VecIndexPtr CpuCacheMgr::GetIndex(const std::string& key) {
+DataObjPtr
+CpuCacheMgr::GetIndex(const std::string& key) {
     DataObjPtr obj = GetItem(key);
-    if(obj != nullptr) {
-        return obj->data();
-    }
-
-    return nullptr;
+    return obj;
 }
 
-}
-}
-}
+}  // namespace cache
+}  // namespace milvus

@@ -15,27 +15,27 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #include <list>
 #include <random>
 #include "../Algorithm.h"
-#include "src/cache/GpuCacheMgr.h"
 #include "Action.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
+#include "src/cache/GpuCacheMgr.h"
+#include "src/server/Config.h"
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 std::vector<ResourcePtr>
-get_neighbours(const ResourcePtr &self) {
+get_neighbours(const ResourcePtr& self) {
     std::vector<ResourcePtr> neighbours;
-    for (auto &neighbour_node : self->GetNeighbours()) {
+    for (auto& neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
-        if (not node) continue;
+        if (not node)
+            continue;
 
         auto resource = std::static_pointer_cast<Resource>(node);
-//        if (not resource->HasExecutor()) continue;
+        //        if (not resource->HasExecutor()) continue;
 
         neighbours.emplace_back(resource);
     }
@@ -43,29 +43,28 @@ get_neighbours(const ResourcePtr &self) {
 }
 
 std::vector<std::pair<ResourcePtr, Connection>>
-get_neighbours_with_connetion(const ResourcePtr &self) {
+get_neighbours_with_connetion(const ResourcePtr& self) {
     std::vector<std::pair<ResourcePtr, Connection>> neighbours;
-    for (auto &neighbour_node : self->GetNeighbours()) {
+    for (auto& neighbour_node : self->GetNeighbours()) {
         auto node = neighbour_node.neighbour_node.lock();
-        if (not node) continue;
+        if (not node)
+            continue;
 
         auto resource = std::static_pointer_cast<Resource>(node);
-//        if (not resource->HasExecutor()) continue;
+        //        if (not resource->HasExecutor()) continue;
         Connection conn = neighbour_node.connection;
         neighbours.emplace_back(std::make_pair(resource, conn));
     }
     return neighbours;
 }
 
-
 void
-Action::PushTaskToNeighbourRandomly(const TaskPtr &task,
-                                    const ResourcePtr &self) {
+Action::PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self) {
     auto neighbours = get_neighbours_with_connetion(self);
     if (not neighbours.empty()) {
-        std::vector<uint64_t > speeds;
+        std::vector<uint64_t> speeds;
         uint64_t total_speed = 0;
-        for (auto &neighbour : neighbours) {
+        for (auto& neighbour : neighbours) {
             uint64_t speed = neighbour.second.speed();
             speeds.emplace_back(speed);
             total_speed += speed;
@@ -85,15 +84,14 @@ Action::PushTaskToNeighbourRandomly(const TaskPtr &task,
         }
 
     } else {
-        //TODO: process
+        // TODO(wxyu): process
     }
-
 }
 
 void
-Action::PushTaskToAllNeighbour(const TaskPtr &task, const ResourcePtr &self) {
+Action::PushTaskToAllNeighbour(const TaskPtr& task, const ResourcePtr& self) {
     auto neighbours = get_neighbours(self);
-    for (auto &neighbour : neighbours) {
+    for (auto& neighbour : neighbours) {
         neighbour->task_table().Put(task);
     }
 }
@@ -104,20 +102,19 @@ Action::PushTaskToResource(const TaskPtr& task, const ResourcePtr& dest) {
 }
 
 void
-Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr,
-                          ResourcePtr resource,
-                          std::shared_ptr<LoadCompletedEvent> event) {
+Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
+                                  std::shared_ptr<LoadCompletedEvent> event) {
     if (not resource->HasExecutor() && event->task_table_item_->Move()) {
         auto task = event->task_table_item_->task;
         auto search_task = std::static_pointer_cast<XSearchTask>(task);
         bool moved = false;
 
-        //to support test task, REFACTOR
+        // to support test task, REFACTOR
         if (auto index_engine = search_task->index_engine_) {
             auto location = index_engine->GetLocation();
 
             for (auto i = 0; i < res_mgr.lock()->GetNumGpuResource(); ++i) {
-                auto index = zilliz::milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
+                auto index = milvus::cache::GpuCacheMgr::GetInstance(i)->GetIndex(location);
                 if (index != nullptr) {
                     moved = true;
                     auto dest_resource = res_mgr.lock()->GetResource(ResourceType::GPU, i);
@@ -134,54 +131,87 @@ Action::DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr,
 }
 
 void
-Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr,
-                                    ResourcePtr resource,
-                                    std::shared_ptr<LoadCompletedEvent> event) {
+Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
+                                            std::shared_ptr<LoadCompletedEvent> event) {
     auto task = event->task_table_item_->task;
     if (resource->type() == ResourceType::DISK) {
         // step 1: calculate shortest path per resource, from disk to compute resource
         auto compute_resources = res_mgr.lock()->GetComputeResources();
         std::vector<std::vector<std::string>> paths;
         std::vector<uint64_t> transport_costs;
-        for (auto &res : compute_resources) {
+        for (auto& res : compute_resources) {
             std::vector<std::string> path;
             uint64_t transport_cost = ShortestPath(resource, res, res_mgr.lock(), path);
             transport_costs.push_back(transport_cost);
             paths.emplace_back(path);
         }
+        //        if (task->job_.lock()->type() == JobType::SEARCH) {
+        //            auto label = task->label();
+        //            auto spec_label = std::static_pointer_cast<SpecResLabel>(label);
+        //            if (spec_label->resource().lock()->type() == ResourceType::CPU) {
+        //                std::vector<std::string> spec_path;
+        //                spec_path.push_back(spec_label->resource().lock()->name());
+        //                spec_path.push_back(resource->name());
+        //                task->path() = Path(spec_path, spec_path.size() - 1);
+        //            } else {
+        //                // step 2: select min cost, cost(resource) = avg_cost * task_to_do + transport_cost
+        //                uint64_t min_cost = std::numeric_limits<uint64_t>::max();
+        //                uint64_t min_cost_idx = 0;
+        //                for (uint64_t i = 0; i < compute_resources.size(); ++i) {
+        //                    if (compute_resources[i]->TotalTasks() == 0) {
+        //                        min_cost_idx = i;
+        //                        break;
+        //                    }
+        //                    uint64_t cost = compute_resources[i]->TaskAvgCost() *
+        //                    compute_resources[i]->NumOfTaskToExec() +
+        //                                    transport_costs[i];
+        //                    if (min_cost > cost) {
+        //                        min_cost = cost;
+        //                        min_cost_idx = i;
+        //                    }
+        //                }
+        //
+        //                // step 3: set path in task
+        //                Path task_path(paths[min_cost_idx], paths[min_cost_idx].size() - 1);
+        //                task->path() = task_path;
+        //            }
+        //
+        //        } else
+        if (task->job_.lock()->type() == JobType::BUILD) {
+            // step2: Read device id in config
+            // get build index gpu resource
+            server::Config& config = server::Config::GetInstance();
+            int32_t build_index_gpu;
+            Status stat = config.GetDBConfigBuildIndexGPU(build_index_gpu);
 
-        // step 2: select min cost, cost(resource) = avg_cost * task_to_do + transport_cost
-        uint64_t min_cost = std::numeric_limits<uint64_t>::max();
-        uint64_t min_cost_idx = 0;
-        for (uint64_t i = 0; i < compute_resources.size(); ++i) {
-            if (compute_resources[i]->TotalTasks() == 0) {
-                min_cost_idx = i;
-                break;
+            bool find_gpu_res = false;
+            for (uint64_t i = 0; i < compute_resources.size(); ++i) {
+                if (res_mgr.lock()->GetResource(ResourceType::GPU, build_index_gpu) != nullptr) {
+                    if (compute_resources[i]->name() ==
+                        res_mgr.lock()->GetResource(ResourceType::GPU, build_index_gpu)->name()) {
+                        find_gpu_res = true;
+                        Path task_path(paths[i], paths[i].size() - 1);
+                        task->path() = task_path;
+                        break;
+                    }
+                }
             }
-            uint64_t cost = compute_resources[i]->TaskAvgCost() * compute_resources[i]->NumOfTaskToExec()
-                + transport_costs[i];
-            if (min_cost > cost) {
-                min_cost = cost;
-                min_cost_idx = i;
+            if (not find_gpu_res) {
+                task->path() = Path(paths[0], paths[0].size() - 1);
             }
         }
-
-        // step 3: set path in task
-        Path task_path(paths[min_cost_idx], paths[min_cost_idx].size() - 1);
-        task->path() = task_path;
     }
 
     if (resource->name() == task->path().Last()) {
-        resource->WakeupLoader();
+        resource->WakeupExecutor();
     } else {
         auto next_res_name = task->path().Next();
         auto next_res = res_mgr.lock()->GetResource(next_res_name);
-        event->task_table_item_->Move();
-        next_res->task_table().Put(task);
+        if (event->task_table_item_->Move()) {
+            next_res->task_table().Put(task);
+        }
     }
 }
 
-}
-}
-}
-
+}  // namespace scheduler
+}  // namespace milvus
