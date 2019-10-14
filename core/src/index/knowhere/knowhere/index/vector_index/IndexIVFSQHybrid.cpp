@@ -79,12 +79,8 @@ IVFSQHybrid::CopyGpuToCpu(const Config& config) {
 
 VectorIndexPtr
 IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
-    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
-        auto p = CopyCpuToGpuWithQuantizer(device_id, config);
-        return p.first;
-    } else {
-        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
-    }
+    auto p = CopyCpuToGpuWithQuantizer(device_id, config);
+    return p.first;
 }
 
 void
