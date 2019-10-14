@@ -25,14 +25,14 @@
 
 #include "knowhere/common/Config.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
+#include "scheduler/Utils.h"
 #include "server/Config.h"
-#include "src/wrapper/VecImpl.h"
-#include "src/wrapper/VecIndex.h"
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
+#include "wrapper/VecImpl.h"
+#include "wrapper/VecIndex.h"
 
-#include <src/core/knowhere/knowhere/index/vector_index/IndexIVFSQHybrid.h>
-#include <src/scheduler/Utils.h>
 #include <stdexcept>
 #include <utility>
 #include <vector>
