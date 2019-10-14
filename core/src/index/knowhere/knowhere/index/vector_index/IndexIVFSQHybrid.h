@@ -19,6 +19,7 @@
 
 #include <faiss/index_io.h>
 #include <memory>
+#include <utility>
 
 #include "IndexGPUIVFSQ.h"
 #include "Quantizer.h"
@@ -60,8 +61,11 @@ class IVFSQHybrid : public GPUIVFSQ {
     void
     UnsetQuantizer();
 
-    void
+    VectorIndexPtr
     LoadData(const knowhere::QuantizerPtr& q, const Config& conf);
+
+    std::pair<VectorIndexPtr, QuantizerPtr>
+    CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& config);
 
     IndexModelPtr
     Train(const DatasetPtr& dataset, const Config& config) override;

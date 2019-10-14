@@ -17,31 +17,47 @@
 
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
-#include <utility>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
-#include "IndexGPUIVF.h"
+namespace milvus {
+namespace scheduler {
 
-namespace knowhere {
-
-class GPUIVFSQ : public GPUIVF {
+class BuildMgr {
  public:
-    explicit GPUIVFSQ(const int& device_id) : GPUIVF(device_id) {
+    explicit BuildMgr(int64_t numoftasks) : numoftasks_(numoftasks) {
     }
 
-    explicit GPUIVFSQ(std::shared_ptr<faiss::Index> index, const int64_t& device_id, ResPtr& resource)
-        : GPUIVF(std::move(index), device_id, resource) {
-    }
-
-    IndexModelPtr
-    Train(const DatasetPtr& dataset, const Config& config) override;
-
-    VectorIndexPtr
-    CopyGpuToCpu(const Config& config) override;
-
- protected:
+ public:
     void
-    search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) override;
+    Put() {
+        ++numoftasks_;
+    }
+
+    void
+    take() {
+        --numoftasks_;
+    }
+
+    int64_t
+    numoftasks() {
+        return (int64_t)numoftasks_;
+    }
+
+ private:
+    std::atomic_long numoftasks_;
 };
 
-}  // namespace knowhere
+using BuildMgrPtr = std::shared_ptr<BuildMgr>;
+
+}  // namespace scheduler
+}  // namespace milvus

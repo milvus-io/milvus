@@ -297,6 +297,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 
+#ifdef CUSTOMIZATION
     //test FAISS_IVFSQ8H optimizer
     index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
     db_->CreateIndex(TABLE_NAME, index); // wait until build index finish
@@ -314,9 +315,7 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
         ASSERT_TRUE(stat.ok());
     }
-
-
-    // TODO(lxj): add groundTruth assert
+#endif
 }
 
 TEST_F(DBTest, PRELOADTABLE_TEST) {
