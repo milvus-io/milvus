@@ -1,9 +1,9 @@
 # CLion generated files
-cpp/cmake-build-debug/
-cpp/cmake-build-release/
-cpp/cmake_build
-cpp/.idea/
-cpp/thirdparty/knowhere_build
+core/cmake-build-debug/
+core/cmake-build-release/
+core/cmake_build
+core/.idea/
+core/thirdparty/knowhere_build
 
 .idea/
 .ycm_extra_conf.py
