@@ -423,8 +423,8 @@ InsertTask::OnExecute() {
             return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
         }
 
-        if (!record_ids_->vector_id_array().empty()) {
-            if (record_ids_->vector_id_array().size() != insert_param_->row_record_array_size()) {
+        if (!insert_param_->row_id_array().empty()) {
+            if (insert_param_->row_id_array().size() != insert_param_->row_record_array_size()) {
                 return Status(SERVER_ILLEGAL_VECTOR_ID, "Size of vector ids is not equal to row record array size");
             }
         }
