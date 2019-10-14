@@ -1,1 +1,0 @@
-pytest -vv --disable-warnings
