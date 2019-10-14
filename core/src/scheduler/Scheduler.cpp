@@ -97,7 +97,7 @@ void
 Scheduler::OnLoadCompleted(const EventPtr& event) {
     auto load_completed_event = std::static_pointer_cast<LoadCompletedEvent>(event);
     if (auto resource = event->resource_.lock()) {
-        resource->WakeupExecutor();
+        //        resource->WakeupExecutor();
 
         auto task_table_type = load_completed_event->task_table_item_->task->label()->Type();
         switch (task_table_type) {
