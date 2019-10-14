@@ -1088,7 +1088,7 @@ MySQLMetaImpl::FilesToIndex(TableFilesSchema& files) {
 }
 
 Status
-MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& partition,
+MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
                              DatePartionedTableFilesSchema& files) {
     files.clear();
 
@@ -1108,9 +1108,9 @@ MySQLMetaImpl::FilesToSearch(const std::string& table_id, const std::vector<size
                 << META_TABLEFILES << " "
                 << "WHERE table_id = " << mysqlpp::quote << table_id;
 
-            if (!partition.empty()) {
+            if (!dates.empty()) {
                 std::stringstream partitionListSS;
-                for (auto& date : partition) {
+                for (auto& date : dates) {
                     partitionListSS << std::to_string(date) << ", ";
                 }
                 std::string partitionListStr = partitionListSS.str();
