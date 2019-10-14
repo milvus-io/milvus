@@ -1,7 +1,7 @@
 container('milvus-build-env') {
     timeout(time: 5, unit: 'MINUTES') {
         dir ("milvus_engine") {
-            dir ("cpp") {
+            dir ("core") {
                 gitlabCommitStatus(name: 'Packaged Engine') {
                     if (fileExists('milvus')) {
                         try {
