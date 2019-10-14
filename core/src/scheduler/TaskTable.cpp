@@ -18,6 +18,7 @@
 #include "scheduler/TaskTable.h"
 #include "Utils.h"
 #include "event/TaskTableUpdatedEvent.h"
+#include "scheduler/SchedInst.h"
 #include "utils/Log.h"
 
 #include <ctime>
@@ -164,6 +165,13 @@ TaskTable::PickToLoad(uint64_t limit) {
         if (not table_[j]) {
             SERVER_LOG_WARNING << "table[" << j << "] is nullptr";
         }
+
+        if (table_[j]->task->path().Current() == "cpu") {
+            if (table_[j]->task->Type() == TaskType::BuildIndexTask && BuildMgrInst::GetInstance()->numoftasks() < 1) {
+                return std::vector<uint64_t>();
+            }
+        }
+
         if (table_[j]->state == TaskTableItemState::LOADED) {
             ++count;
             if (count > 2)
@@ -177,9 +185,21 @@ TaskTable::PickToLoad(uint64_t limit) {
         if (not cross && table_[i]->IsFinish()) {
             last_finish_ = i;
         } else if (table_[i]->state == TaskTableItemState::START) {
-            cross = true;
-            indexes.push_back(i);
-            ++count;
+            auto task = table_[i]->task;
+            if (task->Type() == TaskType::BuildIndexTask && task->path().Current() == "cpu") {
+                if (BuildMgrInst::GetInstance()->numoftasks() == 0) {
+                    break;
+                } else {
+                    cross = true;
+                    indexes.push_back(i);
+                    ++count;
+                    BuildMgrInst::GetInstance()->take();
+                }
+            } else {
+                cross = true;
+                indexes.push_back(i);
+                ++count;
+            }
         }
     }
     return indexes;

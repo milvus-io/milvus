@@ -315,24 +315,40 @@ IVFHybridIndex::UnsetQuantizer() {
     return Status::OK();
 }
 
-Status
+VecIndexPtr
 IVFHybridIndex::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
     try {
         // TODO(linxj): Hardcode here
         if (auto new_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
-            new_idx->LoadData(q, conf);
+            return std::make_shared<IVFHybridIndex>(new_idx->LoadData(q, conf), type);
         } else {
             WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
-            return Status(KNOWHERE_ERROR, "not support");
         }
     } catch (knowhere::KnowhereException& e) {
         WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_UNEXPECTED_ERROR, e.what());
     } catch (std::exception& e) {
         WRAPPER_LOG_ERROR << e.what();
-        return Status(KNOWHERE_ERROR, e.what());
     }
-    return Status::OK();
+    return nullptr;
+}
+
+std::pair<VecIndexPtr, knowhere::QuantizerPtr>
+IVFHybridIndex::CopyToGpuWithQuantizer(const int64_t& device_id, const Config& cfg) {
+    try {
+        // TODO(linxj): Hardcode here
+        if (auto hybrid_idx = std::dynamic_pointer_cast<knowhere::IVFSQHybrid>(index_)) {
+            auto pair = hybrid_idx->CopyCpuToGpuWithQuantizer(device_id, cfg);
+            auto new_idx = std::make_shared<IVFHybridIndex>(pair.first, type);
+            return std::make_pair(new_idx, pair.second);
+        } else {
+            WRAPPER_LOG_ERROR << "Hybrid mode not support for index type: " << int(type);
+        }
+    } catch (knowhere::KnowhereException& e) {
+        WRAPPER_LOG_ERROR << e.what();
+    } catch (std::exception& e) {
+        WRAPPER_LOG_ERROR << e.what();
+    }
+    return std::make_pair(nullptr, nullptr);
 }
 
 }  // namespace engine
