@@ -41,12 +41,21 @@ class Path {
     }
 
     std::string
+    Current() {
+        if (!path_.empty() && path_.size() > index_) {
+            return path_[index_];
+        } else {
+            return "";
+        }
+    }
+
+    std::string
     Next() {
         if (index_ > 0 && !path_.empty()) {
             --index_;
             return path_[index_];
         } else {
-            return nullptr;
+            return "";
         }
     }
 

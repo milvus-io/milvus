@@ -19,9 +19,11 @@
 #include "SchedInst.h"
 #include "TaskCreator.h"
 #include "optimizer/Optimizer.h"
+#include "scheduler/Algorithm.h"
+#include "scheduler/optimizer/Optimizer.h"
+#include "scheduler/tasklabel/SpecResLabel.h"
 #include "task/Task.h"
 
-#include <src/scheduler/optimizer/Optimizer.h>
 #include <utility>
 
 namespace milvus {
@@ -73,6 +75,10 @@ JobMgr::worker_function() {
             OptimizerInst::GetInstance()->Run(task);
         }
 
+        for (auto& task : tasks) {
+            calculate_path(task);
+        }
+
         // disk resources NEVER be empty.
         if (auto disk = res_mgr_->GetDiskResources()[0].lock()) {
             for (auto& task : tasks) {
@@ -85,6 +91,24 @@ JobMgr::worker_function() {
 std::vector<TaskPtr>
 JobMgr::build_task(const JobPtr& job) {
     return TaskCreator::Create(job);
+}
+
+void
+JobMgr::calculate_path(const TaskPtr& task) {
+    if (task->type_ != TaskType::SearchTask) {
+        return;
+    }
+
+    if (task->label()->Type() != TaskLabelType::SPECIFIED_RESOURCE) {
+        return;
+    }
+
+    std::vector<std::string> path;
+    auto spec_label = std::static_pointer_cast<SpecResLabel>(task->label());
+    auto src = res_mgr_->GetDiskResources()[0];
+    auto dest = spec_label->resource();
+    ShortestPath(src.lock(), dest.lock(), res_mgr_, path);
+    task->path() = Path(path, path.size() - 1);
 }
 
 }  // namespace scheduler

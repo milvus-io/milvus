@@ -31,6 +31,7 @@
 #include "wrapper/ConfAdapter.h"
 #include "wrapper/ConfAdapterMgr.h"
 
+#include <src/core/knowhere/knowhere/index/vector_index/IndexIVFSQHybrid.h>
 #include <src/scheduler/Utils.h>
 #include <stdexcept>
 #include <utility>
@@ -245,7 +246,31 @@ ExecutionEngineImpl::Load(bool to_cache) {
 }
 
 Status
-ExecutionEngineImpl::CopyToGpu(uint64_t device_id) {
+ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
+    if (hybrid) {
+        auto key = location_ + ".quantizer";
+        auto quantizer =
+            std::static_pointer_cast<CachedQuantizer>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(key));
+
+        auto conf = std::make_shared<knowhere::QuantizerCfg>();
+        conf->gpu_id = device_id;
+
+        if (quantizer) {
+            // cache hit
+            conf->mode = 2;
+            auto new_index = index_->LoadData(quantizer->Data(), conf);
+            index_ = new_index;
+        } else {
+            auto pair = index_->CopyToGpuWithQuantizer(device_id);
+            index_ = pair.first;
+
+            // cache
+            auto cached_quantizer = std::make_shared<CachedQuantizer>(pair.second);
+            cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(key, cached_quantizer);
+        }
+        return Status::OK();
+    }
+
     auto index = std::static_pointer_cast<VecIndex>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(location_));
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
@@ -389,8 +414,8 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 }
 
 Status
-ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances,
-                            int64_t* labels) const {
+ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
+                            bool hybrid) const {
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");
@@ -406,11 +431,15 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
     auto adapter = AdapterMgr::GetInstance().GetAdapter(index_->GetType());
     auto conf = adapter->MatchSearch(temp_conf, index_->GetType());
 
-    HybridLoad();
+    if (hybrid) {
+        HybridLoad();
+    }
 
     auto status = index_->Search(n, data, distances, labels, conf);
 
-    HybridUnset();
+    if (hybrid) {
+        HybridUnset();
+    }
 
     if (!status.ok()) {
         ENGINE_LOG_ERROR << "Search error";
