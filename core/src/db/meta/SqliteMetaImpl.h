@@ -89,7 +89,7 @@ class SqliteMetaImpl : public Meta {
     UpdateTableFiles(TableFilesSchema& files) override;
 
     Status
-    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& partition,
+    FilesToSearch(const std::string& table_id, const std::vector<size_t>& ids, const DatesT& dates,
                   DatePartionedTableFilesSchema& files) override;
 
     Status

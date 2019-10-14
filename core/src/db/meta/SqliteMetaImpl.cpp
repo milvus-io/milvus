@@ -159,7 +159,7 @@ SqliteMetaImpl::Initialize() {
 Status
 SqliteMetaImpl::DropPartitionsByDates(const std::string &table_id,
                                       const DatesT &dates) {
-    if (dates.size() == 0) {
+    if (dates.empty()) {
         return Status::OK();
     }
 
@@ -171,16 +171,35 @@ SqliteMetaImpl::DropPartitionsByDates(const std::string &table_id,
     }
 
     try {
+        //sqlite_orm has a bug, 'in' statement cannot handle too many elements
+        //so we split one query into multi-queries, this is a work-around!!
+        std::vector<DatesT> split_dates;
+        split_dates.push_back(DatesT());
+        const size_t batch_size = 30;
+        for(DateT date : dates) {
+            DatesT& last_batch = *split_dates.rbegin();
+            last_batch.push_back(date);
+            if(last_batch.size() > batch_size) {
+                split_dates.push_back(DatesT());
+            }
+        }
+
         //multi-threads call sqlite update may get exception('bad logic', etc), so we add a lock here
         std::lock_guard<std::mutex> meta_lock(meta_mutex_);
 
-        ConnectorPtr->update_all(
-            set(
-                c(&TableFileSchema::file_type_) = (int) TableFileSchema::TO_DELETE,
-                c(&TableFileSchema::updated_time_) = utils::GetMicroSecTimeStamp()),
-            where(
-                c(&TableFileSchema::table_id_) == table_id and
-                    in(&TableFileSchema::date_, dates)));
+        for(auto& batch_dates : split_dates) {
+            if(batch_dates.empty()) {
+                continue;
+            }
+
+            ConnectorPtr->update_all(
+                set(
+                    c(&TableFileSchema::file_type_) = (int)TableFileSchema::TO_DELETE,
+                    c(&TableFileSchema::updated_time_) = utils::GetMicroSecTimeStamp()),
+                where(
+                    c(&TableFileSchema::table_id_) == table_id and
+                    in(&TableFileSchema::date_, batch_dates)));
+        }
 
         ENGINE_LOG_DEBUG << "Successfully drop partitions, table id = " << table_schema.table_id_;
     } catch (std::exception &e) {
@@ -673,7 +692,7 @@ SqliteMetaImpl::FilesToIndex(TableFilesSchema &files) {
 Status
 SqliteMetaImpl::FilesToSearch(const std::string &table_id,
                               const std::vector<size_t> &ids,
-                              const DatesT &partition,
+                              const DatesT &dates,
                               DatePartionedTableFilesSchema &files) {
     files.clear();
     server::MetricCollector metric;
@@ -702,23 +721,54 @@ SqliteMetaImpl::FilesToSearch(const std::string &table_id,
         auto status = DescribeTable(table_schema);
         if (!status.ok()) { return status; }
 
+        //sqlite_orm has a bug, 'in' statement cannot handle too many elements
+        //so we split one query into multi-queries, this is a work-around!!
+        std::vector<DatesT> split_dates;
+        split_dates.push_back(DatesT());
+        const size_t batch_size = 30;
+        for(DateT date : dates) {
+            DatesT& last_batch = *split_dates.rbegin();
+            last_batch.push_back(date);
+            if(last_batch.size() > batch_size) {
+                split_dates.push_back(DatesT());
+            }
+        }
+
+        //perform query
         decltype(ConnectorPtr->select(select_columns)) selected;
-        if (partition.empty() && ids.empty()) {
+        if (dates.empty() && ids.empty()) {
             auto filter = where(match_tableid and match_type);
             selected = ConnectorPtr->select(select_columns, filter);
-        } else if (partition.empty() && !ids.empty()) {
+        } else if (dates.empty() && !ids.empty()) {
             auto match_fileid = in(&TableFileSchema::id_, ids);
             auto filter = where(match_tableid and match_fileid and match_type);
             selected = ConnectorPtr->select(select_columns, filter);
-        } else if (!partition.empty() && ids.empty()) {
-            auto match_date = in(&TableFileSchema::date_, partition);
-            auto filter = where(match_tableid and match_date and match_type);
-            selected = ConnectorPtr->select(select_columns, filter);
-        } else if (!partition.empty() && !ids.empty()) {
-            auto match_fileid = in(&TableFileSchema::id_, ids);
-            auto match_date = in(&TableFileSchema::date_, partition);
-            auto filter = where(match_tableid and match_fileid and match_date and match_type);
-            selected = ConnectorPtr->select(select_columns, filter);
+        } else if (!dates.empty() && ids.empty()) {
+            for(auto& batch_dates : split_dates) {
+                if(batch_dates.empty()) {
+                    continue;
+                }
+                auto match_date = in(&TableFileSchema::date_, batch_dates);
+                auto filter = where(match_tableid and match_date and match_type);
+                auto batch_selected = ConnectorPtr->select(select_columns, filter);
+                for (auto &file : batch_selected) {
+                    selected.push_back(file);
+                }
+            }
+
+        } else if (!dates.empty() && !ids.empty()) {
+            for(auto& batch_dates : split_dates) {
+                if(batch_dates.empty()) {
+                    continue;
+                }
+                auto match_fileid = in(&TableFileSchema::id_, ids);
+                auto match_date = in(&TableFileSchema::date_, batch_dates);
+                auto filter = where(match_tableid and match_fileid and match_date and match_type);
+                auto batch_selected = ConnectorPtr->select(select_columns, filter);
+                for (auto &file : batch_selected) {
+                    selected.push_back(file);
+                }
+            }
         }
 
         Status ret;
