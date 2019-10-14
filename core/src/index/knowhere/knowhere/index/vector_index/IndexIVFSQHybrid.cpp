@@ -256,8 +256,14 @@ void
 IVFSQHybrid::UnsetQuantizer() {
 }
 
-void
+VectorIndexPtr
 IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
+    return nullptr;
+}
+
+std::pair<VectorIndexPtr, QuantizerPtr>
+IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& config) {
+    KNOWHERE_THROW_MSG("Not yet implemented");
 }
 
 IndexModelPtr

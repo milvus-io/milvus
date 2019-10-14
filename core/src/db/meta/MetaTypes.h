@@ -41,11 +41,6 @@ using DateT = int;
 const DateT EmptyDate = -1;
 using DatesT = std::vector<DateT>;
 
-struct DateRange {
-    DateT start_date_ = 0x1 << 32;
-    DateT end_date_ = 0;
-};
-
 struct TableSchema {
     typedef enum {
         NORMAL,
