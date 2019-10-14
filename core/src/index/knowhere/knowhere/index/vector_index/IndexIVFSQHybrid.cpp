@@ -27,6 +27,7 @@
 namespace knowhere {
 
 #ifdef CUSTOMIZATION
+
 IndexModelPtr
 IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);
@@ -91,7 +92,7 @@ IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
 
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, &index_composition, &option);
 
-        std::shared_ptr<faiss::Index> device_index = std::shared_ptr<faiss::Index>(gpu_index);;
+        std::shared_ptr<faiss::Index> device_index = std::shared_ptr<faiss::Index>(gpu_index);
         auto new_idx = std::make_shared<IVFSQHybrid>(device_index, device_id, res);
         return new_idx;
     } else {
