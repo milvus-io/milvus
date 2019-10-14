@@ -15,44 +15,46 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <faiss/AutoTune.h>
+#include <faiss/AuxIndexStructures.h>
+#include <faiss/IVFlib.h>
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVF.h>
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/IndexIVFPQ.h>
-#include <faiss/AutoTune.h>
-#include <faiss/IVFlib.h>
-#include <faiss/AuxIndexStructures.h>
-#include <faiss/index_io.h>
 #include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/index_io.h>
+#include <memory>
+#include <utility>
+#include <vector>
 
-
-#include "knowhere/common/Exception.h"
 #include "knowhere/adapter/VectorAdapter.h"
-#include "IndexIVF.h"
-#include "IndexGPUIVF.h"
+#include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/IndexGPUIVF.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
 
-
-namespace zilliz {
 namespace knowhere {
 
-
-IndexModelPtr IVF::Train(const DatasetPtr &dataset, const Config &config) {
-    auto nlist = config["nlist"].as<size_t>();
-    auto metric_type = config["metric_type"].as_string() == "L2" ?
-                       faiss::METRIC_L2 : faiss::METRIC_INNER_PRODUCT;
+IndexModelPtr
+IVF::Train(const DatasetPtr& dataset, const Config& config) {
+    auto build_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    if (build_cfg != nullptr) {
+        build_cfg->CheckValid();  // throw exception
+    }
 
     GETTENSOR(dataset)
 
-    faiss::Index *coarse_quantizer = new faiss::IndexFlatL2(dim);
-    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, nlist, metric_type);
-    index->train(rows, (float *) p_data);
+    faiss::Index* coarse_quantizer = new faiss::IndexFlatL2(dim);
+    auto index = std::make_shared<faiss::IndexIVFFlat>(coarse_quantizer, dim, build_cfg->nlist,
+                                                       GetMetricType(build_cfg->metric_type));
+    index->train(rows, (float*)p_data);
 
-    // TODO: override here. train return model or not.
+    // TODO(linxj): override here. train return model or not.
     return std::make_shared<IVFIndexModel>(index);
 }
 
-
-void IVF::Add(const DatasetPtr &dataset, const Config &config) {
+void
+IVF::Add(const DatasetPtr& dataset, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -60,13 +62,13 @@ void IVF::Add(const DatasetPtr &dataset, const Config &config) {
     std::lock_guard<std::mutex> lk(mutex_);
     GETTENSOR(dataset)
 
-    // TODO: magic here.
     auto array = dataset->array()[0];
-    auto p_ids = array->data()->GetValues<long>(1, 0);
-    index_->add_with_ids(rows, (float *) p_data, p_ids);
+    auto p_ids = array->data()->GetValues<int64_t>(1, 0);
+    index_->add_with_ids(rows, (float*)p_data, p_ids);
 }
 
-void IVF::AddWithoutIds(const DatasetPtr &dataset, const Config &config) {
+void
+IVF::AddWithoutIds(const DatasetPtr& dataset, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -74,10 +76,11 @@ void IVF::AddWithoutIds(const DatasetPtr &dataset, const Config &config) {
     std::lock_guard<std::mutex> lk(mutex_);
     GETTENSOR(dataset)
 
-    index_->add(rows, (float *) p_data);
+    index_->add(rows, (float*)p_data);
 }
 
-BinarySet IVF::Serialize() {
+BinarySet
+IVF::Serialize() {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -87,38 +90,47 @@ BinarySet IVF::Serialize() {
     return SerializeImpl();
 }
 
-void IVF::Load(const BinarySet &index_binary) {
+void
+IVF::Load(const BinarySet& index_binary) {
     std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(index_binary);
 }
 
-DatasetPtr IVF::Search(const DatasetPtr &dataset, const Config &config) {
+DatasetPtr
+IVF::Search(const DatasetPtr& dataset, const Config& config) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
 
-    auto k = config["k"].as<size_t>();
+    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    if (search_cfg != nullptr) {
+        search_cfg->CheckValid();  // throw exception
+    }
 
     GETTENSOR(dataset)
 
-    // TODO(linxj): handle malloc exception
-    auto elems = rows * k;
-    auto res_ids = (int64_t *) malloc(sizeof(int64_t) * elems);
-    auto res_dis = (float *) malloc(sizeof(float) * elems);
+    auto elems = rows * search_cfg->k;
+    auto res_ids = (int64_t*)malloc(sizeof(int64_t) * elems);
+    auto res_dis = (float*)malloc(sizeof(float) * elems);
 
-    search_impl(rows, (float*) p_data, k, res_dis, res_ids, config);
-    //faiss::ivflib::search_with_parameters(index_.get(),
-    //                                      rows,
-    //                                      (float *) p_data,
-    //                                      k,
-    //                                      res_dis,
-    //                                      res_ids,
-    //                                      params.get());
+    search_impl(rows, (float*)p_data, search_cfg->k, res_dis, res_ids, config);
 
-    auto id_buf = MakeMutableBufferSmart((uint8_t *) res_ids, sizeof(int64_t) * elems);
-    auto dist_buf = MakeMutableBufferSmart((uint8_t *) res_dis, sizeof(float) * elems);
+    //    std::stringstream ss_res_id, ss_res_dist;
+    //    for (int i = 0; i < 10; ++i) {
+    //        printf("%llu", res_ids[i]);
+    //        printf("\n");
+    //        printf("%.6f", res_dis[i]);
+    //        printf("\n");
+    //        ss_res_id << res_ids[i] << " ";
+    //        ss_res_dist << res_dis[i] << " ";
+    //    }
+    //    std::cout << std::endl << "after search: " << std::endl;
+    //    std::cout << ss_res_id.str() << std::endl;
+    //    std::cout << ss_res_dist.str() << std::endl << std::endl;
 
-    // TODO: magic
+    auto id_buf = MakeMutableBufferSmart((uint8_t*)res_ids, sizeof(int64_t) * elems);
+    auto dist_buf = MakeMutableBufferSmart((uint8_t*)res_dis, sizeof(float) * elems);
+
     std::vector<BufferPtr> id_bufs{nullptr, id_buf};
     std::vector<BufferPtr> dist_bufs{nullptr, dist_buf};
 
@@ -135,7 +147,8 @@ DatasetPtr IVF::Search(const DatasetPtr &dataset, const Config &config) {
     return std::make_shared<Dataset>(array, nullptr);
 }
 
-void IVF::set_index_model(IndexModelPtr model) {
+void
+IVF::set_index_model(IndexModelPtr model) {
     std::lock_guard<std::mutex> lk(mutex_);
 
     auto rel_model = std::static_pointer_cast<IVFIndexModel>(model);
@@ -144,23 +157,29 @@ void IVF::set_index_model(IndexModelPtr model) {
     index_.reset(faiss::clone_index(rel_model->index_.get()));
 }
 
-std::shared_ptr<faiss::IVFSearchParameters> IVF::GenParams(const Config &config) {
-    auto params = std::make_shared<faiss::IVFPQSearchParameters>();
-    params->nprobe = config.get_with_default("nprobe", size_t(1));
-    //params->max_codes = config.get_with_default("max_codes", size_t(0));
+std::shared_ptr<faiss::IVFSearchParameters>
+IVF::GenParams(const Config& config) {
+    auto params = std::make_shared<faiss::IVFSearchParameters>();
+
+    auto search_cfg = std::dynamic_pointer_cast<IVFCfg>(config);
+    params->nprobe = search_cfg->nprobe;
+    // params->max_codes = config.get_with_default("max_codes", size_t(0));
 
     return params;
 }
 
-int64_t IVF::Count() {
+int64_t
+IVF::Count() {
     return index_->ntotal;
 }
 
-int64_t IVF::Dimension() {
+int64_t
+IVF::Dimension() {
     return index_->d;
 }
 
-void IVF::GenGraph(const int64_t &k, Graph &graph, const DatasetPtr &dataset, const Config &config) {
+void
+IVF::GenGraph(const int64_t& k, Graph& graph, const DatasetPtr& dataset, const Config& config) {
     GETTENSOR(dataset)
 
     auto ntotal = Count();
@@ -176,7 +195,7 @@ void IVF::GenGraph(const int64_t &k, Graph &graph, const DatasetPtr &dataset, co
     for (int i = 0; i < total_search_count; ++i) {
         auto b_size = i == total_search_count - 1 && tail_batch_size != 0 ? tail_batch_size : batch_size;
 
-        auto &res = res_vec[i];
+        auto& res = res_vec[i];
         res.resize(k * b_size);
 
         auto xq = p_data + batch_size * dim * i;
@@ -184,7 +203,7 @@ void IVF::GenGraph(const int64_t &k, Graph &graph, const DatasetPtr &dataset, co
 
         int tmp = 0;
         for (int j = 0; j < b_size; ++j) {
-            auto &node = graph[batch_size * i + j];
+            auto& node = graph[batch_size * i + j];
             node.resize(k);
             for (int m = 0; m < k && tmp < k * b_size; ++m, ++tmp) {
                 // TODO(linxj): avoid memcopy here.
@@ -194,18 +213,15 @@ void IVF::GenGraph(const int64_t &k, Graph &graph, const DatasetPtr &dataset, co
     }
 }
 
-void IVF::search_impl(int64_t n,
-                      const float *data,
-                      int64_t k,
-                      float *distances,
-                      int64_t *labels,
-                      const Config &cfg) {
+void
+IVF::search_impl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& cfg) {
     auto params = GenParams(cfg);
-    faiss::ivflib::search_with_parameters(index_.get(), n, (float *) data, k, distances, labels, params.get());
+    faiss::ivflib::search_with_parameters(index_.get(), n, (float*)data, k, distances, labels, params.get());
 }
 
-VectorIndexPtr IVF::CopyCpuToGpu(const int64_t& device_id, const Config &config) {
-    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)){
+VectorIndexPtr
+IVF::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
+    if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get());
 
@@ -217,7 +233,8 @@ VectorIndexPtr IVF::CopyCpuToGpu(const int64_t& device_id, const Config &config)
     }
 }
 
-VectorIndexPtr IVF::Clone() {
+VectorIndexPtr
+IVF::Clone() {
     std::lock_guard<std::mutex> lk(mutex_);
 
     auto clone_index = faiss::clone_index(index_.get());
@@ -226,21 +243,24 @@ VectorIndexPtr IVF::Clone() {
     return Clone_impl(new_index);
 }
 
-VectorIndexPtr IVF::Clone_impl(const std::shared_ptr<faiss::Index> &index) {
+VectorIndexPtr
+IVF::Clone_impl(const std::shared_ptr<faiss::Index>& index) {
     return std::make_shared<IVF>(index);
 }
 
-void IVF::Seal() {
+void
+IVF::Seal() {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
     SealImpl();
 }
 
+IVFIndexModel::IVFIndexModel(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {
+}
 
-IVFIndexModel::IVFIndexModel(std::shared_ptr<faiss::Index> index) : FaissBaseIndex(std::move(index)) {}
-
-BinarySet IVFIndexModel::Serialize() {
+BinarySet
+IVFIndexModel::Serialize() {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("indexmodel not initialize or trained");
     }
@@ -248,18 +268,15 @@ BinarySet IVFIndexModel::Serialize() {
     return SerializeImpl();
 }
 
-void IVFIndexModel::Load(const BinarySet &binary_set) {
+void
+IVFIndexModel::Load(const BinarySet& binary_set) {
     std::lock_guard<std::mutex> lk(mutex_);
     LoadImpl(binary_set);
 }
 
-void IVFIndexModel::SealImpl() {
+void
+IVFIndexModel::SealImpl() {
     // do nothing
 }
 
-
-
-
-
-}
-}
+}  // namespace knowhere

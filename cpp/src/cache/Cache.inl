@@ -17,7 +17,7 @@
 
 
 
-namespace zilliz {
+
 namespace milvus {
 namespace cache {
 
@@ -33,29 +33,33 @@ Cache<ItemObj>::Cache(int64_t capacity, uint64_t cache_max_count)
 }
 
 template<typename ItemObj>
-void Cache<ItemObj>::set_capacity(int64_t capacity) {
-    if(capacity > 0) {
+void
+Cache<ItemObj>::set_capacity(int64_t capacity) {
+    if (capacity > 0) {
         capacity_ = capacity;
         free_memory();
     }
 }
 
 template<typename ItemObj>
-size_t Cache<ItemObj>::size() const {
+size_t
+Cache<ItemObj>::size() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return lru_.size();
 }
 
 template<typename ItemObj>
-bool Cache<ItemObj>::exists(const std::string& key) {
+bool
+Cache<ItemObj>::exists(const std::string &key) {
     std::lock_guard<std::mutex> lock(mutex_);
     return lru_.exists(key);
 }
 
 template<typename ItemObj>
-ItemObj Cache<ItemObj>::get(const std::string& key) {
+ItemObj
+Cache<ItemObj>::get(const std::string &key) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if(!lru_.exists(key)){
+    if (!lru_.exists(key)) {
         return nullptr;
     }
 
@@ -63,8 +67,9 @@ ItemObj Cache<ItemObj>::get(const std::string& key) {
 }
 
 template<typename ItemObj>
-void Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
-    if(item == nullptr) {
+void
+Cache<ItemObj>::insert(const std::string &key, const ItemObj &item) {
+    if (item == nullptr) {
         return;
     }
 
@@ -80,12 +85,12 @@ void Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
 
         //if key already exist, subtract old item size
         if (lru_.exists(key)) {
-            const ItemObj& old_item = lru_.get(key);
-            usage_ -= old_item->size();
+            const ItemObj &old_item = lru_.get(key);
+            usage_ -= old_item->Size();
         }
 
         //plus new item size
-        usage_ += item->size();
+        usage_ += item->Size();
     }
 
     //if usage exceed capacity, free some items
@@ -101,28 +106,30 @@ void Cache<ItemObj>::insert(const std::string& key, const ItemObj& item) {
         std::lock_guard<std::mutex> lock(mutex_);
 
         lru_.put(key, item);
-        SERVER_LOG_DEBUG << "Insert " << key << " size:" << item->size()
+        SERVER_LOG_DEBUG << "Insert " << key << " size:" << item->Size()
                          << " bytes into cache, usage: " << usage_ << " bytes";
     }
 }
 
 template<typename ItemObj>
-void Cache<ItemObj>::erase(const std::string& key) {
+void
+Cache<ItemObj>::erase(const std::string &key) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if(!lru_.exists(key)){
+    if (!lru_.exists(key)) {
         return;
     }
 
-    const ItemObj& old_item = lru_.get(key);
-    usage_ -= old_item->size();
+    const ItemObj &old_item = lru_.get(key);
+    usage_ -= old_item->Size();
 
-    SERVER_LOG_DEBUG << "Erase " << key << " size: " << old_item->size();
+    SERVER_LOG_DEBUG << "Erase " << key << " size: " << old_item->Size();
 
     lru_.erase(key);
 }
 
 template<typename ItemObj>
-void Cache<ItemObj>::clear() {
+void
+Cache<ItemObj>::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     lru_.clear();
     usage_ = 0;
@@ -131,12 +138,13 @@ void Cache<ItemObj>::clear() {
 
 /* free memory space when CACHE occupation exceed its capacity */
 template<typename ItemObj>
-void Cache<ItemObj>::free_memory() {
+void
+Cache<ItemObj>::free_memory() {
     if (usage_ <= capacity_) return;
 
     int64_t threshhold = capacity_ * freemem_percent_;
     int64_t delta_size = usage_ - threshhold;
-    if(delta_size <= 0) {
+    if (delta_size <= 0) {
         delta_size = 1;//ensure at least one item erased
     }
 
@@ -148,18 +156,18 @@ void Cache<ItemObj>::free_memory() {
 
         auto it = lru_.rbegin();
         while (it != lru_.rend() && released_size < delta_size) {
-            auto& key = it->first;
-            auto& obj_ptr = it->second;
+            auto &key = it->first;
+            auto &obj_ptr = it->second;
 
             key_array.emplace(key);
-            released_size += obj_ptr->size();
+            released_size += obj_ptr->Size();
             ++it;
         }
     }
 
     SERVER_LOG_DEBUG << "to be released memory size: " << released_size;
 
-    for (auto& key : key_array) {
+    for (auto &key : key_array) {
         erase(key);
     }
 
@@ -167,7 +175,8 @@ void Cache<ItemObj>::free_memory() {
 }
 
 template<typename ItemObj>
-void Cache<ItemObj>::print() {
+void
+Cache<ItemObj>::print() {
     size_t cache_count = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -179,7 +188,7 @@ void Cache<ItemObj>::print() {
     SERVER_LOG_DEBUG << "[Cache capacity]: " << capacity_ << " bytes";
 }
 
-}   // cache
-}   // milvus
-}   // zilliz
+} // namespace cache
+} // namespace milvus
+
 

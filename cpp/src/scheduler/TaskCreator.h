@@ -16,42 +16,43 @@
 // under the License.
 #pragma once
 
-#include <string>
-#include <vector>
-#include <list>
-#include <queue>
-#include <deque>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <deque>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
+#include "job/DeleteJob.h"
 #include "job/Job.h"
 #include "job/SearchJob.h"
-#include "job/DeleteJob.h"
-#include "task/Task.h"
-#include "task/SearchTask.h"
+#include "task/BuildIndexTask.h"
 #include "task/DeleteTask.h"
+#include "task/SearchTask.h"
+#include "task/Task.h"
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class TaskCreator {
-public:
+ public:
     static std::vector<TaskPtr>
-    Create(const JobPtr &job);
+    Create(const JobPtr& job);
 
-public:
+ public:
     static std::vector<TaskPtr>
-    Create(const SearchJobPtr &job);
+    Create(const SearchJobPtr& job);
 
     static std::vector<TaskPtr>
-    Create(const DeleteJobPtr &job);
+    Create(const DeleteJobPtr& job);
+
+    static std::vector<TaskPtr>
+    Create(const BuildIndexJobPtr& job);
 };
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

@@ -17,37 +17,37 @@
 
 #pragma once
 
-#include <string>
 #include <chrono>
+#include <string>
 
-
-namespace zilliz {
 namespace milvus {
 
 class TimeRecorder {
     using stdclock = std::chrono::high_resolution_clock;
 
-public:
-    TimeRecorder(const std::string &header,
-                 int64_t log_level = 1);
+ public:
+    explicit TimeRecorder(const std::string& header, int64_t log_level = 1);
 
-    ~TimeRecorder();//trace = 0, debug = 1, info = 2, warn = 3, error = 4, critical = 5
+    ~TimeRecorder();  // trace = 0, debug = 1, info = 2, warn = 3, error = 4, critical = 5
 
-    double RecordSection(const std::string &msg);
+    double
+    RecordSection(const std::string& msg);
 
-    double ElapseFromBegin(const std::string &msg);
+    double
+    ElapseFromBegin(const std::string& msg);
 
-    static std::string GetTimeSpanStr(double span);
+    static std::string
+    GetTimeSpanStr(double span);
 
-private:
-    void PrintTimeRecord(const std::string &msg, double span);
+ private:
+    void
+    PrintTimeRecord(const std::string& msg, double span);
 
-private:
+ private:
     std::string header_;
     stdclock::time_point start_;
     stdclock::time_point last_;
     int64_t log_level_;
 };
 
-}
-}
+}  // namespace milvus

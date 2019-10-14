@@ -18,19 +18,18 @@
 #pragma once
 
 #include "Task.h"
-#include "scheduler/job/SearchJob.h"
 #include "scheduler/Definition.h"
+#include "scheduler/job/SearchJob.h"
 
+#include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-// TODO: rewrite
+// TODO(wxyu): rewrite
 class XSearchTask : public Task {
-public:
-    explicit
-    XSearchTask(TableFileSchemaPtr file);
+ public:
+    explicit XSearchTask(TableFileSchemaPtr file, TaskLabelPtr label);
 
     void
     Load(LoadType type, uint8_t device_id) override;
@@ -38,34 +37,24 @@ public:
     void
     Execute() override;
 
-public:
-    static Status ClusterResult(const std::vector<long> &output_ids,
-                                const std::vector<float> &output_distence,
-                                uint64_t nq,
-                                uint64_t topk,
-                                scheduler::ResultSet &result_set);
+ public:
+    static void
+    MergeTopkToResultSet(const std::vector<int64_t>& input_ids, const std::vector<float>& input_distance,
+                         uint64_t input_k, uint64_t nq, uint64_t topk, bool ascending, scheduler::ResultSet& result);
 
-    static Status MergeResult(scheduler::Id2DistanceMap &distance_src,
-                              scheduler::Id2DistanceMap &distance_target,
-                              uint64_t topk,
-                              bool ascending);
+    static void
+    MergeTopkArray(std::vector<int64_t>& tar_ids, std::vector<float>& tar_distance, uint64_t& tar_input_k,
+                   const std::vector<int64_t>& src_ids, const std::vector<float>& src_distance, uint64_t src_input_k,
+                   uint64_t nq, uint64_t topk, bool ascending);
 
-    static Status TopkResult(scheduler::ResultSet &result_src,
-                             uint64_t topk,
-                             bool ascending,
-                             scheduler::ResultSet &result_target);
-
-public:
+ public:
     TableFileSchemaPtr file_;
 
     size_t index_id_ = 0;
     int index_type_ = 0;
     ExecutionEnginePtr index_engine_ = nullptr;
     bool metric_l2 = true;
-
-    static std::mutex merge_mutex_;
 };
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

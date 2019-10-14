@@ -15,17 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "MemTableFile.h"
 #include "VectorSource.h"
 #include "utils/Status.h"
 
+#include <memory>
 #include <mutex>
+#include <string>
+#include <vector>
 
-
-namespace zilliz {
 namespace milvus {
 namespace engine {
 
@@ -33,21 +33,28 @@ class MemTable {
  public:
     using MemTableFileList = std::vector<MemTableFilePtr>;
 
-    MemTable(const std::string &table_id, const meta::MetaPtr &meta, const DBOptions &options);
+    MemTable(const std::string& table_id, const meta::MetaPtr& meta, const DBOptions& options);
 
-    Status Add(VectorSourcePtr &source, IDNumbers &vector_ids);
+    Status
+    Add(VectorSourcePtr& source, IDNumbers& vector_ids);
 
-    void GetCurrentMemTableFile(MemTableFilePtr &mem_table_file);
+    void
+    GetCurrentMemTableFile(MemTableFilePtr& mem_table_file);
 
-    size_t GetTableFileCount();
+    size_t
+    GetTableFileCount();
 
-    Status Serialize();
+    Status
+    Serialize();
 
-    bool Empty();
+    bool
+    Empty();
 
-    const std::string &GetTableId() const;
+    const std::string&
+    GetTableId() const;
 
-    size_t GetCurrentMem();
+    size_t
+    GetCurrentMem();
 
  private:
     const std::string table_id_;
@@ -59,11 +66,9 @@ class MemTable {
     DBOptions options_;
 
     std::mutex mutex_;
-
-}; //MemTable
+};  // MemTable
 
 using MemTablePtr = std::shared_ptr<MemTable>;
 
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace engine
+}  // namespace milvus

@@ -21,19 +21,16 @@
 
 #include <memory>
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-
 class BroadcastLabel : public TaskLabel {
-public:
-    BroadcastLabel() : TaskLabel(TaskLabelType::BROADCAST) {}
+ public:
+    BroadcastLabel() : TaskLabel(TaskLabelType::BROADCAST) {
+    }
 };
 
 using BroadcastLabelPtr = std::shared_ptr<BroadcastLabel>;
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

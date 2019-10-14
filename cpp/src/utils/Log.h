@@ -17,9 +17,8 @@
 
 #pragma once
 
-#include "easylogging++.h"
+#include "utils/easylogging++.h"
 
-namespace zilliz {
 namespace milvus {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -52,5 +51,4 @@ namespace milvus {
 #define WRAPPER_LOG_ERROR LOG(ERROR) << WRAPPER_DOMAIN_NAME
 #define WRAPPER_LOG_FATAL LOG(FATAL) << WRAPPER_DOMAIN_NAME
 
-} // namespace milvus
-} // namespace zilliz
+}  // namespace milvus

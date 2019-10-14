@@ -70,11 +70,11 @@ fi
 for test in `ls ${DIR_UNITTEST}`; do
     echo $test
     case ${test} in
-        db_test)
-            # set run args for db_test
+        test_db)
+            # set run args for test_db
             args="mysql://${MYSQL_USER_NAME}:${MYSQL_PASSWORD}@${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DB_NAME}"
             ;;
-        *_test)
+        *test_*)
             args=""
             ;;
     esac
@@ -101,9 +101,10 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "src/core/cmake_build*" \
     "src/core/thirdparty*" \
     "src/grpc*"\
+    "src/metrics/MetricBase.h"\
     "src/server/Server.cpp"\
     "src/server/DBWrapper.cpp"\
-    "src/server/grpc_impl/GrpcMilvusServer.cpp"\
+    "src/server/grpc_impl/GrpcServer.cpp"\
     "src/utils/easylogging++.h"\
     "src/utils/easylogging++.cc"\
 

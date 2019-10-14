@@ -17,30 +17,33 @@
 
 #pragma once
 
-#include "Event.h"
+#include "scheduler/TaskTable.h"
+#include "scheduler/event/Event.h"
 
+#include <memory>
+#include <string>
+#include <utility>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class FinishTaskEvent : public Event {
-public:
+ public:
     FinishTaskEvent(std::weak_ptr<Resource> resource, TaskTableItemPtr task_table_item)
-        : Event(EventType::FINISH_TASK, std::move(resource)),
-          task_table_item_(std::move(task_table_item)) {}
+        : Event(EventType::FINISH_TASK, std::move(resource)), task_table_item_(std::move(task_table_item)) {
+    }
 
     inline std::string
     Dump() const override {
         return "<FinishTaskEvent>";
     }
 
-    friend std::ostream &operator<<(std::ostream &out, const FinishTaskEvent &event);
+    friend std::ostream&
+    operator<<(std::ostream& out, const FinishTaskEvent& event);
 
-public:
+ public:
     TaskTableItemPtr task_table_item_;
 };
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

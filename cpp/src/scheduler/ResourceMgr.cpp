@@ -16,19 +16,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "ResourceMgr.h"
+#include "scheduler/ResourceMgr.h"
 #include "utils/Log.h"
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-
 void
 ResourceMgr::Start() {
+    if (not check_resource_valid()) {
+        ENGINE_LOG_ERROR << "Resources invalid, cannot start ResourceMgr.";
+        ENGINE_LOG_ERROR << Dump();
+        return;
+    }
+
     std::lock_guard<std::mutex> lck(resources_mutex_);
-    for (auto &resource : resources_) {
+    for (auto& resource : resources_) {
         resource->Start();
     }
     running_ = true;
@@ -46,13 +49,13 @@ ResourceMgr::Stop() {
     worker_thread_.join();
 
     std::lock_guard<std::mutex> lck(resources_mutex_);
-    for (auto &resource : resources_) {
+    for (auto& resource : resources_) {
         resource->Stop();
     }
 }
 
 ResourceWPtr
-ResourceMgr::Add(ResourcePtr &&resource) {
+ResourceMgr::Add(ResourcePtr&& resource) {
     ResourceWPtr ret(resource);
 
     std::lock_guard<std::mutex> lck(resources_mutex_);
@@ -63,8 +66,20 @@ ResourceMgr::Add(ResourcePtr &&resource) {
 
     resource->RegisterSubscriber(std::bind(&ResourceMgr::post_event, this, std::placeholders::_1));
 
-    if (resource->type() == ResourceType::DISK) {
-        disk_resources_.emplace_back(ResourceWPtr(resource));
+    switch (resource->type()) {
+        case ResourceType::DISK: {
+            disk_resources_.emplace_back(ResourceWPtr(resource));
+            break;
+        }
+        case ResourceType::CPU: {
+            cpu_resources_.emplace_back(ResourceWPtr(resource));
+            break;
+        }
+        case ResourceType::GPU: {
+            gpu_resources_.emplace_back(ResourceWPtr(resource));
+            break;
+        }
+        default: { break; }
     }
     resources_.emplace_back(resource);
 
@@ -72,13 +87,13 @@ ResourceMgr::Add(ResourcePtr &&resource) {
 }
 
 bool
-ResourceMgr::Connect(const std::string &name1, const std::string &name2, Connection &connection) {
+ResourceMgr::Connect(const std::string& name1, const std::string& name2, Connection& connection) {
     auto res1 = GetResource(name1);
     auto res2 = GetResource(name2);
     if (res1 && res2) {
         res1->AddNeighbour(std::static_pointer_cast<Node>(res2), connection);
-        // TODO: enable when task balance supported
-//        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
+        // TODO(wxyu): enable when task balance supported
+        //        res2->AddNeighbour(std::static_pointer_cast<Node>(res1), connection);
         return true;
     }
     return false;
@@ -87,14 +102,20 @@ ResourceMgr::Connect(const std::string &name1, const std::string &name2, Connect
 void
 ResourceMgr::Clear() {
     std::lock_guard<std::mutex> lck(resources_mutex_);
+    if (running_) {
+        ENGINE_LOG_ERROR << "ResourceMgr is running, cannot clear.";
+        return;
+    }
     disk_resources_.clear();
+    cpu_resources_.clear();
+    gpu_resources_.clear();
     resources_.clear();
 }
 
 std::vector<ResourcePtr>
 ResourceMgr::GetComputeResources() {
     std::vector<ResourcePtr> result;
-    for (auto &resource : resources_) {
+    for (auto& resource : resources_) {
         if (resource->HasExecutor()) {
             result.emplace_back(resource);
         }
@@ -104,7 +125,7 @@ ResourceMgr::GetComputeResources() {
 
 ResourcePtr
 ResourceMgr::GetResource(ResourceType type, uint64_t device_id) {
-    for (auto &resource : resources_) {
+    for (auto& resource : resources_) {
         if (resource->type() == type && resource->device_id() == device_id) {
             return resource;
         }
@@ -113,8 +134,8 @@ ResourceMgr::GetResource(ResourceType type, uint64_t device_id) {
 }
 
 ResourcePtr
-ResourceMgr::GetResource(const std::string &name) {
-    for (auto &resource : resources_) {
+ResourceMgr::GetResource(const std::string& name) {
+    for (auto& resource : resources_) {
         if (resource->name() == name) {
             return resource;
         }
@@ -130,7 +151,7 @@ ResourceMgr::GetNumOfResource() const {
 uint64_t
 ResourceMgr::GetNumOfComputeResource() const {
     uint64_t count = 0;
-    for (auto &res : resources_) {
+    for (auto& res : resources_) {
         if (res->HasExecutor()) {
             ++count;
         }
@@ -141,7 +162,7 @@ ResourceMgr::GetNumOfComputeResource() const {
 uint64_t
 ResourceMgr::GetNumGpuResource() const {
     uint64_t num = 0;
-    for (auto &res : resources_) {
+    for (auto& res : resources_) {
         if (res->type() == ResourceType::GPU) {
             num++;
         }
@@ -151,21 +172,21 @@ ResourceMgr::GetNumGpuResource() const {
 
 std::string
 ResourceMgr::Dump() {
-    std::string str = "ResourceMgr contains " + std::to_string(resources_.size()) + " resources.\n";
+    std::stringstream ss;
+    ss << "ResourceMgr contains " << resources_.size() << " resources." << std::endl;
 
-    for (uint64_t i = 0; i < resources_.size(); ++i) {
-        str += "Resource No." + std::to_string(i) + ":\n";
-        //str += resources_[i]->Dump();
+    for (auto& res : resources_) {
+        ss << res->Dump();
     }
 
-    return str;
+    return ss.str();
 }
 
 std::string
 ResourceMgr::DumpTaskTables() {
     std::stringstream ss;
     ss << ">>>>>>>>>>>>>>>ResourceMgr::DumpTaskTable<<<<<<<<<<<<<<<" << std::endl;
-    for (auto &resource : resources_) {
+    for (auto& resource : resources_) {
         ss << resource->Dump() << std::endl;
         ss << resource->task_table().Dump();
         ss << resource->Dump() << std::endl << std::endl;
@@ -173,8 +194,42 @@ ResourceMgr::DumpTaskTables() {
     return ss.str();
 }
 
+bool
+ResourceMgr::check_resource_valid() {
+    {
+        // TODO: check one disk-resource, one cpu-resource, zero or more gpu-resource;
+        if (GetDiskResources().size() != 1) {
+            return false;
+        }
+        if (GetCpuResources().size() != 1) {
+            return false;
+        }
+    }
+
+    {
+        // TODO: one compute-resource at least;
+        if (GetNumOfComputeResource() < 1) {
+            return false;
+        }
+    }
+
+    {
+        // TODO: check disk only connect with cpu
+    }
+
+    {
+        // TODO: check gpu only connect with cpu
+    }
+
+    {
+        // TODO: check if exists isolated node
+    }
+
+    return true;
+}
+
 void
-ResourceMgr::post_event(const EventPtr &event) {
+ResourceMgr::post_event(const EventPtr& event) {
     {
         std::lock_guard<std::mutex> lock(event_mutex_);
         queue_.emplace(event);
@@ -201,6 +256,5 @@ ResourceMgr::event_process() {
     }
 }
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

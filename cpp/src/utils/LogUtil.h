@@ -18,26 +18,26 @@
 #pragma once
 
 #include "utils/Status.h"
+#include "utils/easylogging++.h"
 
-#include <string>
 #include <sstream>
-#include "easylogging++.h"
+#include <string>
 
-namespace zilliz {
 namespace milvus {
 namespace server {
 
-Status InitLog(const std::string& log_config_file);
+Status
+InitLog(const std::string& log_config_file);
 
-void RolloutHandler(const char *filename, std::size_t size, el::Level level);
+void
+RolloutHandler(const char* filename, std::size_t size, el::Level level);
 
 #define SHOW_LOCATION
 #ifdef SHOW_LOCATION
-#define LOCATION_INFO "[" << zilliz::sql::server::GetFileName(__FILE__) << ":" << __LINE__ << "] "
+#define LOCATION_INFO "[" << sql::server::GetFileName(__FILE__) << ":" << __LINE__ << "] "
 #else
 #define LOCATION_INFO ""
 #endif
 
-}
-}
-}
+}  // namespace server
+}  // namespace milvus

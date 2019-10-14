@@ -17,20 +17,23 @@
 
 #pragma once
 
+#include "BuildMgr.h"
+#include "JobMgr.h"
 #include "ResourceMgr.h"
 #include "Scheduler.h"
-#include "JobMgr.h"
+#include "optimizer/HybridPass.h"
+#include "optimizer/LargeSQ8HPass.h"
+#include "optimizer/Optimizer.h"
 
-#include <mutex>
 #include <memory>
+#include <mutex>
+#include <vector>
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class ResMgrInst {
-public:
+ public:
     static ResourceMgrPtr
     GetInstance() {
         if (instance == nullptr) {
@@ -42,13 +45,13 @@ public:
         return instance;
     }
 
-private:
+ private:
     static ResourceMgrPtr instance;
     static std::mutex mutex_;
 };
 
 class SchedInst {
-public:
+ public:
     static SchedulerPtr
     GetInstance() {
         if (instance == nullptr) {
@@ -60,13 +63,13 @@ public:
         return instance;
     }
 
-private:
+ private:
     static SchedulerPtr instance;
     static std::mutex mutex_;
 };
 
 class JobMgrInst {
-public:
+ public:
     static scheduler::JobMgrPtr
     GetInstance() {
         if (instance == nullptr) {
@@ -78,8 +81,47 @@ public:
         return instance;
     }
 
-private:
+ private:
     static scheduler::JobMgrPtr instance;
+    static std::mutex mutex_;
+};
+
+class OptimizerInst {
+ public:
+    static OptimizerPtr
+    GetInstance() {
+        if (instance == nullptr) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (instance == nullptr) {
+                std::vector<PassPtr> pass_list;
+                pass_list.push_back(std::make_shared<LargeSQ8HPass>());
+                pass_list.push_back(std::make_shared<HybridPass>());
+                instance = std::make_shared<Optimizer>(pass_list);
+            }
+        }
+        return instance;
+    }
+
+ private:
+    static scheduler::OptimizerPtr instance;
+    static std::mutex mutex_;
+};
+
+class BuildMgrInst {
+ public:
+    static BuildMgrPtr
+    GetInstance() {
+        if (instance == nullptr) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (instance == nullptr) {
+                instance = std::make_shared<BuildMgr>(4);
+            }
+        }
+        return instance;
+    }
+
+ private:
+    static BuildMgrPtr instance;
     static std::mutex mutex_;
 };
 
@@ -89,6 +131,5 @@ StartSchedulerService();
 void
 StopSchedulerService();
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

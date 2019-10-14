@@ -15,14 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "scheduler/Utils.h"
+#include "server/Config.h"
+#include "utils/Log.h"
 
-#include "Utils.h"
-
-#include <chrono>
 #include <cuda_runtime.h>
+#include <chrono>
+#include <set>
+#include <string>
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
@@ -41,6 +42,42 @@ get_num_gpu() {
     return n_devices;
 }
 
+std::vector<uint64_t>
+get_gpu_pool() {
+    std::vector<uint64_t> gpu_pool;
+
+    server::Config& config = server::Config::GetInstance();
+    std::vector<std::string> pool;
+    Status s = config.GetResourceConfigPool(pool);
+    if (!s.ok()) {
+        SERVER_LOG_ERROR << s.message();
+    }
+
+    std::set<uint64_t> gpu_ids;
+
+    for (auto& resource : pool) {
+        if (resource == "cpu") {
+            continue;
+        } else {
+            if (resource.length() < 4 || resource.substr(0, 3) != "gpu") {
+                // error
+                exit(-1);
+            }
+            auto gpu_id = std::stoi(resource.substr(3));
+            if (gpu_id >= scheduler::get_num_gpu()) {
+                // error
+                exit(-1);
+            }
+            gpu_ids.insert(gpu_id);
+        }
+    }
+
+    for (auto& gpu_id : gpu_ids) {
+        gpu_pool.push_back(gpu_id);
+    }
+
+    return gpu_pool;
 }
-}
-}
+
+}  // namespace scheduler
+}  // namespace milvus

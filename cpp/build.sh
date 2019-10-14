@@ -9,9 +9,12 @@ DB_PATH="/opt/milvus"
 PROFILING="OFF"
 USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
+CUSTOMIZATION="ON"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-while getopts "p:d:t:ulrcgjh" arg
+wget -q --method HEAD
+
+while getopts "p:d:t:ulrcgjhx" arg
 do
         case $arg in
              p)
@@ -44,6 +47,9 @@ do
                 ;;
              j)
                 USE_JFROG_CACHE="ON"
+                ;;
+             x)
+                CUSTOMIZATION="OFF"
                 ;;
              h) # help
                 echo "
@@ -87,6 +93,7 @@ CMAKE_CMD="cmake \
 -DMILVUS_DB_PATH=${DB_PATH} \
 -DMILVUS_ENABLE_PROFILING=${PROFILING} \
 -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
+-DCUSTOMIZATION=${CUSTOMIZATION} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
@@ -99,21 +106,26 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
     # cpplint check
     make lint
     if [ $? -ne 0 ]; then
-        echo "ERROR! cpplint check not pass"
+        echo "ERROR! cpplint check failed"
         exit 1
     fi
+    echo "cpplint check passed!"
+
     # clang-format check
     make check-clang-format
     if [ $? -ne 0 ]; then
         echo "ERROR! clang-format check failed"
         exit 1
     fi
-    # clang-tidy check
-    make check-clang-tidy
-    if [ $? -ne 0 ]; then
-        echo "ERROR! clang-tidy check failed"
-        exit 1
-    fi
+    echo "clang-format check passed!"
+
+#    # clang-tidy check
+#    make check-clang-tidy
+#    if [ $? -ne 0 ]; then
+#        echo "ERROR! clang-tidy check failed"
+#        exit 1
+#    fi
+#    echo "clang-tidy check passed!"
 else
     # compile and build
     make -j 4 || exit 1

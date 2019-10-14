@@ -21,24 +21,22 @@
 
 #include "Resource.h"
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class CpuResource : public Resource {
-public:
-    explicit
-    CpuResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
+ public:
+    explicit CpuResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor);
 
     inline std::string
     Dump() const override {
         return "<CpuResource, name=" + name_ + ">";
     }
 
-    friend std::ostream &operator<<(std::ostream &out, const CpuResource &resource);
+    friend std::ostream&
+    operator<<(std::ostream& out, const CpuResource& resource);
 
-protected:
+ protected:
     void
     LoadFile(TaskPtr task) override;
 
@@ -46,6 +44,5 @@ protected:
     Process(TaskPtr task) override;
 };
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

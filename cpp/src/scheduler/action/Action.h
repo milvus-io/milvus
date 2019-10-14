@@ -17,36 +17,32 @@
 
 #pragma once
 
-#include "../resource/Resource.h"
-#include "../ResourceMgr.h"
+#include "scheduler/ResourceMgr.h"
+#include "scheduler/resource/Resource.h"
 
+#include <memory>
 
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
 class Action {
-public:
+ public:
     static void
-    PushTaskToNeighbourRandomly(const TaskPtr &task, const ResourcePtr &self);
+    PushTaskToNeighbourRandomly(const TaskPtr& task, const ResourcePtr& self);
 
     static void
-    PushTaskToAllNeighbour(const TaskPtr &task, const ResourcePtr &self);
+    PushTaskToAllNeighbour(const TaskPtr& task, const ResourcePtr& self);
 
     static void
-    PushTaskToResource(const TaskPtr &task, const ResourcePtr &dest);
+    PushTaskToResource(const TaskPtr& task, const ResourcePtr& dest);
 
     static void
     DefaultLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource, std::shared_ptr<LoadCompletedEvent> event);
 
     static void
-    SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr,
-                                        ResourcePtr resource,
+    SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr resource,
                                         std::shared_ptr<LoadCompletedEvent> event);
-
 };
 
-
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

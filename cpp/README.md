@@ -50,10 +50,9 @@ Centos7 :
 $ yum install gfortran qt4 flex bison 
 $ yum install mysql-devel mysql
     
-Ubuntu16.04 : 
+Ubuntu 16.04 or 18.04: 
 $ sudo apt-get install gfortran qt4-qmake flex bison 
 $ sudo apt-get install libmysqlclient-dev mysql-client
-       
 ```
 
 Verify the existence of `libmysqlclient_r.so`:
@@ -66,6 +65,10 @@ $ locate libmysqlclient_r.so
 If not, you need to create a symbolic link:
 
 ```shell
+# Locate libmysqlclient.so
+$ sudo updatedb
+$ locate libmysqlclient.so 
+
 # Create symbolic link
 $ sudo ln -s /path/to/libmysqlclient.so /path/to/libmysqlclient_r.so
 ```
@@ -90,7 +93,7 @@ please reinstall CMake with curl:
    ```shell
    CentOS 7:   
    $ yum install curl-devel
-   Ubuntu 16.04: 
+   Ubuntu 16.04 or 18.04: 
    $ sudo apt-get install libcurl4-openssl-dev
    ```
 
@@ -102,14 +105,30 @@ please reinstall CMake with curl:
    ```
 
 ##### code format and linting
-
+Install clang-format and clang-tidy
 ```shell
 CentOS 7:   
 $ yum install clang
 Ubuntu 16.04: 
-$ sudo apt-get install clang-format clang-tidy
-    
+$ sudo apt-get install clang-tidy
+$ sudo su
+$ wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+$ apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-6.0 main"
+$ apt-get update
+$ apt-get install clang-format-6.0
+Ubuntu 18.04: 
+$ sudo apt-get install clang-tidy clang-format
+
+$ rm cmake_build/CMakeCache.txt
+```  
+Check code style
+```shell
 $ ./build.sh -l
+```
+To format the code
+```shell
+$ cd cmake_build
+$ make clang-format
 ```
 
 ##### Run unit test
@@ -119,13 +138,14 @@ $ ./build.sh -u
 ```
 
 ##### Run code coverage
-
+Install lcov
 ```shell
 CentOS 7:   
 $ yum install lcov
-Ubuntu 16.04: 
+Ubuntu 16.04 or 18.04: 
 $ sudo apt-get install lcov
-    
+``` 
+```shell  
 $ ./build.sh -u -c
 ```
 

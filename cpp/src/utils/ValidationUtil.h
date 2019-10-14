@@ -15,23 +15,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 #pragma once
 
 #include "db/meta/MetaTypes.h"
 #include "utils/Status.h"
 
-namespace zilliz {
+#include <string>
+
 namespace milvus {
 namespace server {
 
 class ValidationUtil {
-private:
+ private:
     ValidationUtil() = default;
 
-public:
+ public:
     static Status
-    ValidateTableName(const std::string &table_name);
+    ValidateTableName(const std::string& table_name);
 
     static Status
     ValidateTableDimension(int64_t dimension);
@@ -58,24 +58,23 @@ public:
     ValidateGpuIndex(uint32_t gpu_index);
 
     static Status
-    GetGpuMemory(uint32_t gpu_index, size_t &memory);
+    GetGpuMemory(uint32_t gpu_index, size_t& memory);
 
     static Status
-    ValidateIpAddress(const std::string &ip_address);
+    ValidateIpAddress(const std::string& ip_address);
 
     static Status
-    ValidateStringIsNumber(const std::string &str);
+    ValidateStringIsNumber(const std::string& str);
 
     static Status
-    ValidateStringIsBool(const std::string &str);
+    ValidateStringIsBool(const std::string& str);
 
     static Status
-    ValidateStringIsFloat(const std::string &str);
+    ValidateStringIsFloat(const std::string& str);
 
     static Status
-    ValidateDbURI(const std::string &uri);
+    ValidateDbURI(const std::string& uri);
 };
 
-}
-}
-}
+}  // namespace server
+}  // namespace milvus

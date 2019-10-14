@@ -15,30 +15,30 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "scheduler/resource/GpuResource.h"
 
-#include "GpuResource.h"
-
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-std::ostream &operator<<(std::ostream &out, const GpuResource &resource) {
+std::ostream&
+operator<<(std::ostream& out, const GpuResource& resource) {
     out << resource.Dump();
     return out;
 }
 
 GpuResource::GpuResource(std::string name, uint64_t device_id, bool enable_loader, bool enable_executor)
-    : Resource(std::move(name), ResourceType::GPU, device_id, enable_loader, enable_executor) {}
+    : Resource(std::move(name), ResourceType::GPU, device_id, enable_loader, enable_executor) {
+}
 
-void GpuResource::LoadFile(TaskPtr task) {
+void
+GpuResource::LoadFile(TaskPtr task) {
     task->Load(LoadType::CPU2GPU, device_id_);
 }
 
-void GpuResource::Process(TaskPtr task) {
+void
+GpuResource::Process(TaskPtr task) {
     task->Execute();
 }
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus

@@ -17,14 +17,14 @@
 
 #pragma once
 
-#include "db/engine/ExecutionEngine.h"
 #include "db/Constants.h"
+#include "db/engine/ExecutionEngine.h"
 
-#include <vector>
 #include <map>
+#include <memory>
 #include <string>
+#include <vector>
 
-namespace zilliz {
 namespace milvus {
 namespace engine {
 namespace meta {
@@ -35,9 +35,9 @@ constexpr int32_t DEFAULT_METRIC_TYPE = (int)MetricType::L2;
 constexpr int32_t DEFAULT_INDEX_FILE_SIZE = ONE_GB;
 
 constexpr int64_t FLAG_MASK_NO_USERID = 0x1;
-constexpr int64_t FLAG_MASK_HAS_USERID = 0x1<<1;
+constexpr int64_t FLAG_MASK_HAS_USERID = 0x1 << 1;
 
-using DateT = int ;
+using DateT = int;
 const DateT EmptyDate = -1;
 using DatesT = std::vector<DateT>;
 
@@ -57,7 +57,7 @@ struct TableSchema {
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
     int32_t nlist_ = DEFAULT_NLIST;
     int32_t metric_type_ = DEFAULT_METRIC_TYPE;
-}; // TableSchema
+};  // TableSchema
 
 struct TableFileSchema {
     typedef enum {
@@ -82,17 +82,16 @@ struct TableFileSchema {
     std::string location_;
     int64_t updated_time_ = 0;
     int64_t created_on_ = 0;
-    int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE; //not persist to meta
+    int64_t index_file_size_ = DEFAULT_INDEX_FILE_SIZE;  // not persist to meta
     int32_t engine_type_ = DEFAULT_ENGINE_TYPE;
-    int32_t nlist_ = DEFAULT_NLIST; //not persist to meta
-    int32_t metric_type_ = DEFAULT_METRIC_TYPE; //not persist to meta
-}; // TableFileSchema
+    int32_t nlist_ = DEFAULT_NLIST;              // not persist to meta
+    int32_t metric_type_ = DEFAULT_METRIC_TYPE;  // not persist to meta
+};                                               // TableFileSchema
 
 using TableFileSchemaPtr = std::shared_ptr<meta::TableFileSchema>;
 using TableFilesSchema = std::vector<TableFileSchema>;
 using DatePartionedTableFilesSchema = std::map<DateT, TableFilesSchema>;
 
-} // namespace meta
-} // namespace engine
-} // namespace milvus
-} // namespace zilliz
+}  // namespace meta
+}  // namespace engine
+}  // namespace milvus

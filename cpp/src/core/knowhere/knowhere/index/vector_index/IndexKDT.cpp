@@ -15,41 +15,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
-#include <sstream>
-#include <SPTAG/AnnService/inc/Server/QueryParser.h>
-#include <SPTAG/AnnService/inc/Core/VectorSet.h>
 #include <SPTAG/AnnService/inc/Core/Common.h>
-
+#include <SPTAG/AnnService/inc/Core/VectorSet.h>
+#include <SPTAG/AnnService/inc/Server/QueryParser.h>
+#include <sstream>
+#include <vector>
 
 #undef mkdir
 
-#include "IndexKDT.h"
+#include "knowhere/index/vector_index/IndexKDT.h"
 #include "knowhere/index/vector_index/helpers/Definitions.h"
 //#include "knowhere/index/preprocessor/normalize.h"
-#include "knowhere/index/vector_index/helpers/KDTParameterMgr.h"
 #include "knowhere/adapter/SptagAdapter.h"
 #include "knowhere/common/Exception.h"
+#include "knowhere/index/vector_index/helpers/KDTParameterMgr.h"
 
-
-namespace zilliz {
 namespace knowhere {
 
 BinarySet
 CPUKDTRNG::Serialize() {
-    std::vector<void *> index_blobs;
+    std::vector<void*> index_blobs;
     std::vector<int64_t> index_len;
     index_ptr_->SaveIndexToMemory(index_blobs, index_len);
     BinarySet binary_set;
 
     auto sample = std::make_shared<uint8_t>();
-    sample.reset(static_cast<uint8_t *>(index_blobs[0]));
+    sample.reset(static_cast<uint8_t*>(index_blobs[0]));
     auto tree = std::make_shared<uint8_t>();
-    tree.reset(static_cast<uint8_t *>(index_blobs[1]));
+    tree.reset(static_cast<uint8_t*>(index_blobs[1]));
     auto graph = std::make_shared<uint8_t>();
-    graph.reset(static_cast<uint8_t *>(index_blobs[2]));
+    graph.reset(static_cast<uint8_t*>(index_blobs[2]));
     auto metadata = std::make_shared<uint8_t>();
-    metadata.reset(static_cast<uint8_t *>(index_blobs[3]));
+    metadata.reset(static_cast<uint8_t*>(index_blobs[3]));
 
     binary_set.Append("samples", sample, index_len[0]);
     binary_set.Append("tree", tree, index_len[1]);
@@ -59,8 +56,8 @@ CPUKDTRNG::Serialize() {
 }
 
 void
-CPUKDTRNG::Load(const BinarySet &binary_set) {
-    std::vector<void *> index_blobs;
+CPUKDTRNG::Load(const BinarySet& binary_set) {
+    std::vector<void*> index_blobs;
 
     auto samples = binary_set.GetByName("samples");
     index_blobs.push_back(samples->data.get());
@@ -77,17 +74,17 @@ CPUKDTRNG::Load(const BinarySet &binary_set) {
     index_ptr_->LoadIndexFromMemory(index_blobs);
 }
 
-//PreprocessorPtr
-//CPUKDTRNG::BuildPreprocessor(const DatasetPtr &dataset, const Config &config) {
+// PreprocessorPtr
+// CPUKDTRNG::BuildPreprocessor(const DatasetPtr &dataset, const Config &config) {
 //    return std::make_shared<NormalizePreprocessor>();
 //}
 
 IndexModelPtr
-CPUKDTRNG::Train(const DatasetPtr &origin, const Config &train_config) {
+CPUKDTRNG::Train(const DatasetPtr& origin, const Config& train_config) {
     SetParameters(train_config);
     DatasetPtr dataset = origin->Clone();
 
-    //if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
+    // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
     //    && preprocessor_) {
     //    preprocessor_->Preprocess(dataset);
     //}
@@ -101,11 +98,11 @@ CPUKDTRNG::Train(const DatasetPtr &origin, const Config &train_config) {
 }
 
 void
-CPUKDTRNG::Add(const DatasetPtr &origin, const Config &add_config) {
+CPUKDTRNG::Add(const DatasetPtr& origin, const Config& add_config) {
     SetParameters(add_config);
     DatasetPtr dataset = origin->Clone();
 
-    //if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
+    // if (index_ptr_->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine
     //    && preprocessor_) {
     //    preprocessor_->Preprocess(dataset);
     //}
@@ -116,18 +113,18 @@ CPUKDTRNG::Add(const DatasetPtr &origin, const Config &add_config) {
 }
 
 void
-CPUKDTRNG::SetParameters(const Config &config) {
-    for (auto &para : KDTParameterMgr::GetInstance().GetKDTParameters()) {
-        auto value = config.get_with_default(para.first, para.second);
-        index_ptr_->SetParameter(para.first, value);
+CPUKDTRNG::SetParameters(const Config& config) {
+    for (auto& para : KDTParameterMgr::GetInstance().GetKDTParameters()) {
+        //        auto value = config.get_with_default(para.first, para.second);
+        index_ptr_->SetParameter(para.first, para.second);
     }
 }
 
 DatasetPtr
-CPUKDTRNG::Search(const DatasetPtr &dataset, const Config &config) {
+CPUKDTRNG::Search(const DatasetPtr& dataset, const Config& config) {
     SetParameters(config);
     auto tensor = dataset->tensor()[0];
-    auto p = (float *) tensor->raw_mutable_data();
+    auto p = (float*)tensor->raw_mutable_data();
     for (auto i = 0; i < 10; ++i) {
         for (auto j = 0; j < 10; ++j) {
             std::cout << p[i * 10 + j] << " ";
@@ -138,7 +135,7 @@ CPUKDTRNG::Search(const DatasetPtr &dataset, const Config &config) {
 
 #pragma omp parallel for
     for (auto i = 0; i < query_results.size(); ++i) {
-        auto target = (float *) query_results[i].GetTarget();
+        auto target = (float*)query_results[i].GetTarget();
         std::cout << target[0] << ", " << target[1] << ", " << target[2] << std::endl;
         index_ptr_->SearchIndex(query_results[i]);
     }
@@ -146,27 +143,33 @@ CPUKDTRNG::Search(const DatasetPtr &dataset, const Config &config) {
     return ConvertToDataset(query_results);
 }
 
-int64_t CPUKDTRNG::Count() {
+int64_t
+CPUKDTRNG::Count() {
     index_ptr_->GetNumSamples();
 }
-int64_t CPUKDTRNG::Dimension() {
+
+int64_t
+CPUKDTRNG::Dimension() {
     index_ptr_->GetFeatureDim();
 }
 
-VectorIndexPtr CPUKDTRNG::Clone() {
+VectorIndexPtr
+CPUKDTRNG::Clone() {
     KNOWHERE_THROW_MSG("not support");
 }
 
-void CPUKDTRNG::Seal() {
+void
+CPUKDTRNG::Seal() {
     // do nothing
 }
 
 // TODO(linxj):
 BinarySet
-CPUKDTRNGIndexModel::Serialize() {}
+CPUKDTRNGIndexModel::Serialize() {
+}
 
 void
-CPUKDTRNGIndexModel::Load(const BinarySet &binary) {}
+CPUKDTRNGIndexModel::Load(const BinarySet& binary) {
+}
 
-} // namespace knowhere
-} // namespace zilliz
+}  // namespace knowhere

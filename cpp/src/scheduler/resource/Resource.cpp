@@ -15,26 +15,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "scheduler/resource/Resource.h"
+#include "scheduler/SchedInst.h"
+#include "scheduler/Utils.h"
+
 #include <iostream>
-#include "../Utils.h"
-#include "Resource.h"
+#include <limits>
+#include <utility>
 
-
-namespace zilliz {
 namespace milvus {
 namespace scheduler {
 
-std::ostream &
-operator<<(std::ostream &out, const Resource &resource) {
+std::ostream&
+operator<<(std::ostream& out, const Resource& resource) {
     out << resource.Dump();
     return out;
 }
 
-Resource::Resource(std::string name,
-                   ResourceType type,
-                   uint64_t device_id,
-                   bool enable_loader,
-                   bool enable_executor)
+Resource::Resource(std::string name, ResourceType type, uint64_t device_id, bool enable_loader, bool enable_executor)
     : name_(std::move(name)),
       type_(type),
       device_id_(device_id),
@@ -94,13 +92,15 @@ Resource::WakeupExecutor() {
 uint64_t
 Resource::NumOfTaskToExec() {
     uint64_t count = 0;
-    for (auto &task : task_table_) {
-        if (task->state == TaskTableItemState::LOADED) ++count;
+    for (auto& task : task_table_) {
+        if (task->state == TaskTableItemState::LOADED)
+            ++count;
     }
     return count;
 }
 
-TaskTableItemPtr Resource::pick_task_load() {
+TaskTableItemPtr
+Resource::pick_task_load() {
     auto indexes = task_table_.PickToLoad(10);
     for (auto index : indexes) {
         // try to set one task loading, then return
@@ -111,18 +111,27 @@ TaskTableItemPtr Resource::pick_task_load() {
     return nullptr;
 }
 
-TaskTableItemPtr Resource::pick_task_execute() {
-    auto indexes = task_table_.PickToExecute(3);
+TaskTableItemPtr
+Resource::pick_task_execute() {
+    auto indexes = task_table_.PickToExecute(std::numeric_limits<uint64_t>::max());
     for (auto index : indexes) {
         // try to set one task executing, then return
-        if (task_table_.Execute(index))
+        if (task_table_[index]->task->label()->Type() == TaskLabelType::SPECIFIED_RESOURCE) {
+            if (task_table_[index]->task->path().Last() != name()) {
+                continue;
+            }
+        }
+
+        if (task_table_.Execute(index)) {
             return task_table_.Get(index);
+        }
         // else try next
     }
     return nullptr;
 }
 
-void Resource::loader_function() {
+void
+Resource::loader_function() {
     while (running_) {
         std::unique_lock<std::mutex> lock(load_mutex_);
         load_cv_.wait(lock, [&] { return load_flag_; });
@@ -140,11 +149,11 @@ void Resource::loader_function() {
                 subscriber_(std::static_pointer_cast<Event>(event));
             }
         }
-
     }
 }
 
-void Resource::executor_function() {
+void
+Resource::executor_function() {
     if (subscriber_) {
         auto event = std::make_shared<StartUpEvent>(shared_from_this());
         subscriber_(std::static_pointer_cast<Event>(event));
@@ -167,15 +176,19 @@ void Resource::executor_function() {
             total_cost_ += finish - start;
 
             task_item->Executed();
+
+            if (task_item->task->Type() == TaskType::BuildIndexTask) {
+                BuildMgrInst::GetInstance()->Put();
+                ResMgrInst::GetInstance()->GetResource("cpu")->WakeupLoader();
+            }
+
             if (subscriber_) {
                 auto event = std::make_shared<FinishTaskEvent>(shared_from_this(), task_item);
                 subscriber_(std::static_pointer_cast<Event>(event));
             }
         }
-
     }
 }
 
-}
-}
-}
+}  // namespace scheduler
+}  // namespace milvus
