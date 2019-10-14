@@ -5,6 +5,8 @@ NORMAL=`tput sgr0`
 YELLOW='\033[1;33m'
 ENDC='\033[0m'
 
+echo -e "${BOLD}MISHARDS_REGISTRY=${MISHARDS_REGISTRY}${ENDC}"
+
 function build_image() {
     dockerfile=$1
     remote_registry=$2
