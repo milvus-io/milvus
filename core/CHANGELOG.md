@@ -67,7 +67,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-610 - Change error code base value from hex to decimal
 - MS-624 - Re-organize project directory for open-source
 - MS-635 - Add compile option to support customized faiss
-
+- MS-660 - add ubuntu_build_deps.sh
+	
 # Milvus 0.4.0 (2019-09-12)
 
 ## Bug
