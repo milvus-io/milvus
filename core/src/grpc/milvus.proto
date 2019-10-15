@@ -1,0 +1,323 @@
+syntax = "proto3";
+
+import "status.proto";
+
+package milvus.grpc;
+
+/**
+ * @brief Table Name
+ */
+message TableName {
+    string table_name = 1;
+}
+
+/**
+ * @brief Table Name List
+ */
+message TableNameList {
+    Status status = 1;
+    repeated string table_names = 2;
+}
+
+/**
+ * @brief Table Schema
+ */
+message TableSchema {
+    Status status = 1;
+    string table_name = 2;
+    int64 dimension = 3;
+    int64 index_file_size = 4;
+    int32 metric_type = 5;
+}
+
+/**
+ * @brief Range Schema
+ */
+message Range {
+    string start_value = 1;
+    string end_value = 2;
+}
+
+/**
+ * @brief Record inserted
+ */
+message RowRecord {
+    repeated float vector_data = 1;             //binary vector data
+}
+
+/**
+ * @brief params to be inserted
+ */
+message InsertParam {
+    string table_name = 1;
+    repeated RowRecord row_record_array = 2;
+    repeated int64 row_id_array = 3;            //optional
+}
+
+/**
+ * @brief Vector ids
+ */
+message VectorIds {
+    Status status = 1;
+    repeated int64 vector_id_array = 2;
+}
+
+/**
+ * @brief params for searching vector
+ */
+message SearchParam {
+    string table_name = 1;
+    repeated RowRecord query_record_array = 2;
+    repeated Range query_range_array = 3;
+    int64 topk = 4;
+    int64 nprobe = 5;
+}
+
+/**
+ * @brief params for searching vector in files
+ */
+message SearchInFilesParam {
+    repeated string file_id_array = 1;
+    SearchParam search_param = 2;
+}
+
+/**
+ * @brief Query result params
+ */
+message QueryResult {
+    int64 id = 1;
+    double distance = 2;
+}
+
+/**
+ * @brief TopK query result
+ */
+message TopKQueryResult {
+    repeated QueryResult query_result_arrays = 1;
+}
+
+/**
+ * @brief List of topK query result
+ */
+message TopKQueryResultList {
+    Status status = 1;
+    repeated TopKQueryResult topk_query_result = 2;
+}
+
+/**
+ * @brief Server String Reply
+ */
+message StringReply {
+    Status status = 1;
+    string string_reply = 2;
+}
+
+/**
+ * @brief Server bool Reply
+ */
+message BoolReply {
+    Status status = 1;
+    bool bool_reply = 2;
+}
+
+/**
+ * @brief Return table row count
+ */
+message TableRowCount {
+    Status status = 1;
+    int64 table_row_count = 2;
+}
+
+/**
+ * @brief Give Server Command
+ */
+message Command {
+    string cmd = 1;
+}
+
+/**
+ * @brief Index
+ * @index_type: 0-invalid, 1-idmap, 2-ivflat, 3-ivfsq8, 4-nsgmix
+ * @metric_type: 1-L2, 2-IP
+ */
+message Index {
+    int32 index_type = 1;
+    int32 nlist = 2;
+}
+
+/**
+ * @brief Index params
+ */
+message IndexParam {
+    Status status = 1;
+    string table_name = 2;
+    Index index = 3;
+}
+
+/**
+ * @brief table name and range for DeleteByRange
+ */
+message DeleteByRangeParam {
+    Range range = 1;
+    string table_name = 2;
+}
+
+service MilvusService {
+    /**
+     * @brief Create table method
+     *
+     * This method is used to create table
+     *
+     * @param param, use to provide table information to be created.
+     *
+     */
+    rpc CreateTable(TableSchema) returns (Status){}
+
+    /**
+     * @brief Test table existence method
+     *
+     * This method is used to test table existence.
+     *
+     * @param table_name, table name is going to be tested.
+     *
+     */
+    rpc HasTable(TableName) returns (BoolReply) {}
+
+    /**
+     * @brief Delete table method
+     *
+     * This method is used to delete table.
+     *
+     * @param table_name, table name is going to be deleted.
+     *
+     */
+    rpc DropTable(TableName) returns (Status) {}
+
+    /**
+     * @brief Build index by table method
+     *
+     * This method is used to build index by table in sync mode.
+     *
+     * @param table_name, table is going to be built index.
+     *
+     */
+    rpc CreateIndex(IndexParam) returns (Status) {}
+
+    /**
+     * @brief Add vector array to table
+     *
+     * This method is used to add vector array to table.
+     *
+     * @param table_name, table_name is inserted.
+     * @param record_array, vector array is inserted.
+     *
+     * @return vector id array
+     */
+    rpc Insert(InsertParam) returns (VectorIds) {}
+
+    /**
+     * @brief Query vector
+     *
+     * This method is used to query vector in table.
+     *
+     * @param table_name, table_name is queried.
+     * @param query_record_array, all vector are going to be queried.
+     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+     * @param topk, how many similarity vectors will be searched.
+     *
+     * @return query result array.
+     */
+    rpc Search(SearchParam) returns (TopKQueryResultList) {}
+
+    /**
+     * @brief Internal use query interface
+     *
+     * This method is used to query vector in specified files.
+     *
+     * @param file_id_array, specified files id array, queried.
+     * @param query_record_array, all vector are going to be queried.
+     * @param query_range_array, optional ranges for conditional search. If not specified, search whole table
+     * @param topk, how many similarity vectors will be searched.
+     *
+     * @return query result array.
+     */
+    rpc SearchInFiles(SearchInFilesParam) returns (TopKQueryResultList) {}
+
+    /**
+     * @brief Get table schema
+     *
+     * This method is used to get table schema.
+     *
+     * @param table_name, target table name.
+     *
+     * @return table schema
+     */
+    rpc DescribeTable(TableName) returns (TableSchema) {}
+
+    /**
+     * @brief Get table schema
+     *
+     * This method is used to get table schema.
+     *
+     * @param table_name, target table name.
+     *
+     * @return table schema
+     */
+    rpc CountTable(TableName) returns (TableRowCount) {}
+
+    /**
+     * @brief List all tables in database
+     *
+     * This method is used to list all tables.
+     *
+     *
+     * @return table names.
+     */
+    rpc ShowTables(Command) returns (TableNameList) {}
+
+    /**
+     * @brief Give the server status
+     *
+     * This method is used to give the server status.
+     *
+     * @return Server status.
+     */
+    rpc Cmd(Command) returns (StringReply) {}
+
+     /**
+     * @brief delete table by range
+     *
+     * This method is used to delete vector by range
+     *
+     * @return rpc status.
+     */
+     rpc DeleteByRange(DeleteByRangeParam) returns (Status) {}
+
+     /**
+      * @brief preload table
+      *
+      * This method is used to preload table
+      *
+      * @return Status.
+      */
+     rpc PreloadTable(TableName) returns (Status) {}
+
+     /**
+      * @brief describe index
+      *
+      * This method is used to describe index
+      *
+      * @return Status.
+      */
+     rpc DescribeIndex(TableName) returns (IndexParam) {}
+
+     /**
+      * @brief drop index
+      *
+      * This method is used to drop index
+      *
+      * @return Status.
+      */
+     rpc DropIndex(TableName) returns (Status) {}
+
+}
