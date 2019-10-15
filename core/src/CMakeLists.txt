@@ -96,9 +96,9 @@ set(prometheus_lib
         )
 
 set(boost_lib
-        boost_system_static
-        boost_filesystem_static
-        boost_serialization_static
+        boost_system
+        boost_filesystem
+        boost_serialization
         )
 
 set(cuda_lib
