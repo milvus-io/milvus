@@ -18,29 +18,20 @@
 #include "config/YamlConfigMgr.h"
 #include "utils/Log.h"
 
-#include <sys/stat.h>
-
 namespace milvus {
 namespace server {
 
-ErrorCode
+Status
 YamlConfigMgr::LoadConfigFile(const std::string& filename) {
-    struct stat directoryStat;
-    int statOK = stat(filename.c_str(), &directoryStat);
-    if (statOK != 0) {
-        SERVER_LOG_ERROR << "File not found: " << filename;
-        return SERVER_UNEXPECTED_ERROR;
-    }
-
     try {
         node_ = YAML::LoadFile(filename);
         LoadConfigNode(node_, config_);
     } catch (YAML::Exception& e) {
-        SERVER_LOG_ERROR << "Failed to load config file: " << std::string(e.what());
-        return SERVER_UNEXPECTED_ERROR;
+        std::string str = "Exception: load config file fail: " + std::string(e.what());
+        return Status(SERVER_UNEXPECTED_ERROR, str);
     }
 
-    return SERVER_SUCCESS;
+    return Status::OK();
 }
 
 void
