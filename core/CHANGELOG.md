@@ -11,17 +11,18 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-587 - Count get wrong result after adding vectors and index built immediately
 - MS-599 - Search wrong result when table created with metric_type: IP
 - MS-601 - Docker logs error caused by get CPUTemperature error
-- MS-622 - Delete vectors should be failed if date range is invalid
+- MS-605 - Server going down during searching vectors
 - MS-620 - Get table row counts display wrong error code
+- MS-622 - Delete vectors should be failed if date range is invalid
+- MS-624 - Search vectors failed if time ranges long enough
 - MS-637 - Out of memory when load too many tasks
+- MS-639 - SQ8H index created failed and server hang
 - MS-640 - Cache object size calculate incorrect
 - MS-641 - Segment fault(signal 11) in PickToLoad
-- MS-639 - SQ8H index created failed and server hang
-- MS-647 - [monitor] grafana display average cpu-temp
 - MS-644 - Search crashed with index-type: flat
-- MS-624 - Search vectors failed if time ranges long enough
+- MS-647 - grafana display average cpu-temp
 - MS-652 - IVFSQH quantization double free
-- MS-605 - Server going down during searching vectors
+- MS-653 - When config check fail, Milvus close without message
 - MS-654 - Describe index timeout when building index
 - MS-658 - Fix SQ8 Hybrid can't search
 
@@ -41,8 +42,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-608 - Update TODO names
 - MS-609 - Update task construct function
 - MS-611 - Add resources validity check in ResourceMgr
-- MS-619 - Add optimizer class in scheduler
 - MS-614 - Preload table at startup
+- MS-619 - Add optimizer class in scheduler
 - MS-626 - Refactor DataObj to support cache any type data
 - MS-648 - Improve unittest
 - MS-655 - Upgrade SPTAG
@@ -63,8 +64,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-600 - Reconstruct unittest code
 - MS-602 - Remove zilliz namespace
 - MS-610 - Change error code base value from hex to decimal
-- MS-635 - Add compile option to support customized faiss
 - MS-624 - Re-organize project directory for open-source
+- MS-635 - Add compile option to support customized faiss
 
 # Milvus 0.4.0 (2019-09-12)
 
