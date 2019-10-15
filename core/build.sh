@@ -9,10 +9,16 @@ DB_PATH="/opt/milvus"
 PROFILING="OFF"
 USE_JFROG_CACHE="OFF"
 RUN_CPPLINT="OFF"
-CUSTOMIZATION="ON"
+CUSTOMIZATION="OFF" # default use ori faiss
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 
-wget -q --method HEAD
+CUSTOMIZED_FAISS_URL="${FAISS_URL:-NONE}"
+wget -q --method HEAD ${CUSTOMIZED_FAISS_URL}
+if [ $? -eq 0 ]; then
+  CUSTOMIZATION="ON"
+else
+  CUSTOMIZATION="OFF"
+fi
 
 while getopts "p:d:t:ulrcgjhx" arg
 do
@@ -49,7 +55,7 @@ do
                 USE_JFROG_CACHE="ON"
                 ;;
              x)
-                CUSTOMIZATION="OFF"
+                CUSTOMIZATION="OFF" # force use ori faiss
                 ;;
              h) # help
                 echo "
@@ -94,6 +100,7 @@ CMAKE_CMD="cmake \
 -DMILVUS_ENABLE_PROFILING=${PROFILING} \
 -DUSE_JFROG_CACHE=${USE_JFROG_CACHE} \
 -DCUSTOMIZATION=${CUSTOMIZATION} \
+-DFAISS_URL=${CUSTOMIZED_FAISS_URL} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
