@@ -26,6 +26,11 @@ include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 #this statement must put here, since the CORE_INCLUDE_DIRS is defined in code/CMakeList.txt
 add_subdirectory(index)
+
+if (CUSTOMIZATION)
+    add_definitions(-DCUSTOMIZATION)
+endif (CUSTOMIZATION)
+
 set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
 foreach (dir ${CORE_INCLUDE_DIRS})
     include_directories(${dir})
