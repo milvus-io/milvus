@@ -151,16 +151,15 @@ class IVFTest : public DataGen, public TestWithParam<::std::tuple<std::string, P
     knowhere::IVFIndexPtr index_ = nullptr;
 };
 
-INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest,
-                        Values(std::make_tuple("IVF", ParameterType::ivf),
-                               std::make_tuple("GPUIVF", ParameterType::ivf),
-                               std::make_tuple("IVFPQ", ParameterType::ivfpq),
-                               std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
-                               std::make_tuple("IVFSQ", ParameterType::ivfsq),
+INSTANTIATE_TEST_CASE_P(IVFParameters, IVFTest, Values(std::make_tuple("IVF", ParameterType::ivf),
+                                                       std::make_tuple("GPUIVF", ParameterType::ivf),
+                                                       std::make_tuple("IVFPQ", ParameterType::ivfpq),
+                                                       std::make_tuple("GPUIVFPQ", ParameterType::ivfpq),
+                                                       std::make_tuple("IVFSQ", ParameterType::ivfsq),
 #ifdef CUSTOMIZATION
-                               std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
+                                                       std::make_tuple("IVFSQHybrid", ParameterType::ivfsq),
 #endif
-                               std::make_tuple("GPUIVFSQ", ParameterType::ivfsq)));
+                                                       std::make_tuple("GPUIVFSQ", ParameterType::ivfsq)));
 
 void
 AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
