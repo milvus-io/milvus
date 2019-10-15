@@ -89,5 +89,3 @@ dkms.conf
 /Wrappers/inc/AnnClient.java
 /AnnService.users - Copy.props
 /.vs
-Release/
-Debug/
