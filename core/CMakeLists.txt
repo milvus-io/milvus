@@ -132,6 +132,10 @@ include(ThirdPartyPackages)
 
 config_summary()
 
+if (CUSTOMIZATION)
+    add_definitions(-DCUSTOMIZATION)
+endif (CUSTOMIZATION)
+
 add_subdirectory(src)
 
 if (BUILD_UNIT_TEST STREQUAL "ON")
