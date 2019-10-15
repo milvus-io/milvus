@@ -233,17 +233,16 @@ foreach(_VERSION_ENTRY ${TOOLCHAIN_VERSIONS_TXT})
 endforeach()
 
 if(CUSTOMIZATION)
-    set(FAISS_SOURCE_URL "http://192.168.1.105:6060/jinhai/faiss/-/archive/${FAISS_VERSION}/faiss-${FAISS_VERSION}.tar.gz")
-    # set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
-    # set(FAISS_MD5 "57da9c4f599cc8fa4260488b1c96e1cc") # commit-id 6dbdf75987c34a2c853bd172ea0d384feea8358c branch-0.2.0
-    # set(FAISS_MD5 "21deb1c708490ca40ecb899122c01403") # commit-id 643e48f479637fd947e7b93fa4ca72b38ecc9a39 branch-0.2.0
-    # set(FAISS_MD5 "072db398351cca6e88f52d743bbb9fa0") # commit-id 3a2344d04744166af41ef1a74449d68a315bfe17 branch-0.2.1
-    set(FAISS_MD5 "c89ea8e655f5cdf58f42486f13614714") # commit-id 9c28a1cbb88f41fa03b03d7204106201ad33276b branch-0.2.1
-
-    execute_process(COMMAND wget -q --method HEAD ${FAISS_SOURCE_URL} RESULT_VARIABLE return_code)
-    message(STATUS "Check the remote cache file ${FAISS_SOURCE_URL}. return code = ${return_code}")
+    execute_process(COMMAND wget -q --method HEAD ${FAISS_URL} RESULT_VARIABLE return_code)
+    message(STATUS "Check the remote cache file ${FAISS_URL}. return code = ${return_code}")
     if (NOT return_code EQUAL 0)
-        set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/v1.5.3.tar.gz")
+        MESSAGE(FATAL_ERROR "Can't access to ${FAISS_URL}")
+    else()
+        # set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
+        # set(FAISS_MD5 "57da9c4f599cc8fa4260488b1c96e1cc") # commit-id 6dbdf75987c34a2c853bd172ea0d384feea8358c branch-0.2.0
+        # set(FAISS_MD5 "21deb1c708490ca40ecb899122c01403") # commit-id 643e48f479637fd947e7b93fa4ca72b38ecc9a39 branch-0.2.0
+        # set(FAISS_MD5 "072db398351cca6e88f52d743bbb9fa0") # commit-id 3a2344d04744166af41ef1a74449d68a315bfe17 branch-0.2.1
+        set(FAISS_MD5 "c89ea8e655f5cdf58f42486f13614714") # commit-id 9c28a1cbb88f41fa03b03d7204106201ad33276b branch-0.2.1
     endif()
 else()
     set(FAISS_SOURCE_URL "https://github.com/facebookresearch/faiss/archive/v1.5.3.tar.gz")

@@ -15,21 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/Server.h"
-
 #include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <csignal>
-#include <thread>
-//#include <numaif.h>
 #include <string.h>
 #include <unistd.h>
 
-#include "DBWrapper.h"
 #include "metrics/Metrics.h"
 #include "scheduler/SchedInst.h"
 #include "server/Config.h"
+#include "server/DBWrapper.h"
+#include "server/Server.h"
 #include "server/grpc_impl/GrpcServer.h"
 #include "utils/Log.h"
 #include "utils/LogUtil.h"
@@ -143,7 +137,7 @@ Server::Daemonize() {
     }
 }
 
-void
+Status
 Server::Start() {
     if (daemonized_ != 0) {
         Daemonize();
@@ -151,18 +145,19 @@ Server::Start() {
 
     try {
         /* Read config file */
-        if (LoadConfig() != SERVER_SUCCESS) {
-            std::cerr << "Milvus server fail to load config file" << std::endl;
-            return;
+        Status s = LoadConfig();
+        if (!s.ok()) {
+            std::cerr << "ERROR: Milvus server fail to load config file" << std::endl;
+            return s;
         }
 
         /* log path is defined in Config file, so InitLog must be called after LoadConfig */
         Config& config = Config::GetInstance();
         std::string time_zone;
-        Status s = config.GetServerConfigTimeZone(time_zone);
+        s = config.GetServerConfigTimeZone(time_zone);
         if (!s.ok()) {
             std::cerr << "Fail to get server config timezone" << std::endl;
-            return;
+            return s;
         }
 
         if (time_zone.length() == 3) {
@@ -179,8 +174,7 @@ Server::Start() {
         }
 
         if (setenv("TZ", time_zone.c_str(), 1) != 0) {
-            std::cerr << "Fail to setenv" << std::endl;
-            return;
+            return Status(SERVER_UNEXPECTED_ERROR, "Fail to setenv");
         }
         tzset();
 
@@ -190,9 +184,10 @@ Server::Start() {
         server::SystemInfo::GetInstance().Init();
 
         StartService();
-        std::cout << "Milvus server start successfully." << std::endl;
+        return Status::OK();
     } catch (std::exception& ex) {
-        std::cerr << "Milvus server encounter exception: " << ex.what();
+        std::string str = "Milvus server encounter exception: " + std::string(ex.what());
+        return Status(SERVER_UNEXPECTED_ERROR, str);
     }
 }
 
@@ -204,12 +199,12 @@ Server::Stop() {
     if (pid_fd_ != -1) {
         int ret = lockf(pid_fd_, F_ULOCK, 0);
         if (ret != 0) {
-            std::cerr << "Can't lock file: " << strerror(errno) << std::endl;
+            std::cerr << "ERROR: Can't lock file: " << strerror(errno) << std::endl;
             exit(0);
         }
         ret = close(pid_fd_);
         if (ret != 0) {
-            std::cerr << "Can't close file: " << strerror(errno) << std::endl;
+            std::cerr << "ERROR: Can't close file: " << strerror(errno) << std::endl;
             exit(0);
         }
     }
@@ -218,31 +213,31 @@ Server::Stop() {
     if (!pid_filename_.empty()) {
         int ret = unlink(pid_filename_.c_str());
         if (ret != 0) {
-            std::cerr << "Can't unlink file: " << strerror(errno) << std::endl;
+            std::cerr << "ERROR: Can't unlink file: " << strerror(errno) << std::endl;
             exit(0);
         }
     }
 
     StopService();
 
-    std::cerr << "Milvus server is closed!" << std::endl;
+    std::cerr << "Milvus server exit..." << std::endl;
 }
 
-ErrorCode
+Status
 Server::LoadConfig() {
     Config& config = Config::GetInstance();
     Status s = config.LoadConfigFile(config_filename_);
     if (!s.ok()) {
-        std::cerr << "Failed to load config file: " << config_filename_ << std::endl;
-        exit(0);
+        std::cerr << s.message() << std::endl;
+        return s;
     }
 
     s = config.ValidateConfig();
     if (!s.ok()) {
         std::cerr << "Config check fail: " << s.message() << std::endl;
-        exit(0);
+        return s;
     }
-    return SERVER_SUCCESS;
+    return milvus::Status::OK();
 }
 
 void

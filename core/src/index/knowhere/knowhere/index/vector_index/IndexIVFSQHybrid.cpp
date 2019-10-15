@@ -96,7 +96,7 @@ IVFSQHybrid::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
         auto new_idx = std::make_shared<IVFSQHybrid>(device_index, device_id, res);
         return new_idx;
     } else {
-        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
+        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu: " + std::to_string(gpu_id_) + "resource");
     }
 }
 
@@ -152,7 +152,7 @@ IVFSQHybrid::LoadQuantizer(const Config& conf) {
         gpu_mode = 1;
         return q;
     } else {
-        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
+        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu: " + std::to_string(gpu_id_) + "resource");
     }
 }
 
@@ -215,7 +215,7 @@ IVFSQHybrid::LoadData(const knowhere::QuantizerPtr& q, const Config& conf) {
         auto sq_idx = std::make_shared<IVFSQHybrid>(new_idx, gpu_id_, res);
         return sq_idx;
     } else {
-        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
+        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu: " + std::to_string(gpu_id_) + "resource");
     }
 }
 
@@ -242,7 +242,7 @@ IVFSQHybrid::CopyCpuToGpuWithQuantizer(const int64_t& device_id, const Config& c
         q->size = index_composition.quantizer->d * index_composition.quantizer->getNumVecs() * sizeof(float);
         return std::make_pair(new_idx, q);
     } else {
-        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu_resource");
+        KNOWHERE_THROW_MSG("CopyCpuToGpu Error, can't get gpu: " + std::to_string(gpu_id_) + "resource");
     }
 }
 

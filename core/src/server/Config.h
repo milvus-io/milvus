@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <yaml-cpp/yaml.h>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -110,13 +109,10 @@ class Config {
  private:
     ConfigNode&
     GetConfigNode(const std::string& name);
-
     Status
     GetConfigValueInMem(const std::string& parent_key, const std::string& child_key, std::string& value);
-
     void
     SetConfigValueInMem(const std::string& parent_key, const std::string& child_key, const std::string& value);
-
     void
     PrintConfigSection(const std::string& config_node_name);
 

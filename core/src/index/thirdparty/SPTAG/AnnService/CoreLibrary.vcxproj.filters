@@ -38,6 +38,12 @@
     <Filter Include="Source Files\Core\KDT">
       <UniqueIdentifier>{8fb36afb-73ed-4c3d-8c9b-c3581d80c5d1}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Helper\VectorSetReaders">
+      <UniqueIdentifier>{f7bc0bc7-1af5-4870-b8ee-fabdbabdb4c4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Helper\VectorSetReaders">
+      <UniqueIdentifier>{5c1449e0-38b7-4c82-976e-cbdc488d3fb5}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="inc\Core\Common.h">
@@ -50,6 +56,9 @@
       <Filter>Header Files\Core</Filter>
     </ClInclude>
     <ClInclude Include="inc\Core\SearchQuery.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\SearchResult.h">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
     <ClInclude Include="inc\Core\VectorIndex.h">
@@ -130,11 +139,20 @@
     <ClInclude Include="inc\Core\Common\BKTree.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Helper\ConcurrentSet.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\BufferStream.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h">
+      <Filter>Header Files\Helper\VectorSetReaders</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\VectorSetReader.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\Core\CommonDataStructure.cpp">
-      <Filter>Source Files\Core</Filter>
-    </ClCompile>
     <ClCompile Include="src\Core\VectorIndex.cpp">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
@@ -170,6 +188,12 @@
     </ClCompile>
     <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp">
       <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp">
+      <Filter>Source Files\Helper\VectorSetReaders</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\VectorSetReader.cpp">
+      <Filter>Source Files\Helper</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

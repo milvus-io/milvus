@@ -231,6 +231,56 @@ if __name__ == '__main__':
     testSPTAGClient()
 
  ```
-  
+ 
+ ### **C# Support**
+> Singlebox CsharpWrapper
+ ```C#
+using System;
+using System.Text;
+
+public class test
+{
+    static int dimension = 10;
+    static int n = 10;
+    static int k = 3;
+
+    static byte[] createFloatArray(int n)
+    {
+        byte[] data = new byte[n * dimension * sizeof(float)];
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < dimension; j++)
+                Array.Copy(BitConverter.GetBytes((float)i), 0, data, (i * dimension + j) * sizeof(float), 4);
+        return data;
+    }
+
+    static byte[] createMetadata(int n)
+    {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < n; i++)
+            sb.Append(i.ToString() + '\n');
+        return Encoding.ASCII.GetBytes(sb.ToString());
+    }
+
+    static void Main()
+    {
+        {
+            AnnIndex idx = new AnnIndex("BKT", "Float", dimension);
+            idx.SetBuildParam("DistCalcMethod", "L2");
+            byte[] data = createFloatArray(n);
+            byte[] meta = createMetadata(n);
+            idx.BuildWithMetaData(data, meta, n);
+            idx.Save("testcsharp");
+        }
+
+        AnnIndex index = AnnIndex.Load("testcsharp");
+        BasicResult[] res = index.SearchWithMetaData(createFloatArray(1), k);
+        for (int i = 0; i < res.Length; i++)
+            Console.WriteLine("result " + i.ToString() + ":" + res[i].Dist.ToString() + "@(" + res[i].VID.ToString() + "," + Encoding.ASCII.GetString(res[i].Meta) + ")"); 
+        Console.WriteLine("test finish!");
+    }
+}
+
+ ```
+
   
   

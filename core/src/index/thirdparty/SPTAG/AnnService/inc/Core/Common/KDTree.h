@@ -23,9 +23,9 @@ namespace SPTAG
         // node type for storing KDT
         struct KDTNode
         {
-            int left;
-            int right;
-            short split_dim;
+            SizeType left;
+            SizeType right;
+            DimensionType split_dim;
             float split_value;
         };
 
@@ -39,18 +39,18 @@ namespace SPTAG
                 m_iSamples(other.m_iSamples) {}
             ~KDTree() {}
 
-            inline const KDTNode& operator[](int index) const { return m_pTreeRoots[index]; }
-            inline KDTNode& operator[](int index) { return m_pTreeRoots[index]; }
+            inline const KDTNode& operator[](SizeType index) const { return m_pTreeRoots[index]; }
+            inline KDTNode& operator[](SizeType index) { return m_pTreeRoots[index]; }
 
-            inline int size() const { return (int)m_pTreeRoots.size(); }
+            inline SizeType size() const { return (SizeType)m_pTreeRoots.size(); }
 
             template <typename T>
-            void BuildTrees(VectorIndex* p_index, std::vector<int>* indices = nullptr)
+            void BuildTrees(VectorIndex* p_index, std::vector<SizeType>* indices = nullptr)
             {
-                std::vector<int> localindices;
+                std::vector<SizeType> localindices;
                 if (indices == nullptr) {
                     localindices.resize(p_index->GetNumSamples());
-                    for (int i = 0; i < p_index->GetNumSamples(); i++) localindices[i] = i;
+                    for (SizeType i = 0; i < p_index->GetNumSamples(); i++) localindices[i] = i;
                 }
                 else {
                     localindices.assign(indices->begin(), indices->end());
@@ -63,58 +63,41 @@ namespace SPTAG
                 {
                     Sleep(i * 100); std::srand(clock());
 
-                    std::vector<int> pindices(localindices.begin(), localindices.end());
+                    std::vector<SizeType> pindices(localindices.begin(), localindices.end());
                     std::random_shuffle(pindices.begin(), pindices.end());
 
-                    m_pTreeStart[i] = i * (int)pindices.size();
+                    m_pTreeStart[i] = i * (SizeType)pindices.size();
                     std::cout << "Start to build KDTree " << i + 1 << std::endl;
-                    int iTreeSize = m_pTreeStart[i];
-                    DivideTree<T>(p_index, pindices, 0, (int)pindices.size() - 1, m_pTreeStart[i], iTreeSize);
+                    SizeType iTreeSize = m_pTreeStart[i];
+                    DivideTree<T>(p_index, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize);
                     std::cout << i + 1 << " KDTree built, " << iTreeSize - m_pTreeStart[i] << " " << pindices.size() << std::endl;
                 }
             }
 
-            bool SaveTrees(void **pKDTMemFile, int64_t &len) const
+            inline std::uint64_t BufferSize() const 
+            { 
+                return sizeof(int) + sizeof(SizeType) * m_iTreeNumber + 
+                    sizeof(SizeType) + sizeof(KDTNode) * m_pTreeRoots.size();
+            }
+
+            bool SaveTrees(std::ostream& p_outstream) const
             {
-                int treeNodeSize = (int)m_pTreeRoots.size();
-
-                size_t size = sizeof(int) +
-                    sizeof(int) * m_iTreeNumber +
-                    sizeof(int) +
-                    sizeof(KDTNode) * treeNodeSize;
-                char *mem = (char*)malloc(size);
-                if (mem == NULL) return false;
-
-                auto ptr = mem;
-                *(int*)ptr = m_iTreeNumber;
-                ptr += sizeof(int);
-
-                memcpy(ptr, m_pTreeStart.data(), sizeof(int) * m_iTreeNumber);
-                ptr += sizeof(int) * m_iTreeNumber;
-
-                *(int*)ptr = treeNodeSize;
-                ptr += sizeof(int);
-
-                memcpy(ptr, m_pTreeRoots.data(), sizeof(KDTNode) * treeNodeSize);
-                *pKDTMemFile = mem;
-                len = size;
-
+                p_outstream.write((char*)&m_iTreeNumber, sizeof(int));
+                p_outstream.write((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
+                SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
+                p_outstream.write((char*)&treeNodeSize, sizeof(SizeType));
+                p_outstream.write((char*)m_pTreeRoots.data(), sizeof(KDTNode) * treeNodeSize);
+                std::cout << "Save KDT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
 
             bool SaveTrees(std::string sTreeFileName) const
             {
                 std::cout << "Save KDT to " << sTreeFileName << std::endl;
-                FILE *fp = fopen(sTreeFileName.c_str(), "wb");
-                if (fp == NULL) return false;
-
-                fwrite(&m_iTreeNumber, sizeof(int), 1, fp);
-                fwrite(m_pTreeStart.data(), sizeof(int), m_iTreeNumber, fp);
-                int treeNodeSize = (int)m_pTreeRoots.size();
-                fwrite(&treeNodeSize, sizeof(int), 1, fp);
-                fwrite(m_pTreeRoots.data(), sizeof(KDTNode), treeNodeSize, fp);
-                fclose(fp);
-                std::cout << "Save KDT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
+                std::ofstream output(sTreeFileName, std::ios::binary);
+                if (!output.is_open()) return false;
+                SaveTrees(output);
+                output.close();
                 return true;
             }
 
@@ -123,31 +106,32 @@ namespace SPTAG
                 m_iTreeNumber = *((int*)pKDTMemFile);
                 pKDTMemFile += sizeof(int);
                 m_pTreeStart.resize(m_iTreeNumber);
-                memcpy(m_pTreeStart.data(), pKDTMemFile, sizeof(int) * m_iTreeNumber);
-                pKDTMemFile += sizeof(int)*m_iTreeNumber;
+                memcpy(m_pTreeStart.data(), pKDTMemFile, sizeof(SizeType) * m_iTreeNumber);
+                pKDTMemFile += sizeof(SizeType)*m_iTreeNumber;
 
-                int treeNodeSize = *((int*)pKDTMemFile);
-                pKDTMemFile += sizeof(int);
+                SizeType treeNodeSize = *((SizeType*)pKDTMemFile);
+                pKDTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pKDTMemFile, sizeof(KDTNode) * treeNodeSize);
+                std::cout << "Load KDT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
 
             bool LoadTrees(std::string sTreeFileName)
             {
                 std::cout << "Load KDT From " << sTreeFileName << std::endl;
-                FILE *fp = fopen(sTreeFileName.c_str(), "rb");
-                if (fp == NULL) return false;
+                std::ifstream input(sTreeFileName, std::ios::binary);
+                if (!input.is_open()) return false;
 
-                fread(&m_iTreeNumber, sizeof(int), 1, fp);
+                input.read((char*)&m_iTreeNumber, sizeof(int));
                 m_pTreeStart.resize(m_iTreeNumber);
-                fread(m_pTreeStart.data(), sizeof(int), m_iTreeNumber, fp);
+                input.read((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
 
-                int treeNodeSize;
-                fread(&treeNodeSize, sizeof(int), 1, fp);
+                SizeType treeNodeSize;
+                input.read((char*)&treeNodeSize, sizeof(SizeType));
                 m_pTreeRoots.resize(treeNodeSize);
-                fread(m_pTreeRoots.data(), sizeof(KDTNode), treeNodeSize, fp);
-                fclose(fp);
+                input.read((char*)m_pTreeRoots.data(), sizeof(KDTNode) * treeNodeSize);
+                input.close();
                 std::cout << "Load KDT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
@@ -155,7 +139,7 @@ namespace SPTAG
             template <typename T>
             void InitSearchTrees(const VectorIndex* p_index, const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space,  const int p_limits) const
             {
-                for (char i = 0; i < m_iTreeNumber; i++) {
+                for (int i = 0; i < m_iTreeNumber; i++) {
                     KDTSearch(p_index, p_query, p_space, m_pTreeStart[i], true, 0);
                 }
 
@@ -181,10 +165,10 @@ namespace SPTAG
 
             template <typename T>
             void KDTSearch(const VectorIndex* p_index, const COMMON::QueryResultSet<T> &p_query,
-                           COMMON::WorkSpace& p_space, const int node, const bool isInit, const float distBound) const {
+                           COMMON::WorkSpace& p_space, const SizeType node, const bool isInit, const float distBound) const {
                 if (node < 0)
                 {
-                    int index = -node - 1;
+                    SizeType index = -node - 1;
                     if (index >= p_index->GetNumSamples()) return;
 #ifdef PREFETCH
                     const char* data = (const char *)(p_index->GetSample(index));
@@ -203,7 +187,7 @@ namespace SPTAG
 
                 float diff = (p_query.GetTarget())[tnode.split_dim] - tnode.split_value;
                 float distanceBound = distBound + diff * diff;
-                int otherChild, bestChild;
+                SizeType otherChild, bestChild;
                 if (diff < 0)
                 {
                     bestChild = tnode.left;
@@ -224,10 +208,10 @@ namespace SPTAG
 
 
             template <typename T>
-            void DivideTree(VectorIndex* p_index, std::vector<int>& indices, int first, int last,
-                int index, int &iTreeSize) {
+            void DivideTree(VectorIndex* p_index, std::vector<SizeType>& indices, SizeType first, SizeType last,
+                SizeType index, SizeType &iTreeSize) {
                 ChooseDivision<T>(p_index, m_pTreeRoots[index], indices, first, last);
-                int i = Subdivide<T>(p_index, m_pTreeRoots[index], indices, first, last);
+                SizeType i = Subdivide<T>(p_index, m_pTreeRoots[index], indices, first, last);
                 if (i - 1 <= first)
                 {
                     m_pTreeRoots[index].left = -indices[first] - 1;
@@ -251,30 +235,30 @@ namespace SPTAG
             }
 
             template <typename T>
-            void ChooseDivision(VectorIndex* p_index, KDTNode& node, const std::vector<int>& indices, const int first, const int last)
+            void ChooseDivision(VectorIndex* p_index, KDTNode& node, const std::vector<SizeType>& indices, const SizeType first, const SizeType last)
             {
                 std::vector<float> meanValues(p_index->GetFeatureDim(), 0);
                 std::vector<float> varianceValues(p_index->GetFeatureDim(), 0);
-                int end = min(first + m_iSamples, last);
-                int count = end - first + 1;
+                SizeType end = min(first + m_iSamples, last);
+                SizeType count = end - first + 1;
                 // calculate the mean of each dimension
-                for (int j = first; j <= end; j++)
+                for (SizeType j = first; j <= end; j++)
                 {
                     const T* v = (const T*)p_index->GetSample(indices[j]);
-                    for (int k = 0; k < p_index->GetFeatureDim(); k++)
+                    for (DimensionType k = 0; k < p_index->GetFeatureDim(); k++)
                     {
                         meanValues[k] += v[k];
                     }
                 }
-                for (int k = 0; k < p_index->GetFeatureDim(); k++)
+                for (DimensionType k = 0; k < p_index->GetFeatureDim(); k++)
                 {
                     meanValues[k] /= count;
                 }
                 // calculate the variance of each dimension
-                for (int j = first; j <= end; j++)
+                for (SizeType j = first; j <= end; j++)
                 {
                     const T* v = (const T*)p_index->GetSample(indices[j]);
-                    for (int k = 0; k < p_index->GetFeatureDim(); k++)
+                    for (DimensionType k = 0; k < p_index->GetFeatureDim(); k++)
                     {
                         float dist = v[k] - meanValues[k];
                         varianceValues[k] += dist*dist;
@@ -286,13 +270,13 @@ namespace SPTAG
                 node.split_value = meanValues[node.split_dim];
             }
 
-            int SelectDivisionDimension(const std::vector<float>& varianceValues) const
+            DimensionType SelectDivisionDimension(const std::vector<float>& varianceValues) const
             {
                 // Record the top maximum variances
-                std::vector<int> topind(m_numTopDimensionKDTSplit);
+                std::vector<DimensionType> topind(m_numTopDimensionKDTSplit);
                 int num = 0;
                 // order the variances
-                for (int i = 0; i < varianceValues.size(); i++)
+                for (DimensionType i = 0; i < (DimensionType)varianceValues.size(); i++)
                 {
                     if (num < m_numTopDimensionKDTSplit || varianceValues[i] > varianceValues[topind[num - 1]])
                     {
@@ -314,18 +298,18 @@ namespace SPTAG
                     }
                 }
                 // randomly choose a dimension from TOP_DIM
-                return topind[COMMON::Utils::rand_int(num)];
+                return topind[COMMON::Utils::rand(num)];
             }
 
             template <typename T>
-            int Subdivide(VectorIndex* p_index, const KDTNode& node, std::vector<int>& indices, const int first, const int last) const
+            SizeType Subdivide(VectorIndex* p_index, const KDTNode& node, std::vector<SizeType>& indices, const SizeType first, const SizeType last) const
             {
-                int i = first;
-                int j = last;
+                SizeType i = first;
+                SizeType j = last;
                 // decide which child one point belongs
                 while (i <= j)
                 {
-                    int ind = indices[i];
+                    SizeType ind = indices[i];
                     const T* v = (const T*)p_index->GetSample(ind);
                     float val = v[node.split_dim];
                     if (val < node.split_value)
@@ -347,7 +331,7 @@ namespace SPTAG
             }
 
         private:
-            std::vector<int> m_pTreeStart;
+            std::vector<SizeType> m_pTreeStart;
             std::vector<KDTNode> m_pTreeRoots;
 
         public:

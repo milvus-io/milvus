@@ -107,7 +107,7 @@ class DBImpl : public DB {
  private:
     Status
     QueryAsync(const std::string& table_id, const meta::TableFilesSchema& files, uint64_t k, uint64_t nq,
-               uint64_t nprobe, const float* vectors, const meta::DatesT& dates, QueryResults& results);
+               uint64_t nprobe, const float* vectors, QueryResults& results);
 
     void
     BackgroundTimerTask();
@@ -132,9 +132,6 @@ class DBImpl : public DB {
     StartBuildIndexTask(bool force = false);
     void
     BackgroundBuildIndex();
-
-    Status
-    BuildIndex(const meta::TableFileSchema&);
 
     Status
     MemSerialize();
