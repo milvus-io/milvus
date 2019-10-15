@@ -16,10 +16,6 @@
 # specific language governing permissions and limitations
 # under the License.
 #-------------------------------------------------------------------------------
-if (CUSTOMIZATION)
-    add_definitions(-DCUSTOMIZATION)
-endif (CUSTOMIZATION)
-
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 
 foreach(dir ${CORE_INCLUDE_DIRS})
