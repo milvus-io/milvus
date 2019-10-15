@@ -12,15 +12,8 @@ typedef SPTAG::ByteArray ByteArray;
 
 typedef SPTAG::QueryResult QueryResult;
 
+typedef SPTAG::BasicResult BasicResult;
+
 typedef SPTAG::Socket::RemoteSearchResult RemoteSearchResult;
-
-class Result {
-public:
-    int VID;
-    float Dist;
-    ByteArray Meta;
-
-    Result(int _VID, float _Dist, ByteArray _Meta): VID(_VID), Dist(_Dist), Meta(_Meta) {}
-};
 
 #endif // _SPTAG_PW_TRANSFERDATATYPE_H_

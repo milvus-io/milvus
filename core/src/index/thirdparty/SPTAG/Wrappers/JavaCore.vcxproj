@@ -70,7 +70,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup>
-    <TargetName>SPTAG</TargetName>
+    <TargetName>JAVASPTAG</TargetName>
     <TargetExt>.dll</TargetExt>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
     <IncludePath>$(ProjectDir);$(SolutionDir)AnnService\;$(IncludePath)</IncludePath>
@@ -106,6 +106,7 @@
     <ClCompile Include="$(IntDir)CoreInterface_jwrap.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="inc\JavaCommon.i" />
     <None Include="inc\JavaCore.i" />
   </ItemGroup>
   <ItemGroup>
@@ -113,8 +114,6 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets" Condition="Exists('..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets')" />
-    <Import Project="..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets" Condition="Exists('..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets')" />
   </ImportGroup>
   <Target Name="BeforeBuild" BeforeTargets="PrepareForBuild">
     <MakeDir Directories="$(IntDir)" />
@@ -131,7 +130,5 @@
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe'))" />
-    <Error Condition="!Exists('..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets'))" />
-    <Error Condition="!Exists('..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets'))" />
   </Target>
 </Project>
