@@ -154,7 +154,6 @@
     <Import Project="..\packages\boost_system-vc140.1.67.0.0\build\boost_system-vc140.targets" Condition="Exists('..\packages\boost_system-vc140.1.67.0.0\build\boost_system-vc140.targets')" />
     <Import Project="..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets" Condition="Exists('..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets')" />
     <Import Project="..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets" Condition="Exists('..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets')" />
-    <Import Project="..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets" Condition="Exists('..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
@@ -167,6 +166,5 @@
     <Error Condition="!Exists('..\packages\boost_system-vc140.1.67.0.0\build\boost_system-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_system-vc140.1.67.0.0\build\boost_system-vc140.targets'))" />
     <Error Condition="!Exists('..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets'))" />
     <Error Condition="!Exists('..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets'))" />
-    <Error Condition="!Exists('..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets'))" />
   </Target>
 </Project>

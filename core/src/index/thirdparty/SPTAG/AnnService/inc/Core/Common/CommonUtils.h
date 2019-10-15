@@ -36,9 +36,9 @@ namespace SPTAG
     {
         class Utils {
         public:
-            static int rand_int(int high = RAND_MAX, int low = 0)   // Generates a random int value.
+            static SizeType rand(SizeType high = MaxSize, SizeType low = 0)   // Generates a random int value.
             {
-                return low + (int)(float(high - low)*(std::rand() / (RAND_MAX + 1.0)));
+                return low + (SizeType)(float(high - low)*(std::rand() / (RAND_MAX + 1.0)));
             }
 
             static inline float atomic_float_add(volatile float* ptr, const float operand)
@@ -61,11 +61,11 @@ namespace SPTAG
                 }
             }
 
-            static double GetVector(char* cstr, const char* sep, std::vector<float>& arr, int& NumDim) {
+            static double GetVector(char* cstr, const char* sep, std::vector<float>& arr, DimensionType& NumDim) {
                 char* current;
                 char* context = NULL;
 
-                int i = 0;
+                DimensionType i = 0;
                 double sum = 0;
                 arr.clear();
                 current = strtok_s(cstr, sep, &context);
@@ -90,23 +90,23 @@ namespace SPTAG
             }
 
             template <typename T>
-            static void Normalize(T* arr, int col, int base) {
+            static void Normalize(T* arr, DimensionType col, int base) {
                 double vecLen = 0;
-                for (int j = 0; j < col; j++) {
+                for (DimensionType j = 0; j < col; j++) {
                     double val = arr[j];
                     vecLen += val * val;
                 }
                 vecLen = std::sqrt(vecLen);
                 if (vecLen < 1e-6) {
                     T val = (T)(1.0 / std::sqrt((double)col) * base);
-                    for (int j = 0; j < col; j++) arr[j] = val;
+                    for (DimensionType j = 0; j < col; j++) arr[j] = val;
                 }
                 else {
-                    for (int j = 0; j < col; j++) arr[j] = (T)(arr[j] / vecLen * base);
+                    for (DimensionType j = 0; j < col; j++) arr[j] = (T)(arr[j] / vecLen * base);
                 }
             }
 
-            static size_t ProcessLine(std::string& currentLine, std::vector<float>& arr, int& D, int base, DistCalcMethod distCalcMethod) {
+            static size_t ProcessLine(std::string& currentLine, std::vector<float>& arr, DimensionType& D, int base, DistCalcMethod distCalcMethod) {
                 size_t index;
                 double vecLen;
                 if (currentLine.length() == 0 || (index = currentLine.find_last_of("\t")) == std::string::npos || (vecLen = GetVector(const_cast<char*>(currentLine.c_str() + index + 1), "|", arr, D)) < -1) {
@@ -121,10 +121,10 @@ namespace SPTAG
             }
 
             template <typename T>
-            static void PrepareQuerys(std::ifstream& inStream, std::vector<std::string>& qString, std::vector<std::vector<T>>& Query, int& NumQuery, int& NumDim, DistCalcMethod distCalcMethod, int base) {
+            static void PrepareQuerys(std::ifstream& inStream, std::vector<std::string>& qString, std::vector<std::vector<T>>& Query, SizeType& NumQuery, DimensionType& NumDim, DistCalcMethod distCalcMethod, int base) {
                 std::string currentLine;
                 std::vector<float> arr;
-                int i = 0;
+                SizeType i = 0;
                 size_t index;
                 while ((NumQuery < 0 || i < NumQuery) && !inStream.eof()) {
                     std::getline(inStream, currentLine);
@@ -132,9 +132,9 @@ namespace SPTAG
                         continue;
                     }
                     qString.push_back(currentLine.substr(0, index));
-                    if (Query.size() < i + 1) Query.push_back(std::vector<T>(NumDim, 0));
+                    if ((SizeType)Query.size() < i + 1) Query.push_back(std::vector<T>(NumDim, 0));
 
-                    for (int j = 0; j < NumDim; j++) Query[i][j] = (T)arr[j];
+                    for (DimensionType j = 0; j < NumDim; j++) Query[i][j] = (T)arr[j];
                     i++;
                 }
                 NumQuery = i;
@@ -149,12 +149,12 @@ namespace SPTAG
                 return 1;
             }
 
-            static inline void AddNeighbor(int idx, float dist, int *neighbors, float *dists, int size)
+            static inline void AddNeighbor(SizeType idx, float dist, SizeType *neighbors, float *dists, DimensionType size)
             {
                 size--;
                 if (dist < dists[size] || (dist == dists[size] && idx < neighbors[size]))
                 {
-                    int nb;
+                    DimensionType nb;
                     for (nb = 0; nb <= size && neighbors[nb] != idx; nb++);
 
                     if (nb > size)
