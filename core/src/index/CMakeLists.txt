@@ -86,6 +86,10 @@ include(DefineOptionsCore)
 include(BuildUtilsCore)
 include(ThirdPartyPackagesCore)
 
+if (CUSTOMIZATION)
+    add_definitions(-DCUSTOMIZATION)
+endif (CUSTOMIZATION)
+
 add_subdirectory(knowhere)
 
 if (BUILD_COVERAGE STREQUAL "ON")
