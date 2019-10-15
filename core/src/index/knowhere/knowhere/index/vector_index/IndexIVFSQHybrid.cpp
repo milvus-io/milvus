@@ -27,6 +27,7 @@
 namespace knowhere {
 
 #ifdef CUSTOMIZATION
+
 IndexModelPtr
 IVFSQHybrid::Train(const DatasetPtr& dataset, const Config& config) {
     auto build_cfg = std::dynamic_pointer_cast<IVFSQCfg>(config);

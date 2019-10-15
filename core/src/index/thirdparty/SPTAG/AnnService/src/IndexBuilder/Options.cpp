@@ -11,14 +11,8 @@ using namespace SPTAG::IndexBuilder;
 
 
 BuilderOptions::BuilderOptions()
-    : m_threadNum(32),
-      m_inputValueType(VectorValueType::Float),
-      m_vectorDelimiter("|")
+    : Helper::ReaderOptions(VectorValueType::Float, 0, "|", 32)
 {
-    AddOptionalOption(m_threadNum, "-t", "--thread", "Thread Number.");
-    AddOptionalOption(m_vectorDelimiter, "", "--delimiter", "Vector delimiter.");
-    AddRequiredOption(m_dimension, "-d", "--dimension", "Dimension of vector.");
-    AddRequiredOption(m_inputValueType, "-v", "--vectortype", "Input vector data type. Default is float.");
     AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
     AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
     AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");

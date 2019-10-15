@@ -22,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-624 - Search vectors failed if time ranges long enough
 - MS-652 - IVFSQH quantization double free
 - MS-605 - Server going down during searching vectors
+- MS-654 - Describe index timeout when building index
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
@@ -43,6 +44,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-614 - Preload table at startup
 - MS-626 - Refactor DataObj to support cache any type data
 - MS-648 - Improve unittest
+- MS-655 - Upgrade SPTAG
 
 ## New Feature
 - MS-627 - Integrate new index: IVFSQHybrid
