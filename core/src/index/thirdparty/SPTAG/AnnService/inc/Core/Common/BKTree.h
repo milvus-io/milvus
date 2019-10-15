@@ -24,34 +24,34 @@ namespace SPTAG
         // node type for storing BKT
         struct BKTNode
         {
-            int centerid;
-            int childStart;
-            int childEnd;
+            SizeType centerid;
+            SizeType childStart;
+            SizeType childEnd;
 
-            BKTNode(int cid = -1) : centerid(cid), childStart(-1), childEnd(-1) {}
+            BKTNode(SizeType cid = -1) : centerid(cid), childStart(-1), childEnd(-1) {}
         };
 
         template <typename T>
         struct KmeansArgs {
             int _K;
-            int _D;
+            DimensionType _D;
             int _T;
             T* centers;
-            int* counts;
+            SizeType* counts;
             float* newCenters;
-            int* newCounts;
-            char* label;
-            int* clusterIdx;
+            SizeType* newCounts;
+            int* label;
+            SizeType* clusterIdx;
             float* clusterDist;
             T* newTCenters;
 
-            KmeansArgs(int k, int dim, int datasize, int threadnum) : _K(k), _D(dim), _T(threadnum) {
+            KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum) : _K(k), _D(dim), _T(threadnum) {
                 centers = new T[k * dim];
-                counts = new int[k];
+                counts = new SizeType[k];
                 newCenters = new float[threadnum * k * dim];
-                newCounts = new int[threadnum * k];
-                label = new char[datasize];
-                clusterIdx = new int[threadnum * k];
+                newCounts = new SizeType[threadnum * k];
+                label = new int[datasize];
+                clusterIdx = new SizeType[threadnum * k];
                 clusterDist = new float[threadnum * k];
                 newTCenters = new T[k * dim];
             }
@@ -68,7 +68,7 @@ namespace SPTAG
             }
 
             inline void ClearCounts() {
-                memset(newCounts, 0, sizeof(int) * _T * _K);
+                memset(newCounts, 0, sizeof(SizeType) * _T * _K);
             }
 
             inline void ClearCenters() {
@@ -82,17 +82,17 @@ namespace SPTAG
                 }
             }
 
-            void Shuffle(std::vector<int>& indices, int first, int last) {
-                int* pos = new int[_K];
+            void Shuffle(std::vector<SizeType>& indices, SizeType first, SizeType last) {
+                SizeType* pos = new SizeType[_K];
                 pos[0] = first;
                 for (int k = 1; k < _K; k++) pos[k] = pos[k - 1] + newCounts[k - 1];
 
                 for (int k = 0; k < _K; k++) {
                     if (newCounts[k] == 0) continue;
-                    int i = pos[k];
+                    SizeType i = pos[k];
                     while (newCounts[k] > 0) {
-                        int swapid = pos[(int)(label[i])] + newCounts[(int)(label[i])] - 1;
-                        newCounts[(int)(label[i])]--;
+                        SizeType swapid = pos[label[i]] + newCounts[label[i]] - 1;
+                        newCounts[label[i]]--;
                         std::swap(indices[i], indices[swapid]);
                         std::swap(label[i], label[swapid]);
                     }
@@ -114,59 +114,59 @@ namespace SPTAG
                                    m_iSamples(other.m_iSamples) {}
             ~BKTree() {}
 
-            inline const BKTNode& operator[](int index) const { return m_pTreeRoots[index]; }
-            inline BKTNode& operator[](int index) { return m_pTreeRoots[index]; }
+            inline const BKTNode& operator[](SizeType index) const { return m_pTreeRoots[index]; }
+            inline BKTNode& operator[](SizeType index) { return m_pTreeRoots[index]; }
 
-            inline int size() const { return (int)m_pTreeRoots.size(); }
+            inline SizeType size() const { return (SizeType)m_pTreeRoots.size(); }
 
-            inline const std::unordered_map<int, int>& GetSampleMap() const { return m_pSampleCenterMap; }
+            inline const std::unordered_map<SizeType, SizeType>& GetSampleMap() const { return m_pSampleCenterMap; }
 
             template <typename T>
-            void BuildTrees(VectorIndex* index, std::vector<int>* indices = nullptr)
+            void BuildTrees(VectorIndex* index, std::vector<SizeType>* indices = nullptr)
             {
                 struct  BKTStackItem {
-                    int index, first, last;
-                    BKTStackItem(int index_, int first_, int last_) : index(index_), first(first_), last(last_) {}
+                    SizeType index, first, last;
+                    BKTStackItem(SizeType index_, SizeType first_, SizeType last_) : index(index_), first(first_), last(last_) {}
                 };
                 std::stack<BKTStackItem> ss;
 
-                std::vector<int> localindices;
+                std::vector<SizeType> localindices;
                 if (indices == nullptr) {
                     localindices.resize(index->GetNumSamples());
-                    for (int i = 0; i < index->GetNumSamples(); i++) localindices[i] = i;
+                    for (SizeType i = 0; i < index->GetNumSamples(); i++) localindices[i] = i;
                 }
                 else {
                     localindices.assign(indices->begin(), indices->end());
                 }
-                KmeansArgs<T> args(m_iBKTKmeansK, index->GetFeatureDim(), (int)localindices.size(), omp_get_num_threads());
+                KmeansArgs<T> args(m_iBKTKmeansK, index->GetFeatureDim(), (SizeType)localindices.size(), omp_get_num_threads());
 
                 m_pSampleCenterMap.clear();
                 for (char i = 0; i < m_iTreeNumber; i++)
                 {
                     std::random_shuffle(localindices.begin(), localindices.end());
 
-                    m_pTreeStart.push_back((int)m_pTreeRoots.size());
-                    m_pTreeRoots.push_back(BKTNode((int)localindices.size()));
+                    m_pTreeStart.push_back((SizeType)m_pTreeRoots.size());
+                    m_pTreeRoots.push_back(BKTNode((SizeType)localindices.size()));
                     std::cout << "Start to build BKTree " << i + 1 << std::endl;
 
-                    ss.push(BKTStackItem(m_pTreeStart[i], 0, (int)localindices.size()));
+                    ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size()));
                     while (!ss.empty()) {
                         BKTStackItem item = ss.top(); ss.pop();
-                        int newBKTid = (int)m_pTreeRoots.size();
+                        SizeType newBKTid = (SizeType)m_pTreeRoots.size();
                         m_pTreeRoots[item.index].childStart = newBKTid;
                         if (item.last - item.first <= m_iBKTLeafSize) {
-                            for (int j = item.first; j < item.last; j++) {
+                            for (SizeType j = item.first; j < item.last; j++) {
                                 m_pTreeRoots.push_back(BKTNode(localindices[j]));
                             }
                         }
                         else { // clustering the data into BKTKmeansK clusters
                             int numClusters = KmeansClustering(index, localindices, item.first, item.last, args);
                             if (numClusters <= 1) {
-                                int end = min(item.last + 1, (int)localindices.size());
+                                SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                 std::sort(localindices.begin() + item.first, localindices.begin() + end);
                                 m_pTreeRoots[item.index].centerid = localindices[item.first];
                                 m_pTreeRoots[item.index].childStart = -m_pTreeRoots[item.index].childStart;
-                                for (int j = item.first + 1; j < end; j++) {
+                                for (SizeType j = item.first + 1; j < end; j++) {
                                     m_pTreeRoots.push_back(BKTNode(localindices[j]));
                                     m_pSampleCenterMap[localindices[j]] = m_pTreeRoots[item.index].centerid;
                                 }
@@ -181,53 +181,36 @@ namespace SPTAG
                                 }
                             }
                         }
-                        m_pTreeRoots[item.index].childEnd = (int)m_pTreeRoots.size();
+                        m_pTreeRoots[item.index].childEnd = (SizeType)m_pTreeRoots.size();
                     }
                     std::cout << i + 1 << " BKTree built, " << m_pTreeRoots.size() - m_pTreeStart[i] << " " << localindices.size() << std::endl;
                 }
             }
 
-            bool SaveTrees(void **pKDTMemFile, int64_t &len) const
+            inline std::uint64_t BufferSize() const
             {
-                int treeNodeSize = (int)m_pTreeRoots.size();
+                return sizeof(int) + sizeof(SizeType) * m_iTreeNumber +
+                    sizeof(SizeType) + sizeof(BKTNode) * m_pTreeRoots.size();
+            }
 
-                size_t size = sizeof(int) +
-                    sizeof(int) * m_iTreeNumber +
-                    sizeof(int) +
-                    sizeof(BKTNode) * treeNodeSize;
-                char *mem = (char*)malloc(size);
-                if (mem == NULL) return false;
-
-                auto ptr = mem;
-                *(int*)ptr = m_iTreeNumber;
-                ptr += sizeof(int);
-
-                memcpy(ptr, m_pTreeStart.data(), sizeof(int) * m_iTreeNumber);
-                ptr += sizeof(int) * m_iTreeNumber;
-
-                *(int*)ptr = treeNodeSize;
-                ptr += sizeof(int);
-
-                memcpy(ptr, m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
-                *pKDTMemFile = mem;
-                len = size;
-
+            bool SaveTrees(std::ostream& p_outstream) const
+            {
+                p_outstream.write((char*)&m_iTreeNumber, sizeof(int));
+                p_outstream.write((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
+                SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
+                p_outstream.write((char*)&treeNodeSize, sizeof(SizeType));
+                p_outstream.write((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
+                std::cout << "Save BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
 
             bool SaveTrees(std::string sTreeFileName) const
             {
                 std::cout << "Save BKT to " << sTreeFileName << std::endl;
-                FILE *fp = fopen(sTreeFileName.c_str(), "wb");
-                if (fp == NULL) return false;
-
-                fwrite(&m_iTreeNumber, sizeof(int), 1, fp);
-                fwrite(m_pTreeStart.data(), sizeof(int), m_iTreeNumber, fp);
-                int treeNodeSize = (int)m_pTreeRoots.size();
-                fwrite(&treeNodeSize, sizeof(int), 1, fp);
-                fwrite(m_pTreeRoots.data(), sizeof(BKTNode), treeNodeSize, fp);
-                fclose(fp);
-                std::cout << "Save BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
+                std::ofstream output(sTreeFileName, std::ios::binary);
+                if (!output.is_open()) return false;
+                SaveTrees(output);
+                output.close();
                 return true;
             }
 
@@ -236,31 +219,32 @@ namespace SPTAG
                 m_iTreeNumber = *((int*)pBKTMemFile);
                 pBKTMemFile += sizeof(int);
                 m_pTreeStart.resize(m_iTreeNumber);
-                memcpy(m_pTreeStart.data(), pBKTMemFile, sizeof(int) * m_iTreeNumber);
-                pBKTMemFile += sizeof(int)*m_iTreeNumber;
+                memcpy(m_pTreeStart.data(), pBKTMemFile, sizeof(SizeType) * m_iTreeNumber);
+                pBKTMemFile += sizeof(SizeType)*m_iTreeNumber;
 
-                int treeNodeSize = *((int*)pBKTMemFile);
-                pBKTMemFile += sizeof(int);
+                SizeType treeNodeSize = *((SizeType*)pBKTMemFile);
+                pBKTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pBKTMemFile, sizeof(BKTNode) * treeNodeSize);
+                std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
 
             bool LoadTrees(std::string sTreeFileName)
             {
                 std::cout << "Load BKT From " << sTreeFileName << std::endl;
-                FILE *fp = fopen(sTreeFileName.c_str(), "rb");
-                if (fp == NULL) return false;
+                std::ifstream input(sTreeFileName, std::ios::binary);
+                if (!input.is_open()) return false;
 
-                fread(&m_iTreeNumber, sizeof(int), 1, fp);
+                input.read((char*)&m_iTreeNumber, sizeof(int));
                 m_pTreeStart.resize(m_iTreeNumber);
-                fread(m_pTreeStart.data(), sizeof(int), m_iTreeNumber, fp);
+                input.read((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
 
-                int treeNodeSize;
-                fread(&treeNodeSize, sizeof(int), 1, fp);
+                SizeType treeNodeSize;
+                input.read((char*)&treeNodeSize, sizeof(SizeType));
                 m_pTreeRoots.resize(treeNodeSize);
-                fread(m_pTreeRoots.data(), sizeof(BKTNode), treeNodeSize, fp);
-                fclose(fp);
+                input.read((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
+                input.close();
                 std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
@@ -274,9 +258,9 @@ namespace SPTAG
                         p_space.m_SPTQueue.insert(COMMON::HeapCell(m_pTreeStart[i], p_index->ComputeDistance((const void*)p_query.GetTarget(), p_index->GetSample(node.centerid))));
                     } 
                     else {
-                        for (int begin = node.childStart; begin < node.childEnd; begin++) {
-                            int index = m_pTreeRoots[begin].centerid;
-                             p_space.m_SPTQueue.insert(COMMON::HeapCell(begin, p_index->ComputeDistance((const void*)p_query.GetTarget(), p_index->GetSample(index))));
+                        for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
+                            SizeType index = m_pTreeRoots[begin].centerid;
+                            p_space.m_SPTQueue.insert(COMMON::HeapCell(begin, p_index->ComputeDistance((const void*)p_query.GetTarget(), p_index->GetSample(index))));
                         }
                     } 
                 }
@@ -301,8 +285,8 @@ namespace SPTAG
                         if (!p_space.CheckAndSet(tnode.centerid)) {
                             p_space.m_NGQueue.insert(COMMON::HeapCell(tnode.centerid, bcell.distance));
                         }
-                        for (int begin = tnode.childStart; begin < tnode.childEnd; begin++) {
-                            int index = m_pTreeRoots[begin].centerid;
+                        for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
+                            SizeType index = m_pTreeRoots[begin].centerid;
                             p_space.m_SPTQueue.insert(COMMON::HeapCell(begin, p_index->ComputeDistance((const void*)p_query.GetTarget(), p_index->GetSample(index))));
                         } 
                     }
@@ -313,24 +297,24 @@ namespace SPTAG
 
             template <typename T>
             float KmeansAssign(VectorIndex* p_index,
-                               std::vector<int>& indices, 
-                               const int first, const int last, KmeansArgs<T>& args, const bool updateCenters) const {
+                               std::vector<SizeType>& indices,
+                               const SizeType first, const SizeType last, KmeansArgs<T>& args, const bool updateCenters) const {
                 float currDist = 0;
                 int threads = omp_get_num_threads();
                 float lambda = (updateCenters) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / (100.0f * (last - first)) : 0.0f;
-                int subsize = (last - first - 1) / threads + 1;
+                SizeType subsize = (last - first - 1) / threads + 1;
 
 #pragma omp parallel for
                 for (int tid = 0; tid < threads; tid++)
                 {
-                    int istart = first + tid * subsize;
-                    int iend = min(first + (tid + 1) * subsize, last);
-                    int *inewCounts = args.newCounts + tid * m_iBKTKmeansK;
+                    SizeType istart = first + tid * subsize;
+                    SizeType iend = min(first + (tid + 1) * subsize, last);
+                    SizeType *inewCounts = args.newCounts + tid * m_iBKTKmeansK;
                     float *inewCenters = args.newCenters + tid * m_iBKTKmeansK * p_index->GetFeatureDim();
-                    int * iclusterIdx = args.clusterIdx + tid * m_iBKTKmeansK;
+                    SizeType * iclusterIdx = args.clusterIdx + tid * m_iBKTKmeansK;
                     float * iclusterDist = args.clusterDist + tid * m_iBKTKmeansK;
                     float idist = 0;
-                    for (int i = istart; i < iend; i++) {
+                    for (SizeType i = istart; i < iend; i++) {
                         int clusterid = 0;
                         float smallestDist = MaxDist;
                         for (int k = 0; k < m_iBKTKmeansK; k++) {
@@ -345,7 +329,7 @@ namespace SPTAG
                         if (updateCenters) {
                             const T* v = (const T*)p_index->GetSample(indices[i]);
                             float* center = inewCenters + clusterid*p_index->GetFeatureDim();
-                            for (int j = 0; j < p_index->GetFeatureDim(); j++) center[j] += v[j];
+                            for (DimensionType j = 0; j < p_index->GetFeatureDim(); j++) center[j] += v[j];
                             if (smallestDist > iclusterDist[clusterid]) {
                                 iclusterDist[clusterid] = smallestDist;
                                 iclusterIdx[clusterid] = indices[i];
@@ -369,36 +353,50 @@ namespace SPTAG
                 if (updateCenters) {
                     for (int i = 1; i < threads; i++) {
                         float* currCenter = args.newCenters + i*m_iBKTKmeansK*p_index->GetFeatureDim();
-                        for (int j = 0; j < m_iBKTKmeansK * p_index->GetFeatureDim(); j++) args.newCenters[j] += currCenter[j];
+                        for (size_t j = 0; j < ((size_t)m_iBKTKmeansK) * p_index->GetFeatureDim(); j++) args.newCenters[j] += currCenter[j];
+
+                        for (int k = 0; k < m_iBKTKmeansK; k++) {
+                            if (args.clusterIdx[i*m_iBKTKmeansK + k] != -1 && args.clusterDist[i*m_iBKTKmeansK + k] > args.clusterDist[k]) {
+                                args.clusterDist[k] = args.clusterDist[i*m_iBKTKmeansK + k];
+                                args.clusterIdx[k] = args.clusterIdx[i*m_iBKTKmeansK + k];
+                            }
+                        }
                     }
 
-                    int maxcluster = 0;
-                    for (int k = 1; k < m_iBKTKmeansK; k++) if (args.newCounts[maxcluster] < args.newCounts[k]) maxcluster = k;
-
-                    int maxid = maxcluster;
-                    for (int tid = 1; tid < threads; tid++) {
-                        if (args.clusterDist[maxid] < args.clusterDist[tid * m_iBKTKmeansK + maxcluster]) maxid = tid * m_iBKTKmeansK + maxcluster;
+                    int maxcluster = -1;
+                    SizeType maxCount = 0;
+                    for (int k = 0; k < m_iBKTKmeansK; k++) {
+                        if (args.newCounts[k] > maxCount && DistanceUtils::ComputeL2Distance((T*)p_index->GetSample(args.clusterIdx[k]), args.centers + k * p_index->GetFeatureDim(), p_index->GetFeatureDim()) > 1e-6)
+                        {
+                            maxcluster = k;
+                            maxCount = args.newCounts[k];
+                        }
                     }
-                    if (args.clusterIdx[maxid] < 0 || args.clusterIdx[maxid] >= p_index->GetNumSamples())
-                        std::cout << "first:" << first << " last:" << last << " maxcluster:" << maxcluster << "(" << args.newCounts[maxcluster] << ") Error maxid:" << maxid << " dist:" << args.clusterDist[maxid] << std::endl;
-                    maxid = args.clusterIdx[maxid];
+
+                    if (maxcluster != -1 && (args.clusterIdx[maxcluster] < 0 || args.clusterIdx[maxcluster] >= p_index->GetNumSamples()))
+                        std::cout << "first:" << first << " last:" << last << " maxcluster:" << maxcluster << "(" << args.newCounts[maxcluster] << ") Error dist:" << args.clusterDist[maxcluster] << std::endl;
 
                     for (int k = 0; k < m_iBKTKmeansK; k++) {
                         T* TCenter = args.newTCenters + k * p_index->GetFeatureDim();
                         if (args.newCounts[k] == 0) {
-                            //int nextid = Utils::rand_int(last, first);
-                            //while (args.label[nextid] != maxcluster) nextid = Utils::rand_int(last, first);
-                            int nextid = maxid;
-                            std::memcpy(TCenter, p_index->GetSample(nextid), sizeof(T)*p_index->GetFeatureDim());
+                            if (maxcluster != -1) {
+                                //int nextid = Utils::rand_int(last, first);
+                                //while (args.label[nextid] != maxcluster) nextid = Utils::rand_int(last, first);
+                                SizeType nextid = args.clusterIdx[maxcluster];
+                                std::memcpy(TCenter, p_index->GetSample(nextid), sizeof(T)*p_index->GetFeatureDim());
+                            }
+                            else {
+                                std::memcpy(TCenter, args.centers + k * p_index->GetFeatureDim(), sizeof(T)*p_index->GetFeatureDim());
+                            }
                         }
                         else {
                             float* currCenters = args.newCenters + k * p_index->GetFeatureDim();
-                            for (int j = 0; j < p_index->GetFeatureDim(); j++) currCenters[j] /= args.newCounts[k];
+                            for (DimensionType j = 0; j < p_index->GetFeatureDim(); j++) currCenters[j] /= args.newCounts[k];
 
                             if (p_index->GetDistCalcMethod() == DistCalcMethod::Cosine) {
                                 COMMON::Utils::Normalize(currCenters, p_index->GetFeatureDim(), COMMON::Utils::GetBase<T>());
                             }
-                            for (int j = 0; j < p_index->GetFeatureDim(); j++) TCenter[j] = (T)(currCenters[j]);
+                            for (DimensionType j = 0; j < p_index->GetFeatureDim(); j++) TCenter[j] = (T)(currCenters[j]);
                         }
                     }
                 }
@@ -417,14 +415,14 @@ namespace SPTAG
 
             template <typename T>
             int KmeansClustering(VectorIndex* p_index, 
-                std::vector<int>& indices, const int first, const int last, KmeansArgs<T>& args) const {
+                std::vector<SizeType>& indices, const SizeType first, const SizeType last, KmeansArgs<T>& args) const {
                 int iterLimit = 100;
 
-                int batchEnd = min(first + m_iSamples, last);
+                SizeType batchEnd = min(first + m_iSamples, last);
                 float currDiff, currDist, minClusterDist = MaxDist;
                 for (int numKmeans = 0; numKmeans < 3; numKmeans++) {
                     for (int k = 0; k < m_iBKTKmeansK; k++) {
-                        int randid = COMMON::Utils::rand_int(last, first);
+                        SizeType randid = COMMON::Utils::rand(last, first);
                         std::memcpy(args.centers + k*p_index->GetFeatureDim(), p_index->GetSample(indices[randid]), sizeof(T)*p_index->GetFeatureDim());
                     }
                     args.ClearCounts();
@@ -432,7 +430,7 @@ namespace SPTAG
                     if (currDist < minClusterDist) {
                         minClusterDist = currDist;
                         memcpy(args.newTCenters, args.centers, sizeof(T)*m_iBKTKmeansK*p_index->GetFeatureDim());
-                        memcpy(args.counts, args.newCounts, sizeof(int) * m_iBKTKmeansK);
+                        memcpy(args.counts, args.newCounts, sizeof(SizeType) * m_iBKTKmeansK);
                     }
                 }
 
@@ -446,7 +444,7 @@ namespace SPTAG
                     args.ClearCounts();
                     args.ClearDists(-MaxDist);
                     currDist = KmeansAssign(p_index, indices, first, batchEnd, args, true);
-                    memcpy(args.counts, args.newCounts, sizeof(int)*m_iBKTKmeansK);
+                    memcpy(args.counts, args.newCounts, sizeof(SizeType) * m_iBKTKmeansK);
 
                     currDiff = 0;
                     for (int k = 0; k < m_iBKTKmeansK; k++) {
@@ -466,7 +464,7 @@ namespace SPTAG
                 args.ClearCounts();
                 args.ClearDists(MaxDist);
                 currDist = KmeansAssign(p_index, indices, first, last, args, false);
-                memcpy(args.counts, args.newCounts, sizeof(int)*m_iBKTKmeansK);
+                memcpy(args.counts, args.newCounts, sizeof(SizeType) * m_iBKTKmeansK);
 
                 int numClusters = 0;
                 for (int i = 0; i < m_iBKTKmeansK; i++) if (args.counts[i] > 0) numClusters++;
@@ -480,9 +478,9 @@ namespace SPTAG
             }
 
         private:
-            std::vector<int> m_pTreeStart;
+            std::vector<SizeType> m_pTreeStart;
             std::vector<BKTNode> m_pTreeRoots;
-            std::unordered_map<int, int> m_pSampleCenterMap;
+            std::unordered_map<SizeType, SizeType> m_pSampleCenterMap;
 
         public:
             int m_iTreeNumber, m_iBKTKmeansK, m_iBKTLeafSize, m_iSamples;

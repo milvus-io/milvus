@@ -28,6 +28,8 @@ DefineErrorCode(FailedOpenFile, 0x0002)
 DefineErrorCode(FailedCreateFile, 0x0003)
 DefineErrorCode(ParamNotFound, 0x0010)
 DefineErrorCode(FailedParseValue, 0x0011)
+DefineErrorCode(MemoryOverFlow, 0x0012)
+DefineErrorCode(LackOfInputs, 0x0013)
 
 // 0x1000 ~ 0x1FFF  Index Build Status
 

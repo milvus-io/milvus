@@ -2,7 +2,6 @@ include_directories(${CORE_SOURCE_DIR}/thirdparty)
 include_directories(${CORE_SOURCE_DIR}/include)
 include_directories(/usr/local/cuda/include)
 link_directories(/usr/local/cuda/lib64)
-link_directories(${CORE_SOURCE_DIR}/thirdparty/tbb)
 
 set(unittest_libs
         gtest gmock gtest_main gmock_main)
@@ -10,7 +9,6 @@ set(unittest_libs
 set(depend_libs
         faiss openblas lapack
         arrow ${ARROW_PREFIX}/lib/libjemalloc_pic.a
-        tbb
         )
 
 set(basic_libs

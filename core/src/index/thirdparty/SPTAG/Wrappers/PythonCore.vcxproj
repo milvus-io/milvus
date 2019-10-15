@@ -106,6 +106,7 @@
     <ClCompile Include="$(IntDir)CoreInterface_pwrap.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="inc\PythonCommon.i" />
     <None Include="inc\PythonCore.i" />
   </ItemGroup>
   <ItemGroup>
@@ -113,8 +114,6 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets" Condition="Exists('..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets')" />
-    <Import Project="..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets" Condition="Exists('..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets')" />
   </ImportGroup>
   <Target Name="BeforeBuild" BeforeTargets="PrepareForBuild">
     <MakeDir Directories="$(IntDir)" />
@@ -129,7 +128,5 @@
     </PropertyGroup>
     <Error Condition="!Exists('..\packages\python2.2.7.15\tools\python.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\python2.2.7.15\tools\python.exe'))" />
     <Error Condition="!Exists('..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe'))" />
-    <Error Condition="!Exists('..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets'))" />
-    <Error Condition="!Exists('..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets'))" />
   </Target>
 </Project>
