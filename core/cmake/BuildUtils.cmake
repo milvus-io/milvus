@@ -88,6 +88,11 @@ function(ExternalProject_Create_Cache project_name package_file install_path cac
         file(REMOVE ${package_file})
     endif()
 
+    string(REGEX REPLACE "(.+)/.+$" "\\1" package_dir ${package_file})
+    if(NOT EXISTS ${package_dir})
+        file(MAKE_DIRECTORY ${package_dir})
+    endif()
+
     message(STATUS "Will create cached package file: ${package_file}")
 
     ExternalProject_Add_Step(${project_name} package
