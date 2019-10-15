@@ -15,18 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/DBWrapper.h"
-#include "Config.h"
-#include "db/DBFactory.h"
-#include "utils/CommonUtil.h"
-#include "utils/Log.h"
-#include "utils/StringHelpFunctions.h"
-
 #include <faiss/utils.h>
 #include <omp.h>
 #include <cmath>
 #include <string>
 #include <vector>
+
+#include "db/DBFactory.h"
+#include "server/Config.h"
+#include "server/DBWrapper.h"
+#include "utils/CommonUtil.h"
+#include "utils/Log.h"
+#include "utils/StringHelpFunctions.h"
 
 namespace milvus {
 namespace server {
@@ -35,9 +35,9 @@ Status
 DBWrapper::StartService() {
     Config& config = Config::GetInstance();
     Status s;
+
     // db config
     engine::DBOptions opt;
-
     s = config.GetDBConfigBackendUrl(opt.meta_.backend_uri_);
     if (!s.ok()) {
         return s;
