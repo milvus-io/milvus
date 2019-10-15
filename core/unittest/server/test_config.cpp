@@ -23,8 +23,6 @@
 #include "utils/ValidationUtil.h"
 #include "server/Config.h"
 
-using namespace milvus;
-
 namespace {
 
 static const char *CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
@@ -37,7 +35,7 @@ static constexpr uint64_t GB = MB * 1024;
 } // namespace
 
 TEST(ConfigTest, CONFIG_TEST) {
-    server::ConfigMgr *config_mgr = server::YamlConfigMgr::GetInstance();
+    milvus::server::ConfigMgr *config_mgr = milvus::server::YamlConfigMgr::GetInstance();
 
     milvus::Status s = config_mgr->LoadConfigFile("");
     ASSERT_FALSE(s.ok());
