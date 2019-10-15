@@ -1,4 +1,4 @@
-%module SPTAGClient
+%module JAVASPTAGClient
 
 %{
 #include "inc/ClientInterface.h"
