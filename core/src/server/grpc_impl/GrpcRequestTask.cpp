@@ -40,7 +40,7 @@ namespace grpc {
 
 static const char* DQL_TASK_GROUP = "dql";
 static const char* DDL_DML_TASK_GROUP = "ddl_dml";
-static const char* PING_TASK_GROUP = "ping";
+static const char* INFO_TASK_GROUP = "info";
 
 constexpr int64_t DAY_SECONDS = 24 * 60 * 60;
 
@@ -182,7 +182,7 @@ CreateTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DescribeTableTask::DescribeTableTask(const std::string& table_name, ::milvus::grpc::TableSchema* schema)
-    : GrpcBaseTask(DDL_DML_TASK_GROUP), table_name_(table_name), schema_(schema) {
+    : GrpcBaseTask(INFO_TASK_GROUP), table_name_(table_name), schema_(schema) {
 }
 
 BaseTaskPtr
@@ -288,7 +288,7 @@ CreateIndexTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 HasTableTask::HasTableTask(const std::string& table_name, bool& has_table)
-    : GrpcBaseTask(DDL_DML_TASK_GROUP), table_name_(table_name), has_table_(has_table) {
+    : GrpcBaseTask(INFO_TASK_GROUP), table_name_(table_name), has_table_(has_table) {
 }
 
 BaseTaskPtr
@@ -373,7 +373,7 @@ DropTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ShowTablesTask::ShowTablesTask(::milvus::grpc::TableNameList* table_name_list)
-    : GrpcBaseTask(DDL_DML_TASK_GROUP), table_name_list_(table_name_list) {
+    : GrpcBaseTask(INFO_TASK_GROUP), table_name_list_(table_name_list) {
 }
 
 BaseTaskPtr
@@ -683,7 +683,7 @@ SearchTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 CountTableTask::CountTableTask(const std::string& table_name, int64_t& row_count)
-    : GrpcBaseTask(DDL_DML_TASK_GROUP), table_name_(table_name), row_count_(row_count) {
+    : GrpcBaseTask(INFO_TASK_GROUP), table_name_(table_name), row_count_(row_count) {
 }
 
 BaseTaskPtr
@@ -725,7 +725,7 @@ CountTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 CmdTask::CmdTask(const std::string& cmd, std::string& result)
-    : GrpcBaseTask(PING_TASK_GROUP), cmd_(cmd), result_(result) {
+    : GrpcBaseTask(INFO_TASK_GROUP), cmd_(cmd), result_(result) {
 }
 
 BaseTaskPtr
@@ -816,7 +816,7 @@ DeleteByRangeTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 PreloadTableTask::PreloadTableTask(const std::string& table_name)
-    : GrpcBaseTask(DDL_DML_TASK_GROUP), table_name_(table_name) {
+    : GrpcBaseTask(DQL_TASK_GROUP), table_name_(table_name) {
 }
 
 BaseTaskPtr
@@ -851,7 +851,7 @@ PreloadTableTask::OnExecute() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 DescribeIndexTask::DescribeIndexTask(const std::string& table_name, ::milvus::grpc::IndexParam* index_param)
-    : GrpcBaseTask(DDL_DML_TASK_GROUP), table_name_(table_name), index_param_(index_param) {
+    : GrpcBaseTask(INFO_TASK_GROUP), table_name_(table_name), index_param_(index_param) {
 }
 
 BaseTaskPtr
