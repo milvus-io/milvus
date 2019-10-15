@@ -6,7 +6,7 @@ COPY AnnService ./AnnService/
 COPY Test ./Test/
 COPY Wrappers ./Wrappers/
 
-RUN apt-get update && apt-get -y install wget build-essential libtbb-dev \
+RUN apt-get update && apt-get -y install wget build-essential \
     # remove the following if you don't want to build the wrappers
     openjdk-8-jdk python3-pip swig
 

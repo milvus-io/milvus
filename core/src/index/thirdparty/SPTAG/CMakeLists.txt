@@ -19,12 +19,12 @@ if(NOT WIN32)
 endif()
 
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-    # require at least gcc 4.7
-    if (CXX_COMPILER_VERSION VERSION_LESS 4.7)
-        message(FATAL_ERROR "GCC version must be at least 4.7!")
+    # require at least gcc 5.0
+    if (CXX_COMPILER_VERSION VERSION_LESS 5.0)
+        message(FATAL_ERROR "GCC version must be at least 5.0!")
     endif()
-    set (CMAKE_CXX_FLAGS_RELEASE "-Wall -Wunreachable-code -Wno-reorder -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -lm -lrt -DNDEBUG -std=c++11 -fopenmp -march=native")
-    set (CMAKE_CXX_FLAGS_DEBUG   "-Wall -Wunreachable-code -Wno-reorder -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -ggdb -lm -lrt -DNDEBUG -std=c++11 -fopenmp -march=native")
+    set (CMAKE_CXX_FLAGS_RELEASE "-Wall -Wunreachable-code -Wno-reorder -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -lm -lrt -DNDEBUG -std=c++14 -fopenmp -march=native")
+    set (CMAKE_CXX_FLAGS_DEBUG   "-Wall -Wunreachable-code -Wno-reorder -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -ggdb -lm -lrt -DNDEBUG -std=c++14 -fopenmp -march=native")
 elseif(WIN32)
     if(NOT MSVC14)
          message(FATAL_ERROR "On Windows, only MSVC version 14 are supported!") 
@@ -74,54 +74,18 @@ else()
     message (FATAL_ERROR "Could no find openmp!")
 endif()
 
-#find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex)
-#if (Boost_FOUND)
-#    include_directories (${Boost_INCLUDE_DIR})
-#    link_directories (${Boost_LIBRARY_DIR} "/usr/lib")
-#    message (STATUS "Found Boost.")
-#    message (STATUS "Include Path: ${Boost_INCLUDE_DIRS}")
-#    message (STATUS "Library Path: ${Boost_LIBRARY_DIRS}")
-#    message (STATUS "Library: ${Boost_LIBRARIES}")
-#else()
-#    message (FATAL_ERROR "Could not find Boost 1.67!")
-#endif()
-
-#set(Boost_LIBRARIES
-#        boost_system_static
-#        boost_filesystem_static
-#        boost_serialization_static
-#        boost_wserialization_static
-#        boost_regex_static
-#        boost_thread_static)
-set(TBB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../tbb)
-
-if (WIN32)
-    if (${CMAKE_SIZEOF_VOID_P} EQUAL "8")
-        set (TBB_LIBRARY_SUFFIX "lib/intel64/vc14")
-    else()
-        set (TBB_LIBRARY_SUFFIX "lib/ia32/vc14")
-    endif()
-
-    find_path(TBB_INCLUDE_DIRS tbb/tbb.h HINTS ${TBB_DIR} "C:/Program Files/Intel/TBB" PATH_SUFFIXES include)
-    find_library(TBB_LIBRARIES tbb${CMAKE_STATIC_LIBRARY_SUFFIX} HINTS ${TBB_DIR} "C:/Program Files/Intel/TBB" PATH_SUFFIXES ${TBB_LIBRARY_SUFFIX})
+find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex)
+if (Boost_FOUND)
+    include_directories (${Boost_INCLUDE_DIR})
+    link_directories (${Boost_LIBRARY_DIR} "/usr/lib")
+    message (STATUS "Found Boost.")
+    message (STATUS "Include Path: ${Boost_INCLUDE_DIRS}")
+    message (STATUS "Library Path: ${Boost_LIBRARY_DIRS}")
+    message (STATUS "Library: ${Boost_LIBRARIES}")
 else()
-    find_path(TBB_INCLUDE_DIRS tbb/tbb.h HINTS ${TBB_DIR} "/usr/" PATH_SUFFIXES include)
-    find_library(TBB_LIBRARIES libtbb${CMAKE_SHARED_LIBRARY_SUFFIX} HINTS ${TBB_DIR} "/usr/")
-endif()
-
-set(TBB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../tbb)
-find_path(TBB_INCLUDE_DIRS tbb/tbb.h HINTS ${TBB_DIR} "/usr/" PATH_SUFFIXES include)
-find_library(TBB_LIBRARIES libtbb${CMAKE_SHARED_LIBRARY_SUFFIX} HINTS ${TBB_DIR} "/usr/")
-
-if (TBB_INCLUDE_DIRS AND TBB_LIBRARIES)
-    include_directories (${TBB_INCLUDE_DIRS})
-    message (STATUS "Found TBB.")
-    message (STATUS "Include Path:" ${TBB_INCLUDE_DIRS})
-    message (STATUS "Library:" ${TBB_LIBRARIES})
-else()
-    message (FATAL_ERROR "Could not find TBB!")
+    message (FATAL_ERROR "Could not find Boost 1.67!")
 endif()
 
 add_subdirectory (AnnService)
-#add_subdirectory (Wrappers)
-#add_subdirectory (Test)
+add_subdirectory (Wrappers)
+add_subdirectory (Test)
