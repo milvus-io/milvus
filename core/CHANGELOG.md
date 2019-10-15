@@ -23,6 +23,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-652 - IVFSQH quantization double free
 - MS-605 - Server going down during searching vectors
 - MS-654 - Describe index timeout when building index
+- MS-658 - Fix SQ8 Hybrid can't search
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
