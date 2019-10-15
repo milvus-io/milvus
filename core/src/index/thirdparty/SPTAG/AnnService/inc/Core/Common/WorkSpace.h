@@ -14,10 +14,10 @@ namespace SPTAG
         // node type in the priority queue
         struct HeapCell
         {
-            int node;
+            SizeType node;
             float distance;
 
-            HeapCell(int _node = -1, float _distance = MaxDist) : node(_node), distance(_distance) {}
+            HeapCell(SizeType _node = -1, float _distance = MaxDist) : node(_node), distance(_distance) {}
 
             inline bool operator < (const HeapCell& rhs)
             {
@@ -45,12 +45,12 @@ namespace SPTAG
             // Record 2 hash tables.
             // [0~m_poolSize + 1) is the first block.
             // [m_poolSize + 1, 2*(m_poolSize + 1)) is the second block;
-            int m_hashTable[(m_poolSize + 1) * 2];
+            SizeType m_hashTable[(m_poolSize + 1) * 2];
 
 
-            inline unsigned hash_func2(int idx, int loop)
+            inline unsigned hash_func2(unsigned idx, int loop)
             {
-                return ((unsigned)idx + loop) & m_poolSize;
+                return (idx + loop) & m_poolSize;
             }
 
 
@@ -65,7 +65,7 @@ namespace SPTAG
             ~OptHashPosVector() {}
 
 
-            void Init(int size)
+            void Init(SizeType size)
             {
                 m_secondHash = true;
                 clear();
@@ -76,31 +76,31 @@ namespace SPTAG
                 if (!m_secondHash)
                 {
                     // Clear first block.
-                    memset(&m_hashTable[0], 0, sizeof(int)*(m_poolSize + 1));
+                    memset(&m_hashTable[0], 0, sizeof(SizeType)*(m_poolSize + 1));
                 }
                 else
                 {
                     // Clear all blocks.
-                    memset(&m_hashTable[0], 0, 2 * sizeof(int) * (m_poolSize + 1));
+                    memset(&m_hashTable[0], 0, 2 * sizeof(SizeType) * (m_poolSize + 1));
                     m_secondHash = false;
                 }
             }
 
 
-            inline bool CheckAndSet(int idx)
+            inline bool CheckAndSet(SizeType idx)
             {
                 // Inner Index is begin from 1
                 return _CheckAndSet(&m_hashTable[0], idx + 1) == 0;
             }
 
 
-            inline int _CheckAndSet(int* hashTable, int idx)
+            inline int _CheckAndSet(SizeType* hashTable, SizeType idx)
             {
-                unsigned index, loop;
+                unsigned index;
 
                 // Get first hash position.
-                index = hash_func(idx);
-                for (loop = 0; loop < m_maxLoop; ++loop)
+                index = hash_func((unsigned)idx);
+                for (int loop = 0; loop < m_maxLoop; ++loop)
                 {
                     if (!hashTable[index])
                     {
@@ -132,7 +132,7 @@ namespace SPTAG
         // Variables for each single NN search
         struct WorkSpace
         {
-            void Initialize(int maxCheck, int dataSize)
+            void Initialize(int maxCheck, SizeType dataSize)
             {
                 nodeCheckStatus.Init(dataSize);
                 m_SPTQueue.Resize(maxCheck * 10);
@@ -158,7 +158,7 @@ namespace SPTAG
                 m_iNumOfContinuousNoBetterPropagation = 0;
             }
 
-            inline bool CheckAndSet(int idx)
+            inline bool CheckAndSet(SizeType idx)
             {
                 return nodeCheckStatus.CheckAndSet(idx);
             }

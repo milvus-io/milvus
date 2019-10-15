@@ -56,9 +56,10 @@ inline bool fileexists(const char* path) {
 
 namespace SPTAG
 {
+typedef std::int32_t SizeType;
+typedef std::int32_t DimensionType;
 
-typedef std::uint32_t SizeType;
-
+const SizeType MaxSize = (std::numeric_limits<SizeType>::max)();
 const float MinDist = (std::numeric_limits<float>::min)();
 const float MaxDist = (std::numeric_limits<float>::max)();
 const float Epsilon = 0.000000001f;
@@ -75,11 +76,6 @@ public:
     const char* what() const noexcept { return Exp.c_str(); }
 #endif
 };
-
-// Type of number index.
-typedef std::int32_t IndexType;
-static_assert(std::is_integral<IndexType>::value, "IndexType must be integral type.");
-
 
 enum class ErrorCode : std::uint16_t
 {

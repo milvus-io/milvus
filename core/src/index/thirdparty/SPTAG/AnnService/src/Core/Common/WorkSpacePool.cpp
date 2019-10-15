@@ -7,7 +7,7 @@ using namespace SPTAG;
 using namespace SPTAG::COMMON;
 
 
-WorkSpacePool::WorkSpacePool(int p_maxCheck, int p_vectorCount)
+WorkSpacePool::WorkSpacePool(int p_maxCheck, SizeType p_vectorCount)
     : m_maxCheck(p_maxCheck),
       m_vectorCount(p_vectorCount)
 {

@@ -34,5 +34,8 @@
     <None Include="inc\JavaClient.i">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="inc\JavaCommon.i">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

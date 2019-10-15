@@ -53,19 +53,19 @@ int main(int argc, char** argv)
 
         for (const auto& indexRes : result.m_allIndexResults)
         {
-            fprintf(stdout, "Index: %s\n", indexRes.m_indexName.c_str());
+            std::cout << "Index: " << indexRes.m_indexName << std::endl;
 
             int idx = 0;
             for (const auto& res : indexRes.m_results)
             {
-                fprintf(stdout, "------------------\n");
-                fprintf(stdout, "DocIndex: %d Distance: %f\n", res.VID, res.Dist);
+                std::cout << "------------------" << std::endl;
+                std::cout << "DocIndex: " << res.VID << " Distance: " << res.Dist;
                 if (indexRes.m_results.WithMeta())
                 {
                     const auto& metadata = indexRes.m_results.GetMetadata(idx);
-                    fprintf(stdout, " MetaData: %.*s\n", static_cast<int>(metadata.Length()), metadata.Data());
+                    std::cout << " MetaData: " << std::string((char*)metadata.Data(), metadata.Length());
                 }
-
+                std::cout << std::endl;
                 ++idx;
             }
         }

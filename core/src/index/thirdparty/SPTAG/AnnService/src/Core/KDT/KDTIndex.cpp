@@ -13,22 +13,7 @@ namespace SPTAG
     namespace KDT
     {
         template <typename T>
-        ErrorCode Index<T>::LoadIndexFromMemory(const std::vector<void*>& p_indexBlobs)
-        {
-            if (!m_pSamples.Load((char*)p_indexBlobs[0])) return ErrorCode::FailedParseValue;
-            if (!m_pTrees.LoadTrees((char*)p_indexBlobs[1])) return ErrorCode::FailedParseValue;
-            if (!m_pGraph.LoadGraphFromMemory((char*)p_indexBlobs[2])) return ErrorCode::FailedParseValue;
-            m_pMetadata = std::make_shared<MemMetadataSet>();
-            if (ErrorCode::Success != m_pMetadata->LoadMetadataFromMemory((char*)p_indexBlobs[3]))
-                return ErrorCode::FailedParseValue;
-
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
-            m_workSpacePool->Init(m_iNumberOfThreads);
-            return ErrorCode::Success;
-        }
-
-        template <typename T>
-        ErrorCode Index<T>::LoadIndex(const std::string& p_folderPath, Helper::IniReader& p_reader)
+        ErrorCode Index<T>::LoadConfig(Helper::IniReader& p_reader)
         {
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
             SetParameter(RepresentStr, \
@@ -38,13 +23,74 @@ namespace SPTAG
 
 #include "inc/Core/KDT/ParameterDefinitionList.h"
 #undef DefineKDTParameter
+            return ErrorCode::Success;
+        }
 
-            if (!m_pSamples.Load(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
-            if (!m_pTrees.LoadTrees(p_folderPath + m_sKDTFilename)) return ErrorCode::Fail;
-            if (!m_pGraph.LoadGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
+        template <typename T>
+        ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs)
+        {
+            if (p_indexBlobs.size() < 3) return ErrorCode::LackOfInputs;
+
+            if (!m_pSamples.Load((char*)p_indexBlobs[0].Data())) return ErrorCode::FailedParseValue;
+            if (!m_pTrees.LoadTrees((char*)p_indexBlobs[1].Data())) return ErrorCode::FailedParseValue;
+            if (!m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data())) return ErrorCode::FailedParseValue;
+            if (p_indexBlobs.size() > 3 && !m_deletedID.load((char*)p_indexBlobs[3].Data())) return ErrorCode::FailedParseValue;
 
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::LoadIndexData(const std::string& p_folderPath)
+        {
+            if (!m_pSamples.Load(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
+            if (!m_pTrees.LoadTrees(p_folderPath + m_sKDTFilename)) return ErrorCode::Fail;
+            if (!m_pGraph.LoadGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
+            if (!m_deletedID.load(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
+
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
+            m_workSpacePool->Init(m_iNumberOfThreads);
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SaveConfig(std::ostream& p_configOut) const
+        {
+#define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
+    p_configOut << RepresentStr << "=" << GetParameter(RepresentStr) << std::endl;
+
+#include "inc/Core/KDT/ParameterDefinitionList.h"
+#undef DefineKDTParameter
+            p_configOut << std::endl;
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SaveIndexData(const std::string& p_folderPath)
+        {
+            std::lock_guard<std::mutex> lock(m_dataAddLock);
+            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
+
+            if (!m_pSamples.Save(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
+            if (!m_pTrees.SaveTrees(p_folderPath + m_sKDTFilename)) return ErrorCode::Fail;
+            if (!m_pGraph.SaveGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
+            if (!m_deletedID.save(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SaveIndexData(const std::vector<std::ostream*>& p_indexStreams)
+        {
+            if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
+
+            std::lock_guard<std::mutex> lock(m_dataAddLock);
+            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
+
+            if (!m_pSamples.Save(*p_indexStreams[0])) return ErrorCode::Fail;
+            if (!m_pTrees.SaveTrees(*p_indexStreams[1])) return ErrorCode::Fail;
+            if (!m_pGraph.SaveGraph(*p_indexStreams[2])) return ErrorCode::Fail;
+            if (!m_deletedID.save(*p_indexStreams[3])) return ErrorCode::Fail;
             return ErrorCode::Success;
         }
 
@@ -54,19 +100,19 @@ namespace SPTAG
         m_pTrees.InitSearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         while (!p_space.m_NGQueue.empty()) { \
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
-            const int *node = m_pGraph[gnode.node]; \
+            const SizeType *node = m_pGraph[gnode.node]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
             CheckDeleted1 { \
                 if (!p_query.AddPoint(gnode.node, gnode.distance) && p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
                     p_query.SortResult(); return; \
                 } \
             } \
-            for (int i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) \
+            for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) \
                 _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
             float upperBound = max(p_query.worstDist(), gnode.distance); \
             bool bLocalOpt = true; \
-            for (int i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) { \
-                int nn_index = node[i]; \
+            for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) { \
+                SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
                 if (p_space.CheckAndSet(nn_index)) continue; \
                 float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
@@ -87,9 +133,9 @@ namespace SPTAG
         p_query.SortResult(); \
 
         template <typename T>
-        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const tbb::concurrent_unordered_set<int> &p_deleted) const
+        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const Helper::Concurrent::ConcurrentSet<SizeType> &p_deleted) const
         {
-            Search(if (p_deleted.find(gnode.node) == p_deleted.end()))
+            Search(if (!p_deleted.contains(gnode.node)))
         }
 
         template <typename T>
@@ -116,7 +162,7 @@ namespace SPTAG
             {
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
                 {
-                    int result = p_query.GetResult(i)->VID;
+                    SizeType result = p_query.GetResult(i)->VID;
                     p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadata(result));
                 }
             }
@@ -125,7 +171,7 @@ namespace SPTAG
 #pragma endregion
 
         template <typename T>
-        ErrorCode Index<T>::BuildIndex(const void* p_data, int p_vectorNum, int p_dimension)
+        ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension)
         {
             omp_set_num_threads(m_iNumberOfThreads);
 
@@ -135,7 +181,7 @@ namespace SPTAG
             {
                 int base = COMMON::Utils::GetBase<T>();
 #pragma omp parallel for
-                for (int i = 0; i < GetNumSamples(); i++) {
+                for (SizeType i = 0; i < GetNumSamples(); i++) {
                     COMMON::Utils::Normalize(m_pSamples[i], GetFeatureDim(), base);
                 }
             }
@@ -145,7 +191,54 @@ namespace SPTAG
 
             m_pTrees.BuildTrees<T>(this);
             m_pGraph.BuildGraph<T>(this);
+            
+            return ErrorCode::Success;
+        }
 
+        template <typename T>
+        ErrorCode Index<T>::RefineIndex(const std::vector<std::ostream*>& p_indexStreams)
+        {
+            std::lock_guard<std::mutex> lock(m_dataAddLock);
+            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
+
+            SizeType newR = GetNumSamples();
+
+            std::vector<SizeType> indices;
+            std::vector<SizeType> reverseIndices(newR);
+            for (SizeType i = 0; i < newR; i++) {
+                if (!m_deletedID.contains(i)) {
+                    indices.push_back(i);
+                    reverseIndices[i] = i;
+                }
+                else {
+                    while (m_deletedID.contains(newR - 1) && newR > i) newR--;
+                    if (newR == i) break;
+                    indices.push_back(newR - 1);
+                    reverseIndices[newR - 1] = i;
+                    newR--;
+                }
+            }
+
+            std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+
+            if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
+            if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
+
+            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, *p_indexStreams[2]);
+
+            COMMON::KDTree newTrees(m_pTrees);
+            newTrees.BuildTrees<T>(this, &indices);
+#pragma omp parallel for
+            for (SizeType i = 0; i < newTrees.size(); i++) {
+                if (newTrees[i].left < 0)
+                    newTrees[i].left = -reverseIndices[-newTrees[i].left - 1] - 1;
+                if (newTrees[i].right < 0)
+                    newTrees[i].right = -reverseIndices[-newTrees[i].right - 1] - 1;
+            }
+            newTrees.SaveTrees(*p_indexStreams[1]);
+
+            Helper::Concurrent::ConcurrentSet<SizeType> newDeletedID;
+            newDeletedID.save(*p_indexStreams[3]);
             return ErrorCode::Success;
         }
 
@@ -163,56 +256,40 @@ namespace SPTAG
                 mkdir(folderPath.c_str());
             }
 
-            std::lock_guard<std::mutex> lock(m_dataLock);
-            int newR = GetNumSamples();
-
-            std::vector<int> indices;
-            std::vector<int> reverseIndices(newR);
-            for (int i = 0; i < newR; i++) {
-                if (m_deletedID.find(i) == m_deletedID.end()) {
-                    indices.push_back(i);
-                    reverseIndices[i] = i;
-                }
-                else {
-                    while (m_deletedID.find(newR - 1) != m_deletedID.end() && newR > i) newR--;
-                    if (newR == i) break;
-                    indices.push_back(newR - 1);
-                    reverseIndices[newR - 1] = i;
-                    newR--;
-                }
+            std::vector<std::ostream*> streams;
+            streams.push_back(new std::ofstream(folderPath + m_sDataPointsFilename, std::ios::binary));
+            streams.push_back(new std::ofstream(folderPath + m_sKDTFilename, std::ios::binary));
+            streams.push_back(new std::ofstream(folderPath + m_sGraphFilename, std::ios::binary));
+            streams.push_back(new std::ofstream(folderPath + m_sDeleteDataPointsFilename, std::ios::binary));
+            if (nullptr != m_pMetadata)
+            {
+                streams.push_back(new std::ofstream(folderPath + m_sMetadataFile, std::ios::binary));
+                streams.push_back(new std::ofstream(folderPath + m_sMetadataIndexFile, std::ios::binary));
             }
 
-            std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            for (size_t i = 0; i < streams.size(); i++) 
+                if (!(((std::ofstream*)streams[i])->is_open())) return ErrorCode::FailedCreateFile;
 
-            if (false == m_pSamples.Refine(indices, folderPath + m_sDataPointsFilename)) return ErrorCode::FailedCreateFile;
-            if (nullptr != m_pMetadata && ErrorCode::Success != m_pMetadata->RefineMetadata(indices, folderPath)) return ErrorCode::FailedCreateFile;
-
-            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, folderPath + m_sGraphFilename);
-
-            COMMON::KDTree newTrees(m_pTrees);
-            newTrees.BuildTrees<T>(this, &indices);
-#pragma omp parallel for
-            for (int i = 0; i < newTrees.size(); i++) {
-                if (newTrees[i].left < 0)
-                    newTrees[i].left = -reverseIndices[-newTrees[i].left - 1] - 1;
-                if (newTrees[i].right < 0)
-                    newTrees[i].right = -reverseIndices[-newTrees[i].right - 1] - 1;
+            ErrorCode ret = RefineIndex(streams);
+            
+            for (size_t i = 0; i < streams.size(); i++) 
+            {
+                ((std::ofstream*)streams[i])->close();
+                delete streams[i];
             }
-            newTrees.SaveTrees(folderPath + m_sKDTFilename);
-            return ErrorCode::Success;
+            return ret;
         }
 
         template <typename T>
-        ErrorCode Index<T>::DeleteIndex(const void* p_vectors, int p_vectorNum) {
+        ErrorCode Index<T>::DeleteIndex(const void* p_vectors, SizeType p_vectorNum) {
             const T* ptr_v = (const T*)p_vectors;
 #pragma omp parallel for schedule(dynamic)
-            for (int i = 0; i < p_vectorNum; i++) {
+            for (SizeType i = 0; i < p_vectorNum; i++) {
                 COMMON::QueryResultSet<T> query(ptr_v + i * GetFeatureDim(), m_pGraph.m_iCEF);
                 SearchIndex(query);
 
                 for (int i = 0; i < m_pGraph.m_iCEF; i++) {
                     if (query.GetResult(i)->Dist < 1e-6) {
-                        std::lock_guard<std::mutex> lock(m_dataLock);
                         m_deletedID.insert(query.GetResult(i)->VID);
                     }
                 }
@@ -221,85 +298,47 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::AddIndex(const void* p_vectors, int p_vectorNum, int p_dimension)
+        ErrorCode Index<T>::DeleteIndex(const SizeType& p_id) {
+            m_deletedID.insert(p_id);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension, SizeType* p_start)
         {
-            int begin, end;
+            SizeType begin, end;
             {
-                std::lock_guard<std::mutex> lock(m_dataLock);
-
-                if (GetNumSamples() == 0)
-                    return BuildIndex(p_vectors, p_vectorNum, p_dimension);
-
-                if (p_dimension != GetFeatureDim())
-                    return ErrorCode::FailedParseValue;
+                std::lock_guard<std::mutex> lock(m_dataAddLock);
 
                 begin = GetNumSamples();
                 end = GetNumSamples() + p_vectorNum;
 
-                m_pSamples.AddBatch((const T*)p_vectors, p_vectorNum);
-                m_pGraph.AddBatch(p_vectorNum);
+                if (p_start != nullptr) *p_start = begin;
 
-                if (m_pSamples.R() != end || m_pGraph.R() != end) {
+                if (begin == 0) return BuildIndex(p_vectors, p_vectorNum, p_dimension);
+
+                if (p_dimension != GetFeatureDim()) return ErrorCode::FailedParseValue;
+
+                if (m_pSamples.AddBatch((const T*)p_vectors, p_vectorNum) != ErrorCode::Success || m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success) {
                     std::cout << "Memory Error: Cannot alloc space for vectors" << std::endl;
                     m_pSamples.SetR(begin);
                     m_pGraph.SetR(begin);
-                    return ErrorCode::Fail;
+                    return ErrorCode::MemoryOverFlow;
                 }
                 if (DistCalcMethod::Cosine == m_iDistCalcMethod)
                 {
                     int base = COMMON::Utils::GetBase<T>();
-                    for (int i = begin; i < end; i++) {
+                    for (SizeType i = begin; i < end; i++) {
                         COMMON::Utils::Normalize((T*)m_pSamples[i], GetFeatureDim(), base);
                     }
                 }
             }
 
-            for (int node = begin; node < end; node++)
+            for (SizeType node = begin; node < end; node++)
             {
                 m_pGraph.RefineNode<T>(this, node, true);
             }
             std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
-            return ErrorCode::Success;
-        }
-
-        template<typename T>
-        ErrorCode
-            Index<T>::SaveIndexToMemory(std::vector<void*>& p_indexBlobs, std::vector<int64_t> &p_indexBlobsLen)
-        {
-            p_indexBlobs.resize(4);
-            p_indexBlobsLen.resize(4);
-            if (!m_pSamples.Save(&p_indexBlobs[0], p_indexBlobsLen[0])) return ErrorCode::Fail;
-            if (!m_pTrees.SaveTrees(&p_indexBlobs[1], p_indexBlobsLen[1])) return ErrorCode::Fail;
-            if (!m_pGraph.SaveGraphToMemory(&p_indexBlobs[2], p_indexBlobsLen[2])) return ErrorCode::Fail;
-            if (ErrorCode::Success != m_pMetadata->SaveMetadataToMemory(&p_indexBlobs[3], p_indexBlobsLen[3]))
-                return ErrorCode::Fail;
-            return ErrorCode::Success;
-        }
-
-        template<typename T>
-        ErrorCode
-            Index<T>::SaveIndex(const std::string& p_folderPath, std::ofstream& p_configout)
-        {
-            m_sDataPointsFilename = "vectors.bin";
-            m_sKDTFilename = "tree.bin";
-            m_sGraphFilename = "graph.bin";
-
-#define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
-    p_configout << RepresentStr << "=" << GetParameter(RepresentStr) << std::endl;
-
-#include "inc/Core/KDT/ParameterDefinitionList.h"
-#undef DefineKDTParameter
-
-            p_configout << std::endl;
-
-            if (m_deletedID.size() > 0) {
-                RefineIndex(p_folderPath);
-            }
-            else {
-                if (!m_pSamples.Save(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
-                if (!m_pTrees.SaveTrees(p_folderPath + m_sKDTFilename)) return ErrorCode::Fail;
-                if (!m_pGraph.SaveGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
-            }
             return ErrorCode::Success;
         }
 
