@@ -25,15 +25,8 @@ IniReader::~IniReader()
 }
 
 
-ErrorCode
-IniReader::LoadIniFile(const std::string& p_iniFilePath)
+ErrorCode IniReader::LoadIni(std::istream& p_input)
 {
-    std::ifstream input(p_iniFilePath);
-    if (!input.is_open())
-    {
-        return ErrorCode::FailedOpenFile;
-    }
-
     const std::size_t c_bufferSize = 1 << 16;
 
     std::unique_ptr<char[]> line(new char[c_bufferSize]);
@@ -51,9 +44,9 @@ IniReader::LoadIniFile(const std::string& p_iniFilePath)
         return std::isspace(p_ch) != 0;
     };
 
-    while (!input.eof())
+    while (!p_input.eof())
     {
-        if (!input.getline(line.get(), c_bufferSize))
+        if (!p_input.getline(line.get(), c_bufferSize))
         {
             break;
         }
@@ -141,8 +134,18 @@ IniReader::LoadIniFile(const std::string& p_iniFilePath)
             }
         }
     }
-
     return ErrorCode::Success;
+}
+
+
+ErrorCode
+IniReader::LoadIniFile(const std::string& p_iniFilePath)
+{
+    std::ifstream input(p_iniFilePath);
+    if (!input.is_open()) return ErrorCode::FailedOpenFile;
+    ErrorCode ret = LoadIni(input);
+    input.close();
+    return ret;
 }
 
 

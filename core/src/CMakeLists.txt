@@ -26,6 +26,11 @@ include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
 #this statement must put here, since the CORE_INCLUDE_DIRS is defined in code/CMakeList.txt
 add_subdirectory(index)
+
+if (CUSTOMIZATION)
+    add_definitions(-DCUSTOMIZATION)
+endif (CUSTOMIZATION)
+
 set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
 foreach (dir ${CORE_INCLUDE_DIRS})
     include_directories(${dir})
@@ -182,8 +187,6 @@ target_link_libraries(milvus_server
 install(TARGETS milvus_server DESTINATION bin)
 
 install(FILES
-        ${CMAKE_SOURCE_DIR}/src/index/thirdparty/tbb/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}
-        ${CMAKE_SOURCE_DIR}/src/index/thirdparty/tbb/${CMAKE_SHARED_LIBRARY_PREFIX}tbb${CMAKE_SHARED_LIBRARY_SUFFIX}.2
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3
         ${CMAKE_BINARY_DIR}/mysqlpp_ep-prefix/src/mysqlpp_ep/lib/${CMAKE_SHARED_LIBRARY_PREFIX}mysqlpp${CMAKE_SHARED_LIBRARY_SUFFIX}.3.2.4

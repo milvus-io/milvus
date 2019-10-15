@@ -11,6 +11,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-587 - Count get wrong result after adding vectors and index built immediately
 - MS-599 - Search wrong result when table created with metric_type: IP
 - MS-601 - Docker logs error caused by get CPUTemperature error
+- MS-605 - Server going down during searching vectors
 - MS-620 - Get table row counts display wrong error code
 - MS-622 - Delete vectors should be failed if date range is invalid
 - MS-624 - Search vectors failed if time ranges long enough
@@ -19,9 +20,11 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-640 - Cache object size calculate incorrect
 - MS-641 - Segment fault(signal 11) in PickToLoad
 - MS-644 - Search crashed with index-type: flat
-- MS-647 - [monitor] grafana display average cpu-temp
+- MS-647 - grafana display average cpu-temp
 - MS-652 - IVFSQH quantization double free
 - MS-653 - When config check fail, Milvus close without message
+- MS-654 - Describe index timeout when building index
+- MS-658 - Fix SQ8 Hybrid can't search
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
@@ -43,6 +46,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-619 - Add optimizer class in scheduler
 - MS-626 - Refactor DataObj to support cache any type data
 - MS-648 - Improve unittest
+- MS-655 - Upgrade SPTAG
 
 ## New Feature
 - MS-627 - Integrate new index: IVFSQHybrid

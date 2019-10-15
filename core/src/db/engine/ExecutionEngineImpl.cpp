@@ -37,6 +37,7 @@
 #include <utility>
 #include <vector>
 
+//#define ON_SEARCH
 namespace milvus {
 namespace engine {
 
@@ -248,26 +249,6 @@ ExecutionEngineImpl::Load(bool to_cache) {
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
     if (hybrid) {
-        auto key = location_ + ".quantizer";
-        auto quantizer =
-            std::static_pointer_cast<CachedQuantizer>(cache::GpuCacheMgr::GetInstance(device_id)->GetIndex(key));
-
-        auto conf = std::make_shared<knowhere::QuantizerCfg>();
-        conf->gpu_id = device_id;
-
-        if (quantizer) {
-            // cache hit
-            conf->mode = 2;
-            auto new_index = index_->LoadData(quantizer->Data(), conf);
-            index_ = new_index;
-        } else {
-            auto pair = index_->CopyToGpuWithQuantizer(device_id);
-            index_ = pair.first;
-
-            // cache
-            auto cached_quantizer = std::make_shared<CachedQuantizer>(pair.second);
-            cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(key, cached_quantizer);
-        }
         return Status::OK();
     }
 
@@ -415,7 +396,60 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 
 Status
 ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
-                            bool hybrid) const {
+                            bool hybrid) {
+    if (index_type_ == EngineType::FAISS_IVFSQ8H) {
+        if (!hybrid) {
+            const std::string key = location_ + ".quantizer";
+            std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+
+            const int64_t NOT_FOUND = -1;
+            int64_t device_id = NOT_FOUND;
+
+            // cache hit
+            {
+                knowhere::QuantizerPtr quantizer = nullptr;
+
+                for (auto& gpu : gpus) {
+                    auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+                    if (auto cached_quantizer = cache->GetIndex(key)) {
+                        device_id = gpu;
+                        quantizer = std::static_pointer_cast<CachedQuantizer>(cached_quantizer)->Data();
+                    }
+                }
+
+                if (device_id != NOT_FOUND) {
+                    // cache hit
+                    auto config = std::make_shared<knowhere::QuantizerCfg>();
+                    config->gpu_id = device_id;
+                    config->mode = 2;
+                    auto new_index = index_->LoadData(quantizer, config);
+                    index_ = new_index;
+                }
+            }
+
+            if (device_id == NOT_FOUND) {
+                // cache miss
+                std::vector<int64_t> all_free_mem;
+                for (auto& gpu : gpus) {
+                    auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+                    auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
+                    all_free_mem.push_back(free_mem);
+                }
+
+                auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
+                auto best_index = std::distance(all_free_mem.begin(), max_e);
+                device_id = gpus[best_index];
+
+                auto pair = index_->CopyToGpuWithQuantizer(device_id);
+                index_ = pair.first;
+
+                // cache
+                auto cached_quantizer = std::make_shared<CachedQuantizer>(pair.second);
+                cache::GpuCacheMgr::GetInstance(device_id)->InsertItem(key, cached_quantizer);
+            }
+        }
+    }
+
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
         return Status(DB_ERROR, "index is null");

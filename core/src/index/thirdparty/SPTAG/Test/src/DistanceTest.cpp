@@ -6,7 +6,7 @@
 #include "inc/Core/Common/DistanceUtils.h"
 
 template<typename T>
-static float ComputeCosineDistance(const T *pX, const T *pY, int length) {
+static float ComputeCosineDistance(const T *pX, const T *pY, SPTAG::DimensionType length) {
     float diff = 0;
     const T* pEnd1 = pX + length;
     while (pX < pEnd1) diff += (*pX++) * (*pY++);
@@ -14,7 +14,7 @@ static float ComputeCosineDistance(const T *pX, const T *pY, int length) {
 }
 
 template<typename T>
-static float ComputeL2Distance(const T *pX, const T *pY, int length)
+static float ComputeL2Distance(const T *pX, const T *pY, SPTAG::DimensionType length)
 {
     float diff = 0;
     const T* pEnd1 = pX + length;
@@ -32,10 +32,10 @@ T random(int high = RAND_MAX, int low = 0)   // Generates a random value.
 
 template<typename T>
 void test(int high) {
-    int dimension = random<int>(256, 2);
+    SPTAG::DimensionType dimension = random<SPTAG::DimensionType>(256, 2);
     T *X = new T[dimension], *Y = new T[dimension];
     BOOST_ASSERT(X != nullptr && Y != nullptr);
-    for (int i = 0; i < dimension; i++) {
+    for (SPTAG::DimensionType i = 0; i < dimension; i++) {
         X[i] = random<T>(high, -high);
         Y[i] = random<T>(high, -high);
     }

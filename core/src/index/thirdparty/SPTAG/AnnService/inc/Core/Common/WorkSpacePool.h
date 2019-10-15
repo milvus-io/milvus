@@ -17,7 +17,7 @@ namespace COMMON
 class WorkSpacePool
 {
 public:
-    WorkSpacePool(int p_maxCheck, int p_vectorCount);
+    WorkSpacePool(int p_maxCheck, SizeType p_vectorCount);
 
     virtual ~WorkSpacePool();
 
@@ -34,7 +34,7 @@ private:
 
     int m_maxCheck;
 
-    int m_vectorCount;
+    SizeType m_vectorCount;
 };
 
 }

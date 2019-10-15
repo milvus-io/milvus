@@ -94,7 +94,6 @@ class OptimizerInst {
             std::lock_guard<std::mutex> lock(mutex_);
             if (instance == nullptr) {
                 std::vector<PassPtr> pass_list;
-                pass_list.push_back(std::make_shared<LargeSQ8HPass>());
                 pass_list.push_back(std::make_shared<HybridPass>());
                 instance = std::make_shared<Optimizer>(pass_list);
             }
