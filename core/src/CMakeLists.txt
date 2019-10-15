@@ -24,11 +24,11 @@ include_directories(${CUDA_TOOLKIT_ROOT_DIR}/include)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-status)
 include_directories(${MILVUS_ENGINE_SRC}/grpc/gen-milvus)
 
-#this statement must put here, since the CORE_INCLUDE_DIRS is defined in code/CMakeList.txt
+#this statement must put here, since the INDEX_INCLUDE_DIRS is defined in code/CMakeList.txt
 add_subdirectory(index)
 
-set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
-foreach (dir ${CORE_INCLUDE_DIRS})
+set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
+foreach (dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach ()
 
