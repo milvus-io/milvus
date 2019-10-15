@@ -540,7 +540,13 @@ DBImpl::StartMetricTask() {
     server::Metrics::GetInstance().KeepingAliveCounterIncrement(METRIC_ACTION_INTERVAL);
     int64_t cache_usage = cache::CpuCacheMgr::GetInstance()->CacheUsage();
     int64_t cache_total = cache::CpuCacheMgr::GetInstance()->CacheCapacity();
-    server::Metrics::GetInstance().CpuCacheUsageGaugeSet(cache_usage * 100 / cache_total);
+    if (cache_total > 0) {
+        double cache_usage_double = cache_usage;
+        server::Metrics::GetInstance().CpuCacheUsageGaugeSet(cache_usage_double * 100 / cache_total);
+    } else {
+        server::Metrics::GetInstance().CpuCacheUsageGaugeSet(0);
+    }
+
     server::Metrics::GetInstance().GpuCacheUsageGaugeSet();
     uint64_t size;
     Size(size);
