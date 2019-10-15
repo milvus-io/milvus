@@ -292,7 +292,8 @@ DBImpl::CreateIndex(const std::string& table_id, const TableIndex& index) {
     std::vector<int> file_types;
     if (index.engine_type_ == static_cast<int32_t>(EngineType::FAISS_IDMAP)) {
         file_types = {
-            static_cast<int32_t>(meta::TableFileSchema::NEW), static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
+            static_cast<int32_t>(meta::TableFileSchema::NEW),
+            static_cast<int32_t>(meta::TableFileSchema::NEW_MERGE),
         };
     } else {
         file_types = {
