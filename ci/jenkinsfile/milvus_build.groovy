@@ -10,6 +10,7 @@ container('milvus-build-env') {
                         sh "git config --global user.name \"test\""
                         withCredentials([usernamePassword(credentialsId: "${params.JFROG_USER}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
                             sh "./build.sh -l"
+                            sh "rm -rf cmake_build"
                             sh "export JFROG_ARTFACTORY_URL='${params.JFROG_ARTFACTORY_URL}' \
                             && export JFROG_USER_NAME='${USERNAME}' \
                             && export JFROG_PASSWORD='${PASSWORD}' \
