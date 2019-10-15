@@ -114,7 +114,7 @@ SearchService::Run()
 void
 SearchService::RunSocketMode()
 {
-    auto threadNum = max((unsigned int)1, m_serviceContext->GetServiceSettings()->m_threadNum);
+    auto threadNum = max((SizeType)1, m_serviceContext->GetServiceSettings()->m_threadNum);
     m_threadPool.reset(new boost::asio::thread_pool(threadNum));
 
     Socket::PacketHandlerMapPtr handlerMap(new Socket::PacketHandlerMap);
@@ -161,7 +161,7 @@ SearchService::RunInteractiveMode()
     std::unique_ptr<char[]> inputBuffer(new char[bufferSize]);
     while (true)
     {
-        fprintf(stdout, "Query: ");
+        std::cout << "Query: ";
         if (!fgets(inputBuffer.get(), bufferSize, stdin))
         {
             break;
@@ -169,29 +169,28 @@ SearchService::RunInteractiveMode()
 
         auto callback = [](std::shared_ptr<SearchExecutionContext> p_exeContext)
         {
-            fprintf(stdout, "Result:\n");
+            std::cout << "Result:" << std::endl;
             if (nullptr == p_exeContext)
             {
-                fprintf(stdout, "Not Executed.\n");
+                std::cout << "Not Executed." << std::endl;
                 return;
             }
 
             const auto& results = p_exeContext->GetResults();
             for (const auto& result : results)
             {
-                fprintf(stdout, "Index: %s\n", result.m_indexName.c_str());
+                std::cout << "Index: " << result.m_indexName << std::endl;
                 int idx = 0;
                 for (const auto& res : result.m_results)
                 {
-                    fprintf(stdout, "------------------\n");
-                    fprintf(stdout, "DocIndex: %d Distance: %f", res.VID, res.Dist);
+                    std::cout << "------------------" << std::endl;
+                    std::cout << "DocIndex: " << res.VID << " Distance: " << res.Dist;
                     if (result.m_results.WithMeta())
                     {
                         const auto& metadata = result.m_results.GetMetadata(idx);
-                        fprintf(stdout, " MetaData: %.*s", static_cast<int>(metadata.Length()), metadata.Data());
+                        std::cout << " MetaData: " << std::string((char*)metadata.Data(), metadata.Length());
                     } 
-
-                    fprintf(stdout, "\n");
+                    std::cout << std::endl;
                     ++idx;
                 }
             }

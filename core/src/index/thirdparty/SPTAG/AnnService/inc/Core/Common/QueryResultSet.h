@@ -51,7 +51,7 @@ public:
         return m_results[0].Dist;
     }
 
-    bool AddPoint(const int index, float dist)
+    bool AddPoint(const SizeType index, float dist)
     {
         if (dist < m_results[0].Dist || (dist == m_results[0].Dist && index < m_results[0].VID))
         {

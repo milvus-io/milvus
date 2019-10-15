@@ -43,6 +43,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-614 - Preload table at startup
 - MS-626 - Refactor DataObj to support cache any type data
 - MS-648 - Improve unittest
+- MS-655 - Upgrade SPTAG
 
 ## New Feature
 - MS-627 - Integrate new index: IVFSQHybrid

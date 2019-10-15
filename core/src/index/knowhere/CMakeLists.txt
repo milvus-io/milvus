@@ -1,7 +1,3 @@
-set(TBB_DIR ${CORE_SOURCE_DIR}/thirdparty/tbb)
-set(TBB_LIBRARIES ${TBB_DIR}/libtbb.so)
-include_directories(${TBB_DIR}/include)
-
 include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 link_directories(${CUDA_TOOLKIT_ROOT_DIR}/lib64)
 
@@ -60,7 +56,6 @@ set(index_srcs
 
 set(depend_libs
         SPTAGLibStatic
-        ${TBB_LIBRARIES}
         faiss
         openblas
         lapack
@@ -107,13 +102,6 @@ INSTALL(FILES ${OPENBLAS_REAL_STATIC_LIB}
         DESTINATION lib
         )
 
-INSTALL(FILES ${CORE_SOURCE_DIR}/thirdparty/tbb/libtbb.so.2
-        DESTINATION lib
-        )
-INSTALL(FILES ${CORE_SOURCE_DIR}/thirdparty/tbb/libtbb.so
-        DESTINATION lib
-        )
-
 set(CORE_INCLUDE_DIRS
         ${CORE_SOURCE_DIR}/knowhere
         ${CORE_SOURCE_DIR}/thirdparty
@@ -122,7 +110,6 @@ set(CORE_INCLUDE_DIRS
         ${FAISS_INCLUDE_DIR}
         ${OPENBLAS_INCLUDE_DIR}
         ${LAPACK_INCLUDE_DIR}
-        ${CORE_SOURCE_DIR}/thirdparty/tbb/include
         )
 
 set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
@@ -132,7 +119,6 @@ set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
 #        ${ARROW_INCLUDE_DIR}/arrow
 #        ${FAISS_PREFIX}/include/faiss
 #        ${OPENBLAS_INCLUDE_DIR}/
-#        ${CORE_SOURCE_DIR}/thirdparty/tbb/include/tbb
 #        DESTINATION
 #        include)
 #
