@@ -125,6 +125,15 @@ Resource::pick_task_execute() {
         if (task_table_.Execute(index)) {
             return task_table_.Get(index);
         }
+        //        if (task_table_[index]->task->label()->Type() == TaskLabelType::SPECIFIED_RESOURCE) {
+        //            if (task_table_.Get(index)->task->path().Current() == task_table_.Get(index)->task->path().Last()
+        //            &&
+        //                task_table_.Get(index)->task->path().Last() == name()) {
+        //                if (task_table_.Execute(index)) {
+        //                    return task_table_.Get(index);
+        //                }
+        //            }
+        //        }
         // else try next
     }
     return nullptr;
@@ -180,6 +189,7 @@ Resource::executor_function() {
             if (task_item->task->Type() == TaskType::BuildIndexTask) {
                 BuildMgrInst::GetInstance()->Put();
                 ResMgrInst::GetInstance()->GetResource("cpu")->WakeupLoader();
+                ResMgrInst::GetInstance()->GetResource("disk")->WakeupLoader();
             }
 
             if (subscriber_) {
