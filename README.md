@@ -40,37 +40,20 @@ Use Docker to install Milvus is a breeze. See the [Milvus install guide](https:/
 
 #### Use source code
 
+##### Software requirements
+
+- Ubuntu 18.04 or higher
+- CMake 3.14 or higher
+- CUDA 10.0 or higher
+- NVIDIA driver 418 or higher
+
 ##### Compilation
 
-###### Step 1 Install necessary tools
+###### Step 1 Install dependencies
 
 ```shell
-# Install tools
-Centos7 : 
-$ yum install gfortran qt4 flex bison 
-$ yum install mysql-devel mysql
-    
-Ubuntu 16.04 or 18.04: 
-$ sudo apt-get install gfortran qt4-qmake flex bison 
-$ sudo apt-get install libmysqlclient-dev mysql-client
-```
-
-Verify the existence of `libmysqlclient_r.so`:
-
-```shell
-# Verify existence
-$ locate libmysqlclient_r.so
-```
-
-If not, you need to create a symbolic link:
-
-```shell
-# Locate libmysqlclient.so
-$ sudo updatedb
-$ locate libmysqlclient.so 
-
-# Create symbolic link
-$ sudo ln -s /path/to/libmysqlclient.so /path/to/libmysqlclient_r.so
+$ cd [Milvus sourcecode path]/core
+./ubuntu_build_deps.sh
 ```
 
 ###### Step 2 Build
@@ -84,43 +67,13 @@ $ ./build.sh -t Release
 
 When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
 
-If you encounter the following error message,
-`protocol https not supported or disabled in libcurl`
-
-please reinstall CMake with curl:
-
-1. Install curl development files:
-   ```shell
-   CentOS 7:   
-   $ yum install curl-devel
-   Ubuntu 16.04 or 18.04: 
-   $ sudo apt-get install libcurl4-openssl-dev
-   ```
-
-2. Install [CMake 3.14](https://github.com/Kitware/CMake/releases/download/v3.14.6/cmake-3.14.6.tar.gz): 
-   ```shell
-   $ ./bootstrap --system-curl 
-   $ make 
-   $ sudo make install
-   ```
-
 ##### code format and linting
-Install clang-format and clang-tidy
-```shell
-CentOS 7:   
-$ yum install clang
-Ubuntu 16.04: 
-$ sudo apt-get install clang-tidy
-$ sudo su
-$ wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-$ apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-6.0 main"
-$ apt-get update
-$ apt-get install clang-format-6.0
-Ubuntu 18.04: 
-$ sudo apt-get install clang-tidy clang-format
 
+Install clang-format
+```shell
+$ sudo apt-get install clang-format
 $ rm cmake_build/CMakeCache.txt
-```  
+```
 Check code style
 ```shell
 $ ./build.sh -l
@@ -138,24 +91,29 @@ $ ./build.sh -u
 ```
 
 ##### Run code coverage
+
 Install lcov
 ```shell
-CentOS 7:   
-$ yum install lcov
-Ubuntu 16.04 or 18.04: 
 $ sudo apt-get install lcov
-``` 
+```
 ```shell  
 $ ./build.sh -u -c
 ```
-Run mysql docker
+Run MySQL docker
 ```shell 
 docker pull mysql:latest
 docker run -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql:latest
 ```
 Run code coverage
+
 ```shell  
 $ ./coverage.sh -u root -p 123456 -t 127.0.0.1
+```
+
+Or start your own MySQL server, and then run code coverage
+
+```shell
+$ ./coverage.sh -u ${MYSQL_USERNAME} -p ${MYSQL_PASSWORD} -t ${MYSQL_SERVER_IP}
 ```
 
 ##### Launch Milvus server
@@ -198,7 +156,7 @@ Install Milvus Python SDK.
 $ pip install pymilvus==0.2.0
 ```
 
-Create a new file `example.py`, and add [Python example code](https://github.com/milvus-io/pymilvus/blob/branch-0.3.1/examples/AdvancedExample.py) to it.
+Create a new file `example.py`, and add [Python example code](https://github.com/milvus-io/pymilvus/blob/master/examples/AdvancedExample.py) to it.
 
 Run the example code.
 
@@ -217,9 +175,9 @@ $ python3 example.py
 
 ## Contribution guidelines
 
-Contributions are welcomed and greatly appreciated. If you want to contribute to Milvus, please read our [contribution guidelines](CONTRIBUTING.md). This project adheres to the [code of conduct](CODE OF CONDUCT.md) of Milvus. By participating, you are expected to uphold this code.
+Contributions are welcomed and greatly appreciated. If you want to contribute to Milvus, please read our [contribution guidelines](CONTRIBUTING.md). This project adheres to the [code of conduct](CODE_OF_CONDUCT.md) of Milvus. By participating, you are expected to uphold this code.
 
-We use [GitHub issues](https://github.com/milvus-io/milvus/issues) to track issues and bugs. For general questions and public discussions, please join our community.
+We use [GitHub issues](https://github.com/milvus-io/milvus/issues/new) to track issues and bugs. For general questions and public discussions, please join our community.
 
 ## Join the Milvus community
 
@@ -233,7 +191,7 @@ Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upc
 
 [Milvus official website](https://www.milvus.io)
 
-[Milvus docs](https://www.milvus.io/docs/en/QuickStart/)
+[Milvus docs](https://www.milvus.io/docs/en/userguide/install_milvus/)
 
 [Milvus blog](https://www.milvus.io/blog/)
 
