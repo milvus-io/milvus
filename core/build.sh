@@ -136,11 +136,4 @@ else
     fi
 
     make install || exit 1
-
-    # evaluate code coverage
-    if [[ ${BUILD_COVERAGE} == "ON" ]]; then
-        cd -
-        bash `pwd`/coverage.sh
-        cd -
-    fi
 fi
