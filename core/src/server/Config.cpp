@@ -15,18 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "server/Config.h"
-
-#include <stdlib.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
 
-#include "config/ConfigMgr.h"
+#include "config/YamlConfigMgr.h"
+#include "server/Config.h"
 #include "utils/CommonUtil.h"
 #include "utils/ValidationUtil.h"
 
@@ -44,26 +40,24 @@ Config::GetInstance() {
 Status
 Config::LoadConfigFile(const std::string& filename) {
     if (filename.empty()) {
-        std::cerr << "ERROR: need specify config file" << std::endl;
-        exit(1);
+        return Status(SERVER_UNEXPECTED_ERROR, "No specified config file");
     }
-    struct stat dirStat;
-    int statOK = stat(filename.c_str(), &dirStat);
-    if (statOK != 0) {
-        std::cerr << "ERROR: Config file not exist: " << filename << std::endl;
-        exit(1);
+
+    struct stat file_stat;
+    if (stat(filename.c_str(), &file_stat) != 0) {
+        std::string str = "Config file not exist: " + filename;
+        return Status(SERVER_FILE_NOT_FOUND, str);
     }
 
     try {
-        ConfigMgr* mgr = const_cast<ConfigMgr*>(ConfigMgr::GetInstance());
-        ErrorCode err = mgr->LoadConfigFile(filename);
-        if (err != 0) {
-            std::cerr << "Server failed to load config file: " << filename << std::endl;
-            exit(1);
+        ConfigMgr* mgr = YamlConfigMgr::GetInstance();
+        Status s = mgr->LoadConfigFile(filename);
+        if (!s.ok()) {
+            return s;
         }
     } catch (YAML::Exception& e) {
-        std::cerr << "Server failed to load config file: " << filename << std::endl;
-        exit(1);
+        std::string str = "Exception occurs when loading config file: " + filename;
+        return Status(SERVER_UNEXPECTED_ERROR, str);
     }
 
     return Status::OK();
@@ -632,7 +626,7 @@ Config::CheckResourceConfigPool(const std::vector<std::string>& value) {
 ////////////////////////////////////////////////////////////////////////////////
 ConfigNode&
 Config::GetConfigNode(const std::string& name) {
-    ConfigMgr* mgr = ConfigMgr::GetInstance();
+    ConfigMgr* mgr = YamlConfigMgr::GetInstance();
     ConfigNode& root_node = mgr->GetRootNode();
     return root_node.GetChild(name);
 }
