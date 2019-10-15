@@ -1,11 +1,11 @@
 include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 link_directories(${CUDA_TOOLKIT_ROOT_DIR}/lib64)
 
-include_directories(${CORE_SOURCE_DIR}/knowhere)
-include_directories(${CORE_SOURCE_DIR}/thirdparty)
-include_directories(${CORE_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
+include_directories(${INDEX_SOURCE_DIR}/knowhere)
+include_directories(${INDEX_SOURCE_DIR}/thirdparty)
+include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
 
-set(SPTAG_SOURCE_DIR ${CORE_SOURCE_DIR}/thirdparty/SPTAG)
+set(SPTAG_SOURCE_DIR ${INDEX_SOURCE_DIR}/thirdparty/SPTAG)
 file(GLOB HDR_FILES
         ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/*.h
         ${SPTAG_SOURCE_DIR}/AnnService/inc/Core/Common/*.h
@@ -102,20 +102,20 @@ INSTALL(FILES ${OPENBLAS_REAL_STATIC_LIB}
         DESTINATION lib
         )
 
-set(CORE_INCLUDE_DIRS
-        ${CORE_SOURCE_DIR}/knowhere
-        ${CORE_SOURCE_DIR}/thirdparty
-        ${CORE_SOURCE_DIR}/thirdparty/SPTAG/AnnService
+set(INDEX_INCLUDE_DIRS
+        ${INDEX_SOURCE_DIR}/knowhere
+        ${INDEX_SOURCE_DIR}/thirdparty
+        ${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService
         ${ARROW_INCLUDE_DIR}
         ${FAISS_INCLUDE_DIR}
         ${OPENBLAS_INCLUDE_DIR}
         ${LAPACK_INCLUDE_DIR}
         )
 
-set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
+set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 
 #INSTALL(DIRECTORY
-#        ${CORE_SOURCE_DIR}/include/knowhere
+#        ${INDEX_SOURCE_DIR}/include/knowhere
 #        ${ARROW_INCLUDE_DIR}/arrow
 #        ${FAISS_PREFIX}/include/faiss
 #        ${OPENBLAS_INCLUDE_DIR}/

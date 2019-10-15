@@ -18,7 +18,7 @@
 #-------------------------------------------------------------------------------
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 
-foreach(dir ${CORE_INCLUDE_DIRS})
+foreach(dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach()
 
