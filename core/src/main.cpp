@@ -32,12 +32,32 @@
 INITIALIZE_EASYLOGGINGPP
 
 void
-print_help(const std::string& app_name);
+print_help(const std::string& app_name) {
+    std::cout << std::endl << "Usage: " << app_name << " [OPTIONS]" << std::endl << std::endl;
+    std::cout << "  Options:" << std::endl;
+    std::cout << "   -h --help                 Print this help" << std::endl;
+    std::cout << "   -c --conf_file filename   Read configuration from the file" << std::endl;
+    std::cout << "   -d --daemon               Daemonize this application" << std::endl;
+    std::cout << "   -p --pid_file  filename   PID file used by daemonized app" << std::endl;
+    std::cout << std::endl;
+}
+
+void
+print_banner() {
+    std::cout << std::endl;
+    std::cout << "    __  _________ _   ____  ______    " << std::endl;
+    std::cout << "   /  |/  /  _/ /| | / / / / / __/    " << std::endl;
+    std::cout << "  / /|_/ // // /_| |/ / /_/ /\\ \\    " << std::endl;
+    std::cout << " /_/  /_/___/____/___/\\____/___/     " << std::endl;
+    std::cout << std::endl;
+    std::cout << "Welcome to use Milvus by Zilliz!" << std::endl;
+    std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << ", built at " << BUILD_TIME << std::endl;
+    std::cout << std::endl;
+}
 
 int
 main(int argc, char* argv[]) {
-    std::cout << std::endl << "Welcome to use Milvus by Zilliz!" << std::endl;
-    std::cout << "Milvus " << BUILD_TYPE << " version: v" << MILVUS_VERSION << " built at " << BUILD_TIME << std::endl;
+    print_banner();
 
     static struct option long_options[] = {{"conf_file", required_argument, nullptr, 'c'},
                                            {"log_conf_file", required_argument, nullptr, 'l'},
@@ -53,10 +73,12 @@ main(int argc, char* argv[]) {
     std::string pid_filename;
     std::string app_name = argv[0];
 
+    milvus::server::Server& server = milvus::server::Server::GetInstance();
+    milvus::Status s;
+
     if (argc < 2) {
         print_help(app_name);
-        std::cout << "Milvus server exit..." << std::endl;
-        return EXIT_FAILURE;
+        goto FAIL;
     }
 
     int value;
@@ -106,23 +128,21 @@ main(int argc, char* argv[]) {
     signal(SIGUSR2, milvus::server::SignalUtil::HandleSignal);
     signal(SIGTERM, milvus::server::SignalUtil::HandleSignal);
 
-    milvus::server::Server& server = milvus::server::Server::GetInstance();
     server.Init(start_daemonized, pid_filename, config_filename, log_config_file);
-    server.Start();
+
+    s = server.Start();
+    if (s.ok()) {
+        std::cout << "Milvus server start successfully." << std::endl;
+    } else {
+        goto FAIL;
+    }
 
     /* wait signal */
     pause();
 
-    return 0;
-}
+    return EXIT_SUCCESS;
 
-void
-print_help(const std::string& app_name) {
-    std::cout << std::endl << "Usage: " << app_name << " [OPTIONS]" << std::endl << std::endl;
-    std::cout << "  Options:" << std::endl;
-    std::cout << "   -h --help                 Print this help" << std::endl;
-    std::cout << "   -c --conf_file filename   Read configuration from the file" << std::endl;
-    std::cout << "   -d --daemon               Daemonize this application" << std::endl;
-    std::cout << "   -p --pid_file  filename   PID file used by daemonized app" << std::endl;
-    std::cout << std::endl;
+FAIL:
+    std::cout << "Milvus server exit..." << std::endl;
+    return EXIT_FAILURE;
 }

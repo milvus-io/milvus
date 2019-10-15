@@ -17,42 +17,28 @@
 
 #pragma once
 
-#include "ConfigNode.h"
-#include "utils/Error.h"
-
 #include <string>
+
+#include "ConfigNode.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace server {
 
-// this class can parse nested config file and return config item
-// config file example(yaml style)
-//       AAA: 1
-//       BBB:
-//         CCC: hello
-//         DDD: 23.5
-//
-// usage
-//   const ConfigMgr* mgr = ConfigMgr::GetInstance();
-//   const ConfigNode& node = mgr->GetRootNode();
-//   std::string val = node.GetValue("AAA"); // return '1'
-//   const ConfigNode& child = node.GetChild("BBB");
-//   val = child.GetValue("CCC"); //return 'hello'
-
 class ConfigMgr {
  public:
-    static ConfigMgr*
-    GetInstance();
-
-    virtual ErrorCode
+    virtual Status
     LoadConfigFile(const std::string& filename) = 0;
+
     virtual void
     Print() const = 0;  // will be deleted
+
     virtual std::string
     DumpString() const = 0;
 
     virtual const ConfigNode&
     GetRootNode() const = 0;
+
     virtual ConfigNode&
     GetRootNode() = 0;
 };
