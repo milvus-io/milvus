@@ -26,9 +26,30 @@ Contributions to Milvus fall into the following categories.
 
 ### Contributing code
 
-If you have improvements to Milvus, send us your pull requests! For those just getting started, GitHub has a [how-to](https://help.github.com/en/articles/about-pull-requests).
+If you have improvements to Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow).
 
 The Milvus team members will review your pull requests, and once it is accepted, it will be given a `ready to merge` label. This means we are working on submitting your pull request to the internal repository. After the change has been submitted internally, your pull request will be merged automatically on GitHub.
+
+### GitHub workflow
+
+Please create a new branch from an up-to-date master on your fork.
+
+1. Fork the repository on GitHub.
+2. Clone your fork to your local machine with `git clone git@github.com:<yourname>/milvus-io/milvus.git`.
+3. Create a branch with `git checkout -b my-topic-branch`.
+4. Make your changes, commit, then push to to GitHub with `git push --set-upstream origin my-topic-branch`.
+5. Visit GitHub and make your pull request.
+
+If you have an existing local repository, please update it before you start, to minimize the chance of merge conflicts.
+
+```shell
+git remote add upstream git@github.com:milvus-io/milvus.git
+git checkout master
+git pull upstream master
+git checkout -b my-topic-branch
+```
+
+### General guidelines
 
 ### General guidelines
 
