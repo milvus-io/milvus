@@ -21,6 +21,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-644 - Search crashed with index-type: flat
 - MS-624 - Search vectors failed if time ranges long enough
 - MS-652 - IVFSQH quantization double free
+- MS-650 - SQ8H index create issue
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
