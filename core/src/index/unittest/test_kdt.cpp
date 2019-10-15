@@ -112,7 +112,7 @@ TEST_F(KDTTest, kdt_basic) {
 }
 
 // TODO(zirui): enable test
-//TEST_F(KDTTest, kdt_serialize) {
+// TEST_F(KDTTest, kdt_serialize) {
 //    assert(!xb.empty());
 //
 //    auto preprocessor = index_->BuildPreprocessor(base_dataset, conf);
