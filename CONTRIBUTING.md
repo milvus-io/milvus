@@ -51,8 +51,6 @@ git checkout -b my-topic-branch
 
 ### General guidelines
 
-### General guidelines
-
 Before sending your pull requests for review, make sure your changes are consistent with the guidelines and follow the Milvus coding style.
 
 - Include unit tests when you contribute new features, as they help to prove that your code works correctly, and also guard against future breaking changes to lower the maintenance cost.
