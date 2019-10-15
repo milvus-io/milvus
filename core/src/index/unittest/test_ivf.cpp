@@ -96,10 +96,10 @@ class ParamGenerator {
             auto tempconf = std::make_shared<knowhere::IVFPQCfg>();
             tempconf->d = DIM;
             tempconf->gpu_id = device_id;
-            tempconf->nlist = 100;
-            tempconf->nprobe = 16;
+            tempconf->nlist = 25;
+            tempconf->nprobe = 4;
             tempconf->k = K;
-            tempconf->m = 8;
+            tempconf->m = 4;
             tempconf->nbits = 8;
             tempconf->metric_type = knowhere::METRICTYPE::L2;
             return tempconf;
