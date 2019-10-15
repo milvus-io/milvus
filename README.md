@@ -1,3 +1,4 @@
+![Milvuslogo](https://milvus.io/docs/assets/milvus_logo.png)
 
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 - [Blog](https://www.milvus.io/blog/)
