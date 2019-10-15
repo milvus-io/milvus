@@ -75,11 +75,11 @@ else()
 endif()
 message(STATUS "Build type = ${BUILD_TYPE}")
 
-set(CORE_SOURCE_DIR ${PROJECT_SOURCE_DIR})
-set(CORE_BINARY_DIR ${PROJECT_BINARY_DIR})
+set(INDEX_SOURCE_DIR ${PROJECT_SOURCE_DIR})
+set(INDEX_BINARY_DIR ${PROJECT_BINARY_DIR})
 message(STATUS "Core source dir: ${PROJECT_SOURCE_DIR}")
 message(STATUS "Core binary dir: ${PROJECT_BINARY_DIR}")
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CORE_SOURCE_DIR}/cmake")
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${INDEX_SOURCE_DIR}/cmake")
 
 include(ExternalProject)
 include(DefineOptionsCore)
@@ -92,7 +92,7 @@ if (BUILD_COVERAGE STREQUAL "ON")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
 endif()
 
-set(CORE_INCLUDE_DIRS ${CORE_INCLUDE_DIRS} PARENT_SCOPE)
+set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
 
 if(BUILD_UNIT_TEST STREQUAL "ON")
     add_subdirectory(unittest)
