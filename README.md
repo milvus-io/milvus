@@ -1,5 +1,7 @@
+
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 - [Blog](https://www.milvus.io/blog/)
+- [Twitter](https://twitter.com/milvus_io)
 
 # Welcome to Milvus
 
@@ -32,31 +34,29 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
 
 ## Get started
 
-### Install and start Milvus server
-
-#### Use Docker
+### Install using docker
 
 Use Docker to install Milvus is a breeze. See the [Milvus install guide](https://milvus.io/docs/en/userguide/install_milvus/) for details.
 
-#### Use source code
+### Build from source
 
-##### Software requirements
+#### Software requirements
 
 - Ubuntu 18.04 or higher
 - CMake 3.14 or higher
 - CUDA 10.0 or higher
 - NVIDIA driver 418 or higher
 
-##### Compilation
+#### Compilation
 
-###### Step 1 Install dependencies
+##### Step 1 Install dependencies
 
 ```shell
 $ cd [Milvus sourcecode path]/core
 ./ubuntu_build_deps.sh
 ```
 
-###### Step 2 Build
+##### Step 2 Build
 
 ```shell
 $ cd [Milvus sourcecode path]/core
@@ -67,7 +67,7 @@ $ ./build.sh -t Release
 
 When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
 
-##### code format and linting
+#### Code format and linting
 
 Install clang-format
 ```shell
@@ -84,13 +84,13 @@ $ cd cmake_build
 $ make clang-format
 ```
 
-##### Run unit test
+#### Run unit test
 
 ```shell
 $ ./build.sh -u
 ```
 
-##### Run code coverage
+#### Run code coverage
 
 Install lcov
 ```shell
@@ -116,7 +116,7 @@ Or start your own MySQL server, and then run code coverage
 $ ./coverage.sh -u ${MYSQL_USERNAME} -p ${MYSQL_PASSWORD} -t ${MYSQL_SERVER_IP}
 ```
 
-##### Launch Milvus server
+#### Launch Milvus server
 
 ```shell
 $ cd [Milvus root path]/core/milvus
