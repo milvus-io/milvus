@@ -1,0 +1,38 @@
+<code_scheme name="milvus" version="173">
+  <Objective-C>
+    <option name="INDENT_NAMESPACE_MEMBERS" value="0" />
+    <option name="INDENT_VISIBILITY_KEYWORDS" value="1" />
+    <option name="KEEP_STRUCTURES_IN_ONE_LINE" value="true" />
+    <option name="KEEP_CASE_EXPRESSIONS_IN_ONE_LINE" value="true" />
+    <option name="FUNCTION_NON_TOP_AFTER_RETURN_TYPE_WRAP" value="0" />
+    <option name="FUNCTION_TOP_AFTER_RETURN_TYPE_WRAP" value="2" />
+    <option name="FUNCTION_PARAMETERS_WRAP" value="5" />
+    <option name="FUNCTION_CALL_ARGUMENTS_WRAP" value="5" />
+    <option name="TEMPLATE_CALL_ARGUMENTS_WRAP" value="5" />
+    <option name="TEMPLATE_CALL_ARGUMENTS_ALIGN_MULTILINE" value="true" />
+    <option name="CLASS_CONSTRUCTOR_INIT_LIST_WRAP" value="5" />
+    <option name="ALIGN_INIT_LIST_IN_COLUMNS" value="false" />
+    <option name="SPACE_BEFORE_PROTOCOLS_BRACKETS" value="false" />
+    <option name="SPACE_BEFORE_POINTER_IN_DECLARATION" value="false" />
+    <option name="SPACE_AFTER_POINTER_IN_DECLARATION" value="true" />
+    <option name="SPACE_BEFORE_REFERENCE_IN_DECLARATION" value="false" />
+    <option name="SPACE_AFTER_REFERENCE_IN_DECLARATION" value="true" />
+    <option name="KEEP_BLANK_LINES_BEFORE_END" value="1" />
+  </Objective-C>
+  <codeStyleSettings language="ObjectiveC">
+    <option name="KEEP_BLANK_LINES_IN_DECLARATIONS" value="1" />
+    <option name="KEEP_BLANK_LINES_IN_CODE" value="1" />
+    <option name="KEEP_BLANK_LINES_BEFORE_RBRACE" value="1" />
+    <option name="BLANK_LINES_AROUND_CLASS" value="0" />
+    <option name="BLANK_LINES_AROUND_METHOD_IN_INTERFACE" value="0" />
+    <option name="BLANK_LINES_AFTER_CLASS_HEADER" value="1" />
+    <option name="SPACE_AFTER_TYPE_CAST" value="false" />
+    <option name="BINARY_OPERATION_SIGN_ON_NEXT_LINE" value="true" />
+    <option name="KEEP_SIMPLE_BLOCKS_IN_ONE_LINE" value="false" />
+    <option name="FOR_STATEMENT_WRAP" value="1" />
+    <option name="ASSIGNMENT_WRAP" value="1" />
+    <indentOptions>
+      <option name="CONTINUATION_INDENT_SIZE" value="4" />
+    </indentOptions>
+  </codeStyleSettings>
+</code_scheme>
