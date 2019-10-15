@@ -1,32 +1,28 @@
-# Prerequisites
-*.d
+# CLion generated files
+core/cmake-build-debug/
+core/cmake-build-release/
+core/cmake_build
+core/.idea/
+core/thirdparty/knowhere_build
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+.idea/
+.ycm_extra_conf.py
+__pycache__
 
-# Precompiled Headers
-*.gch
-*.pch
+# vscode generated files
+.vscode
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+.env
+build
+cmake-build-debug
+cmake-build-release
+cmake_build
 
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
+# Compiled source
 *.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
+*.so
+*.so.*
+*.o
+*.lo
+*.tar.gz
+*.log
