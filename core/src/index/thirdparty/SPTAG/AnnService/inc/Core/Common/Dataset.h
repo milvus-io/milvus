@@ -28,23 +28,31 @@ namespace SPTAG
         class Dataset
         {
         private:
-            int rows;
-            int cols;
+            std::string name = "Data";
+            SizeType rows = 0;
+            DimensionType cols = 1;
             bool ownData = false;
             T* data = nullptr;
-            std::vector<T> dataIncremental;
-
+            SizeType incRows = 0;
+            std::vector<T*> incBlocks;
+            static const SizeType rowsInBlock = 1024 * 1024;
         public:
-            Dataset(): rows(0), cols(1) {}
-            Dataset(int rows_, int cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            Dataset()
+            {
+                incBlocks.reserve(MaxSize / rowsInBlock + 1); 
+            }
+            Dataset(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 Initialize(rows_, cols_, data_, transferOnwership_);
+                incBlocks.reserve(MaxSize / rowsInBlock + 1);
             }
             ~Dataset()
             {
                 if (ownData) aligned_free(data);
+                for (T* ptr : incBlocks) aligned_free(ptr);
+                incBlocks.clear();
             }
-            void Initialize(int rows_, int cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            void Initialize(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 rows = rows_;
                 cols = cols_;
@@ -52,161 +60,166 @@ namespace SPTAG
                 if (data_ == nullptr || !transferOnwership_)
                 {
                     ownData = true;
-                    data = (T*)aligned_malloc(sizeof(T) * rows * cols, ALIGN);
-                    if (data_ != nullptr) memcpy(data, data_, rows * cols * sizeof(T));
-                    else std::memset(data, -1, rows * cols * sizeof(T));
+                    data = (T*)aligned_malloc(((size_t)rows) * cols * sizeof(T), ALIGN);
+                    if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
+                    else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
             }
-            void SetR(int R_)
+            void SetName(const std::string name_) { name = name_; }
+            void SetR(SizeType R_) 
             {
                 if (R_ >= rows)
-                    dataIncremental.resize((R_ - rows) * cols);
-                else
+                    incRows = R_ - rows;
+                else 
                 {
                     rows = R_;
-                    dataIncremental.clear();
+                    incRows = 0;
                 }
             }
-            inline int R() const { return (int)(rows + dataIncremental.size() / cols); }
-            inline int C() const { return cols; }
-            T* operator[](int index)
+            inline SizeType R() const { return rows + incRows; }
+            inline DimensionType C() const { return cols; }
+            inline std::uint64_t BufferSize() const { return sizeof(SizeType) + sizeof(DimensionType) + sizeof(T) * R() * C(); }
+
+            inline const T* At(SizeType index) const
             {
                 if (index >= rows) {
-                    return dataIncremental.data() + (size_t)(index - rows)*cols;
+                    SizeType incIndex = index - rows;
+                    return incBlocks[incIndex / rowsInBlock] + ((size_t)(incIndex % rowsInBlock)) * cols;
                 }
-                return data + (size_t)index*cols;
+                return data + ((size_t)index) * cols;
             }
 
-            const T* operator[](int index) const
+            T* operator[](SizeType index)
             {
-                if (index >= rows) {
-                    return dataIncremental.data() + (size_t)(index - rows)*cols;
-                }
-                return data + (size_t)index*cols;
+                return (T*)At(index);
+            }
+            
+            const T* operator[](SizeType index) const
+            {
+                return At(index);
             }
 
-            void AddBatch(const T* pData, int num)
+            ErrorCode AddBatch(const T* pData, SizeType num)
             {
-                dataIncremental.insert(dataIncremental.end(), pData, pData + num*cols);
+                if (R() > MaxSize - num) return ErrorCode::MemoryOverFlow;
+
+                SizeType written = 0;
+                while (written < num) {
+                    SizeType curBlockIdx = (incRows + written) / rowsInBlock;
+                    if (curBlockIdx >= (SizeType)incBlocks.size()) {
+                        T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
+                        if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
+                        incBlocks.push_back(newBlock);
+                    }
+                    SizeType curBlockPos = (incRows + written) % rowsInBlock;
+                    SizeType toWrite = min(rowsInBlock - curBlockPos, num - written);
+                    std::memcpy(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, pData + ((size_t)written) * cols, ((size_t)toWrite) * cols * sizeof(T));
+                    written += toWrite;
+                }
+                incRows += written;
+                return ErrorCode::Success;
             }
 
-            void AddBatch(int num)
+            ErrorCode AddBatch(SizeType num)
             {
-                dataIncremental.insert(dataIncremental.end(), (size_t)num*cols, T(-1));
+                if (R() > MaxSize - num) return ErrorCode::MemoryOverFlow;
+
+                SizeType written = 0;
+                while (written < num) {
+                    SizeType curBlockIdx = (incRows + written) / rowsInBlock;
+                    if (curBlockIdx >= (SizeType)incBlocks.size()) {
+                        T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
+                        if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
+                        incBlocks.push_back(newBlock);
+                    }
+                    SizeType curBlockPos = (incRows + written) % rowsInBlock;
+                    SizeType toWrite = min(rowsInBlock - curBlockPos, num - written);
+                    std::memset(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, -1, ((size_t)toWrite) * cols * sizeof(T));
+                    written += toWrite;
+                }
+                incRows += written;
+                return ErrorCode::Success;
             }
 
-            bool Save(std::string sDataPointsFileName)
+            bool Save(std::ostream& p_outstream) const
             {
-                std::cout << "Save Data To " << sDataPointsFileName << std::endl;
-                FILE * fp = fopen(sDataPointsFileName.c_str(), "wb");
-                if (fp == NULL) return false;
+                SizeType CR = R();
+                p_outstream.write((char*)&CR, sizeof(SizeType));
+                p_outstream.write((char*)&cols, sizeof(DimensionType));
+                p_outstream.write((char*)data, sizeof(T) * cols * rows);
 
-                int CR = R();
-                fwrite(&CR, sizeof(int), 1, fp);
-                fwrite(&cols, sizeof(int), 1, fp);
+                SizeType blocks = incRows / rowsInBlock;
+                for (int i = 0; i < blocks; i++)
+                    p_outstream.write((char*)incBlocks[i], sizeof(T) * cols * rowsInBlock);
 
-                T* ptr = data;
-                int toWrite = rows;
-                while (toWrite > 0)
-                {
-                    size_t write = fwrite(ptr, sizeof(T) * cols, toWrite, fp);
-                    ptr += write * cols;
-                    toWrite -= (int)write;
-                }
-                ptr = dataIncremental.data();
-                toWrite = CR - rows;
-                while (toWrite > 0)
-                {
-                    size_t write = fwrite(ptr, sizeof(T) * cols, toWrite, fp);
-                    ptr += write * cols;
-                    toWrite -= (int)write;
-                }
-                fclose(fp);
-
-                std::cout << "Save Data (" << CR << ", " << cols << ") Finish!" << std::endl;
+                SizeType remain = incRows % rowsInBlock;
+                if (remain > 0) p_outstream.write((char*)incBlocks[blocks], sizeof(T) * cols * remain);
+                std::cout << "Save " << name << " (" << CR << ", " << cols << ") Finish!" << std::endl;
                 return true;
             }
 
-            bool Save(void **pDataPointsMemFile, int64_t &len)
+            bool Save(std::string sDataPointsFileName) const
             {
-                size_t size = sizeof(int) + sizeof(int) + sizeof(T) * R() *cols;
-                char *mem = (char*)malloc(size);
-                if (mem == NULL) return false;
-
-                int CR = R();
-
-                auto header = (int*)mem;
-                header[0] = CR;
-                header[1] = cols;
-                auto body = &mem[8];
-
-                memcpy(body, data, sizeof(T) * cols * rows);
-                body += sizeof(T) * cols * rows;
-                memcpy(body, dataIncremental.data(), sizeof(T) * cols * (CR - rows));
-                body += sizeof(T) * cols * (CR - rows);
-
-                *pDataPointsMemFile = mem;
-                len = size;
-
+                std::cout << "Save " << name << " To " << sDataPointsFileName << std::endl;
+                std::ofstream output(sDataPointsFileName, std::ios::binary);
+                if (!output.is_open()) return false;
+                Save(output);
+                output.close();
                 return true;
             }
 
             bool Load(std::string sDataPointsFileName)
             {
-                std::cout << "Load Data From " << sDataPointsFileName << std::endl;
-                FILE * fp = fopen(sDataPointsFileName.c_str(), "rb");
-                if (fp == NULL) return false;
+                std::cout << "Load " << name << " From " << sDataPointsFileName << std::endl;
+                std::ifstream input(sDataPointsFileName, std::ios::binary);
+                if (!input.is_open()) return false;
 
-                int R, C;
-                fread(&R, sizeof(int), 1, fp);
-                fread(&C, sizeof(int), 1, fp);
+                input.read((char*)&rows, sizeof(SizeType));
+                input.read((char*)&cols, sizeof(DimensionType));
 
-                Initialize(R, C);
-                T* ptr = data;
-                while (R > 0) {
-                    size_t read = fread(ptr, sizeof(T) * C, R, fp);
-                    ptr += read * C;
-                    R -= (int)read;
-                }
-                fclose(fp);
-                std::cout << "Load Data (" << rows << ", " << cols << ") Finish!" << std::endl;
+                Initialize(rows, cols);
+                input.read((char*)data, sizeof(T) * cols * rows);
+                input.close();
+                std::cout << "Load " << name << " (" << rows << ", " << cols << ") Finish!" << std::endl;
                 return true;
             }
 
             // Functions for loading models from memory mapped files
             bool Load(char* pDataPointsMemFile)
             {
-                int R, C;
-                R = *((int*)pDataPointsMemFile);
-                pDataPointsMemFile += sizeof(int);
+                SizeType R;
+                DimensionType C;
+                R = *((SizeType*)pDataPointsMemFile);
+                pDataPointsMemFile += sizeof(SizeType);
 
-                C = *((int*)pDataPointsMemFile);
-                pDataPointsMemFile += sizeof(int);
+                C = *((DimensionType*)pDataPointsMemFile);
+                pDataPointsMemFile += sizeof(DimensionType);
 
                 Initialize(R, C, (T*)pDataPointsMemFile);
+                std::cout << "Load " << name << " (" << R << ", " << C << ") Finish!" << std::endl;
                 return true;
             }
 
-            bool Refine(const std::vector<int>& indices, std::string sDataPointsFileName)
+            bool Refine(const std::vector<SizeType>& indices, std::ostream& output)
             {
-                std::cout << "Save Refine Data To " << sDataPointsFileName << std::endl;
-                FILE * fp = fopen(sDataPointsFileName.c_str(), "wb");
-                if (fp == NULL) return false;
+                SizeType R = (SizeType)(indices.size());
+                output.write((char*)&R, sizeof(SizeType));
+                output.write((char*)&cols, sizeof(DimensionType));
 
-                int R = (int)(indices.size());
-                fwrite(&R, sizeof(int), 1, fp);
-                fwrite(&cols, sizeof(int), 1, fp);
-
-                // write point one by one in case for cache miss
-                for (int i = 0; i < R; i++) {
-                    if (indices[i] < rows)
-                        fwrite(data + (size_t)indices[i] * cols, sizeof(T) * cols, 1, fp);
-                    else
-                        fwrite(dataIncremental.data() + (size_t)(indices[i] - rows) * cols, sizeof(T) * cols, 1, fp);
+                for (SizeType i = 0; i < R; i++) {
+                    output.write((char*)At(indices[i]), sizeof(T) * cols);
                 }
-                fclose(fp);
+                std::cout << "Save Refine " << name << " (" << R << ", " << cols << ") Finish!" << std::endl;
+                return true;
+            }
 
-                std::cout << "Save Refine Data (" << R << ", " << cols << ") Finish!" << std::endl;
+            bool Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName)
+            {
+                std::cout << "Save Refine " << name << " To " << sDataPointsFileName << std::endl;
+                std::ofstream output(sDataPointsFileName, std::ios::binary);
+                if (!output.is_open()) return false;
+                Refine(indices, output);
+                output.close();
                 return true;
             }
         };

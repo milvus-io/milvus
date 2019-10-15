@@ -1,4 +1,4 @@
-%module SPTAG
+%module JAVASPTAG
 
 %{
 #include "inc/CoreInterface.h"
@@ -14,4 +14,4 @@
 %}
 
 %include "CoreInterface.h"
-%include "TransferDataType.h"
+%include "../../AnnService/inc/Core/SearchResult.h"

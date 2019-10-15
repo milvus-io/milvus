@@ -149,25 +149,29 @@
     <ClInclude Include="inc\Core\DefinitionList.h" />
     <ClInclude Include="inc\Core\MetadataSet.h" />
     <ClInclude Include="inc\Core\SearchQuery.h" />
+    <ClInclude Include="inc\Core\SearchResult.h" />
     <ClInclude Include="inc\Core\VectorIndex.h" />
     <ClInclude Include="inc\Core\VectorSet.h" />
     <ClInclude Include="inc\Helper\ArgumentsParser.h" />
     <ClInclude Include="inc\Helper\Base64Encode.h" />
+    <ClInclude Include="inc\Helper\BufferStream.h" />
     <ClInclude Include="inc\Helper\CommonHelper.h" />
     <ClInclude Include="inc\Helper\Concurrent.h" />
+    <ClInclude Include="inc\Helper\ConcurrentSet.h" />
     <ClInclude Include="inc\Helper\SimpleIniReader.h" />
     <ClInclude Include="inc\Helper\StringConvert.h" />
     <ClInclude Include="inc\Core\Common\NeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\RelativeNeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\BKTree.h" />
     <ClInclude Include="inc\Core\Common\KDTree.h" />
+    <ClInclude Include="inc\Helper\VectorSetReader.h" />
+    <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
     <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
     <ClCompile Include="src\Core\KDT\KDTIndex.cpp" />
     <ClCompile Include="src\Core\Common\WorkSpacePool.cpp" />
-    <ClCompile Include="src\Core\CommonDataStructure.cpp" />
     <ClCompile Include="src\Core\MetadataSet.cpp" />
     <ClCompile Include="src\Core\VectorIndex.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
@@ -176,18 +180,13 @@
     <ClCompile Include="src\Helper\CommonHelper.cpp" />
     <ClCompile Include="src\Helper\Concurrent.cpp" />
     <ClCompile Include="src\Helper\SimpleIniReader.cpp" />
+    <ClCompile Include="src\Helper\VectorSetReader.cpp" />
+    <ClCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets" Condition="Exists('..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets')" />
   </ImportGroup>
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets'))" />
-  </Target>
 </Project>

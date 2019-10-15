@@ -125,10 +125,6 @@ set(MILVUS_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 set(MILVUS_BINARY_DIR ${PROJECT_BINARY_DIR})
 set(MILVUS_ENGINE_SRC ${PROJECT_SOURCE_DIR}/src)
 
-if (CUSTOMIZATION)
-    add_definitions(-DCUSTOMIZATION)
-endif (CUSTOMIZATION)
-
 include(ExternalProject)
 include(DefineOptions)
 include(BuildUtils)

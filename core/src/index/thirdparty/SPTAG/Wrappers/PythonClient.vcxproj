@@ -158,6 +158,7 @@
     </None>
   </ItemGroup>
   <ItemGroup>
+    <None Include="inc\PythonCommon.i" />
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

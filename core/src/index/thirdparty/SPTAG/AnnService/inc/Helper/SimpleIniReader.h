@@ -31,6 +31,8 @@ public:
 
     ErrorCode LoadIniFile(const std::string& p_iniFilePath);
 
+    ErrorCode LoadIni(std::istream& p_input);
+
     bool DoesSectionExist(const std::string& p_section) const;
 
     bool DoesParameterExist(const std::string& p_section, const std::string& p_param) const;
