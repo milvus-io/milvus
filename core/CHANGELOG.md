@@ -22,6 +22,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-644 - Search crashed with index-type: flat
 - MS-647 - grafana display average cpu-temp
 - MS-652 - IVFSQH quantization double free
+- MS-650 - SQ8H index create issue
 - MS-653 - When config check fail, Milvus close without message
 - MS-654 - Describe index timeout when building index
 - MS-658 - Fix SQ8 Hybrid can't search
