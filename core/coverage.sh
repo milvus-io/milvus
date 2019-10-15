@@ -3,8 +3,8 @@
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/milvus/lib
 
 MYSQL_USER_NAME=root
-MYSQL_PASSWORD=Fantast1c
-MYSQL_HOST='192.168.1.194'
+MYSQL_PASSWORD=123456
+MYSQL_HOST='127.0.0.1'
 MYSQL_PORT='3306'
 
 while getopts "u:p:t:h" arg
