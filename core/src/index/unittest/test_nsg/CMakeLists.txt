@@ -13,11 +13,11 @@ else ()
 endif ()
 message(${OpenMP_CXX_FLAGS})
 
-include_directories(${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/nsg)
-aux_source_directory(${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/nsg nsg_src)
+include_directories(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/nsg)
+aux_source_directory(${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/nsg nsg_src)
 
 set(interface_src
-        ${CORE_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNSG.cpp
+        ${INDEX_SOURCE_DIR}/knowhere/knowhere/index/vector_index/IndexNSG.cpp
         )
 
 if(NOT TARGET test_nsg)

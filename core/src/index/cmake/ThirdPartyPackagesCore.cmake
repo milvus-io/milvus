@@ -115,7 +115,7 @@ endif (UNIX)
 
 # ----------------------------------------------------------------------
 # thirdparty directory
-set(THIRDPARTY_DIR "${CORE_SOURCE_DIR}/thirdparty")
+set(THIRDPARTY_DIR "${INDEX_SOURCE_DIR}/thirdparty")
 
 # ----------------------------------------------------------------------
 # JFrog
@@ -283,7 +283,7 @@ set(OPENBLAS_MD5 "8a110a25b819a4b94e8a9580702b6495")
 
 # ----------------------------------------------------------------------
 # ARROW
-set(ARROW_PREFIX "${CORE_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep/cpp")
+set(ARROW_PREFIX "${INDEX_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep/cpp")
 
 macro(build_arrow)
     message(STATUS "Building Apache ARROW-${ARROW_VERSION} from source")
@@ -337,13 +337,13 @@ macro(build_arrow)
                         "${ARROW_STATIC_LIB}"
                         )
 
-                ExternalProject_Create_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} "${CORE_BINARY_DIR}/arrow_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ARROW_CACHE_URL})
+                ExternalProject_Create_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/arrow_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${ARROW_CACHE_URL})
             else()
                 file(DOWNLOAD ${ARROW_CACHE_URL} ${ARROW_CACHE_PACKAGE_PATH} STATUS status)
                 list(GET status 0 status_code)
                 message(STATUS "DOWNLOADING FROM ${ARROW_CACHE_URL} TO ${ARROW_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
                 if (status_code EQUAL 0)
-                    ExternalProject_Use_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} ${CORE_BINARY_DIR})
+                    ExternalProject_Use_Cache(arrow_ep ${ARROW_CACHE_PACKAGE_PATH} ${INDEX_BINARY_DIR})
                 endif()
             endif()
         else()
@@ -379,7 +379,7 @@ macro(build_arrow)
             INTERFACE_INCLUDE_DIRECTORIES "${ARROW_INCLUDE_DIR}")
         add_dependencies(arrow arrow_ep)
 
-    set(JEMALLOC_PREFIX "${CORE_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep-build/jemalloc_ep-prefix/src/jemalloc_ep")
+    set(JEMALLOC_PREFIX "${INDEX_BINARY_DIR}/arrow_ep-prefix/src/arrow_ep-build/jemalloc_ep-prefix/src/jemalloc_ep")
 
     add_custom_command(TARGET arrow_ep POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory ${ARROW_PREFIX}/lib/
@@ -401,7 +401,7 @@ endif()
 
 macro(build_openblas)
     message(STATUS "Building OpenBLAS-${OPENBLAS_VERSION} from source")
-    set(OPENBLAS_PREFIX "${CORE_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
+    set(OPENBLAS_PREFIX "${INDEX_BINARY_DIR}/openblas_ep-prefix/src/openblas_ep")
     set(OPENBLAS_INCLUDE_DIR "${OPENBLAS_PREFIX}/include")
     set(OPENBLAS_STATIC_LIB
             "${OPENBLAS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}")
@@ -434,13 +434,13 @@ macro(build_openblas)
                     BUILD_BYPRODUCTS
                     ${OPENBLAS_STATIC_LIB})
 
-            ExternalProject_Create_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} "${CORE_BINARY_DIR}/openblas_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${OPENBLAS_CACHE_URL})
+            ExternalProject_Create_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/openblas_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${OPENBLAS_CACHE_URL})
         else()
             file(DOWNLOAD ${OPENBLAS_CACHE_URL} ${OPENBLAS_CACHE_PACKAGE_PATH} STATUS status)
             list(GET status 0 status_code)
             message(STATUS "DOWNLOADING FROM ${OPENBLAS_CACHE_URL} TO ${OPENBLAS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
             if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} ${CORE_BINARY_DIR})
+                ExternalProject_Use_Cache(openblas_ep ${OPENBLAS_CACHE_PACKAGE_PATH} ${INDEX_BINARY_DIR})
             endif()
         endif()
     else()
@@ -478,7 +478,7 @@ endmacro()
 
 macro(build_lapack)
     message(STATUS "Building LAPACK-${LAPACK_VERSION} from source")
-    set(LAPACK_PREFIX "${CORE_BINARY_DIR}/lapack_ep-prefix/src/lapack_ep")
+    set(LAPACK_PREFIX "${INDEX_BINARY_DIR}/lapack_ep-prefix/src/lapack_ep")
     set(LAPACK_INCLUDE_DIR "${LAPACK_PREFIX}/include")
     set(LAPACK_STATIC_LIB
             "${LAPACK_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}lapack${CMAKE_STATIC_LIBRARY_SUFFIX}")
@@ -510,13 +510,13 @@ macro(build_lapack)
                     BUILD_BYPRODUCTS
                     ${LAPACK_STATIC_LIB})
 
-            ExternalProject_Create_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} "${CORE_BINARY_DIR}/lapack_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LAPACK_CACHE_URL})
+            ExternalProject_Create_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/lapack_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${LAPACK_CACHE_URL})
         else()
             file(DOWNLOAD ${LAPACK_CACHE_URL} ${LAPACK_CACHE_PACKAGE_PATH} STATUS status)
             list(GET status 0 status_code)
             message(STATUS "DOWNLOADING FROM ${LAPACK_CACHE_URL} TO ${LAPACK_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
             if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} ${CORE_BINARY_DIR})
+                ExternalProject_Use_Cache(lapack_ep ${LAPACK_CACHE_PACKAGE_PATH} ${INDEX_BINARY_DIR})
             endif()
         endif()
     else()
@@ -559,7 +559,7 @@ macro(build_gtest)
                 -Wno-ignored-attributes)
     endif()
 
-    set(GTEST_PREFIX "${CORE_BINARY_DIR}/googletest_ep-prefix/src/googletest_ep")
+    set(GTEST_PREFIX "${INDEX_BINARY_DIR}/googletest_ep-prefix/src/googletest_ep")
     set(GTEST_INCLUDE_DIR "${GTEST_PREFIX}/include")
     set(GTEST_STATIC_LIB
             "${GTEST_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}")
@@ -601,13 +601,13 @@ macro(build_gtest)
                     ${GTEST_CMAKE_ARGS}
                     ${EP_LOG_OPTIONS})
 
-            ExternalProject_Create_Cache(googletest_ep ${GTEST_CACHE_PACKAGE_PATH} "${CORE_BINARY_DIR}/googletest_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${GTEST_CACHE_URL})
+            ExternalProject_Create_Cache(googletest_ep ${GTEST_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/googletest_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${GTEST_CACHE_URL})
         else()
             file(DOWNLOAD ${GTEST_CACHE_URL} ${GTEST_CACHE_PACKAGE_PATH} STATUS status)
             list(GET status 0 status_code)
             message(STATUS "DOWNLOADING FROM ${GTEST_CACHE_URL} TO ${GTEST_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
             if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(googletest_ep ${GTEST_CACHE_PACKAGE_PATH} ${CORE_BINARY_DIR})
+                ExternalProject_Use_Cache(googletest_ep ${GTEST_CACHE_PACKAGE_PATH} ${INDEX_BINARY_DIR})
             endif()
         endif()
     else()
@@ -667,7 +667,7 @@ endif()
 
 macro(build_faiss)
     message(STATUS "Building FAISS-${FAISS_VERSION} from source")
-    set(FAISS_PREFIX "${CORE_BINARY_DIR}/faiss_ep-prefix/src/faiss_ep")
+    set(FAISS_PREFIX "${INDEX_BINARY_DIR}/faiss_ep-prefix/src/faiss_ep")
     set(FAISS_INCLUDE_DIR "${FAISS_PREFIX}/include")
     set(FAISS_STATIC_LIB
             "${FAISS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}faiss${CMAKE_STATIC_LIBRARY_SUFFIX}")
@@ -717,13 +717,13 @@ macro(build_faiss)
 
             ExternalProject_Add_StepDependencies(faiss_ep build openblas_ep lapack_ep)
 
-            ExternalProject_Create_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} "${CORE_BINARY_DIR}/faiss_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${FAISS_CACHE_URL})
+            ExternalProject_Create_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} "${INDEX_BINARY_DIR}/faiss_ep-prefix" ${JFROG_USER_NAME} ${JFROG_PASSWORD} ${FAISS_CACHE_URL})
         else()
             file(DOWNLOAD ${FAISS_CACHE_URL} ${FAISS_CACHE_PACKAGE_PATH} STATUS status)
             list(GET status 0 status_code)
             message(STATUS "DOWNLOADING FROM ${FAISS_CACHE_URL} TO ${FAISS_CACHE_PACKAGE_PATH}. STATUS = ${status_code}")
             if (status_code EQUAL 0)
-                ExternalProject_Use_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} ${CORE_BINARY_DIR})
+                ExternalProject_Use_Cache(faiss_ep ${FAISS_CACHE_PACKAGE_PATH} ${INDEX_BINARY_DIR})
             endif()
         endif()
     else()
