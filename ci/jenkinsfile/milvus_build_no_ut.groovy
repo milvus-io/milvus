@@ -10,7 +10,14 @@ container('milvus-build-env') {
                         sh "git config --global user.name \"test\""
                         withCredentials([usernamePassword(credentialsId: "${params.JFROG_USER}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
                             sh "./build.sh -l"
-                            sh "export JFROG_ARTFACTORY_URL='${params.JFROG_ARTFACTORY_URL}' && export JFROG_USER_NAME='${USERNAME}' && export JFROG_PASSWORD='${PASSWORD}' && ./build.sh -t ${params.BUILD_TYPE} -j"
+                            sh "rm -rf cmake_build"
+                            sh "export JFROG_ARTFACTORY_URL='${params.JFROG_ARTFACTORY_URL}' \
+                            && export JFROG_USER_NAME='${USERNAME}' \
+                            && export JFROG_PASSWORD='${PASSWORD}' \
+                            && export FAISS_URL='http://192.168.1.105:6060/jinhai/faiss/-/archive/branch-0.2.1/faiss-branch-0.2.1.tar.gz' \
+                            && export http_proxy=http://proxy.zilliz.tech:1087 \
+                            && export https_proxy=http://proxy.zilliz.tech:1087 \
+                            && ./build.sh -t ${params.BUILD_TYPE} -j"
                             sh "./coverage.sh -u root -p Fantast1c -t 192.168.1.194"
                         }
                     }
