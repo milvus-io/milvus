@@ -43,7 +43,6 @@ The searches in the trees and the graph are iteratively conducted.
 * swig >= 3.0
 * cmake >= 3.12.0
 * boost >= 1.67.0
-* tbb >= 4.2
 
 ### **Install**
 
@@ -66,7 +65,7 @@ Compiling the ALL_BUILD project in the Visual Studio (at least 2015) will genera
 ```bash
 docker build -t sptag .
 ```
-Will build a docker container with binaries in `/app/Release/`
+Will build a docker container with binaries in `/app/Release/`.
 
 ### **Verify** 
 
@@ -75,6 +74,7 @@ Run the test (or Test.exe) in the Release folder to verify all the tests have pa
 ### **Usage**
 
 The detailed usage can be found in [Get started](docs/GettingStart.md).
+The detailed parameters tunning can be found in [Parameters](docs/Parameters.md).
 
 ## **References**
 Please cite SPTAG in your publications if it helps your research:

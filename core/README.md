@@ -76,13 +76,13 @@ $ sudo ln -s /path/to/libmysqlclient.so /path/to/libmysqlclient_r.so
 ###### Step 2 Build
 
 ```shell
-$ cd [Milvus sourcecode path]/cpp
+$ cd [Milvus sourcecode path]/core
 $ ./build.sh -t Debug
 or 
 $ ./build.sh -t Release
 ```
 
-When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/cpp/milvus`.
+When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
 
 If you encounter the following error message,
 `protocol https not supported or disabled in libcurl`
@@ -148,11 +148,20 @@ $ sudo apt-get install lcov
 ```shell  
 $ ./build.sh -u -c
 ```
+Run mysql docker
+```shell 
+docker pull mysql:latest
+docker run -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql:latest
+```
+Run code coverage
+```shell  
+$ ./coverage.sh -u root -p 123456 -t 127.0.0.1
+```
 
 ##### Launch Milvus server
 
 ```shell
-$ cd [Milvus root path]/cpp/milvus
+$ cd [Milvus root path]/core/milvus
 ```
 
 Add `lib/` directory to `LD_LIBRARY_PATH`
@@ -202,7 +211,7 @@ $ python3 example.py
 
 ```shell
  # Run Milvus C++ example
- $ cd [Milvus root path]/cpp/milvus/bin
+ $ cd [Milvus root path]/core/milvus/bin
  $ ./sdk_simple
 ```
 

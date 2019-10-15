@@ -15,13 +15,13 @@
 using namespace SPTAG;
 
 template <typename T>
-float CalcRecall(std::vector<QueryResult> &results, const std::vector<std::set<int>> &truth, int NumQuerys, int K, std::ofstream& log)
+float CalcRecall(std::vector<QueryResult> &results, const std::vector<std::set<SizeType>> &truth, SizeType NumQuerys, int K, std::ofstream& log)
 {
     float meanrecall = 0, minrecall = MaxDist, maxrecall = 0, stdrecall = 0;
     std::vector<float> thisrecall(NumQuerys, 0);
-    for (int i = 0; i < NumQuerys; i++)
+    for (SizeType i = 0; i < NumQuerys; i++)
     {
-        for (int id : truth[i])
+        for (SizeType id : truth[i])
         {
             for (int j = 0; j < K; j++)
             {
@@ -38,7 +38,7 @@ float CalcRecall(std::vector<QueryResult> &results, const std::vector<std::set<i
         if (thisrecall[i] > maxrecall) maxrecall = thisrecall[i];
     }
     meanrecall /= NumQuerys;
-    for (int i = 0; i < NumQuerys; i++)
+    for (SizeType i = 0; i < NumQuerys; i++)
     {
         stdrecall += (thisrecall[i] - meanrecall) * (thisrecall[i] - meanrecall);
     }
@@ -47,11 +47,11 @@ float CalcRecall(std::vector<QueryResult> &results, const std::vector<std::set<i
     return meanrecall;
 }
 
-void LoadTruth(std::ifstream& fp, std::vector<std::set<int>>& truth, int NumQuerys, int K)
+void LoadTruth(std::ifstream& fp, std::vector<std::set<SizeType>>& truth, SizeType NumQuerys, int K)
 {
-    int get;
+    SizeType get;
     std::string line;
-    for (int i = 0; i < NumQuerys; ++i)
+    for (SizeType i = 0; i < NumQuerys; ++i)
     {
         truth[i].clear();
         for (int j = 0; j < K; ++j)
@@ -70,8 +70,8 @@ int Process(Helper::IniReader& reader, VectorIndex& index)
     std::string truthFile = reader.GetParameter("Index", "TruthFile", std::string("truth.txt"));
     std::string outputFile = reader.GetParameter("Index", "ResultFile", std::string(""));
 
-    int numBatchQuerys = reader.GetParameter("Index", "NumBatchQuerys", 10000);
-    int numDebugQuerys = reader.GetParameter("Index", "NumDebugQuerys", -1);
+    SizeType numBatchQuerys = reader.GetParameter("Index", "NumBatchQuerys", (SizeType)10000);
+    SizeType numDebugQuerys = reader.GetParameter("Index", "NumDebugQuerys", (SizeType)-1);
     int K = reader.GetParameter("Index", "K", 32);
 
     std::vector<std::string> maxCheck = Helper::StrUtils::SplitString(reader.GetParameter("Index", "MaxCheck", std::string("2048")), "#");
@@ -100,13 +100,13 @@ int Process(Helper::IniReader& reader, VectorIndex& index)
         return -1;
     }
 
-    int numQuerys = (numDebugQuerys >= 0) ? numDebugQuerys : numBatchQuerys;
+    SizeType numQuerys = (numDebugQuerys >= 0) ? numDebugQuerys : numBatchQuerys;
 
     std::vector<std::vector<T>> Query(numQuerys, std::vector<T>(index.GetFeatureDim(), 0)); 
-    std::vector<std::set<int>> truth(numQuerys);
+    std::vector<std::set<SizeType>> truth(numQuerys);
     std::vector<QueryResult> results(numQuerys, QueryResult(NULL, K, 0));
 
-    int * latencies = new int[numQuerys + 1];
+    clock_t * latencies = new clock_t[numQuerys + 1];
 
     int base = 1;
     if (index.GetDistCalcMethod() == DistCalcMethod::Cosine) {
@@ -114,7 +114,7 @@ int Process(Helper::IniReader& reader, VectorIndex& index)
     }
     int basesquare = base * base;
 
-    int dims = index.GetFeatureDim();
+    DimensionType dims = index.GetFeatureDim();
     std::vector<std::string> QStrings;
     while (!inStream.eof())
     {
@@ -122,43 +122,33 @@ int Process(Helper::IniReader& reader, VectorIndex& index)
         COMMON::Utils::PrepareQuerys(inStream, QStrings, Query, numQuerys, dims, index.GetDistCalcMethod(), base);
         if (numQuerys == 0) break;
 
-        for (int i = 0; i < numQuerys; i++) results[i].SetTarget(Query[i].data());
+        for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(Query[i].data());
         if (ftruth.is_open()) LoadTruth(ftruth, truth, numQuerys, K);
 
         std::cout << "    \t[avg]      \t[99%] \t[95%] \t[recall] \t[mem]" << std::endl;
 
-        int subSize = (numQuerys - 1) / index.GetNumThreads() + 1;
+        SizeType subSize = (numQuerys - 1) / omp_get_num_threads() + 1;
         for (std::string& mc : maxCheck)
         {
             index.SetParameter("MaxCheck", mc.c_str());
-            for (int i = 0; i < numQuerys; i++) results[i].Reset();
+            for (SizeType i = 0; i < numQuerys; i++) results[i].Reset();
 
-            if (index.GetNumThreads() == 1)
+#pragma omp parallel for
+            for (int tid = 0; tid < omp_get_num_threads(); tid++)
             {
-                for (int i = 0; i < numQuerys; i++)
+                SizeType start = tid * subSize;
+                SizeType end = min((tid + 1) * subSize, numQuerys);
+                for (SizeType i = start; i < end; i++)
                 {
                     latencies[i] = clock();
                     index.SearchIndex(results[i]);
                 }
             }
-            else
-            {
-#pragma omp parallel for
-                for (int tid = 0; tid < index.GetNumThreads(); tid++)
-                {
-                    int start = tid * subSize;
-                    int end = min((tid + 1) * subSize, numQuerys);
-                    for (int i = start; i < end; i++)
-                    {
-                        latencies[i] = clock();
-                        index.SearchIndex(results[i]);
-                    }
-                }
-            }
+
             latencies[numQuerys] = clock();
 
             float timeMean = 0, timeMin = MaxDist, timeMax = 0, timeStd = 0;
-            for (int i = 0; i < numQuerys; i++)
+            for (SizeType i = 0; i < numQuerys; i++)
             {
                 if (latencies[i + 1] >= latencies[i])
                     latencies[i] = latencies[i + 1] - latencies[i];
@@ -169,16 +159,16 @@ int Process(Helper::IniReader& reader, VectorIndex& index)
                 if (latencies[i] < timeMin) timeMin = (float)latencies[i];
             }
             timeMean /= numQuerys;
-            for (int i = 0; i < numQuerys; i++) timeStd += ((float)latencies[i] - timeMean) * ((float)latencies[i] - timeMean);
+            for (SizeType i = 0; i < numQuerys; i++) timeStd += ((float)latencies[i] - timeMean) * ((float)latencies[i] - timeMean);
             timeStd = std::sqrt(timeStd / numQuerys);
             log << timeMean << " " << timeStd << " " << timeMin << " " << timeMax << " ";
 
-            std::sort(latencies, latencies + numQuerys, [](int x, int y)
+            std::sort(latencies, latencies + numQuerys, [](clock_t x, clock_t y)
             {
                 return x < y;
             });
-            float l99 = float(latencies[int(numQuerys * 0.99)]) / CLOCKS_PER_SEC;
-            float l95 = float(latencies[int(numQuerys * 0.95)]) / CLOCKS_PER_SEC;
+            float l99 = float(latencies[SizeType(numQuerys * 0.99)]) / CLOCKS_PER_SEC;
+            float l95 = float(latencies[SizeType(numQuerys * 0.95)]) / CLOCKS_PER_SEC;
 
             float recall = 0;
             if (ftruth.is_open())
@@ -202,7 +192,7 @@ int Process(Helper::IniReader& reader, VectorIndex& index)
         if (fp.is_open())
         {
             fp << std::setprecision(3) << std::fixed;
-            for (int i = 0; i < numQuerys; i++)
+            for (SizeType i = 0; i < numQuerys; i++)
             {
                 fp << QStrings[i] << ":";
                 for (int j = 0; j < K; j++)
@@ -258,13 +248,13 @@ int main(int argc, char** argv)
     {
         std::string param(argv[i]);
         size_t idx = param.find("=");
-        if (idx < 0) continue;
+        if (idx == std::string::npos) continue;
 
         std::string paramName = param.substr(0, idx);
         std::string paramVal = param.substr(idx + 1);
         std::string sectionName;
         idx = paramName.find(".");
-        if (idx >= 0) {
+        if (idx != std::string::npos) {
             sectionName = paramName.substr(0, idx);
             paramName = paramName.substr(idx + 1);
         }

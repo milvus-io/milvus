@@ -17,10 +17,8 @@
 
 #pragma once
 
-#include "utils/Status.h"
-
-#include <cstdint>
 #include <string>
+#include "utils/Status.h"
 
 namespace milvus {
 namespace server {
@@ -34,7 +32,7 @@ class Server {
     Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename,
          const std::string& log_config_file);
 
-    void
+    Status
     Start();
     void
     Stop();
@@ -46,7 +44,7 @@ class Server {
     void
     Daemonize();
 
-    ErrorCode
+    Status
     LoadConfig();
 
     void

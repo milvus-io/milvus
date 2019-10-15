@@ -16,7 +16,6 @@
 # specific language governing permissions and limitations
 # under the License.
 #-------------------------------------------------------------------------------
-
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 
 foreach(dir ${CORE_INCLUDE_DIRS})
