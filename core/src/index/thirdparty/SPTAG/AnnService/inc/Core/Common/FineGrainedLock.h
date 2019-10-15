@@ -16,30 +16,30 @@ namespace SPTAG
         public:
             FineGrainedLock() {}
             ~FineGrainedLock() { 
-                for (int i = 0; i < locks.size(); i++)
+                for (size_t i = 0; i < locks.size(); i++)
                     locks[i].reset();
                 locks.clear();
             }
             
-            void resize(int n) {
-                int current = (int)locks.size();
+            void resize(SizeType n) {
+                SizeType current = (SizeType)locks.size();
                 if (current <= n) {
                     locks.resize(n);
-                    for (int i = current; i < n; i++)
+                    for (SizeType i = current; i < n; i++)
                         locks[i].reset(new std::mutex);
                 }
                 else {
-                    for (int i = n; i < current; i++)
+                    for (SizeType i = n; i < current; i++)
                         locks[i].reset();
                     locks.resize(n);
                 }
             }
 
-            std::mutex& operator[](int idx) {
+            std::mutex& operator[](SizeType idx) {
                 return *locks[idx];
             }
 
-            const std::mutex& operator[](int idx) const {
+            const std::mutex& operator[](SizeType idx) const {
                 return *locks[idx];
             }
         private:
