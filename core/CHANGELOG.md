@@ -43,13 +43,13 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-608 - Update TODO names
 - MS-609 - Update task construct function
 - MS-611 - Add resources validity check in ResourceMgr
-- MS-614 - Preload table at startup
 - MS-619 - Add optimizer class in scheduler
 - MS-626 - Refactor DataObj to support cache any type data
 - MS-648 - Improve unittest
 - MS-655 - Upgrade SPTAG
 
 ## New Feature
+- MS-614 - Preload table at startup
 - MS-627 - Integrate new index: IVFSQHybrid
 - MS-631 - IVFSQ8H Index support
 - MS-636 - Add optimizer in scheduler for FAISS_IVFSQ8H
@@ -67,7 +67,8 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-610 - Change error code base value from hex to decimal
 - MS-624 - Re-organize project directory for open-source
 - MS-635 - Add compile option to support customized faiss
-
+- MS-660 - add ubuntu_build_deps.sh
+	
 # Milvus 0.4.0 (2019-09-12)
 
 ## Bug
