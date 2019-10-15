@@ -238,6 +238,7 @@ if(CUSTOMIZATION)
     if (NOT return_code EQUAL 0)
         MESSAGE(FATAL_ERROR "Can't access to ${FAISS_URL}")
     else()
+        set(FAISS_SOURCE_URL ${FAISS_URL})
         # set(FAISS_MD5 "a589663865a8558205533c8ac414278c")
         # set(FAISS_MD5 "57da9c4f599cc8fa4260488b1c96e1cc") # commit-id 6dbdf75987c34a2c853bd172ea0d384feea8358c branch-0.2.0
         # set(FAISS_MD5 "21deb1c708490ca40ecb899122c01403") # commit-id 643e48f479637fd947e7b93fa4ca72b38ecc9a39 branch-0.2.0
