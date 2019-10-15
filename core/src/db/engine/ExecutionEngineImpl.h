@@ -72,7 +72,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
 
     Status
     Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
-           bool hybrid = false) const override;
+           bool hybrid = false) override;
 
     ExecutionEnginePtr
     BuildIndex(const std::string& location, EngineType engine_type) override;
