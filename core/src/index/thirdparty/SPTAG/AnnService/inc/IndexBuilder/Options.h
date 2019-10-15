@@ -5,7 +5,7 @@
 #define _SPTAG_INDEXBUILDER_OPTIONS_H_
 
 #include "inc/Core/Common.h"
-#include "inc/Helper/ArgumentsParser.h"
+#include "inc/Helper/VectorSetReader.h"
 
 #include <string>
 #include <vector>
@@ -16,20 +16,12 @@ namespace SPTAG
 namespace IndexBuilder
 {
 
-class BuilderOptions : public Helper::ArgumentsParser
+class BuilderOptions : public Helper::ReaderOptions
 {
 public:
     BuilderOptions();
 
     ~BuilderOptions();
-
-    std::uint32_t m_threadNum;
-
-    std::uint32_t m_dimension;
-
-    std::string m_vectorDelimiter;
-
-    SPTAG::VectorValueType m_inputValueType;
 
     std::string m_inputFiles;
 

@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#ifndef _SPTAG_INDEXBUILDER_VECTORSETREADERS_DEFAULTREADER_H_
-#define _SPTAG_INDEXBUILDER_VECTORSETREADERS_DEFAULTREADER_H_
+#ifndef _SPTAG_HELPER_VECTORSETREADERS_DEFAULTREADER_H_
+#define _SPTAG_HELPER_VECTORSETREADERS_DEFAULTREADER_H_
 
 #include "../VectorSetReader.h"
 #include "inc/Helper/Concurrent.h"
@@ -13,13 +13,13 @@
 
 namespace SPTAG
 {
-namespace IndexBuilder
+namespace Helper
 {
 
 class DefaultReader : public VectorSetReader
 {
 public:
-    DefaultReader(std::shared_ptr<BuilderOptions> p_options);
+    DefaultReader(std::shared_ptr<ReaderOptions> p_options);
 
     virtual ~DefaultReader();
 
@@ -44,7 +44,7 @@ private:
     template<typename DataType>
     bool TranslateVector(char* p_str, DataType* p_vector)
     {
-        std::uint32_t eleCount = 0;
+        DimensionType eleCount = 0;
         char* next = p_str;
         while ((*next) != '\0')
         {
@@ -85,11 +85,11 @@ private:
 
     std::size_t m_subTaskBlocksize;
 
-    std::atomic<std::uint32_t> m_totalRecordCount;
+    std::atomic<SizeType> m_totalRecordCount;
 
     std::atomic<std::size_t> m_totalRecordVectorBytes;
 
-    std::vector<std::uint32_t> m_subTaskRecordCount;
+    std::vector<SizeType> m_subTaskRecordCount;
 
     std::string m_vectorOutput;
 
@@ -102,7 +102,7 @@ private:
 
 
 
-} // namespace IndexBuilder
+} // namespace Helper
 } // namespace SPTAG
 
-#endif // _SPTAG_INDEXBUILDER_VECTORSETREADERS_DEFAULT_H_
+#endif // _SPTAG_HELPER_VECTORSETREADERS_DEFAULT_H_
