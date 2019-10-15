@@ -209,9 +209,9 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr
     } else {
         auto next_res_name = task->path().Next();
         auto next_res = res_mgr.lock()->GetResource(next_res_name);
-//        if (event->task_table_item_->Move()) {
-//            next_res->task_table().Put(task);
-//        }
+        //        if (event->task_table_item_->Move()) {
+        //            next_res->task_table().Put(task);
+        //        }
         event->task_table_item_->Move();
         next_res->task_table().Put(task);
     }
