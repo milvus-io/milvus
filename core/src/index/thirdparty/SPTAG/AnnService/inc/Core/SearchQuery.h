@@ -4,23 +4,12 @@
 #ifndef _SPTAG_SEARCHQUERY_H_
 #define _SPTAG_SEARCHQUERY_H_
 
-#include "CommonDataStructure.h"
+#include "SearchResult.h"
 
 #include <cstring>
 
 namespace SPTAG
 {
-
-    struct BasicResult
-    {
-        int VID;
-        float Dist;
-
-        BasicResult() : VID(-1), Dist(MaxDist) {}
-
-        BasicResult(int p_vid, float p_dist) : VID(p_vid), Dist(p_dist) {}
-    };
-
 
 // Space to save temporary answer, similar with TopKCache
 class QueryResult
@@ -38,39 +27,26 @@ public:
 
 
     QueryResult(const void* p_target, int p_resultNum, bool p_withMeta)
-        : m_target(nullptr),
-          m_resultNum(0),
-          m_withMeta(false)
     {
         Init(p_target, p_resultNum, p_withMeta);
     }
 
     
-    QueryResult(const void* p_target, int p_resultNum, std::vector<BasicResult>& p_results)
+    QueryResult(const void* p_target, int p_resultNum, bool p_withMeta, BasicResult* p_results)
         : m_target(p_target),
           m_resultNum(p_resultNum),
-          m_withMeta(false)
+          m_withMeta(p_withMeta)
     {
-        p_results.resize(p_resultNum);
-        m_results.reset(p_results.data());
+        m_results.Set(p_results, p_resultNum, false);
     }
 
 
     QueryResult(const QueryResult& p_other)
-        : m_target(p_other.m_target),
-          m_resultNum(p_other.m_resultNum),
-          m_withMeta(p_other.m_withMeta)
     {
+        Init(p_other.m_target, p_other.m_resultNum, p_other.m_withMeta);
         if (m_resultNum > 0)
         {
-            m_results.reset(new BasicResult[m_resultNum]);
-            std::memcpy(m_results.get(), p_other.m_results.get(), sizeof(BasicResult) * m_resultNum);
-
-            if (m_withMeta)
-            {
-                m_metadatas.reset(new ByteArray[m_resultNum]);
-                std::copy(p_other.m_metadatas.get(), p_other.m_metadatas.get() + m_resultNum, m_metadatas.get());
-            }
+            std::copy(p_other.m_results.Data(), p_other.m_results.Data() + m_resultNum, m_results.Data());
         }
     }
 
@@ -78,14 +54,9 @@ public:
     QueryResult& operator=(const QueryResult& p_other)
     {
         Init(p_other.m_target, p_other.m_resultNum, p_other.m_withMeta);
-
         if (m_resultNum > 0)
         {
-            std::memcpy(m_results.get(), p_other.m_results.get(), sizeof(BasicResult) * m_resultNum);
-            if (m_withMeta)
-            {
-                std::copy(p_other.m_metadatas.get(), p_other.m_metadatas.get() + m_resultNum, m_metadatas.get());
-            }
+            std::copy(p_other.m_results.Data(), p_other.m_results.Data() + m_resultNum, m_results.Data());
         }
 
         return *this;
@@ -100,18 +71,10 @@ public:
     inline void Init(const void* p_target, int p_resultNum, bool p_withMeta)
     {
         m_target = p_target;
-        if (p_resultNum > m_resultNum)
-        {
-            m_results.reset(new BasicResult[p_resultNum]);
-        }
-
-        if (p_withMeta && (!m_withMeta || p_resultNum > m_resultNum))
-        {
-            m_metadatas.reset(new ByteArray[p_resultNum]);
-        }
-
         m_resultNum = p_resultNum;
         m_withMeta = p_withMeta;
+
+        m_results = Array<BasicResult>::Alloc(p_resultNum);
     }
 
 
@@ -135,11 +98,11 @@ public:
 
     inline BasicResult* GetResult(int i) const
     {
-        return i < m_resultNum ? m_results.get() + i : nullptr;
+        return i < m_resultNum ? m_results.Data() + i : nullptr;
     }
 
 
-    inline void SetResult(int p_index, int p_VID, float p_dist)
+    inline void SetResult(int p_index, SizeType p_VID, float p_dist)
     {
         if (p_index < m_resultNum)
         {
@@ -151,7 +114,7 @@ public:
 
     inline BasicResult* GetResults() const
     {
-        return m_results.get();
+        return m_results.Data();
     }
 
 
@@ -165,7 +128,7 @@ public:
     {
         if (p_index < m_resultNum && m_withMeta)
         {
-            return m_metadatas[p_index];
+            return m_results[p_index].Meta;
         }
 
         return ByteArray::c_empty;
@@ -176,7 +139,7 @@ public:
     {
         if (p_index < m_resultNum && m_withMeta)
         {
-            m_metadatas[p_index] = std::move(p_metadata);
+            m_results[p_index].Meta = std::move(p_metadata);
         }
     }
 
@@ -187,39 +150,32 @@ public:
         {
             m_results[i].VID = -1;
             m_results[i].Dist = MaxDist;
-        }
-
-        if (m_withMeta)
-        {
-            for (int i = 0; i < m_resultNum; i++)
-            {
-                m_metadatas[i].Clear();
-            }
+            m_results[i].Meta.Clear();
         }
     }
 
 
     iterator begin()
     {
-        return m_results.get();
+        return m_results.Data();
     }
 
 
     iterator end()
     {
-        return m_results.get() + m_resultNum;
+        return m_results.Data() + m_resultNum;
     }
 
 
     const_iterator begin() const
     {
-        return m_results.get();
+        return m_results.Data();
     }
 
 
     const_iterator end() const
     {
-        return m_results.get() + m_resultNum;
+        return m_results.Data() + m_resultNum;
     }
 
 
@@ -230,9 +186,7 @@ protected:
 
     bool m_withMeta;
 
-    std::unique_ptr<BasicResult[]> m_results;
-
-    std::unique_ptr<ByteArray[]> m_metadatas;
+    Array<BasicResult> m_results;
 };
 } // namespace SPTAG
 
