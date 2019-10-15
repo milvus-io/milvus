@@ -4,7 +4,6 @@ include_directories(${CORE_SOURCE_DIR}/knowhere)
 include_directories(${CORE_SOURCE_DIR})
 include_directories(/usr/local/cuda/include)
 link_directories(/usr/local/cuda/lib64)
-link_directories(${CORE_SOURCE_DIR}/thirdparty/tbb)
 
 message(STATUS "arrow prefix: ${ARROW_PREFIX}")
 message(STATUS "libjemalloc_pic path: ${ARROW_PREFIX}/lib/libjemalloc_pic.a")
@@ -13,7 +12,6 @@ set(depend_libs
         gtest gmock gtest_main gmock_main
         faiss openblas lapack
         arrow "${ARROW_PREFIX}/lib/libjemalloc_pic.a"
-        tbb
         )
 
 set(basic_libs
