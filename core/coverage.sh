@@ -2,6 +2,44 @@
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/milvus/lib
 
+MYSQL_USER_NAME=root
+MYSQL_PASSWORD=Fantast1c
+MYSQL_HOST='192.168.1.194'
+MYSQL_PORT='3306'
+
+while getopts "u:p:t:h" arg
+do
+        case $arg in
+             u)
+                MYSQL_USER_NAME=$OPTARG
+                ;;
+             p)
+                MYSQL_PASSWORD=$OPTARG
+                ;;
+             t)
+                MYSQL_HOST=$OPTARG
+                ;;
+             h) # help
+                echo "
+
+parameter:
+-u: mysql account
+-p: mysql password
+-t: mysql host
+-h: help
+
+usage:
+./coverage.sh -u \${MYSQL_USER} -p \${MYSQL_PASSWORD} -t \${MYSQL_HOST} [-h]
+                "
+                exit 0
+                ;;
+             ?)
+                echo "ERROR! unknown argument"
+        exit 1
+        ;;
+        esac
+done
+
 LCOV_CMD="lcov"
 LCOV_GEN_CMD="genhtml"
 
@@ -15,13 +53,12 @@ DIR_GCNO="cmake_build"
 DIR_UNITTEST="milvus/unittest"
 
 # delete old code coverage info files
+rm -f FILE_INFO_BASE
+rm -f FILE_INFO_MILVUS
+rm -f FILE_INFO_OUTPUT
+rm -f FILE_INFO_OUTPUT_NEW
 rm -rf lcov_out
 rm -f FILE_INFO_BASE FILE_INFO_MILVUS FILE_INFO_OUTPUT FILE_INFO_OUTPUT_NEW
- 
-MYSQL_USER_NAME=root
-MYSQL_PASSWORD=Fantast1c
-MYSQL_HOST='192.168.1.194'
-MYSQL_PORT='3306'
 
 MYSQL_DB_NAME=milvus_`date +%s%N`
 
