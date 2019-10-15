@@ -15,6 +15,8 @@ container('milvus-build-env') {
                             && export JFROG_USER_NAME='${USERNAME}' \
                             && export JFROG_PASSWORD='${PASSWORD}' \
                             && export FAISS_URL='http://192.168.1.105:6060/jinhai/faiss/-/archive/branch-0.2.1/faiss-branch-0.2.1.tar.gz' \
+                            && export http_proxy=http://proxy.zilliz.tech:1087 \
+                            && export https_proxy=http://proxy.zilliz.tech:1087 \
                             && ./build.sh -t ${params.BUILD_TYPE} -j -u -c"
 
                             sh "./coverage.sh -u root -p Fantast1c -t 192.168.1.194"
