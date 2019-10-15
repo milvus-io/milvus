@@ -18,10 +18,12 @@
 #include <gtest/gtest.h>
 #include <gtest/gtest-death-test.h>
 
-#include "config/ConfigMgr.h"
+#include "config/YamlConfigMgr.h"
 #include "utils/CommonUtil.h"
 #include "utils/ValidationUtil.h"
 #include "server/Config.h"
+
+using namespace milvus;
 
 namespace {
 
@@ -35,16 +37,16 @@ static constexpr uint64_t GB = MB * 1024;
 } // namespace
 
 TEST(ConfigTest, CONFIG_TEST) {
-    milvus::server::ConfigMgr *config_mgr = milvus::server::ConfigMgr::GetInstance();
+    server::ConfigMgr *config_mgr = server::YamlConfigMgr::GetInstance();
 
-    milvus::ErrorCode err = config_mgr->LoadConfigFile("");
-    ASSERT_EQ(err, milvus::SERVER_UNEXPECTED_ERROR);
+    milvus::Status s = config_mgr->LoadConfigFile("");
+    ASSERT_FALSE(s.ok());
 
-    err = config_mgr->LoadConfigFile(LOG_FILE_PATH);
-    ASSERT_EQ(err, milvus::SERVER_UNEXPECTED_ERROR);
+    s = config_mgr->LoadConfigFile(LOG_FILE_PATH);
+    ASSERT_FALSE(s.ok());
 
-    err = config_mgr->LoadConfigFile(CONFIG_FILE_PATH);
-    ASSERT_EQ(err, milvus::SERVER_SUCCESS);
+    s = config_mgr->LoadConfigFile(CONFIG_FILE_PATH);
+    ASSERT_TRUE(s.ok());
 
     config_mgr->Print();
 
