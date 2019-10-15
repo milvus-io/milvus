@@ -17,27 +17,35 @@
 
 #pragma once
 
-#include "ConfigMgr.h"
-#include "ConfigNode.h"
-#include "utils/Error.h"
-
 #include <yaml-cpp/yaml.h>
 #include <string>
+
+#include "ConfigMgr.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace server {
 
 class YamlConfigMgr : public ConfigMgr {
  public:
-    virtual ErrorCode
+    static ConfigMgr*
+    GetInstance() {
+        static YamlConfigMgr mgr;
+        return &mgr;
+    }
+
+    virtual Status
     LoadConfigFile(const std::string& filename);
+
     virtual void
     Print() const;
+
     virtual std::string
     DumpString() const;
 
     virtual const ConfigNode&
     GetRootNode() const;
+
     virtual ConfigNode&
     GetRootNode();
 

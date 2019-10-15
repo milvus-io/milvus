@@ -17,11 +17,10 @@
 
 #pragma once
 
+#include <string>
+
 #include "db/DB.h"
 #include "utils/Status.h"
-
-#include <memory>
-#include <string>
 
 namespace milvus {
 namespace server {
