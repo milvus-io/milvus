@@ -32,7 +32,6 @@ TEST(TaskTest, INVALID_INDEX) {
     build_task->Load(LoadType::TEST, 10);
 
     build_task->Execute();
-
 }
 
 } // namespace scheduler
