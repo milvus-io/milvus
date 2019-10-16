@@ -18,8 +18,6 @@ Firstly, welcome, and thanks for your interest in [Milvus](https://milvus.io)! N
 
 Milvus is an open source vector search engine that supports similarity search of large-scale vectors. Built on optimized indexing algorithm, it is compatible with major AI/ML models.
 
-Milvus was developed by ZILLIZ, a tech startup that intends to reinvent data science, with the purpose of providing enterprises with efficient and scalable similarity search and analysis of feature vectors and unstructured data. 
-
 Milvus provides stable Python, C++ and Java APIs.
 
 Keep up-to-date with newest releases and latest updates by reading Milvus [release notes](https://milvus.io/docs/en/Releases/v0.4.0/).
