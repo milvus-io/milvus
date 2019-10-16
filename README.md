@@ -1,4 +1,4 @@
-![Milvuslogo](https://milvus.io/docs/tree/branch-0.5.0/assets/milvus_logo.png)
+![Milvuslogo](https://milvus.io/docs/assets/milvus_logo.png)
 
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
@@ -37,7 +37,7 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
   The data is stored and computed on a distributed architecture. This lets you scale data sizes up and down without redesigning the system.
 
 ## Architecture
-![Milvus_arch](https://milvus.io/docs/tree/branch-0.5.0/assets/milvus_arch.png)
+![Milvus_arch](https://milvus.io/docs/assets/milvus_arch.png)
 
 ## Get started
 
