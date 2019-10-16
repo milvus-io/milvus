@@ -7,12 +7,12 @@ from milvus.grpc_gen import status_pb2, milvus_pb2
 logger = logging.getLogger(__name__)
 
 
-class TestTracer(opentracing.Tracer):
+class FakeTracer(opentracing.Tracer):
     pass
 
-class TestSpan(opentracing.Span):
+class FakeSpan(opentracing.Span):
     def __init__(self, context, tracer, **kwargs):
-        super(TestSpan, self).__init__(tracer, context)
+        super(FakeSpan, self).__init__(tracer, context)
         self.reset()
 
     def set_tag(self, key, value):
@@ -26,7 +26,7 @@ class TestSpan(opentracing.Span):
         self.logs = []
 
 
-class TestRpcInfo:
+class FakeRpcInfo:
     def __init__(self, request, response):
         self.request = request
         self.response = response
@@ -37,32 +37,32 @@ class TestGrpcUtils:
         request = 'request'
         OK = status_pb2.Status(error_code=status_pb2.SUCCESS, reason='Success')
         response = OK
-        rpc_info = TestRpcInfo(request=request, response=response)
-        span = TestSpan(context=None, tracer=TestTracer())
+        rpc_info = FakeRpcInfo(request=request, response=response)
+        span = FakeSpan(context=None, tracer=FakeTracer())
         span_deco = GrpcSpanDecorator()
         span_deco(span, rpc_info)
         assert len(span.logs) == 0
         assert len(span.tags) == 0
 
         response = milvus_pb2.BoolReply(status=OK, bool_reply=False)
-        rpc_info = TestRpcInfo(request=request, response=response)
-        span = TestSpan(context=None, tracer=TestTracer())
+        rpc_info = FakeRpcInfo(request=request, response=response)
+        span = FakeSpan(context=None, tracer=FakeTracer())
         span_deco = GrpcSpanDecorator()
         span_deco(span, rpc_info)
         assert len(span.logs) == 0
         assert len(span.tags) == 0
 
         response = 1
-        rpc_info = TestRpcInfo(request=request, response=response)
-        span = TestSpan(context=None, tracer=TestTracer())
+        rpc_info = FakeRpcInfo(request=request, response=response)
+        span = FakeSpan(context=None, tracer=FakeTracer())
         span_deco = GrpcSpanDecorator()
         span_deco(span, rpc_info)
         assert len(span.logs) == 1
         assert len(span.tags) == 1
 
         response = 0
-        rpc_info = TestRpcInfo(request=request, response=response)
-        span = TestSpan(context=None, tracer=TestTracer())
+        rpc_info = FakeRpcInfo(request=request, response=response)
+        span = FakeSpan(context=None, tracer=FakeTracer())
         span_deco = GrpcSpanDecorator()
         span_deco(span, rpc_info)
         assert len(span.logs) == 0

@@ -237,13 +237,15 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
 
+    def _add_vectors(self, param, metadata=None):
+        return self.connection(metadata=metadata).add_vectors(None, None, insert_param=param)
+
     @mark_grpc_method
     def Insert(self, request, context):
         logger.info('Insert')
         # TODO: Ths SDK interface add_vectors() could update, add a key 'row_id_array'
-        _status, _ids = self.connection(metadata={
-            'resp_class': milvus_pb2.VectorIds
-        }).add_vectors(None, None, insert_param=request)
+        _status, _ids = self._add_vectors(metadata={
+            'resp_class': milvus_pb2.VectorIds}, param=request)
         return milvus_pb2.VectorIds(
             status=status_pb2.Status(error_code=_status.code, reason=_status.message),
             vector_id_array=_ids
@@ -305,6 +307,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     def SearchInFiles(self, request, context):
         raise NotImplemented()
 
+    def _describe_table(self, table_name, metadata=None):
+        return self.connection(metadata=metadata).describe_table(table_name)
+
     @mark_grpc_method
     def DescribeTable(self, request, context):
         _status, _table_name = Parser.parse_proto_TableName(request)
@@ -319,7 +324,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         }
 
         logger.info('DescribeTable {}'.format(_table_name))
-        _status, _table = self.connection(metadata=metadata).describe_table(_table_name)
+        _status, _table = self._describe_table(metadata=metadata, table_name=_table_name)
 
         if _status.OK():
             return milvus_pb2.TableSchema(
@@ -334,6 +339,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             table_name=_table_name,
             status=status_pb2.Status(error_code=_status.code, reason=_status.message),
         )
+
+    def _count_table(self, table_name, metadata=None):
+        return self.connection(metadata=metadata).get_table_row_count(table_name)
 
     @mark_grpc_method
     def CountTable(self, request, context):
@@ -351,11 +359,15 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         metadata = {
             'resp_class': milvus_pb2.TableRowCount
         }
-        _status, _count = self.connection(metadata=metadata).get_table_row_count(_table_name)
+        _status, _count = self._count_table(_table_name, metadata=metadata)
 
         return milvus_pb2.TableRowCount(
             status=status_pb2.Status(error_code=_status.code, reason=_status.message),
             table_row_count=_count if isinstance(_count, int) else -1)
+
+
+    def _get_server_version(self, metadata=None):
+        return self.connection(metadata=metadata).server_version()
 
     @mark_grpc_method
     def Cmd(self, request, context):
@@ -364,7 +376,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         if not _status.OK():
             return milvus_pb2.StringReply(
-                status_pb2.Status(error_code=_status.code, reason=_status.message)
+                status=status_pb2.Status(error_code=_status.code, reason=_status.message)
             )
 
         metadata = {
@@ -372,7 +384,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         }
 
         if _cmd == 'version':
-            _status, _reply = self.connection(metadata=metadata).server_version()
+            _status, _reply = self._get_server_version(metadata=metadata)
         else:
             _status, _reply = self.connection(metadata=metadata).server_status()
 
@@ -381,18 +393,24 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             string_reply=_reply
         )
 
+    def _show_tables(self):
+        return self.connection(metadata=metadata).show_tables()
+
     @mark_grpc_method
     def ShowTables(self, request, context):
         logger.info('ShowTables')
         metadata = {
             'resp_class': milvus_pb2.TableName
         }
-        _status, _results = self.connection(metadata=metadata).show_tables()
+        _status, _results = self._show_tables()
 
         return milvus_pb2.TableNameList(
             status=status_pb2.Status(error_code=_status.code, reason=_status.message),
             table_names=_results
         )
+
+    def _delete_by_range(self, table_name, start_date, end_date):
+        return self.connection().delete_vectors_by_range(table_name, start_date, end_date)
 
     @mark_grpc_method
     def DeleteByRange(self, request, context):
@@ -405,8 +423,11 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         _table_name, _start_date, _end_date = unpacks
 
         logger.info('DeleteByRange {}: {} {}'.format(_table_name, _start_date, _end_date))
-        _status = self.connection().delete_vectors_by_range(_table_name, _start_date, _end_date)
+        _status = self._delete_by_range(_table_name, _start_date, _end_date)
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
+
+    def _preload_table(self, table_name):
+        return self.connection().preload_table(table_name)
 
     @mark_grpc_method
     def PreloadTable(self, request, context):
@@ -416,8 +437,11 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             return status_pb2.Status(error_code=_status.code, reason=_status.message)
 
         logger.info('PreloadTable {}'.format(_table_name))
-        _status = self.connection().preload_table(_table_name)
+        _status = self._preload_table(_table_name)
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
+
+    def _describe_index(self, table_name, metadata=None):
+        return self.connection(metadata=metadata).describe_index(table_name)
 
     @mark_grpc_method
     def DescribeIndex(self, request, context):
@@ -433,12 +457,15 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         }
 
         logger.info('DescribeIndex {}'.format(_table_name))
-        _status, _index_param = self.connection(metadata=metadata).describe_index(_table_name)
+        _status, _index_param = self._describe_index(table_name=_table_name, metadata=metadata)
 
         _index = milvus_pb2.Index(index_type=_index_param._index_type, nlist=_index_param._nlist)
 
         return milvus_pb2.IndexParam(status=status_pb2.Status(error_code=_status.code, reason=_status.message),
                                      table_name=_table_name, index=_index)
+
+    def _drop_index(self, table_name):
+        return self.connection().drop_index(table_name)
 
     @mark_grpc_method
     def DropIndex(self, request, context):
@@ -448,5 +475,5 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             return status_pb2.Status(error_code=_status.code, reason=_status.message)
 
         logger.info('DropIndex {}'.format(_table_name))
-        _status = self.connection().drop_index(_table_name)
+        _status = self._drop_index(_table_name)
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
