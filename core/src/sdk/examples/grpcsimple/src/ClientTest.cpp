@@ -40,8 +40,10 @@ constexpr int64_t BATCH_ROW_COUNT = 100000;
 constexpr int64_t NQ = 5;
 constexpr int64_t TOP_K = 10;
 constexpr int64_t SEARCH_TARGET = 5000;  // change this value, result is different
-constexpr int64_t ADD_VECTOR_LOOP = 1;
+constexpr int64_t ADD_VECTOR_LOOP = 5;
 constexpr int64_t SECONDS_EACH_HOUR = 3600;
+constexpr milvus::IndexType INDEX_TYPE = milvus::IndexType::gpu_ivfsq8;
+constexpr int32_t N_LIST = 15000;
 
 #define BLOCK_SPLITER std::cout << "===========================================" << std::endl;
 
@@ -311,8 +313,8 @@ ClientTest::Test(const std::string& address, const std::string& port) {
         std::cout << "Wait until create all index done" << std::endl;
         milvus::IndexParam index;
         index.table_name = TABLE_NAME;
-        index.index_type = milvus::IndexType::gpu_ivfsq8;
-        index.nlist = 16384;
+        index.index_type = INDEX_TYPE;
+        index.nlist = N_LIST;
         milvus::Status stat = conn->CreateIndex(index);
         std::cout << "CreateIndex function call status: " << stat.message() << std::endl;
 
@@ -344,8 +346,8 @@ ClientTest::Test(const std::string& address, const std::string& port) {
 
     {  // delete by range
         milvus::Range rg;
-        rg.start_value = CurrentTmDate(-2);
-        rg.end_value = CurrentTmDate(-3);
+        rg.start_value = CurrentTmDate(-3);
+        rg.end_value = CurrentTmDate(-2);
 
         milvus::Status stat = conn->DeleteByRange(rg, TABLE_NAME);
         std::cout << "DeleteByRange function call status: " << stat.message() << std::endl;
