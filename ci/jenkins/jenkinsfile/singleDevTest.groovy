@@ -4,7 +4,7 @@ timeout(time: 30, unit: 'MINUTES') {
         sh "pytest . --alluredir=\"test_out/dev/single/sqlite\" --level=1 --ip ${env.PIPELIEN_NAME}-${env.BUILD_NUMBER}-single-gpu-milvus-gpu-engine.milvus.svc.cluster.local"
     }
     // mysql database backend test
-    load "${env.WORKSPACE}/ci/jenkinsfile/cleanupSingleDev.groovy"
+    load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/cleanupSingleDev.groovy"
 
     if (!fileExists('milvus-helm')) {
         dir ("milvus-helm") {
