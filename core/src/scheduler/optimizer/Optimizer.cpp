@@ -20,12 +20,12 @@
 namespace milvus {
 namespace scheduler {
 
-void
-Optimizer::Init() {
-    for (auto& pass : pass_list_) {
-        pass->Init();
-    }
-}
+//void
+//Optimizer::Init() {
+//    for (auto& pass : pass_list_) {
+//        pass->Init();
+//    }
+//}
 
 bool
 Optimizer::Run(const TaskPtr& task) {
