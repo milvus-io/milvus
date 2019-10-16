@@ -1,10 +1,10 @@
-![Milvuslogo](https://milvus.io/docs/assets/milvus_logo.png)
+![Milvuslogo](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_logo.png)
 
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
-- [Twitter](https://twitter.com/milvus_io)
+- [Twitter](https://twitter.com/milvusio)
 - [Blog](https://www.milvus.io/blog/)
 - [CSDN](https://zilliz.blog.csdn.net/)
 - [中文官网](https://www.milvus.io/zh-CN/)
@@ -17,8 +17,6 @@ Firstly, welcome, and thanks for your interest in [Milvus](https://milvus.io)! N
 ## What is Milvus
 
 Milvus is an open source vector search engine that supports similarity search of large-scale vectors. Built on optimized indexing algorithm, it is compatible with major AI/ML models.
-
-Milvus was developed by ZILLIZ, a tech startup that intends to reinvent data science, with the purpose of providing enterprises with efficient and scalable similarity search and analysis of feature vectors and unstructured data. 
 
 Milvus provides stable Python, C++ and Java APIs.
 
@@ -37,7 +35,7 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
   The data is stored and computed on a distributed architecture. This lets you scale data sizes up and down without redesigning the system.
 
 ## Architecture
-![Milvus_arch](https://milvus.io/docs/assets/milvus_arch.png)
+![Milvus_arch](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_arch.png)
 
 ## Get started
 
