@@ -12,7 +12,7 @@
 
 # Welcome to Milvus
 
-Firstly, welcome, and thanks for your interest in [Milvus](https://milvus.io)! No matter who you are, what you do, we greatly appreciate your contribution to help us reinvent data science with Milvus.
+Firstly, welcome, and thanks for your interest in [Milvus](https://milvus.io)! ​​No matter who you are, what you do, we greatly appreciate your contribution to help us reinvent data science with Milvus.
 
 ## What is Milvus
 
@@ -28,14 +28,14 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
 
 - Intelligent index
 
-  With a “Decide Your Own Algorithm” approach, you can embed machine learning and advanced algorithms into Milvus without the headache of complex data engineering or migrating data between disparate systems. Milvus is built on optimized indexing algorithm based on quantization indexing, tree-based and graph indexing methods.
+  With a "Decide Your Own Algorithm" approach, you can embed machine learning and advanced algorithms into Milvus without the headache of complex data engineering or migrating data between disparate systems. Milvus is built on optimized indexing algorithm based on quantization indexing, tree-based and graph indexing methods.
 
 - Strong scalability
 
   The data is stored and computed on a distributed architecture. This lets you scale data sizes up and down without redesigning the system.
 
 ## Architecture
-![Milvus_arch](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_arch.png)
+![Milvus_arch](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_arch.jpg)
 
 ## Get started
 
@@ -71,55 +71,6 @@ $ ./build.sh -t Release
 ```
 
 When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
-
-#### Code format and linting
-
-Install clang-format
-```shell
-$ sudo apt-get install clang-format
-$ rm cmake_build/CMakeCache.txt
-```
-Check code style
-```shell
-$ ./build.sh -l
-```
-To format the code
-```shell
-$ cd cmake_build
-$ make clang-format
-```
-
-#### Run unit test
-
-```shell
-$ ./build.sh -u
-```
-
-#### Run code coverage
-
-Install lcov
-```shell
-$ sudo apt-get install lcov
-```
-```shell  
-$ ./build.sh -u -c
-```
-Run MySQL docker
-```shell 
-docker pull mysql:latest
-docker run -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql:latest
-```
-Run code coverage
-
-```shell  
-$ ./coverage.sh -u root -p 123456 -t 127.0.0.1
-```
-
-Or start your own MySQL server, and then run code coverage
-
-```shell
-$ ./coverage.sh -u ${MYSQL_USERNAME} -p ${MYSQL_PASSWORD} -t ${MYSQL_SERVER_IP}
-```
 
 #### Launch Milvus server
 
