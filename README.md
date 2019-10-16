@@ -35,7 +35,7 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
   The data is stored and computed on a distributed architecture. This lets you scale data sizes up and down without redesigning the system.
 
 ## Architecture
-![Milvus_arch](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_arch.)
+![Milvus_arch](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_arch.jpg)
 
 ## Get started
 
