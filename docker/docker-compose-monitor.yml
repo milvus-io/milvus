@@ -42,15 +42,15 @@ services:
 
     milvus_server:
         runtime: nvidia
-        image: registry.zilliz.com/milvus/engine:branch-0.4.0-release
+        image: milvusdb/milvus:latest
         restart: always
         links:
             - prometheus
         environment:
             WEB_APP: host.docker.internal
         volumes:
-            - ../cpp/conf/server_config.yaml:/opt/milvus/conf/server_config.yaml
-            - ../cpp/conf/log_config.conf:/opt/milvus/conf/log_config.conf
+            - ../core/conf/server_config.yaml:/opt/milvus/conf/server_config.yaml
+            - ../core/conf/log_config.conf:/opt/milvus/conf/log_config.conf
         ports:
             - "8080:8080"
             - "19530:19530"
