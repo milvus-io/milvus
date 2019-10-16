@@ -27,7 +27,7 @@ container('publish-images') {
                     sh "docker rmi ${dockerRegistryURL}/${imageName}"
                 }
 
-                docker.withRegistry("${dockerRegistryURL}", "${params.DOCKER_CREDENTIALS_ID}") {
+                docker.withRegistry("https://${dockerRegistryURL}", "${params.DOCKER_CREDENTIALS_ID}") {
                     customImage.push()
                 }
             } catch (exc) {
