@@ -7,6 +7,7 @@
 - [Twitter](https://twitter.com/milvus_io)
 - [Blog](https://www.milvus.io/blog/)
 - [CSDN](https://zilliz.blog.csdn.net/)
+- 中文网站(https://www.milvus.io/zh-CN/)
 
 
 # Welcome to Milvus
@@ -182,7 +183,7 @@ $ python3 example.py
 #### Run Java example code
 Make sure Java 8 or higher is already installed.
 
-Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples) for example code.
+Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples) for the example code.
 
 ## Contribution guidelines
 
