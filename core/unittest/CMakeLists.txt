@@ -18,7 +18,7 @@
 #-------------------------------------------------------------------------------
 include_directories("${CUDA_TOOLKIT_ROOT_DIR}/include")
 
-foreach(dir ${CORE_INCLUDE_DIRS})
+foreach(dir ${INDEX_INCLUDE_DIRS})
     include_directories(${dir})
 endforeach()
 
@@ -92,8 +92,8 @@ set(common_files
 
 set(unittest_libs
         sqlite
-        boost_system_static
-        boost_filesystem_static
+        libboost_system.a
+        libboost_filesystem.a
         lz4
         mysqlpp
         yaml-cpp
