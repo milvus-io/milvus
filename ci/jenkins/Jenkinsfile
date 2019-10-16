@@ -37,7 +37,7 @@ pipeline {
                         kubernetes {
                             label 'build'
                             defaultContainer 'jnlp'
-                            yamlFile 'ci/pod/milvus-build-env-pod.yaml'
+                            yamlFile 'ci/jenkins/pod/milvus-build-env-pod.yaml'
                         }
                     }
 
@@ -68,7 +68,7 @@ pipeline {
                         kubernetes {
                             label 'publish'
                             defaultContainer 'jnlp'
-                            yamlFile 'ci/pod/docker-pod.yaml'
+                            yamlFile 'ci/jenkins/pod/docker-pod.yaml'
                         }
                     }
 
@@ -90,7 +90,7 @@ pipeline {
                         kubernetes {
                             label 'dev-test'
                             defaultContainer 'jnlp'
-                            yamlFile 'ci/pod/testEnvironment.yaml'
+                            yamlFile 'ci/jenkins/pod/testEnvironment.yaml'
                         }
                     }
 
