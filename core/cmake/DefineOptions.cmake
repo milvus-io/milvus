@@ -56,7 +56,7 @@ define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 
 define_option(MILVUS_BOOST_VENDORED "Use vendored Boost instead of existing Boost. \
-Note that this requires linking Boost statically" ON)
+Note that this requires linking Boost statically" OFF)
 
 define_option(MILVUS_BOOST_HEADER_ONLY "Use only BOOST headers" OFF)
 

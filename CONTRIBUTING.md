@@ -1,6 +1,6 @@
 # Contributing to Milvus
 
-First of all, thanks for taking the time to contribute to Milvus! It's people like you that help Milvus come to fruition.
+First of all, thanks for taking the time to contribute to Milvus! It's people like you that help Milvus come to fruition. :tada:
 
 The following are a set of guidelines for contributing to Milvus. Following these guidelines helps contributing to this project easy and transparent. These are mostly guideline, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
@@ -11,8 +11,8 @@ As for everything else in the project, the contributions to Milvus are governed 
 Before you make any contributions, make sure you follow this list.
 
 - Read [Contributing to Milvus](CONTRIBUTING.md).
-- Check if the changes are consistent with the [coding style](CONTRIBUTING.md#coding-style).
-- Run [unit tests](CONTRIBUTING.md#run-unit-test).
+- Check if the changes are consistent with the [coding style](CONTRIBUTING.md#coding-style), and format your code accordingly.
+- Run [unit tests](CONTRIBUTING.md#run-unit-test-with-code-coverage) and check your code coverage rate.
 
 ## What contributions can I make?
 
@@ -68,15 +68,51 @@ And we made the following changes based on the guide:
 - 120-character line length
 - Camel-Cased file names
 
+### Format code
 
-## Run unit test
-
-We use Google Test framework for test running.
-To run unit test for Milvus under C++, please use the following command:
-
+Install clang-format
 ```shell
-# Run unit test for Milvus
-$ ./build.sh -u
+$ sudo apt-get install clang-format
+$ rm cmake_build/CMakeCache.txt
+```
+Check code style
+```shell
+$ ./build.sh -l
+```
+To format the code
+```shell
+$ cd cmake_build
+$ make clang-format
 ```
 
+## Run unit test with code coverage
+
+Before submitting your PR, make sure you have run unit test, and your code coverage rate is >= 90%.
+
+Install lcov
+```shell
+$ sudo apt-get install lcov
+```
+Run unit test and generate code for code coverage check
+```shell 
+$ ./build.sh -u -c
+```
+
+Run MySQL docker
+```shell 
+docker pull mysql:latest
+docker run -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql:latest
+```
+
+Run code coverage
+
+```shell  
+$ ./coverage.sh -u root -p 123456 -t 127.0.0.1
+```
+
+Or start your own MySQL server, and then run code coverage
+
+```shell
+$ ./coverage.sh -u ${MYSQL_USERNAME} -p ${MYSQL_PASSWORD} -t ${MYSQL_SERVER_IP}
+```
 
