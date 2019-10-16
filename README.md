@@ -2,7 +2,7 @@
 
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
-[![Twitter Follow](https://img.shields.io/twitter/follow/milvusio.svg?style=social&label=Follow)](https://twitter.com/milvusio)
+[![@milvusio](https://img.shields.io/twitter/follow/milvusio.svg?style=social&label=Follow)](https://twitter.com/milvusio)
 
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 - [Twitter](https://twitter.com/milvus_io)
