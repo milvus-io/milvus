@@ -1,8 +1,14 @@
 ![Milvuslogo](https://milvus.io/docs/assets/milvus_logo.png)
 
+![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
+![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
+
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
-- [Blog](https://www.milvus.io/blog/)
 - [Twitter](https://twitter.com/milvus_io)
+- [Blog](https://www.milvus.io/blog/)
+- [CSDN](https://zilliz.blog.csdn.net/)
+- [中文官网](https://www.milvus.io/zh-CN/)
+
 
 # Welcome to Milvus
 
@@ -174,11 +180,16 @@ $ python3 example.py
  $ ./sdk_simple
 ```
 
+#### Run Java example code
+Make sure Java 8 or higher is already installed.
+
+Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples) for the example code.
+
 ## Contribution guidelines
 
 Contributions are welcomed and greatly appreciated. If you want to contribute to Milvus, please read our [contribution guidelines](CONTRIBUTING.md). This project adheres to the [code of conduct](CODE_OF_CONDUCT.md) of Milvus. By participating, you are expected to uphold this code.
 
-We use [GitHub issues](https://github.com/milvus-io/milvus/issues/new) to track issues and bugs. For general questions and public discussions, please join our community.
+We use [GitHub issues](https://github.com/milvus-io/milvus/issues/new/choose) to track issues and bugs. For general questions and public discussions, please join our community.
 
 ## Join the Milvus community
 
@@ -194,9 +205,11 @@ Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upc
 
 [Milvus docs](https://www.milvus.io/docs/en/userguide/install_milvus/)
 
+[Milvus bootcamp](https://github.com/milvus-io/bootcamp)
+
 [Milvus blog](https://www.milvus.io/blog/)
 
-[Milvus CSDN](https://mp.csdn.net/mdeditor/100041006#)
+[Milvus CSDN](https://zilliz.blog.csdn.net/)
 
 [Milvus roadmap](https://milvus.io/docs/en/roadmap/)
 
