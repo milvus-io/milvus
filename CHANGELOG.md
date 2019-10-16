@@ -69,6 +69,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-624 - Re-organize project directory for open-source
 - MS-635 - Add compile option to support customized faiss
 - MS-660 - add ubuntu_build_deps.sh
+- \#18 - Add all test cases
 	
 # Milvus 0.4.0 (2019-09-12)
 
