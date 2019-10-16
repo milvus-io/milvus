@@ -1,18 +1,22 @@
-![Milvuslogo](https://milvus.io/docs/assets/milvus_logo.png)
+![Milvuslogo](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_logo.png)
+
+![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
+![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
+- [Twitter](https://twitter.com/milvusio)
 - [Blog](https://www.milvus.io/blog/)
-- [Twitter](https://twitter.com/milvus_io)
+- [CSDN](https://zilliz.blog.csdn.net/)
+- [中文官网](https://www.milvus.io/zh-CN/)
+
 
 # Welcome to Milvus
 
-Firstly, welcome, and thanks for your interest in [Milvus](https://milvus.io)! No matter who you are, what you do, we greatly appreciate your contribution to help us reinvent data science with Milvus.
+Firstly, welcome, and thanks for your interest in [Milvus](https://milvus.io)! ​​No matter who you are, what you do, we greatly appreciate your contribution to help us reinvent data science with Milvus.
 
 ## What is Milvus
 
 Milvus is an open source vector search engine that supports similarity search of large-scale vectors. Built on optimized indexing algorithm, it is compatible with major AI/ML models.
-
-Milvus was developed by ZILLIZ, a tech startup that intends to reinvent data science, with the purpose of providing enterprises with efficient and scalable similarity search and analysis of feature vectors and unstructured data. 
 
 Milvus provides stable Python, C++ and Java APIs.
 
@@ -24,14 +28,14 @@ Keep up-to-date with newest releases and latest updates by reading Milvus [relea
 
 - Intelligent index
 
-  With a “Decide Your Own Algorithm” approach, you can embed machine learning and advanced algorithms into Milvus without the headache of complex data engineering or migrating data between disparate systems. Milvus is built on optimized indexing algorithm based on quantization indexing, tree-based and graph indexing methods.
+  With a "Decide Your Own Algorithm" approach, you can embed machine learning and advanced algorithms into Milvus without the headache of complex data engineering or migrating data between disparate systems. Milvus is built on optimized indexing algorithm based on quantization indexing, tree-based and graph indexing methods.
 
 - Strong scalability
 
   The data is stored and computed on a distributed architecture. This lets you scale data sizes up and down without redesigning the system.
 
 ## Architecture
-![Milvus_arch](https://milvus.io/docs/assets/milvus_arch.png)
+![Milvus_arch](https://github.com/milvus-io/docs/blob/branch-0.5.0/assets/milvus_arch.jpg)
 
 ## Get started
 
@@ -67,55 +71,6 @@ $ ./build.sh -t Release
 ```
 
 When the build is completed, all the stuff that you need in order to run Milvus will be installed under `[Milvus root path]/core/milvus`.
-
-#### Code format and linting
-
-Install clang-format
-```shell
-$ sudo apt-get install clang-format
-$ rm cmake_build/CMakeCache.txt
-```
-Check code style
-```shell
-$ ./build.sh -l
-```
-To format the code
-```shell
-$ cd cmake_build
-$ make clang-format
-```
-
-#### Run unit test
-
-```shell
-$ ./build.sh -u
-```
-
-#### Run code coverage
-
-Install lcov
-```shell
-$ sudo apt-get install lcov
-```
-```shell  
-$ ./build.sh -u -c
-```
-Run MySQL docker
-```shell 
-docker pull mysql:latest
-docker run -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql:latest
-```
-Run code coverage
-
-```shell  
-$ ./coverage.sh -u root -p 123456 -t 127.0.0.1
-```
-
-Or start your own MySQL server, and then run code coverage
-
-```shell
-$ ./coverage.sh -u ${MYSQL_USERNAME} -p ${MYSQL_PASSWORD} -t ${MYSQL_SERVER_IP}
-```
 
 #### Launch Milvus server
 
@@ -174,11 +129,16 @@ $ python3 example.py
  $ ./sdk_simple
 ```
 
+#### Run Java example code
+Make sure Java 8 or higher is already installed.
+
+Refer to [this link](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples) for the example code.
+
 ## Contribution guidelines
 
 Contributions are welcomed and greatly appreciated. If you want to contribute to Milvus, please read our [contribution guidelines](CONTRIBUTING.md). This project adheres to the [code of conduct](CODE_OF_CONDUCT.md) of Milvus. By participating, you are expected to uphold this code.
 
-We use [GitHub issues](https://github.com/milvus-io/milvus/issues/new) to track issues and bugs. For general questions and public discussions, please join our community.
+We use [GitHub issues](https://github.com/milvus-io/milvus/issues/new/choose) to track issues and bugs. For general questions and public discussions, please join our community.
 
 ## Join the Milvus community
 
@@ -194,9 +154,11 @@ Please read our [roadmap](https://milvus.io/docs/en/roadmap/) to learn about upc
 
 [Milvus docs](https://www.milvus.io/docs/en/userguide/install_milvus/)
 
+[Milvus bootcamp](https://github.com/milvus-io/bootcamp)
+
 [Milvus blog](https://www.milvus.io/blog/)
 
-[Milvus CSDN](https://mp.csdn.net/mdeditor/100041006#)
+[Milvus CSDN](https://zilliz.blog.csdn.net/)
 
 [Milvus roadmap](https://milvus.io/docs/en/roadmap/)
 
