@@ -405,8 +405,8 @@ TEST_F(RpcHandlerTest, DELETE_BY_RANGE_TEST) {
     handler->DeleteByRange(&context, &request, &status);
 
     request.set_table_name(TABLE_NAME);
-    request.mutable_range()->set_start_value(CurrentTmDate(-2));
-    request.mutable_range()->set_end_value(CurrentTmDate(-3));
+    request.mutable_range()->set_start_value(CurrentTmDate(-3));
+    request.mutable_range()->set_end_value(CurrentTmDate(-2));
 
     ::grpc::Status grpc_status = handler->DeleteByRange(&context, &request, &status);
     int error_code = status.error_code();
