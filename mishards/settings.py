@@ -43,10 +43,7 @@ elif SD_PROVIDER == 'Static':
     SD_PROVIDER_SETTINGS = StaticProviderSettings(
         hosts=env.list('SD_STATIC_HOSTS', []))
 
-TESTING = env.bool('TESTING', False)
-TESTING_WOSERVER = env.str('TESTING_WOSERVER', 'tcp://127.0.0.1:19530')
-
-TRACING_TYPE = env.str('TRACING_TYPE', '')
+# TESTING_WOSERVER = env.str('TESTING_WOSERVER', 'tcp://127.0.0.1:19530')
 
 
 class TracingConfig:
@@ -64,19 +61,24 @@ class TracingConfig:
         },
         'logging': env.bool('TRACING_LOGGING', True)
     }
+    DEFAULT_TRACING_CONFIG = {
+        'sampler': {
+            'type': env.str('TRACING_SAMPLER_TYPE', 'const'),
+            'param': env.str('TRACING_SAMPLER_PARAM', "0"),
+        }
+    }
 
 
 class DefaultConfig:
     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
     SQL_ECHO = env.bool('SQL_ECHO', False)
+    TRACING_TYPE = env.str('TRACING_TYPE', '')
 
 
-TESTING = env.bool('TESTING', False)
-if TESTING:
-
-    class TestingConfig(DefaultConfig):
-        SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_TEST_URI')
-        SQL_ECHO = env.bool('SQL_TEST_ECHO', False)
+class TestingConfig(DefaultConfig):
+    SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_TEST_URI')
+    SQL_ECHO = env.bool('SQL_TEST_ECHO', False)
+    TRACING_TYPE = env.str('TRACING_TEST_TYPE', '')
 
 
 if __name__ == '__main__':

@@ -18,7 +18,7 @@ class Connection:
         self.conn = Milvus()
         self.error_handlers = [] if not error_handlers else error_handlers
         self.on_retry_func = kwargs.get('on_retry_func', None)
-        self._connect()
+        # self._connect()
 
     def __str__(self):
         return 'Connection:name=\"{}\";uri=\"{}\"'.format(self.name, self.uri)

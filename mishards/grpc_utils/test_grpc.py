@@ -57,7 +57,6 @@ class TestGrpcUtils:
         span = TestSpan(context=None, tracer=TestTracer())
         span_deco = GrpcSpanDecorator()
         span_deco(span, rpc_info)
-        logger.error(span.logs)
         assert len(span.logs) == 1
         assert len(span.tags) == 1
 
@@ -66,7 +65,6 @@ class TestGrpcUtils:
         span = TestSpan(context=None, tracer=TestTracer())
         span_deco = GrpcSpanDecorator()
         span_deco(span, rpc_info)
-        logger.error(span.logs)
         assert len(span.logs) == 0
         assert len(span.tags) == 0
 

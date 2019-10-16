@@ -24,7 +24,7 @@ def create_app(testing_config=None):
 
     from tracing.factory import TracerFactory
     from mishards.grpc_utils import GrpcSpanDecorator
-    tracer = TracerFactory.new_tracer(settings.TRACING_TYPE, settings.TracingConfig,
+    tracer = TracerFactory.new_tracer(config.TRACING_TYPE, settings.TracingConfig,
                                       span_decorator=GrpcSpanDecorator())
 
     grpc_server.init_app(conn_mgr=connect_mgr, tracer=tracer, discover=discover)

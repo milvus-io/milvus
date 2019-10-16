@@ -1,6 +1,8 @@
 import logging
 import pytest
+import mock
 
+from milvus import Milvus
 from mishards.connections import (ConnectionMgr, Connection)
 from mishards import exceptions
 
@@ -27,6 +29,12 @@ class TestConnection:
         mgr.register('WOSERVER', 'xxxx')
         assert len(mgr.conn_names) == 0
 
+        assert not mgr.conn('XXXX', None)
+        with pytest.raises(exceptions.ConnectionNotFoundError):
+            mgr.conn('XXXX', None, True)
+
+        mgr.conn('WOSERVER', None)
+
     def test_connection(self):
         class Conn:
             def __init__(self, state):
@@ -37,6 +45,7 @@ class TestConnection:
 
             def connected(self):
                 return self.state
+
         FAIL_CONN = Conn(False)
         PASS_CONN = Conn(True)
 
@@ -58,7 +67,9 @@ class TestConnection:
         max_retry = 3
 
         RetryObj = Retry()
-        c = Connection('client', uri='',
+
+        c = Connection('client',
+                       uri='xx',
                        max_retry=max_retry,
                        on_retry_func=RetryObj)
         c.conn = FAIL_CONN
@@ -75,3 +86,16 @@ class TestConnection:
         this_connect()
         assert ff.executed
         assert RetryObj.times == 0
+
+        this_connect = c.connect(func=None)
+        with pytest.raises(TypeError):
+            this_connect()
+
+        errors = []
+
+        def error_handler(err):
+            errors.append(err)
+
+        this_connect = c.connect(func=None, exception_handler=error_handler)
+        this_connect()
+        assert len(errors) == 1

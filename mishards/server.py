@@ -39,7 +39,7 @@ class Server:
         self.register_pre_run_handler(self.pre_run_handler)
 
     def pre_run_handler(self):
-        woserver = settings.WOSERVER if not settings.TESTING else settings.TESTING_WOSERVER
+        woserver = settings.WOSERVER
         url = urlparse(woserver)
         ip = socket.gethostbyname(url.hostname)
         socket.inet_pton(socket.AF_INET, ip)
