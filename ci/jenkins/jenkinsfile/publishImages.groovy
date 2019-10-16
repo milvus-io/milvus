@@ -13,6 +13,10 @@ container('publish-images') {
             def imageName = "${PROJECT_NAME}/engine:${DOCKER_VERSION}"
 
             try {
+                def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName}")
+                if (isExistImage == 0) {
+                    sh "docker rmi ${imageName}"
+                }
                 def customImage = docker.build("${imageName}")
                 docker.withRegistry('https://registry.zilliz.com', "${params.DOCKER_CREDENTIALS_ID}") {
                     customImage.push()
