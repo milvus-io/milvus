@@ -44,7 +44,9 @@ TestTask::Execute() {
 void
 TestTask::Wait() {
     std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [&] { return done_; });
+    cv_.wait(lock, [&] {
+        return done_;
+    });
 }
 
 }  // namespace scheduler

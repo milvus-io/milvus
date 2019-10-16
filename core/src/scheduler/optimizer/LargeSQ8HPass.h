@@ -14,34 +14,34 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-#pragma once
-
-#include <condition_variable>
-#include <deque>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
-
-#include "Pass.h"
-
-namespace milvus {
-namespace scheduler {
-
-class LargeSQ8HPass : public Pass {
- public:
-    LargeSQ8HPass() = default;
-
- public:
-    bool
-    Run(const TaskPtr& task) override;
-};
-
-using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
-
-}  // namespace scheduler
-}  // namespace milvus
+//#pragma once
+//
+//#include <condition_variable>
+//#include <deque>
+//#include <list>
+//#include <memory>
+//#include <mutex>
+//#include <queue>
+//#include <string>
+//#include <thread>
+//#include <unordered_map>
+//#include <vector>
+//
+//#include "Pass.h"
+//
+//namespace milvus {
+//namespace scheduler {
+//
+//class LargeSQ8HPass : public Pass {
+// public:
+//    LargeSQ8HPass() = default;
+//
+// public:
+//    bool
+//    Run(const TaskPtr& task) override;
+//};
+//
+//using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
+//
+//}  // namespace scheduler
+//}  // namespace milvus
