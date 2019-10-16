@@ -104,7 +104,7 @@ macro(config_summary)
     message(STATUS "  Source directory: ${CMAKE_CURRENT_SOURCE_DIR}")
     if(${CMAKE_EXPORT_COMPILE_COMMANDS})
         message(
-                STATUS "  Compile commands: ${CORE_BINARY_DIR}/compile_commands.json")
+                STATUS "  Compile commands: ${INDEX_BINARY_DIR}/compile_commands.json")
     endif()
 
     foreach(category ${KNOWHERE_OPTION_CATEGORIES})

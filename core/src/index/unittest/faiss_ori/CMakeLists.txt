@@ -1,5 +1,5 @@
-include_directories(${CORE_SOURCE_DIR}/thirdparty)
-include_directories(${CORE_SOURCE_DIR}/include)
+include_directories(${INDEX_SOURCE_DIR}/thirdparty)
+include_directories(${INDEX_SOURCE_DIR}/include)
 include_directories(/usr/local/cuda/include)
 link_directories(/usr/local/cuda/lib64)
 

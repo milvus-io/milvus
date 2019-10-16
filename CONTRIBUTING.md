@@ -1,20 +1,18 @@
 # Contributing to Milvus
 
-First of all, thanks for taking the time to contribute to Milvus! It's people like you that help Milvus come to fruition.
+First of all, thanks for taking the time to contribute to Milvus! It's people like you that help Milvus come to fruition. :tada:
 
 The following are a set of guidelines for contributing to Milvus. Following these guidelines helps contributing to this project easy and transparent. These are mostly guideline, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
 
-As for everything else in the project, the contributions to Milvus are governed by our [Code of Conduct](CODE OF CONDUCT.md).
-
-TOC
+As for everything else in the project, the contributions to Milvus are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Contribution Checklist
 
 Before you make any contributions, make sure you follow this list.
 
 - Read [Contributing to Milvus](CONTRIBUTING.md).
-- Check if the changes are consistent with the [coding style](CONTRIBUTING.md#coding-style).
-- Run [unit tests](CONTRIBUTING.md#run-unit-test).
+- Check if the changes are consistent with the [coding style](CONTRIBUTING.md#coding-style), and format your code accordingly.
+- Run [unit tests](CONTRIBUTING.md#run-unit-test-with-code-coverage) and check your code coverage rate.
 
 ## What contributions can I make?
 
@@ -28,9 +26,28 @@ Contributions to Milvus fall into the following categories.
 
 ### Contributing code
 
-If you have improvements to Milvus, send us your pull requests! For those just getting started, GitHub has a [how-to](https://help.github.com/en/articles/about-pull-requests).
+If you have improvements to Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow).
 
 The Milvus team members will review your pull requests, and once it is accepted, it will be given a `ready to merge` label. This means we are working on submitting your pull request to the internal repository. After the change has been submitted internally, your pull request will be merged automatically on GitHub.
+
+### GitHub workflow
+
+Please create a new branch from an up-to-date master on your fork.
+
+1. Fork the repository on GitHub.
+2. Clone your fork to your local machine with `git clone git@github.com:<yourname>/milvus-io/milvus.git`.
+3. Create a branch with `git checkout -b my-topic-branch`.
+4. Make your changes, commit, then push to to GitHub with `git push --set-upstream origin my-topic-branch`.
+5. Visit GitHub and make your pull request.
+
+If you have an existing local repository, please update it before you start, to minimize the chance of merge conflicts.
+
+```shell
+git remote add upstream git@github.com:milvus-io/milvus.git
+git checkout master
+git pull upstream master
+git checkout -b my-topic-branch
+```
 
 ### General guidelines
 
@@ -51,15 +68,51 @@ And we made the following changes based on the guide:
 - 120-character line length
 - Camel-Cased file names
 
+### Format code
 
-## Run unit test
-
-We use Google Test framework for test running.
-To run unit test for Milvus under C++, please use the following command:
-
+Install clang-format
 ```shell
-# Run unit test for Milvus
-$ ./build.sh -u
+$ sudo apt-get install clang-format
+$ rm cmake_build/CMakeCache.txt
+```
+Check code style
+```shell
+$ ./build.sh -l
+```
+To format the code
+```shell
+$ cd cmake_build
+$ make clang-format
 ```
 
+## Run unit test with code coverage
+
+Before submitting your PR, make sure you have run unit test, and your code coverage rate is >= 90%.
+
+Install lcov
+```shell
+$ sudo apt-get install lcov
+```
+Run unit test and generate code for code coverage check
+```shell 
+$ ./build.sh -u -c
+```
+
+Run MySQL docker
+```shell 
+docker pull mysql:latest
+docker run -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql:latest
+```
+
+Run code coverage
+
+```shell  
+$ ./coverage.sh -u root -p 123456 -t 127.0.0.1
+```
+
+Or start your own MySQL server, and then run code coverage
+
+```shell
+$ ./coverage.sh -u ${MYSQL_USERNAME} -p ${MYSQL_PASSWORD} -t ${MYSQL_SERVER_IP}
+```
 
