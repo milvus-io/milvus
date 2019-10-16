@@ -15,14 +15,14 @@ container('publish-images') {
             def imageName = "${PROJECT_NAME}/engine:${DOCKER_VERSION}"
 
             try {
-                def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName}")
+                def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName} 2>&1 > /dev/null")
                 if (isExistImage == 0) {
                     sh "docker rmi ${imageName}"
                 }
 
                 def customImage = docker.build("${imageName}")
 
-                isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${dockerRegistryURL}/${imageName}")
+                isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${dockerRegistryURL}/${imageName} 2>&1 > /dev/null"
                 if (isExistImage == 0) {
                     sh "docker rmi ${dockerRegistryURL}/${imageName}"
                 }
@@ -33,12 +33,12 @@ container('publish-images') {
             } catch (exc) {
                 throw exc
             } finally {
-                def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName}")
+                def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName} 2>&1 > /dev/null")
                 if (isExistImage == 0) {
                     sh "docker rmi ${imageName}"
                 }
 
-                isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${dockerRegistryURL}/${imageName}")
+                isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${dockerRegistryURL}/${imageName} 2>&1 > /dev/null")
                 if (isExistImage == 0) {
                     sh "docker rmi ${dockerRegistryURL}/${imageName}"
                 }
