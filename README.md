@@ -7,7 +7,7 @@
 - [Twitter](https://twitter.com/milvus_io)
 - [Blog](https://www.milvus.io/blog/)
 - [CSDN](https://zilliz.blog.csdn.net/)
-- 中文网站(https://www.milvus.io/zh-CN/)
+- [中文官网](https://www.milvus.io/zh-CN/)
 
 
 # Welcome to Milvus
