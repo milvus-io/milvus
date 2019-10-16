@@ -38,8 +38,8 @@ class Optimizer {
     explicit Optimizer(std::vector<PassPtr> pass_list) : pass_list_(std::move(pass_list)) {
     }
 
-//    void
-//    Init();
+    void
+    Init();
 
     bool
     Run(const TaskPtr& task);
