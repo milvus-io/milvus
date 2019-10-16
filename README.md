@@ -4,7 +4,7 @@
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
-- [Twitter](https://twitter.com/milvus_io)
+- [Twitter](https://twitter.com/milvusio)
 - [Blog](https://www.milvus.io/blog/)
 - [CSDN](https://zilliz.blog.csdn.net/)
 - [中文官网](https://www.milvus.io/zh-CN/)
