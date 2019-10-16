@@ -1,0 +1,142 @@
+pipeline {
+    agent none
+
+    options {
+        timestamps()
+    }
+
+    parameters{
+        choice choices: ['Release', 'Debug'], description: '', name: 'BUILD_TYPE'
+        string defaultValue: 'cf1434e7-5a4b-4d25-82e8-88d667aef9e5', description: 'GIT CREDENTIALS ID', name: 'GIT_CREDENTIALS_ID', trim: true
+        string defaultValue: '1a527823-d2b7-44fd-834b-9844350baf14', description: 'JFROG CREDENTIALS ID', name: 'JFROG_CREDENTIALS_ID', trim: true
+        string defaultValue: 'ba070c98-c8cc-4f7c-b657-897715f359fc', description: 'DOCKER CREDENTIALS ID', name: 'DOCKER_CREDENTIALS_ID', trim: true
+        string defaultValue: 'http://192.168.1.202/artifactory/milvus', description: 'JFROG ARTFACTORY URL', name: 'JFROG_ARTFACTORY_URL', trim: true
+    }
+
+    environment {
+        PROJECT_NAME = "milvus"
+        LOWER_BUILD_TYPE = params.BUILD_TYPE.toLowerCase()
+        SEMVER = "${BRANCH_NAME}"
+        JOBNAMES = env.JOB_NAME.split('/')
+        PIPELIEN_NAME = "${JOBNAMES[0]}"
+    }
+
+    stages {
+        stage("Ubuntu 16.04") {
+            environment {
+                OS_NAME = "ubuntu16.04"
+                PACKAGE_VERSION = VersionNumber([
+                    versionNumberString : '${SEMVER}-${LOWER_BUILD_TYPE}-${OS_NAME}-x86_64-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
+                ]);
+                DOCKER_VERSION = "${SEMVER}-${OS_NAME}-${LOWER_BUILD_TYPE}"
+            }
+
+            stages {
+                stage("Run Build") {
+                    agent {
+                        kubernetes {
+                            label 'build'
+                            defaultContainer 'jnlp'
+                            yamlFile 'ci/pod/milvus-build-env-pod.yaml'
+                        }
+                    }
+
+                    stages {
+                        stage('Build') {
+                            steps {
+                                container('milvus-build-env') {
+                                    script {
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/build.groovy"
+                                    }
+                                }
+                            }
+                        }
+                        stage('Upload Package') {
+                            steps {
+                                container('milvus-build-env') {
+                                    script {
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/package.groovy"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                stage("Publish docker images") {
+                    agent {
+                        kubernetes {
+                            label 'publish'
+                            defaultContainer 'jnlp'
+                            yamlFile 'ci/pod/docker-pod.yaml'
+                        }
+                    }
+
+                    stages {
+                        stage('Publish') {
+                            steps {
+                                container('publish-images'){
+                                    script {
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/publishImages.groovy"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                stage("Deploy to Development") {
+                    agent {
+                        kubernetes {
+                            label 'dev-test'
+                            defaultContainer 'jnlp'
+                            yamlFile 'ci/pod/testEnvironment.yaml'
+                        }
+                    }
+
+                    stages {
+                        stage("Deploy to Dev") {
+                            steps {
+                                container('milvus-test-env') {
+                                    script {
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/deploySingle2Dev.groovy"
+                                    }
+                                }
+                            }
+                        }
+
+                        stage("Dev Test") {
+                            steps {
+                                container('milvus-test-env') {
+                                    script {
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/singleDevTest.groovy"
+                                    }
+                                }
+                            }
+                        }
+
+                        stage ("Cleanup Dev") {
+                            steps {
+                                container('milvus-test-env') {
+                                    script {
+                                        load "${env.WORKSPACE}/ci/jenkinsfile/cleanupSingleDev.groovy"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    post {
+                        unsuccessful {
+                            container('milvus-test-env') {
+                                script {
+                                    load "${env.WORKSPACE}/ci/jenkinsfile/cleanupSingleDev.groovy"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
