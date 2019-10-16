@@ -17,6 +17,7 @@
 
 
 #include "scheduler/task/SearchTask.h"
+#include "scheduler/task/BuildIndexTask.h"
 #include <gtest/gtest.h>
 
 
@@ -26,6 +27,12 @@ namespace scheduler {
 TEST(TaskTest, INVALID_INDEX) {
     auto search_task = std::make_shared<XSearchTask>(nullptr, nullptr);
     search_task->Load(LoadType::TEST, 10);
+
+    auto build_task = std::make_shared<XBuildIndexTask>(nullptr, nullptr);
+    build_task->Load(LoadType::TEST, 10);
+
+    build_task->Execute();
+
 }
 
 } // namespace scheduler
