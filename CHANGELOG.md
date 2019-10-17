@@ -47,6 +47,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-626 - Refactor DataObj to support cache any type data
 - MS-648 - Improve unittest
 - MS-655 - Upgrade SPTAG
+- MS-666 - Add codebeat icon into README.md
 
 ## New Feature
 - MS-614 - Preload table at startup
