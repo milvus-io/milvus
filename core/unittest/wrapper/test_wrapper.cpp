@@ -164,3 +164,14 @@ TEST_P(KnowhereWrapperTest, SERIALIZE_TEST) {
         AssertResult(res_ids, res_dis);
     }
 }
+
+#include "wrapper/ConfAdapter.h"
+TEST(whatever, test_config) {
+    milvus::engine::TempMetaConf conf;
+    auto nsg_conf = std::make_shared<milvus::engine::NSGConfAdapter>();
+    nsg_conf->Match(conf);
+    nsg_conf->MatchSearch(conf, milvus::engine::IndexType::FAISS_IVFPQ_GPU);
+
+    auto pq_conf = std::make_shared<milvus::engine::IVFPQConfAdapter>();
+    pq_conf->Match(conf);
+}
