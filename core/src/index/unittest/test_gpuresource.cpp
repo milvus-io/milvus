@@ -35,8 +35,8 @@
 #include "knowhere/index/vector_index/IndexIVFSQHybrid.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 
-#include "unittest/utils.h"
 #include "unittest/Helper.h"
+#include "unittest/utils.h"
 
 class GPURESTEST : public DataGen, public TestGpuIndexBase {
  protected:
@@ -206,38 +206,38 @@ TEST_F(GPURESTEST, gpu_ivf_resource_test) {
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
 
-//        knowhere::TimeRecorder tc("knowere GPUIVF");
+        //        knowhere::TimeRecorder tc("knowere GPUIVF");
         for (int i = 0; i < search_count; ++i) {
             index_->Search(query_dataset, conf);
             if (i > search_count - 6 || i < 5)
-//                tc.RecordSection("search once");
+            //                tc.RecordSection("search once");
         }
-//        tc.ElapseFromBegin("search all");
+        //        tc.ElapseFromBegin("search all");
     }
     knowhere::FaissGpuResourceMgr::GetInstance().Dump();
 
-//    {
-//        // ori faiss IVF-Search
-//        faiss::gpu::StandardGpuResources res;
-//        faiss::gpu::GpuIndexIVFFlatConfig idx_config;
-//        idx_config.device = DEVICEID;
-//        faiss::gpu::GpuIndexIVFFlat device_index(&res, dim, 1638, faiss::METRIC_L2, idx_config);
-//        device_index.train(nb, xb.data());
-//        device_index.add(nb, xb.data());
-//
-//        knowhere::TimeRecorder tc("ori IVF");
-//        for (int i = 0; i < search_count; ++i) {
-//            device_index.search(nq, xq.data(), k, dis, ids);
-//            if (i > search_count - 6 || i < 5)
-//                tc.RecordSection("search once");
-//        }
-//        tc.ElapseFromBegin("search all");
-//    }
+    //    {
+    //        // ori faiss IVF-Search
+    //        faiss::gpu::StandardGpuResources res;
+    //        faiss::gpu::GpuIndexIVFFlatConfig idx_config;
+    //        idx_config.device = DEVICEID;
+    //        faiss::gpu::GpuIndexIVFFlat device_index(&res, dim, 1638, faiss::METRIC_L2, idx_config);
+    //        device_index.train(nb, xb.data());
+    //        device_index.add(nb, xb.data());
+    //
+    //        knowhere::TimeRecorder tc("ori IVF");
+    //        for (int i = 0; i < search_count; ++i) {
+    //            device_index.search(nq, xq.data(), k, dis, ids);
+    //            if (i > search_count - 6 || i < 5)
+    //                tc.RecordSection("search once");
+    //        }
+    //        tc.ElapseFromBegin("search all");
+    //    }
 }
 
 TEST_F(GPURESTEST, gpuivfsq) {
     {
-// knowhere gpu ivfsq
+        // knowhere gpu ivfsq
         index_type = "GPUIVFSQ";
         index_ = IndexFactory(index_type);
 
@@ -255,8 +255,8 @@ TEST_F(GPURESTEST, gpuivfsq) {
         auto model = index_->Train(base_dataset, conf);
         index_->set_index_model(model);
         index_->Add(base_dataset, conf);
-//        auto result = index_->Search(query_dataset, conf);
-//        AssertAnns(result, nq, k);
+        //        auto result = index_->Search(query_dataset, conf);
+        //        AssertAnns(result, nq, k);
 
         auto cpu_idx = knowhere::cloner::CopyGpuToCpu(index_, knowhere::Config());
         cpu_idx->Seal();
@@ -307,5 +307,3 @@ TEST_F(GPURESTEST, gpuivfsq) {
     }
 }
 #endif
-
-
