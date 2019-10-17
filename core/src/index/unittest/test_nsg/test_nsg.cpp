@@ -30,7 +30,7 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-constexpr int64_t DEVICE_ID = 1;
+constexpr int64_t DEVICE_ID = 0;
 
 class NSGInterfaceTest : public DataGen, public ::testing::Test {
  protected:
