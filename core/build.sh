@@ -92,7 +92,7 @@ fi
 cd ${BUILD_OUTPUT_DIR}
 
 # remove make cache since build.sh -l use default variables
-# force update the variables each time 
+# force update the variables each time
 make rebuild_cache
 
 CMAKE_CMD="cmake \
