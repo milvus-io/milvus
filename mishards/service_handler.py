@@ -125,8 +125,9 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         range_array = [self._range_to_date(r, metadata=metadata) for r in range_array] if range_array else None
 
         routing = {}
+        p_span = None if self.tracer.empty else context.get_active_span().context
         with self.tracer.start_span('get_routing',
-                                    child_of=context.get_active_span().context):
+                                    child_of=p_span):
             routing = self._get_routing_file_ids(table_id, range_array, metadata=metadata)
         logger.info('Routing: {}'.format(routing))
 
@@ -145,9 +146,10 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             conn = self.query_conn(addr, metadata=metadata)
             start = time.time()
             span = kwargs.get('span', None)
-            span = span if span else context.get_active_span().context
+            span = span if span else (None if self.tracer.empty else context.get_active_span().context)
+
             with self.tracer.start_span('search_{}'.format(addr),
-                                        child_of=context.get_active_span().context):
+                                        child_of=span):
                 ret = conn.search_vectors_in_files(table_name=query_params['table_id'],
                                                    file_ids=query_params['file_ids'],
                                                    query_records=vectors,
@@ -160,7 +162,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                 all_topk_results.append(ret)
 
         with self.tracer.start_span('do_search',
-                                    child_of=context.get_active_span().context) as span:
+                                    child_of=p_span) as span:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 for addr, params in routing.items():
                     res = pool.submit(search, addr, params, vectors, topk, nprobe, span=span)
@@ -171,8 +173,11 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         reverse = table_meta.metric_type == Types.MetricType.IP
         with self.tracer.start_span('do_merge',
-                                    child_of=context.get_active_span().context):
+                                    child_of=p_span):
             return self._do_merge(all_topk_results, topk, reverse=reverse, metadata=metadata)
+
+    def _create_table(self, table_schema):
+        return self.connection().create_table(table_schema)
 
     @mark_grpc_method
     def CreateTable(self, request, context):
@@ -183,9 +188,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         logger.info('CreateTable {}'.format(_table_schema['table_name']))
 
-        _status = self.connection().create_table(_table_schema)
+        _status = self._create_table(_table_schema)
 
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
+
+    def _has_table(self, table_name, metadata=None):
+        return self.connection(metadata=metadata).has_table(table_name)
 
     @mark_grpc_method
     def HasTable(self, request, context):
@@ -199,14 +207,16 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         logger.info('HasTable {}'.format(_table_name))
 
-        _bool = self.connection(metadata={
-            'resp_class': milvus_pb2.BoolReply
-        }).has_table(_table_name)
+        _bool = self._has_table(_table_name, metadata={
+            'resp_class': milvus_pb2.BoolReply})
 
         return milvus_pb2.BoolReply(
             status=status_pb2.Status(error_code=status_pb2.SUCCESS, reason="OK"),
             bool_reply=_bool
         )
+
+    def _delete_table(self, table_name):
+        return self.connection().delete_table(table_name)
 
     @mark_grpc_method
     def DropTable(self, request, context):
@@ -217,9 +227,12 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
 
         logger.info('DropTable {}'.format(_table_name))
 
-        _status = self.connection().delete_table(_table_name)
+        _status = self._delete_table(_table_name)
 
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
+
+    def _create_index(self, table_name, index):
+        return  self.connection().create_index(table_name, index)
 
     @mark_grpc_method
     def CreateIndex(self, request, context):
@@ -233,7 +246,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         logger.info('CreateIndex {}'.format(_table_name))
 
         # TODO: interface create_table incompleted
-        _status = self.connection().create_index(_table_name, _index)
+        _status = self._create_index(_table_name, _index)
 
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
 
@@ -298,7 +311,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         logger.info('SearchVector takes: {}'.format(now - start))
 
         topk_result_list = milvus_pb2.TopKQueryResultList(
-            status=status,
+            status=status_pb2.Status(error_code=status.error_code, reason=status.reason),
             topk_query_result=results
         )
         return topk_result_list

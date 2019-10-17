@@ -6,6 +6,7 @@ from factory.alchemy import SQLAlchemyModelFactory
 from faker import Faker
 from faker.providers import BaseProvider
 
+from milvus.client.types import MetricType
 from mishards import db
 from mishards.models import Tables, TableFiles
 
@@ -27,12 +28,12 @@ class TablesFactory(SQLAlchemyModelFactory):
 
     id = factory.Faker('random_number', digits=16, fix_len=True)
     table_id = factory.Faker('uuid4')
-    state = factory.Faker('random_element', elements=(0, 1, 2, 3))
+    state = factory.Faker('random_element', elements=(0, 1))
     dimension = factory.Faker('random_element', elements=(256, 512))
     created_on = int(time.time())
     index_file_size = 0
     engine_type = factory.Faker('random_element', elements=(0, 1, 2, 3))
-    metric_type = factory.Faker('random_element', elements=(0, 1))
+    metric_type = factory.Faker('random_element', elements=(MetricType.L2, MetricType.IP))
     nlist = 16384
 
 
