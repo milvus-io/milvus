@@ -37,11 +37,6 @@ container('publish-images') {
                 if (isExistImage == 0) {
                     sh "docker rmi ${imageName}"
                 }
-
-                isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${dockerRegistryURL}/${imageName} 2>&1 > /dev/null")
-                if (isExistImage == 0) {
-                    sh "docker rmi ${dockerRegistryURL}/${imageName}"
-                }
             }
         } 
     }
