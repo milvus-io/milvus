@@ -3,6 +3,7 @@
 ![LICENSE](https://img.shields.io/badge/license-Apache--2.0-brightgreen)
 ![Language](https://img.shields.io/badge/language-C%2B%2B-blue)
 [![@milvusio](https://img.shields.io/twitter/follow/milvusio.svg?style=social&label=Follow)](https://twitter.com/milvusio)
+[![codebeat badge](https://codebeat.co/badges/57be869e-fac6-482d-82bf-68018369bcd6)](https://codebeat.co/projects/github-com-bosszou-milvus-master)
 
 - [Slack Community](https://join.slack.com/t/milvusio/shared_invite/enQtNzY1OTQ0NDI3NjMzLWNmYmM1NmNjOTQ5MGI5NDhhYmRhMGU5M2NhNzhhMDMzY2MzNDdlYjM5ODQ5MmE3ODFlYzU3YjJkNmVlNDQ2ZTk)
 - [Twitter](https://twitter.com/milvusio)
