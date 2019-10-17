@@ -28,45 +28,45 @@ namespace scheduler {
 
 bool
 LargeSQ8HPass::Run(const TaskPtr& task) {
-    if (task->Type() != TaskType::SearchTask) {
-        return false;
-    }
-
-    auto search_task = std::static_pointer_cast<XSearchTask>(task);
-    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8H) {
-        return false;
-    }
-
-    auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
-
-    // TODO: future, Index::IVFSQ8H, if nq < threshold set cpu, else set gpu
-    if (search_job->nq() < 100) {
-        return false;
-    }
-
-    std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
-    std::vector<int64_t> all_free_mem;
-    for (auto& gpu : gpus) {
-        auto cache = cache::GpuCacheMgr::GetInstance(gpu);
-        auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
-        all_free_mem.push_back(free_mem);
-    }
-
-    auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
-    auto best_index = std::distance(all_free_mem.begin(), max_e);
-    auto best_device_id = gpus[best_index];
-
-    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, best_device_id);
-    if (not res_ptr) {
-        SERVER_LOG_ERROR << "GpuResource " << best_device_id << " invalid.";
-        // TODO: throw critical error and exit
-        return false;
-    }
-
-    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
-    task->label() = label;
-
-    return true;
+    //    if (task->Type() != TaskType::SearchTask) {
+    //        return false;
+    //    }
+    //
+    //    auto search_task = std::static_pointer_cast<XSearchTask>(task);
+    //    if (search_task->file_->engine_type_ != (int)engine::EngineType::FAISS_IVFSQ8H) {
+    //        return false;
+    //    }
+    //
+    //    auto search_job = std::static_pointer_cast<SearchJob>(search_task->job_.lock());
+    //
+    //    // TODO: future, Index::IVFSQ8H, if nq < threshold set cpu, else set gpu
+    //    if (search_job->nq() < 100) {
+    //        return false;
+    //    }
+    //
+    //    std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
+    //    std::vector<int64_t> all_free_mem;
+    //    for (auto& gpu : gpus) {
+    //        auto cache = cache::GpuCacheMgr::GetInstance(gpu);
+    //        auto free_mem = cache->CacheCapacity() - cache->CacheUsage();
+    //        all_free_mem.push_back(free_mem);
+    //    }
+    //
+    //    auto max_e = std::max_element(all_free_mem.begin(), all_free_mem.end());
+    //    auto best_index = std::distance(all_free_mem.begin(), max_e);
+    //    auto best_device_id = gpus[best_index];
+    //
+    //    ResourcePtr res_ptr = ResMgrInst::GetInstance()->GetResource(ResourceType::GPU, best_device_id);
+    //    if (not res_ptr) {
+    //        SERVER_LOG_ERROR << "GpuResource " << best_device_id << " invalid.";
+    //        // TODO: throw critical error and exit
+    //        return false;
+    //    }
+    //
+    //    auto label = std::make_shared<SpecResLabel>(std::weak_ptr<Resource>(res_ptr));
+    //    task->label() = label;
+    //
+    //    return true;
 }
 
 }  // namespace scheduler

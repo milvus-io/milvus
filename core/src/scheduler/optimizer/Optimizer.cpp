@@ -22,9 +22,9 @@ namespace scheduler {
 
 void
 Optimizer::Init() {
-    for (auto& pass : pass_list_) {
-        pass->Init();
-    }
+    //    for (auto& pass : pass_list_) {
+    //        pass->Init();
+    //    }
 }
 
 bool
