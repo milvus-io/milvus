@@ -27,6 +27,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-654 - Describe index timeout when building index
 - MS-658 - Fix SQ8 Hybrid can't search
 - \#20 - C++ sdk example get grpc error 
+- \#23 - Add unittest to improve code coverage
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
