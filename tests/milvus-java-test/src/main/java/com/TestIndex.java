@@ -140,7 +140,7 @@ public class TestIndex {
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_create_index_IVFSQ8H(MilvusClient client, String tableName) throws InterruptedException {
-        IndexType indexType = IndexType.IVF_SQ8_H;
+        IndexType indexType = IndexType.IVF_SQ8H;
         List<List<Float>> vectors = gen_vectors(nb);
         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).build();
         client.insert(insertParam);
