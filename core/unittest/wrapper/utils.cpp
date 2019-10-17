@@ -16,6 +16,7 @@
 // under the License.
 
 
+#include <gtest/gtest.h>
 #include <faiss/IndexFlat.h>
 
 #include "wrapper/utils.h"
@@ -58,4 +59,32 @@ DataGenBase::GenData(const int &dim,
     gt_ids.resize(nq * k);
     gt_dis.resize(nq * k);
     GenData(dim, nb, nq, xb.data(), xq.data(), ids.data(), k, gt_ids.data(), gt_dis.data());
+}
+
+void
+DataGenBase::AssertResult(const std::vector<int64_t>& ids, const std::vector<float>& dis) {
+        EXPECT_EQ(ids.size(), nq * k);
+        EXPECT_EQ(dis.size(), nq * k);
+
+        for (auto i = 0; i < nq; i++) {
+            EXPECT_EQ(ids[i * k], gt_ids[i * k]);
+            //EXPECT_EQ(dis[i * k], gt_dis[i * k]);
+        }
+
+        int match = 0;
+        for (int i = 0; i < nq; ++i) {
+            for (int j = 0; j < k; ++j) {
+                for (int l = 0; l < k; ++l) {
+                    if (ids[i * nq + j] == gt_ids[i * nq + l]) match++;
+                }
+            }
+        }
+
+        auto precision = float(match) / (nq * k);
+        EXPECT_GT(precision, 0.5);
+        std::cout << std::endl << "Precision: " << precision
+                  << ", match: " << match
+                  << ", total: " << nq * k
+                  << std::endl;
+
 }

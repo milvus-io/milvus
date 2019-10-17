@@ -30,19 +30,19 @@ using ::testing::Combine;
 using ::testing::TestWithParam;
 using ::testing::Values;
 
-constexpr int64_t DEVICE_ID = 1;
+constexpr int64_t DEVICEID = 0;
 
 class NSGInterfaceTest : public DataGen, public ::testing::Test {
  protected:
     void
     SetUp() override {
         // Init_with_default();
-        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICE_ID, 1024 * 1024 * 200, 1024 * 1024 * 600, 2);
+        knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, 1024 * 1024 * 200, 1024 * 1024 * 600, 2);
         Generate(256, 1000000 / 100, 1);
         index_ = std::make_shared<knowhere::NSG>();
 
         auto tmp_conf = std::make_shared<knowhere::NSGCfg>();
-        tmp_conf->gpu_id = DEVICE_ID;
+        tmp_conf->gpu_id = DEVICEID;
         tmp_conf->knng = 20;
         tmp_conf->nprobe = 8;
         tmp_conf->nlist = 163;
@@ -69,14 +69,6 @@ class NSGInterfaceTest : public DataGen, public ::testing::Test {
     knowhere::Config search_conf;
 };
 
-void
-AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->array()[0];
-    for (auto i = 0; i < nq; i++) {
-        EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
-    }
-}
-
 TEST_F(NSGInterfaceTest, basic_test) {
     assert(!xb.empty());
 
@@ -92,11 +84,13 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dimension(), dim);
-    ASSERT_THROW({ index_->Clone(); }, knowhere::KnowhereException);
+    ASSERT_THROW({
+                     index_->Clone();
+                 }, knowhere::KnowhereException);
     ASSERT_NO_THROW({
-        index_->Add(base_dataset, knowhere::Config());
-        index_->Seal();
-    });
+                        index_->Add(base_dataset, knowhere::Config());
+                        index_->Seal();
+                    });
 
     {
         // std::cout << "k = 1" << std::endl;
