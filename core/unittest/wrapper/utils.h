@@ -70,13 +70,6 @@ class DataGenBase {
     std::vector<float> gt_dis;
 };
 
-namespace {
-
-namespace ms = milvus::engine;
-namespace kw = knowhere;
-
-} // namespace
-
 class ParamGenerator {
  public:
     static ParamGenerator& GetInstance() {
