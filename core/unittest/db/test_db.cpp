@@ -308,6 +308,12 @@ TEST_F(DBTest, SEARCH_TEST) {
         ASSERT_TRUE(stat.ok());
     }
 
+    {
+        milvus::engine::QueryResults large_nq_results;
+        stat = db_->Query(TABLE_NAME, k, 200, 10, xq.data(), large_nq_results);
+        ASSERT_TRUE(stat.ok());
+    }
+
     {//search by specify index file
         milvus::engine::meta::DatesT dates;
         std::vector<std::string> file_ids = {"1", "2", "3", "4", "5", "6"};
@@ -315,6 +321,8 @@ TEST_F(DBTest, SEARCH_TEST) {
         stat = db_->Query(TABLE_NAME, file_ids, k, nq, 10, xq.data(), dates, results);
         ASSERT_TRUE(stat.ok());
     }
+
+
 #endif
 }
 
@@ -411,6 +419,16 @@ TEST_F(DBTest, INDEX_TEST) {
     index.metric_type_ = (int) milvus::engine::MetricType::IP;
     stat = db_->CreateIndex(table_info.table_id_, index);
     ASSERT_TRUE(stat.ok());
+
+    index.engine_type_ = (int) milvus::engine::EngineType::FAISS_IVFFLAT;
+    stat = db_->CreateIndex(table_info.table_id_, index);
+    ASSERT_TRUE(stat.ok());
+
+#ifdef CUSTOMIZATION
+    index.engine_type_ = (int)milvus::engine::EngineType::FAISS_IVFSQ8H;
+    stat = db_->CreateIndex(table_info.table_id_, index);
+    ASSERT_TRUE(stat.ok());
+#endif
 
     milvus::engine::TableIndex index_out;
     stat = db_->DescribeIndex(table_info.table_id_, index_out);
