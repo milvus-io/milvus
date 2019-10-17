@@ -26,7 +26,10 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-653 - When config check fail, Milvus close without message
 - MS-654 - Describe index timeout when building index
 - MS-658 - Fix SQ8 Hybrid can't search
-- #9 Change default gpu_cache_capacity to 4
+- \#9 Change default gpu_cache_capacity to 4
+- \#20 - C++ sdk example get grpc error 
+- \#23 - Add unittest to improve code coverage
+- \#31 - make clang-format failed after run build.sh -l
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
