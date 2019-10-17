@@ -17,6 +17,7 @@
 
 #include "unittest/utils.h"
 
+#include <gtest/gtest.h>
 #include <memory>
 #include <string>
 #include <utility>
@@ -146,4 +147,31 @@ generate_query_dataset(int64_t nb, int64_t dim, float* xb) {
 
     auto dataset = std::make_shared<knowhere::Dataset>(std::move(tensors), tensor_schema);
     return dataset;
+}
+
+void
+AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
+    auto ids = result->array()[0];
+    for (auto i = 0; i < nq; i++) {
+        EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
+    }
+}
+
+void
+PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
+    auto ids = result->array()[0];
+    auto dists = result->array()[1];
+
+    std::stringstream ss_id;
+    std::stringstream ss_dist;
+    for (auto i = 0; i < 10; i++) {
+        for (auto j = 0; j < k; ++j) {
+            ss_id << *(ids->data()->GetValues<int64_t>(1, i * k + j)) << " ";
+            ss_dist << *(dists->data()->GetValues<float>(1, i * k + j)) << " ";
+        }
+        ss_id << std::endl;
+        ss_dist << std::endl;
+    }
+    std::cout << "id\n" << ss_id.str() << std::endl;
+    std::cout << "dist\n" << ss_dist.str() << std::endl;
 }
