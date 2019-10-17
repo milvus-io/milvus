@@ -84,13 +84,11 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dimension(), dim);
-    ASSERT_THROW({
-                     index_->Clone();
-                 }, knowhere::KnowhereException);
+    ASSERT_THROW({ index_->Clone(); }, knowhere::KnowhereException);
     ASSERT_NO_THROW({
-                        index_->Add(base_dataset, knowhere::Config());
-                        index_->Seal();
-                    });
+        index_->Add(base_dataset, knowhere::Config());
+        index_->Seal();
+    });
 
     {
         // std::cout << "k = 1" << std::endl;

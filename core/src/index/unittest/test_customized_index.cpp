@@ -57,7 +57,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 
     auto binaryset = index_->Serialize();
     {
-// copy cpu to gpu
+        // copy cpu to gpu
         auto cpu_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
         cpu_idx->Load(binaryset);
 
@@ -66,13 +66,13 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
                 auto gpu_idx = cpu_idx->CopyCpuToGpu(DEVICEID, conf);
                 auto result = gpu_idx->Search(query_dataset, conf);
                 AssertAnns(result, nq, conf->k);
-// PrintResult(result, nq, k);
+                // PrintResult(result, nq, k);
             }
         }
     }
 
     {
-// quantization already in gpu, only copy data
+        // quantization already in gpu, only copy data
         auto cpu_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
         cpu_idx->Load(binaryset);
 
@@ -82,10 +82,10 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
 
         auto result = gpu_idx->Search(query_dataset, conf);
         AssertAnns(result, nq, conf->k);
-//        PrintResult(result, nq, k);
+        //        PrintResult(result, nq, k);
 
         auto quantizer_conf = std::make_shared<knowhere::QuantizerCfg>();
-        quantizer_conf->mode = 2; // only copy data
+        quantizer_conf->mode = 2;  // only copy data
         quantizer_conf->gpu_id = DEVICEID;
         for (int i = 0; i < 2; ++i) {
             auto hybrid_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
@@ -94,12 +94,12 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
             auto new_idx = hybrid_idx->LoadData(quantization, quantizer_conf);
             auto result = new_idx->Search(query_dataset, conf);
             AssertAnns(result, nq, conf->k);
-//            PrintResult(result, nq, k);
+            //            PrintResult(result, nq, k);
         }
     }
 
     {
-// quantization already in gpu, only set quantization
+        // quantization already in gpu, only set quantization
         auto cpu_idx = std::make_shared<knowhere::IVFSQHybrid>(DEVICEID);
         cpu_idx->Load(binaryset);
 
@@ -113,7 +113,7 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
             hybrid_idx->SetQuantizer(quantization);
             auto result = hybrid_idx->Search(query_dataset, conf);
             AssertAnns(result, nq, conf->k);
-//            PrintResult(result, nq, k);
+            //            PrintResult(result, nq, k);
             hybrid_idx->UnsetQuantizer();
         }
     }
