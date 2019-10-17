@@ -26,7 +26,7 @@ pipeline {
             environment {
                 OS_NAME = "ubuntu18.04"
                 PACKAGE_VERSION = VersionNumber([
-                    versionNumberString : '${SEMVER}-${LOWER_BUILD_TYPE}-${OS_NAME}-x86_64-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
+                    versionNumberString : '${SEMVER}-${LOWER_BUILD_TYPE}-ubuntu18.04-x86_64-${BUILD_DATE_FORMATTED, "yyyyMMdd"}-${BUILDS_TODAY}'
                 ]);
                 DOCKER_VERSION = "${SEMVER}-${OS_NAME}-${LOWER_BUILD_TYPE}"
             }
