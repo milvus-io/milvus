@@ -63,7 +63,7 @@ FaissGpuResourceMgr::InitResource() {
 
         mutex_cache_.emplace(device_id, std::make_unique<std::mutex>());
 
-        // std::cout << "Device Id: " << device_id << std::endl;
+        // std::cout << "Device Id: " << DEVICEID << std::endl;
         auto& device_param = device.second;
         auto& bq = idle_map_[device_id];
 
@@ -119,7 +119,7 @@ void
 FaissGpuResourceMgr::Dump() {
     for (auto& item : idle_map_) {
         auto& bq = item.second;
-        std::cout << "device_id: " << item.first << ", resource count:" << bq.Size();
+        std::cout << "DEVICEID: " << item.first << ", resource count:" << bq.Size();
     }
 }
 
