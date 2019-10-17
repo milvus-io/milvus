@@ -14,34 +14,24 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-#pragma once
 
-#include <condition_variable>
-#include <deque>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
+#include "wrapper/KnowhereResource.h"
+#include "server/Config.h"
 
-#include "Pass.h"
+#include <gtest/gtest.h>
 
-namespace milvus {
-namespace scheduler {
+namespace {
 
-class LargeSQ8HPass : public Pass {
- public:
-    LargeSQ8HPass() = default;
+static const char* CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
+static const char* LOG_FILE_PATH = "./milvus/conf/log_config.conf";
 
- public:
-    //    bool
-    //    Run(const TaskPtr& task) override;
-};
+} // namespace
 
-using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
+TEST(KnowhereTest, KNOWHERE_RESOURCE_TEST) {
+    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
+    ASSERT_TRUE(s.ok());
 
-}  // namespace scheduler
-}  // namespace milvus
+    milvus::engine::KnowhereResource::Initialize();
+    milvus::engine::KnowhereResource::Finalize();
+}
