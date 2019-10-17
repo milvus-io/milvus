@@ -397,6 +397,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 Status
 ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t nprobe, float* distances, int64_t* labels,
                             bool hybrid) {
+#if 0
     if (index_type_ == EngineType::FAISS_IVFSQ8H) {
         if (!hybrid) {
             const std::string key = location_ + ".quantizer";
@@ -449,6 +450,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, int64_t npr
             }
         }
     }
+#endif
 
     if (index_ == nullptr) {
         ENGINE_LOG_ERROR << "ExecutionEngineImpl: index is null, failed to search";
