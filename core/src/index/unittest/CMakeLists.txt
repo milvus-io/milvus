@@ -73,9 +73,17 @@ target_link_libraries(test_kdt
         SPTAGLibStatic
         ${depend_libs} ${unittest_libs} ${basic_libs})
 
+add_executable(test_gpuresource test_gpuresource.cpp ${util_srcs} ${ivf_srcs})
+target_link_libraries(test_gpuresource ${depend_libs} ${unittest_libs} ${basic_libs})
+
+add_executable(test_customized_index test_customized_index.cpp ${util_srcs} ${ivf_srcs})
+target_link_libraries(test_customized_index ${depend_libs} ${unittest_libs} ${basic_libs})
+
 install(TARGETS test_ivf DESTINATION unittest)
 install(TARGETS test_idmap DESTINATION unittest)
 install(TARGETS test_kdt DESTINATION unittest)
+install(TARGETS test_gpuresource DESTINATION unittest)
+install(TARGETS test_customized_index DESTINATION unittest)
 
 #add_subdirectory(faiss_ori)
 add_subdirectory(test_nsg)
