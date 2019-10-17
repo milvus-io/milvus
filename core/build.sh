@@ -91,6 +91,10 @@ fi
 
 cd ${BUILD_OUTPUT_DIR}
 
+# remove make cache since build.sh -l use default variables
+# force update the variables each time 
+make rebuild_cache
+
 CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
@@ -115,7 +119,6 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
     make lint
     if [ $? -ne 0 ]; then
         echo "ERROR! cpplint check failed"
-        rm -f CMakeCache.txt
         exit 1
     fi
     echo "cpplint check passed!"
@@ -124,7 +127,6 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
     make check-clang-format
     if [ $? -ne 0 ]; then
         echo "ERROR! clang-format check failed"
-        rm -f CMakeCache.txt
         exit 1
     fi
     echo "clang-format check passed!"
@@ -133,12 +135,9 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 #    make check-clang-tidy
 #    if [ $? -ne 0 ]; then
 #        echo "ERROR! clang-tidy check failed"
-#        rm -f CMakeCache.txt
 #        exit 1
 #    fi
 #    echo "clang-tidy check passed!"
-
-    rm -f CMakeCache.txt
 else
     # compile and build
     make -j 4 || exit 1
