@@ -16,6 +16,7 @@
 // under the License.
 
 #include <memory>
+#include <string>
 
 #include "knowhere/index/vector_index/IndexGPUIVF.h"
 #include "knowhere/index/vector_index/IndexGPUIVFPQ.h"

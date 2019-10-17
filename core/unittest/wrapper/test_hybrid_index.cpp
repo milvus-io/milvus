@@ -28,7 +28,7 @@ using ::testing::Values;
 using ::testing::Combine;
 
 class KnowhereHybrid
- : public DataGenBase, public ::testing::Test {
+    : public DataGenBase, public ::testing::Test {
  protected:
     void SetUp() override {
         knowhere::FaissGpuResourceMgr::GetInstance().InitDevice(DEVICEID, PINMEM, TEMPMEM, RESNUM);
@@ -38,7 +38,6 @@ class KnowhereHybrid
         nq = 100;
         k = 100;
         GenData(dim, nb, nq, xb, xq, ids, k, gt_ids, gt_dis);
-
     }
 
     void TearDown() override {
@@ -130,4 +129,5 @@ TEST_F(KnowhereHybrid, test_interface) {
         }
     }
 }
+
 #endif
