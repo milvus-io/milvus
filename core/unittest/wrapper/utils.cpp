@@ -86,5 +86,4 @@ DataGenBase::AssertResult(const std::vector<int64_t>& ids, const std::vector<flo
                   << ", match: " << match
                   << ", total: " << nq * k
                   << std::endl;
-
 }
