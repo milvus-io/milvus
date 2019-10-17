@@ -55,9 +55,6 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
             } else if (type == LoadType::CPU2GPU) {
                 stat = to_index_engine_->CopyToIndexFileToGpu(device_id);
                 type_str = "CPU2GPU";
-            } else if (type == LoadType::GPU2CPU) {
-                stat = to_index_engine_->CopyToCpu();
-                type_str = "GPU2CPU";
             } else {
                 error_msg = "Wrong load type";
                 stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
@@ -199,8 +196,9 @@ XBuildIndexTask::Execute() {
             ENGINE_LOG_DEBUG << "New index file " << table_file.file_id_ << " of size " << index->PhysicalSize()
                              << " bytes"
                              << " from file " << origin_file.file_id_;
-
-            //            index->Cache();
+            if (build_index_job->options().insert_cache_immediately_) {
+                index->Cache();
+            }
         } else {
             // failed to update meta, mark the new file as to_delete, don't delete old file
             origin_file.file_type_ = engine::meta::TableFileSchema::TO_INDEX;

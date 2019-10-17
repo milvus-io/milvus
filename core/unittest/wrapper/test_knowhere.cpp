@@ -15,26 +15,23 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "wrapper/KnowhereResource.h"
+#include "server/Config.h"
 
-#include "scheduler/task/SearchTask.h"
-#include "scheduler/task/BuildIndexTask.h"
 #include <gtest/gtest.h>
 
+namespace {
 
-namespace milvus {
-namespace scheduler {
+static const char* CONFIG_FILE_PATH = "./milvus/conf/server_config.yaml";
+static const char* LOG_FILE_PATH = "./milvus/conf/log_config.conf";
 
-TEST(TaskTest, INVALID_INDEX) {
-    auto search_task = std::make_shared<XSearchTask>(nullptr, nullptr);
-    search_task->Load(LoadType::TEST, 10);
+} // namespace
 
-    auto build_task = std::make_shared<XBuildIndexTask>(nullptr, nullptr);
-    build_task->Load(LoadType::TEST, 10);
+TEST(KnowhereTest, KNOWHERE_RESOURCE_TEST) {
+    milvus::server::Config &config = milvus::server::Config::GetInstance();
+    milvus::Status s = config.LoadConfigFile(CONFIG_FILE_PATH);
+    ASSERT_TRUE(s.ok());
 
-    build_task->Execute();
+    milvus::engine::KnowhereResource::Initialize();
+    milvus::engine::KnowhereResource::Finalize();
 }
-
-} // namespace scheduler
-} // namespace milvus
-
-
