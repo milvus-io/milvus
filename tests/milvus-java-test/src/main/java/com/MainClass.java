@@ -33,7 +33,7 @@ public class MainClass {
     }
 
     @DataProvider(name="ConnectInstance")
-    public Object[][] connectInstance(){
+    public Object[][] connectInstance() throws ConnectFailedException {
         MilvusClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
                 .withHost(host)
@@ -45,7 +45,7 @@ public class MainClass {
     }
 
     @DataProvider(name="DisConnectInstance")
-    public Object[][] disConnectInstance(){
+    public Object[][] disConnectInstance() throws ConnectFailedException {
         // Generate connection instance
         MilvusClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
@@ -63,7 +63,7 @@ public class MainClass {
     }
 
     @DataProvider(name="Table")
-    public Object[][] provideTable(){
+    public Object[][] provideTable() throws ConnectFailedException {
         Object[][] tables = new Object[2][2];
         MetricType metricTypes[] = { MetricType.L2, MetricType.IP };
         for (Integer i = 0; i < metricTypes.length; ++i) {

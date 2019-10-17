@@ -1,15 +1,13 @@
 package com;
 
-import io.milvus.client.ConnectParam;
-import io.milvus.client.MilvusClient;
-import io.milvus.client.MilvusGrpcClient;
-import io.milvus.client.Response;
+import io.milvus.client.*;
+import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 public class TestConnect {
     @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)
-    public void test_connect(String host, String port){
+    public void test_connect(String host, String port) throws ConnectFailedException {
         System.out.println("Host: "+host+", Port: "+port);
         MilvusClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
@@ -18,31 +16,42 @@ public class TestConnect {
                 .build();
         Response res = client.connect(connectParam);
         assert(res.ok());
-        assert(client.connected());
+        assert(client.isConnected());
     }
 
     @Test(dataProvider = "DefaultConnectArgs", dataProviderClass = MainClass.class)
-    public void test_connect_repeat(String host, String port){
+    public void test_connect_repeat(String host, String port) {
         MilvusGrpcClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
                 .withHost(host)
                 .withPort(port)
                 .build();
-        client.connect(connectParam);
-        Response res = client.connect(connectParam);
-        assert(!res.ok());
-        assert(client.connected());
+        Response res = null;
+        try {
+            res = client.connect(connectParam);
+            res = client.connect(connectParam);
+        } catch (ConnectFailedException e) {
+            e.printStackTrace();
+        }
+        assert (res.ok());
+        assert(client.isConnected());
     }
 
     @Test(dataProvider="InvalidConnectArgs")
-    public void test_connect_invalid_connect_args(String ip, String port) throws InterruptedException {
+    public void test_connect_invalid_connect_args(String ip, String port) {
         MilvusClient client = new MilvusGrpcClient();
         ConnectParam connectParam = new ConnectParam.Builder()
                 .withHost(ip)
                 .withPort(port)
                 .build();
-        client.connect(connectParam);
-        assert(!client.connected());
+        Response res = null;
+        try {
+            res = client.connect(connectParam);
+        } catch (ConnectFailedException e) {
+            e.printStackTrace();
+        }
+        Assert.assertEquals(res, null);
+        assert(!client.isConnected());
     }
 
     // TODO: MS-615
@@ -63,18 +72,18 @@ public class TestConnect {
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_disconnect(MilvusClient client, String tableName){
-        assert(!client.connected());
+        assert(!client.isConnected());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
-    public void test_disconnect_repeatably(MilvusClient client, String tableNam){
+    public void test_disconnect_repeatably(MilvusClient client, String tableName){
         Response res = null;
         try {
             res = client.disconnect();
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-        assert(res.ok());
-        assert(!client.connected());
+        assert(!res.ok());
+        assert(!client.isConnected());
     }
 }
