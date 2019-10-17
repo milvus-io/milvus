@@ -3,12 +3,12 @@ import opentracing
 from mishards.grpc_utils import GrpcSpanDecorator, is_grpc_method
 from milvus.grpc_gen import status_pb2, milvus_pb2
 
-
 logger = logging.getLogger(__name__)
 
 
 class FakeTracer(opentracing.Tracer):
     pass
+
 
 class FakeSpan(opentracing.Span):
     def __init__(self, context, tracer, **kwargs):
@@ -16,7 +16,7 @@ class FakeSpan(opentracing.Span):
         self.reset()
 
     def set_tag(self, key, value):
-        self.tags.append({key:value})
+        self.tags.append({key: value})
 
     def log_kv(self, key_values, timestamp=None):
         self.logs.append(key_values)

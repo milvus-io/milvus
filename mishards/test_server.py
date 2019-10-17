@@ -254,7 +254,7 @@ class TestServer:
 
         mock_results = milvus_pb2.TopKQueryResultList(status=status_pb2.Status(
             error_code=status_pb2.SUCCESS, reason="Success"),
-                                                      topk_query_result=result)
+            topk_query_result=result)
 
         table_schema = TableSchema(table_name=table_name,
                                    index_file_size=table.index_file_size,

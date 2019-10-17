@@ -16,6 +16,7 @@ def app(request):
 
     db.drop_all()
 
+
 @pytest.fixture
 def started_app(app):
     app.on_pre_run()

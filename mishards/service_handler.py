@@ -232,7 +232,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         return status_pb2.Status(error_code=_status.code, reason=_status.message)
 
     def _create_index(self, table_name, index):
-        return  self.connection().create_index(table_name, index)
+        return self.connection().create_index(table_name, index)
 
     @mark_grpc_method
     def CreateIndex(self, request, context):
@@ -377,7 +377,6 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         return milvus_pb2.TableRowCount(
             status=status_pb2.Status(error_code=_status.code, reason=_status.message),
             table_row_count=_count if isinstance(_count, int) else -1)
-
 
     def _get_server_version(self, metadata=None):
         return self.connection(metadata=metadata).server_version()

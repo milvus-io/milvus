@@ -1,7 +1,9 @@
 from contextlib import contextmanager
 
+
 def empty_server_interceptor_decorator(target_server, interceptor):
     return target_server
+
 
 @contextmanager
 def EmptySpan(*args, **kwargs):
@@ -10,7 +12,8 @@ def EmptySpan(*args, **kwargs):
 
 
 class Tracer:
-    def __init__(self, tracer=None,
+    def __init__(self,
+                 tracer=None,
                  interceptor=None,
                  server_decorator=empty_server_interceptor_decorator):
         self.tracer = tracer
@@ -27,10 +30,14 @@ class Tracer:
     def close(self):
         self.tracer and self.tracer.close()
 
-    def start_span(self, operation_name=None,
-                   child_of=None, references=None, tags=None,
-                   start_time=None, ignore_active_span=False):
+    def start_span(self,
+                   operation_name=None,
+                   child_of=None,
+                   references=None,
+                   tags=None,
+                   start_time=None,
+                   ignore_active_span=False):
         if self.empty:
             return EmptySpan()
-        return self.tracer.start_span(operation_name, child_of,
-                                      references, tags, start_time, ignore_active_span)
+        return self.tracer.start_span(operation_name, child_of, references,
+                                      tags, start_time, ignore_active_span)
