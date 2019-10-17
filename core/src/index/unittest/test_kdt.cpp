@@ -52,33 +52,6 @@ class KDTTest : public DataGen, public ::testing::Test {
     std::shared_ptr<knowhere::CPUKDTRNG> index_ = nullptr;
 };
 
-void
-AssertAnns(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->array()[0];
-    for (auto i = 0; i < nq; i++) {
-        EXPECT_EQ(i, *(ids->data()->GetValues<int64_t>(1, i * k)));
-    }
-}
-
-void
-PrintResult(const knowhere::DatasetPtr& result, const int& nq, const int& k) {
-    auto ids = result->array()[0];
-    auto dists = result->array()[1];
-
-    std::stringstream ss_id;
-    std::stringstream ss_dist;
-    for (auto i = 0; i < 10; i++) {
-        for (auto j = 0; j < k; ++j) {
-            ss_id << *(ids->data()->GetValues<int64_t>(1, i * k + j)) << " ";
-            ss_dist << *(dists->data()->GetValues<float>(1, i * k + j)) << " ";
-        }
-        ss_id << std::endl;
-        ss_dist << std::endl;
-    }
-    std::cout << "id\n" << ss_id.str() << std::endl;
-    std::cout << "dist\n" << ss_dist.str() << std::endl;
-}
-
 // TODO(lxj): add test about count() and dimension()
 TEST_F(KDTTest, kdt_basic) {
     assert(!xb.empty());
