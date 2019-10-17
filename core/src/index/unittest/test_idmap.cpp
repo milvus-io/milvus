@@ -23,8 +23,8 @@
 #include "knowhere/index/vector_index/IndexIDMAP.h"
 #include "knowhere/index/vector_index/helpers/Cloner.h"
 
-#include "unittest/utils.h"
 #include "Helper.h"
+#include "unittest/utils.h"
 
 class IDMAPTest : public DataGen, public TestGpuIndexBase {
  protected:
@@ -61,7 +61,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     ASSERT_TRUE(index_->GetRawIds() != nullptr);
     auto result = index_->Search(query_dataset, conf);
     AssertAnns(result, nq, k);
-//    PrintResult(result, nq, k);
+    //    PrintResult(result, nq, k);
 
     index_->Seal();
     auto binaryset = index_->Serialize();
@@ -69,7 +69,7 @@ TEST_F(IDMAPTest, idmap_basic) {
     new_index->Load(binaryset);
     auto re_result = index_->Search(query_dataset, conf);
     AssertAnns(re_result, nq, k);
-//    PrintResult(re_result, nq, k);
+    //    PrintResult(re_result, nq, k);
 }
 
 TEST_F(IDMAPTest, idmap_serialize) {
@@ -92,7 +92,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
         index_->Add(base_dataset, knowhere::Config());
         auto re_result = index_->Search(query_dataset, conf);
         AssertAnns(re_result, nq, k);
-//        PrintResult(re_result, nq, k);
+        //        PrintResult(re_result, nq, k);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dimension(), dim);
         auto binaryset = index_->Serialize();
@@ -112,7 +112,7 @@ TEST_F(IDMAPTest, idmap_serialize) {
         EXPECT_EQ(index_->Dimension(), dim);
         auto result = index_->Search(query_dataset, conf);
         AssertAnns(result, nq, k);
-//        PrintResult(result, nq, k);
+        //        PrintResult(result, nq, k);
     }
 }
 
