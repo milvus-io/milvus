@@ -37,8 +37,8 @@ class LargeSQ8HPass : public Pass {
     LargeSQ8HPass() = default;
 
  public:
-    bool
-    Run(const TaskPtr& task) override;
+    //    bool
+    //    Run(const TaskPtr& task) override;
 };
 
 using LargeSQ8HPassPtr = std::shared_ptr<LargeSQ8HPass>;
