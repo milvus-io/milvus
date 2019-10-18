@@ -53,26 +53,35 @@ load_simple_config() {
     config.GetResourceConfigSearchResources(pool);
 
     // get resources
-    bool use_cpu_to_compute = false;
-    for (auto& resource : pool) {
-        if (resource == "cpu") {
-            use_cpu_to_compute = true;
-            break;
-        }
-    }
     auto gpu_ids = get_gpu_pool();
+
+    int32_t build_gpu_id;
+    config.GetResourceConfigIndexBuildDevice(build_gpu_id);
 
     // create and connect
     ResMgrInst::GetInstance()->Add(ResourceFactory::Create("disk", "DISK", 0, true, false));
 
     auto io = Connection("io", 500);
-    ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0, true, use_cpu_to_compute));
+    ResMgrInst::GetInstance()->Add(ResourceFactory::Create("cpu", "CPU", 0, true, true));
     ResMgrInst::GetInstance()->Connect("disk", "cpu", io);
 
     auto pcie = Connection("pcie", 12000);
+    bool find_build_gpu_id = false;
     for (auto& gpu_id : gpu_ids) {
         ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(gpu_id), "GPU", gpu_id, true, true));
         ResMgrInst::GetInstance()->Connect("cpu", std::to_string(gpu_id), pcie);
+        if (build_gpu_id == gpu_id) {
+            find_build_gpu_id = true;
+        }
+    }
+
+    if (not find_build_gpu_id) {
+        ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(build_gpu_id),
+                                                               "GPU",
+                                                               build_gpu_id,
+                                                               true,
+                                                               true));
+        ResMgrInst::GetInstance()->Connect("cpu", std::to_string(build_gpu_id), pcie);
     }
 }
 
