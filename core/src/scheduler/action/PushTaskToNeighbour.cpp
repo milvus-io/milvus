@@ -187,8 +187,8 @@ Action::SpecifiedResourceLabelTaskScheduler(ResourceMgrWPtr res_mgr, ResourcePtr
             Status stat = config.GetResourceConfigIndexBuildDevice(build_index_gpu);
 
             bool find_gpu_res = false;
-            for (uint64_t i = 0; i < compute_resources.size(); ++i) {
-                if (res_mgr.lock()->GetResource(ResourceType::GPU, build_index_gpu) != nullptr) {
+            if (res_mgr.lock()->GetResource(ResourceType::GPU, build_index_gpu) != nullptr) {
+                for (uint64_t i = 0; i < compute_resources.size(); ++i) {
                     if (compute_resources[i]->name() ==
                         res_mgr.lock()->GetResource(ResourceType::GPU, build_index_gpu)->name()) {
                         find_gpu_res = true;
