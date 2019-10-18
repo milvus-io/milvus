@@ -53,6 +53,7 @@ class FileBasedHashRingRouter(RouterMixin):
 
     def _route(self, table_name, range_array, metadata=None, **kwargs):
         # PXU TODO: Implement Thread-local Context
+        # PXU TODO: Session life mgt
         try:
             table = db.Session.query(Tables).filter(
                 and_(Tables.table_id == table_name,
@@ -63,6 +64,7 @@ class FileBasedHashRingRouter(RouterMixin):
         if not table:
             raise exceptions.TableNotFoundError(table_name, metadata=metadata)
         files = table.files_to_search(range_array)
+        db.remove_session()
 
         servers = self.conn_mgr.conn_names
         logger.info('Available servers: {}'.format(servers))

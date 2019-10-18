@@ -42,6 +42,9 @@ class DB:
     def Session(self):
         return self.session_factory()
 
+    def remove_session(self):
+        self.session_factory.remove()
+
     def drop_all(self):
         self.Model.metadata.drop_all(self.engine)
 
