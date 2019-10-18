@@ -34,9 +34,9 @@ namespace scheduler {
 
 class Pass {
  public:
-    virtual void
-    Init() {
-    }
+    //    virtual void
+    //    Init() {
+    //    }
 
     virtual bool
     Run(const TaskPtr& task) = 0;
