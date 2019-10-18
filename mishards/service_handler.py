@@ -405,7 +405,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
             string_reply=_reply
         )
 
-    def _show_tables(self):
+    def _show_tables(self, metadata=None):
         return self.connection(metadata=metadata).show_tables()
 
     @mark_grpc_method
@@ -414,7 +414,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
         metadata = {
             'resp_class': milvus_pb2.TableName
         }
-        _status, _results = self._show_tables()
+        _status, _results = self._show_tables(metadata=metadata)
 
         return milvus_pb2.TableNameList(
             status=status_pb2.Status(error_code=_status.code, reason=_status.message),
