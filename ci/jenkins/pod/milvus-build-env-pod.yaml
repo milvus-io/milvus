@@ -9,6 +9,11 @@ spec:
   containers:
   - name: milvus-build-env
     image: registry.zilliz.com/milvus/milvus-build-env:v0.5.0-ubuntu18.04
+    env:
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
     command:
     - cat
     tty: true
@@ -25,10 +30,6 @@ spec:
     env:
     - name: MYSQL_ROOT_PASSWORD
       value: 123456
-    - name: POD_IP
-      valueFrom:
-        fieldRef:
-          fieldPath: status.podIP
     ports:
     - containerPort: 3306
       name: mysql
