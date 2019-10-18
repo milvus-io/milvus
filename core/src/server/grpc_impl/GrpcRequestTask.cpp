@@ -114,9 +114,11 @@ ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array,
     return Status::OK();
 }
 
-std::string TableNotExistMsg(const std::string& table_name) {
-    return "Table " + table_name
-    + " not exist. Use milvus.has_table to verify whether the table exists. You also can check if the table name exists.";
+std::string
+TableNotExistMsg(const std::string& table_name) {
+    return "Table " + table_name +
+           " not exist. Use milvus.has_table to verify whether the table exists. You also can check if the table name "
+           "exists.";
 }
 
 }  // namespace
@@ -426,12 +428,14 @@ InsertTask::OnExecute() {
             return status;
         }
         if (insert_param_->row_record_array().empty()) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector array is empty. Make sure you have entered vector records.");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                          "The vector array is empty. Make sure you have entered vector records.");
         }
 
         if (!insert_param_->row_id_array().empty()) {
             if (insert_param_->row_id_array().size() != insert_param_->row_record_array_size()) {
-                return Status(SERVER_ILLEGAL_VECTOR_ID, "The size of vector ID array must be equal to the size of the vector.");
+                return Status(SERVER_ILLEGAL_VECTOR_ID,
+                              "The size of vector ID array must be equal to the size of the vector.");
             }
         }
 
@@ -458,8 +462,9 @@ InsertTask::OnExecute() {
 
         // user didn't provided id before, no need to provide user id
         if ((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
-            return Status(SERVER_ILLEGAL_VECTOR_ID,
-                          "Table vector IDs are auto-generated. All vectors of this table must use auto-generated IDs.");
+            return Status(
+                SERVER_ILLEGAL_VECTOR_ID,
+                "Table vector IDs are auto-generated. All vectors of this table must use auto-generated IDs.");
         }
 
         rc.RecordSection("check validation");
@@ -476,7 +481,8 @@ InsertTask::OnExecute() {
         // TODO(yk): change to one dimension array or use multiple-thread to copy the data
         for (size_t i = 0; i < insert_param_->row_record_array_size(); i++) {
             if (insert_param_->row_record_array(i).vector_data().empty()) {
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                              "The vector dimension must be equal to the table dimension.");
             }
             uint64_t vec_dim = insert_param_->row_record_array(i).vector_data().size();
             if (vec_dim != table_info.dimension_) {
@@ -592,7 +598,8 @@ SearchTask::OnExecute() {
         }
 
         if (search_param_->query_record_array().empty()) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector array is empty. Make sure you have entered vector records.");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                          "The vector array is empty. Make sure you have entered vector records.");
         }
 
         // step 4: check date range, and convert to db dates
@@ -614,7 +621,8 @@ SearchTask::OnExecute() {
         std::vector<float> vec_f(record_array_size * table_info.dimension_, 0);
         for (size_t i = 0; i < record_array_size; i++) {
             if (search_param_->query_record_array(i).vector_data().empty()) {
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY,
+                              "The vector dimension must be equal to the table dimension.");
             }
             uint64_t query_vec_dim = search_param_->query_record_array(i).vector_data().size();
             if (query_vec_dim != table_info.dimension_) {
