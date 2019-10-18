@@ -50,7 +50,7 @@ load_simple_config() {
     std::string mode;
     config.GetResourceConfigMode(mode);
     std::vector<std::string> pool;
-    config.GetResourceConfigPool(pool);
+    config.GetResourceConfigSearchResources(pool);
 
     // get resources
     bool use_cpu_to_compute = false;
