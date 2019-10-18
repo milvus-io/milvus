@@ -26,6 +26,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-653 - When config check fail, Milvus close without message
 - MS-654 - Describe index timeout when building index
 - MS-658 - Fix SQ8 Hybrid can't search
+- \#9 Change default gpu_cache_capacity to 4
 - MS-665 - IVF_SQ8H search crash when no GPU resource in search_resources
 - \#20 - C++ sdk example get grpc error 
 - \#23 - Add unittest to improve code coverage
@@ -75,6 +76,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - MS-624 - Re-organize project directory for open-source
 - MS-635 - Add compile option to support customized faiss
 - MS-660 - add ubuntu_build_deps.sh
+- \#18 - Add all test cases
 	
 # Milvus 0.4.0 (2019-09-12)
 
