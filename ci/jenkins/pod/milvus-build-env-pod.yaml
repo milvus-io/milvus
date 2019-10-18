@@ -20,18 +20,6 @@ spec:
       requests:
         memory: "16Gi"
         cpu: "4.0"
-
----
-
-apiVersion: v1
-kind: Pod
-metadata:
-  name: milvus-mysql
-  labels:
-    app: milvus
-    componet: mysql
-spec:
-  containers:
   - name: milvus-mysql
     image: mysql:5.6
     env:
