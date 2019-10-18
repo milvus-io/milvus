@@ -25,6 +25,10 @@ spec:
     env:
     - name: MYSQL_ROOT_PASSWORD
       value: 123456
+    - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
     ports:
     - containerPort: 3306
       name: mysql
