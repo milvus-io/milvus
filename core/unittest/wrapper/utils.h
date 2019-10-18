@@ -104,28 +104,28 @@ class ParamGenerator {
                 tempconf->metric_type = knowhere::METRICTYPE::L2;
                 return tempconf;
             }
-            case milvus::engine::IndexType::FAISS_IVFPQ_CPU:
-            case milvus::engine::IndexType::FAISS_IVFPQ_GPU: {
-                auto tempconf = std::make_shared<knowhere::IVFPQCfg>();
-                tempconf->nlist = 100;
-                tempconf->nprobe = 16;
-                tempconf->nbits = 8;
-                tempconf->m = 8;
-                tempconf->metric_type = knowhere::METRICTYPE::L2;
-                return tempconf;
-            }
-            case milvus::engine::IndexType::NSG_MIX: {
-                auto tempconf = std::make_shared<knowhere::NSGCfg>();
-                tempconf->nlist = 100;
-                tempconf->nprobe = 16;
-                tempconf->search_length = 8;
-                tempconf->knng = 200;
-                tempconf->search_length = 40; // TODO(linxj): be 20 when search
-                tempconf->out_degree = 60;
-                tempconf->candidate_pool_size = 200;
-                tempconf->metric_type = knowhere::METRICTYPE::L2;
-                return tempconf;
-            }
+//            case milvus::engine::IndexType::FAISS_IVFPQ_CPU:
+//            case milvus::engine::IndexType::FAISS_IVFPQ_GPU: {
+//                auto tempconf = std::make_shared<knowhere::IVFPQCfg>();
+//                tempconf->nlist = 100;
+//                tempconf->nprobe = 16;
+//                tempconf->nbits = 8;
+//                tempconf->m = 8;
+//                tempconf->metric_type = knowhere::METRICTYPE::L2;
+//                return tempconf;
+//            }
+//            case milvus::engine::IndexType::NSG_MIX: {
+//                auto tempconf = std::make_shared<knowhere::NSGCfg>();
+//                tempconf->nlist = 100;
+//                tempconf->nprobe = 16;
+//                tempconf->search_length = 8;
+//                tempconf->knng = 200;
+//                tempconf->search_length = 40; // TODO(linxj): be 20 when search
+//                tempconf->out_degree = 60;
+//                tempconf->candidate_pool_size = 200;
+//                tempconf->metric_type = knowhere::METRICTYPE::L2;
+//                return tempconf;
+//            }
         }
     }
 };

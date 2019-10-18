@@ -16,7 +16,6 @@ db_config:
 
   insert_buffer_size: 4             # GB, maximum insert buffer size allowed
                                     # sum of insert_buffer_size and cpu_cache_capacity cannot exceed total memory
-  build_index_gpu: 0                # gpu id used for building index
 
   preload_table:                    # preload data at startup, '*' means load all tables, empty value means no preload
                                     # you can specify preload tables like this: table1,table2,table3
@@ -39,6 +38,6 @@ engine_config:
                                     # if nq >= use_blas_threshold, use OpenBlas, slower with stable response times
 
 resource_config:
-  resource_pool:
-    - cpu
+  search_resources:                 # define the GPUs used for search computation, valid value: gpux
     - gpu0
+  index_build_device: gpu0          # GPU used for building index
