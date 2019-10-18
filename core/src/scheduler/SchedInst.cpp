@@ -76,11 +76,8 @@ load_simple_config() {
     }
 
     if (not find_build_gpu_id) {
-        ResMgrInst::GetInstance()->Add(ResourceFactory::Create(std::to_string(build_gpu_id),
-                                                               "GPU",
-                                                               build_gpu_id,
-                                                               true,
-                                                               true));
+        ResMgrInst::GetInstance()->Add(
+            ResourceFactory::Create(std::to_string(build_gpu_id), "GPU", build_gpu_id, true, true));
         ResMgrInst::GetInstance()->Connect("cpu", std::to_string(build_gpu_id), pcie);
     }
 }
