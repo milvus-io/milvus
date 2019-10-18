@@ -47,6 +47,7 @@ pipeline {
                                 container('milvus-build-env') {
                                     script {
                                         load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/build.groovy"
+                                        load "${env.WORKSPACE}/ci/jenkins/jenkinsfile/coverage.groovy"
                                     }
                                 }
                             }
