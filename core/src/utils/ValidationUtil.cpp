@@ -74,8 +74,8 @@ ValidationUtil::ValidateTableName(const std::string& table_name) {
 Status
 ValidationUtil::ValidateTableDimension(int64_t dimension) {
     if (dimension <= 0 || dimension > TABLE_DIMENSION_LIMIT) {
-        std::string msg = "Invalid table dimension: " + std::to_string(dimension) + ". "
-            + "The table dimension must be within the range of 1 ~ 16384.";
+        std::string msg = "Invalid table dimension: " + std::to_string(dimension) + ". " +
+                          "The table dimension must be within the range of 1 ~ 16384.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
     } else {
@@ -87,8 +87,8 @@ Status
 ValidationUtil::ValidateTableIndexType(int32_t index_type) {
     int engine_type = static_cast<int>(engine::EngineType(index_type));
     if (engine_type <= 0 || engine_type > static_cast<int>(engine::EngineType::MAX_VALUE)) {
-        std::string msg = "Invalid index type: " + std::to_string(index_type) + ". "
-            + "Make sure the index type is in IndexType list.";
+        std::string msg = "Invalid index type: " + std::to_string(index_type) + ". " +
+                          "Make sure the index type is in IndexType list.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
     }
@@ -108,8 +108,8 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
 Status
 ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
     if (nlist <= 0) {
-        std::string msg = "Invalid index nlist: " + std::to_string(nlist) + ". "
-            + "The index nlist must be greater than 0.";
+        std::string msg =
+            "Invalid index nlist: " + std::to_string(nlist) + ". " + "The index nlist must be greater than 0.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_NLIST, msg);
     }
@@ -120,9 +120,9 @@ ValidationUtil::ValidateTableIndexNlist(int32_t nlist) {
 Status
 ValidationUtil::ValidateTableIndexFileSize(int64_t index_file_size) {
     if (index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
-        std::string msg = "Invalid index file size: " + std::to_string(index_file_size) + ". "
-            + "The index file size must be within the range of 1 ~ "
-            + std::to_string(INDEX_FILE_SIZE_LIMIT) + ".";
+        std::string msg = "Invalid index file size: " + std::to_string(index_file_size) + ". " +
+                          "The index file size must be within the range of 1 ~ " +
+                          std::to_string(INDEX_FILE_SIZE_LIMIT) + ".";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_FILE_SIZE, msg);
     }
@@ -134,8 +134,8 @@ Status
 ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
     if (metric_type != static_cast<int32_t>(engine::MetricType::L2) &&
         metric_type != static_cast<int32_t>(engine::MetricType::IP)) {
-        std::string msg = "Invalid index metric type: " + std::to_string(metric_type) + ". "
-            + "Make sure the metric type is either MetricType.L2 or MetricType.IP.";
+        std::string msg = "Invalid index metric type: " + std::to_string(metric_type) + ". " +
+                          "Make sure the metric type is either MetricType.L2 or MetricType.IP.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_INDEX_METRIC_TYPE, msg);
     }
@@ -145,8 +145,8 @@ ValidationUtil::ValidateTableIndexMetricType(int32_t metric_type) {
 Status
 ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchema& table_schema) {
     if (top_k <= 0 || top_k > 2048) {
-        std::string msg = "Invalid topk: " + std::to_string(top_k) + ". "
-            + "The topk must be within the range of 1 ~ 2048.";
+        std::string msg =
+            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 2048.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_TOPK, msg);
     }
@@ -157,8 +157,8 @@ ValidationUtil::ValidateSearchTopk(int64_t top_k, const engine::meta::TableSchem
 Status
 ValidationUtil::ValidateSearchNprobe(int64_t nprobe, const engine::meta::TableSchema& table_schema) {
     if (nprobe <= 0 || nprobe > table_schema.nlist_) {
-        std::string msg = "Invalid nprobe: " + std::to_string(nprobe) + ". "
-            + "The nprobe must be within the range of 1 ~ index nlist.";
+        std::string msg = "Invalid nprobe: " + std::to_string(nprobe) + ". " +
+                          "The nprobe must be within the range of 1 ~ index nlist.";
         SERVER_LOG_ERROR << msg;
         return Status(SERVER_INVALID_NPROBE, msg);
     }
