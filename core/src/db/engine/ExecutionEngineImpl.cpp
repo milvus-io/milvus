@@ -65,7 +65,7 @@ ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& 
     : location_(location), dim_(dimension), index_type_(index_type), metric_type_(metric_type), nlist_(nlist) {
     index_ = CreatetVecIndex(EngineType::FAISS_IDMAP);
     if (!index_) {
-        throw Exception(DB_ERROR, "Could not create VecIndex");
+        throw Exception(DB_ERROR, "Unsupported index type");
     }
 
     TempMetaConf temp_conf;
@@ -111,7 +111,7 @@ ExecutionEngineImpl::CreatetVecIndex(EngineType type) {
             break;
         }
         default: {
-            ENGINE_LOG_ERROR << "Invalid engine type";
+            ENGINE_LOG_ERROR << "Unsupported index type";
             return nullptr;
         }
     }
@@ -373,7 +373,7 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 
     auto to_index = CreatetVecIndex(engine_type);
     if (!to_index) {
-        throw Exception(DB_ERROR, "Could not create VecIndex");
+        throw Exception(DB_ERROR, "Unsupported index type");
     }
 
     TempMetaConf temp_conf;

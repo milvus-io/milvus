@@ -94,6 +94,15 @@ ValidationUtil::ValidateTableIndexType(int32_t index_type) {
         return Status(SERVER_INVALID_INDEX_TYPE, msg);
     }
 
+#ifndef CUSTOMIZATION
+    // special case, hybird index only available in customize faiss library
+    if (engine_type == static_cast<int>(engine::EngineType::FAISS_IVFSQ8H)) {
+        std::string msg = "Unsupported index type: " + std::to_string(index_type);
+        SERVER_LOG_ERROR << msg;
+        return Status(SERVER_INVALID_INDEX_TYPE, msg);
+    }
+#endif
+
     return Status::OK();
 }
 
