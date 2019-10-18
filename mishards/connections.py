@@ -114,6 +114,7 @@ class ConnectionMgr:
         return rconn
 
     def on_new_meta(self, name, url):
+        logger.info('Register Connection: name={};url={}'.format(name, url))
         self.metas[name] = url
 
     def on_duplicate_meta(self, name, url):
@@ -139,7 +140,6 @@ class ConnectionMgr:
         logger.warning('Non-existed meta: {}'.format(name))
 
     def register(self, name, url):
-        logger.info('Register Connection: name={};url={}'.format(name, url))
         meta = self.metas.get(name)
         if not meta:
             return self.on_new_meta(name, url)
