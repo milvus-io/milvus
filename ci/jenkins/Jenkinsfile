@@ -18,7 +18,7 @@ pipeline {
         LOWER_BUILD_TYPE = params.BUILD_TYPE.toLowerCase()
         SEMVER = "${BRANCH_NAME}"
         JOBNAMES = env.JOB_NAME.split('/')
-        PIPELIEN_NAME = "${JOBNAMES[0]}"
+        PIPELINE_NAME = "${JOBNAMES[0]}"
     }
 
     stages {
