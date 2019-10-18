@@ -113,6 +113,12 @@ ConvertTimeRangeToDBDates(const std::vector<::milvus::grpc::Range>& range_array,
 
     return Status::OK();
 }
+
+std::string TableNotExistMsg(const std::string& table_name) {
+    return "Table " + table_name
+    + " not exist. Use milvus.has_table to verify whether the table exists. You also can check if the table name exists.";
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -255,7 +261,7 @@ CreateIndexTask::OnExecute() {
         }
 
         if (!has_table) {
-            return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
         }
 
         auto& grpc_index = index_param_->index();
@@ -348,7 +354,7 @@ DropTableTask::OnExecute() {
         status = DBWrapper::DB()->DescribeTable(table_info);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
             } else {
                 return status;
             }
@@ -420,12 +426,12 @@ InsertTask::OnExecute() {
             return status;
         }
         if (insert_param_->row_record_array().empty()) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector array is empty. Make sure you have entered vector records.");
         }
 
         if (!insert_param_->row_id_array().empty()) {
             if (insert_param_->row_id_array().size() != insert_param_->row_record_array_size()) {
-                return Status(SERVER_ILLEGAL_VECTOR_ID, "Size of vector ids is not equal to row record array size");
+                return Status(SERVER_ILLEGAL_VECTOR_ID, "The size of vector ID array must be equal to the size of the vector.");
             }
         }
 
@@ -435,7 +441,7 @@ InsertTask::OnExecute() {
         status = DBWrapper::DB()->DescribeTable(table_info);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, "Table " + insert_param_->table_name() + " not exists");
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(insert_param_->table_name()));
             } else {
                 return status;
             }
@@ -447,13 +453,13 @@ InsertTask::OnExecute() {
         // user already provided id before, all insert action require user id
         if ((table_info.flag_ & engine::meta::FLAG_MASK_HAS_USERID) != 0 && !user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
-                          "Table vector ids are user defined, please provide id for this batch");
+                          "Table vector IDs are user-defined. Please provide IDs for all vectors of this table.");
         }
 
         // user didn't provided id before, no need to provide user id
         if ((table_info.flag_ & engine::meta::FLAG_MASK_NO_USERID) != 0 && user_provide_ids) {
             return Status(SERVER_ILLEGAL_VECTOR_ID,
-                          "Table vector ids are auto generated, no need to provide id for this batch");
+                          "Table vector IDs are auto-generated. All vectors of this table must use auto-generated IDs.");
         }
 
         rc.RecordSection("check validation");
@@ -470,13 +476,12 @@ InsertTask::OnExecute() {
         // TODO(yk): change to one dimension array or use multiple-thread to copy the data
         for (size_t i = 0; i < insert_param_->row_record_array_size(); i++) {
             if (insert_param_->row_record_array(i).vector_data().empty()) {
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array data is empty");
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
             }
             uint64_t vec_dim = insert_param_->row_record_array(i).vector_data().size();
             if (vec_dim != table_info.dimension_) {
                 ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
-                std::string error_msg = "Invalid row record dimension: " + std::to_string(vec_dim) +
-                                        " vs. table dimension:" + std::to_string(table_info.dimension_);
+                std::string error_msg = "The vector dimension must be equal to the table dimension.";
                 return Status(error_code, error_msg);
             }
             memcpy(&vec_f[i * table_info.dimension_], insert_param_->row_record_array(i).vector_data().data(),
@@ -569,7 +574,7 @@ SearchTask::OnExecute() {
         status = DBWrapper::DB()->DescribeTable(table_info);
         if (!status.ok()) {
             if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
             } else {
                 return status;
             }
@@ -587,7 +592,7 @@ SearchTask::OnExecute() {
         }
 
         if (search_param_->query_record_array().empty()) {
-            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array is empty");
+            return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector array is empty. Make sure you have entered vector records.");
         }
 
         // step 4: check date range, and convert to db dates
@@ -609,13 +614,12 @@ SearchTask::OnExecute() {
         std::vector<float> vec_f(record_array_size * table_info.dimension_, 0);
         for (size_t i = 0; i < record_array_size; i++) {
             if (search_param_->query_record_array(i).vector_data().empty()) {
-                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "Row record array data is empty");
+                return Status(SERVER_INVALID_ROWRECORD_ARRAY, "The vector dimension must be equal to the table dimension.");
             }
             uint64_t query_vec_dim = search_param_->query_record_array(i).vector_data().size();
             if (query_vec_dim != table_info.dimension_) {
                 ErrorCode error_code = SERVER_INVALID_VECTOR_DIMENSION;
-                std::string error_msg = "Invalid row record dimension: " + std::to_string(query_vec_dim) +
-                                        " vs. table dimension:" + std::to_string(table_info.dimension_);
+                std::string error_msg = "The vector dimension must be equal to the table dimension.";
                 return Status(error_code, error_msg);
             }
 
@@ -707,7 +711,7 @@ CountTableTask::OnExecute() {
         status = DBWrapper::DB()->GetTableRowCount(table_name_, row_count);
         if (!status.ok()) {
             if (status.code(), DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
             } else {
                 return status;
             }
@@ -779,7 +783,7 @@ DeleteByRangeTask::OnExecute() {
         status = DBWrapper::DB()->DescribeTable(table_info);
         if (!status.ok()) {
             if (status.code(), DB_NOT_FOUND) {
-                return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name + " not exists");
+                return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name));
             } else {
                 return status;
             }
@@ -917,7 +921,7 @@ DropIndexTask::OnExecute() {
         }
 
         if (!has_table) {
-            return Status(SERVER_TABLE_NOT_EXIST, "Table " + table_name_ + " not exists");
+            return Status(SERVER_TABLE_NOT_EXIST, TableNotExistMsg(table_name_));
         }
 
         // step 2: check table existence

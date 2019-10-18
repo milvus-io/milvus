@@ -30,6 +30,7 @@ Please mark all change in change log and use the ticket from JIRA.
 - \#23 - Add unittest to improve code coverage
 - \#31 - make clang-format failed after run build.sh -l
 - \#39 - Create SQ8H index hang if using github server version
+- \#30 - Some troubleshoot messages in Milvus do not provide enough information
 
 ## Improvement
 - MS-552 - Add and change the easylogging library
