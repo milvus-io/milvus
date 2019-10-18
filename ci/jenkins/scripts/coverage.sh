@@ -105,7 +105,7 @@ for test in `ls ${DIR_UNITTEST}`; do
             ;;
     esac
     # run unittest
-    ./${DIR_UNITTEST}/${test} "${args}"
+    ${DIR_UNITTEST}/${test} "${args}"
     if [ $? -ne 0 ]; then
         echo ${args}
         echo ${DIR_UNITTEST}/${test} "run failed"
