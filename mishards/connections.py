@@ -44,7 +44,7 @@ class Connection:
         if self.on_retry_func:
             self.on_retry_func(self)
         else:
-            logger.warning('{} is retrying {}'.format(self, self.retried))
+            self.retried > 1 and logger.warning('{} is retrying {}'.format(self, self.retried))
 
     def on_connect(self, metadata=None):
         while not self.connected and self.can_retry:
