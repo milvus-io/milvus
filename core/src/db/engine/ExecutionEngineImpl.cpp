@@ -503,7 +503,7 @@ ExecutionEngineImpl::GpuCache(uint64_t gpu_id) {
 Status
 ExecutionEngineImpl::Init() {
     server::Config& config = server::Config::GetInstance();
-    Status s = config.GetDBConfigBuildIndexGPU(gpu_num_);
+    Status s = config.GetResourceConfigIndexBuildDevice(gpu_num_);
     if (!s.ok()) {
         return s;
     }
