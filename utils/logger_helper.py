@@ -73,10 +73,10 @@ def config(log_level, log_path, name, tz='UTC'):
         'disable_existing_loggers': False,
         'formatters': {
             'default': {
-                'format': '[%(asctime)s-%(levelname)s-%(name)s]: %(message)s (%(filename)s:%(lineno)s)'
+                'format': '%(asctime)s | %(levelname)s | %(name)s | %(threadName)s: %(message)s (%(filename)s:%(lineno)s)',
             },
             'colorful_console': {
-                'format': '[%(asctime)s-%(levelname)s-%(name)s]: %(message)s (%(filename)s:%(lineno)s)',
+                'format': '%(asctime)s | %(levelname)s | %(name)s | %(threadName)s: %(message)s (%(filename)s:%(lineno)s)',
                 '()': ColorfulFormatter,
             },
         },
