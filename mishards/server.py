@@ -22,17 +22,24 @@ class Server:
         self.error_handlers = {}
         self.exit_flag = False
 
-    def init_app(self, conn_mgr, tracer, discover, port=19530, max_workers=10, **kwargs):
+    def init_app(self,
+                 conn_mgr,
+                 tracer,
+                 router,
+                 discover,
+                 port=19530,
+                 max_workers=10,
+                 **kwargs):
         self.port = int(port)
         self.conn_mgr = conn_mgr
         self.tracer = tracer
+        self.router = router
         self.discover = discover
 
         self.server_impl = grpc.server(
             thread_pool=futures.ThreadPoolExecutor(max_workers=max_workers),
             options=[(cygrpc.ChannelArgKey.max_send_message_length, -1),
-                     (cygrpc.ChannelArgKey.max_receive_message_length, -1)]
-        )
+                     (cygrpc.ChannelArgKey.max_receive_message_length, -1)])
 
         self.server_impl = self.tracer.decorate(self.server_impl)
 
@@ -43,8 +50,8 @@ class Server:
         url = urlparse(woserver)
         ip = socket.gethostbyname(url.hostname)
         socket.inet_pton(socket.AF_INET, ip)
-        self.conn_mgr.register('WOSERVER',
-                               '{}://{}:{}'.format(url.scheme, ip, url.port or 80))
+        self.conn_mgr.register(
+            'WOSERVER', '{}://{}:{}'.format(url.scheme, ip, url.port or 80))
 
     def register_pre_run_handler(self, func):
         logger.info('Regiterring {} into server pre_run_handlers'.format(func))
@@ -65,9 +72,11 @@ class Server:
 
     def errorhandler(self, exception):
         if inspect.isclass(exception) and issubclass(exception, Exception):
+
             def wrapper(func):
                 self.error_handlers[exception] = func
                 return func
+
             return wrapper
         return exception
 
@@ -78,8 +87,12 @@ class Server:
 
     def start(self, port=None):
         handler_class = self.decorate_handler(ServiceHandler)
-        add_MilvusServiceServicer_to_server(handler_class(conn_mgr=self.conn_mgr, tracer=self.tracer), self.server_impl)
-        self.server_impl.add_insecure_port("[::]:{}".format(str(port or self._port)))
+        add_MilvusServiceServicer_to_server(
+            handler_class(conn_mgr=self.conn_mgr,
+                          tracer=self.tracer,
+                          router=self.router), self.server_impl)
+        self.server_impl.add_insecure_port("[::]:{}".format(
+            str(port or self._port)))
         self.server_impl.start()
 
     def run(self, port):

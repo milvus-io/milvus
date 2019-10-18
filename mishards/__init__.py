@@ -27,7 +27,10 @@ def create_app(testing_config=None):
     tracer = TracerFactory.new_tracer(config.TRACING_TYPE, settings.TracingConfig,
                                       span_decorator=GrpcSpanDecorator())
 
-    grpc_server.init_app(conn_mgr=connect_mgr, tracer=tracer, discover=discover)
+    from mishards.routings import RouterFactory
+    router = RouterFactory.new_router(config.ROUTER_CLASS_NAME, connect_mgr)
+
+    grpc_server.init_app(conn_mgr=connect_mgr, tracer=tracer, router=router, discover=discover)
 
     from mishards import exception_handlers
 

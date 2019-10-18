@@ -73,12 +73,14 @@ class DefaultConfig:
     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_URI')
     SQL_ECHO = env.bool('SQL_ECHO', False)
     TRACING_TYPE = env.str('TRACING_TYPE', '')
+    ROUTER_CLASS_NAME = env.str('ROUTER_CLASS_NAME', 'FileBasedHashRingRouter')
 
 
 class TestingConfig(DefaultConfig):
     SQLALCHEMY_DATABASE_URI = env.str('SQLALCHEMY_DATABASE_TEST_URI')
     SQL_ECHO = env.bool('SQL_TEST_ECHO', False)
     TRACING_TYPE = env.str('TRACING_TEST_TYPE', '')
+    ROUTER_CLASS_NAME = env.str('ROUTER_CLASS_TEST_NAME', 'FileBasedHashRingRouter')
 
 
 if __name__ == '__main__':
