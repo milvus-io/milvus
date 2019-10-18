@@ -12,7 +12,6 @@ grpc_server = Server()
 def create_app(testing_config=None):
     config = testing_config if testing_config else settings.DefaultConfig
     db.init_db(uri=config.SQLALCHEMY_DATABASE_URI, echo=config.SQL_ECHO)
-    logger.info(db)
 
     from mishards.connections import ConnectionMgr
     connect_mgr = ConnectionMgr()

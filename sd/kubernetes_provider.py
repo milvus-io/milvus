@@ -170,7 +170,7 @@ class EventHandler(threading.Thread):
                     event['pod']))
             return
         elif try_cnt <= 0 and not pod.status.pod_ip:
-            logger.warn('NoPodIPFoundError')
+            logger.warning('NoPodIPFoundError')
             return
 
         logger.info('Register POD {} with IP {}'.format(
