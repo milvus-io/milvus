@@ -18,6 +18,7 @@
 #include <sys/stat.h>
 #include <algorithm>
 #include <iostream>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -129,12 +130,6 @@ Config::ValidateConfig() {
         return s;
     }
 
-    int32_t db_build_index_gpu;
-    s = GetDBConfigBuildIndexGPU(db_build_index_gpu);
-    if (!s.ok()) {
-        return s;
-    }
-
     /* metric config */
     bool metric_enable_monitor;
     s = GetMetricConfigEnableMonitor(metric_enable_monitor);
@@ -205,8 +200,14 @@ Config::ValidateConfig() {
         return s;
     }
 
-    std::vector<std::string> resource_pool;
-    s = GetResourceConfigPool(resource_pool);
+    std::vector<std::string> search_resources;
+    s = GetResourceConfigSearchResources(search_resources);
+    if (!s.ok()) {
+        return s;
+    }
+
+    int32_t resource_index_build_device;
+    s = GetResourceConfigIndexBuildDevice(resource_index_build_device);
     if (!s.ok()) {
         return s;
     }
@@ -270,11 +271,6 @@ Config::ResetDefaultConfig() {
         return s;
     }
 
-    s = SetDBConfigBuildIndexGPU(CONFIG_DB_BUILD_INDEX_GPU_DEFAULT);
-    if (!s.ok()) {
-        return s;
-    }
-
     /* metric config */
     s = SetMetricConfigEnableMonitor(CONFIG_METRIC_ENABLE_MONITOR_DEFAULT);
     if (!s.ok()) {
@@ -330,6 +326,11 @@ Config::ResetDefaultConfig() {
 
     /* resource config */
     s = SetResourceConfigMode(CONFIG_RESOURCE_MODE_DEFAULT);
+    if (!s.ok()) {
+        return s;
+    }
+
+    s = SetResourceConfigIndexBuildDevice(CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT);
     if (!s.ok()) {
         return s;
     }
@@ -460,19 +461,6 @@ Config::CheckDBConfigInsertBufferSize(const std::string& value) {
 }
 
 Status
-Config::CheckDBConfigBuildIndexGPU(const std::string& value) {
-    if (!ValidationUtil::ValidateStringIsNumber(value).ok()) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid DB config build_index_gpu: " + value);
-    } else {
-        int32_t gpu_index = std::stoi(value);
-        if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
-            return Status(SERVER_INVALID_ARGUMENT, "Invalid DB config build_index_gpu: " + value);
-        }
-    }
-    return Status::OK();
-}
-
-Status
 Config::CheckMetricConfigEnableMonitor(const std::string& value) {
     if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
         return Status(SERVER_INVALID_ARGUMENT, "Invalid metric config auto_bootup: " + value);
@@ -544,7 +532,7 @@ Config::CheckCacheConfigGpuCacheCapacity(const std::string& value) {
     } else {
         uint64_t gpu_cache_capacity = std::stoi(value) * GB;
         int gpu_index;
-        Status s = GetDBConfigBuildIndexGPU(gpu_index);
+        Status s = GetResourceConfigIndexBuildDevice(gpu_index);
         if (!s.ok()) {
             return s;
         }
@@ -616,9 +604,38 @@ Config::CheckResourceConfigMode(const std::string& value) {
 }
 
 Status
-Config::CheckResourceConfigPool(const std::vector<std::string>& value) {
+CheckGpuDevice(const std::string& value) {
+    const std::regex pat("gpu(\\d+)");
+    std::cmatch m;
+    if (!std::regex_match(value.c_str(), m, pat)) {
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid gpu device: " + value);
+    }
+
+    int32_t gpu_index = std::stoi(value.substr(3));
+    if (!ValidationUtil::ValidateGpuIndex(gpu_index).ok()) {
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid gpu device: " + value);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckResourceConfigSearchResources(const std::vector<std::string>& value) {
     if (value.empty()) {
-        return Status(SERVER_INVALID_ARGUMENT, "Invalid resource config pool");
+        return Status(SERVER_INVALID_ARGUMENT, "Empty resource config search_resources");
+    }
+
+    for (auto& gpu_device : value) {
+        if (!CheckGpuDevice(gpu_device).ok()) {
+            return Status(SERVER_INVALID_ARGUMENT, "Invalid resource config search_resources: " + gpu_device);
+        }
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckResourceConfigIndexBuildDevice(const std::string& value) {
+    if (!CheckGpuDevice(value).ok()) {
+        return Status(SERVER_INVALID_ARGUMENT, "Invalid resource config index_build_device: " + value);
     }
     return Status::OK();
 }
@@ -731,18 +748,6 @@ Status
 Config::GetDBConfigInsertBufferSize(int32_t& value) {
     std::string str = GetConfigStr(CONFIG_DB, CONFIG_DB_INSERT_BUFFER_SIZE, CONFIG_DB_INSERT_BUFFER_SIZE_DEFAULT);
     Status s = CheckDBConfigInsertBufferSize(str);
-    if (!s.ok()) {
-        return s;
-    }
-
-    value = std::stoi(str);
-    return Status::OK();
-}
-
-Status
-Config::GetDBConfigBuildIndexGPU(int32_t& value) {
-    std::string str = GetConfigStr(CONFIG_DB, CONFIG_DB_BUILD_INDEX_GPU, CONFIG_DB_BUILD_INDEX_GPU_DEFAULT);
-    Status s = CheckDBConfigBuildIndexGPU(str);
     if (!s.ok()) {
         return s;
     }
@@ -880,10 +885,23 @@ Config::GetResourceConfigMode(std::string& value) {
 }
 
 Status
-Config::GetResourceConfigPool(std::vector<std::string>& value) {
+Config::GetResourceConfigSearchResources(std::vector<std::string>& value) {
     ConfigNode resource_config = GetConfigNode(CONFIG_RESOURCE);
-    value = resource_config.GetSequence(CONFIG_RESOURCE_POOL);
-    return CheckResourceConfigPool(value);
+    value = resource_config.GetSequence(CONFIG_RESOURCE_SEARCH_RESOURCES);
+    return CheckResourceConfigSearchResources(value);
+}
+
+Status
+Config::GetResourceConfigIndexBuildDevice(int32_t& value) {
+    std::string str =
+        GetConfigStr(CONFIG_RESOURCE, CONFIG_RESOURCE_INDEX_BUILD_DEVICE, CONFIG_RESOURCE_INDEX_BUILD_DEVICE_DEFAULT);
+    Status s = CheckResourceConfigIndexBuildDevice(str);
+    if (!s.ok()) {
+        return s;
+    }
+
+    value = std::stoi(str.substr(3));
+    return Status::OK();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -996,17 +1014,6 @@ Config::SetDBConfigInsertBufferSize(const std::string& value) {
     }
 
     SetConfigValueInMem(CONFIG_DB, CONFIG_DB_INSERT_BUFFER_SIZE, value);
-    return Status::OK();
-}
-
-Status
-Config::SetDBConfigBuildIndexGPU(const std::string& value) {
-    Status s = CheckDBConfigBuildIndexGPU(value);
-    if (!s.ok()) {
-        return s;
-    }
-
-    SetConfigValueInMem(CONFIG_DB, CONFIG_DB_BUILD_INDEX_GPU, value);
     return Status::OK();
 }
 
@@ -1132,6 +1139,17 @@ Config::SetResourceConfigMode(const std::string& value) {
     }
 
     SetConfigValueInMem(CONFIG_DB, CONFIG_RESOURCE_MODE, value);
+    return Status::OK();
+}
+
+Status
+Config::SetResourceConfigIndexBuildDevice(const std::string& value) {
+    Status s = CheckResourceConfigIndexBuildDevice(value);
+    if (!s.ok()) {
+        return s;
+    }
+
+    SetConfigValueInMem(CONFIG_DB, CONFIG_RESOURCE_INDEX_BUILD_DEVICE, value);
     return Status::OK();
 }
 
