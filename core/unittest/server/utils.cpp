@@ -16,12 +16,12 @@
 // under the License.
 
 #include "server/utils.h"
+#include "utils/CommonUtil.h"
 
 #include <fstream>
 #include <iostream>
 #include <thread>
 #include <string>
-#include <boost/filesystem.hpp>
 
 namespace {
 
@@ -67,8 +67,8 @@ static const char
 static const char* INVALID_CONFIG_STR = "*INVALID*";
 
 void
-WriteToFile(const char* file_path, const char* content) {
-    std::fstream fs(file_path, std::ios_base::out);
+WriteToFile(const std::string& file_path, const char* content) {
+    std::fstream fs(file_path.c_str(), std::ios_base::out);
 
     //write data to file
     fs << content;
@@ -80,12 +80,14 @@ WriteToFile(const char* file_path, const char* content) {
 
 void
 ConfigTest::SetUp() {
-    WriteToFile(VALID_CONFIG_PATH, VALID_CONFIG_STR);
-    WriteToFile(INVALID_CONFIG_PATH, INVALID_CONFIG_STR);
+    std::string config_path(CONFIG_PATH);
+    milvus::server::CommonUtil::CreateDirectory(config_path);
+    WriteToFile(config_path + VALID_CONFIG_FILE, VALID_CONFIG_STR);
+    WriteToFile(config_path+ INVALID_CONFIG_FILE, INVALID_CONFIG_STR);
 }
 
 void
 ConfigTest::TearDown() {
-    boost::filesystem::remove(VALID_CONFIG_PATH);
-    boost::filesystem::remove(INVALID_CONFIG_PATH);
+    std::string config_path(CONFIG_PATH);
+    milvus::server::CommonUtil::DeleteDirectory(config_path);
 }
