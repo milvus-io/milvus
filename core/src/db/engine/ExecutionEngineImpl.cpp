@@ -124,6 +124,11 @@ ExecutionEngineImpl::HybridLoad() const {
         return;
     }
 
+    if (index_->GetType() == IndexType::FAISS_IDMAP) {
+        ENGINE_LOG_WARNING << "HybridLoad with type FAISS_IDMAP, ignore";
+        return;
+    }
+
     const std::string key = location_ + ".quantizer";
     std::vector<uint64_t> gpus = scheduler::get_gpu_pool();
 
@@ -176,6 +181,9 @@ ExecutionEngineImpl::HybridLoad() const {
 void
 ExecutionEngineImpl::HybridUnset() const {
     if (index_type_ != EngineType::FAISS_IVFSQ8H) {
+        return;
+    }
+    if (index_->GetType() == IndexType::FAISS_IDMAP) {
         return;
     }
     index_->UnsetQuantizer();
