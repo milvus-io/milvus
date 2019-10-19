@@ -204,6 +204,11 @@ XSearchTask::Execute() {
         output_distance.resize(topk * nq);
         std::string hdr =
             "job " + std::to_string(search_job->id()) + " nq " + std::to_string(nq) + " topk " + std::to_string(topk);
+        auto str = R"(s324gagbds
+bbvcb\fds
+b
+fdb\f
+e))";
 
         try {
             // step 2: search
