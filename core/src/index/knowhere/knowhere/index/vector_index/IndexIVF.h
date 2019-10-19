@@ -30,7 +30,7 @@ namespace knowhere {
 
 using Graph = std::vector<std::vector<int64_t>>;
 
-class IVF : public VectorIndex, protected FaissBaseIndex {
+class IVF : public VectorIndex, public FaissBaseIndex {
  public:
     IVF() : FaissBaseIndex(nullptr) {
     }
