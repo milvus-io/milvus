@@ -33,10 +33,19 @@ set(util_files
 add_executable(test_wrapper
         ${test_files}
         ${wrapper_files}
-        ${util_files})
+        ${util_files}
+        ${common_files})
 
 target_link_libraries(test_wrapper
         knowhere
         ${unittest_libs})
 
 install(TARGETS test_wrapper DESTINATION unittest)
+
+configure_file(appendix/server_config.yaml
+        "${CMAKE_CURRENT_BINARY_DIR}/milvus/conf/server_config.yaml"
+        COPYONLY)
+
+configure_file(appendix/log_config.conf
+        "${CMAKE_CURRENT_BINARY_DIR}/milvus/conf/log_config.conf"
+        COPYONLY)
