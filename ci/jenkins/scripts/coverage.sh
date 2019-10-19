@@ -124,15 +124,15 @@ ${LCOV_CMD} -r "${FILE_INFO_OUTPUT}" -o "${FILE_INFO_OUTPUT_NEW}" \
     "/usr/*" \
     "*/boost/*" \
     "*/cmake_build/*_ep-prefix/*" \
-    "src/index/cmake_build*" \
-    "src/index/thirdparty*" \
-    "src/grpc*" \
-    "src/metrics/MetricBase.h" \
-    "src/server/Server.cpp" \
-    "src/server/DBWrapper.cpp" \
-    "src/server/grpc_impl/GrpcServer.cpp" \
-    "src/utils/easylogging++.h" \
-    "src/utils/easylogging++.cc" \
+    "*/src/index/cmake_build*" \
+    "*/src/index/thirdparty*" \
+    "*/src/grpc*" \
+    "*/src/metrics/MetricBase.h" \
+    "*/src/server/Server.cpp" \
+    "*/src/server/DBWrapper.cpp" \
+    "*/src/server/grpc_impl/GrpcServer.cpp" \
+    "*/src/utils/easylogging++.h" \
+    "*/src/utils/easylogging++.cc"
 
 # gen html report
 # ${LCOV_GEN_CMD} "${FILE_INFO_OUTPUT_NEW}" --output-directory ${DIR_LCOV_OUTPUT}/
