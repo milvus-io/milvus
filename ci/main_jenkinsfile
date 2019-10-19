@@ -45,6 +45,11 @@ spec:
   containers:
   - name: milvus-build-env
     image: registry.zilliz.com/milvus/milvus-build-env:v0.13
+    env:
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
     command:
     - cat
     tty: true
@@ -56,6 +61,14 @@ spec:
       requests:
         memory: "14Gi"
         cpu: "5.0"
+  - name: milvus-mysql
+    image: mysql:5.6
+    env:
+    - name: MYSQL_ROOT_PASSWORD
+      value: 123456
+    ports:
+    - containerPort: 3306
+      name: mysql
 """
                         }
                     }
