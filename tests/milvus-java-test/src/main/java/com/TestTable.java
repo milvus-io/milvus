@@ -17,8 +17,7 @@ public class TestTable {
                 .withIndexFileSize(index_file_size)
                 .withMetricType(MetricType.L2)
                 .build();
-        TableSchemaParam tableSchemaParam = new TableSchemaParam.Builder(tableSchema).build();
-        Response res = client.createTable(tableSchemaParam);
+        Response res = client.createTable(tableSchema);
         assert(res.ok());
         Assert.assertEquals(res.ok(), true);
     }
@@ -29,8 +28,7 @@ public class TestTable {
                 .withIndexFileSize(index_file_size)
                 .withMetricType(MetricType.L2)
                 .build();
-        TableSchemaParam tableSchemaParam = new TableSchemaParam.Builder(tableSchema).build();
-        Response res = client.createTable(tableSchemaParam);
+        Response res = client.createTable(tableSchema);
         assert(!res.ok());
     }
 
@@ -40,10 +38,9 @@ public class TestTable {
                 .withIndexFileSize(index_file_size)
                 .withMetricType(MetricType.L2)
                 .build();
-        TableSchemaParam tableSchemaParam = new TableSchemaParam.Builder(tableSchema).build();
-        Response res = client.createTable(tableSchemaParam);
+        Response res = client.createTable(tableSchema);
         Assert.assertEquals(res.ok(), true);
-        Response res_new = client.createTable(tableSchemaParam);
+        Response res_new = client.createTable(tableSchema);
         Assert.assertEquals(res_new.ok(), false);
     }
 
@@ -54,8 +51,7 @@ public class TestTable {
                 .withIndexFileSize(index_file_size)
                 .withMetricType(MetricType.L2)
                 .build();
-        TableSchemaParam tableSchemaParam = new TableSchemaParam.Builder(tableSchema).build();
-        Response res = client.createTable(tableSchemaParam);
+        Response res = client.createTable(tableSchema);
         System.out.println(res.toString());
         Assert.assertEquals(res.ok(), false);
     }
@@ -70,8 +66,7 @@ public class TestTable {
                     .withIndexFileSize(index_file_size)
                     .withMetricType(MetricType.L2)
                     .build();
-            TableSchemaParam tableSchemaParam = new TableSchemaParam.Builder(tableSchema).build();
-            client.createTable(tableSchemaParam);
+            client.createTable(tableSchema);
             List<String> tableNames = client.showTables().getTableNames();
             Assert.assertTrue(tableNames.contains(tableNameNew));
         }
@@ -85,8 +80,7 @@ public class TestTable {
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_drop_table(MilvusClient client, String tableName) throws InterruptedException {
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Response res = client.dropTable(tableParam);
+        Response res = client.dropTable(tableName);
         assert(res.ok());
         Thread.currentThread().sleep(1000);
         List<String> tableNames = client.showTables().getTableNames();
@@ -95,8 +89,7 @@ public class TestTable {
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_drop_table_not_existed(MilvusClient client, String tableName) throws InterruptedException {
-        TableParam tableParam = new TableParam.Builder(tableName+"_").build();
-        Response res = client.dropTable(tableParam);
+        Response res = client.dropTable(tableName+"_");
         assert(!res.ok());
         List<String> tableNames = client.showTables().getTableNames();
         Assert.assertTrue(tableNames.contains(tableName));
@@ -104,15 +97,13 @@ public class TestTable {
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_drop_table_without_connect(MilvusClient client, String tableName) throws InterruptedException {
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Response res = client.dropTable(tableParam);
+        Response res = client.dropTable(tableName);
         assert(!res.ok());
     }
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_describe_table(MilvusClient client, String tableName) throws InterruptedException {
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        DescribeTableResponse res = client.describeTable(tableParam);
+        DescribeTableResponse res = client.describeTable(tableName);
         assert(res.getResponse().ok());
         TableSchema tableSchema = res.getTableSchema().get();
         Assert.assertEquals(tableSchema.getDimension(), dimension);
@@ -123,30 +114,26 @@ public class TestTable {
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_describe_table_without_connect(MilvusClient client, String tableName) throws InterruptedException {
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        DescribeTableResponse res = client.describeTable(tableParam);
+        DescribeTableResponse res = client.describeTable(tableName);
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_has_table_not_existed(MilvusClient client, String tableName) throws InterruptedException {
-        TableParam tableParam = new TableParam.Builder(tableName+"_").build();
-        HasTableResponse res = client.hasTable(tableParam);
+        HasTableResponse res = client.hasTable(tableName+"_");
         assert(res.getResponse().ok());
         Assert.assertFalse(res.hasTable());
     }
 
     @Test(dataProvider = "DisConnectInstance", dataProviderClass = MainClass.class)
     public void test_has_table_without_connect(MilvusClient client, String tableName) throws InterruptedException {
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        HasTableResponse res = client.hasTable(tableParam);
+        HasTableResponse res = client.hasTable(tableName);
         assert(!res.getResponse().ok());
     }
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_has_table(MilvusClient client, String tableName) throws InterruptedException {
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        HasTableResponse res = client.hasTable(tableParam);
+        HasTableResponse res = client.hasTable(tableName);
         assert(res.getResponse().ok());
         Assert.assertTrue(res.hasTable());
     }

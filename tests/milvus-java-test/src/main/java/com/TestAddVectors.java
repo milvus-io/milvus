@@ -3,7 +3,6 @@ package com;
 import io.milvus.client.InsertParam;
 import io.milvus.client.InsertResponse;
 import io.milvus.client.MilvusClient;
-import io.milvus.client.TableParam;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -55,19 +54,18 @@ public class TestAddVectors {
         assert(res.getResponse().ok());
         Thread.currentThread().sleep(1000);
         // Assert table row count
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Assert.assertEquals(client.getTableRowCount(tableParam).getTableRowCount(), nb);
+        Assert.assertEquals(client.getTableRowCount(tableName).getTableRowCount(), nb);
     }
 
-    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
-    public void test_add_vectors_timeout(MilvusClient client, String tableName) throws InterruptedException {
-        int nb = 200000;
-        List<List<Float>> vectors = gen_vectors(nb);
-        System.out.println(new Date());
-        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).withTimeout(1).build();
-        InsertResponse res = client.insert(insertParam);
-        assert(!res.getResponse().ok());
-    }
+//    @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
+//    public void test_add_vectors_timeout(MilvusClient client, String tableName) throws InterruptedException {
+//        int nb = 200000;
+//        List<List<Float>> vectors = gen_vectors(nb);
+//        System.out.println(new Date());
+//        InsertParam insertParam = new InsertParam.Builder(tableName, vectors).withTimeout(1).build();
+//        InsertResponse res = client.insert(insertParam);
+//        assert(!res.getResponse().ok());
+//    }
 
     @Test(dataProvider = "Table", dataProviderClass = MainClass.class)
     public void test_add_vectors_big_data(MilvusClient client, String tableName) throws InterruptedException {
@@ -91,10 +89,9 @@ public class TestAddVectors {
         InsertParam insertParam = new InsertParam.Builder(tableName, vectors).withVectorIds(vectorIds).build();
         InsertResponse res = client.insert(insertParam);
         assert(res.getResponse().ok());
-        Thread.currentThread().sleep(1000);
+        Thread.currentThread().sleep(2000);
         // Assert table row count
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Assert.assertEquals(client.getTableRowCount(tableParam).getTableRowCount(), nb);
+        Assert.assertEquals(client.getTableRowCount(tableName).getTableRowCount(), nb);
     }
 
     // TODO: MS-628
@@ -147,8 +144,7 @@ public class TestAddVectors {
         }
         Thread.currentThread().sleep(1000);
         // Assert table row count
-        TableParam tableParam = new TableParam.Builder(tableName).build();
-        Assert.assertEquals(client.getTableRowCount(tableParam).getTableRowCount(), nb * loops);
+        Assert.assertEquals(client.getTableRowCount(tableName).getTableRowCount(), nb * loops);
     }
 
 }
