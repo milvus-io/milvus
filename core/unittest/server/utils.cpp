@@ -17,6 +17,7 @@
 
 #include "server/utils.h"
 
+#include <fstream>
 #include <iostream>
 #include <thread>
 #include <string>
@@ -67,12 +68,11 @@ static const char* INVALID_CONFIG_STR = "*INVALID*";
 
 void
 WriteToFile(const char* file_path, const char* content) {
-    boost::filesystem::path fpath(file_path);
-    boost::filesystem::fstream fstream(fpath, std::ios_base::out);
+    std::fstream fs(file_path, std::ios_base::out);
 
     //write data to file
-    fstream << content;
-    fstream.close();
+    fs << content;
+    fs.close();
 }
 
 } // namespace
