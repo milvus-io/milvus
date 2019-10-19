@@ -15,11 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <faiss/AutoTune.h>
 #include <faiss/IndexFlat.h>
 #include <faiss/MetaIndexes.h>
-#include <faiss/gpu/GpuAutoTune.h>
 #include <faiss/index_io.h>
+#include <faiss/index_factory.h>
+#include <faiss/gpu/GpuCloner.h>
+
 #include <vector>
 
 #include "knowhere/adapter/VectorAdapter.h"

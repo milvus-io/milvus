@@ -15,7 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <faiss/gpu/GpuAutoTune.h>
+#include <faiss/index_factory.h>
+#include <faiss/gpu/GpuCloner.h>
 #include <memory>
 
 #include "knowhere/adapter/VectorAdapter.h"
@@ -56,14 +57,7 @@ IVFSQ::CopyCpuToGpu(const int64_t& device_id, const Config& config) {
     if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(device_id)) {
         ResScope rs(res, device_id, false);
 
-#ifdef CUSTOMIZATION
-        faiss::gpu::GpuClonerOptions option;
-        option.allInGpu = true;
-
-        auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get(), &option);
-#else
         auto gpu_index = faiss::gpu::index_cpu_to_gpu(res->faiss_res.get(), device_id, index_.get());
-#endif
 
         std::shared_ptr<faiss::Index> device_index;
         device_index.reset(gpu_index);
