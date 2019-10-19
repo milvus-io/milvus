@@ -15,21 +15,27 @@ container('publish-images') {
             def imageName = "${PROJECT_NAME}/engine:${DOCKER_VERSION}"
 
             try {
-                def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName} 2>&1 > /dev/null")
-                if (isExistImage == 0) {
-                    sh "docker rmi ${imageName}"
+                def isExistSourceImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName} 2>&1 > /dev/null")
+                if (isExistSourceImage == 0) {
+                    def removeSourceImageStatus = sh(returnStatus: true, script: "docker rmi ${imageName}")
                 }
 
                 def customImage = docker.build("${imageName}")
+
+                def isExistTargeImage = sh(returnStatus: true, script: "docker inspect --type=image ${dockerRegistryURL}/${imageName} 2>&1 > /dev/null")
+                if (isExistTargeImage == 0) {
+                    def removeTargeImageStatus = sh(returnStatus: true, script: "docker rmi ${dockerRegistryURL}/${imageName}")
+                }
+
                 docker.withRegistry("https://${dockerRegistryURL}", "${params.DOCKER_CREDENTIALS_ID}") {
                     customImage.push()
                 }
             } catch (exc) {
                 throw exc
             } finally {
-                def isExistImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName} 2>&1 > /dev/null")
-                if (isExistImage == 0) {
-                    sh "docker rmi ${imageName}"
+                def isExistSourceImage = sh(returnStatus: true, script: "docker inspect --type=image ${imageName} 2>&1 > /dev/null")
+                if (isExistSourceImage == 0) {
+                    def removeSourceImageStatus = sh(returnStatus: true, script: "docker rmi ${imageName}")
                 }
             }
         } 
