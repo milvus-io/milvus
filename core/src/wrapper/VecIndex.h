@@ -25,8 +25,8 @@
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/common/Config.h"
 #include "knowhere/index/vector_index/Quantizer.h"
-#include "utils/Status.h"
 #include "utils/Log.h"
+#include "utils/Status.h"
 
 namespace milvus {
 namespace engine {
