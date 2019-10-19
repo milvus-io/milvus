@@ -38,10 +38,11 @@ TEST_F(ConfigTest, CONFIG_TEST) {
     milvus::Status s = config_mgr->LoadConfigFile("");
     ASSERT_FALSE(s.ok());
 
-    s = config_mgr->LoadConfigFile(INVALID_CONFIG_PATH);
+    std::string config_path(CONFIG_PATH);
+    s = config_mgr->LoadConfigFile(config_path+ INVALID_CONFIG_FILE);
     ASSERT_FALSE(s.ok());
 
-    s = config_mgr->LoadConfigFile(VALID_CONFIG_PATH);
+    s = config_mgr->LoadConfigFile(config_path + VALID_CONFIG_FILE);
     ASSERT_TRUE(s.ok());
 
     config_mgr->Print();
@@ -98,8 +99,9 @@ TEST_F(ConfigTest, CONFIG_TEST) {
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_TEST) {
+    std::string config_path(CONFIG_PATH);
     milvus::server::Config &config = milvus::server::Config::GetInstance();
-    milvus::Status s = config.LoadConfigFile(VALID_CONFIG_PATH);
+    milvus::Status s = config.LoadConfigFile(config_path + VALID_CONFIG_FILE);
     ASSERT_TRUE(s.ok());
 
     s = config.ValidateConfig();
